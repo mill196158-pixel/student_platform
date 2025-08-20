@@ -1,0 +1,123 @@
+diff --git a/lib/src/ui/learning/tabs/chat/message_bubble.dart b/lib/src/ui/learning/tabs/chat/message_bubble.dart
+index 1111111..2222222 100644
+--- a/lib/src/ui/learning/tabs/chat/message_bubble.dart
++++ b/lib/src/ui/learning/tabs/chat/message_bubble.dart
+@@ -1,10 +1,14 @@
+   @override
+   Widget build(BuildContext context) {
+-    final bool isMe = message.isMine; // или своя логика
+-    final bg = isMe
+-        ? Theme.of(context).colorScheme.primary
+-        : Theme.of(context).colorScheme.surfaceVariant;
+-    final fg = isMe ? Colors.white : Colors.black87;
++    // Мягкий вид: мои пузыри светлые/полупрозрачные, текст чёрный
++    final bool isMe = message.isMine; // оставь твою логику
++    final bg = isMe
++        ? Theme.of(context).colorScheme.primary.withOpacity(0.14)
++        : Theme.of(context).colorScheme.surfaceVariant;
++    final fg = Colors.black87;
+ 
+     return Container(
+       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+@@ -15,11 +19,15 @@
+-      decoration: BoxDecoration(
+-        color: bg,
+-        borderRadius: BorderRadius.only(
+-          topLeft: Radius.circular(16),
+-          topRight: Radius.circular(16),
+-          bottomLeft: isMe ? Radius.circular(16) : Radius.circular(4),
+-          bottomRight: isMe ? Radius.circular(4) : Radius.circular(16),
+-        ),
+-      ),
++      decoration: BoxDecoration(
++        color: bg,
++        border: Border.all(color: Colors.black12),
++        borderRadius: BorderRadius.only(
++          topLeft: Radius.circular(16),
++          topRight: Radius.circular(16),
++          bottomLeft: isMe ? Radius.circular(16) : Radius.circular(6),
++          bottomRight: isMe ? Radius.circular(6) : Radius.circular(16),
++        ),
++      ),
+       child: DefaultTextStyle(
+-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: fg),
++        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
++              color: fg,
++              height: 1.25,
++            ),
+         child: Column(
+           crossAxisAlignment:
+               isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+diff --git a/lib/src/ui/learning/tabs/chat_tab.dart b/lib/src/ui/learning/tabs/chat_tab.dart
+index 3333333..4444444 100644
+--- a/lib/src/ui/learning/tabs/chat_tab.dart
++++ b/lib/src/ui/learning/tabs/chat_tab.dart
+@@ -10,6 +10,12 @@
+   final _scroll = ScrollController();
+ 
+   @override
+   void initState() {
+     super.initState();
++    // Открываемся снизу: после первого кадра прыгаем в конец
++    WidgetsBinding.instance.addPostFrameCallback((_) {
++      if (_scroll.hasClients) {
++        _scroll.jumpTo(_scroll.position.maxScrollExtent);
++      }
++    });
+   }
+ 
+   @override
+@@ -20,7 +26,9 @@
+-    return ListView.builder(
++    return ListView.builder(
+       controller: _scroll,
++      reverse: true, // новые сообщения внизу
+       itemCount: messages.length,
+       itemBuilder: (context, i) {
+-        final m = messages[i];
++        // при reverse:true messages идут как обычно
++        final m = messages[i];
+         // ...
+       },
+diff --git a/lib/src/ui/learning/tabs/chat/composer.dart b/lib/src/ui/learning/tabs/chat/composer.dart
+index 5555555..6666666 100644
+--- a/lib/src/ui/learning/tabs/chat/composer.dart
++++ b/lib/src/ui/learning/tabs/chat/composer.dart
+@@ -12,9 +12,10 @@
+   @override
+   Widget build(BuildContext context) {
+     return Row(
+       children: [
+-        IconButton(
+-          icon: const Icon(Icons.emoji_emotions_outlined),
+-          onPressed: _openEmojiSheet,
+-        ),
++        // убрали кнопку эмодзи — используем системную клавиатуру
++        const SizedBox.shrink(),
+         Expanded(
+           child: TextField(
+             controller: _ctrl,
+@@ -25,7 +26,8 @@
+-        const PlusButton(),
++        const PlusButton(), // иконку меняем внутри PlusButton
+       ],
+     );
+   }
+diff --git a/lib/src/ui/learning/tabs/chat/plus_button.dart b/lib/src/ui/learning/tabs/chat/plus_button.dart
+index 7777777..8888888 100644
+--- a/lib/src/ui/learning/tabs/chat/plus_button.dart
++++ b/lib/src/ui/learning/tabs/chat/plus_button.dart
+@@ -10,9 +10,13 @@
+-    return IconButton(
+-      icon: const Icon(Icons.add),
+-      onPressed: onPressed,
+-      tooltip: 'Меню',
+-    );
++    // вместо «плюса» показываем «скрепку»
++    return IconButton(
++      icon: const Icon(Icons.attach_file),
++      onPressed: onPressed,
++      tooltip: 'Прикрепить файл',
++    );
+   }
+ }
