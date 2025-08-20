@@ -13,7 +13,7 @@ class AssignmentBubble extends StatelessWidget {
   final String time;
   final VoidCallback? onOpen;
   final VoidCallback? onPublish; // для старосты
-  final VoidCallback? onVote;    // для обычных
+  final VoidCallback? onVote;    // обычные
   final VoidCallback? onLongPress;
   final VoidCallback? onPin;
 
