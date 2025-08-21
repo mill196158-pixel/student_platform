@@ -2,7 +2,7 @@
 // FILE: lib/src/ui/learning/models/message.dart
 // =============================
 
-enum MessageType { text, assignmentDraft, assignmentPublished }
+enum MessageType { text, assignmentDraft, assignmentPublished, file }
 
 class Message {
   final String id;
@@ -18,6 +18,7 @@ class Message {
   final String? imagePath;       // путь к локальной картинке/вложению (клиент)
   final String? replyToId;       // id сообщения, на которое был ответ
   final String? assignmentId;    // для карточек заданий
+  final String? fileId;          // ID файла в чате
   final MessageType type;        // msg_type
 
   const Message({
@@ -32,6 +33,7 @@ class Message {
     this.imagePath,
     this.replyToId,
     this.assignmentId,
+    this.fileId,
     this.type = MessageType.text,
   });
 
@@ -52,6 +54,7 @@ class Message {
     String? imagePath,
     String? replyToId,
     String? assignmentId,
+    String? fileId,
     MessageType? type,
   }) {
     return Message(
@@ -66,6 +69,7 @@ class Message {
       imagePath: imagePath ?? this.imagePath,
       replyToId: replyToId ?? this.replyToId,
       assignmentId: assignmentId ?? this.assignmentId,
+      fileId: fileId ?? this.fileId,
       type: type ?? this.type,
     );
   }
@@ -82,6 +86,7 @@ class Message {
         'imagePath': imagePath,
         'replyToId': replyToId,
         'assignmentId': assignmentId,
+        'fileId': fileId,
         'msg_type': type.name,
       };
 
@@ -101,6 +106,7 @@ class Message {
         imagePath: (j['imagePath'] ?? j['image_path'])?.toString(),
         replyToId: (j['replyToId'] ?? j['reply_to_id'])?.toString(),
         assignmentId: j['assignmentId']?.toString(),
+        fileId: j['fileId']?.toString(),
         type: _parseType(j['msg_type'] ?? j['type']),
       );
 

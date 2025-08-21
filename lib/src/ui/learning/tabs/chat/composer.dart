@@ -9,6 +9,7 @@ class Composer extends StatelessWidget {
   final VoidCallback onSend;
   final VoidCallback onClearPicked;
   final Future<void> Function() onPickImage;
+  final VoidCallback? onAttachFile;
   final FocusNode? focusNode;
 
   const Composer({
@@ -21,6 +22,7 @@ class Composer extends StatelessWidget {
     required this.onPickImage,
     this.leftButton,
     this.focusNode,
+    this.onAttachFile,
   });
 
   @override
@@ -79,12 +81,6 @@ class Composer extends StatelessWidget {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        IconButton(
-                          icon: const Icon(Icons.emoji_emotions_outlined),
-                          onPressed: onOpenEmoji, // просто открываем клавиатуру/даём фокус
-                          tooltip: 'Эмодзи',
-                        ),
-
                         // одна строка → авто-рост до 6 (без горизонтального скролла)
                         Expanded(
                           child: TextField(
@@ -104,10 +100,11 @@ class Composer extends StatelessWidget {
                           ),
                         ),
 
+                        // правая скрепка - для файлов
                         IconButton(
-                          icon: const Icon(Icons.camera_alt_outlined),
-                          onPressed: () => onPickImage(), // из галереи (gif поддерживаются как файл)
-                          tooltip: 'Изображение',
+                          icon: const Icon(Icons.attach_file),
+                          onPressed: onAttachFile ?? () => onPickImage(), // загрузка файлов
+                          tooltip: 'Прикрепить файл',
                         ),
                       ],
                     ),

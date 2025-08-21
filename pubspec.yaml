@@ -20,7 +20,7 @@ dependencies:
   equatable: ^2.0.5
 
   # Хранилище/настройки
-  get_storage: ^2.1.1
+  # get_storage: ^2.1.1  # Временно отключено
   shared_preferences: ^2.3.2
 
   # Медиа/файлы
@@ -32,11 +32,15 @@ dependencies:
   # UI / ассеты
   lottie: ^3.1.2
   cached_network_image: ^3.4.1
+  photo_view: ^0.14.0
 
   # Ссылки/утилиты
   url_launcher: ^6.3.0
   emoji_picker_flutter: ^4.3.0
   intl: ^0.20.0
+  crypto: ^3.0.3
+  http: ^1.1.0
+  minio: ^3.5.8 # Added for Yandex Object Storage (S3-compatible)
 
   # === Supabase авторизация ===
   supabase_flutter: ^2.6.0

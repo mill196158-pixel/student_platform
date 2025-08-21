@@ -15,7 +15,7 @@ abstract class LearningRepository {
 
   /// Возвращает true, если сообщение успешно отправлено на сервер.
   /// Если false — значит упало (или сервер вернул пусто), мы оставляем локально.
-  Future<bool> saveChat(String teamId, List<Message> messages);
+  Future<String?> saveChat(String teamId, List<Message> messages);
 
   // Файлы
   Future<List<FileItem>> loadFiles(String teamId);

@@ -99,10 +99,11 @@ class AssignmentBubble extends StatelessWidget {
         children: [
           // левая пустая зона для выравнивания системного сообщения
           const SizedBox(width: 36),
-          Expanded(
-            child: Container(
-              margin: const EdgeInsets.symmetric(vertical: 4),
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+          Flexible(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 280),
+              child: Container(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
               decoration: BoxDecoration(
                 color: bg,
                 border: Border.all(color: border, width: 1),
@@ -147,7 +148,7 @@ class AssignmentBubble extends StatelessWidget {
                     ),
                   ),
 
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 4),
 
                   // КОНТЕНТ
                   Text(
@@ -174,7 +175,7 @@ class AssignmentBubble extends StatelessWidget {
                     ),
                   ],
 
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
 
                   // КНОПКИ
                   Wrap(
@@ -221,6 +222,7 @@ class AssignmentBubble extends StatelessWidget {
                   ),
                 ],
               ),
+            ),
             ),
           ),
         ],

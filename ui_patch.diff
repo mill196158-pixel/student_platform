@@ -2,74 +2,69 @@ diff --git a/lib/src/ui/learning/tabs/chat/message_bubble.dart b/lib/src/ui/lear
 index 1111111..2222222 100644
 --- a/lib/src/ui/learning/tabs/chat/message_bubble.dart
 +++ b/lib/src/ui/learning/tabs/chat/message_bubble.dart
-@@ -1,10 +1,14 @@
-   @override
-   Widget build(BuildContext context) {
--    final bool isMe = message.isMine; // или своя логика
--    final bg = isMe
--        ? Theme.of(context).colorScheme.primary
--        : Theme.of(context).colorScheme.surfaceVariant;
--    final fg = isMe ? Colors.white : Colors.black87;
-+    // Мягкий вид: мои пузыри светлые/полупрозрачные, текст чёрный
-+    final bool isMe = message.isMine; // оставь твою логику
-+    final bg = isMe
-+        ? Theme.of(context).colorScheme.primary.withOpacity(0.14)
-+        : Theme.of(context).colorScheme.surfaceVariant;
-+    final fg = Colors.black87;
+@@ -40,9 +40,9 @@ class MessageBubble extends StatelessWidget {
+     final bg = isSystem
+         ? theme.colorScheme.tertiaryContainer.withOpacity(.6)
+         : (isMe
+-            ? theme.colorScheme.primary.withOpacity(0.14)
++            ? theme.colorScheme.primary.withOpacity(0.22) // чуть темнее для моих сообщений
+             : theme.colorScheme.surfaceContainerHighest);
  
-     return Container(
-       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-@@ -15,11 +19,15 @@
--      decoration: BoxDecoration(
--        color: bg,
--        borderRadius: BorderRadius.only(
--          topLeft: Radius.circular(16),
--          topRight: Radius.circular(16),
--          bottomLeft: isMe ? Radius.circular(16) : Radius.circular(4),
--          bottomRight: isMe ? Radius.circular(4) : Radius.circular(16),
--        ),
--      ),
-+      decoration: BoxDecoration(
-+        color: bg,
-+        border: Border.all(color: Colors.black12),
-+        borderRadius: BorderRadius.only(
-+          topLeft: Radius.circular(16),
-+          topRight: Radius.circular(16),
-+          bottomLeft: isMe ? Radius.circular(16) : Radius.circular(6),
-+          bottomRight: isMe ? Radius.circular(6) : Radius.circular(16),
-+        ),
-+      ),
-       child: DefaultTextStyle(
--        style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: fg),
-+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-+              color: fg,
-+              height: 1.25,
-+            ),
-         child: Column(
-           crossAxisAlignment:
-               isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+-    final textColor = isSystem
++    final textColor = isSystem
+         ? theme.colorScheme.onTertiaryContainer
+         : Colors.black87;
+ 
+@@ -120,7 +120,7 @@ class MessageBubble extends StatelessWidget {
+                 Text(time,
+                     style: TextStyle(
+-                        color: textColor.withOpacity(.75), fontSize: 11)),
++                        color: textColor.withOpacity(.6), fontSize: 11)),
+               ],
+             ),
+             if (reactions != null && reactions!.isNotEmpty) ...[
+@@ -130,7 +130,7 @@ class MessageBubble extends StatelessWidget {
+                 children: reactions!.entries
+                     .map((e) => Container(
+                           padding: const EdgeInsets.symmetric(
+-                              horizontal: 8, vertical: 4),
++                              horizontal: 6, vertical: 3),
+                           decoration: BoxDecoration(
+                             color: Colors.black.withOpacity(isMe ? .15 : .08),
+                             borderRadius: BorderRadius.circular(12),
+@@ -138,7 +138,7 @@ class MessageBubble extends StatelessWidget {
+                           child: Text('${e.key} ${e.value}',
+                               style:
+                                   TextStyle(color: textColor, fontSize: 12)),
+-                        ))
++                        ))
+                     .toList(),
+               ),
+             ],
 diff --git a/lib/src/ui/learning/tabs/chat_tab.dart b/lib/src/ui/learning/tabs/chat_tab.dart
 index 3333333..4444444 100644
 --- a/lib/src/ui/learning/tabs/chat_tab.dart
 +++ b/lib/src/ui/learning/tabs/chat_tab.dart
-@@ -10,6 +10,12 @@
+@@ -10,6 +10,12 @@ class _ChatTabState extends State<ChatTab> {
    final _scroll = ScrollController();
  
    @override
-   void initState() {
-     super.initState();
++  void initState() {
++    super.initState();
 +    // Открываемся снизу: после первого кадра прыгаем в конец
 +    WidgetsBinding.instance.addPostFrameCallback((_) {
 +      if (_scroll.hasClients) {
 +        _scroll.jumpTo(_scroll.position.maxScrollExtent);
 +      }
 +    });
-   }
- 
-   @override
-@@ -20,7 +26,9 @@
--    return ListView.builder(
-+    return ListView.builder(
++  }
++
++  @override
+   void dispose() {
+     _scroll.dispose();
+     super.dispose();
+@@ -20,7 +26,9 @@ class _ChatTabState extends State<ChatTab> {
+     return ListView.builder(
        controller: _scroll,
 +      reverse: true, // новые сообщения внизу
        itemCount: messages.length,
@@ -77,47 +72,186 @@ index 3333333..4444444 100644
 -        final m = messages[i];
 +        // при reverse:true messages идут как обычно
 +        final m = messages[i];
-         // ...
+         // ... остальной код без изменений
        },
+     );
 diff --git a/lib/src/ui/learning/tabs/chat/composer.dart b/lib/src/ui/learning/tabs/chat/composer.dart
 index 5555555..6666666 100644
 --- a/lib/src/ui/learning/tabs/chat/composer.dart
 +++ b/lib/src/ui/learning/tabs/chat/composer.dart
-@@ -12,9 +12,10 @@
-   @override
-   Widget build(BuildContext context) {
-     return Row(
-       children: [
--        IconButton(
--          icon: const Icon(Icons.emoji_emotions_outlined),
--          onPressed: _openEmojiSheet,
--        ),
-+        // убрали кнопку эмодзи — используем системную клавиатуру
-+        const SizedBox.shrink(),
-         Expanded(
-           child: TextField(
-             controller: _ctrl,
-@@ -25,7 +26,8 @@
--        const PlusButton(),
-+        const PlusButton(), // иконку меняем внутри PlusButton
-       ],
-     );
-   }
+@@ -70,9 +70,10 @@ class Composer extends StatelessWidget {
+                     child: Row(
+                       crossAxisAlignment: CrossAxisAlignment.end,
+                       children: [
+-                        IconButton(
+-                          icon: const Icon(Icons.emoji_emotions_outlined),
+-                          onPressed: onOpenEmoji, // просто открываем клавиатуру/даём фокус
++                        // левая кнопка - задания и опросы
++                        leftButton ?? const SizedBox.shrink(),
+
+                        // одна строка → авто-рост до 6 (без горизонтального скролла)
+                        Expanded(
+                          child: TextField(
+                            controller: controller,
+                            decoration: InputDecoration(
+                              hintText: 'Сообщение',
+                              border: InputBorder.none,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 12,
+                              ),
+                            ),
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Colors.black87,
+                            ),
+                            maxLines: 1,
+                            minLines: 1,
+                            expands: false,
+                          ),
+                        ),
+
+                        // правая скрепка - для файлов
+                        IconButton(
+                          icon: const Icon(Icons.attach_file),
+                          onPressed: () => onPickImage(), // загрузка файлов
+                          tooltip: 'Прикрепить файл',
+                        ),
+                      ],
+                    ),
+                  ),
 diff --git a/lib/src/ui/learning/tabs/chat/plus_button.dart b/lib/src/ui/learning/tabs/chat/plus_button.dart
 index 7777777..8888888 100644
 --- a/lib/src/ui/learning/tabs/chat/plus_button.dart
 +++ b/lib/src/ui/learning/tabs/chat/plus_button.dart
-@@ -10,9 +10,13 @@
--    return IconButton(
--      icon: const Icon(Icons.add),
--      onPressed: onPressed,
--      tooltip: 'Меню',
--    );
-+    // вместо «плюса» показываем «скрепку»
-+    return IconButton(
-+      icon: const Icon(Icons.attach_file),
-+      onPressed: onPressed,
-+      tooltip: 'Прикрепить файл',
+@@ -20,7 +20,7 @@ class PlusButton extends StatelessWidget {
+   @override
+   Widget build(BuildContext context) {
+     return IconButton(
+-      icon: const Icon(Icons.add_circle_outline),
++      icon: const Icon(Icons.add_circle_outline),
+       onPressed: () async {
+         showModalBottomSheet(
+           context: context,
+@@ -28,6 +28,20 @@ class PlusButton extends StatelessWidget {
+           builder: (_) => SafeArea(
+             child: Wrap(
+               children: [
++                ListTile(
++                  leading: const Icon(Icons.post_add_outlined),
++                  title: const Text('Предложить задание'),
++                  onTap: () async {
++                    Navigator.pop(context);
++                    final res = await _askAssignment(context);
++                    if (res == null) return;
++                    await onPropose?.call(res.$1, res.$2, res.$3, res.$4, res.$5);
++                  },
++                ),
++                ListTile(
++                  leading: const Icon(Icons.poll_outlined),
++                  title: const Text('Добавить опрос'),
++                  onTap: () async {
++                    Navigator.pop(context);
++                    // TODO: Добавить логику создания опроса
++                    ScaffoldMessenger.of(context).showSnackBar(
++                      const SnackBar(content: Text('Функция опросов пока в разработке')),
++                    );
++                  },
++                ),
++                if (onPinText != null) ...[
++                  const Divider(),
++                  ListTile(
++                    leading: const Icon(Icons.push_pin_outlined),
++                    title: const Text('Закрепить заметку'),
++                    onTap: () async {
++                      Navigator.pop(context);
++                      final txt = await _askText(context);
++                      if (txt != null && txt.trim().isNotEmpty) onPinText!(txt.trim());
++                    },
++                  ),
++                ],
+                 ListTile(
+                   leading: const Icon(Icons.post_add_outlined),
+                   title: const Text('Предложить задание'),
+diff --git a/lib/src/ui/learning/tabs/chat/date_separator.dart b/lib/src/ui/learning/tabs/chat/date_separator.dart
+index 9999999..aaaaaaa 100644
+--- a/lib/src/ui/learning/tabs/chat/date_separator.dart
++++ b/lib/src/ui/learning/tabs/chat/date_separator.dart
+@@ -0,0 +1,65 @@
++import 'package:flutter/material.dart';
++import 'package:intl/intl.dart';
++
++class DateSeparator extends StatelessWidget {
++  final DateTime date;
++
++  const DateSeparator({
++    super.key,
++    required this.date,
++  });
++
++  String _formatDate(DateTime date) {
++    final now = DateTime.now();
++    final today = DateTime(now.year, now.month, now.day);
++    final messageDate = DateTime(date.year, date.month, date.day);
++    
++    if (messageDate == today) {
++      return 'Сегодня';
++    } else if (messageDate == today.subtract(const Duration(days: 1))) {
++      return 'Вчера';
++    } else if (messageDate == today.add(const Duration(days: 1))) {
++      return 'Завтра';
++    } else {
++      return DateFormat('dd MMMM yyyy', 'ru_RU').format(date);
++    }
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    return Padding(
++      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
++      child: Row(
++        children: [
++          Expanded(
++            child: Container(
++              height: 1,
++              decoration: BoxDecoration(
++                gradient: LinearGradient(
++                  colors: [
++                    Colors.transparent,
++                    Colors.grey.withOpacity(0.3),
++                    Colors.transparent,
++                  ],
++                ),
++              ),
++            ),
++          ),
++          Padding(
++            padding: const EdgeInsets.symmetric(horizontal: 12),
++            child: Text(
++              _formatDate(date),
++              style: TextStyle(
++                fontSize: 12,
++                color: Colors.grey[600],
++                fontWeight: FontWeight.w500,
++              ),
++            ),
++          ),
++          Expanded(
++            child: Container(
++              height: 1,
++              decoration: BoxDecoration(
++                gradient: LinearGradient(
++                  colors: [
++                    Colors.transparent,
++                    Colors.grey.withOpacity(0.3),
++                    Colors.transparent,
++                  ],
++                ),
++              ),
++            ),
++          ),
++        ],
++      ),
 +    );
-   }
- }
++  }
++}

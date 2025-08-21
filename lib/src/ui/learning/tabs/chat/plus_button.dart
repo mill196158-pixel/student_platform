@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../../../services/file_service.dart';
 
 class PlusButton extends StatelessWidget {
   final void Function(String text)? onPinText;
@@ -34,6 +35,17 @@ class PlusButton extends StatelessWidget {
                     await onPropose?.call(res.$1, res.$2, res.$3, res.$4, res.$5);
                   },
                 ),
+                ListTile(
+                  leading: const Icon(Icons.poll_outlined),
+                  title: const Text('Добавить опрос'),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    // TODO: Добавить логику создания опроса
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Функция опросов пока в разработке')),
+                    );
+                  },
+                ),
                 if (onPinText != null)
                   ListTile(
                     leading: const Icon(Icons.push_pin_outlined),
@@ -44,6 +56,16 @@ class PlusButton extends StatelessWidget {
                       if (txt != null && txt.trim().isNotEmpty) onPinText!(txt.trim());
                     },
                   ),
+                const Divider(),
+                ListTile(
+                  leading: const Icon(Icons.storage),
+                  title: const Text('🧪 Тест Яндекс Storage'),
+                  subtitle: const Text('Проверить подключение'),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    await _testYandexStorage(context);
+                  },
+                ),
               ],
             ),
           ),
@@ -163,6 +185,88 @@ class PlusButton extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Future<void> _testYandexStorage(BuildContext context) async {
+    try {
+      // Показываем индикатор загрузки
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const AlertDialog(
+          content: Row(
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 16),
+              Text('Тестируем подключение к Яндекс Storage...'),
+            ],
+          ),
+        ),
+      );
+
+      final fileService = FileService();
+      
+      // Тест 1: Проверяем подключение
+      final connectionResult = await fileService.testConnection();
+      
+      if (!connectionResult.success) {
+        Navigator.pop(context); // Закрываем диалог загрузки
+        _showErrorDialog(context, '❌ Ошибка подключения', connectionResult.error ?? 'Неизвестная ошибка');
+        return;
+      }
+
+      // Тест 2: Пробуем загрузить тестовый файл
+      final testResult = await fileService.uploadTestFile();
+      
+      Navigator.pop(context); // Закрываем диалог загрузки
+
+      if (testResult.success) {
+        _showSuccessDialog(context, '✅ Тест успешен!', 
+          'Подключение к Яндекс Storage работает.\n\n'
+          'Тестовый файл загружен:\n'
+          '📁 ${testResult.fileName}\n'
+          '🔗 ${testResult.fileUrl}');
+      } else {
+        _showErrorDialog(context, '❌ Ошибка загрузки', testResult.error ?? 'Не удалось загрузить тестовый файл');
+      }
+
+      fileService.dispose();
+    } catch (e) {
+      Navigator.pop(context); // Закрываем диалог загрузки
+      _showErrorDialog(context, '❌ Критическая ошибка', e.toString());
+    }
+  }
+
+  void _showSuccessDialog(BuildContext context, String title, String message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showErrorDialog(BuildContext context, String title, String message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
       ),
     );
   }

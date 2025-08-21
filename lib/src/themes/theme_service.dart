@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:get_storage/get_storage.dart';
+// import 'package:get_storage/get_storage.dart'; // Временно отключено
 
 enum ThemeOptions { light, dark }
 
@@ -13,7 +13,7 @@ class ThemeService extends ChangeNotifier {
     statusBarColor: Colors.transparent,
   );
 
-  final _getStorage = GetStorage();
+  // final _getStorage = GetStorage(); // Временно отключено
   final storageKey = 'isDarkMode';
 
   switchStatusColor() {
@@ -34,11 +34,13 @@ class ThemeService extends ChangeNotifier {
   }
 
   bool isSavedDarkMode() {
-    return _getStorage.read(storageKey) ?? false;
+    // return _getStorage.read(storageKey) ?? false; // Временно отключено
+    return false; // По умолчанию светлая тема
   }
 
   void saveThemeMode(bool isDarkMode) async {
-    _getStorage.write(storageKey, isDarkMode);
+    // _getStorage.write(storageKey, isDarkMode); // Временно отключено
+    // Временно не сохраняем настройки темы
   }
 
   void changeThemeMode() {

@@ -198,7 +198,7 @@ class TeamCubit extends Cubit<TeamState> {
   }
 
   // ----------------------------- ЧАТ -----------------------------
-  Future<void> sendMessage(
+  Future<String?> sendMessage(
     String author,
     String text, {
     String? authorName,
@@ -206,9 +206,10 @@ class TeamCubit extends Cubit<TeamState> {
     String? replyToId,
     MessageType type = MessageType.text,
     String? assignmentId,
+    String? fileId,
   }) async {
     final t = text.trim();
-    if (t.isEmpty && imagePath == null && type == MessageType.text) return;
+    if (t.isEmpty && imagePath == null && type == MessageType.text) return null;
 
     final currentUid = Supabase.instance.client.auth.currentUser?.id ?? '';
 
@@ -226,13 +227,14 @@ class TeamCubit extends Cubit<TeamState> {
       replyToId: replyToId,
       type: type,
       assignmentId: assignmentId,
+      fileId: fileId,
     );
     final optimistic = [...state.chat, local];
     emit(state.copyWith(chat: optimistic));
 
     // сервер
-    final ok = await repo.saveChat(state.team.id, optimistic);
-    if (ok) {
+    final messageId = await repo.saveChat(state.team.id, optimistic);
+    if (messageId != null) {
       final fresh = await repo.loadChat(state.team.id);
       if (fresh.isNotEmpty) {
         emit(state.copyWith(chat: fresh));
@@ -240,6 +242,7 @@ class TeamCubit extends Cubit<TeamState> {
     }
 
     await _hydrateAssignmentIdsInChat();
+    return messageId;
   }
 
   void removeMessage(String id) {

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:get_storage/get_storage.dart';
+// import 'package:get_storage/get_storage.dart'; // Временно отключено
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -49,7 +49,9 @@ final GoRouter appRouter = GoRouter(
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await GetStorage.init(); // локальное хранилище
+  
+  // Временно отключаем GetStorage для избежания ошибок
+  // await GetStorage.init('student_platform');
 
   // === ТВОИ реальные значения из Supabase Settings → API ===
   const supabaseUrl = 'https://gwdanmwluhrcfxbnplwd.supabase.co';

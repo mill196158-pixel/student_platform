@@ -83,6 +83,8 @@ class SupabaseLearningRepository implements LearningRepository {
         return MessageType.assignmentDraft;
       case 'assignmentPublished':
         return MessageType.assignmentPublished;
+      case 'file':
+        return MessageType.file;
       default:
         return MessageType.text;
     }
@@ -94,6 +96,8 @@ class SupabaseLearningRepository implements LearningRepository {
         return 'assignmentDraft';
       case MessageType.assignmentPublished:
         return 'assignmentPublished';
+      case MessageType.file:
+        return 'file';
       default:
         return 'text';
     }
@@ -188,7 +192,8 @@ class SupabaseLearningRepository implements LearningRepository {
           imagePath: _firstAttachmentUrl(m['image_path'] ?? m['attachments']),
           replyToId: m['reply_to_id']?.toString(),
           type: _typeFromServer(m['type']?.toString()),
-          assignmentId: null,
+          assignmentId: m['assignment_id']?.toString(),
+          fileId: m['file_id']?.toString(),
           authorAvatarUrl: (m['author_avatar_url'] ?? m['avatar_url'])?.toString(),
         );
       }).toList();
@@ -207,8 +212,8 @@ class SupabaseLearningRepository implements LearningRepository {
   }
 
   @override
-  Future<bool> saveChat(String teamId, List<Message> messages) async {
-    if (messages.isEmpty) return true;
+  Future<String?> saveChat(String teamId, List<Message> messages) async {
+    if (messages.isEmpty) return null;
 
     final last = messages.last;
     final String typeStr = _typeToServer(last);
@@ -217,42 +222,43 @@ class SupabaseLearningRepository implements LearningRepository {
 
     debugPrint('[saveChat] "${last.text}" teamId=$teamId type=$typeStr replyTo=$replyTo attach=$attachment');
 
-    bool sent = false;
+    String? messageId;
 
     try {
-      await _sb.rpc('send_chat_message', params: {
+      final result = await _sb.rpc('send_chat_message', params: {
         'p_team_id': teamId,
         'p_text': last.text,
         'p_type': typeStr,
         'p_reply_to': replyTo,
         'p_attachment_url': attachment,
-        'p_assignment_id': last.assignmentId, // ДОБАВЛЕНО
+        'p_assignment_id': last.assignmentId,
+        'p_file_id': last.fileId,
       });
-      sent = true;
+      messageId = result?.toString();
     } catch (e, st) {
       debugPrint('[saveChat] send_chat_message error: $e\n$st');
-      try {
-        final login = await _currentLogin();
-        if (login != null && login.isNotEmpty) {
-          await _sb.rpc('send_chat_message_for_login', params: {
-            'p_team_id': teamId,
-            'p_login': login,
-            'p_text': last.text,
-            'p_type': typeStr,
-            'p_reply_to': replyTo,
-            'p_attachment_url': attachment,
-            'p_assignment_id': last.assignmentId,
-          });
-          sent = true;
-        }
+              try {
+          final login = await _currentLogin();
+          if (login != null && login.isNotEmpty) {
+            final result = await _sb.rpc('send_chat_message_for_login', params: {
+              'p_team_id': teamId,
+              'p_login': login,
+              'p_text': last.text,
+              'p_type': typeStr,
+              'p_reply_to': replyTo,
+              'p_attachment_url': attachment,
+              'p_assignment_id': last.assignmentId,
+              'p_file_id': last.fileId,
+            });
+            messageId = result?.toString();
+          }
       } catch (e2, st2) {
         debugPrint('[saveChat] send_chat_message_for_login error: $e2\n$st2');
-        sent = false;
       }
     }
 
     await _saveChatLocal(teamId, messages);
-    return sent;
+    return messageId;
   }
 
   // ---------------------- Файлы ----------------------

@@ -43,12 +43,12 @@ class MessageBubble extends StatelessWidget {
     final bg = isSystem
         ? theme.colorScheme.tertiaryContainer.withOpacity(.6)
         : (isMe
-            ? theme.colorScheme.primary
+            ? theme.colorScheme.primary.withOpacity(0.22) // чуть темнее для моих сообщений
             : theme.colorScheme.surfaceContainerHighest);
 
     final textColor = isSystem
         ? theme.colorScheme.onTertiaryContainer
-        : (isMe ? Colors.white : theme.colorScheme.onSurface);
+        : Colors.black87;
 
     final bubble = ConstrainedBox(
       constraints: BoxConstraints(maxWidth: maxW),
@@ -56,6 +56,7 @@ class MessageBubble extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
           color: bg,
+          border: Border.all(color: Colors.black12),
           borderRadius: BorderRadius.circular(18),
         ),
         child: Column(
@@ -75,7 +76,7 @@ class MessageBubble extends StatelessWidget {
               ),
             if (replyPreview != null && replyPreview!.isNotEmpty)
               Container(
-                margin: const EdgeInsets.only(bottom: 6),
+                margin: const EdgeInsets.only(bottom: 2),
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
                   color: isMe ? Colors.black.withOpacity(.12) : Colors.black12,
@@ -114,7 +115,7 @@ class MessageBubble extends StatelessWidget {
                 const SizedBox(width: 8),
                 Text(time,
                     style: TextStyle(
-                        color: textColor.withOpacity(.75), fontSize: 11)),
+                        color: textColor.withOpacity(.6), fontSize: 11)),
               ],
             ),
             if (reactions != null && reactions!.isNotEmpty) ...[
@@ -125,7 +126,7 @@ class MessageBubble extends StatelessWidget {
                 children: reactions!.entries
                     .map((e) => Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
+                              horizontal: 6, vertical: 3),
                           decoration: BoxDecoration(
                             color: Colors.black.withOpacity(isMe ? .15 : .08),
                             borderRadius: BorderRadius.circular(12),

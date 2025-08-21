@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' as services;
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -8,7 +9,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../state/team_cubit.dart';
 import '../models/message.dart';
 import '../models/assignment.dart';
+import '../models/chat_file.dart';
 import '../assignment_details_screen.dart';
+import '../../../services/file_service.dart';
 
 // виджеты
 import 'chat/composer.dart';
@@ -19,6 +22,10 @@ import 'chat/assignment_bubble.dart';
 import 'chat/plus_button.dart';
 import 'chat/pinned_strip.dart';
 import 'chat/typing_line.dart';
+import 'chat/file_test_screen.dart';
+import 'chat/file_upload_sheet.dart';
+import 'chat/date_separator.dart';
+import 'chat/file_message_bubble.dart';
 
 class ChatTab extends StatefulWidget {
   const ChatTab({super.key});
@@ -39,11 +46,15 @@ class _ChatTabState extends State<ChatTab> {
 
   final List<PinEntry> _pins = [];
   bool _pinsHidden = false;
-  bool _autoPinHidden = false;
+  bool _autoPinHidden = true; // отключаем автозакреп по умолчанию
 
   final Set<String> _typingUsers = {};
   Timer? _myTypingOff;
   bool get _someoneTyping => _typingUsers.isNotEmpty;
+
+  // Файлы в чате
+  final List<ChatFile> _chatFiles = [];
+  final FileService _fileService = FileService();
 
   final FocusNode _composerFocus = FocusNode();
 
@@ -68,6 +79,20 @@ class _ChatTabState extends State<ChatTab> {
       }
       return null;
     });
+
+    // Автоматически скроллим вниз при открытии чата
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _scroll.hasClients) {
+        _jumpToBottom();
+      }
+    });
+
+      // Загружаем файлы из базы данных
+  _loadChatFiles();
+  
+  // Отладочная информация
+  print('🔧 ChatTab инициализирован');
+  print('📁 FileMessageBubble импортирован: ${FileMessageBubble != null}');
   }
 
   @override
@@ -82,7 +107,7 @@ class _ChatTabState extends State<ChatTab> {
   }
 
   void _onScroll() {
-    final show = _scroll.hasClients && _scroll.offset < _scroll.position.maxScrollExtent - 300;
+    final show = _scroll.hasClients && _scroll.offset > 100; // В reverse режиме показываем кнопку, если прокрутили от начала
     if (show != _showJump) setState(() => _showJump = show);
   }
 
@@ -104,7 +129,7 @@ class _ChatTabState extends State<ChatTab> {
   Future<void> _jumpToBottom() async {
     if (!_scroll.hasClients) return;
     await _scroll.animateTo(
-      _scroll.position.maxScrollExtent,
+      0.0, // В reverse режиме начало списка это "низ" чата
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeOut,
     );
@@ -211,6 +236,312 @@ class _ChatTabState extends State<ChatTab> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _jumpToBottom());
   }
 
+  Future<void> _uploadFileToChat(File file) async {
+    try {
+      // Показываем диалог загрузки
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const AlertDialog(
+          content: Row(
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 16),
+              Text('Загружаем файл...'),
+            ],
+          ),
+        ),
+      );
+
+      // Получаем текущего пользователя
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user == null) {
+        Navigator.pop(context); // закрываем диалог
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('❌ Не удалось получить пользователя')),
+        );
+        return;
+      }
+
+      // Получаем chatId для команды
+      final chatId = await _getChatIdForTeam('7f0a7234-9565-4db4-9123-98c852740a6b'); // TODO: получить реальный team_id
+
+                        // Сначала сохраняем метаданные файла в БД (без message_id)
+                  final chatFile = ChatFile(
+                    id: '',
+                    chatId: chatId,
+                    messageId: null, // NULL для файлов без сообщения
+                    fileName: file.path.split('/').last,
+                    fileKey: '',
+                    fileUrl: '',
+                    fileType: 'application/octet-stream',
+                    fileSize: await file.length(),
+                    uploadedBy: user.id,
+                    uploadedAt: DateTime.now(),
+                  );
+
+      // Сохраняем файл в БД и получаем его ID
+      final savedChatFile = await _saveChatFileToDatabase(chatFile, user.id);
+      
+      // Загружаем файл в Yandex Storage
+      final uploadResult = await _fileService.uploadFileToChat(
+        file: file,
+        chatId: chatId,
+        messageId: '', // Пока пустой
+        uploadedBy: user.id,
+      );
+
+      // Обновляем chat_file с результатами загрузки
+      await Supabase.instance.client
+          .from('chat_files')
+          .update({
+            'file_key': uploadResult.fileKey,
+            'file_url': uploadResult.fileUrl,
+            'file_type': uploadResult.fileType,
+            'file_size': uploadResult.fileSize,
+          })
+          .eq('id', savedChatFile.id);
+      
+      print('✅ Файл обновлен в БД: ${uploadResult.fileName}');
+      print('📁 URL в БД: ${uploadResult.fileUrl}');
+
+                        // Создаем сообщение с типом 'file' и передаем file_id
+                  final messageId = await context.read<TeamCubit>().sendMessage(
+                    'me',
+                    '📎 ${uploadResult.fileName}',
+                    type: MessageType.file,
+                    fileId: savedChatFile.id, // Передаем ID файла
+                  );
+                  
+                  print('📝 Создано сообщение: messageId=$messageId, fileId=${savedChatFile.id}');
+
+                  // Связываем файл с сообщением
+                  if (messageId != null) {
+                    await Supabase.instance.client.rpc('link_chat_file_to_message', params: {
+                      'p_file_id': savedChatFile.id,
+                      'p_message_id': messageId,
+                    });
+                  }
+
+      // Добавляем файл в локальный список с правильными данными
+      setState(() {
+        _chatFiles.add(savedChatFile.copyWith(
+          id: savedChatFile.id,
+          fileKey: uploadResult.fileKey,
+          fileUrl: uploadResult.fileUrl,
+          fileType: uploadResult.fileType,
+          fileSize: uploadResult.fileSize,
+        ));
+      });
+      
+      print('✅ Файл добавлен в локальный список: ${uploadResult.fileName}');
+      print('📁 URL: ${uploadResult.fileUrl}');
+      
+      // Перезагружаем файлы из БД для обновления данных
+      await _loadChatFiles();
+
+      Navigator.pop(context); // закрываем диалог
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✅ Файл "${uploadResult.fileName}" загружен!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+
+    } catch (e) {
+      Navigator.pop(context); // закрываем диалог
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Ошибка загрузки: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _showFileUploadSheet(BuildContext context) {
+    // Простое меню выбора файла
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.attach_file),
+              title: const Text('Выбрать файл'),
+              onTap: () async {
+                Navigator.pop(context);
+                final file = await _fileService.pickFile();
+                if (file != null) {
+                  await _uploadFileToChat(file);
+                }
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.image),
+              title: const Text('Выбрать изображение'),
+              onTap: () async {
+                Navigator.pop(context);
+                final file = await _fileService.pickImage();
+                if (file != null) {
+                  await _uploadFileToChat(file);
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildMessagesWithDates(List<Message> messages, MediaQueryData mq) {
+    final widgets = <Widget>[];
+    DateTime? lastDate;
+
+    for (final m in messages) {
+      final messageDate = DateTime(m.at.year, m.at.month, m.at.day);
+      
+      // Добавляем разделитель даты
+      if (lastDate == null || messageDate != lastDate) {
+        widgets.add(DateSeparator(date: m.at)); // Всегда добавляем разделитель даты
+        lastDate = messageDate;
+      }
+
+      final key = _messageKeys[m.id] ??= GlobalKey();
+
+      if (m.type == MessageType.assignmentDraft || m.type == MessageType.assignmentPublished) {
+        final boostedTs = (mq.textScaleFactor * _assignmentTextBoost).clamp(1.0, 1.6);
+        widgets.add(
+          KeyedSubtree(
+            key: key,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 4), // такое же расстояние как у сообщений
+              child: MediaQuery(
+                data: mq.copyWith(textScaleFactor: boostedTs * _assignmentScale), // уменьшаем текст вместо всего виджета
+                child: AssignmentBubble(
+                  message: m,
+                  isDraft: m.type == MessageType.assignmentDraft,
+                  time: _time(m.at),
+                  onOpen: () {
+                    final st = context.read<TeamCubit>().state;
+                    Assignment? a;
+                    final byId = st.assignments.where((e) => e.id == m.assignmentId);
+                    if (byId.isNotEmpty) a = byId.first; else if (st.published.isNotEmpty) a = st.published.last;
+                    if (a == null) return;
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => BlocProvider.value(
+                          value: context.read<TeamCubit>(),
+                          child: AssignmentDetailsScreen(assignmentId: a!.id),
+                        ),
+                      ),
+                    );
+                  },
+                  onVote: () => context.read<TeamCubit>().voteForPending(),
+                  onLongPress: () => _showAssignmentActions(context, m),
+                  onPin: () {
+                    final st = context.read<TeamCubit>().state;
+                    final a = st.assignments.firstWhere(
+                      (e) => e.id == m.assignmentId,
+                      orElse: () => st.published.isNotEmpty ? st.published.last : st.assignments.first,
+                    );
+                    _pinAssignment(a);
+                  },
+                ),
+              ),
+            ),
+          ),
+        );
+                   } else if (m.type == MessageType.file) {
+               // Находим файл для этого сообщения
+               // Связь: messages.file_id → chat_files.id
+               print('🔍 Ищем файл для сообщения: messageId=${m.id}, fileId=${m.fileId}');
+               print('📁 Доступные файлы: ${_chatFiles.map((f) => '${f.id}:${f.fileName}').join(', ')}');
+               
+               final chatFile = _chatFiles.firstWhere(
+                 (f) => f.id == m.fileId,
+                 orElse: () {
+                   print('❌ Файл не найден, создаем заглушку');
+                   return ChatFile(
+                     id: m.fileId ?? '',
+                     chatId: m.chatId,
+                     messageId: m.id,
+                     fileName: m.text.replaceFirst('📎 ', ''),
+                     fileKey: '',
+                     fileUrl: '',
+                     fileType: 'application/octet-stream',
+                     fileSize: 0,
+                     uploadedBy: m.authorId,
+                     uploadedAt: m.at,
+                   );
+                 },
+               );
+               
+               print('✅ Найден файл: ${chatFile.fileName}, URL: ${chatFile.fileUrl}');
+               print('🎨 Создаем FileMessageBubble для файла: ${chatFile.fileName}');
+
+               widgets.add(
+                 KeyedSubtree(
+                   key: key,
+                   child: Padding(
+                     padding: const EdgeInsets.only(bottom: 4),
+                     child: SwipeToReply(
+                       onReply: () => setState(() => _replyTo = m),
+                       child: FileMessageBubble(
+                         file: chatFile,
+                         isMe: m.isMine(Supabase.instance.client.auth.currentUser?.id),
+                         time: _time(m.at),
+                         onLongPress: () => _showFileActions(context, chatFile),
+                       ),
+                     ),
+                   ),
+                 ),
+               );
+             } else {
+               final reply = m.replyToId != null
+                   ? messages.firstWhere(
+                       (x) => x.id == m.replyToId,
+                       orElse: () => Message(
+                         id: '0',
+                         chatId: '',
+                         authorId: '',
+                         authorLogin: '',
+                         authorName: '',
+                         text: '',
+                         at: DateTime.now(),
+                       ),
+                     )
+                   : null;
+
+               widgets.add(
+                 KeyedSubtree(
+                   key: key,
+                   child: Padding(
+                     padding: const EdgeInsets.only(bottom: 4), // нормальное расстояние между сообщениями
+                     child: SwipeToReply(
+                       onReply: () => setState(() => _replyTo = m),
+                       child: MessageBubble(
+                         message: m,
+                         time: _time(m.at),
+                         replyPreview: reply?.text,
+                         imagePath: m.imagePath,
+                         reactions: _localReactions[m.id],
+                         onReact: (emoji) => _addReaction(m.id, emoji),
+                         onLongPress: () => _showMessageActions(context, m),
+                       ),
+                     ),
+                   ),
+                 ),
+               );
+             }
+    }
+
+    return widgets;
+  }
+
   @override
   Widget build(BuildContext context) {
     final mq = MediaQuery.of(context);
@@ -274,6 +605,15 @@ class _ChatTabState extends State<ChatTab> {
                                 setState(() => _pinsHidden = true);
                               },
                             ),
+                            if (_autoPinHidden)
+                              ListTile(
+                                leading: const Icon(Icons.push_pin_outlined),
+                                title: const Text('Включить авто-закреп задания'),
+                                onTap: () {
+                                  Navigator.pop(context);
+                                  setState(() => _autoPinHidden = false);
+                                },
+                              ),
                             if (!_autoPinHidden)
                               ListTile(
                                 leading: const Icon(Icons.push_pin_outlined),
@@ -283,6 +623,19 @@ class _ChatTabState extends State<ChatTab> {
                                   setState(() => _autoPinHidden = true);
                                 },
                               ),
+                            const Divider(),
+                            ListTile(
+                              leading: const Icon(Icons.storage),
+                              title: const Text('Тест файлового сервиса'),
+                              onTap: () {
+                                Navigator.pop(context);
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (context) => const FileTestScreen(),
+                                  ),
+                                );
+                              },
+                            ),
                             if (_pins.isNotEmpty) const Divider(height: 12),
                             ..._pins.map((p) => ListTile(
                                   leading: Icon(p.icon),
@@ -317,97 +670,12 @@ class _ChatTabState extends State<ChatTab> {
               Expanded(
                 child: Stack(
                   children: [
-                    ListView.builder(
-                      controller: _scroll,
-                      padding: const EdgeInsets.fromLTRB(12, 12, 12, listBottomPad),
-                      itemCount: list.length,
-                      itemBuilder: (context, i) {
-                        final m = list[i];
-                        final key = _messageKeys[m.id] ??= GlobalKey();
-
-                        if (m.type == MessageType.assignmentDraft || m.type == MessageType.assignmentPublished) {
-                          final boostedTs = (mq.textScaleFactor * _assignmentTextBoost).clamp(1.0, 1.6);
-                          return KeyedSubtree(
-                            key: key,
-                            child: Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: Transform.scale(
-                                scale: _assignmentScale,
-                                alignment: Alignment.centerLeft,
-                                child: MediaQuery(
-                                  data: mq.copyWith(textScaleFactor: boostedTs),
-                                  child: AssignmentBubble(
-                                    message: m,
-                                    isDraft: m.type == MessageType.assignmentDraft,
-                                    time: _time(m.at),
-                                    onOpen: () {
-                                      final st = context.read<TeamCubit>().state;
-                                      Assignment? a;
-                                      final byId = st.assignments.where((e) => e.id == m.assignmentId);
-                                      if (byId.isNotEmpty) a = byId.first; else if (st.published.isNotEmpty) a = st.published.last;
-                                      if (a == null) return;
-                                      Navigator.of(context).push(
-                                        MaterialPageRoute(
-                                          builder: (_) => BlocProvider.value(
-                                            value: context.read<TeamCubit>(),
-                                            child: AssignmentDetailsScreen(assignmentId: a!.id),
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                    onPublish: () => context.read<TeamCubit>().publishPendingManually(),
-                                    onVote: () => context.read<TeamCubit>().voteForPending(),
-                                    onLongPress: () => _showAssignmentActions(context, m),
-                                    onPin: () {
-                                      final st = context.read<TeamCubit>().state;
-                                      final a = st.assignments.firstWhere(
-                                        (e) => e.id == m.assignmentId,
-                                        orElse: () => st.published.isNotEmpty ? st.published.last : st.assignments.first,
-                                      );
-                                      _pinAssignment(a);
-                                    },
-                                  ),
-                                ),
-                              ),
-                            ),
-                          );
-                        }
-
-                        final reply = m.replyToId != null
-                            ? state.chat.firstWhere(
-                                (x) => x.id == m.replyToId,
-                                orElse: () => Message(
-                                  id: '0',
-                                  chatId: '',
-                                  authorId: '',
-                                  authorLogin: '',
-                                  authorName: '',
-                                  text: '',
-                                  at: DateTime.now(),
-                                ),
-                              )
-                            : null;
-
-                        return KeyedSubtree(
-                          key: key,
-                          child: Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: SwipeToReply(
-                              onReply: () => setState(() => _replyTo = m),
-                              child: MessageBubble(
-                                message: m,
-                                time: _time(m.at),
-                                replyPreview: reply?.text,
-                                imagePath: m.imagePath,
-                                reactions: _localReactions[m.id],
-                                onReact: (emoji) => _addReaction(m.id, emoji),
-                                onLongPress: () => _showMessageActions(context, m),
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
+                                             ListView(
+                           reverse: true, // Новые сообщения внизу
+                           controller: _scroll,
+                           padding: const EdgeInsets.fromLTRB(12, 12, 12, listBottomPad),
+                           children: _buildMessagesWithDates(list.reversed.toList(), mq),
+                         ),
 
                     if (_showJump)
                       Positioned(
@@ -462,6 +730,12 @@ class _ChatTabState extends State<ChatTab> {
                   services.SystemChannels.textInput.invokeMethod('TextInput.show');
                 },
                 onSend: () => _send(context),
+                                       onAttachFile: () async {
+                         final file = await _fileService.pickFile();
+                         if (file != null) {
+                           await _uploadFileToChat(file);
+                         }
+                       },
               ),
             ],
           );
@@ -684,5 +958,137 @@ class _ChatTabState extends State<ChatTab> {
         ),
       ),
     );
+  }
+
+  void _showFileActions(BuildContext context, ChatFile file) {
+    final myUid = Supabase.instance.client.auth.currentUser?.id;
+    final isMyFile = file.uploadedBy == myUid;
+
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.download),
+              title: const Text('Скачать файл'),
+              onTap: () {
+                Navigator.pop(context);
+                // Скачивание уже реализовано в FileMessageBubble
+              },
+            ),
+            if (isMyFile)
+              ListTile(
+                leading: const Icon(Icons.delete_outline),
+                title: const Text('Удалить файл'),
+                onTap: () async {
+                  Navigator.pop(context);
+                  final ok = await showDialog<bool>(
+                    context: context,
+                    builder: (_) => AlertDialog(
+                      title: const Text('Удалить файл?'),
+                      content: Text('Файл "${file.fileName}" будет удален безвозвратно.'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, false),
+                          child: const Text('Отмена'),
+                        ),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(context, true),
+                          child: const Text('Удалить'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (ok == true) {
+                    // TODO: Удалить файл из Yandex Storage и БД
+                    setState(() {
+                      _chatFiles.removeWhere((f) => f.id == file.id);
+                    });
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Файл "${file.fileName}" удален'),
+                        backgroundColor: Colors.orange,
+                      ),
+                    );
+                  }
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Получаем chatId для команды
+  Future<String> _getChatIdForTeam(String teamId) async {
+    try {
+      final response = await Supabase.instance.client
+          .from('chats')
+          .select('id')
+          .eq('team_id', teamId)
+          .eq('type', 'team_main')
+          .limit(1)
+          .single();
+      
+      return response['id'] as String;
+    } catch (e) {
+      print('Ошибка получения chatId: $e');
+      return 'test-chat-${DateTime.now().millisecondsSinceEpoch}';
+    }
+  }
+
+  // Загружаем файлы из базы данных
+  Future<void> _loadChatFiles() async {
+    try {
+      final chatId = await _getChatIdForTeam('7f0a7234-9565-4db4-9123-98c852740a6b'); // TODO: получить реальный team_id
+      if (chatId.isEmpty) return;
+
+      final response = await Supabase.instance.client
+          .from('chat_files')
+          .select('*')
+          .eq('chat_id', chatId)
+          .eq('is_deleted', false)
+          .order('uploaded_at', ascending: false);
+
+      setState(() {
+        _chatFiles.clear();
+        for (final row in response) {
+          final chatFile = ChatFile.fromJson(row);
+          _chatFiles.add(chatFile);
+          print('📁 Загружен файл из БД: ${chatFile.fileName}, URL: ${chatFile.fileUrl}');
+        }
+      });
+
+      print('✅ Загружено ${_chatFiles.length} файлов из БД');
+    } catch (e) {
+      print('❌ Ошибка загрузки файлов: $e');
+    }
+  }
+
+  // Сохраняем файл в chat_files таблицу
+  Future<ChatFile> _saveChatFileToDatabase(ChatFile chatFile, String userId) async {
+    try {
+      final response = await Supabase.instance.client.rpc('save_chat_file', params: {
+        'p_chat_id': chatFile.chatId,
+        'p_file_name': chatFile.fileName,
+        'p_file_key': chatFile.fileKey,
+        'p_file_url': chatFile.fileUrl,
+        'p_file_type': chatFile.fileType,
+        'p_file_size': chatFile.fileSize,
+        'p_uploaded_by': userId,
+        'p_message_id': chatFile.messageId?.isEmpty == true ? null : chatFile.messageId, // NULL если пустая строка
+      });
+      
+      print('✅ Файл сохранен в БД: ${chatFile.fileName}');
+      
+      // Возвращаем обновленный ChatFile с ID из БД
+      return chatFile.copyWith(id: response.toString());
+    } catch (e) {
+      print('❌ Ошибка сохранения файла в БД: $e');
+      throw Exception('Ошибка сохранения файла в БД: $e');
+    }
   }
 }
