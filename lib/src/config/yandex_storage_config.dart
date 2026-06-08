@@ -1,10 +1,17 @@
-class YandexStorageConfig {
-  // Данные Yandex Object Storage
-  static const String _accessKey = 'YOUR_ACCESS_KEY';
-  static const String _secretKey = 'YOUR_SECRET_KEY';
-  static const String _bucketName = 'YOUR_BUCKET_NAME';
-  static const String _region = 'ru-central1';
-  static const String _endpoint = 'storage.yandexcloud.net';
+﻿class YandexStorageConfig {
+  // Client-side Flutter code must never contain Yandex Cloud secret keys.
+  // TODO: replace direct S3 upload with backend-issued presigned upload URLs.
+  static const String _accessKey = '';
+  static const String _secretKey = '';
+  static const String _bucketName = String.fromEnvironment('YANDEX_STORAGE_BUCKET');
+  static const String _region = String.fromEnvironment(
+    'YANDEX_STORAGE_REGION',
+    defaultValue: 'ru-central1',
+  );
+  static const String _endpoint = String.fromEnvironment(
+    'YANDEX_STORAGE_ENDPOINT',
+    defaultValue: 'storage.yandexcloud.net',
+  );
 
   static String get accessKey => _accessKey;
   static String get secretKey => _secretKey;
@@ -12,10 +19,9 @@ class YandexStorageConfig {
   static String get region => _region;
   static String get endpoint => _endpoint;
 
-  // Проверка конфигурации
-  static bool get isConfigured {
-    return _accessKey != 'YOUR_ACCESS_KEY' && 
-           _secretKey != 'YOUR_SECRET_KEY' && 
-           _bucketName != 'YOUR_BUCKET_NAME';
-  }
+  static bool get isConfigured => false;
+
+  static String get missingConfigMessage =>
+      'Direct Yandex Storage uploads are disabled in the Flutter client. '
+      'Use backend-generated presigned upload URLs instead.';
 }
