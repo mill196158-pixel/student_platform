@@ -81,6 +81,7 @@ class TeamCubit extends Cubit<TeamState> {
   // realtime
   RealtimeChannel? _rtChat;
   RealtimeChannel? _rtAssignments;
+  RealtimeChannel? _rtReactions;
   RealtimeChannel? _rtVotes;
   RealtimeChannel? _rtDone;
 
@@ -245,12 +246,90 @@ class TeamCubit extends Cubit<TeamState> {
     return messageId;
   }
 
-  void removeMessage(String id) {
+  Future<void> removeMessage(String id) async {
     final idx = state.chat.indexWhere((m) => m.id == id);
     if (idx == -1) return;
+    
+    // Оптимистично удаляем локально
     final updated = List<Message>.from(state.chat)..removeAt(idx);
     emit(state.copyWith(chat: updated));
-    repo.saveChat(state.team.id, updated);
+    
+    // Удаляем с сервера
+    final success = await repo.deleteMessage(id);
+    if (!success) {
+      // Если не удалось удалить с сервера, возвращаем сообщение обратно
+      emit(state.copyWith(chat: state.chat));
+      print('[TeamCubit] Не удалось удалить сообщение с сервера: $id');
+      return;
+    }
+    // Перечитываем чат, чтобы зафиксировать удаление сервером (устойчиво к рейсам/RT)
+    try {
+      final fresh = await repo.loadChat(state.team.id);
+      if (fresh.isNotEmpty) emit(state.copyWith(chat: fresh));
+    } catch (_) {}
+  }
+
+  // Toggle server-side pin for a message with optimistic UI
+  Future<void> pinMessage(String id, bool pinned) async {
+    final idx = state.chat.indexWhere((m) => m.id == id);
+    if (idx == -1) return;
+
+    // optimistic
+    final updated = List<Message>.from(state.chat);
+    updated[idx] = updated[idx].copyWith(isPinned: pinned);
+    emit(state.copyWith(chat: updated));
+
+    final ok = await repo.pinMessage(id, pinned);
+    if (!ok) {
+      // revert if failed
+      final reverted = List<Message>.from(updated);
+      reverted[idx] = reverted[idx].copyWith(isPinned: !pinned);
+      emit(state.copyWith(chat: reverted));
+    }
+    // realtime UPDATE will also refresh list shortly
+  }
+
+  String _messageIdFromPayload(PostgresChangePayload payload, {bool old = false}) {
+    final record = old ? payload.oldRecord : payload.newRecord;
+    return (record['id'] ?? '').toString();
+  }
+
+  Future<void> _onRealtimeMessageInsert(PostgresChangePayload payload) async {
+    final id = _messageIdFromPayload(payload);
+    if (id.isEmpty || state.chat.any((m) => m.id == id)) return;
+
+    final message = await repo.loadMessageById(state.team.id, id);
+    if (message == null) return;
+
+    emit(state.copyWith(chat: [...state.chat, message]));
+    await _hydrateAssignmentIdsInChat();
+  }
+
+  Future<void> _onRealtimeMessageUpdate(PostgresChangePayload payload) async {
+    final id = _messageIdFromPayload(payload);
+    if (id.isEmpty) return;
+
+    final idx = state.chat.indexWhere((m) => m.id == id);
+    if (idx == -1) return;
+
+    final message = await repo.loadMessageById(state.team.id, id);
+    if (message == null) return;
+
+    final updated = List<Message>.from(state.chat);
+    updated[idx] = message;
+    emit(state.copyWith(chat: updated));
+    await _hydrateAssignmentIdsInChat();
+  }
+
+  Future<void> _onRealtimeMessageDelete(PostgresChangePayload payload) async {
+    final id = _messageIdFromPayload(payload, old: true);
+    if (id.isEmpty) return;
+
+    final updated = state.chat.where((m) => m.id != id).toList();
+    if (updated.length == state.chat.length) return;
+
+    emit(state.copyWith(chat: updated));
+    await _hydrateAssignmentIdsInChat();
   }
 
   Future<void> _subscribeToChat() async {
@@ -262,7 +341,7 @@ class TeamCubit extends Cubit<TeamState> {
           .eq('team_id', state.team.id)
           .eq('type', 'team_main')
           .limit(1);
-      if (rows is! List || rows.isEmpty) return;
+      if (rows.isEmpty) return;
       final chatId = (rows.first['id'] ?? '').toString();
       if (chatId.isEmpty) return;
 
@@ -277,18 +356,18 @@ class TeamCubit extends Cubit<TeamState> {
         value: chatId,
       );
 
+      // ДЕБАГ: проверяем chatId для RT
+      print('[TeamCubit] RT: подписываемся на chat_id=$chatId');
+
       _rtChat!
           .onPostgresChanges(
             event: PostgresChangeEvent.insert,
             schema: 'public',
             table: 'messages',
             filter: filter,
-            callback: (_) async {
-              // лог
+            callback: (payload) async {
               print('[TeamCubit] RT: messages INSERT');
-              final fresh = await repo.loadChat(state.team.id);
-              emit(state.copyWith(chat: fresh));
-              await _hydrateAssignmentIdsInChat();
+              await _onRealtimeMessageInsert(payload);
             },
           )
           .onPostgresChanges(
@@ -296,11 +375,9 @@ class TeamCubit extends Cubit<TeamState> {
             schema: 'public',
             table: 'messages',
             filter: filter,
-            callback: (_) async {
+            callback: (payload) async {
               print('[TeamCubit] RT: messages UPDATE');
-              final fresh = await repo.loadChat(state.team.id);
-              emit(state.copyWith(chat: fresh));
-              await _hydrateAssignmentIdsInChat();
+              await _onRealtimeMessageUpdate(payload);
             },
           )
           .onPostgresChanges(
@@ -308,15 +385,63 @@ class TeamCubit extends Cubit<TeamState> {
             schema: 'public',
             table: 'messages',
             filter: filter,
-            callback: (_) async {
+            callback: (payload) async {
               print('[TeamCubit] RT: messages DELETE');
-              final fresh = await repo.loadChat(state.team.id);
-              emit(state.copyWith(chat: fresh));
-              await _hydrateAssignmentIdsInChat();
+              await _onRealtimeMessageDelete(payload);
             },
           );
 
       await _rtChat!.subscribe();
+      // subscribe to reactions table for lightweight updates
+      try {
+        await _rtReactions?.unsubscribe();
+      } catch (_) {}
+      _rtReactions = sb.channel('public:message_reactions');
+      _rtReactions!
+          .onPostgresChanges(
+            event: PostgresChangeEvent.insert,
+            schema: 'public',
+            table: 'message_reactions',
+            callback: (payload) async {
+              try {
+                final newRec = payload.newRecord as Map<String, dynamic>?;
+                final mid = newRec?['message_id']?.toString();
+                if (mid != null && mid.isNotEmpty) {
+                  final res = await repo.loadReactionsForMessage(mid);
+                  final counts = Map<String, int>.from(res['counts'] ?? {});
+                  final chat = [...state.chat];
+                  final idx = chat.indexWhere((m) => m.id == mid);
+                  if (idx != -1) {
+                    chat[idx] = chat[idx].copyWith(reactions: counts);
+                    emit(state.copyWith(chat: chat));
+                  }
+                }
+              } catch (_) {}
+            },
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.delete,
+            schema: 'public',
+            table: 'message_reactions',
+            callback: (payload) async {
+              try {
+                final oldRec = payload.oldRecord as Map<String, dynamic>?;
+                final mid = oldRec?['message_id']?.toString();
+                if (mid != null && mid.isNotEmpty) {
+                  final res = await repo.loadReactionsForMessage(mid);
+                  final counts = Map<String, int>.from(res['counts'] ?? {});
+                  final chat = [...state.chat];
+                  final idx = chat.indexWhere((m) => m.id == mid);
+                  if (idx != -1) {
+                    chat[idx] = chat[idx].copyWith(reactions: counts);
+                    emit(state.copyWith(chat: chat));
+                  }
+                }
+              } catch (_) {}
+            },
+          );
+
+      await _rtReactions!.subscribe();
     } catch (_) {
       // тихо
     }

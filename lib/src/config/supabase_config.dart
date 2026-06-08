@@ -1,14 +1,18 @@
-  static Future<void> init() async {
-    if (_inited) return;
-    await Supabase.initialize(
-      url: const String.fromEnvironment('https://gwdanmwluhrcfxbnplwd.supabase.co'),
-      anonKey: const String.fromEnvironment('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd3ZGFubXdsdWhyY2Z4Ym5wbHdkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTUyNjM1MTgsImV4cCI6MjA3MDgzOTUxOH0.tBZ7b_FyOxPWiqkFQf1OIh9c6hJ7Fm2eHyjsDjoBoSA'),
-      debug: false,
-    );
-    _inited = true;
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+class SupabaseConfig {
+  static const String url = String.fromEnvironment('SUPABASE_URL');
+  static const String anonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+
+  static void validate() {
+    if (url.isEmpty || anonKey.isEmpty) {
+      throw StateError(
+        'Supabase config is missing. Run with '
+        '--dart-define=SUPABASE_URL=... '
+        '--dart-define=SUPABASE_ANON_KEY=...',
+      );
+    }
   }
 
   static SupabaseClient get client => Supabase.instance.client;
-}
-
 }

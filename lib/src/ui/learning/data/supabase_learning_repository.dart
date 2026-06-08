@@ -9,6 +9,7 @@ import 'package:student_platform/src/ui/learning/models/team.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/learning/models/file_item.dart';
 import 'package:student_platform/src/ui/learning/models/assignment.dart';
+import 'package:student_platform/src/ui/learning/models/chat_file.dart'; // ДОБАВЛЕНО!
 
 class SupabaseLearningRepository implements LearningRepository {
   final SupabaseClient _sb = Supabase.instance.client;
@@ -108,7 +109,7 @@ class SupabaseLearningRepository implements LearningRepository {
     if (user == null) return null;
     try {
       final rows = await _sb.from('users').select('login').eq('id', user.id).limit(1);
-      if (rows is List && rows.isNotEmpty) {
+      if (rows.isNotEmpty) {
         final m = Map<String, dynamic>.from(rows.first as Map);
         final login = (m['login'] ?? '').toString();
         return login.isEmpty ? null : login;
@@ -127,12 +128,19 @@ class SupabaseLearningRepository implements LearningRepository {
         .eq('team_id', teamId)
         .eq('type', 'team_main')
         .limit(1);
-    if (rows is List && rows.isNotEmpty) {
+    if (rows.isNotEmpty) {
       final id = (rows.first['id'] ?? '').toString();
       _chatIdByTeam[teamId] = id;
       return id;
     }
     return null;
+  }
+
+  /// Public API to fetch main chat id for a team (type='team_main').
+  /// Returns empty string if not found.
+  Future<String> getMainChatId(String teamId) async {
+    final id = await _getTeamMainChatId(teamId);
+    return id ?? '';
   }
 
   String? _firstAttachmentUrl(dynamic value) {
@@ -147,6 +155,51 @@ class SupabaseLearningRepository implements LearningRepository {
     } catch (_) {
       return null;
     }
+  }
+
+  List<ChatFile> _parseAttachments(dynamic value) {
+    final attachments = <ChatFile>[];
+    if (value == null) return attachments;
+    
+    // ДЕБАГ: проверяем тип attachments
+    print('[loadChat] attachments type: ${value.runtimeType}, value: $value');
+    
+    try {
+      List<dynamic> attachmentsList;
+      
+      if (value is String) {
+        // Если attachments пришло как JSON строка
+        if (value.isEmpty || value == '[]') return attachments;
+        final decoded = jsonDecode(value);
+        attachmentsList = decoded is List ? decoded : [];
+      } else if (value is List) {
+        attachmentsList = value;
+      } else {
+        print('[loadChat] Неизвестный тип attachments: ${value.runtimeType}');
+        return attachments;
+      }
+      
+      for (final it in attachmentsList) {
+        if (it is Map<String, dynamic>) {
+          attachments.add(ChatFile(
+            id: (it['id'] ?? '').toString(),
+            chatId: '', // Будет заполнено позже
+            messageId: '', // Будет заполнено позже
+            fileName: (it['fileName'] ?? it['name'] ?? '').toString(),
+            fileKey: '', // Не используется в UI
+            fileUrl: (it['fileUrl'] ?? it['url'] ?? '').toString(),
+            fileType: (it['fileType'] ?? it['type'] ?? '').toString(),
+            fileSize: (it['fileSize'] ?? it['size'] ?? 0) as int,
+            uploadedBy: '', // Не критично для отображения
+            uploadedAt: DateTime.tryParse((it['uploadedAt'] ?? it['created_at'] ?? '').toString()) ?? DateTime.now(),
+          ));
+        }
+      }
+    } catch (e) {
+      print('[loadChat] Ошибка парсинга attachments: $e');
+    }
+    
+    return attachments;
   }
 
   Future<void> _saveChatLocal(String teamId, List<Message> messages) async {
@@ -164,6 +217,51 @@ class SupabaseLearningRepository implements LearningRepository {
         .toList();
   }
 
+  Message _mapMessageRow(
+    Map<String, dynamic> m, {
+    required String chatId,
+    required String currentUserId,
+  }) {
+    final authorId = (m['author_id']?.toString() ?? '');
+    final amI = currentUserId.isNotEmpty && authorId == currentUserId;
+
+    return Message(
+      id: (m['id'] ?? '').toString(),
+      chatId: (m['chat_id'] ?? chatId).toString(),
+      authorId: authorId,
+      authorLogin: (m['author_login'] ?? 'system').toString(),
+      authorName: (m['author_name'] ?? (amI ? 'Вы' : 'Студент')).toString(),
+      text: (m['text'] ?? m['content'] ?? m['body'] ?? '').toString(),
+      at: DateTime.tryParse((m['at'] ?? m['created_at'] ?? '').toString()) ?? DateTime.now(),
+      imagePath: _firstAttachmentUrl(m['image_path'] ?? m['attachments']),
+      replyToId: m['reply_to_id']?.toString(),
+      type: _typeFromServer((m['type'] ?? m['msg_type'])?.toString()),
+      assignmentId: (m['assignment_id'] ?? m['assignmentId'])?.toString(),
+      fileId: (m['file_id'] ?? m['fileId'])?.toString(),
+      authorAvatarUrl: (m['author_avatar_url'] ?? m['avatar_url'])?.toString(),
+      attachments: _parseAttachments(m['attachments']),
+      isPinned: (m['is_pinned'] ?? false) == true,
+      reactions: (m['reactions'] is Map)
+          ? Map<String, int>.from(m['reactions'] as Map)
+          : (m['reactions'] is String && (m['reactions'] as String).isNotEmpty
+              ? Map<String, int>.from(jsonDecode(m['reactions'] as String) as Map)
+              : null),
+      userReactions: (m['user_reactions'] is List)
+          ? (m['user_reactions'] as List).map((e) => e.toString()).toList()
+          : null,
+    );
+  }
+
+  Future<List<ChatFile>> _loadChatFilesForMessage(String messageId) async {
+    final rows = await _sb
+        .from('chat_files')
+        .select('*')
+        .eq('message_id', messageId);
+    return (rows as List)
+        .map((e) => ChatFile.fromJson(Map<String, dynamic>.from(e as Map)))
+        .toList();
+  }
+
   @override
   Future<List<Message>> loadChat(String teamId) async {
     try {
@@ -173,41 +271,77 @@ class SupabaseLearningRepository implements LearningRepository {
       debugPrint('[loadChat] teamId=$teamId, chatId=$chatId');
       final res = await _sb.rpc('get_chat_messages_for_team', params: {
         'p_team_id': teamId,
-        'p_limit': 400,
+        'p_limit': 50,
       });
 
       final list = (res as List).map<Message>((e) {
         final m = Map<String, dynamic>.from(e as Map);
-        final authorId = (m['author_id']?.toString() ?? '');
-        final amI = (me != null && authorId.isNotEmpty && authorId == me.id);
-
-        return Message(
-          id: (m['id'] ?? '').toString(),
+        return _mapMessageRow(
+          m,
           chatId: chatId ?? '',
-          authorId: authorId,
-          authorLogin: (m['author_login'] ?? 'system').toString(),
-          authorName: (m['author_name'] ?? (amI ? 'Вы' : 'Студент')).toString(),
-          text: (m['text'] ?? m['content'] ?? '').toString(),
-          at: DateTime.tryParse((m['at'] ?? m['created_at'] ?? '').toString()) ?? DateTime.now(),
-          imagePath: _firstAttachmentUrl(m['image_path'] ?? m['attachments']),
-          replyToId: m['reply_to_id']?.toString(),
-          type: _typeFromServer(m['type']?.toString()),
-          assignmentId: m['assignment_id']?.toString(),
-          fileId: m['file_id']?.toString(),
-          authorAvatarUrl: (m['author_avatar_url'] ?? m['avatar_url'])?.toString(),
+          currentUserId: me?.id ?? '',
         );
       }).toList();
 
-      if (list.isEmpty) {
-        debugPrint('[loadChat] пустой список, возвращаем локальный кэш');
-        return _loadChatLocal(teamId);
-      }
-
+      // Всегда синхронизируем локальный кэш с серверным ответом,
+      // даже если список пуст — это важно, чтобы удалённое последнее
+      // сообщение не «воскресало» из локального кэша.
       await _saveChatLocal(teamId, list);
       return list;
     } catch (e, st) {
       debugPrint('[loadChat] error: $e\n$st');
       return _loadChatLocal(teamId);
+    }
+  }
+
+  @override
+  Future<Message?> loadMessageById(String teamId, String messageId) async {
+    try {
+      final chatId = await _getTeamMainChatId(teamId);
+      if (chatId == null || chatId.isEmpty || messageId.isEmpty) return null;
+
+      final row = await _sb
+          .from('messages')
+          .select('*')
+          .eq('id', messageId)
+          .eq('chat_id', chatId)
+          .maybeSingle();
+      if (row == null) return null;
+
+      final data = Map<String, dynamic>.from(row as Map);
+      final attachments = await _loadChatFilesForMessage(messageId);
+      if (attachments.isNotEmpty) {
+        data['attachments'] = attachments.map((e) => e.toJson()).toList();
+      }
+
+      final authorId = (data['author_id'] ?? '').toString();
+      if (authorId.isNotEmpty) {
+        try {
+          final user = await _sb
+              .from('users')
+              .select('login,name,surname,avatar_url')
+              .eq('id', authorId)
+              .maybeSingle();
+          if (user != null) {
+            final u = Map<String, dynamic>.from(user as Map);
+            data['author_login'] = (u['login'] ?? '').toString();
+            data['author_name'] = [
+              (u['name'] ?? '').toString(),
+              (u['surname'] ?? '').toString(),
+            ].where((s) => s.isNotEmpty).join(' ').trim();
+            data['author_avatar_url'] = (u['avatar_url'] ?? '').toString();
+          }
+        } catch (_) {}
+      }
+
+      return _mapMessageRow(
+        data,
+        chatId: chatId,
+        currentUserId: _sb.auth.currentUser?.id ?? '',
+      );
+    } catch (e, st) {
+      debugPrint('[loadMessageById] error: $e\n$st');
+      return null;
     }
   }
 
@@ -259,6 +393,77 @@ class SupabaseLearningRepository implements LearningRepository {
 
     await _saveChatLocal(teamId, messages);
     return messageId;
+  }
+
+  @override
+  Future<Map<String, dynamic>> loadReactionsForMessage(String messageId) async {
+    try {
+      final rows = await _sb
+          .from('message_reactions')
+          .select('emoji,user_id')
+          .eq('message_id', messageId) as List<dynamic>?;
+
+      final counts = <String, int>{};
+      final userReacts = <String>[];
+      final uid = _sb.auth.currentUser?.id;
+      if (rows != null) {
+        for (final r in rows) {
+          final map = Map<String, dynamic>.from(r as Map);
+          final emoji = (map['emoji'] ?? '').toString();
+          counts[emoji] = (counts[emoji] ?? 0) + 1;
+          if (uid != null && uid.isNotEmpty && (map['user_id'] ?? '') == uid) {
+            userReacts.add(emoji);
+          }
+        }
+      }
+      return {'counts': counts, 'userReactions': userReacts};
+    } catch (e) {
+      print('[SupabaseLearningRepository] loadReactionsForMessage error: $e');
+      return {'counts': <String, int>{}, 'userReactions': <String>[]};
+    }
+  }
+
+  @override
+  Future<bool> deleteMessage(String messageId) async {
+    try {
+      debugPrint('[deleteMessage] messageId=$messageId');
+      
+      // Вместо удаления файлов — отвязываем их от сообщения (message_id = null),
+      // чтобы файлы оставались доступны во вкладке "Файлы".
+      await _sb
+          .from('chat_files')
+          .update({'message_id': null})
+          .eq('message_id', messageId);
+      
+      debugPrint('[deleteMessage] связанные файлы отвязаны (message_id=null)');
+      
+      // Затем удаляем само сообщение
+      await _sb
+          .from('messages')
+          .delete()
+          .eq('id', messageId);
+      
+      debugPrint('[deleteMessage] сообщение успешно удалено');
+      return true;
+    } catch (e, st) {
+      debugPrint('[deleteMessage] error: $e\n$st');
+      return false;
+    }
+  }
+
+  @override
+  Future<bool> pinMessage(String messageId, bool pinned) async {
+    try {
+      debugPrint('[pinMessage] id=$messageId pinned=$pinned');
+      await _sb.rpc('pin_message', params: {
+        'p_message_id': messageId,
+        'p_pinned': pinned,
+      });
+      return true;
+    } catch (e, st) {
+      debugPrint('[pinMessage] error: $e\n$st');
+      return false;
+    }
   }
 
   // ---------------------- Файлы ----------------------
