@@ -13,6 +13,7 @@ abstract class LearningRepository {
   // Чат
   Future<List<Message>> loadChat(String teamId);
   Future<Message?> loadMessageById(String teamId, String messageId);
+  Future<List<Message>> loadOlderMessages(String teamId, Message before, {int limit = 50});
 
   /// Возвращает true, если сообщение успешно отправлено на сервер.
   /// Если false — значит упало (или сервер вернул пусто), мы оставляем локально.

@@ -269,6 +269,20 @@ class TeamCubit extends Cubit<TeamState> {
     } catch (_) {}
   }
 
+  Future<List<Message>> loadOlderMessages({int limit = 50}) async {
+    if (state.chat.isEmpty) return [];
+    final oldest = state.chat.reduce((a, b) => a.at.isBefore(b.at) ? a : b);
+    final older = await repo.loadOlderMessages(state.team.id, oldest, limit: limit);
+    if (older.isEmpty) return [];
+
+    final existingIds = state.chat.map((m) => m.id).toSet();
+    final uniqueOlder = older.where((m) => existingIds.add(m.id)).toList();
+    if (uniqueOlder.isEmpty) return [];
+
+    emit(state.copyWith(chat: [...uniqueOlder, ...state.chat]));
+    return uniqueOlder;
+  }
+
   // Toggle server-side pin for a message with optimistic UI
   Future<void> pinMessage(String id, bool pinned) async {
     final idx = state.chat.indexWhere((m) => m.id == id);

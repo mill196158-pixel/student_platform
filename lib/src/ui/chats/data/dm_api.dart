@@ -8,6 +8,8 @@ import 'package:student_platform/src/ui/learning/models/local_attach.dart';
 
 class DmApi {
   static final SupabaseClient _sb = Supabase.instance.client;
+  static final Map<String, List<Message>> _streamMessages = {};
+  static final Map<String, StreamController<List<Message>>> _streamControllers = {};
 
   // 1) Создать/вернуть chat_id ЛС
   static Future<String> getOrCreateChatId({required String peerId}) async {
@@ -126,10 +128,64 @@ class DmApi {
     }
   }
 
+  static Future<List<Message>> loadOlderMessages({
+    required String chatId,
+    required Message before,
+    int limit = 50,
+  }) async {
+    try {
+      final rows = await _sb
+          .from('messages')
+          .select('*')
+          .eq('chat_id', chatId)
+          .lte('created_at', before.at.toUtc().toIso8601String())
+          .order('created_at', ascending: false)
+          .limit(limit + 1);
+
+      final older = <Message>[];
+      for (final row in rows as List) {
+        final data = Map<String, dynamic>.from(row as Map);
+        final id = (data['id'] ?? '').toString();
+        if (id.isEmpty || id == before.id) continue;
+
+        await _hydrateAuthor(data);
+        final files = await _loadFilesByMessage([id]);
+        older.add(_messageFromRow(data, chatId: chatId).copyWith(
+          attachments: files[id] ?? const [],
+        ));
+      }
+
+      older.sort((a, b) => a.at.compareTo(b.at));
+      final page = older.take(limit).toList();
+      final current = _streamMessages[chatId];
+      final ctrl = _streamControllers[chatId];
+      if (current != null && ctrl != null) {
+        final existingIds = current.map((m) => m.id).toSet();
+        final unique = page.where((m) => existingIds.add(m.id)).toList();
+        if (unique.isNotEmpty) {
+          current.insertAll(0, unique);
+          if (!ctrl.isClosed) ctrl.add(List<Message>.unmodifiable(current));
+        }
+        return unique;
+      }
+      return page;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[DM] loadOlderMessages failed: $e');
+      }
+      return [];
+    }
+  }
+
   // 3) Realtime подписка по chat_id
   static Stream<List<Message>> watchMessages({required String chatId}) {
+    if (_streamControllers.containsKey(chatId)) {
+      return _streamControllers[chatId]!.stream;
+    }
+
     final ctrl = StreamController<List<Message>>.broadcast();
-    final current = <Message>[];
+    final current = _streamMessages.putIfAbsent(chatId, () => <Message>[]);
+    _streamControllers[chatId] = ctrl;
 
     String idFromPayload(PostgresChangePayload payload, {bool old = false}) {
       final record = old ? payload.oldRecord : payload.newRecord;
@@ -216,6 +272,8 @@ class DmApi {
 
     ctrl.onCancel = () async {
       try { await ch.unsubscribe(); } catch (_) {}
+      _streamControllers.remove(chatId);
+      _streamMessages.remove(chatId);
     };
 
     return ctrl.stream;

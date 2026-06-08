@@ -346,6 +346,66 @@ class SupabaseLearningRepository implements LearningRepository {
   }
 
   @override
+  Future<List<Message>> loadOlderMessages(String teamId, Message before, {int limit = 50}) async {
+    try {
+      final chatId = await _getTeamMainChatId(teamId);
+      if (chatId == null || chatId.isEmpty) return [];
+
+      final rows = await _sb
+          .from('messages')
+          .select('*')
+          .eq('chat_id', chatId)
+          .lte('created_at', before.at.toUtc().toIso8601String())
+          .order('created_at', ascending: false)
+          .limit(limit + 1);
+
+      final older = <Message>[];
+      for (final row in rows as List) {
+        final data = Map<String, dynamic>.from(row as Map);
+        final id = (data['id'] ?? '').toString();
+        if (id.isEmpty || id == before.id) continue;
+
+        final attachments = await _loadChatFilesForMessage(id);
+        if (attachments.isNotEmpty) {
+          data['attachments'] = attachments.map((e) => e.toJson()).toList();
+        }
+
+        final authorId = (data['author_id'] ?? '').toString();
+        if (authorId.isNotEmpty) {
+          try {
+            final user = await _sb
+                .from('users')
+                .select('login,name,surname,avatar_url')
+                .eq('id', authorId)
+                .maybeSingle();
+            if (user != null) {
+              final u = Map<String, dynamic>.from(user as Map);
+              data['author_login'] = (u['login'] ?? '').toString();
+              data['author_name'] = [
+                (u['name'] ?? '').toString(),
+                (u['surname'] ?? '').toString(),
+              ].where((s) => s.isNotEmpty).join(' ').trim();
+              data['author_avatar_url'] = (u['avatar_url'] ?? '').toString();
+            }
+          } catch (_) {}
+        }
+
+        older.add(_mapMessageRow(
+          data,
+          chatId: chatId,
+          currentUserId: _sb.auth.currentUser?.id ?? '',
+        ));
+      }
+
+      older.sort((a, b) => a.at.compareTo(b.at));
+      return older.take(limit).toList();
+    } catch (e, st) {
+      debugPrint('[loadOlderMessages] error: $e\n$st');
+      return [];
+    }
+  }
+
+  @override
   Future<String?> saveChat(String teamId, List<Message> messages) async {
     if (messages.isEmpty) return null;
 
