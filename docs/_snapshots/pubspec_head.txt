@@ -1,0 +1,79 @@
+﻿name: student_platform
+description: MVP РІ СЃС‚РёР»Рµ Cloudmate (Flutter)
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # РќР°РІРёРіР°С†РёСЏ / СЃРµС‚СЊ / СЃРѕСЃС‚РѕСЏРЅРёСЏ
+  go_router: ^14.2.0
+  dio: ^5.5.0+1
+  flutter_bloc: ^8.1.5
+  equatable: ^2.0.5
+
+  # РҐСЂР°РЅРёР»РёС‰Рµ/РЅР°СЃС‚СЂРѕР№РєРё
+  shared_preferences: ^2.3.2
+  # get_storage: ^2.1.1  # Р’СЂРµРјРµРЅРЅРѕ РѕС‚РєР»СЋС‡РµРЅРѕ
+
+  # РњРµРґРёР°/С„Р°Р№Р»С‹
+  image_picker: ^1.1.2
+  file_picker: ^8.0.6
+  path_provider: ^2.1.4
+  open_filex: ^4.4.0
+
+  # UI / Р°СЃСЃРµС‚С‹
+  lottie: ^3.1.2
+  cached_network_image: ^3.4.1
+  photo_view: ^0.14.0
+  webview_flutter: ^4.2.1
+
+  # РЎСЃС‹Р»РєРё/СѓС‚РёР»РёС‚С‹
+  url_launcher: ^6.3.0
+  emoji_picker_flutter: ^4.3.0
+  intl: ^0.20.0
+  crypto: ^3.0.3
+  http: ^1.1.0
+  minio: ^3.5.8 # Yandex Object Storage (S3-compatible)
+  vibration: ^3.0.0 # haptic feedback
+
+  # === Supabase Р°РІС‚РѕСЂРёР·Р°С†РёСЏ ===
+  supabase_flutter: ^2.6.0
+  bcrypt: ^1.1.3
+  pdf: ^3.12.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  # Р›РёРЅС‚РёРЅРі Рё РјРµС‚СЂРёРєРё
+  custom_lint: ^0.6.4
+  dart_code_metrics_presets: ^2.15.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/icons/
+    - assets/images/
+    - assets/lottie/
+    - assets/fonts/
+    - assets/lottie/cat_sleeping.json
+
+  fonts:
+    - family: Lato
+      fonts:
+        - asset: assets/fonts/Lato-Regular.ttf
+    - family: Allison
+      fonts:
+        - asset: assets/fonts/Allison-Regular.ttf
+    - family: DancingScript
+      fonts:
+        - asset: assets/fonts/DancingScript.ttf

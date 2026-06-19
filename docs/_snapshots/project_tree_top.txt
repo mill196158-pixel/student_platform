@@ -1,0 +1,47 @@
+﻿.cursor
+.dart_tool
+.env.backup.local
+.env.local
+.flutter-plugins-dependencies
+.git
+.gitignore
+.idea
+.metadata
+.vscode
+AGENTS.md
+analysis_options.yaml
+android
+assets
+backup_unused_files
+backups
+build
+chat_tab_fixes.md
+devtools_options.yaml
+docs
+FILE_SERVER_DOCUMENTATION.md
+FILE_STORAGE_SETUP.md
+flutter_fixes.md
+INSTRUCTIONS.md
+ios
+lib
+macos
+pubspec.lock
+pubspec.yaml
+REFACTORING_SUMMARY.md
+scripts
+server
+student_platform.iml
+supabase
+supabase_stage_curriculum_vv_2024.csv
+supabase_stage_students_vv_2024.csv
+test
+web
+windows
+Все студенты.xlsx
+Идея.docx
+Мои студенты.xlsx
+Правила
+Приоритетные стуенды.xlsx
+Сотрудники.xlsx
+Супер приоритетные .xlsx
+Учебный план график мои.xlsx

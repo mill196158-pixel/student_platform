@@ -1,0 +1,2 @@
+﻿origin	https://github.com/mill196158-pixel/student_platform.git (fetch)
+origin	https://github.com/mill196158-pixel/student_platform.git (push)
