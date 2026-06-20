@@ -222,12 +222,13 @@ lib\all_dart_code.txt:23044:List<PinEntry> buildFromState(TeamState st) {
 lib\all_dart_code.txt:24765:debugPrint('${_ts()} [Profile] loadTeams("$group")');
 lib\all_dart_code.txt:24766:final teams = await _repo.loadTeams(group);
 lib\all_dart_code.txt:24768:for (final t in teams) {
-lib\src\data\subject_diary_repository_supabase.dart:544:final res = await _sb.rpc('get_my_teams');
-lib\src\data\subject_diary_repository_supabase.dart:577:final teams = await _sb.rpc('get_my_teams');
-lib\src\data\subject_diary_repository_supabase.dart:578:if (teams is List) {
-lib\src\data\subject_diary_repository_supabase.dart:579:for (final it in teams) {
-lib\src\data\subject_diary_repository_supabase.dart:594:// 2) Фолбэк: поиск через уроки и teams по group_name
-lib\src\data\subject_diary_repository_supabase.dart:611:.from('teams')
+lib\src\data\subject_diary_repository_supabase.dart:816:.from('teams')
+lib\src\data\subject_diary_repository_supabase.dart:854:final res = await _sb.rpc('get_my_teams');
+lib\src\data\subject_diary_repository_supabase.dart:887:final teams = await _sb.rpc('get_my_teams');
+lib\src\data\subject_diary_repository_supabase.dart:888:if (teams is List) {
+lib\src\data\subject_diary_repository_supabase.dart:889:for (final it in teams) {
+lib\src\data\subject_diary_repository_supabase.dart:904:// 2) Фолбэк: поиск через уроки и teams по group_name
+lib\src\data\subject_diary_repository_supabase.dart:921:.from('teams')
 lib\src\ui\chats\my_chats_screen.dart:124:final teams = await _repo.loadTeams(group);
 lib\src\ui\chats\my_chats_screen.dart:127:final teamSummaries = await Future.wait(teams.map(_buildSummaryForTeam));
 lib\src\ui\chats\my_chats_screen.dart:133:final list = <_ChatSummary>[...teamSummaries, ...dmSummaries]
@@ -236,10 +237,10 @@ lib\src\ui\chats\forward\forward_picker.dart:80:final teamRows = await _sb.from(
 lib\src\ui\chats\forward\forward_picker.dart:81:final teams = (teamRows as List)
 lib\src\ui\chats\forward\forward_picker.dart:108:_all = [...dms, ...teams];
 lib\src\ui\info\info_screen.dart:336:.from('teams')
-lib\src\ui\info\subject_info_screen.dart:204:.from('teams')
-lib\src\ui\learning\assignment_details_screen.dart:33:body: BlocBuilder<TeamCubit, TeamState>(
-lib\src\ui\learning\assignment_details_screen.dart:75:bottomNavigationBar: BlocBuilder<TeamCubit, TeamState>(
-lib\src\ui\learning\assignment_details_screen.dart:139:Assignment _pickAssignment(TeamState st, String id) {
+lib\src\ui\info\subject_info_screen.dart:215:.from('teams')
+lib\src\ui\learning\assignment_details_screen.dart:42:body: BlocBuilder<TeamCubit, TeamState>(
+lib\src\ui\learning\assignment_details_screen.dart:95:bottomNavigationBar: BlocBuilder<TeamCubit, TeamState>(
+lib\src\ui\learning\assignment_details_screen.dart:178:Assignment _pickAssignment(TeamState st, String id) {
 lib\src\ui\learning\learning_screen.dart:16:import 'manage/manage_teams_screen.dart';
 lib\src\ui\learning\learning_screen.dart:45:RealtimeChannel? _teamsMembershipChannel;
 lib\src\ui\learning\learning_screen.dart:55:_subscribeToTeamsRealtime();
@@ -260,12 +261,20 @@ lib\src\ui\learning\data\supabase_learning_repository.dart:18:static const _kTea
 lib\src\ui\learning\data\supabase_learning_repository.dart:31:Future<List<Team>> loadTeams(String groupCode) async {
 lib\src\ui\learning\data\supabase_learning_repository.dart:33:debugPrint('[loadTeams] calling get_my_teams');
 lib\src\ui\learning\data\supabase_learning_repository.dart:34:final res = await _sb.rpc('get_my_teams');
-lib\src\ui\learning\data\supabase_learning_repository.dart:39:await saveTeams(list);
-lib\src\ui\learning\data\supabase_learning_repository.dart:42:debugPrint('[loadTeams] error: $e\n$st');
-lib\src\ui\learning\data\supabase_learning_repository.dart:44:final raw = prefs.getString(_kTeamsCache);
-lib\src\ui\learning\data\supabase_learning_repository.dart:65:Future<void> saveTeams(List<Team> teams) async {
-lib\src\ui\learning\data\supabase_learning_repository.dart:68:_kTeamsCache,
-lib\src\ui\learning\data\supabase_learning_repository.dart:69:jsonEncode(teams.map((e) => e.toJson()).toList()),
+lib\src\ui\learning\data\supabase_learning_repository.dart:39:final list = await _hydrateTeamsAcademicFields(baseList);
+lib\src\ui\learning\data\supabase_learning_repository.dart:40:await saveTeams(list);
+lib\src\ui\learning\data\supabase_learning_repository.dart:43:debugPrint('[loadTeams] error: $e\n$st');
+lib\src\ui\learning\data\supabase_learning_repository.dart:45:final raw = prefs.getString(_kTeamsCache);
+lib\src\ui\learning\data\supabase_learning_repository.dart:74:Future<List<Team>> _hydrateTeamsAcademicFields(List<Team> teams) async {
+lib\src\ui\learning\data\supabase_learning_repository.dart:76:teams.map((team) => team.id).where((id) => id.isNotEmpty).toList();
+lib\src\ui\learning\data\supabase_learning_repository.dart:77:if (ids.isEmpty) return teams;
+lib\src\ui\learning\data\supabase_learning_repository.dart:81:.from('teams')
+lib\src\ui\learning\data\supabase_learning_repository.dart:93:return teams.map((team) {
+lib\src\ui\learning\data\supabase_learning_repository.dart:106:safeDebugLog('[loadTeams] academic hydrate failed: ${e.runtimeType}');
+lib\src\ui\learning\data\supabase_learning_repository.dart:107:return teams;
+lib\src\ui\learning\data\supabase_learning_repository.dart:112:Future<void> saveTeams(List<Team> teams) async {
+lib\src\ui\learning\data\supabase_learning_repository.dart:115:_kTeamsCache,
+lib\src\ui\learning\data\supabase_learning_repository.dart:116:jsonEncode(teams.map((e) => e.toJson()).toList()),
 lib\src\ui\learning\manage\manage_teams_screen.dart:1:// lib/src/ui/learning/manage/manage_teams_screen.dart
 lib\src\ui\learning\manage\manage_teams_screen.dart:9:class ManageTeamsScreen extends StatefulWidget {
 lib\src\ui\learning\manage\manage_teams_screen.dart:11:const ManageTeamsScreen({super.key, required this.groupCode});
@@ -295,9 +304,9 @@ lib\src\ui\learning\state\team_cubit.dart:78:super(TeamState(team: team));
 lib\src\ui\learning\tabs\assignments_tab.dart:21:return BlocBuilder<TeamCubit, TeamState>(
 lib\src\ui\learning\tabs\assignment_details_screen.dart:28:body: BlocBuilder<TeamCubit, TeamState>(
 lib\src\ui\learning\tabs\assignment_details_screen.dart:81:bottomNavigationBar: BlocBuilder<TeamCubit, TeamState>(
-lib\src\ui\learning\tabs\assignment_details_screen.dart:136:Assignment _pickAssignment(TeamState st, String id) {
+lib\src\ui\learning\tabs\assignment_details_screen.dart:141:Assignment _pickAssignment(TeamState st, String id) {
 lib\src\ui\learning\tabs\chat_tab.dart:970:child: BlocBuilder<TeamCubit, TeamState>(
-lib\src\ui\learning\tabs\assignments\assignments_tab.dart:77:List<Assignment> _apply(TeamState st) {
+lib\src\ui\learning\tabs\assignments\assignments_tab.dart:80:List<Assignment> _apply(TeamState st) {
 lib\src\ui\learning\tabs\chat\pins\pin_controller.dart:12:List<PinEntry> buildFromState(TeamState st) {
 lib\src\ui\profile\profile_screen.dart:377:debugPrint('${_ts()} [Profile] loadTeams("$group")');
 lib\src\ui\profile\profile_screen.dart:378:final teams = await _repo.loadTeams(group);
@@ -391,6 +400,12 @@ supabase\stage2_3_schedule_subject_resolver_rollback.sql:89:test_teams as (
 supabase\stage2_3_schedule_subject_resolver_rollback.sql:91:from public.teams
 supabase\stage2_3_schedule_subject_resolver_rollback.sql:96:where team_id in (select id from test_teams)
 supabase\stage2_3_schedule_subject_resolver_rollback.sql:110:delete from public.teams
+supabase\stage4_2_1b_assignment_persistence_fix.sql:102:v_team public.teams%rowtype;
+supabase\stage4_2_1b_assignment_persistence_fix.sql:113:from public.teams
+supabase\stage4_2_1b_assignment_persistence_fix_rollback.sql:87:v_team public.teams%rowtype;
+supabase\stage4_2_1b_assignment_persistence_fix_rollback.sql:95:select * into v_team from public.teams where id = p_team_id;
+supabase\stage4_2_1_assignment_model_hardening.sql:80:v_team public.teams%rowtype;
+supabase\stage4_2_1_assignment_model_hardening.sql:90:from public.teams
 supabase\checks\academic_rls_audit.sql:25:('teams'),
 supabase\checks\academic_rls_audit.sql:68:('teams'),
 supabase\checks\academic_rls_audit.sql:110:('teams'),
@@ -483,8 +498,8 @@ lib\all_dart_code.txt:9973:_teamsMembershipChannel = client.channel('public:team
 lib\all_dart_code.txt:9977:table: 'team_members',
 lib\all_dart_code.txt:9988:table: 'team_members',
 lib\all_dart_code.txt:12539:.from('team_members')
-lib\src\data\subject_diary_repository_supabase.dart:554:// Фолбэк: берём последнюю команду из team_members
-lib\src\data\subject_diary_repository_supabase.dart:556:final data = await _sb.from('team_members').select('team_id').limit(1);
+lib\src\data\subject_diary_repository_supabase.dart:864:// Фолбэк: берём последнюю команду из team_members
+lib\src\data\subject_diary_repository_supabase.dart:866:final data = await _sb.from('team_members').select('team_id').limit(1);
 lib\src\ui\learning\learning_screen.dart:77:_teamsMembershipChannel = client.channel('public:team_members:$uid')
 lib\src\ui\learning\learning_screen.dart:81:table: 'team_members',
 lib\src\ui\learning\learning_screen.dart:92:table: 'team_members',
@@ -505,6 +520,12 @@ supabase\fix_pin_message.sql:26:'author_id = auth.uid() or exists (select 1 from
 supabase\fix_pin_message.sql:50:join public.team_members tm on tm.team_id = c.team_id
 supabase\stage2_3_schedule_subject_resolver.sql:465:insert into public.team_members (team_id, user_id, role)
 supabase\stage2_3_schedule_subject_resolver_rollback.sql:75:delete from public.team_members
+supabase\stage4_2_1b_assignment_persistence_fix.sql:132:from public.team_members tm
+supabase\stage4_2_1b_assignment_persistence_fix_rollback.sql:102:from public.team_members tm
+supabase\stage4_2_1_assignment_model_hardening.sql:99:from public.team_members tm
+supabase\stage4_2_1_assignment_model_hardening.sql:196:select 1 from public.team_members tm
+supabase\stage4_2_1_assignment_model_hardening.sql:248:from public.team_members tm
+supabase\stage4_2_1_assignment_model_hardening_rollback.sql:101:select 1 from public.team_members tm
 supabase\checks\vv_2024_current_semester_teams_dry_run.sql:43:from public.team_members tm
 supabase\checks\vv_2024_current_semester_teams_dry_run.sql:50:) as existing_current_team_members_total,
 supabase\checks\vv_2024_current_semester_teams_dry_run.sql:114:duplicate_team_members as (
@@ -783,8 +804,8 @@ lib\src\ui\friends\friend_profile_screen.dart:386:// DirectChatScreen сам и�
 lib\src\ui\friends\my_friends_screen.dart:9:import 'package:student_platform/src/ui/chats/direct_chat_screen.dart';
 lib\src\ui\friends\my_friends_screen.dart:672:child: DirectChatScreen(
 lib\src\ui\info\info_screen.dart:346:.from('chats')
-lib\src\ui\info\subject_info_screen.dart:214:.from('chats')
-lib\src\ui\learning\data\supabase_learning_repository.dart:130:.from('chats')
+lib\src\ui\info\subject_info_screen.dart:225:.from('chats')
+lib\src\ui\learning\data\supabase_learning_repository.dart:177:.from('chats')
 lib\src\ui\learning\state\team_cubit.dart:16:import 'package:student_platform/src/ui/chats/core/chat_message_memory_cache.dart';
 lib\src\ui\learning\state\team_cubit.dart:130:.from('chats')
 lib\src\ui\learning\tabs\chat_tab.dart:32:import '../../chats/core/forward_payload.dart';
@@ -805,7 +826,7 @@ lib\src\ui\learning\tabs\chat_tab.dart:493:await _chatScroll.jumpToBottom();
 lib\src\ui\learning\tabs\chat_tab.dart:505:if (!_chatScroll.atBottom()) return;
 lib\src\ui\learning\tabs\chat_tab.dart:514:await _chatScroll.scrollToMessage(id);
 lib\src\ui\learning\tabs\chat_tab.dart:1002:if (changed && _chatScroll.nearBottom()) {
-lib\src\ui\learning\tabs\chat_tab.dart:1504:// вспомогательное — как в UnifiedChatScreen
+lib\src\ui\learning\tabs\chat_tab.dart:1514:// вспомогательное — как в UnifiedChatScreen
 lib\src\ui\learning\tabs\files_tab.dart:692:.from('chats')
 lib\src\ui\learning\tabs\chat\scroll_controller.dart:4:class ChatScrollAnchor {
 lib\src\ui\learning\tabs\chat\scroll_controller.dart:8:const ChatScrollAnchor({
@@ -815,11 +836,10 @@ lib\src\ui\learning\tabs\chat\scroll_controller.dart:32:ChatScrollAnchor? captur
 lib\src\ui\learning\tabs\chat\scroll_controller.dart:35:return ChatScrollAnchor(
 lib\src\ui\learning\tabs\chat\scroll_controller.dart:41:Future<void> restorePrependAnchor(ChatScrollAnchor? anchor) async {
 lib\src\ui\learning\tabs\chat\data\chat_repository.dart:90:.from('chats')
-lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:19:final ChatSearchController search;
-lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:86:child: const _EmptyChatState(),
-lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:112:// Расставляем ключи, совпадающие с теми, что ждёт ChatScrollController
-lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:366:class _EmptyChatState extends StatelessWidget {
-lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:367:const _EmptyChatState();
+lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:15:final ChatSearchController search;
+lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:82:child: const _EmptyChatState(),
+lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:413:class _EmptyChatState extends StatelessWidget {
+lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:414:const _EmptyChatState();
 lib\src\ui\learning\tabs\chat\search\chat_search_controller.dart:4:class ChatSearchController extends ChangeNotifier {
 lib\src\ui\learning\tabs\chat\search\chat_search_sheet.dart:4:class ChatSearchSheet extends StatefulWidget {
 lib\src\ui\learning\tabs\chat\search\chat_search_sheet.dart:5:final ChatSearchController controller;
@@ -866,6 +886,12 @@ supabase\stage2_3_schedule_subject_resolver_rollback.sql:49:test_chats as (
 supabase\stage2_3_schedule_subject_resolver_rollback.sql:51:from public.chats
 supabase\stage2_3_schedule_subject_resolver_rollback.sql:56:where chat_id in (select id from test_chats);
 supabase\stage2_3_schedule_subject_resolver_rollback.sql:95:delete from public.chats
+supabase\stage4_2_1b_assignment_persistence_fix.sql:39:from public.chats
+supabase\stage4_2_1b_assignment_persistence_fix.sql:122:from public.chats
+supabase\stage4_2_1b_assignment_persistence_fix_rollback.sql:31:select id from public.chats
+supabase\stage4_2_1b_assignment_persistence_fix_rollback.sql:151:from public.chats
+supabase\stage4_2_1_assignment_model_hardening.sql:151:from public.chats
+supabase\stage4_2_1_assignment_model_hardening_rollback.sql:66:from public.chats
 supabase\checks\academic_rls_audit.sql:26:('chats'),
 supabase\checks\academic_rls_audit.sql:69:('chats'),
 supabase\checks\academic_rls_audit.sql:111:('chats'),
@@ -1067,6 +1093,7 @@ lib\all_dart_code.txt:25083:onTap: onMessagesTap,
 lib\all_dart_code.txt:25100:if (messagesBadge > 0)
 lib\all_dart_code.txt:25105:key: ValueKey('msg_${messagesBadge}'),
 lib\all_dart_code.txt:25106:text: messagesBadge > 99 ? '99+' : messagesBadge.toString(),
+lib\src\data\personal_diary_service.dart:365:.from('messages')
 lib\src\models\demo_user.dart:13:final int messagesCount;
 lib\src\models\demo_user.dart:26:required this.messagesCount,
 lib\src\models\demo_user.dart:41:int? messagesCount,
@@ -1164,18 +1191,18 @@ lib\src\ui\chats\media\chat_media_sheet.dart:13:final Stream<List<Message>> mess
 lib\src\ui\chats\media\chat_media_sheet.dart:31:_sub = widget.messagesStream.listen(_rebuildMedia);
 lib\src\ui\learning\data\learning_repository.dart:16:Future<List<Message>> loadOlderMessages(String teamId, Message before, {int limit = 50});
 lib\src\ui\learning\data\learning_repository.dart:20:Future<String?> saveChat(String teamId, List<Message> messages);
-lib\src\ui\learning\data\supabase_learning_repository.dart:223:Future<void> _saveChatLocal(String teamId, List<Message> messages) async {
-lib\src\ui\learning\data\supabase_learning_repository.dart:225:final raw = jsonEncode(messages.map((e) => e.toJson()).toList());
-lib\src\ui\learning\data\supabase_learning_repository.dart:291:final res = await _sb.rpc('get_chat_messages_for_team', params: {
-lib\src\ui\learning\data\supabase_learning_repository.dart:323:.from('messages')
-lib\src\ui\learning\data\supabase_learning_repository.dart:368:Future<List<Message>> loadOlderMessages(String teamId, Message before,
-lib\src\ui\learning\data\supabase_learning_repository.dart:375:.from('messages')
-lib\src\ui\learning\data\supabase_learning_repository.dart:423:debugPrint('[loadOlderMessages] error: $e\n$st');
-lib\src\ui\learning\data\supabase_learning_repository.dart:429:Future<String?> saveChat(String teamId, List<Message> messages) async {
-lib\src\ui\learning\data\supabase_learning_repository.dart:430:if (messages.isEmpty) return null;
-lib\src\ui\learning\data\supabase_learning_repository.dart:432:final last = messages.last;
-lib\src\ui\learning\data\supabase_learning_repository.dart:477:await _saveChatLocal(teamId, messages);
-lib\src\ui\learning\data\supabase_learning_repository.dart:524:await _sb.from('messages').delete().eq('id', messageId);
+lib\src\ui\learning\data\supabase_learning_repository.dart:285:Future<void> _saveChatLocal(String teamId, List<Message> messages) async {
+lib\src\ui\learning\data\supabase_learning_repository.dart:287:final raw = jsonEncode(messages.map((e) => e.toJson()).toList());
+lib\src\ui\learning\data\supabase_learning_repository.dart:353:final res = await _sb.rpc('get_chat_messages_for_team', params: {
+lib\src\ui\learning\data\supabase_learning_repository.dart:385:.from('messages')
+lib\src\ui\learning\data\supabase_learning_repository.dart:430:Future<List<Message>> loadOlderMessages(String teamId, Message before,
+lib\src\ui\learning\data\supabase_learning_repository.dart:437:.from('messages')
+lib\src\ui\learning\data\supabase_learning_repository.dart:485:debugPrint('[loadOlderMessages] error: $e\n$st');
+lib\src\ui\learning\data\supabase_learning_repository.dart:491:Future<String?> saveChat(String teamId, List<Message> messages) async {
+lib\src\ui\learning\data\supabase_learning_repository.dart:492:if (messages.isEmpty) return null;
+lib\src\ui\learning\data\supabase_learning_repository.dart:494:final last = messages.last;
+lib\src\ui\learning\data\supabase_learning_repository.dart:539:await _saveChatLocal(teamId, messages);
+lib\src\ui\learning\data\supabase_learning_repository.dart:586:await _sb.from('messages').delete().eq('id', messageId);
 lib\src\ui\learning\state\team_cubit.dart:147:List<Message> _mergeCachedChat(List<Message> messages) {
 lib\src\ui\learning\state\team_cubit.dart:149:if (chatId == null || chatId.isEmpty) return _dedupeAndSort(messages);
 lib\src\ui\learning\state\team_cubit.dart:150:return ChatMessageMemoryCache.merge(chatId, messages);
@@ -1190,8 +1217,7 @@ lib\src\ui\learning\state\team_cubit.dart:523:table: 'messages',
 lib\src\ui\learning\state\team_cubit.dart:526:safeDebugLog('[TeamCubit] RT messages UPDATE');
 lib\src\ui\learning\state\team_cubit.dart:533:table: 'messages',
 lib\src\ui\learning\state\team_cubit.dart:536:safeDebugLog('[TeamCubit] RT messages DELETE');
-lib\src\ui\learning\state\team_cubit.dart:605:// 1) создаём черновик (RPC сам вставит карточку в messages)
-lib\src\ui\learning\state\team_cubit.dart:620:// 2) подтянем свежие задания (карточка прилетит через RT messages)
+lib\src\ui\learning\state\team_cubit.dart:792:// messages.assignment_id returned by Supabase.
 lib\src\ui\learning\tabs\chat_tab.dart:66:// Selection of messages
 lib\src\ui\learning\tabs\chat_tab.dart:67:bool _selectingMessages = false;
 lib\src\ui\learning\tabs\chat_tab.dart:69:bool _loadingOlderMessages = false;
@@ -1219,43 +1245,43 @@ lib\src\ui\learning\tabs\chat_tab.dart:1094:if (_loadingOlderMessages)
 lib\src\ui\learning\tabs\chat_tab.dart:1110:if (_selectingMessages)
 lib\src\ui\learning\tabs\chat_tab.dart:1125:if (_selectingMessages)
 lib\src\ui\learning\tabs\chat_tab.dart:1185:if (!_selectingMessages)
-lib\src\ui\learning\tabs\chat_tab.dart:1612:.from('messages')
-lib\src\ui\learning\tabs\chat_tab.dart:1619:'[ChatTab] legacy file messages found count=${response.length}');
-lib\src\ui\learning\tabs\chat_tab.dart:1696:List<Message> messages, int currentIndex, String? currentUserId) {
-lib\src\ui\learning\tabs\chat_tab.dart:1700:final currentMessage = messages[currentIndex];
-lib\src\ui\learning\tabs\chat_tab.dart:1701:final previousMessage = messages[currentIndex - 1];
-lib\src\ui\learning\tabs\chat_tab.dart:1854:// removed: duplicate _onUnpin for messages; use unified pin handlers
+lib\src\ui\learning\tabs\chat_tab.dart:1622:.from('messages')
+lib\src\ui\learning\tabs\chat_tab.dart:1629:'[ChatTab] legacy file messages found count=${response.length}');
+lib\src\ui\learning\tabs\chat_tab.dart:1706:List<Message> messages, int currentIndex, String? currentUserId) {
+lib\src\ui\learning\tabs\chat_tab.dart:1710:final currentMessage = messages[currentIndex];
+lib\src\ui\learning\tabs\chat_tab.dart:1711:final previousMessage = messages[currentIndex - 1];
+lib\src\ui\learning\tabs\chat_tab.dart:1864:// removed: duplicate _onUnpin for messages; use unified pin handlers
 lib\src\ui\learning\tabs\chat\widgets.dart:36:export 'messages/chat_message_list.dart';
-lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:15:final List<Message> messages;
-lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:40:final bool selectingMessages;
-lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:46:required this.messages,
-lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:63:required this.selectingMessages,
-lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:71:final list = [...messages]..sort((a, b) => a.at.compareTo(b.at));
-lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:120:? messages.firstWhere(
-lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:151:// build reactions map for all messages: messageId -> {emoji: count}
-lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:208:selected: ((selectingMessages && (selectedMessageIds?.contains(m.id) ?? false)) || hoveredMessageId == m.id),
-lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:234:children.add(const _NewMessagesChip());
-lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:262:onLongPress: selectingMessages ? null : () async {
-lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:288:onTap: selectingMessages ? () => onToggleSelect?.call(m.id) : null,
-lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:305:final applyHighlight = (selectingMessages && isSelected) || isHovered;
-lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:308:return IgnorePointer(ignoring: selectingMessages, child: bubbleWithKey);
-lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:315:IgnorePointer(ignoring: selectingMessages, child: bubbleWithKey),
-lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:352:bool _shouldShowAvatar(List<Message> messages, int currentIndex) {
-lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:354:final currentMessage = messages[currentIndex];
-lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:355:final previousMessage = messages[currentIndex - 1];
-lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:404:class _NewMessagesChip extends StatelessWidget {
-lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:405:const _NewMessagesChip();
+lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:11:final List<Message> messages;
+lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:37:final bool selectingMessages;
+lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:43:required this.messages,
+lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:60:required this.selectingMessages,
+lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:68:final list = [...messages]..sort((a, b) => a.at.compareTo(b.at));
+lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:119:? messages.firstWhere(
+lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:152:// build reactions map for all messages: messageId -> {emoji: count}
+lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:216:selected: ((selectingMessages &&
+lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:253:children.add(const _NewMessagesChip());
+lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:284:onLongPress: selectingMessages
+lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:330:onTap: selectingMessages
+lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:341:(selectingMessages && isSelected) ||
+lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:346:ignoring: selectingMessages,
+lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:354:ignoring: selectingMessages,
+lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:398:bool _shouldShowAvatar(List<Message> messages, int currentIndex) {
+lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:400:final currentMessage = messages[currentIndex];
+lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:401:final previousMessage = messages[currentIndex - 1];
+lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:451:class _NewMessagesChip extends StatelessWidget {
+lib\src\ui\learning\tabs\chat\messages\chat_message_list.dart:452:const _NewMessagesChip();
 lib\src\ui\profile\profile_screen.dart:522:messagesBadge: _unreadTotal,
 lib\src\ui\profile\profile_screen.dart:524:onMessagesTap: () async {
-lib\src\ui\profile\profile_screen.dart:669:final int messagesBadge;
-lib\src\ui\profile\profile_screen.dart:671:final VoidCallback? onMessagesTap;
-lib\src\ui\profile\profile_screen.dart:675:required this.messagesBadge,
-lib\src\ui\profile\profile_screen.dart:677:this.onMessagesTap,
-lib\src\ui\profile\profile_screen.dart:684:'${DateTime.now().toIso8601String().substring(11, 23)} [ActionsRow] build messages=$messagesBadge requests=$requestsBadge');
-lib\src\ui\profile\profile_screen.dart:697:onTap: onMessagesTap,
-lib\src\ui\profile\profile_screen.dart:713:if (messagesBadge > 0)
-lib\src\ui\profile\profile_screen.dart:718:key: ValueKey('msg_${messagesBadge}'),
-lib\src\ui\profile\profile_screen.dart:719:text: messagesBadge > 99 ? '99+' : messagesBadge.toString(),
+lib\src\ui\profile\profile_screen.dart:671:final int messagesBadge;
+lib\src\ui\profile\profile_screen.dart:673:final VoidCallback? onMessagesTap;
+lib\src\ui\profile\profile_screen.dart:677:required this.messagesBadge,
+lib\src\ui\profile\profile_screen.dart:679:this.onMessagesTap,
+lib\src\ui\profile\profile_screen.dart:686:'${DateTime.now().toIso8601String().substring(11, 23)} [ActionsRow] build messages=$messagesBadge requests=$requestsBadge');
+lib\src\ui\profile\profile_screen.dart:699:onTap: onMessagesTap,
+lib\src\ui\profile\profile_screen.dart:715:if (messagesBadge > 0)
+lib\src\ui\profile\profile_screen.dart:720:key: ValueKey('msg_${messagesBadge}'),
+lib\src\ui\profile\profile_screen.dart:721:text: messagesBadge > 99 ? '99+' : messagesBadge.toString(),
 scripts\collect_project_snapshot.ps1:116:Write-Search "table_terms_usage.txt" @("groups", "teams", "team_members", "chats", "chat_members", "messages", "chat_files", "users", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects", "schedule", "lessons", "assignments", "diary", "friends", "useful")
 supabase\check_pin_message.sql:12:and table_name = 'messages'
 supabase\check_pin_message.sql:27:and tablename = 'messages'
@@ -1294,6 +1320,22 @@ supabase\fix_pin_message.sql:81:and tablename = 'messages'
 supabase\fix_pin_message.sql:83:execute 'alter publication supabase_realtime add table public.messages';
 supabase\sql_send_message_with_files.sql:39:INSERT INTO public.messages (
 supabase\sql_send_message_with_files.sql:63:UPDATE public.messages
+supabase\stage4_2_1b_assignment_persistence_fix.sql:6:drop function if exists public.get_chat_messages_for_team(uuid, integer, timestamptz);
+supabase\stage4_2_1b_assignment_persistence_fix.sql:8:create or replace function public.get_chat_messages_for_team(
+supabase\stage4_2_1b_assignment_persistence_fix.sql:74:from public.messages m
+supabase\stage4_2_1b_assignment_persistence_fix.sql:184:insert into public.messages(
+supabase\stage4_2_1b_assignment_persistence_fix.sql:216:grant execute on function public.get_chat_messages_for_team(uuid, integer, timestamptz) to anon, authenticated, service_role;
+supabase\stage4_2_1b_assignment_persistence_fix_rollback.sql:4:drop function if exists public.get_chat_messages_for_team(uuid, integer, timestamptz);
+supabase\stage4_2_1b_assignment_persistence_fix_rollback.sql:6:create or replace function public.get_chat_messages_for_team(
+supabase\stage4_2_1b_assignment_persistence_fix_rollback.sql:60:from public.messages m
+supabase\stage4_2_1b_assignment_persistence_fix_rollback.sql:155:insert into public.messages(
+supabase\stage4_2_1b_assignment_persistence_fix_rollback.sql:179:grant execute on function public.get_chat_messages_for_team(uuid, integer, timestamptz) to anon, authenticated, service_role;
+supabase\stage4_2_1_assignment_model_hardening.sql:155:insert into public.messages(
+supabase\stage4_2_1_assignment_model_hardening.sql:212:update public.messages
+supabase\stage4_2_1_assignment_model_hardening.sql:273:update public.messages
+supabase\stage4_2_1_assignment_model_hardening_rollback.sql:70:insert into public.messages(
+supabase\stage4_2_1_assignment_model_hardening_rollback.sql:111:update public.messages
+supabase\stage4_2_3_personal_diary_tasks.sql:2:-- Personal tasks are diary-only. They do not create chat messages and do not
 
 ## PATTERN: chat_files
 lib\all_dart_code.txt:1318:// Р—Р°РіСЂСѓР·РєР° С„Р°Р№Р»Р° РІ С‡Р°С‚ (СЃРѕР·РґР°РµС‚ Р·Р°РїРёСЃСЊ РІ chat_files)
@@ -1321,13 +1363,13 @@ lib\src\ui\chats\core\unified_chat_screen.dart:316:.from('chat_files')
 lib\src\ui\chats\data\dm_api.dart:82:.from('chat_files')
 lib\src\ui\chats\data\dm_api.dart:407:.from('chat_files')
 lib\src\ui\chats\data\dm_api.dart:492:.from('chat_files')
-lib\src\ui\learning\data\supabase_learning_repository.dart:277:await _sb.from('chat_files').select('*').eq('message_id', messageId);
-lib\src\ui\learning\data\supabase_learning_repository.dart:518:.from('chat_files')
+lib\src\ui\learning\data\supabase_learning_repository.dart:339:await _sb.from('chat_files').select('*').eq('message_id', messageId);
+lib\src\ui\learning\data\supabase_learning_repository.dart:580:.from('chat_files')
 lib\src\ui\learning\tabs\chat_tab.dart:864:await Supabase.instance.client.from('chat_files').update({
-lib\src\ui\learning\tabs\chat_tab.dart:1621:// Загружаем файлы из chat_files
-lib\src\ui\learning\tabs\chat_tab.dart:1637:.from('chat_files')
-lib\src\ui\learning\tabs\chat_tab.dart:1672:// Сохраняем файл в chat_files таблицу
-lib\src\ui\learning\tabs\chat_tab.dart:1683:.from('chat_files')
+lib\src\ui\learning\tabs\chat_tab.dart:1631:// Загружаем файлы из chat_files
+lib\src\ui\learning\tabs\chat_tab.dart:1647:.from('chat_files')
+lib\src\ui\learning\tabs\chat_tab.dart:1682:// Сохраняем файл в chat_files таблицу
+lib\src\ui\learning\tabs\chat_tab.dart:1693:.from('chat_files')
 lib\src\ui\learning\tabs\files_tab.dart:70:.from('chat_files')
 lib\src\ui\learning\tabs\files_tab.dart:102:_rtFiles = _sb.channel('public:chat_files');
 lib\src\ui\learning\tabs\files_tab.dart:112:table: 'chat_files',
@@ -1435,9 +1477,9 @@ lib\src\ui\friends\my_friends_screen.dart:409:return (users as List)
 lib\src\ui\friends\my_friends_screen.dart:575:final res = await _sb.rpc('search_users_global', params: {'p_q': q});
 lib\src\ui\friends\my_friends_screen.dart:588:.from('users')
 lib\src\ui\friends\my_friends_screen.dart:599:.from('users')
-lib\src\ui\learning\data\supabase_learning_repository.dart:115:await _sb.from('users').select('login').eq('id', user.id).limit(1);
-lib\src\ui\learning\data\supabase_learning_repository.dart:340:.from('users')
-lib\src\ui\learning\data\supabase_learning_repository.dart:397:.from('users')
+lib\src\ui\learning\data\supabase_learning_repository.dart:162:await _sb.from('users').select('login').eq('id', user.id).limit(1);
+lib\src\ui\learning\data\supabase_learning_repository.dart:402:.from('users')
+lib\src\ui\learning\data\supabase_learning_repository.dart:459:.from('users')
 lib\src\ui\learning\models\message.dart:91:final String? authorAvatarUrl; // URL аватарки автора (из users.avatar_url)
 lib\src\ui\learning\state\team_cubit.dart:274:.from('users')
 lib\src\ui\learning\state\team_cubit.dart:308:.from('users')
@@ -1495,6 +1537,8 @@ scripts\import_academic_batch.js:596:return { step: 'students:apply', usersCreat
 scripts\import_academic_batch.js:904:const [users, enrollments, offerings, teams, chats, teamMembers, chatMembers] = await Promise.all([
 scripts\import_academic_batch.js:905:ctx.db.list('users'),
 scripts\import_academic_batch.js:920:users: users.length,
+supabase\stage4_2_1b_assignment_persistence_fix.sql:76:left join public.users u on u.id = m.author_id
+supabase\stage4_2_1b_assignment_persistence_fix_rollback.sql:62:left join public.users u on u.id = m.author_id
 supabase\checks\academic_rls_audit.sql:23:('users'),
 supabase\checks\academic_rls_audit.sql:66:('users'),
 supabase\checks\academic_rls_audit.sql:108:('users'),
@@ -1743,9 +1787,11 @@ supabase\migrations_recovered\migration_001_core_academic_subjects.sql:150:creat
 supabase\migrations_recovered\migration_001_core_academic_subjects.sql:151:on public.student_enrollments(started_at, ended_at);
 
 ## PATTERN: subject_offerings
+lib\src\data\personal_diary_service.dart:237:.from('subject_offerings')
+lib\src\data\subject_diary_repository_supabase.dart:806:.from('subject_offerings')
 lib\src\ui\exams\exams_screen.dart:2103:.from('subject_offerings')
 lib\src\ui\info\info_screen.dart:301:.from('subject_offerings')
-lib\src\ui\info\subject_info_screen.dart:170:.from('subject_offerings')
+lib\src\ui\info\subject_info_screen.dart:181:.from('subject_offerings')
 scripts\collect_project_snapshot.ps1:115:Write-Search "academic_terms_usage.txt" @("academic_years", "academic_terms", "group_academic_profiles", "group_term_semesters", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects")
 scripts\collect_project_snapshot.ps1:116:Write-Search "table_terms_usage.txt" @("groups", "teams", "team_members", "chats", "chat_members", "messages", "chat_files", "users", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects", "schedule", "lessons", "assignments", "diary", "friends", "useful")
 scripts\import_academic_batch.js:58:curriculum  Create subject_catalog, subject_aliases, curriculum_subjects, subject_offerings
@@ -1774,6 +1820,7 @@ supabase\stage2_3_schedule_subject_resolver_rollback.sql:66:from public.subject_
 supabase\stage2_3_schedule_subject_resolver_rollback.sql:86:from public.subject_offerings
 supabase\stage2_3_schedule_subject_resolver_rollback.sql:107:from public.subject_offerings
 supabase\stage2_3_schedule_subject_resolver_rollback.sql:130:delete from public.subject_offerings
+supabase\stage4_2_3_personal_diary_tasks.sql:8:subject_offering_id uuid null references public.subject_offerings(id) on delete set null,
 supabase\checks\academic_rls_audit.sql:17:('subject_offerings'),
 supabase\checks\academic_rls_audit.sql:60:('subject_offerings'),
 supabase\checks\academic_rls_audit.sql:102:('subject_offerings'),
@@ -1871,7 +1918,7 @@ supabase\migrations_recovered\migration_002_extend_existing_tables.sql:43:add co
 lib\src\ui\exams\exams_screen.dart:2120:subject_catalog(canonical_name)
 lib\src\ui\exams\exams_screen.dart:2302:final catalog = _asMap(row['subject_catalog']);
 lib\src\ui\info\info_screen.dart:320:.from('subject_catalog')
-lib\src\ui\info\subject_info_screen.dart:186:.from('subject_catalog')
+lib\src\ui\info\subject_info_screen.dart:197:.from('subject_catalog')
 scripts\collect_project_snapshot.ps1:115:Write-Search "academic_terms_usage.txt" @("academic_years", "academic_terms", "group_academic_profiles", "group_term_semesters", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects")
 scripts\collect_project_snapshot.ps1:116:Write-Search "table_terms_usage.txt" @("groups", "teams", "team_members", "chats", "chat_members", "messages", "chat_files", "users", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects", "schedule", "lessons", "assignments", "diary", "friends", "useful")
 scripts\import_academic_batch.js:58:curriculum  Create subject_catalog, subject_aliases, curriculum_subjects, subject_offerings
@@ -1969,7 +2016,7 @@ supabase\migrations_recovered\migration_002_extend_existing_tables.sql:42:add co
 lib\src\ui\exams\exams_screen.dart:2110:curriculum_subjects(
 lib\src\ui\exams\exams_screen.dart:2301:final curriculum = _asMap(row['curriculum_subjects']);
 lib\src\ui\info\info_screen.dart:329:.from('curriculum_subjects')
-lib\src\ui\info\subject_info_screen.dart:195:.from('curriculum_subjects')
+lib\src\ui\info\subject_info_screen.dart:206:.from('curriculum_subjects')
 scripts\collect_project_snapshot.ps1:115:Write-Search "academic_terms_usage.txt" @("academic_years", "academic_terms", "group_academic_profiles", "group_term_semesters", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects")
 scripts\collect_project_snapshot.ps1:116:Write-Search "table_terms_usage.txt" @("groups", "teams", "team_members", "chats", "chat_members", "messages", "chat_files", "users", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects", "schedule", "lessons", "assignments", "diary", "friends", "useful")
 scripts\import_academic_batch.js:58:curriculum  Create subject_catalog, subject_aliases, curriculum_subjects, subject_offerings
@@ -2050,17 +2097,24 @@ lib\all_dart_code.txt:26939:const _ScheduleHeader({
 lib\all_dart_code.txt:29891:void _scheduleReload([Duration delay = const Duration(milliseconds: 400)]) {
 lib\all_dart_code.txt:30490:if (!_isEditMode) _scheduleReload();
 lib\all_dart_code.txt:30504:if (!_isEditMode) _scheduleReload();
-lib\main.dart:23:import 'src/ui/schedule/subject_diary/subject_diary.dart';
+lib\main.dart:24:import 'src/ui/schedule/subject_diary/subject_diary.dart';
+lib\src\data\personal_diary_service.dart:7:import '../ui/schedule/subject_diary/subject_diary.dart';
+lib\src\data\personal_diary_service.dart:724:Future<List<PersonalDiaryLesson>> loadScheduleLessons() async {
 lib\src\ui\chats\core\unified_chat_screen.dart:677:void _scheduleSeenCheck() {
 lib\src\ui\chats\core\unified_chat_screen.dart:1091:_scheduleSeenCheck();
 lib\src\ui\exams\exams_screen.dart:763:Icons.schedule_rounded,
-lib\src\ui\info\subject_info_screen.dart:6:import '../schedule/subject_diary_screen.dart';
-lib\src\ui\info\subject_info_screen.dart:365:'stage2_schedule_subject_resolver',
+lib\src\ui\info\subject_info_screen.dart:6:import '../schedule/subject_diary/subject_diary.dart';
+lib\src\ui\info\subject_info_screen.dart:7:import '../schedule/subject_diary_screen.dart';
+lib\src\ui\info\subject_info_screen.dart:376:'stage2_schedule_subject_resolver',
 lib\src\ui\learning\tabs\chat_tab.dart:497:void _scheduleSeenCheck() {
 lib\src\ui\learning\tabs\chat_tab.dart:1006:_scheduleSeenCheck();
 lib\src\ui\navigation\navigation_screen.dart:8:import '../schedule/schedule_screen.dart';
 lib\src\ui\navigation\navigation_screen.dart:34:const _KeepAlive(storageKey: 'tab_schedule', child: ScheduleScreen()),
-lib\src\ui\profile\profile_screen.dart:906:route: '/schedule',
+lib\src\ui\profile\personal_diary_screen.dart:4:import '../schedule/subject_diary/subject_diary.dart';
+lib\src\ui\profile\personal_diary_screen.dart:5:import '../schedule/subject_diary_screen.dart';
+lib\src\ui\profile\personal_diary_screen.dart:449:final lessons = await _service.loadScheduleLessons();
+lib\src\ui\profile\personal_diary_screen.dart:555:final lessons = await _service.loadScheduleLessons();
+lib\src\ui\profile\profile_screen.dart:908:route: '/schedule',
 lib\src\ui\schedule\all_dart_text.txt:451:// lib/src/ui/schedule/lesson_details_screen.dart
 lib\src\ui\schedule\all_dart_text.txt:509:icon: Icons.schedule_outlined,
 lib\src\ui\schedule\all_dart_text.txt:1011:// lib/src/ui/schedule/schedule_screen.dart
@@ -2091,9 +2145,9 @@ lib\src\ui\schedule\schedule_screen.dart:91:final _repo = ScheduleRepository();
 lib\src\ui\schedule\schedule_screen.dart:289:child: _ScheduleHeader(
 lib\src\ui\schedule\schedule_screen.dart:402:class _ScheduleHeader extends StatelessWidget {
 lib\src\ui\schedule\schedule_screen.dart:416:const _ScheduleHeader({
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:34:void _scheduleReload([Duration delay = const Duration(milliseconds: 400)]) {
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:633:if (!_isEditMode) _scheduleReload();
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:647:if (!_isEditMode) _scheduleReload();
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:39:void _scheduleReload([Duration delay = const Duration(milliseconds: 400)]) {
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:644:if (!_isEditMode) _scheduleReload();
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:658:if (!_isEditMode) _scheduleReload();
 scripts\collect_project_snapshot.ps1:116:Write-Search "table_terms_usage.txt" @("groups", "teams", "team_members", "chats", "chat_members", "messages", "chat_files", "users", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects", "schedule", "lessons", "assignments", "diary", "friends", "useful")
 supabase\dev_seed_test_schedule_subject_link.sql:1:-- Stage 2.1 dev/test seed: schedule -> subject_offering -> team/chat link.
 supabase\dev_seed_test_schedule_subject_link.sql:4:--   subject_catalog.description = 'stage2_1_test_schedule_subject_link'
@@ -2180,8 +2234,30 @@ lib\all_dart_code.txt:26665:.channel('public:lessons')
 lib\all_dart_code.txt:26669:table: 'lessons',
 lib\all_dart_code.txt:26741:final lessons = _all.where((l) => _isSameDate(l.date, d));
 lib\all_dart_code.txt:26743:for (final l in lessons) {
-lib\src\data\subject_diary_repository_supabase.dart:597:final resp = await _sb.rpc('get_my_lessons', params: {
-lib\src\data\subject_diary_repository_supabase.dart:643:final resp = await _sb.rpc('get_my_lessons', params: {
+lib\src\data\personal_diary_service.dart:724:Future<List<PersonalDiaryLesson>> loadScheduleLessons() async {
+lib\src\data\personal_diary_service.dart:733:.from('lessons')
+lib\src\data\subject_diary_repository_supabase.dart:907:final resp = await _sb.rpc('get_my_lessons', params: {
+lib\src\data\subject_diary_repository_supabase.dart:953:final resp = await _sb.rpc('get_my_lessons', params: {
+lib\src\ui\profile\personal_diary_screen.dart:449:final lessons = await _service.loadScheduleLessons();
+lib\src\ui\profile\personal_diary_screen.dart:462:lessons: lessons,
+lib\src\ui\profile\personal_diary_screen.dart:555:final lessons = await _service.loadScheduleLessons();
+lib\src\ui\profile\personal_diary_screen.dart:557:if (lessons.isEmpty) {
+lib\src\ui\profile\personal_diary_screen.dart:564:final selected = await _pickLesson(lessons);
+lib\src\ui\profile\personal_diary_screen.dart:593:List<PersonalDiaryLesson> lessons,
+lib\src\ui\profile\personal_diary_screen.dart:603:builder: (ctx) => _LessonPickerSheet(lessons: lessons),
+lib\src\ui\profile\personal_diary_screen.dart:650:final List<PersonalDiaryLesson> lessons;
+lib\src\ui\profile\personal_diary_screen.dart:659:required this.lessons,
+lib\src\ui\profile\personal_diary_screen.dart:816:for (final lesson in widget.lessons) {
+lib\src\ui\profile\personal_diary_screen.dart:821:subtitle: _lessonSubtitle(lesson),
+lib\src\ui\profile\personal_diary_screen.dart:836:...widget.lessons.map((lesson) => lesson.date),
+lib\src\ui\profile\personal_diary_screen.dart:856:String _lessonSubtitle(PersonalDiaryLesson lesson) {
+lib\src\ui\profile\personal_diary_screen.dart:1538:final List<PersonalDiaryLesson> lessons;
+lib\src\ui\profile\personal_diary_screen.dart:1540:const _LessonPickerSheet({required this.lessons});
+lib\src\ui\profile\personal_diary_screen.dart:1563:final filtered = widget.lessons.where((lesson) {
+lib\src\ui\profile\personal_diary_screen.dart:1579:..sort((a, b) => _compareLessons(a, b, today));
+lib\src\ui\profile\personal_diary_screen.dart:1667:int _compareLessons(
+lib\src\ui\profile\personal_diary_screen.dart:1848:subtitle: Text(_lessonSubtitle(lesson)),
+lib\src\ui\profile\personal_diary_screen.dart:1854:String _lessonSubtitle(PersonalDiaryLesson lesson) {
 lib\src\ui\schedule\all_dart_text.txt:1033:final resp = await _sb.rpc('get_my_lessons', params: {
 lib\src\ui\schedule\all_dart_text.txt:1041:print('[schedule] loaded ${list.length} lessons for ${anchor.year}-${anchor.month}');
 lib\src\ui\schedule\all_dart_text.txt:1047:print('RPC get_my_lessons error: $e\n$st');
@@ -2359,6 +2435,55 @@ lib\all_dart_code.txt:16565:Iterable<Assignment> base = st.assignments;
 lib\all_dart_code.txt:16774:class AssignmentsViewMode {
 lib\all_dart_code.txt:16823:final byId = st.assignments.where((x) => x.id == aid);
 lib\all_dart_code.txt:21090:export 'assignments/edit_assignment_dialog.dart';
+lib\src\data\personal_diary_service.dart:16:final List<PersonalDiaryAssignment> publishedAssignments;
+lib\src\data\personal_diary_service.dart:17:final List<PersonalDiaryAssignment> upcomingAssignments;
+lib\src\data\personal_diary_service.dart:22:final int totalAssignments;
+lib\src\data\personal_diary_service.dart:23:final int pendingAssignmentsCount;
+lib\src\data\personal_diary_service.dart:24:final int completedAssignmentsCount;
+lib\src\data\personal_diary_service.dart:36:this.publishedAssignments = const [],
+lib\src\data\personal_diary_service.dart:37:this.upcomingAssignments = const [],
+lib\src\data\personal_diary_service.dart:42:this.totalAssignments = 0,
+lib\src\data\personal_diary_service.dart:43:this.pendingAssignmentsCount = 0,
+lib\src\data\personal_diary_service.dart:44:this.completedAssignmentsCount = 0,
+lib\src\data\personal_diary_service.dart:221:publishedAssignments: const [],
+lib\src\data\personal_diary_service.dart:222:upcomingAssignments: const [],
+lib\src\data\personal_diary_service.dart:227:totalAssignments: 0,
+lib\src\data\personal_diary_service.dart:228:pendingAssignmentsCount: 0,
+lib\src\data\personal_diary_service.dart:229:completedAssignmentsCount: 0,
+lib\src\data\personal_diary_service.dart:265:publishedAssignments: const [],
+lib\src\data\personal_diary_service.dart:266:upcomingAssignments: const [],
+lib\src\data\personal_diary_service.dart:271:totalAssignments: 0,
+lib\src\data\personal_diary_service.dart:272:pendingAssignmentsCount: 0,
+lib\src\data\personal_diary_service.dart:273:completedAssignmentsCount: 0,
+lib\src\data\personal_diary_service.dart:296:final assignmentsByOffering = <String, List<PersonalDiaryAssignment>>{};
+lib\src\data\personal_diary_service.dart:343:.from('assignments')
+lib\src\data\personal_diary_service.dart:352:final rawAssignments = (assignmentRows as List)
+lib\src\data\personal_diary_service.dart:358:final assignmentIds = rawAssignments
+lib\src\data\personal_diary_service.dart:390:for (final row in rawAssignments) {
+lib\src\data\personal_diary_service.dart:410:(assignmentsByOffering[offeringId] ??= []).add(assignment);
+lib\src\data\personal_diary_service.dart:433:final assignments =
+lib\src\data\personal_diary_service.dart:434:assignmentsByOffering[id] ?? const <PersonalDiaryAssignment>[];
+lib\src\data\personal_diary_service.dart:451:assignmentCount: assignments.length,
+lib\src\data\personal_diary_service.dart:452:incompleteAssignmentCount: assignments
+lib\src\data\personal_diary_service.dart:482:final publishedAssignments = assignmentsByOffering.values
+lib\src\data\personal_diary_service.dart:485:..sort(_compareAssignments);
+lib\src\data\personal_diary_service.dart:486:final upcomingAssignments = publishedAssignments.take(5).toList();
+lib\src\data\personal_diary_service.dart:494:final totalAssignments = publishedAssignments.length;
+lib\src\data\personal_diary_service.dart:495:final completedAssignmentsCount = publishedAssignments
+lib\src\data\personal_diary_service.dart:498:final pendingAssignmentsCount =
+lib\src\data\personal_diary_service.dart:499:totalAssignments - completedAssignmentsCount;
+lib\src\data\personal_diary_service.dart:511:publishedAssignments: publishedAssignments,
+lib\src\data\personal_diary_service.dart:512:upcomingAssignments: upcomingAssignments,
+lib\src\data\personal_diary_service.dart:517:totalAssignments: totalAssignments,
+lib\src\data\personal_diary_service.dart:518:pendingAssignmentsCount: pendingAssignmentsCount,
+lib\src\data\personal_diary_service.dart:519:completedAssignmentsCount: completedAssignmentsCount,
+lib\src\data\personal_diary_service.dart:536:Future<List<PersonalDiaryAssignment>> loadPublishedAssignmentsForOffering({
+lib\src\data\personal_diary_service.dart:544:.from('assignments')
+lib\src\data\personal_diary_service.dart:553:final rawAssignments = (rows as List)
+lib\src\data\personal_diary_service.dart:557:final ids = rawAssignments
+lib\src\data\personal_diary_service.dart:576:return rawAssignments.map((row) {
+lib\src\data\personal_diary_service.dart:593:..sort(_compareAssignments);
+lib\src\data\personal_diary_service.dart:798:static int _compareAssignments(
 lib\src\ui\chats\core\dm_chat_service.dart:21:bool get supportsAssignments => false;
 lib\src\ui\chats\core\i_chat_service.dart:11:bool get supportsAssignments; // для DM => false
 lib\src\ui\chats\core\team_chat_service.dart:29:bool get supportsAssignments => true;
@@ -2368,8 +2493,8 @@ lib\src\ui\chats\core\unified_chat_screen.dart:1031:_canManageAssignments(contex
 lib\src\ui\chats\core\unified_chat_screen.dart:1474:showProposeInPlus: canProposeAssignments,
 lib\src\ui\chats\core\unified_chat_screen.dart:1477:if (!canProposeAssignments) return;
 lib\src\ui\chats\core\unified_chat_screen.dart:1494:bool _canManageAssignments(BuildContext context) {
-lib\src\ui\learning\assignment_details_screen.dart:140:return (st.assignments).firstWhere(
-lib\src\ui\learning\assignment_details_screen.dart:142:orElse: () => st.published.isNotEmpty ? st.published.last : st.assignments.first,
+lib\src\ui\learning\assignment_details_screen.dart:179:return (st.assignments).firstWhere(
+lib\src\ui\learning\assignment_details_screen.dart:182:st.published.isNotEmpty ? st.published.last : st.assignments.first,
 lib\src\ui\learning\team_details_screen — копия.dart:6:import 'tabs/assignments_tab.dart';
 lib\src\ui\learning\team_details_screen — копия.dart:9:import 'tabs/assignments/view_mode.dart';
 lib\src\ui\learning\team_details_screen — копия.dart:73:actions: const [AssignmentsViewModeButton()],
@@ -2389,10 +2514,10 @@ lib\src\ui\learning\team_details_screen.dart:191:valueListenable: AssignmentsVie
 lib\src\ui\learning\team_details_screen.dart:195:onPressed: () => AssignmentsViewMode.grid.value = !asGrid,
 lib\src\ui\learning\data\learning_repository.dart:36:Future<List<Assignment>> loadAssignments(String teamId);
 lib\src\ui\learning\data\learning_repository.dart:37:Future<void> saveAssignments(String teamId, List<Assignment> items);
-lib\src\ui\learning\data\supabase_learning_repository.dart:607:Future<List<Assignment>> loadAssignments(String teamId) async {
-lib\src\ui\learning\data\supabase_learning_repository.dart:610:await _sb.rpc('get_team_assignments', params: {'p_team_id': teamId});
-lib\src\ui\learning\data\supabase_learning_repository.dart:622:debugPrint('[loadAssignments] error: $e\n$st');
-lib\src\ui\learning\data\supabase_learning_repository.dart:634:Future<void> saveAssignments(String teamId, List<Assignment> items) async {
+lib\src\ui\learning\data\supabase_learning_repository.dart:684:Future<List<Assignment>> loadAssignments(String teamId) async {
+lib\src\ui\learning\data\supabase_learning_repository.dart:687:await _sb.rpc('get_team_assignments', params: {'p_team_id': teamId});
+lib\src\ui\learning\data\supabase_learning_repository.dart:699:debugPrint('[loadAssignments] error: $e\n$st');
+lib\src\ui\learning\data\supabase_learning_repository.dart:711:Future<void> saveAssignments(String teamId, List<Assignment> items) async {
 lib\src\ui\learning\state\team_cubit.dart:23:final List<Assignment> assignments;
 lib\src\ui\learning\state\team_cubit.dart:30:assignments.where((a) => a.published).toList();
 lib\src\ui\learning\state\team_cubit.dart:33:for (int i = assignments.length - 1; i >= 0; i--) {
@@ -2404,57 +2529,97 @@ lib\src\ui\learning\state\team_cubit.dart:86:RealtimeChannel? _rtAssignments;
 lib\src\ui\learning\state\team_cubit.dart:104:final ass = await repo.loadAssignments(state.team.id);
 lib\src\ui\learning\state\team_cubit.dart:114:assignments: ass,
 lib\src\ui\learning\state\team_cubit.dart:123:_subscribeToAssignments();
-lib\src\ui\learning\state\team_cubit.dart:621:await _reloadAssignments();
-lib\src\ui\learning\state\team_cubit.dart:656:await _reloadAssignments();
-lib\src\ui\learning\state\team_cubit.dart:670:await _reloadAssignments();
-lib\src\ui\learning\state\team_cubit.dart:689:await _reloadAssignments();
-lib\src\ui\learning\state\team_cubit.dart:710:await _reloadAssignments();
-lib\src\ui\learning\state\team_cubit.dart:729:await _reloadAssignments();
-lib\src\ui\learning\state\team_cubit.dart:736:await _reloadAssignments();
-lib\src\ui\learning\state\team_cubit.dart:740:Future<void> _reloadAssignments() async {
-lib\src\ui\learning\state\team_cubit.dart:741:final ass = await repo.loadAssignments(state.team.id);
-lib\src\ui\learning\state\team_cubit.dart:743:assignments: ass,
-lib\src\ui\learning\state\team_cubit.dart:748:safeDebugLog('[TeamCubit] assignments reloaded count=${ass.length}');
-lib\src\ui\learning\state\team_cubit.dart:785:final same = state.assignments
-lib\src\ui\learning\state\team_cubit.dart:824:void _subscribeToAssignments() {
-lib\src\ui\learning\state\team_cubit.dart:827:// assignments (insert/update/delete)
-lib\src\ui\learning\state\team_cubit.dart:829:_rtAssignments?.unsubscribe();
-lib\src\ui\learning\state\team_cubit.dart:831:_rtAssignments = sb.channel('public:assignments');
-lib\src\ui\learning\state\team_cubit.dart:832:_rtAssignments!
-lib\src\ui\learning\state\team_cubit.dart:836:table: 'assignments',
-lib\src\ui\learning\state\team_cubit.dart:842:callback: (_) => _reloadAssignments(),
-lib\src\ui\learning\state\team_cubit.dart:847:table: 'assignments',
-lib\src\ui\learning\state\team_cubit.dart:853:callback: (_) => _reloadAssignments(),
-lib\src\ui\learning\state\team_cubit.dart:858:table: 'assignments',
-lib\src\ui\learning\state\team_cubit.dart:864:callback: (_) => _reloadAssignments(),
-lib\src\ui\learning\state\team_cubit.dart:877:callback: (_) => _reloadAssignments(),
-lib\src\ui\learning\state\team_cubit.dart:883:callback: (_) => _reloadAssignments(),
-lib\src\ui\learning\state\team_cubit.dart:896:callback: (_) => _reloadAssignments(),
-lib\src\ui\learning\state\team_cubit.dart:902:callback: (_) => _reloadAssignments(),
-lib\src\ui\learning\state\team_cubit.dart:905:_rtAssignments!.subscribe();
-lib\src\ui\learning\state\team_cubit.dart:920:await _rtAssignments?.unsubscribe();
+lib\src\ui\learning\state\team_cubit.dart:624:await _reloadAssignments();
+lib\src\ui\learning\state\team_cubit.dart:671:await _reloadAssignments();
+lib\src\ui\learning\state\team_cubit.dart:693:await _reloadAssignments();
+lib\src\ui\learning\state\team_cubit.dart:705:await _reloadAssignments();
+lib\src\ui\learning\state\team_cubit.dart:716:await _reloadAssignments();
+lib\src\ui\learning\state\team_cubit.dart:735:await _reloadAssignments();
+lib\src\ui\learning\state\team_cubit.dart:742:await _reloadAssignments();
+lib\src\ui\learning\state\team_cubit.dart:746:Future<void> _reloadAssignments() async {
+lib\src\ui\learning\state\team_cubit.dart:747:final ass = await repo.loadAssignments(state.team.id);
+lib\src\ui\learning\state\team_cubit.dart:749:assignments: ass,
+lib\src\ui\learning\state\team_cubit.dart:754:safeDebugLog('[TeamCubit] assignments reloaded count=${ass.length}');
+lib\src\ui\learning\state\team_cubit.dart:804:final byId = state.assignments.where((x) => x.id == m.assignmentId);
+lib\src\ui\learning\state\team_cubit.dart:825:void _subscribeToAssignments() {
+lib\src\ui\learning\state\team_cubit.dart:828:// assignments (insert/update/delete)
+lib\src\ui\learning\state\team_cubit.dart:830:_rtAssignments?.unsubscribe();
+lib\src\ui\learning\state\team_cubit.dart:832:_rtAssignments = sb.channel('public:assignments');
+lib\src\ui\learning\state\team_cubit.dart:833:_rtAssignments!
+lib\src\ui\learning\state\team_cubit.dart:837:table: 'assignments',
+lib\src\ui\learning\state\team_cubit.dart:843:callback: (_) => _reloadAssignments(),
+lib\src\ui\learning\state\team_cubit.dart:848:table: 'assignments',
+lib\src\ui\learning\state\team_cubit.dart:854:callback: (_) => _reloadAssignments(),
+lib\src\ui\learning\state\team_cubit.dart:859:table: 'assignments',
+lib\src\ui\learning\state\team_cubit.dart:865:callback: (_) => _reloadAssignments(),
+lib\src\ui\learning\state\team_cubit.dart:878:callback: (_) => _reloadAssignments(),
+lib\src\ui\learning\state\team_cubit.dart:884:callback: (_) => _reloadAssignments(),
+lib\src\ui\learning\state\team_cubit.dart:897:callback: (_) => _reloadAssignments(),
+lib\src\ui\learning\state\team_cubit.dart:903:callback: (_) => _reloadAssignments(),
+lib\src\ui\learning\state\team_cubit.dart:906:_rtAssignments!.subscribe();
+lib\src\ui\learning\state\team_cubit.dart:921:await _rtAssignments?.unsubscribe();
 lib\src\ui\learning\tabs\assignments_tab.dart:10:import 'assignments/view_mode.dart';
 lib\src\ui\learning\tabs\assignments_tab.dart:12:class AssignmentsTab extends StatelessWidget {
 lib\src\ui\learning\tabs\assignments_tab.dart:14:const AssignmentsTab({super.key, required this.team});
 lib\src\ui\learning\tabs\assignments_tab.dart:19:valueListenable: AssignmentsViewMode.grid,
 lib\src\ui\learning\tabs\assignments_tab.dart:23:final items = [...state.assignments];
-lib\src\ui\learning\tabs\assignment_details_screen.dart:137:return (st.assignments).firstWhere(
-lib\src\ui\learning\tabs\assignment_details_screen.dart:139:orElse: () => st.published.isNotEmpty ? st.published.last : st.assignments.first,
+lib\src\ui\learning\tabs\assignment_details_screen.dart:142:return (st.assignments).firstWhere(
+lib\src\ui\learning\tabs\assignment_details_screen.dart:145:st.published.isNotEmpty ? st.published.last : st.assignments.first,
 lib\src\ui\learning\tabs\chat_tab.dart:30:import 'chat/assignments/edit_assignment_dialog.dart';
 lib\src\ui\learning\tabs\chat_tab.dart:975:previous.assignments != current.assignments;
 lib\src\ui\learning\tabs\assignments\assignments_tab.dart:10:class AssignmentsTab extends StatefulWidget {
-lib\src\ui\learning\tabs\assignments\assignments_tab.dart:11:final Object? team; // совместимость с вызовом AssignmentsTab(team: state.team)
-lib\src\ui\learning\tabs\assignments\assignments_tab.dart:12:const AssignmentsTab({super.key, this.team});
-lib\src\ui\learning\tabs\assignments\assignments_tab.dart:15:State<AssignmentsTab> createState() => _AssignmentsTabState();
-lib\src\ui\learning\tabs\assignments\assignments_tab.dart:18:class _AssignmentsTabState extends State<AssignmentsTab> {
-lib\src\ui\learning\tabs\assignments\assignments_tab.dart:90:? st.assignments
-lib\src\ui\learning\tabs\assignments\assignments_tab.dart:91:: st.assignments.where((a) => a.published);
+lib\src\ui\learning\tabs\assignments\assignments_tab.dart:12:team; // совместимость с вызовом AssignmentsTab(team: state.team)
+lib\src\ui\learning\tabs\assignments\assignments_tab.dart:13:const AssignmentsTab({super.key, this.team});
+lib\src\ui\learning\tabs\assignments\assignments_tab.dart:16:State<AssignmentsTab> createState() => _AssignmentsTabState();
+lib\src\ui\learning\tabs\assignments\assignments_tab.dart:19:class _AssignmentsTabState extends State<AssignmentsTab> {
+lib\src\ui\learning\tabs\assignments\assignments_tab.dart:93:? st.assignments
+lib\src\ui\learning\tabs\assignments\assignments_tab.dart:94:: st.assignments.where((a) => a.published);
 lib\src\ui\learning\tabs\assignments\view_mode.dart:5:class AssignmentsViewMode {
 lib\src\ui\learning\tabs\chat\assignment_bubble.dart:11:import 'assignments/assignment_form_dialog.dart';
-lib\src\ui\learning\tabs\chat\assignment_bubble.dart:57:final byId = st.assignments.where((x) => x.id == aid);
+lib\src\ui\learning\tabs\chat\assignment_bubble.dart:53:final byId = st.assignments.where((x) => x.id == aid);
 lib\src\ui\learning\tabs\chat\widgets.dart:37:export 'assignments/edit_assignment_dialog.dart';
 lib\src\ui\learning\tabs\chat\composer\chat_composer_bar.dart:5:import '../assignments/assignment_form_dialog.dart';
+lib\src\ui\profile\personal_diary_screen.dart:95:'${data.totalAssignments} групповых • ${data.personalTasksActive} личных активных',
+lib\src\ui\profile\personal_diary_screen.dart:167:...data.upcomingAssignments.map(_UpcomingDiaryItem.groupAssignment),
+lib\src\ui\profile\personal_diary_screen.dart:183:...data.publishedAssignments.map(_UpcomingDiaryItem.groupAssignment),
+lib\src\ui\profile\personal_diary_screen.dart:791:for (final assignment in widget.data.publishedAssignments) {
+lib\src\ui\profile\personal_diary_screen.dart:837:...widget.data.publishedAssignments
+lib\src\ui\schedule\subject_diary_screen.dart:36:List<PersonalDiaryAssignment> _assignments = [];
+lib\src\ui\schedule\subject_diary_screen.dart:60:var assignments = const <PersonalDiaryAssignment>[];
+lib\src\ui\schedule\subject_diary_screen.dart:64:assignments = await _diaryService.loadPublishedAssignmentsForOffering(
+lib\src\ui\schedule\subject_diary_screen.dart:76:_assignments = assignments;
+lib\src\ui\schedule\subject_diary_screen.dart:526:final filteredAssignments = _assignments.where((assignment) {
+lib\src\ui\schedule\subject_diary_screen.dart:573:child: _SubjectAssignmentsSection(
+lib\src\ui\schedule\subject_diary_screen.dart:574:assignments: filteredAssignments,
+lib\src\ui\schedule\subject_diary_screen.dart:728:class _SubjectAssignmentsSection extends StatelessWidget {
+lib\src\ui\schedule\subject_diary_screen.dart:729:final List<PersonalDiaryAssignment> assignments;
+lib\src\ui\schedule\subject_diary_screen.dart:739:const _SubjectAssignmentsSection({
+lib\src\ui\schedule\subject_diary_screen.dart:740:required this.assignments,
+lib\src\ui\schedule\subject_diary_screen.dart:758:'${assignments.length} групповых • ${tasks.where((task) => !task.isDone).length} личных активных',
+lib\src\ui\schedule\subject_diary_screen.dart:761:if (assignments.isEmpty && tasks.isEmpty)
+lib\src\ui\schedule\subject_diary_screen.dart:767:...assignments.map(
 scripts\collect_project_snapshot.ps1:116:Write-Search "table_terms_usage.txt" @("groups", "teams", "team_members", "chats", "chat_members", "messages", "chat_files", "users", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects", "schedule", "lessons", "assignments", "diary", "friends", "useful")
+supabase\stage4_2_1b_assignment_persistence_fix.sql:144:insert into public.assignments(
+supabase\stage4_2_1b_assignment_persistence_fix_rollback.sql:112:insert into public.assignments(
+supabase\stage4_2_1_assignment_model_hardening.sql:5:drop function if exists public.get_team_assignments(uuid);
+supabase\stage4_2_1_assignment_model_hardening.sql:7:create or replace function public.get_team_assignments(p_team_id uuid)
+supabase\stage4_2_1_assignment_model_hardening.sql:58:from public.assignments a
+supabase\stage4_2_1_assignment_model_hardening.sql:110:insert into public.assignments(
+supabase\stage4_2_1_assignment_model_hardening.sql:192:from public.assignments
+supabase\stage4_2_1_assignment_model_hardening.sql:206:update public.assignments
+supabase\stage4_2_1_assignment_model_hardening.sql:239:from public.assignments
+supabase\stage4_2_1_assignment_model_hardening.sql:266:update public.assignments
+supabase\stage4_2_1_assignment_model_hardening.sql:284:from public.assignments
+supabase\stage4_2_1_assignment_model_hardening.sql:294:grant execute on function public.get_team_assignments(uuid) to anon, authenticated, service_role;
+supabase\stage4_2_1_assignment_model_hardening_rollback.sql:4:drop function if exists public.get_team_assignments(uuid);
+supabase\stage4_2_1_assignment_model_hardening_rollback.sql:6:create or replace function public.get_team_assignments(p_team_id uuid)
+supabase\stage4_2_1_assignment_model_hardening_rollback.sql:39:from public.assignments a
+supabase\stage4_2_1_assignment_model_hardening_rollback.sql:61:insert into public.assignments(team_id, title, description, link, due_text, attachments, created_by)
+supabase\stage4_2_1_assignment_model_hardening_rollback.sql:98:select team_id into v_team from public.assignments where id = p_assignment_id;
+supabase\stage4_2_1_assignment_model_hardening_rollback.sql:109:update public.assignments set published_at = now() where id = p_assignment_id;
+supabase\stage4_2_1_assignment_model_hardening_rollback.sql:138:update public.assignments
+supabase\stage4_2_1_assignment_model_hardening_rollback.sql:146:'published', (select published_at is not null from public.assignments where id = p_assignment_id)
+supabase\stage4_2_1_assignment_model_hardening_rollback.sql:151:grant execute on function public.get_team_assignments(uuid) to anon, authenticated, service_role;
 supabase\checks\academic_rls_audit.sql:27:('assignments'),
 supabase\checks\academic_rls_audit.sql:70:('assignments'),
 supabase\checks\academic_rls_audit.sql:112:('assignments'),
@@ -2684,62 +2849,325 @@ lib\all_dart_code.txt:30342:Future<void> _openFile(BuildContext ctx, SubjectDiar
 lib\all_dart_code.txt:30359:Future<void> _openImageViewer(BuildContext ctx, List<SubjectDiaryFile> imgs, int start) async {
 lib\all_dart_code.txt:30582:await SubjectDiaryRepository.instance.addText(
 lib\all_dart_code.txt:30667:await SubjectDiaryRepository.instance.updateTextEntry(id: widget.entryId, newText: text);
-lib\main.dart:23:import 'src/ui/schedule/subject_diary/subject_diary.dart';
-lib\main.dart:81:SubjectDiaryRepository.instance = SubjectDiaryRepositorySupabase();
+lib\main.dart:22:import 'src/ui/profile/personal_diary_screen.dart';
+lib\main.dart:24:import 'src/ui/schedule/subject_diary/subject_diary.dart';
+lib\main.dart:64:path: '/my-diary',
+lib\main.dart:65:builder: (_, __) => const PersonalDiaryScreen(),
+lib\main.dart:86:SubjectDiaryRepository.instance = SubjectDiaryRepositorySupabase();
+lib\src\data\personal_diary_service.dart:7:import '../ui/schedule/subject_diary/subject_diary.dart';
+lib\src\data\personal_diary_service.dart:9:class PersonalDiaryData {
+lib\src\data\personal_diary_service.dart:13:final List<PersonalDiarySubject> allSubjects;
+lib\src\data\personal_diary_service.dart:14:final List<PersonalDiarySubject> subjects;
+lib\src\data\personal_diary_service.dart:15:final List<PersonalDiaryLatestEntry> latestEntries;
+lib\src\data\personal_diary_service.dart:16:final List<PersonalDiaryAssignment> publishedAssignments;
+lib\src\data\personal_diary_service.dart:17:final List<PersonalDiaryAssignment> upcomingAssignments;
+lib\src\data\personal_diary_service.dart:18:final List<PersonalDiaryTask> personalTasks;
+lib\src\data\personal_diary_service.dart:19:final List<PersonalDiaryTask> upcomingPersonalTasks;
+lib\src\data\personal_diary_service.dart:29:const PersonalDiaryData({
+lib\src\data\personal_diary_service.dart:51:class PersonalDiarySubject {
+lib\src\data\personal_diary_service.dart:66:const PersonalDiarySubject({
+lib\src\data\personal_diary_service.dart:82:SubjectDiaryArgs toDiaryArgs() {
+lib\src\data\personal_diary_service.dart:83:return SubjectDiaryArgs(
+lib\src\data\personal_diary_service.dart:94:class PersonalDiaryAssignment {
+lib\src\data\personal_diary_service.dart:109:const PersonalDiaryAssignment({
+lib\src\data\personal_diary_service.dart:128:class PersonalDiaryTask {
+lib\src\data\personal_diary_service.dart:140:const PersonalDiaryTask({
+lib\src\data\personal_diary_service.dart:181:class PersonalDiaryLatestEntry {
+lib\src\data\personal_diary_service.dart:189:const PersonalDiaryLatestEntry({
+lib\src\data\personal_diary_service.dart:199:class PersonalDiaryService {
+lib\src\data\personal_diary_service.dart:200:PersonalDiaryService({SupabaseClient? client})
+lib\src\data\personal_diary_service.dart:207:Future<PersonalDiaryData> load({int? semesterNumber}) async {
+lib\src\data\personal_diary_service.dart:214:return PersonalDiaryData(
+lib\src\data\personal_diary_service.dart:258:return PersonalDiaryData(
+lib\src\data\personal_diary_service.dart:296:final assignmentsByOffering = <String, List<PersonalDiaryAssignment>>{};
+lib\src\data\personal_diary_service.dart:297:final tasksByOffering = <String, List<PersonalDiaryTask>>{};
+lib\src\data\personal_diary_service.dart:300:var generalTasks = const <PersonalDiaryTask>[];
+lib\src\data\personal_diary_service.dart:304:.from('subject_diary_entries')
+lib\src\data\personal_diary_service.dart:325:.from('subject_diary_files')
+lib\src\data\personal_diary_service.dart:395:final assignment = PersonalDiaryAssignment(
+lib\src\data\personal_diary_service.dart:427:final subjects = <PersonalDiarySubject>[];
+lib\src\data\personal_diary_service.dart:434:assignmentsByOffering[id] ?? const <PersonalDiaryAssignment>[];
+lib\src\data\personal_diary_service.dart:435:final tasks = tasksByOffering[id] ?? const <PersonalDiaryTask>[];
+lib\src\data\personal_diary_service.dart:443:PersonalDiarySubject(
+lib\src\data\personal_diary_service.dart:469:return PersonalDiaryLatestEntry(
+lib\src\data\personal_diary_service.dart:504:return PersonalDiaryData(
+lib\src\data\personal_diary_service.dart:536:Future<List<PersonalDiaryAssignment>> loadPublishedAssignmentsForOffering({
+lib\src\data\personal_diary_service.dart:578:return PersonalDiaryAssignment(
+lib\src\data\personal_diary_service.dart:596:Future<List<PersonalDiaryTask>> loadPersonalTasksForOfferings({
+lib\src\data\personal_diary_service.dart:612:.from('personal_diary_tasks')
+lib\src\data\personal_diary_service.dart:626:.from('personal_diary_tasks')
+lib\src\data\personal_diary_service.dart:655:Future<PersonalDiaryTask> createPersonalTask({
+lib\src\data\personal_diary_service.dart:669:.from('personal_diary_tasks')
+lib\src\data\personal_diary_service.dart:716:await _sb.from('personal_diary_tasks').update({
+lib\src\data\personal_diary_service.dart:724:Future<List<PersonalDiaryLesson>> loadScheduleLessons() async {
+lib\src\data\personal_diary_service.dart:748:.map(PersonalDiaryLesson.fromRow)
+lib\src\data\personal_diary_service.dart:763:static PersonalDiarySubject _subjectFromOffering(Map<String, dynamic> row) {
+lib\src\data\personal_diary_service.dart:764:return PersonalDiarySubject(
+lib\src\data\personal_diary_service.dart:799:PersonalDiaryAssignment a,
+lib\src\data\personal_diary_service.dart:800:PersonalDiaryAssignment b,
+lib\src\data\personal_diary_service.dart:815:static PersonalDiaryTask _taskFromRow(
+lib\src\data\personal_diary_service.dart:820:return PersonalDiaryTask(
+lib\src\data\personal_diary_service.dart:836:Future<PersonalDiaryTask> _createLocalPersonalTask({
+lib\src\data\personal_diary_service.dart:866:Future<List<PersonalDiaryTask>> _loadLocalPersonalTasks({
+lib\src\data\personal_diary_service.dart:928:String _localTasksKey(String userId) => 'personal_diary_tasks_local_$userId';
+lib\src\data\personal_diary_service.dart:930:static int _compareTasks(PersonalDiaryTask a, PersonalDiaryTask b) {
+lib\src\data\personal_diary_service.dart:960:class PersonalDiaryLesson {
+lib\src\data\personal_diary_service.dart:971:const PersonalDiaryLesson({
+lib\src\data\personal_diary_service.dart:983:factory PersonalDiaryLesson.fromRow(Map<String, dynamic> row) {
+lib\src\data\personal_diary_service.dart:985:return PersonalDiaryLesson(
+lib\src\data\personal_diary_service.dart:995:semesterNumber: PersonalDiaryService._asInt(row['semester_number']),
+lib\src\data\personal_diary_service.dart:996:pairNum: PersonalDiaryService._asInt(row['pair_num']),
+lib\src\data\personal_diary_service.dart:1001:SubjectDiaryArgs toDiaryArgs() {
+lib\src\data\personal_diary_service.dart:1002:return SubjectDiaryArgs(
 lib\src\data\subject_diary_repository_supabase.dart:1:part of subject_diary;
 lib\src\data\subject_diary_repository_supabase.dart:4:class SubjectDiaryRepositorySupabase implements SubjectDiaryRepository {
-lib\src\data\subject_diary_repository_supabase.dart:15:SubjectDiaryRepositorySupabase() {
-lib\src\data\subject_diary_repository_supabase.dart:38:// ===== SubjectDiaryRepository API =====
-lib\src\data\subject_diary_repository_supabase.dart:41:Future<SubjectDiaryEntry> addText({
-lib\src\data\subject_diary_repository_supabase.dart:50:name: 'DiaryRepo',
-lib\src\data\subject_diary_repository_supabase.dart:54:return await SubjectDiaryRepositorySupabase()
-lib\src\data\subject_diary_repository_supabase.dart:71:final res = await _sb.rpc('add_subject_diary_entry', params: params);
-lib\src\data\subject_diary_repository_supabase.dart:78:return SubjectDiaryEntry(
-lib\src\data\subject_diary_repository_supabase.dart:88:Future<SubjectDiaryEntry> addConspect({
-lib\src\data\subject_diary_repository_supabase.dart:106:return SubjectDiaryEntry(
-lib\src\data\subject_diary_repository_supabase.dart:116:Future<SubjectDiaryEntry> addFiles({
-lib\src\data\subject_diary_repository_supabase.dart:130:return SubjectDiaryEntry(
-lib\src\data\subject_diary_repository_supabase.dart:140:Future<SubjectDiaryEntry> addFilesPublic({
-lib\src\data\subject_diary_repository_supabase.dart:143:required List<SubjectDiaryPickedFile> files,
-lib\src\data\subject_diary_repository_supabase.dart:153:return SubjectDiaryEntry(
-lib\src\data\subject_diary_repository_supabase.dart:163:Future<List<SubjectDiaryEntry>> listBySubject(String subjectKey) async {
-lib\src\data\subject_diary_repository_supabase.dart:174:final res = await _sb.rpc('get_my_subject_diary', params: params);
-lib\src\data\subject_diary_repository_supabase.dart:175:final list = <SubjectDiaryEntry>[];
-lib\src\data\subject_diary_repository_supabase.dart:187:final enriched = SubjectDiaryEntry(
-lib\src\data\subject_diary_repository_supabase.dart:216:.from('subject_diary_files')
-lib\src\data\subject_diary_repository_supabase.dart:231:await _sb.rpc('delete_subject_diary_entry', params: {'p_entry_id': id});
-lib\src\data\subject_diary_repository_supabase.dart:242:Future<SubjectDiaryEntry> updateTextEntry({
-lib\src\data\subject_diary_repository_supabase.dart:247:await _sb.rpc('update_subject_diary_text', params: {
-lib\src\data\subject_diary_repository_supabase.dart:253:return SubjectDiaryEntry(
-lib\src\data\subject_diary_repository_supabase.dart:262:Future<SubjectDiaryEntry?> removeFileFromEntry({
-lib\src\data\subject_diary_repository_supabase.dart:272:const SubjectDiaryFile(name: '', size: 0, mime: '', url: ''),
-lib\src\data\subject_diary_repository_supabase.dart:279:.from('subject_diary_files')
-lib\src\data\subject_diary_repository_supabase.dart:296:.from('subject_diary_files')
-lib\src\data\subject_diary_repository_supabase.dart:304:await _sb.rpc('remove_subject_diary_file',
-lib\src\data\subject_diary_repository_supabase.dart:319:.from('subject_diary_entries')
-lib\src\data\subject_diary_repository_supabase.dart:335:return SubjectDiaryEntry(
-lib\src\data\subject_diary_repository_supabase.dart:352:.from('subject_diary_files')
-lib\src\data\subject_diary_repository_supabase.dart:366:.rpc('remove_subject_diary_file', params: {'p_file_id': fid});
-lib\src\data\subject_diary_repository_supabase.dart:372:.from('subject_diary_entries')
-lib\src\data\subject_diary_repository_supabase.dart:380:await _sb.rpc('delete_subject_diary_entry',
-lib\src\data\subject_diary_repository_supabase.dart:392:.from('subject_diary_files')
-lib\src\data\subject_diary_repository_supabase.dart:406:.rpc('delete_subject_diary_entry', params: {'p_entry_id': entryId});
-lib\src\data\subject_diary_repository_supabase.dart:416:.from('subject_diary_files')
-lib\src\data\subject_diary_repository_supabase.dart:433:.rpc('remove_subject_diary_file', params: {'p_file_id': fid});
-lib\src\data\subject_diary_repository_supabase.dart:441:SubjectDiaryEntry _mapEntryRow(Map<String, dynamic> m) {
-lib\src\data\subject_diary_repository_supabase.dart:453:return SubjectDiaryEntry(
-lib\src\data\subject_diary_repository_supabase.dart:464:Future<List<SubjectDiaryFile>> _listFiles(String entryId) async {
-lib\src\data\subject_diary_repository_supabase.dart:467:.rpc('get_subject_diary_files', params: {'p_entry_id': entryId});
-lib\src\data\subject_diary_repository_supabase.dart:502:return SubjectDiaryFile(name: name, size: size, mime: mime, url: url);
-lib\src\data\subject_diary_repository_supabase.dart:704:await _sb.rpc('add_subject_diary_file', params: {
-lib\src\ui\info\subject_info_screen.dart:6:import '../schedule/subject_diary_screen.dart';
-lib\src\ui\info\subject_info_screen.dart:80:onDiaryTap: () => _openDiary(context, data),
-lib\src\ui\info\subject_info_screen.dart:107:onTap: () => _openDiary(context, data),
-lib\src\ui\info\subject_info_screen.dart:137:void _openDiary(BuildContext context, _SubjectInfoData data) {
-lib\src\ui\info\subject_info_screen.dart:140:builder: (_) => SubjectDiaryScreen(subjectKey: data.displayTitle),
-lib\src\ui\info\subject_info_screen.dart:496:final VoidCallback onDiaryTap;
-lib\src\ui\info\subject_info_screen.dart:502:required this.onDiaryTap,
-lib\src\ui\info\subject_info_screen.dart:526:onTap: onDiaryTap,
+lib\src\data\subject_diary_repository_supabase.dart:13:final Map<String, _DiaryOfferingContext> _cachedOfferingContext =
+lib\src\data\subject_diary_repository_supabase.dart:14:<String, _DiaryOfferingContext>{};
+lib\src\data\subject_diary_repository_supabase.dart:17:SubjectDiaryRepositorySupabase() {
+lib\src\data\subject_diary_repository_supabase.dart:40:// ===== SubjectDiaryRepository API =====
+lib\src\data\subject_diary_repository_supabase.dart:43:Future<SubjectDiaryEntry> addText({
+lib\src\data\subject_diary_repository_supabase.dart:47:SubjectDiaryArgs? args,
+lib\src\data\subject_diary_repository_supabase.dart:57:name: 'DiaryRepo',
+lib\src\data\subject_diary_repository_supabase.dart:61:return await SubjectDiaryRepositorySupabase()
+lib\src\data\subject_diary_repository_supabase.dart:78:final res = await _sb.rpc('add_subject_diary_entry', params: params);
+lib\src\data\subject_diary_repository_supabase.dart:85:return SubjectDiaryEntry(
+lib\src\data\subject_diary_repository_supabase.dart:95:Future<SubjectDiaryEntry> addConspect({
+lib\src\data\subject_diary_repository_supabase.dart:99:SubjectDiaryArgs? args,
+lib\src\data\subject_diary_repository_supabase.dart:114:return SubjectDiaryEntry(
+lib\src\data\subject_diary_repository_supabase.dart:136:return SubjectDiaryEntry(
+lib\src\data\subject_diary_repository_supabase.dart:146:Future<SubjectDiaryEntry> addFiles({
+lib\src\data\subject_diary_repository_supabase.dart:150:SubjectDiaryArgs? args,
+lib\src\data\subject_diary_repository_supabase.dart:167:return SubjectDiaryEntry(
+lib\src\data\subject_diary_repository_supabase.dart:185:return SubjectDiaryEntry(
+lib\src\data\subject_diary_repository_supabase.dart:195:Future<SubjectDiaryEntry> addFilesPublic({
+lib\src\data\subject_diary_repository_supabase.dart:198:required List<SubjectDiaryPickedFile> files,
+lib\src\data\subject_diary_repository_supabase.dart:199:SubjectDiaryArgs? args,
+lib\src\data\subject_diary_repository_supabase.dart:216:return SubjectDiaryEntry(
+lib\src\data\subject_diary_repository_supabase.dart:233:return SubjectDiaryEntry(
+lib\src\data\subject_diary_repository_supabase.dart:243:Future<List<SubjectDiaryEntry>> listBySubject(String subjectKey) async {
+lib\src\data\subject_diary_repository_supabase.dart:254:final res = await _sb.rpc('get_my_subject_diary', params: params);
+lib\src\data\subject_diary_repository_supabase.dart:255:final list = <SubjectDiaryEntry>[];
+lib\src\data\subject_diary_repository_supabase.dart:267:final enriched = SubjectDiaryEntry(
+lib\src\data\subject_diary_repository_supabase.dart:291:Future<List<SubjectDiaryEntry>> listByArgs(SubjectDiaryArgs args) async {
+lib\src\data\subject_diary_repository_supabase.dart:302:.from('subject_diary_entries')
+lib\src\data\subject_diary_repository_supabase.dart:312:final list = <SubjectDiaryEntry>[];
+lib\src\data\subject_diary_repository_supabase.dart:319:final enriched = SubjectDiaryEntry(
+lib\src\data\subject_diary_repository_supabase.dart:345:.from('subject_diary_files')
+lib\src\data\subject_diary_repository_supabase.dart:360:await _sb.rpc('delete_subject_diary_entry', params: {'p_entry_id': id});
+lib\src\data\subject_diary_repository_supabase.dart:371:Future<SubjectDiaryEntry> updateTextEntry({
+lib\src\data\subject_diary_repository_supabase.dart:376:await _sb.rpc('update_subject_diary_text', params: {
+lib\src\data\subject_diary_repository_supabase.dart:382:return SubjectDiaryEntry(
+lib\src\data\subject_diary_repository_supabase.dart:391:Future<SubjectDiaryEntry?> removeFileFromEntry({
+lib\src\data\subject_diary_repository_supabase.dart:401:const SubjectDiaryFile(name: '', size: 0, mime: '', url: ''),
+lib\src\data\subject_diary_repository_supabase.dart:408:.from('subject_diary_files')
+lib\src\data\subject_diary_repository_supabase.dart:425:.from('subject_diary_files')
+lib\src\data\subject_diary_repository_supabase.dart:433:await _sb.rpc('remove_subject_diary_file',
+lib\src\data\subject_diary_repository_supabase.dart:448:.from('subject_diary_entries')
+lib\src\data\subject_diary_repository_supabase.dart:464:return SubjectDiaryEntry(
+lib\src\data\subject_diary_repository_supabase.dart:481:.from('subject_diary_files')
+lib\src\data\subject_diary_repository_supabase.dart:495:.rpc('remove_subject_diary_file', params: {'p_file_id': fid});
+lib\src\data\subject_diary_repository_supabase.dart:501:.from('subject_diary_entries')
+lib\src\data\subject_diary_repository_supabase.dart:509:await _sb.rpc('delete_subject_diary_entry',
+lib\src\data\subject_diary_repository_supabase.dart:521:.from('subject_diary_files')
+lib\src\data\subject_diary_repository_supabase.dart:535:.rpc('delete_subject_diary_entry', params: {'p_entry_id': entryId});
+lib\src\data\subject_diary_repository_supabase.dart:545:.from('subject_diary_files')
+lib\src\data\subject_diary_repository_supabase.dart:562:.rpc('remove_subject_diary_file', params: {'p_file_id': fid});
+lib\src\data\subject_diary_repository_supabase.dart:570:SubjectDiaryEntry _mapEntryRow(
+lib\src\data\subject_diary_repository_supabase.dart:585:return SubjectDiaryEntry(
+lib\src\data\subject_diary_repository_supabase.dart:600:Future<List<SubjectDiaryFile>> _listFiles(String entryId) async {
+lib\src\data\subject_diary_repository_supabase.dart:603:.rpc('get_subject_diary_files', params: {'p_entry_id': entryId});
+lib\src\data\subject_diary_repository_supabase.dart:638:return SubjectDiaryFile(name: name, size: size, mime: mime, url: url);
+lib\src\data\subject_diary_repository_supabase.dart:673:Future<SubjectDiaryEntry> _addTextForOffering({
+lib\src\data\subject_diary_repository_supabase.dart:674:required SubjectDiaryArgs args,
+lib\src\data\subject_diary_repository_supabase.dart:685:return SubjectDiaryEntry(
+lib\src\data\subject_diary_repository_supabase.dart:695:required SubjectDiaryArgs args,
+lib\src\data\subject_diary_repository_supabase.dart:697:required _DiaryOfferingContext context,
+lib\src\data\subject_diary_repository_supabase.dart:714:required SubjectDiaryArgs args,
+lib\src\data\subject_diary_repository_supabase.dart:716:required _DiaryOfferingContext context,
+lib\src\data\subject_diary_repository_supabase.dart:723:.from('subject_diary_entries')
+lib\src\data\subject_diary_repository_supabase.dart:741:required SubjectDiaryArgs args,
+lib\src\data\subject_diary_repository_supabase.dart:744:required _DiaryOfferingContext context,
+lib\src\data\subject_diary_repository_supabase.dart:777:.from('subject_diary_entries')
+lib\src\data\subject_diary_repository_supabase.dart:784:.from('subject_diary_entries')
+lib\src\data\subject_diary_repository_supabase.dart:791:Future<_DiaryOfferingContext> _resolveOfferingContext(
+lib\src\data\subject_diary_repository_supabase.dart:792:SubjectDiaryArgs args) async {
+lib\src\data\subject_diary_repository_supabase.dart:795:return _DiaryOfferingContext(
+lib\src\data\subject_diary_repository_supabase.dart:826:final context = _DiaryOfferingContext(
+lib\src\data\subject_diary_repository_supabase.dart:1036:await _sb.rpc('add_subject_diary_file', params: {
+lib\src\data\subject_diary_repository_supabase.dart:1120:class _DiaryOfferingContext {
+lib\src\data\subject_diary_repository_supabase.dart:1130:const _DiaryOfferingContext({
+lib\src\ui\info\subject_info_screen.dart:6:import '../schedule/subject_diary/subject_diary.dart';
+lib\src\ui\info\subject_info_screen.dart:7:import '../schedule/subject_diary_screen.dart';
+lib\src\ui\info\subject_info_screen.dart:81:onDiaryTap: () => _openDiary(context, data),
+lib\src\ui\info\subject_info_screen.dart:108:onTap: () => _openDiary(context, data),
+lib\src\ui\info\subject_info_screen.dart:138:void _openDiary(BuildContext context, _SubjectInfoData data) {
+lib\src\ui\info\subject_info_screen.dart:141:builder: (_) => SubjectDiaryScreen(
+lib\src\ui\info\subject_info_screen.dart:142:args: SubjectDiaryArgs(
+lib\src\ui\info\subject_info_screen.dart:507:final VoidCallback onDiaryTap;
+lib\src\ui\info\subject_info_screen.dart:513:required this.onDiaryTap,
+lib\src\ui\info\subject_info_screen.dart:537:onTap: onDiaryTap,
+lib\src\ui\profile\personal_diary_screen.dart:3:import '../../data/personal_diary_service.dart';
+lib\src\ui\profile\personal_diary_screen.dart:4:import '../schedule/subject_diary/subject_diary.dart';
+lib\src\ui\profile\personal_diary_screen.dart:5:import '../schedule/subject_diary_screen.dart';
+lib\src\ui\profile\personal_diary_screen.dart:7:class PersonalDiaryScreen extends StatefulWidget {
+lib\src\ui\profile\personal_diary_screen.dart:8:const PersonalDiaryScreen({super.key});
+lib\src\ui\profile\personal_diary_screen.dart:11:State<PersonalDiaryScreen> createState() => _PersonalDiaryScreenState();
+lib\src\ui\profile\personal_diary_screen.dart:14:class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
+lib\src\ui\profile\personal_diary_screen.dart:15:final _service = PersonalDiaryService();
+lib\src\ui\profile\personal_diary_screen.dart:19:late Future<PersonalDiaryData> _future = _service.load();
+lib\src\ui\profile\personal_diary_screen.dart:38:body: FutureBuilder<PersonalDiaryData>(
+lib\src\ui\profile\personal_diary_screen.dart:51:final diarySubjects = data.subjects
+lib\src\ui\profile\personal_diary_screen.dart:54:final activeDiarySubjects = diarySubjects
+lib\src\ui\profile\personal_diary_screen.dart:70:_DiaryHeader(
+lib\src\ui\profile\personal_diary_screen.dart:84:_DiarySummaryCard(data: data),
+lib\src\ui\profile\personal_diary_screen.dart:134:if (activeDiarySubjects.isNotEmpty ||
+lib\src\ui\profile\personal_diary_screen.dart:135:diarySubjects.isNotEmpty) ...[
+lib\src\ui\profile\personal_diary_screen.dart:139:subtitle: activeDiarySubjects.isEmpty
+lib\src\ui\profile\personal_diary_screen.dart:141:: '${activeDiarySubjects.length} с записями',
+lib\src\ui\profile\personal_diary_screen.dart:143:subjects: activeDiarySubjects,
+lib\src\ui\profile\personal_diary_screen.dart:144:onTap: _openSubjectDiary,
+lib\src\ui\profile\personal_diary_screen.dart:148:subtitle: '${diarySubjects.length} предметов',
+lib\src\ui\profile\personal_diary_screen.dart:150:subjects: diarySubjects,
+lib\src\ui\profile\personal_diary_screen.dart:151:onTap: _openSubjectDiary,
+lib\src\ui\profile\personal_diary_screen.dart:165:List<_UpcomingDiaryItem> _buildUpcomingItems(PersonalDiaryData data) {
+lib\src\ui\profile\personal_diary_screen.dart:166:final items = <_UpcomingDiaryItem>[
+lib\src\ui\profile\personal_diary_screen.dart:167:...data.upcomingAssignments.map(_UpcomingDiaryItem.groupAssignment),
+lib\src\ui\profile\personal_diary_screen.dart:168:...data.upcomingPersonalTasks.map(_UpcomingDiaryItem.personalTask),
+lib\src\ui\profile\personal_diary_screen.dart:181:List<_UpcomingDiaryItem> _buildDoneUpcomingItems(PersonalDiaryData data) {
+lib\src\ui\profile\personal_diary_screen.dart:182:final items = <_UpcomingDiaryItem>[
+lib\src\ui\profile\personal_diary_screen.dart:183:...data.publishedAssignments.map(_UpcomingDiaryItem.groupAssignment),
+lib\src\ui\profile\personal_diary_screen.dart:184:...data.personalTasks.map(_UpcomingDiaryItem.personalTask),
+lib\src\ui\profile\personal_diary_screen.dart:190:Widget _buildUpcomingCard(_UpcomingDiaryItem item) {
+lib\src\ui\profile\personal_diary_screen.dart:193:return _AssignmentDiaryCard(
+lib\src\ui\profile\personal_diary_screen.dart:209:bool _isUpcomingItemDone(_UpcomingDiaryItem item) {
+lib\src\ui\profile\personal_diary_screen.dart:215:bool _assignmentDone(PersonalDiaryAssignment assignment) {
+lib\src\ui\profile\personal_diary_screen.dart:219:String _taskStatus(PersonalDiaryTask task) {
+lib\src\ui\profile\personal_diary_screen.dart:223:String _nextTaskStatus(PersonalDiaryTask task) {
+lib\src\ui\profile\personal_diary_screen.dart:235:bool _matchesSubject(PersonalDiarySubject subject, String query) {
+lib\src\ui\profile\personal_diary_screen.dart:241:bool _matchesLatestEntry(PersonalDiaryLatestEntry entry, String query) {
+lib\src\ui\profile\personal_diary_screen.dart:247:bool _matchesUpcomingItem(_UpcomingDiaryItem item, String query) {
+lib\src\ui\profile\personal_diary_screen.dart:254:Future<void> _openSubjectDiary(PersonalDiarySubject subject) async {
+lib\src\ui\profile\personal_diary_screen.dart:257:builder: (_) => SubjectDiaryScreen(args: subject.toDiaryArgs()),
+lib\src\ui\profile\personal_diary_screen.dart:263:Future<void> _toggleAssignmentDone(PersonalDiaryAssignment assignment) async {
+lib\src\ui\profile\personal_diary_screen.dart:282:PersonalDiaryTask task,
+lib\src\ui\profile\personal_diary_screen.dart:299:PersonalDiaryAssignment assignment) async {
+lib\src\ui\profile\personal_diary_screen.dart:321:Future<void> _openPersonalTaskDetails(PersonalDiaryTask task) async {
+lib\src\ui\profile\personal_diary_screen.dart:343:Future<void> _openAddEntryPicker(PersonalDiaryData data) async {
+lib\src\ui\profile\personal_diary_screen.dart:390:onTap: () => Navigator.pop(ctx, _AddEntryMode.diaryCalendar),
+lib\src\ui\profile\personal_diary_screen.dart:430:case _AddEntryMode.diaryCalendar:
+lib\src\ui\profile\personal_diary_screen.dart:431:await _openDiaryCalendar(data);
+lib\src\ui\profile\personal_diary_screen.dart:448:Future<void> _openDiaryCalendar(PersonalDiaryData data) async {
+lib\src\ui\profile\personal_diary_screen.dart:460:return _DiaryCalendarSheet(
+lib\src\ui\profile\personal_diary_screen.dart:466:PersonalDiarySubject? subject;
+lib\src\ui\profile\personal_diary_screen.dart:475:_openSubjectDiary(subject);
+lib\src\ui\profile\personal_diary_screen.dart:490:Future<void> _createPersonalTask(PersonalDiaryData data) async {
+lib\src\ui\profile\personal_diary_screen.dart:505:PersonalDiarySubject? subject,
+lib\src\ui\profile\personal_diary_screen.dart:522:PersonalDiaryData data, {
+lib\src\ui\profile\personal_diary_screen.dart:549:args: selected.toDiaryArgs().copyWith(date: pickedDate),
+lib\src\ui\profile\personal_diary_screen.dart:568:args: selected.toDiaryArgs(),
+lib\src\ui\profile\personal_diary_screen.dart:573:Future<PersonalDiarySubject?> _pickSubject(
+lib\src\ui\profile\personal_diary_screen.dart:574:List<PersonalDiarySubject> subjects, {
+lib\src\ui\profile\personal_diary_screen.dart:577:return showModalBottomSheet<PersonalDiarySubject>(
+lib\src\ui\profile\personal_diary_screen.dart:592:Future<PersonalDiaryLesson?> _pickLesson(
+lib\src\ui\profile\personal_diary_screen.dart:593:List<PersonalDiaryLesson> lessons,
+lib\src\ui\profile\personal_diary_screen.dart:595:return showModalBottomSheet<PersonalDiaryLesson>(
+lib\src\ui\profile\personal_diary_screen.dart:609:required SubjectDiaryArgs args,
+lib\src\ui\profile\personal_diary_screen.dart:625:enum _AddEntryMode { diaryCalendar, personalTask, todaySubject, datedSubject, lesson }
+lib\src\ui\profile\personal_diary_screen.dart:627:class _UpcomingDiaryItem {
+lib\src\ui\profile\personal_diary_screen.dart:628:final PersonalDiaryAssignment? assignment;
+lib\src\ui\profile\personal_diary_screen.dart:629:final PersonalDiaryTask? task;
+lib\src\ui\profile\personal_diary_screen.dart:631:const _UpcomingDiaryItem.groupAssignment(this.assignment) : task = null;
+lib\src\ui\profile\personal_diary_screen.dart:632:const _UpcomingDiaryItem.personalTask(this.task) : assignment = null;
+lib\src\ui\profile\personal_diary_screen.dart:644:PersonalDiarySubject? subject,
+lib\src\ui\profile\personal_diary_screen.dart:648:class _DiaryCalendarSheet extends StatefulWidget {
+lib\src\ui\profile\personal_diary_screen.dart:649:final PersonalDiaryData data;
+lib\src\ui\profile\personal_diary_screen.dart:650:final List<PersonalDiaryLesson> lessons;
+lib\src\ui\profile\personal_diary_screen.dart:651:final bool Function(PersonalDiaryAssignment assignment) assignmentDone;
+lib\src\ui\profile\personal_diary_screen.dart:652:final String Function(PersonalDiaryTask task) taskStatus;
+lib\src\ui\profile\personal_diary_screen.dart:654:final ValueChanged<PersonalDiaryAssignment> onOpenAssignment;
+lib\src\ui\profile\personal_diary_screen.dart:655:final ValueChanged<PersonalDiaryTask> onOpenTask;
+lib\src\ui\profile\personal_diary_screen.dart:657:const _DiaryCalendarSheet({
+lib\src\ui\profile\personal_diary_screen.dart:668:State<_DiaryCalendarSheet> createState() => _DiaryCalendarSheetState();
+lib\src\ui\profile\personal_diary_screen.dart:671:class _DiaryCalendarSheetState extends State<_DiaryCalendarSheet> {
+lib\src\ui\profile\personal_diary_screen.dart:732:const _DiaryCalendarLegend(),
+lib\src\ui\profile\personal_diary_screen.dart:761:return _DiaryCalendarEventTile(
+lib\src\ui\profile\personal_diary_screen.dart:775:Map<String, List<_DiaryCalendarEvent>> _eventsByDay() {
+lib\src\ui\profile\personal_diary_screen.dart:776:final map = <String, List<_DiaryCalendarEvent>>{};
+lib\src\ui\profile\personal_diary_screen.dart:777:void add(DateTime date, _DiaryCalendarEvent event) {
+lib\src\ui\profile\personal_diary_screen.dart:784:_DiaryCalendarEvent.entry(
+lib\src\ui\profile\personal_diary_screen.dart:797:_DiaryCalendarEvent.assignment(
+lib\src\ui\profile\personal_diary_screen.dart:809:_DiaryCalendarEvent.task(
+lib\src\ui\profile\personal_diary_screen.dart:819:_DiaryCalendarEvent.lesson(
+lib\src\ui\profile\personal_diary_screen.dart:856:String _lessonSubtitle(PersonalDiaryLesson lesson) {
+lib\src\ui\profile\personal_diary_screen.dart:865:void _openEvent(_DiaryCalendarEvent event) {
+lib\src\ui\profile\personal_diary_screen.dart:867:case _DiaryCalendarEventType.entry:
+lib\src\ui\profile\personal_diary_screen.dart:871:case _DiaryCalendarEventType.assignment:
+lib\src\ui\profile\personal_diary_screen.dart:875:case _DiaryCalendarEventType.task:
+lib\src\ui\profile\personal_diary_screen.dart:879:case _DiaryCalendarEventType.lesson:
+lib\src\ui\profile\personal_diary_screen.dart:886:Color _eventColor(_DiaryCalendarEvent event) {
+lib\src\ui\profile\personal_diary_screen.dart:888:case _DiaryCalendarEventType.lesson:
+lib\src\ui\profile\personal_diary_screen.dart:890:case _DiaryCalendarEventType.assignment:
+lib\src\ui\profile\personal_diary_screen.dart:892:case _DiaryCalendarEventType.task:
+lib\src\ui\profile\personal_diary_screen.dart:894:case _DiaryCalendarEventType.entry:
+lib\src\ui\profile\personal_diary_screen.dart:921:enum _DiaryCalendarEventType { entry, assignment, task, lesson }
+lib\src\ui\profile\personal_diary_screen.dart:923:class _DiaryCalendarEvent {
+lib\src\ui\profile\personal_diary_screen.dart:924:final _DiaryCalendarEventType type;
+lib\src\ui\profile\personal_diary_screen.dart:928:final PersonalDiaryAssignment? assignment;
+lib\src\ui\profile\personal_diary_screen.dart:929:final PersonalDiaryTask? task;
+lib\src\ui\profile\personal_diary_screen.dart:930:final PersonalDiaryLesson? lesson;
+lib\src\ui\profile\personal_diary_screen.dart:932:const _DiaryCalendarEvent.entry({
+lib\src\ui\profile\personal_diary_screen.dart:936:})  : type = _DiaryCalendarEventType.entry,
+lib\src\ui\profile\personal_diary_screen.dart:941:const _DiaryCalendarEvent.assignment({
+lib\src\ui\profile\personal_diary_screen.dart:945:})  : type = _DiaryCalendarEventType.assignment,
+lib\src\ui\profile\personal_diary_screen.dart:950:const _DiaryCalendarEvent.task({
+lib\src\ui\profile\personal_diary_screen.dart:954:})  : type = _DiaryCalendarEventType.task,
+lib\src\ui\profile\personal_diary_screen.dart:959:const _DiaryCalendarEvent.lesson({
+lib\src\ui\profile\personal_diary_screen.dart:963:})  : type = _DiaryCalendarEventType.lesson,
+lib\src\ui\profile\personal_diary_screen.dart:970:case _DiaryCalendarEventType.entry:
+lib\src\ui\profile\personal_diary_screen.dart:972:case _DiaryCalendarEventType.assignment:
+lib\src\ui\profile\personal_diary_screen.dart:974:case _DiaryCalendarEventType.task:
+lib\src\ui\profile\personal_diary_screen.dart:976:case _DiaryCalendarEventType.lesson:
+lib\src\ui\profile\personal_diary_screen.dart:982:class _DiaryCalendarLegend extends StatelessWidget {
+lib\src\ui\profile\personal_diary_screen.dart:983:const _DiaryCalendarLegend();
+lib\src\ui\profile\personal_diary_screen.dart:1144:class _DiaryCalendarEventTile extends StatelessWidget {
+lib\src\ui\profile\personal_diary_screen.dart:1145:final _DiaryCalendarEvent event;
+lib\src\ui\profile\personal_diary_screen.dart:1148:const _DiaryCalendarEventTile({
+lib\src\ui\profile\personal_diary_screen.dart:1179:final List<PersonalDiarySubject> subjects;
+lib\src\ui\profile\personal_diary_screen.dart:1196:PersonalDiarySubject? _subject;
+lib\src\ui\profile\personal_diary_screen.dart:1250:DropdownButtonFormField<PersonalDiarySubject?>(
+lib\src\ui\profile\personal_diary_screen.dart:1263:const DropdownMenuItem<PersonalDiarySubject?>(
+lib\src\ui\profile\personal_diary_screen.dart:1271:(subject) => DropdownMenuItem<PersonalDiarySubject?>(
+lib\src\ui\profile\personal_diary_screen.dart:1364:final List<PersonalDiarySubject> subjects;
+lib\src\ui\profile\personal_diary_screen.dart:1523:int _compareSubjects(PersonalDiarySubject a, PersonalDiarySubject b) {
+lib\src\ui\profile\personal_diary_screen.dart:1538:final List<PersonalDiaryLesson> lessons;
+lib\src\ui\profile\personal_diary_screen.dart:1668:PersonalDiaryLesson a,
+lib\src\ui\profile\personal_diary_screen.dart:1669:PersonalDiaryLesson b,
+lib\src\ui\profile\personal_diary_screen.dart:1802:final PersonalDiarySubject subject;
+lib\src\ui\profile\personal_diary_screen.dart:1830:final PersonalDiaryLesson lesson;
+lib\src\ui\profile\personal_diary_screen.dart:1854:String _lessonSubtitle(PersonalDiaryLesson lesson) {
+lib\src\ui\profile\personal_diary_screen.dart:1924:class _DiaryHeader extends StatelessWidget {
+lib\src\ui\profile\personal_diary_screen.dart:1927:const _DiaryHeader({required this.onAdd});
+lib\src\ui\profile\personal_diary_screen.dart:2114:class _DiarySummaryCard extends StatelessWidget {
+lib\src\ui\profile\personal_diary_screen.dart:2115:final PersonalDiaryData data;
+lib\src\ui\profile\personal_diary_screen.dart:2117:const _DiarySummaryCard({required this.data});
+lib\src\ui\profile\personal_diary_screen.dart:2257:final List<_UpcomingDiaryItem> items;
+lib\src\ui\profile\personal_diary_screen.dart:2258:final Widget Function(_UpcomingDiaryItem item) itemBuilder;
+lib\src\ui\profile\personal_diary_screen.dart:2307:final List<PersonalDiarySubject> subjects;
+lib\src\ui\profile\personal_diary_screen.dart:2308:final ValueChanged<PersonalDiarySubject> onTap;
+lib\src\ui\profile\personal_diary_screen.dart:2364:class _AssignmentDiaryCard extends StatelessWidget {
+lib\src\ui\profile\personal_diary_screen.dart:2365:final PersonalDiaryAssignment assignment;
+lib\src\ui\profile\personal_diary_screen.dart:2370:const _AssignmentDiaryCard({
+lib\src\ui\profile\personal_diary_screen.dart:2495:final PersonalDiaryTask task;
+lib\src\ui\profile\personal_diary_screen.dart:2614:final PersonalDiaryTask task;
+lib\src\ui\profile\personal_diary_screen.dart:2646:final PersonalDiaryTask task;
+lib\src\ui\profile\personal_diary_screen.dart:2734:final PersonalDiaryAssignment assignment;
+lib\src\ui\profile\personal_diary_screen.dart:2823:final PersonalDiarySubject subject;
+lib\src\ui\profile\personal_diary_screen.dart:2886:String _subjectMeta(PersonalDiarySubject subject) {
+lib\src\ui\profile\personal_diary_screen.dart:2911:final PersonalDiaryLatestEntry entry;
+lib\src\ui\profile\personal_diary_screen.dart:3069:String? _assignmentDueText(PersonalDiaryAssignment assignment) {
+lib\src\ui\profile\profile_screen.dart:556:_PersonalDiaryBanner(onTap: () => context.push('/my-diary')),
+lib\src\ui\profile\profile_screen.dart:1171:class _PersonalDiaryBanner extends StatelessWidget {
+lib\src\ui\profile\profile_screen.dart:1173:const _PersonalDiaryBanner({required this.onTap});
 lib\src\ui\schedule\all_dart_text.txt:4:show SubjectDiaryEntry, SubjectDiaryFile, SubjectDiaryRepository;
 lib\src\ui\schedule\all_dart_text.txt:7:class DiaryEntryDetailsScreen extends StatelessWidget {
 lib\src\ui\schedule\all_dart_text.txt:8:final SubjectDiaryEntry entry;
@@ -2917,153 +3345,245 @@ lib\src\ui\schedule\diary_entry_details_screen.dart:385:body: FutureBuilder<List
 lib\src\ui\schedule\diary_entry_details_screen.dart:389:final files = <SubjectDiaryFile>[];
 lib\src\ui\schedule\lesson_details_screen.dart:8:import 'subject_diary/subject_diary.dart';
 lib\src\ui\schedule\lesson_details_screen.dart:9:import 'subject_diary_screen.dart';
-lib\src\ui\schedule\lesson_details_screen.dart:120:SubjectDiaryScreen(subjectKey: lesson.subject.trim()),
+lib\src\ui\schedule\lesson_details_screen.dart:108:? SubjectDiaryArgs(
+lib\src\ui\schedule\lesson_details_screen.dart:132:? SubjectDiaryScreen(
+lib\src\ui\schedule\lesson_details_screen.dart:133:args: SubjectDiaryArgs(
+lib\src\ui\schedule\lesson_details_screen.dart:144:: SubjectDiaryScreen(subjectKey: lesson.subject.trim()),
 lib\src\ui\schedule\subject_diary_screen.dart:6:import 'subject_diary/subject_diary.dart';
+lib\src\ui\schedule\subject_diary_screen.dart:7:import '../../data/personal_diary_service.dart';
 lib\src\ui\schedule\subject_diary_screen.dart:10:enum DiaryViewMode { cards, grid }
 lib\src\ui\schedule\subject_diary_screen.dart:12:class SubjectDiaryScreen extends StatefulWidget {
-lib\src\ui\schedule\subject_diary_screen.dart:14:const SubjectDiaryScreen({super.key, required this.subjectKey});
-lib\src\ui\schedule\subject_diary_screen.dart:17:State<SubjectDiaryScreen> createState() => _SubjectDiaryScreenState();
-lib\src\ui\schedule\subject_diary_screen.dart:20:class _SubjectDiaryScreenState extends State<SubjectDiaryScreen> {
-lib\src\ui\schedule\subject_diary_screen.dart:21:final _repo = SubjectDiaryRepository.instance;
-lib\src\ui\schedule\subject_diary_screen.dart:24:List<SubjectDiaryEntry> _all = [];
-lib\src\ui\schedule\subject_diary_screen.dart:29:DiaryViewMode _view = DiaryViewMode.cards;
-lib\src\ui\schedule\subject_diary_screen.dart:40:_subscribeDiaryRealtime(anchor: _focusedMonth);
-lib\src\ui\schedule\subject_diary_screen.dart:54:RealtimeChannel? _diaryEntriesCh;
-lib\src\ui\schedule\subject_diary_screen.dart:55:RealtimeChannel? _diaryFilesCh;
-lib\src\ui\schedule\subject_diary_screen.dart:57:void _subscribeDiaryRealtime({required DateTime anchor}) {
-lib\src\ui\schedule\subject_diary_screen.dart:59:_diaryEntriesCh = client
-lib\src\ui\schedule\subject_diary_screen.dart:60:.channel('public:subject_diary_entries')
-lib\src\ui\schedule\subject_diary_screen.dart:64:table: 'subject_diary_entries',
-lib\src\ui\schedule\subject_diary_screen.dart:65:callback: (_) => _reloadDiary(anchor: anchor),
-lib\src\ui\schedule\subject_diary_screen.dart:69:_diaryFilesCh = client
-lib\src\ui\schedule\subject_diary_screen.dart:70:.channel('public:subject_diary_files')
-lib\src\ui\schedule\subject_diary_screen.dart:74:table: 'subject_diary_files',
-lib\src\ui\schedule\subject_diary_screen.dart:75:callback: (_) => _reloadDiary(anchor: anchor),
-lib\src\ui\schedule\subject_diary_screen.dart:80:void _disposeDiaryRealtime() {
-lib\src\ui\schedule\subject_diary_screen.dart:82:if (_diaryEntriesCh != null) client.removeChannel(_diaryEntriesCh!);
-lib\src\ui\schedule\subject_diary_screen.dart:83:if (_diaryFilesCh != null) client.removeChannel(_diaryFilesCh!);
-lib\src\ui\schedule\subject_diary_screen.dart:84:_diaryEntriesCh = null;
-lib\src\ui\schedule\subject_diary_screen.dart:85:_diaryFilesCh = null;
-lib\src\ui\schedule\subject_diary_screen.dart:88:Future<void> _reloadDiary({required DateTime anchor}) async {
-lib\src\ui\schedule\subject_diary_screen.dart:90:if (diaryRealtimeSuspended.value) return;
-lib\src\ui\schedule\subject_diary_screen.dart:96:_disposeDiaryRealtime();
-lib\src\ui\schedule\subject_diary_screen.dart:108:Map<DateTime, List<SubjectDiaryEntry>> get _groupedByDay {
-lib\src\ui\schedule\subject_diary_screen.dart:109:final map = <DateTime, List<SubjectDiaryEntry>>{};
-lib\src\ui\schedule\subject_diary_screen.dart:147:final ids = (_groupedByDay[day] ?? const <SubjectDiaryEntry>[]).map((e) => e.id).toList();
-lib\src\ui\schedule\subject_diary_screen.dart:173:setState(() => _view = DiaryViewMode.cards);
-lib\src\ui\schedule\subject_diary_screen.dart:176:setState(() => _view = DiaryViewMode.grid);
-lib\src\ui\schedule\subject_diary_screen.dart:311:final files = <SubjectDiaryPickedFile>[];
-lib\src\ui\schedule\subject_diary_screen.dart:316:files.add(SubjectDiaryPickedFile(name: name, mime: mime, bytes: bytes));
-lib\src\ui\schedule\subject_diary_screen.dart:318:await SubjectDiaryRepository.instance.addFilesPublic(
-lib\src\ui\schedule\subject_diary_screen.dart:367:if (_view == DiaryViewMode.cards)
-lib\src\ui\schedule\subject_diary_screen.dart:448:final Map<DateTime, List<SubjectDiaryEntry>> grouped;
-lib\src\ui\schedule\subject_diary_screen.dart:465:final entries = grouped[day] ?? const <SubjectDiaryEntry>[];
-lib\src\ui\schedule\subject_diary_screen.dart:495:final Map<DateTime, List<SubjectDiaryEntry>> grouped;
-lib\src\ui\schedule\subject_diary_screen.dart:517:final entries = grouped[day] ?? const <SubjectDiaryEntry>[];
-lib\src\ui\schedule\subject_diary_screen.dart:546:final List<SubjectDiaryEntry> entries;
-lib\src\ui\schedule\subject_diary_screen.dart:554:final repo = SubjectDiaryRepository.instance;
-lib\src\ui\schedule\subject_diary_screen.dart:556:final allImages = <SubjectDiaryFile>[];
-lib\src\ui\schedule\subject_diary_screen.dart:605:String _metaLine(List<SubjectDiaryEntry> entries) {
-lib\src\ui\schedule\subject_diary_screen.dart:622:final List<SubjectDiaryEntry> entries;
-lib\src\ui\schedule\subject_diary_screen.dart:630:final repo = SubjectDiaryRepository.instance;
-lib\src\ui\schedule\subject_diary_screen.dart:632:final images = <SubjectDiaryFile>[];
-lib\src\ui\schedule\subject_diary_screen.dart:675:String _metaLine(List<SubjectDiaryEntry> entries) {
-lib\src\ui\schedule\subject_diary_screen.dart:688:final List<SubjectDiaryFile> thumbs; // image/*
-lib\src\ui\schedule\subject_diary_screen.dart:689:final SubjectDiaryRepository repo;
-lib\src\ui\schedule\subject_diary_screen.dart:746:final Future<List<SubjectDiaryEntry>> entriesFuture;
-lib\src\ui\schedule\subject_diary_screen.dart:751:final repo = SubjectDiaryRepository.instance;
-lib\src\ui\schedule\subject_diary_screen.dart:761:child: FutureBuilder<List<SubjectDiaryEntry>>(
-lib\src\ui\schedule\subject_diary_screen.dart:765:final images = <SubjectDiaryFile>[];
-lib\src\ui\schedule\subject_diary_screen.dart:812:final Future<List<SubjectDiaryEntry>> entriesFuture;
-lib\src\ui\schedule\subject_diary_screen.dart:824:child: FutureBuilder<List<SubjectDiaryEntry>>(
-lib\src\ui\schedule\subject_diary_screen.dart:828:final files = <SubjectDiaryFile>[];
-lib\src\ui\schedule\subject_diary_screen.dart:869:final Future<List<SubjectDiaryEntry>> entriesFuture;
-lib\src\ui\schedule\subject_diary_screen.dart:881:child: FutureBuilder<List<SubjectDiaryEntry>>(
-lib\src\ui\schedule\subject_diary_screen.dart:1138:await SubjectDiaryRepository.instance.addText(
+lib\src\ui\schedule\subject_diary_screen.dart:13:final SubjectDiaryArgs args;
+lib\src\ui\schedule\subject_diary_screen.dart:15:SubjectDiaryScreen({
+lib\src\ui\schedule\subject_diary_screen.dart:18:SubjectDiaryArgs? args,
+lib\src\ui\schedule\subject_diary_screen.dart:19:}) : args = args ?? SubjectDiaryArgs.legacy(subjectKey ?? 'Предмет');
+lib\src\ui\schedule\subject_diary_screen.dart:24:State<SubjectDiaryScreen> createState() => _SubjectDiaryScreenState();
+lib\src\ui\schedule\subject_diary_screen.dart:27:class _SubjectDiaryScreenState extends State<SubjectDiaryScreen> {
+lib\src\ui\schedule\subject_diary_screen.dart:28:final _repo = SubjectDiaryRepository.instance;
+lib\src\ui\schedule\subject_diary_screen.dart:29:final _diaryService = PersonalDiaryService();
+lib\src\ui\schedule\subject_diary_screen.dart:35:List<SubjectDiaryEntry> _all = [];
+lib\src\ui\schedule\subject_diary_screen.dart:36:List<PersonalDiaryAssignment> _assignments = [];
+lib\src\ui\schedule\subject_diary_screen.dart:37:List<PersonalDiaryTask> _personalTasks = [];
+lib\src\ui\schedule\subject_diary_screen.dart:42:DiaryViewMode _view = DiaryViewMode.cards;
+lib\src\ui\schedule\subject_diary_screen.dart:44:SubjectDiaryArgs get _args => widget.args;
+lib\src\ui\schedule\subject_diary_screen.dart:54:_subscribeDiaryRealtime(anchor: _focusedMonth);
+lib\src\ui\schedule\subject_diary_screen.dart:60:var assignments = const <PersonalDiaryAssignment>[];
+lib\src\ui\schedule\subject_diary_screen.dart:61:var tasks = const <PersonalDiaryTask>[];
+lib\src\ui\schedule\subject_diary_screen.dart:64:assignments = await _diaryService.loadPublishedAssignmentsForOffering(
+lib\src\ui\schedule\subject_diary_screen.dart:68:tasks = await _diaryService.loadPersonalTasksForOfferings(
+lib\src\ui\schedule\subject_diary_screen.dart:83:RealtimeChannel? _diaryEntriesCh;
+lib\src\ui\schedule\subject_diary_screen.dart:84:RealtimeChannel? _diaryFilesCh;
+lib\src\ui\schedule\subject_diary_screen.dart:86:void _subscribeDiaryRealtime({required DateTime anchor}) {
+lib\src\ui\schedule\subject_diary_screen.dart:88:_diaryEntriesCh = client
+lib\src\ui\schedule\subject_diary_screen.dart:89:.channel('public:subject_diary_entries')
+lib\src\ui\schedule\subject_diary_screen.dart:93:table: 'subject_diary_entries',
+lib\src\ui\schedule\subject_diary_screen.dart:94:callback: (_) => _reloadDiary(anchor: anchor),
+lib\src\ui\schedule\subject_diary_screen.dart:98:_diaryFilesCh = client
+lib\src\ui\schedule\subject_diary_screen.dart:99:.channel('public:subject_diary_files')
+lib\src\ui\schedule\subject_diary_screen.dart:103:table: 'subject_diary_files',
+lib\src\ui\schedule\subject_diary_screen.dart:104:callback: (_) => _reloadDiary(anchor: anchor),
+lib\src\ui\schedule\subject_diary_screen.dart:109:void _disposeDiaryRealtime() {
+lib\src\ui\schedule\subject_diary_screen.dart:111:if (_diaryEntriesCh != null) client.removeChannel(_diaryEntriesCh!);
+lib\src\ui\schedule\subject_diary_screen.dart:112:if (_diaryFilesCh != null) client.removeChannel(_diaryFilesCh!);
+lib\src\ui\schedule\subject_diary_screen.dart:113:_diaryEntriesCh = null;
+lib\src\ui\schedule\subject_diary_screen.dart:114:_diaryFilesCh = null;
+lib\src\ui\schedule\subject_diary_screen.dart:117:Future<void> _reloadDiary({required DateTime anchor}) async {
+lib\src\ui\schedule\subject_diary_screen.dart:119:if (diaryRealtimeSuspended.value) return;
+lib\src\ui\schedule\subject_diary_screen.dart:126:_disposeDiaryRealtime();
+lib\src\ui\schedule\subject_diary_screen.dart:138:Map<DateTime, List<SubjectDiaryEntry>> get _groupedByDay {
+lib\src\ui\schedule\subject_diary_screen.dart:139:final map = <DateTime, List<SubjectDiaryEntry>>{};
+lib\src\ui\schedule\subject_diary_screen.dart:158:final entries = _groupedByDay[day] ?? const <SubjectDiaryEntry>[];
+lib\src\ui\schedule\subject_diary_screen.dart:169:bool _assignmentDone(PersonalDiaryAssignment assignment) {
+lib\src\ui\schedule\subject_diary_screen.dart:173:String _taskStatus(PersonalDiaryTask task) {
+lib\src\ui\schedule\subject_diary_screen.dart:177:String _nextTaskStatus(PersonalDiaryTask task) {
+lib\src\ui\schedule\subject_diary_screen.dart:207:final ids = (_groupedByDay[day] ?? const <SubjectDiaryEntry>[]).map((e) => e.id).toList();
+lib\src\ui\schedule\subject_diary_screen.dart:233:setState(() => _view = DiaryViewMode.cards);
+lib\src\ui\schedule\subject_diary_screen.dart:236:setState(() => _view = DiaryViewMode.grid);
+lib\src\ui\schedule\subject_diary_screen.dart:298:Future<void> _toggleAssignmentDone(PersonalDiaryAssignment assignment) async {
+lib\src\ui\schedule\subject_diary_screen.dart:302:await _diaryService.setAssignmentDone(
+lib\src\ui\schedule\subject_diary_screen.dart:314:Future<void> _setTaskStatus(PersonalDiaryTask task, String status) async {
+lib\src\ui\schedule\subject_diary_screen.dart:317:await _diaryService.updatePersonalTaskStatus(
+lib\src\ui\schedule\subject_diary_screen.dart:329:Future<void> _openAssignmentDetails(PersonalDiaryAssignment assignment) async {
+lib\src\ui\schedule\subject_diary_screen.dart:349:Future<void> _openTaskDetails(PersonalDiaryTask task) async {
+lib\src\ui\schedule\subject_diary_screen.dart:392:await _diaryService.createPersonalTask(
+lib\src\ui\schedule\subject_diary_screen.dart:492:final files = <SubjectDiaryPickedFile>[];
+lib\src\ui\schedule\subject_diary_screen.dart:497:files.add(SubjectDiaryPickedFile(name: name, mime: mime, bytes: bytes));
+lib\src\ui\schedule\subject_diary_screen.dart:499:await SubjectDiaryRepository.instance.addFilesPublic(
+lib\src\ui\schedule\subject_diary_screen.dart:559:child: _DiarySearchField(
+lib\src\ui\schedule\subject_diary_screen.dart:602:else if (_view == DiaryViewMode.cards)
+lib\src\ui\schedule\subject_diary_screen.dart:651:class _DiarySearchField extends StatelessWidget {
+lib\src\ui\schedule\subject_diary_screen.dart:656:const _DiarySearchField({
+lib\src\ui\schedule\subject_diary_screen.dart:729:final List<PersonalDiaryAssignment> assignments;
+lib\src\ui\schedule\subject_diary_screen.dart:730:final List<PersonalDiaryTask> tasks;
+lib\src\ui\schedule\subject_diary_screen.dart:731:final bool Function(PersonalDiaryAssignment assignment) assignmentDone;
+lib\src\ui\schedule\subject_diary_screen.dart:732:final String Function(PersonalDiaryTask task) taskStatus;
+lib\src\ui\schedule\subject_diary_screen.dart:733:final ValueChanged<PersonalDiaryAssignment> onAssignmentTap;
+lib\src\ui\schedule\subject_diary_screen.dart:734:final Future<void> Function(PersonalDiaryAssignment assignment)
+lib\src\ui\schedule\subject_diary_screen.dart:736:final ValueChanged<PersonalDiaryTask> onTaskTap;
+lib\src\ui\schedule\subject_diary_screen.dart:737:final ValueChanged<PersonalDiaryTask> onTaskStatusTap;
+lib\src\ui\schedule\subject_diary_screen.dart:790:final PersonalDiaryAssignment assignment;
+lib\src\ui\schedule\subject_diary_screen.dart:818:final PersonalDiaryTask task;
+lib\src\ui\schedule\subject_diary_screen.dart:974:final PersonalDiaryTask task;
+lib\src\ui\schedule\subject_diary_screen.dart:1061:final PersonalDiaryAssignment assignment;
+lib\src\ui\schedule\subject_diary_screen.dart:1328:final Map<DateTime, List<SubjectDiaryEntry>> grouped;
+lib\src\ui\schedule\subject_diary_screen.dart:1345:final entries = grouped[day] ?? const <SubjectDiaryEntry>[];
+lib\src\ui\schedule\subject_diary_screen.dart:1375:final Map<DateTime, List<SubjectDiaryEntry>> grouped;
+lib\src\ui\schedule\subject_diary_screen.dart:1397:final entries = grouped[day] ?? const <SubjectDiaryEntry>[];
+lib\src\ui\schedule\subject_diary_screen.dart:1426:final List<SubjectDiaryEntry> entries;
+lib\src\ui\schedule\subject_diary_screen.dart:1434:final repo = SubjectDiaryRepository.instance;
+lib\src\ui\schedule\subject_diary_screen.dart:1436:final allImages = <SubjectDiaryFile>[];
+lib\src\ui\schedule\subject_diary_screen.dart:1485:String _metaLine(List<SubjectDiaryEntry> entries) {
+lib\src\ui\schedule\subject_diary_screen.dart:1502:final List<SubjectDiaryEntry> entries;
+lib\src\ui\schedule\subject_diary_screen.dart:1510:final repo = SubjectDiaryRepository.instance;
+lib\src\ui\schedule\subject_diary_screen.dart:1512:final images = <SubjectDiaryFile>[];
+lib\src\ui\schedule\subject_diary_screen.dart:1555:String _metaLine(List<SubjectDiaryEntry> entries) {
+lib\src\ui\schedule\subject_diary_screen.dart:1568:final List<SubjectDiaryFile> thumbs; // image/*
+lib\src\ui\schedule\subject_diary_screen.dart:1569:final SubjectDiaryRepository repo;
+lib\src\ui\schedule\subject_diary_screen.dart:1626:final Future<List<SubjectDiaryEntry>> entriesFuture;
+lib\src\ui\schedule\subject_diary_screen.dart:1631:final repo = SubjectDiaryRepository.instance;
+lib\src\ui\schedule\subject_diary_screen.dart:1641:child: FutureBuilder<List<SubjectDiaryEntry>>(
+lib\src\ui\schedule\subject_diary_screen.dart:1645:final images = <SubjectDiaryFile>[];
+lib\src\ui\schedule\subject_diary_screen.dart:1693:final Future<List<SubjectDiaryEntry>> entriesFuture;
+lib\src\ui\schedule\subject_diary_screen.dart:1705:child: FutureBuilder<List<SubjectDiaryEntry>>(
+lib\src\ui\schedule\subject_diary_screen.dart:1709:final files = <SubjectDiaryFile>[];
+lib\src\ui\schedule\subject_diary_screen.dart:1750:final Future<List<SubjectDiaryEntry>> entriesFuture;
+lib\src\ui\schedule\subject_diary_screen.dart:1762:child: FutureBuilder<List<SubjectDiaryEntry>>(
+lib\src\ui\schedule\subject_diary_screen.dart:1953:final SubjectDiaryArgs? args;
+lib\src\ui\schedule\subject_diary_screen.dart:2031:await SubjectDiaryRepository.instance.addText(
 lib\src\ui\schedule\subject_diary\models.dart:1:part of subject_diary;
-lib\src\ui\schedule\subject_diary\models.dart:5:class SubjectDiaryEntry {
-lib\src\ui\schedule\subject_diary\models.dart:10:final List<SubjectDiaryFile> files; // файлы/фото
-lib\src\ui\schedule\subject_diary\models.dart:11:SubjectDiaryEntry({
-lib\src\ui\schedule\subject_diary\models.dart:24:class SubjectDiaryFile {
-lib\src\ui\schedule\subject_diary\models.dart:29:const SubjectDiaryFile({
-lib\src\ui\schedule\subject_diary\models.dart:40:class SubjectDiaryPickedFile {
-lib\src\ui\schedule\subject_diary\models.dart:44:const SubjectDiaryPickedFile({required this.name, required this.mime, this.bytes});
+lib\src\ui\schedule\subject_diary\models.dart:5:class SubjectDiaryArgs {
+lib\src\ui\schedule\subject_diary\models.dart:15:const SubjectDiaryArgs({
+lib\src\ui\schedule\subject_diary\models.dart:26:factory SubjectDiaryArgs.legacy(String subjectKey) {
+lib\src\ui\schedule\subject_diary\models.dart:27:return SubjectDiaryArgs(
+lib\src\ui\schedule\subject_diary\models.dart:48:SubjectDiaryArgs copyWith({
+lib\src\ui\schedule\subject_diary\models.dart:58:return SubjectDiaryArgs(
+lib\src\ui\schedule\subject_diary\models.dart:71:class SubjectDiaryEntry {
+lib\src\ui\schedule\subject_diary\models.dart:76:final List<SubjectDiaryFile> files; // файлы/фото
+lib\src\ui\schedule\subject_diary\models.dart:77:SubjectDiaryEntry({
+lib\src\ui\schedule\subject_diary\models.dart:90:class SubjectDiaryFile {
+lib\src\ui\schedule\subject_diary\models.dart:95:const SubjectDiaryFile({
+lib\src\ui\schedule\subject_diary\models.dart:106:class SubjectDiaryPickedFile {
+lib\src\ui\schedule\subject_diary\models.dart:110:const SubjectDiaryPickedFile({required this.name, required this.mime, this.bytes});
 lib\src\ui\schedule\subject_diary\repo.dart:1:part of subject_diary;
 lib\src\ui\schedule\subject_diary\repo.dart:5:abstract class SubjectDiaryRepository {
 lib\src\ui\schedule\subject_diary\repo.dart:6:Future<SubjectDiaryEntry> addText({
-lib\src\ui\schedule\subject_diary\repo.dart:12:Future<SubjectDiaryEntry> addConspect({
-lib\src\ui\schedule\subject_diary\repo.dart:18:Future<SubjectDiaryEntry> addFiles({
-lib\src\ui\schedule\subject_diary\repo.dart:25:Future<SubjectDiaryEntry> addFilesPublic({
-lib\src\ui\schedule\subject_diary\repo.dart:28:required List<SubjectDiaryPickedFile> files,
-lib\src\ui\schedule\subject_diary\repo.dart:31:Future<List<SubjectDiaryEntry>> listBySubject(String subjectKey);
-lib\src\ui\schedule\subject_diary\repo.dart:37:Future<SubjectDiaryEntry> updateTextEntry({required String id, required String newText});
-lib\src\ui\schedule\subject_diary\repo.dart:38:Future<SubjectDiaryEntry?> removeFileFromEntry({required String entryId, required String fileUrl});
-lib\src\ui\schedule\subject_diary\repo.dart:43:static SubjectDiaryRepository instance = SubjectDiaryRepositorySupabase();
-lib\src\ui\schedule\subject_diary\repo.dart:46:class SubjectDiaryRepositoryInMemory implements SubjectDiaryRepository {
-lib\src\ui\schedule\subject_diary\repo.dart:47:final _store = <String, List<SubjectDiaryEntry>>{}; // subjectKey -> entries (desc)
-lib\src\ui\schedule\subject_diary\repo.dart:56:Future<SubjectDiaryEntry> addText({
-lib\src\ui\schedule\subject_diary\repo.dart:61:final e = SubjectDiaryEntry(
-lib\src\ui\schedule\subject_diary\repo.dart:72:Future<SubjectDiaryEntry> addConspect({
-lib\src\ui\schedule\subject_diary\repo.dart:83:final newFiles = <SubjectDiaryFile>[];
-lib\src\ui\schedule\subject_diary\repo.dart:89:newFiles.add(SubjectDiaryFile(
-lib\src\ui\schedule\subject_diary\repo.dart:102:final merged = SubjectDiaryEntry(
-lib\src\ui\schedule\subject_diary\repo.dart:112:final e = SubjectDiaryEntry(
-lib\src\ui\schedule\subject_diary\repo.dart:125:Future<SubjectDiaryEntry> addFiles({
-lib\src\ui\schedule\subject_diary\repo.dart:136:final newFiles = <SubjectDiaryFile>[];
-lib\src\ui\schedule\subject_diary\repo.dart:146:newFiles.add(SubjectDiaryFile(
-lib\src\ui\schedule\subject_diary\repo.dart:158:final merged = SubjectDiaryEntry(
-lib\src\ui\schedule\subject_diary\repo.dart:168:final e = SubjectDiaryEntry(
-lib\src\ui\schedule\subject_diary\repo.dart:181:Future<SubjectDiaryEntry> addFilesPublic({
-lib\src\ui\schedule\subject_diary\repo.dart:184:required List<SubjectDiaryPickedFile> files,
-lib\src\ui\schedule\subject_diary\repo.dart:186:final list = <SubjectDiaryFile>[];
-lib\src\ui\schedule\subject_diary\repo.dart:196:list.add(SubjectDiaryFile(
-lib\src\ui\schedule\subject_diary\repo.dart:203:final e = SubjectDiaryEntry(
-lib\src\ui\schedule\subject_diary\repo.dart:215:Future<List<SubjectDiaryEntry>> listBySubject(String subjectKey) async {
-lib\src\ui\schedule\subject_diary\repo.dart:216:return List<SubjectDiaryEntry>.from(_store[subjectKey] ?? const []);
-lib\src\ui\schedule\subject_diary\repo.dart:233:Future<SubjectDiaryEntry> updateTextEntry({required String id, required String newText}) async {
-lib\src\ui\schedule\subject_diary\repo.dart:239:final updated = SubjectDiaryEntry(
-lib\src\ui\schedule\subject_diary\repo.dart:254:Future<SubjectDiaryEntry?> removeFileFromEntry({required String entryId, required String fileUrl}) async {
-lib\src\ui\schedule\subject_diary\repo.dart:260:final nf = List<SubjectDiaryFile>.from(old.files)..removeWhere((f) => f.url == fileUrl);
-lib\src\ui\schedule\subject_diary\repo.dart:263:final updated = SubjectDiaryEntry(
-lib\src\ui\schedule\subject_diary\repo.dart:280:final list = _store[key] ?? const <SubjectDiaryEntry>[];
-lib\src\ui\schedule\subject_diary\repo.dart:292:_store[key]![idx] = SubjectDiaryEntry(
-lib\src\ui\schedule\subject_diary\repo.dart:308:final list = _store[key] ?? const <SubjectDiaryEntry>[];
-lib\src\ui\schedule\subject_diary\repo.dart:321:final list = _store[key] ?? const <SubjectDiaryEntry>[];
-lib\src\ui\schedule\subject_diary\repo.dart:326:_store[key]![idx] = SubjectDiaryEntry(
+lib\src\ui\schedule\subject_diary\repo.dart:10:SubjectDiaryArgs? args,
+lib\src\ui\schedule\subject_diary\repo.dart:13:Future<SubjectDiaryEntry> addConspect({
+lib\src\ui\schedule\subject_diary\repo.dart:17:SubjectDiaryArgs? args,
+lib\src\ui\schedule\subject_diary\repo.dart:20:Future<SubjectDiaryEntry> addFiles({
+lib\src\ui\schedule\subject_diary\repo.dart:24:SubjectDiaryArgs? args,
+lib\src\ui\schedule\subject_diary\repo.dart:28:Future<SubjectDiaryEntry> addFilesPublic({
+lib\src\ui\schedule\subject_diary\repo.dart:31:required List<SubjectDiaryPickedFile> files,
+lib\src\ui\schedule\subject_diary\repo.dart:32:SubjectDiaryArgs? args,
+lib\src\ui\schedule\subject_diary\repo.dart:35:Future<List<SubjectDiaryEntry>> listBySubject(String subjectKey);
+lib\src\ui\schedule\subject_diary\repo.dart:36:Future<List<SubjectDiaryEntry>> listByArgs(SubjectDiaryArgs args);
+lib\src\ui\schedule\subject_diary\repo.dart:42:Future<SubjectDiaryEntry> updateTextEntry({required String id, required String newText});
+lib\src\ui\schedule\subject_diary\repo.dart:43:Future<SubjectDiaryEntry?> removeFileFromEntry({required String entryId, required String fileUrl});
+lib\src\ui\schedule\subject_diary\repo.dart:48:static SubjectDiaryRepository instance = SubjectDiaryRepositorySupabase();
+lib\src\ui\schedule\subject_diary\repo.dart:51:class SubjectDiaryRepositoryInMemory implements SubjectDiaryRepository {
+lib\src\ui\schedule\subject_diary\repo.dart:52:final _store = <String, List<SubjectDiaryEntry>>{}; // subjectKey -> entries (desc)
+lib\src\ui\schedule\subject_diary\repo.dart:61:Future<SubjectDiaryEntry> addText({
+lib\src\ui\schedule\subject_diary\repo.dart:65:SubjectDiaryArgs? args,
+lib\src\ui\schedule\subject_diary\repo.dart:67:final e = SubjectDiaryEntry(
+lib\src\ui\schedule\subject_diary\repo.dart:78:Future<SubjectDiaryEntry> addConspect({
+lib\src\ui\schedule\subject_diary\repo.dart:82:SubjectDiaryArgs? args,
+lib\src\ui\schedule\subject_diary\repo.dart:90:final newFiles = <SubjectDiaryFile>[];
+lib\src\ui\schedule\subject_diary\repo.dart:96:newFiles.add(SubjectDiaryFile(
+lib\src\ui\schedule\subject_diary\repo.dart:109:final merged = SubjectDiaryEntry(
+lib\src\ui\schedule\subject_diary\repo.dart:119:final e = SubjectDiaryEntry(
+lib\src\ui\schedule\subject_diary\repo.dart:132:Future<SubjectDiaryEntry> addFiles({
+lib\src\ui\schedule\subject_diary\repo.dart:136:SubjectDiaryArgs? args,
+lib\src\ui\schedule\subject_diary\repo.dart:144:final newFiles = <SubjectDiaryFile>[];
+lib\src\ui\schedule\subject_diary\repo.dart:154:newFiles.add(SubjectDiaryFile(
+lib\src\ui\schedule\subject_diary\repo.dart:166:final merged = SubjectDiaryEntry(
+lib\src\ui\schedule\subject_diary\repo.dart:176:final e = SubjectDiaryEntry(
+lib\src\ui\schedule\subject_diary\repo.dart:189:Future<SubjectDiaryEntry> addFilesPublic({
+lib\src\ui\schedule\subject_diary\repo.dart:192:required List<SubjectDiaryPickedFile> files,
+lib\src\ui\schedule\subject_diary\repo.dart:193:SubjectDiaryArgs? args,
+lib\src\ui\schedule\subject_diary\repo.dart:195:final list = <SubjectDiaryFile>[];
+lib\src\ui\schedule\subject_diary\repo.dart:205:list.add(SubjectDiaryFile(
+lib\src\ui\schedule\subject_diary\repo.dart:212:final e = SubjectDiaryEntry(
+lib\src\ui\schedule\subject_diary\repo.dart:224:Future<List<SubjectDiaryEntry>> listBySubject(String subjectKey) async {
+lib\src\ui\schedule\subject_diary\repo.dart:225:return List<SubjectDiaryEntry>.from(_store[subjectKey] ?? const []);
+lib\src\ui\schedule\subject_diary\repo.dart:229:Future<List<SubjectDiaryEntry>> listByArgs(SubjectDiaryArgs args) {
+lib\src\ui\schedule\subject_diary\repo.dart:247:Future<SubjectDiaryEntry> updateTextEntry({required String id, required String newText}) async {
+lib\src\ui\schedule\subject_diary\repo.dart:253:final updated = SubjectDiaryEntry(
+lib\src\ui\schedule\subject_diary\repo.dart:268:Future<SubjectDiaryEntry?> removeFileFromEntry({required String entryId, required String fileUrl}) async {
+lib\src\ui\schedule\subject_diary\repo.dart:274:final nf = List<SubjectDiaryFile>.from(old.files)..removeWhere((f) => f.url == fileUrl);
+lib\src\ui\schedule\subject_diary\repo.dart:277:final updated = SubjectDiaryEntry(
+lib\src\ui\schedule\subject_diary\repo.dart:294:final list = _store[key] ?? const <SubjectDiaryEntry>[];
+lib\src\ui\schedule\subject_diary\repo.dart:306:_store[key]![idx] = SubjectDiaryEntry(
+lib\src\ui\schedule\subject_diary\repo.dart:322:final list = _store[key] ?? const <SubjectDiaryEntry>[];
+lib\src\ui\schedule\subject_diary\repo.dart:335:final list = _store[key] ?? const <SubjectDiaryEntry>[];
+lib\src\ui\schedule\subject_diary\repo.dart:340:_store[key]![idx] = SubjectDiaryEntry(
 lib\src\ui\schedule\subject_diary\subject_diary.dart:1:library subject_diary;
 lib\src\ui\schedule\subject_diary\subject_diary.dart:28:part '../../../data/subject_diary_repository_supabase.dart';
 lib\src\ui\schedule\subject_diary\subject_diary.dart:31:final ValueNotifier<bool> diaryRealtimeSuspended = ValueNotifier<bool>(false);
 lib\src\ui\schedule\subject_diary\widgets.dart:1:part of subject_diary;
 lib\src\ui\schedule\subject_diary\screens\photo_conspect_screen.dart:1:part of subject_diary;
-lib\src\ui\schedule\subject_diary\screens\photo_conspect_screen.dart:38:final repo = SubjectDiaryRepository.instance;
-lib\src\ui\schedule\subject_diary\screens\photo_conspect_screen.dart:186:await SubjectDiaryRepository.instance.addConspect(
+lib\src\ui\schedule\subject_diary\screens\photo_conspect_screen.dart:11:final SubjectDiaryArgs? args;
+lib\src\ui\schedule\subject_diary\screens\photo_conspect_screen.dart:44:final repo = SubjectDiaryRepository.instance;
+lib\src\ui\schedule\subject_diary\screens\photo_conspect_screen.dart:46:widget.args ?? SubjectDiaryArgs.legacy(widget.subjectKey),
+lib\src\ui\schedule\subject_diary\screens\photo_conspect_screen.dart:194:await SubjectDiaryRepository.instance.addConspect(
 lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:1:part of subject_diary;
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:20:final _repo = SubjectDiaryRepository.instance;
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:25:List<SubjectDiaryEntry> _dayEntries = [];
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:58:diaryRealtimeSuspended.value = true; // отписать родителя на время работы экрана дня
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:59:_subscribeDiaryRealtime(anchor: _day);
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:71:RealtimeChannel? _diaryEntriesCh;
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:72:RealtimeChannel? _diaryFilesCh;
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:74:void _subscribeDiaryRealtime({required DateTime anchor}) {
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:76:_diaryEntriesCh = client
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:77:.channel('public:subject_diary_entries')
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:81:table: 'subject_diary_entries',
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:82:callback: (_) => _reloadDiary(anchor: anchor),
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:86:_diaryFilesCh = client
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:87:.channel('public:subject_diary_files')
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:91:table: 'subject_diary_files',
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:92:callback: (_) => _reloadDiary(anchor: anchor),
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:97:Future<void> _reloadDiary({required DateTime anchor}) async {
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:104:if (_diaryEntriesCh != null) client.removeChannel(_diaryEntriesCh!);
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:105:if (_diaryFilesCh != null) client.removeChannel(_diaryFilesCh!);
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:106:diaryRealtimeSuspended.value = false; // вернуть родителю realtime
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:424:void _openEditNoteSheet({required SubjectDiaryEntry entry}) {
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:474:await SubjectDiaryRepository.instance.addFiles(
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:485:Future<void> _openFile(BuildContext ctx, SubjectDiaryFile f) async {
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:502:Future<void> _openImageViewer(BuildContext ctx, List<SubjectDiaryFile> imgs, int start) async {
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:725:await SubjectDiaryRepository.instance.addText(
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:810:await SubjectDiaryRepository.instance.updateTextEntry(id: widget.entryId, newText: text);
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:7:final SubjectDiaryArgs? args;
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:23:final _repo = SubjectDiaryRepository.instance;
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:25:late final SubjectDiaryArgs _args =
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:26:widget.args ?? SubjectDiaryArgs.legacy(widget.subjectKey);
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:30:List<SubjectDiaryEntry> _dayEntries = [];
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:63:diaryRealtimeSuspended.value = true; // отписать родителя на время работы экрана дня
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:64:_subscribeDiaryRealtime(anchor: _day);
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:76:RealtimeChannel? _diaryEntriesCh;
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:77:RealtimeChannel? _diaryFilesCh;
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:79:void _subscribeDiaryRealtime({required DateTime anchor}) {
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:81:_diaryEntriesCh = client
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:82:.channel('public:subject_diary_entries')
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:86:table: 'subject_diary_entries',
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:87:callback: (_) => _reloadDiary(anchor: anchor),
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:91:_diaryFilesCh = client
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:92:.channel('public:subject_diary_files')
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:96:table: 'subject_diary_files',
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:97:callback: (_) => _reloadDiary(anchor: anchor),
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:102:Future<void> _reloadDiary({required DateTime anchor}) async {
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:109:if (_diaryEntriesCh != null) client.removeChannel(_diaryEntriesCh!);
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:110:if (_diaryFilesCh != null) client.removeChannel(_diaryFilesCh!);
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:111:diaryRealtimeSuspended.value = false; // вернуть родителю realtime
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:430:void _openEditNoteSheet({required SubjectDiaryEntry entry}) {
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:484:await SubjectDiaryRepository.instance.addFiles(
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:496:Future<void> _openFile(BuildContext ctx, SubjectDiaryFile f) async {
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:513:Future<void> _openImageViewer(BuildContext ctx, List<SubjectDiaryFile> imgs, int start) async {
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:666:final SubjectDiaryArgs? args;
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:742:await SubjectDiaryRepository.instance.addText(
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:828:await SubjectDiaryRepository.instance.updateTextEntry(id: widget.entryId, newText: text);
 scripts\collect_project_snapshot.ps1:116:Write-Search "table_terms_usage.txt" @("groups", "teams", "team_members", "chats", "chat_members", "messages", "chat_files", "users", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects", "schedule", "lessons", "assignments", "diary", "friends", "useful")
+supabase\stage4_2_3_personal_diary_tasks.sql:1:-- Stage 4.2.3 - private personal diary tasks
+supabase\stage4_2_3_personal_diary_tasks.sql:2:-- Personal tasks are diary-only. They do not create chat messages and do not
+supabase\stage4_2_3_personal_diary_tasks.sql:5:create table if not exists public.personal_diary_tasks (
+supabase\stage4_2_3_personal_diary_tasks.sql:18:create index if not exists personal_diary_tasks_author_idx
+supabase\stage4_2_3_personal_diary_tasks.sql:19:on public.personal_diary_tasks(author_id);
+supabase\stage4_2_3_personal_diary_tasks.sql:21:create index if not exists personal_diary_tasks_author_subject_idx
+supabase\stage4_2_3_personal_diary_tasks.sql:22:on public.personal_diary_tasks(author_id, subject_offering_id);
+supabase\stage4_2_3_personal_diary_tasks.sql:24:create index if not exists personal_diary_tasks_author_status_due_idx
+supabase\stage4_2_3_personal_diary_tasks.sql:25:on public.personal_diary_tasks(author_id, status, due_at);
+supabase\stage4_2_3_personal_diary_tasks.sql:27:alter table public.personal_diary_tasks enable row level security;
+supabase\stage4_2_3_personal_diary_tasks.sql:29:drop policy if exists "personal_diary_tasks_select_own" on public.personal_diary_tasks;
+supabase\stage4_2_3_personal_diary_tasks.sql:30:create policy "personal_diary_tasks_select_own"
+supabase\stage4_2_3_personal_diary_tasks.sql:31:on public.personal_diary_tasks
+supabase\stage4_2_3_personal_diary_tasks.sql:36:drop policy if exists "personal_diary_tasks_insert_own" on public.personal_diary_tasks;
+supabase\stage4_2_3_personal_diary_tasks.sql:37:create policy "personal_diary_tasks_insert_own"
+supabase\stage4_2_3_personal_diary_tasks.sql:38:on public.personal_diary_tasks
+supabase\stage4_2_3_personal_diary_tasks.sql:43:drop policy if exists "personal_diary_tasks_update_own" on public.personal_diary_tasks;
+supabase\stage4_2_3_personal_diary_tasks.sql:44:create policy "personal_diary_tasks_update_own"
+supabase\stage4_2_3_personal_diary_tasks.sql:45:on public.personal_diary_tasks
+supabase\stage4_2_3_personal_diary_tasks.sql:51:drop policy if exists "personal_diary_tasks_delete_own" on public.personal_diary_tasks;
+supabase\stage4_2_3_personal_diary_tasks.sql:52:create policy "personal_diary_tasks_delete_own"
+supabase\stage4_2_3_personal_diary_tasks.sql:53:on public.personal_diary_tasks
+supabase\stage4_2_3_personal_diary_tasks_rollback.sql:1:-- Rollback for Stage 4.2.3 personal diary tasks.
+supabase\stage4_2_3_personal_diary_tasks_rollback.sql:3:drop policy if exists "personal_diary_tasks_delete_own" on public.personal_diary_tasks;
+supabase\stage4_2_3_personal_diary_tasks_rollback.sql:4:drop policy if exists "personal_diary_tasks_update_own" on public.personal_diary_tasks;
+supabase\stage4_2_3_personal_diary_tasks_rollback.sql:5:drop policy if exists "personal_diary_tasks_insert_own" on public.personal_diary_tasks;
+supabase\stage4_2_3_personal_diary_tasks_rollback.sql:6:drop policy if exists "personal_diary_tasks_select_own" on public.personal_diary_tasks;
+supabase\stage4_2_3_personal_diary_tasks_rollback.sql:8:drop table if exists public.personal_diary_tasks;
 supabase\checks\academic_rls_audit.sql:30:('subject_diary_entries')
 supabase\checks\academic_rls_audit.sql:73:('subject_diary_entries')
 supabase\checks\academic_rls_audit.sql:115:('subject_diary_entries')
@@ -3407,9 +3927,9 @@ lib\src\ui\profile\profile_screen.dart:324:return (friends, requests);
 lib\src\ui\profile\profile_screen.dart:455:'${_ts()} [Profile] build ui -> friends=$_friendsCount req=$_requestsCount unread=$_unreadTotal loading=$_loading');
 lib\src\ui\profile\profile_screen.dart:532:onFriendsTap: () async {
 lib\src\ui\profile\profile_screen.dart:534:MaterialPageRoute(builder: (_) => const MyFriendsScreen()),
-lib\src\ui\profile\profile_screen.dart:672:final VoidCallback? onFriendsTap;
-lib\src\ui\profile\profile_screen.dart:678:this.onFriendsTap,
-lib\src\ui\profile\profile_screen.dart:708:onTap: onFriendsTap,
+lib\src\ui\profile\profile_screen.dart:674:final VoidCallback? onFriendsTap;
+lib\src\ui\profile\profile_screen.dart:680:this.onFriendsTap,
+lib\src\ui\profile\profile_screen.dart:710:onTap: onFriendsTap,
 scripts\collect_project_snapshot.ps1:116:Write-Search "table_terms_usage.txt" @("groups", "teams", "team_members", "chats", "chat_members", "messages", "chat_files", "users", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects", "schedule", "lessons", "assignments", "diary", "friends", "useful")
 supabase\migrations\20260609190000_get_my_classmates_rpc.sql:5:-- but the friends screen needs users with the same active enrollment context and
 

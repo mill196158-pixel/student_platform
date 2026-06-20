@@ -10,6 +10,7 @@ import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/learning/models/file_item.dart';
 import 'package:student_platform/src/ui/learning/models/assignment.dart';
 import 'package:student_platform/src/ui/learning/models/chat_file.dart'; // ДОБАВЛЕНО!
+import 'package:student_platform/src/utils/safe_debug_log.dart';
 
 class SupabaseLearningRepository implements LearningRepository {
   final SupabaseClient _sb = Supabase.instance.client;
@@ -21,7 +22,8 @@ class SupabaseLearningRepository implements LearningRepository {
   static const _filesPrefix = 'learning_files_';
   static const _assignPrefix = 'learning_assign_';
 
-  final Map<String, String> _chatIdByTeam = {}; // teamId -> chatId (type='team_main')
+  final Map<String, String> _chatIdByTeam =
+      {}; // teamId -> chatId (type='team_main')
 
   // -------------------- Команды --------------------
 
@@ -30,10 +32,11 @@ class SupabaseLearningRepository implements LearningRepository {
     try {
       debugPrint('[loadTeams] calling get_my_teams');
       final res = await _sb.rpc('get_my_teams');
-      final list = (res as List)
+      final baseList = (res as List)
           .map((e) => Map<String, dynamic>.from(e as Map))
           .map(_mapRowToTeam)
           .toList();
+      final list = await _hydrateTeamsAcademicFields(baseList);
       await saveTeams(list);
       return list;
     } catch (e, st) {
@@ -56,7 +59,53 @@ class SupabaseLearningRepository implements LearningRepository {
       icon: (m['icon'] ?? '').toString(),
       unread: 0,
       pollApproved: false,
+      subjectOfferingId:
+          _nullableString(m['subject_offering_id'] ?? m['subjectOfferingId']),
+      groupId: _nullableString(m['group_id'] ?? m['groupId']),
+      subjectId: _nullableString(m['subject_id'] ?? m['subjectId']),
+      academicYearId:
+          _nullableString(m['academic_year_id'] ?? m['academicYearId']),
+      academicTermId:
+          _nullableString(m['academic_term_id'] ?? m['academicTermId']),
+      semesterNumber: _nullableInt(m['semester_number'] ?? m['semesterNumber']),
     );
+  }
+
+  Future<List<Team>> _hydrateTeamsAcademicFields(List<Team> teams) async {
+    final ids =
+        teams.map((team) => team.id).where((id) => id.isNotEmpty).toList();
+    if (ids.isEmpty) return teams;
+
+    try {
+      final rows = await _sb
+          .from('teams')
+          .select(
+            'id,group_id,subject_id,subject_offering_id,academic_year_id,academic_term_id,semester_number',
+          )
+          .inFilter('id', ids);
+      final byId = <String, Map<String, dynamic>>{};
+      for (final raw in rows as List) {
+        final row = Map<String, dynamic>.from(raw as Map);
+        final id = (row['id'] ?? '').toString();
+        if (id.isNotEmpty) byId[id] = row;
+      }
+
+      return teams.map((team) {
+        final row = byId[team.id];
+        if (row == null) return team;
+        return team.copyWith(
+          subjectOfferingId: _nullableString(row['subject_offering_id']),
+          groupId: _nullableString(row['group_id']),
+          subjectId: _nullableString(row['subject_id']),
+          academicYearId: _nullableString(row['academic_year_id']),
+          academicTermId: _nullableString(row['academic_term_id']),
+          semesterNumber: _nullableInt(row['semester_number']),
+        );
+      }).toList();
+    } catch (e) {
+      safeDebugLog('[loadTeams] academic hydrate failed: ${e.runtimeType}');
+      return teams;
+    }
   }
 
   @override
@@ -71,7 +120,8 @@ class SupabaseLearningRepository implements LearningRepository {
   @override
   Future<String> joinByInviteCode(String code) async {
     debugPrint('[joinByInviteCode] code=$code');
-    final res = await _sb.rpc('join_team_by_code', params: {'p_code': code.trim()});
+    final res =
+        await _sb.rpc('join_team_by_code', params: {'p_code': code.trim()});
     final teamId = res?.toString() ?? '';
     return teamId;
   }
@@ -108,7 +158,8 @@ class SupabaseLearningRepository implements LearningRepository {
     final user = _sb.auth.currentUser;
     if (user == null) return null;
     try {
-      final rows = await _sb.from('users').select('login').eq('id', user.id).limit(1);
+      final rows =
+          await _sb.from('users').select('login').eq('id', user.id).limit(1);
       if (rows.isNotEmpty) {
         final m = Map<String, dynamic>.from(rows.first as Map);
         final login = (m['login'] ?? '').toString();
@@ -160,13 +211,12 @@ class SupabaseLearningRepository implements LearningRepository {
   List<ChatFile> _parseAttachments(dynamic value) {
     final attachments = <ChatFile>[];
     if (value == null) return attachments;
-    
-    // ДЕБАГ: проверяем тип attachments
-    print('[loadChat] attachments type: ${value.runtimeType}, value: $value');
-    
+
+    safeDebugLog('[loadChat] attachments type=${value.runtimeType}');
+
     try {
       List<dynamic> attachmentsList;
-      
+
       if (value is String) {
         // Если attachments пришло как JSON строка
         if (value.isEmpty || value == '[]') return attachments;
@@ -175,31 +225,61 @@ class SupabaseLearningRepository implements LearningRepository {
       } else if (value is List) {
         attachmentsList = value;
       } else {
-        print('[loadChat] Неизвестный тип attachments: ${value.runtimeType}');
+        safeDebugLog(
+            '[loadChat] unknown attachments type=${value.runtimeType}');
         return attachments;
       }
-      
+
       for (final it in attachmentsList) {
         if (it is Map<String, dynamic>) {
           attachments.add(ChatFile(
             id: (it['id'] ?? '').toString(),
-            chatId: '', // Будет заполнено позже
-            messageId: '', // Будет заполнено позже
-            fileName: (it['fileName'] ?? it['name'] ?? '').toString(),
-            fileKey: '', // Не используется в UI
-            fileUrl: (it['fileUrl'] ?? it['url'] ?? '').toString(),
-            fileType: (it['fileType'] ?? it['type'] ?? '').toString(),
-            fileSize: (it['fileSize'] ?? it['size'] ?? 0) as int,
-            uploadedBy: '', // Не критично для отображения
-            uploadedAt: DateTime.tryParse((it['uploadedAt'] ?? it['created_at'] ?? '').toString()) ?? DateTime.now(),
+            chatId: (it['chatId'] ?? it['chat_id'] ?? '').toString(),
+            messageId: (it['messageId'] ?? it['message_id'] ?? '').toString(),
+            fileName: (it['fileName'] ?? it['file_name'] ?? it['name'] ?? '')
+                .toString(),
+            fileKey: (it['fileKey'] ?? it['file_key'] ?? '').toString(),
+            fileUrl:
+                (it['fileUrl'] ?? it['file_url'] ?? it['url'] ?? '').toString(),
+            fileType: (it['fileType'] ?? it['file_type'] ?? it['type'] ?? '')
+                .toString(),
+            fileSize: _asInt(it['fileSize'] ?? it['file_size'] ?? it['size']),
+            uploadedBy:
+                (it['uploadedBy'] ?? it['uploaded_by'] ?? '').toString(),
+            uploadedAt: DateTime.tryParse((it['uploadedAt'] ??
+                        it['uploaded_at'] ??
+                        it['created_at'] ??
+                        '')
+                    .toString()) ??
+                DateTime.now(),
           ));
         }
       }
     } catch (e) {
-      print('[loadChat] Ошибка парсинга attachments: $e');
+      safeDebugLog('[loadChat] attachments parse failed: ${e.runtimeType}');
     }
-    
+
     return attachments;
+  }
+
+  int _asInt(dynamic value) {
+    if (value is int) return value;
+    return int.tryParse((value ?? '').toString()) ?? 0;
+  }
+
+  int? _nullableInt(dynamic value) {
+    if (value is int) return value;
+    return int.tryParse((value ?? '').toString());
+  }
+
+  String? _nullableString(dynamic value) {
+    final text = (value ?? '').toString();
+    return text.isEmpty ? null : text;
+  }
+
+  DateTime? _nullableDate(dynamic value) {
+    final text = (value ?? '').toString();
+    return text.isEmpty ? null : DateTime.tryParse(text);
   }
 
   Future<void> _saveChatLocal(String teamId, List<Message> messages) async {
@@ -232,7 +312,8 @@ class SupabaseLearningRepository implements LearningRepository {
       authorLogin: (m['author_login'] ?? 'system').toString(),
       authorName: (m['author_name'] ?? (amI ? 'Вы' : 'Студент')).toString(),
       text: (m['text'] ?? m['content'] ?? m['body'] ?? '').toString(),
-      at: DateTime.tryParse((m['at'] ?? m['created_at'] ?? '').toString()) ?? DateTime.now(),
+      at: DateTime.tryParse((m['at'] ?? m['created_at'] ?? '').toString()) ??
+          DateTime.now(),
       imagePath: _firstAttachmentUrl(m['image_path'] ?? m['attachments']),
       replyToId: m['reply_to_id']?.toString(),
       type: _typeFromServer((m['type'] ?? m['msg_type'])?.toString()),
@@ -244,7 +325,8 @@ class SupabaseLearningRepository implements LearningRepository {
       reactions: (m['reactions'] is Map)
           ? Map<String, int>.from(m['reactions'] as Map)
           : (m['reactions'] is String && (m['reactions'] as String).isNotEmpty
-              ? Map<String, int>.from(jsonDecode(m['reactions'] as String) as Map)
+              ? Map<String, int>.from(
+                  jsonDecode(m['reactions'] as String) as Map)
               : null),
       userReactions: (m['user_reactions'] is List)
           ? (m['user_reactions'] as List).map((e) => e.toString()).toList()
@@ -253,10 +335,8 @@ class SupabaseLearningRepository implements LearningRepository {
   }
 
   Future<List<ChatFile>> _loadChatFilesForMessage(String messageId) async {
-    final rows = await _sb
-        .from('chat_files')
-        .select('*')
-        .eq('message_id', messageId);
+    final rows =
+        await _sb.from('chat_files').select('*').eq('message_id', messageId);
     return (rows as List)
         .map((e) => ChatFile.fromJson(Map<String, dynamic>.from(e as Map)))
         .toList();
@@ -268,7 +348,8 @@ class SupabaseLearningRepository implements LearningRepository {
       final me = _sb.auth.currentUser;
       final chatId = await _getTeamMainChatId(teamId);
 
-      debugPrint('[loadChat] teamId=$teamId, chatId=$chatId');
+      safeDebugLog(
+          '[loadChat] team=${maskDebugId(teamId)} chat=${maskDebugId(chatId)}');
       final res = await _sb.rpc('get_chat_messages_for_team', params: {
         'p_team_id': teamId,
         'p_limit': 50,
@@ -346,7 +427,8 @@ class SupabaseLearningRepository implements LearningRepository {
   }
 
   @override
-  Future<List<Message>> loadOlderMessages(String teamId, Message before, {int limit = 50}) async {
+  Future<List<Message>> loadOlderMessages(String teamId, Message before,
+      {int limit = 50}) async {
     try {
       final chatId = await _getTeamMainChatId(teamId);
       if (chatId == null || chatId.isEmpty) return [];
@@ -411,10 +493,13 @@ class SupabaseLearningRepository implements LearningRepository {
 
     final last = messages.last;
     final String typeStr = _typeToServer(last);
-    final String? replyTo = (last.replyToId?.isNotEmpty ?? false) ? last.replyToId : null;
-    final String? attachment = (last.imagePath?.isNotEmpty ?? false) ? last.imagePath : null;
+    final String? replyTo =
+        (last.replyToId?.isNotEmpty ?? false) ? last.replyToId : null;
+    final String? attachment =
+        (last.imagePath?.isNotEmpty ?? false) ? last.imagePath : null;
 
-    debugPrint('[saveChat] "${last.text}" teamId=$teamId type=$typeStr replyTo=$replyTo attach=$attachment');
+    safeDebugLog(
+        '[saveChat] team=${maskDebugId(teamId)} type=$typeStr replyTo=${maskDebugId(replyTo)} hasAttachment=${attachment != null}');
 
     String? messageId;
 
@@ -431,21 +516,21 @@ class SupabaseLearningRepository implements LearningRepository {
       messageId = result?.toString();
     } catch (e, st) {
       debugPrint('[saveChat] send_chat_message error: $e\n$st');
-              try {
-          final login = await _currentLogin();
-          if (login != null && login.isNotEmpty) {
-            final result = await _sb.rpc('send_chat_message_for_login', params: {
-              'p_team_id': teamId,
-              'p_login': login,
-              'p_text': last.text,
-              'p_type': typeStr,
-              'p_reply_to': replyTo,
-              'p_attachment_url': attachment,
-              'p_assignment_id': last.assignmentId,
-              'p_file_id': last.fileId,
-            });
-            messageId = result?.toString();
-          }
+      try {
+        final login = await _currentLogin();
+        if (login != null && login.isNotEmpty) {
+          final result = await _sb.rpc('send_chat_message_for_login', params: {
+            'p_team_id': teamId,
+            'p_login': login,
+            'p_text': last.text,
+            'p_type': typeStr,
+            'p_reply_to': replyTo,
+            'p_attachment_url': attachment,
+            'p_assignment_id': last.assignmentId,
+            'p_file_id': last.fileId,
+          });
+          messageId = result?.toString();
+        }
       } catch (e2, st2) {
         debugPrint('[saveChat] send_chat_message_for_login error: $e2\n$st2');
       }
@@ -478,7 +563,8 @@ class SupabaseLearningRepository implements LearningRepository {
       }
       return {'counts': counts, 'userReactions': userReacts};
     } catch (e) {
-      print('[SupabaseLearningRepository] loadReactionsForMessage error: $e');
+      safeDebugLog(
+          '[SupabaseLearningRepository] loadReactionsForMessage failed message=${maskDebugId(messageId)} error=${e.runtimeType}');
       return {'counts': <String, int>{}, 'userReactions': <String>[]};
     }
   }
@@ -486,23 +572,19 @@ class SupabaseLearningRepository implements LearningRepository {
   @override
   Future<bool> deleteMessage(String messageId) async {
     try {
-      debugPrint('[deleteMessage] messageId=$messageId');
-      
+      safeDebugLog('[deleteMessage] message=${maskDebugId(messageId)}');
+
       // Вместо удаления файлов — отвязываем их от сообщения (message_id = null),
       // чтобы файлы оставались доступны во вкладке "Файлы".
       await _sb
           .from('chat_files')
-          .update({'message_id': null})
-          .eq('message_id', messageId);
-      
+          .update({'message_id': null}).eq('message_id', messageId);
+
       debugPrint('[deleteMessage] связанные файлы отвязаны (message_id=null)');
-      
+
       // Затем удаляем само сообщение
-      await _sb
-          .from('messages')
-          .delete()
-          .eq('id', messageId);
-      
+      await _sb.from('messages').delete().eq('id', messageId);
+
       debugPrint('[deleteMessage] сообщение успешно удалено');
       return true;
     } catch (e, st) {
@@ -514,7 +596,8 @@ class SupabaseLearningRepository implements LearningRepository {
   @override
   Future<bool> pinMessage(String messageId, bool pinned) async {
     try {
-      debugPrint('[pinMessage] id=$messageId pinned=$pinned');
+      safeDebugLog(
+          '[pinMessage] message=${maskDebugId(messageId)} pinned=$pinned');
       await _sb.rpc('pin_message', params: {
         'p_message_id': messageId,
         'p_pinned': pinned,
@@ -562,25 +645,46 @@ class SupabaseLearningRepository implements LearningRepository {
       }
     } catch (_) {}
 
+    final status = _nullableString(m['status']);
+    final publishedAt = _nullableDate(m['published_at']);
+    final dueAt = _nullableDate(m['due_at']);
+
     return Assignment(
       id: (m['id'] ?? '').toString(),
       title: (m['title'] ?? '').toString(),
       description: (m['description'] ?? '').toString(),
-      link: (m['link'] ?? '').toString().isEmpty ? null : (m['link'] ?? '').toString(),
-      due: (m['due'] ?? m['due_text'] ?? '').toString().isEmpty ? null : (m['due'] ?? m['due_text']).toString(),
+      link: (m['link'] ?? '').toString().isEmpty
+          ? null
+          : (m['link'] ?? '').toString(),
+      due: (m['due'] ?? m['due_text'] ?? '').toString().isEmpty
+          ? null
+          : (m['due'] ?? m['due_text']).toString(),
+      dueAt: dueAt,
       attachments: attachments,
-      published: (m['published'] ?? (m['published_at'] != null)) == true,
-      votes: (m['votes'] ?? 0) as int,
+      published: (m['published'] ?? false) == true ||
+          publishedAt != null ||
+          status == 'published',
+      votes: _asInt(m['votes'] ?? m['votes_count']),
       completedByMe: (m['completed_by_me'] ?? false) as bool,
       createdBy: (m['created_by'] ?? '').toString(),
-      createdAt: DateTime.tryParse((m['created_at'] ?? '').toString()) ?? DateTime.now(),
+      createdAt: DateTime.tryParse((m['created_at'] ?? '').toString()) ??
+          DateTime.now(),
+      status: status,
+      publishedAt: publishedAt,
+      subjectOfferingId: _nullableString(m['subject_offering_id']),
+      groupId: _nullableString(m['group_id']),
+      subjectId: _nullableString(m['subject_id']),
+      academicYearId: _nullableString(m['academic_year_id']),
+      academicTermId: _nullableString(m['academic_term_id']),
+      semesterNumber: _nullableInt(m['semester_number']),
     );
   }
 
   @override
   Future<List<Assignment>> loadAssignments(String teamId) async {
     try {
-      final res = await _sb.rpc('get_team_assignments', params: {'p_team_id': teamId});
+      final res =
+          await _sb.rpc('get_team_assignments', params: {'p_team_id': teamId});
       final list = (res as List)
           .map((e) => Map<String, dynamic>.from(e as Map))
           .map(_mapAssignmentRow)
@@ -588,7 +692,8 @@ class SupabaseLearningRepository implements LearningRepository {
 
       // кэш для оффлайна
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('$_assignPrefix$teamId', jsonEncode(list.map((e) => e.toJson()).toList()));
+      await prefs.setString('$_assignPrefix$teamId',
+          jsonEncode(list.map((e) => e.toJson()).toList()));
       return list;
     } catch (e, st) {
       debugPrint('[loadAssignments] error: $e\n$st');

@@ -14,6 +14,24 @@
  D debug_dates.sql
  D diagnose_file_issues.sql
  D diagnostic_check.sql
+ M docs/_snapshots/academic_terms_usage.txt
+ M docs/_snapshots/blocs_cubits_tree.txt
+ M docs/_snapshots/docs_tree.txt
+ M docs/_snapshots/git_status.txt
+ M docs/_snapshots/lib_tree.txt
+ M docs/_snapshots/models_tree.txt
+ M docs/_snapshots/navigator_usage.txt
+ M docs/_snapshots/repositories_tree.txt
+ M docs/_snapshots/router_usage.txt
+ M docs/_snapshots/screens_tree.txt
+ M docs/_snapshots/supabase_auth_usage.txt
+ M docs/_snapshots/supabase_from_usage.txt
+ M docs/_snapshots/supabase_rpc_usage.txt
+ M docs/_snapshots/supabase_tree.txt
+ M docs/_snapshots/table_terms_usage.txt
+ M docs/stage0_real/08_NEXT_STAGE_PLAN.md
+ M docs/stage0_real/STAGE0_REAL_INDEX.md
+ M docs/stage0_real/WORKLOG.md
  D drop_and_create_link_function.sql
  D drop_and_update_get_chat_messages_function.sql
  D final_fix.sql
@@ -57,12 +75,16 @@
  M lib/src/ui/chats/core/unified_chat_screen.dart
  M lib/src/ui/chats/data/dm_api.dart
  M lib/src/ui/exams/exams_screen.dart
- M lib/src/ui/info/info_screen.dart
+ M lib/src/ui/info/subject_info_screen.dart
+ M lib/src/ui/learning/assignment_details_screen.dart
  M lib/src/ui/learning/data/supabase_learning_repository.dart
  M lib/src/ui/learning/learning_screen.dart
+ M lib/src/ui/learning/models/assignment.dart
  M lib/src/ui/learning/models/message.dart
+ M lib/src/ui/learning/models/team.dart
  M lib/src/ui/learning/state/team_cubit.dart
  M lib/src/ui/learning/tabs/assignment_details_screen.dart
+ M lib/src/ui/learning/tabs/assignments/assignment_card.dart
  M lib/src/ui/learning/tabs/assignments/assignments_tab.dart
  M lib/src/ui/learning/tabs/chat/assignment_bubble.dart
  M lib/src/ui/learning/tabs/chat/assignments/assignment_form_dialog.dart
@@ -71,6 +93,7 @@
  M lib/src/ui/learning/tabs/chat/date_separator.dart
  M lib/src/ui/learning/tabs/chat/file_message_bubble.dart
  M lib/src/ui/learning/tabs/chat/message_bubble.dart
+ M lib/src/ui/learning/tabs/chat/pinned_assignment_bar.dart
  M lib/src/ui/learning/tabs/chat/pinned_strip.dart
  M lib/src/ui/learning/tabs/chat/plus_button.dart
  M lib/src/ui/learning/tabs/chat_tab.dart
@@ -82,7 +105,7 @@
  M lib/src/ui/profile/edit_profile_screen.dart
  M lib/src/ui/profile/profile_repository.dart
  M lib/src/ui/profile/profile_screen.dart
- M lib/src/ui/schedule/schedule_screen.dart
+ M lib/src/ui/schedule/lesson_details_screen.dart
  D lib/src/ui/screens/chat_screen.dart
  M lib/src/ui/splash/splash_screen.dart
  D lib/src/widgets/empty_state_widget.dart
@@ -195,14 +218,20 @@
 ?? backup_unused_files/
 ?? chat_tab_fixes.md
 ?? docs/CHAT_FAQ.md
-?? docs/_snapshots/
 ?? docs/academic_architecture_for_frontend.md
 ?? docs/academic_rls_and_visibility_plan.md
 ?? docs/bulk_import_cli_usage.md
 ?? docs/bulk_import_runbook_full.md
 ?? docs/bulk_import_simple_for_beginner.md
 ?? docs/legacy_to_new_academic_migration_notes.md
-?? docs/stage0_real/
+?? docs/stage0_real/STAGE4_0_PERSONAL_DIARY_AUDIT.md
+?? docs/stage0_real/STAGE4_1_PERSONAL_DIARY_MVP.md
+?? docs/stage0_real/STAGE4_2_1B_ASSIGNMENT_PERSISTENCE_FIX.md
+?? docs/stage0_real/STAGE4_2_1_ASSIGNMENT_MODEL_HARDENING.md
+?? docs/stage0_real/STAGE4_2_2_GROUP_ASSIGNMENTS_IN_PERSONAL_DIARY.md
+?? docs/stage0_real/STAGE4_2_3B_PERSONAL_TASKS_SQL_AND_RUNTIME_CHECK.md
+?? docs/stage0_real/STAGE4_2_3_PERSONAL_TASKS_AND_SUBJECT_DIARY_ASSIGNMENTS.md
+?? docs/stage0_real/STAGE4_2_ASSIGNMENTS_AND_PERSONAL_DIARY_AUDIT.md
 ?? docs/supabase_tables_explained.md
 ?? docs/vv_2024_import_next_steps.md
 ?? docs/vv_2024_staging_import.md
@@ -211,7 +240,8 @@
 ?? ios/Podfile.lock
 ?? lib/all_dart_code.txt
 ?? lib/router_observer.dart
-?? lib/src/data/
+?? lib/src/data/personal_diary_service.dart
+?? lib/src/data/subject_diary_repository_supabase.dart
 ?? lib/src/services/image_cache_service.dart
 ?? lib/src/ui/authentication/screens/change_password_screen.dart
 ?? lib/src/ui/chats/core/chat_message_memory_cache.dart
@@ -222,7 +252,6 @@
 ?? lib/src/ui/chats/media/
 ?? lib/src/ui/chats/my_chats_screen.dart
 ?? lib/src/ui/friends/
-?? lib/src/ui/info/subject_info_screen.dart
 ?? lib/src/ui/learning/global_cache.dart
 ?? lib/src/ui/learning/models/local_attach.dart
 ?? lib/src/ui/learning/tabs/chat/actions/
@@ -242,26 +271,28 @@
 ?? lib/src/ui/learning/tabs/chat/widgets.dart
 ?? "lib/src/ui/learning/team_details_screen \342\200\224 \320\272\320\276\320\277\320\270\321\217.dart"
 ?? lib/src/ui/learning/widgets/file_card.dart
+?? lib/src/ui/profile/personal_diary_screen.dart
 ?? lib/src/ui/schedule/all_dart_text.txt
 ?? lib/src/ui/schedule/diary_entry_details_screen.dart
-?? lib/src/ui/schedule/lesson_details_screen.dart
-?? lib/src/ui/schedule/models/
 ?? lib/src/ui/schedule/subject_diary/
 ?? lib/src/ui/schedule/subject_diary_screen.dart
-?? lib/src/ui/schedule/widgets/
+?? lib/src/ui/schedule/widgets/calendar_icon_button.dart
+?? lib/src/ui/schedule/widgets/mini_calendar.dart
 ?? lib/src/utils/
 ?? scripts/
 ?? server/
 ?? supabase/check_pin_message.sql
 ?? supabase/checks/
-?? supabase/dev_seed_test_schedule_subject_link.sql
-?? supabase/dev_seed_test_schedule_subject_link_rollback.sql
 ?? supabase/enable_pin_for_all.sql
 ?? supabase/fix_pin_message.sql
 ?? supabase/migrations/
 ?? supabase/sql_send_message_with_files.sql
-?? supabase/stage2_3_schedule_subject_resolver.sql
-?? supabase/stage2_3_schedule_subject_resolver_rollback.sql
+?? supabase/stage4_2_1_assignment_model_hardening.sql
+?? supabase/stage4_2_1_assignment_model_hardening_rollback.sql
+?? supabase/stage4_2_1b_assignment_persistence_fix.sql
+?? supabase/stage4_2_1b_assignment_persistence_fix_rollback.sql
+?? supabase/stage4_2_3_personal_diary_tasks.sql
+?? supabase/stage4_2_3_personal_diary_tasks_rollback.sql
 ?? supabase_stage_curriculum_vv_2024.csv
 ?? supabase_stage_students_vv_2024.csv
 ?? "\320\222\321\201\320\265 \321\201\321\202\321\203\320\264\320\265\320\275\321\202\321\213.xlsx"

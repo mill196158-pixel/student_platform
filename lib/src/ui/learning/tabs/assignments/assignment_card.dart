@@ -26,7 +26,8 @@ class AssignmentCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final bg = isDraft ? Colors.amber.withOpacity(.14) : cs.surfaceContainerHigh;
+    final bg =
+        isDraft ? Colors.amber.withOpacity(.14) : cs.surfaceContainerHigh;
     final border = isDraft ? Colors.orangeAccent : cs.outlineVariant;
 
     return Container(
@@ -41,10 +42,15 @@ class AssignmentCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(isDraft ? Icons.edit_note_outlined : Icons.assignment_outlined, color: isDraft ? Colors.orangeAccent : cs.primary),
+              Icon(
+                  isDraft
+                      ? Icons.edit_note_outlined
+                      : Icons.assignment_outlined,
+                  color: isDraft ? Colors.orangeAccent : cs.primary),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(assignment.title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                child: Text(assignment.title,
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
               ),
               PopupMenuButton<String>(
                 itemBuilder: (_) => const [
@@ -63,12 +69,14 @@ class AssignmentCard extends StatelessWidget {
           if (assignment.due != null)
             Padding(
               padding: const EdgeInsets.only(top: 4),
-              child: Text('до ${assignment.due}', style: Theme.of(context).textTheme.bodySmall),
+              child: Text('до ${assignment.due}',
+                  style: Theme.of(context).textTheme.bodySmall),
             ),
           if (assignment.description.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 8),
-              child: Text(assignment.description, maxLines: 3, overflow: TextOverflow.ellipsis),
+              child: Text(assignment.description,
+                  maxLines: 3, overflow: TextOverflow.ellipsis),
             ),
           const SizedBox(height: 8),
           Row(
@@ -76,12 +84,20 @@ class AssignmentCard extends StatelessWidget {
               TextButton(onPressed: onOpen, child: const Text('Открыть')),
               const Spacer(),
               if (isDraft && !canPublish)
-                OutlinedButton.icon(onPressed: onVote, icon: const Icon(Icons.how_to_vote_outlined, size: 18), label: const Text('За')),
+                OutlinedButton.icon(
+                    onPressed: onVote,
+                    icon: const Icon(Icons.how_to_vote_outlined, size: 18),
+                    label: const Text('За')),
               if (canPublish)
-                FilledButton.icon(onPressed: onPublish, icon: const Icon(Icons.publish_outlined, size: 18), label: const Text('Опубликовать')),
+                FilledButton.icon(
+                    onPressed: onPublish,
+                    icon: const Icon(Icons.publish_outlined, size: 18),
+                    label: const Text('Опубликовать')),
               if (isDraft) ...[
                 const SizedBox(width: 8),
-                Chip(label: Text('${assignment.votes}/3'), visualDensity: VisualDensity.compact),
+                Chip(
+                    label: Text('${assignment.votesCount}/2'),
+                    visualDensity: VisualDensity.compact),
               ],
             ],
           ),

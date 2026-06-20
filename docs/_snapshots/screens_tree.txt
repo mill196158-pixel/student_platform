@@ -121,6 +121,7 @@ lib\src\ui\navigation
 lib\src\ui\navigation\navigation_screen.dart
 lib\src\ui\profile
 lib\src\ui\profile\edit_profile_screen.dart
+lib\src\ui\profile\personal_diary_screen.dart
 lib\src\ui\profile\profile_repository.dart
 lib\src\ui\profile\profile_screen.dart
 lib\src\ui\schedule

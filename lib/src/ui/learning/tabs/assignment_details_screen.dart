@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import 'state/team_cubit.dart';
-import 'models/assignment.dart';
+import '../state/team_cubit.dart';
+import '../models/assignment.dart';
 
 class AssignmentDetailsScreen extends StatelessWidget {
   final String assignmentId;
@@ -100,7 +100,8 @@ class AssignmentDetailsScreen extends StatelessWidget {
                         onPressed: () {
                           context.read<TeamCubit>().publishPendingManually();
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Задание опубликовано')),
+                            const SnackBar(
+                                content: Text('Задание опубликовано')),
                           );
                         },
                       ),
@@ -110,7 +111,8 @@ class AssignmentDetailsScreen extends StatelessWidget {
                       child: _BigButton.tonalIcon(
                         icon: Icons.how_to_vote_outlined,
                         label: 'Голосовать «за»',
-                        onPressed: () => context.read<TeamCubit>().voteForPending(),
+                        onPressed: () =>
+                            context.read<TeamCubit>().voteFor(a.id),
                       ),
                     ),
                   if (!isDraft)
@@ -118,10 +120,13 @@ class AssignmentDetailsScreen extends StatelessWidget {
                       child: _BigButton.icon(
                         icon: isDone ? Icons.check_circle : Icons.task_alt,
                         label: isDone ? 'Выполнено' : 'Отметить как выполнено',
-                        bgColor: isDone ? const Color(0xFF16A34A) : null, // зелёный если уже выполнено
+                        bgColor: isDone
+                            ? const Color(0xFF16A34A)
+                            : null, // зелёный если уже выполнено
                         onPressed: () => context
                             .read<TeamCubit>()
-                            .markAssignmentDone(assignmentId: a.id, done: !isDone),
+                            .markAssignmentDone(
+                                assignmentId: a.id, done: !isDone),
                       ),
                     ),
                 ],
@@ -133,10 +138,11 @@ class AssignmentDetailsScreen extends StatelessWidget {
     );
   }
 
-  TeamAssignment _pickAssignment(TeamState st, String id) {
+  Assignment _pickAssignment(TeamState st, String id) {
     return (st.assignments).firstWhere(
       (x) => x.id == id,
-      orElse: () => st.published.isNotEmpty ? st.published.last : st.assignments.first,
+      orElse: () =>
+          st.published.isNotEmpty ? st.published.last : st.assignments.first,
     );
   }
 
@@ -161,7 +167,7 @@ class AssignmentDetailsScreen extends StatelessWidget {
 
 /// ——— Карточка «шапки»: статусные чипы, заголовок, срок
 class _AssignmentHeaderCard extends StatelessWidget {
-  final TeamAssignment assignment;
+  final Assignment assignment;
   final bool isDraft;
   final bool isDone;
 
@@ -175,7 +181,9 @@ class _AssignmentHeaderCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final stripe = isDraft
         ? const Color(0xFFF59E0B) // amber-500
-        : (isDone ? const Color(0xFF16A34A) : Theme.of(context).colorScheme.primary);
+        : (isDone
+            ? const Color(0xFF16A34A)
+            : Theme.of(context).colorScheme.primary);
 
     return Container(
       decoration: BoxDecoration(
@@ -246,7 +254,8 @@ class _AssignmentHeaderCard extends StatelessWidget {
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      const Icon(Icons.event_outlined, size: 18, color: Color(0xFF6B7280)),
+                      const Icon(Icons.event_outlined,
+                          size: 18, color: Color(0xFF6B7280)),
                       const SizedBox(width: 6),
                       Text(
                         'Срок: ${_formatDue(assignment.due)}',
@@ -368,7 +377,8 @@ class _AttachmentTile extends StatelessWidget {
     final ext = name.split('.').last.toLowerCase();
     IconData icon = Icons.insert_drive_file_outlined;
     if (['pdf'].contains(ext)) icon = Icons.picture_as_pdf_outlined;
-    if (['png', 'jpg', 'jpeg', 'webp', 'gif'].contains(ext)) icon = Icons.image_outlined;
+    if (['png', 'jpg', 'jpeg', 'webp', 'gif'].contains(ext))
+      icon = Icons.image_outlined;
     if (['xls', 'xlsx', 'csv'].contains(ext)) icon = Icons.table_chart_outlined;
     if (['doc', 'docx'].contains(ext)) icon = Icons.description_outlined;
     if (['zip', 'rar', '7z'].contains(ext)) icon = Icons.archive_outlined;
@@ -426,7 +436,8 @@ class _BigButton extends StatelessWidget {
     required VoidCallback onPressed,
     Color? bgColor,
   }) =>
-      _BigButton._(icon: icon, label: label, onPressed: onPressed, bgColor: bgColor);
+      _BigButton._(
+          icon: icon, label: label, onPressed: onPressed, bgColor: bgColor);
 
   factory _BigButton.tonalIcon({
     required IconData icon,

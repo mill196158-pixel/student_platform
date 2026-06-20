@@ -20,7 +20,6 @@ Future<AssignmentFormResult?> showAssignmentFormDialog(
   final due = TextEditingController(text: initial?.due ?? '');
   final files = <Map<String, String>>[...?initial?.attachments];
   final formKey = GlobalKey<FormState>();
-  final theme = Theme.of(context);
 
   return showModalBottomSheet<AssignmentFormResult>(
     context: context,
@@ -30,6 +29,7 @@ Future<AssignmentFormResult?> showAssignmentFormDialog(
     builder: (sheetContext) {
       return StatefulBuilder(
         builder: (context, setState) {
+          final theme = Theme.of(context);
           final viewInsets = MediaQuery.viewInsetsOf(context);
           final colorScheme = theme.colorScheme;
           final textTheme = theme.textTheme;
@@ -44,6 +44,7 @@ Future<AssignmentFormResult?> showAssignmentFormDialog(
               initialDate: now,
             );
             if (picked == null) return;
+            if (!context.mounted) return;
             due.text =
                 '${picked.day.toString().padLeft(2, '0')}.${picked.month.toString().padLeft(2, '0')}';
             setState(() {});
@@ -68,7 +69,8 @@ Future<AssignmentFormResult?> showAssignmentFormDialog(
                 constraints: const BoxConstraints(maxWidth: 560),
                 child: Material(
                   color: colorScheme.surface,
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(28)),
                   clipBehavior: Clip.antiAlias,
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
@@ -99,7 +101,9 @@ Future<AssignmentFormResult?> showAssignmentFormDialog(
                                   borderRadius: BorderRadius.circular(16),
                                 ),
                                 child: Icon(
-                                  isEditing ? Icons.edit_note : Icons.assignment_add,
+                                  isEditing
+                                      ? Icons.edit_note
+                                      : Icons.assignment_add,
                                   color: colorScheme.onPrimaryContainer,
                                 ),
                               ),
@@ -109,8 +113,11 @@ Future<AssignmentFormResult?> showAssignmentFormDialog(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      isEditing ? 'Редактировать задание' : 'Новое задание',
-                                      style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+                                      isEditing
+                                          ? 'Редактировать задание'
+                                          : 'Новое задание',
+                                      style: textTheme.titleLarge?.copyWith(
+                                          fontWeight: FontWeight.w800),
                                     ),
                                     const SizedBox(height: 2),
                                     Text(
@@ -136,8 +143,9 @@ Future<AssignmentFormResult?> showAssignmentFormDialog(
                               prefixIcon: Icon(Icons.title),
                               border: OutlineInputBorder(),
                             ),
-                            validator: (value) =>
-                                (value ?? '').trim().isEmpty ? 'Добавь название задания' : null,
+                            validator: (value) => (value ?? '').trim().isEmpty
+                                ? 'Добавь название задания'
+                                : null,
                           ),
                           const SizedBox(height: 12),
                           TextFormField(
@@ -147,13 +155,15 @@ Future<AssignmentFormResult?> showAssignmentFormDialog(
                             textInputAction: TextInputAction.newline,
                             decoration: const InputDecoration(
                               labelText: 'Что сделать',
-                              hintText: 'Опиши задачу, формат сдачи и важные условия',
+                              hintText:
+                                  'Опиши задачу, формат сдачи и важные условия',
                               prefixIcon: Icon(Icons.notes),
                               alignLabelWithHint: true,
                               border: OutlineInputBorder(),
                             ),
-                            validator: (value) =>
-                                (value ?? '').trim().isEmpty ? 'Опиши, что нужно сделать' : null,
+                            validator: (value) => (value ?? '').trim().isEmpty
+                                ? 'Опиши, что нужно сделать'
+                                : null,
                           ),
                           const SizedBox(height: 12),
                           TextFormField(
@@ -188,15 +198,19 @@ Future<AssignmentFormResult?> showAssignmentFormDialog(
                           ),
                           if (files.isNotEmpty) ...[
                             const SizedBox(height: 16),
-                            Text('Вложения', style: textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+                            Text('Вложения',
+                                style: textTheme.titleSmall
+                                    ?.copyWith(fontWeight: FontWeight.w700)),
                             const SizedBox(height: 8),
                             for (final file in files)
                               Card(
                                 elevation: 0,
-                                color: colorScheme.surfaceContainerHighest.withValues(alpha: .55),
+                                color: colorScheme.surfaceContainerHighest
+                                    .withValues(alpha: .55),
                                 child: ListTile(
                                   dense: true,
-                                  leading: const Icon(Icons.insert_drive_file_outlined),
+                                  leading: const Icon(
+                                      Icons.insert_drive_file_outlined),
                                   title: Text(file['name'] ?? 'Файл'),
                                   subtitle: Text(
                                     file['path'] ?? '',
@@ -219,8 +233,11 @@ Future<AssignmentFormResult?> showAssignmentFormDialog(
                               Expanded(
                                 child: FilledButton.icon(
                                   onPressed: submit,
-                                  icon: Icon(isEditing ? Icons.save_outlined : Icons.add_task),
-                                  label: Text(isEditing ? 'Сохранить' : 'Добавить'),
+                                  icon: Icon(isEditing
+                                      ? Icons.save_outlined
+                                      : Icons.add_task),
+                                  label: Text(
+                                      isEditing ? 'Сохранить' : 'Добавить'),
                                 ),
                               ),
                             ],

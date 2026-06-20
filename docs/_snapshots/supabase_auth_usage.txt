@@ -60,7 +60,15 @@ lib\src\app.dart:29:final userId = Supabase.instance.client.auth.currentUser?.id
 lib\src\config\auth_email_adapter.dart:1:/// Converts a student login or email into the email used by Supabase Auth.
 lib\src\core\session.dart:24:final sess = sb.auth.currentSession;
 lib\src\data\academic_context_service.dart:85:final authUser = _sb.auth.currentUser;
-lib\src\data\subject_diary_repository_supabase.dart:684:final String userId = _sb.auth.currentUser?.id ?? 'anon';
+lib\src\data\personal_diary_service.dart:209:final userId = _sb.auth.currentUser?.id ?? context.userId ?? '';
+lib\src\data\personal_diary_service.dart:540:final userId = _sb.auth.currentUser?.id ?? '';
+lib\src\data\personal_diary_service.dart:601:final userId = _sb.auth.currentUser?.id ?? '';
+lib\src\data\personal_diary_service.dart:662:final userId = _sb.auth.currentUser?.id ?? '';
+lib\src\data\personal_diary_service.dart:707:final userId = _sb.auth.currentUser?.id ?? '';
+lib\src\data\subject_diary_repository_supabase.dart:296:final authorId = _sb.auth.currentUser?.id ?? '';
+lib\src\data\subject_diary_repository_supabase.dart:718:final authorId = _sb.auth.currentUser?.id ?? '';
+lib\src\data\subject_diary_repository_supabase.dart:746:final authorId = _sb.auth.currentUser?.id ?? '';
+lib\src\data\subject_diary_repository_supabase.dart:1015:final String userId = _sb.auth.currentUser?.id ?? 'anon';
 lib\src\services\auth_service.dart:20:await _sb.auth.signInWithPassword(email: email, password: password);
 lib\src\services\auth_service.dart:25:final uid = _sb.auth.currentUser?.id;
 lib\src\services\auth_service.dart:48:await _sb.auth.signOut();
@@ -89,16 +97,16 @@ lib\src\ui\friends\my_friends_screen.dart:491:final uid = _sb.auth.currentUser?.
 lib\src\ui\friends\my_friends_screen.dart:514:final uid = _sb.auth.currentUser?.id;
 lib\src\ui\friends\my_friends_screen.dart:563:final me = _sb.auth.currentUser?.id;
 lib\src\ui\learning\learning_screen.dart:72:final uid = client.auth.currentUser?.id;
-lib\src\ui\learning\data\supabase_learning_repository.dart:111:final user = _sb.auth.currentUser;
-lib\src\ui\learning\data\supabase_learning_repository.dart:286:final me = _sb.auth.currentUser;
-lib\src\ui\learning\data\supabase_learning_repository.dart:359:currentUserId: _sb.auth.currentUser?.id ?? '',
-lib\src\ui\learning\data\supabase_learning_repository.dart:416:currentUserId: _sb.auth.currentUser?.id ?? '',
-lib\src\ui\learning\data\supabase_learning_repository.dart:491:final uid = _sb.auth.currentUser?.id;
+lib\src\ui\learning\data\supabase_learning_repository.dart:158:final user = _sb.auth.currentUser;
+lib\src\ui\learning\data\supabase_learning_repository.dart:348:final me = _sb.auth.currentUser;
+lib\src\ui\learning\data\supabase_learning_repository.dart:421:currentUserId: _sb.auth.currentUser?.id ?? '',
+lib\src\ui\learning\data\supabase_learning_repository.dart:478:currentUserId: _sb.auth.currentUser?.id ?? '',
+lib\src\ui\learning\data\supabase_learning_repository.dart:553:final uid = _sb.auth.currentUser?.id;
 lib\src\ui\learning\state\team_cubit.dart:237:final uid = sb.auth.currentUser?.id;
 lib\src\ui\learning\state\team_cubit.dart:271:final uid = Supabase.instance.client.auth.currentUser?.id;
 lib\src\ui\learning\state\team_cubit.dart:305:final uid = Supabase.instance.client.auth.currentUser?.id;
 lib\src\ui\learning\state\team_cubit.dart:336:final currentUid = Supabase.instance.client.auth.currentUser?.id ?? '';
-lib\src\ui\learning\state\team_cubit.dart:639:final uid = sb.auth.currentUser?.id;
+lib\src\ui\learning\state\team_cubit.dart:664:final uid = sb.auth.currentUser?.id;
 lib\src\ui\learning\tabs\chat_tab.dart:76:final uid = Supabase.instance.client.auth.currentUser?.id;
 lib\src\ui\learning\tabs\chat_tab.dart:826:final user = Supabase.instance.client.auth.currentUser;
 lib\src\ui\learning\tabs\chat_tab.dart:1058:Supabase.instance.client.auth.currentUser?.id,
@@ -137,6 +145,24 @@ supabase\fix_pin_message.sql:43:raise exception 'auth.uid() is null';
 supabase\fix_pin_message.sql:47:m.author_id = auth.uid()
 supabase\fix_pin_message.sql:52:and tm.user_id = auth.uid()
 supabase\sql_send_message_with_files.sql:23:v_user_id := auth.uid();
+supabase\stage4_2_1b_assignment_persistence_fix.sql:71:where mr.message_id = m.id and mr.user_id = auth.uid()
+supabase\stage4_2_1b_assignment_persistence_fix.sql:101:v_user uuid := auth.uid();
+supabase\stage4_2_1b_assignment_persistence_fix_rollback.sql:57:where mr.message_id = m.id and mr.user_id = auth.uid()
+supabase\stage4_2_1b_assignment_persistence_fix_rollback.sql:86:v_user uuid := auth.uid();
+supabase\stage4_2_1_assignment_model_hardening.sql:48:where d.assignment_id = a.id and d.user_id = auth.uid()
+supabase\stage4_2_1_assignment_model_hardening.sql:79:v_user uuid := auth.uid();
+supabase\stage4_2_1_assignment_model_hardening.sql:198:and tm.user_id = auth.uid()
+supabase\stage4_2_1_assignment_model_hardening.sql:229:v_user uuid := auth.uid();
+supabase\stage4_2_1_assignment_model_hardening_rollback.sql:35:where d.assignment_id = a.id and d.user_id = auth.uid()
+supabase\stage4_2_1_assignment_model_hardening_rollback.sql:62:values (p_team_id, p_title, p_description, nullif(p_link,''), nullif(p_due,''), coalesce(p_attachments,'[]'::jsonb), auth.uid())
+supabase\stage4_2_1_assignment_model_hardening_rollback.sql:77:v_chat, auth.uid(),
+supabase\stage4_2_1_assignment_model_hardening_rollback.sql:102:where tm.team_id = v_team and tm.user_id = auth.uid() and tm.role in ('starosta','teacher','admin','owner')
+supabase\stage4_2_1_assignment_model_hardening_rollback.sql:126:v_user uuid := auth.uid();
+supabase\stage4_2_3_personal_diary_tasks.sql:34:using (author_id = auth.uid());
+supabase\stage4_2_3_personal_diary_tasks.sql:41:with check (author_id = auth.uid());
+supabase\stage4_2_3_personal_diary_tasks.sql:48:using (author_id = auth.uid())
+supabase\stage4_2_3_personal_diary_tasks.sql:49:with check (author_id = auth.uid());
+supabase\stage4_2_3_personal_diary_tasks.sql:56:using (author_id = auth.uid());
 supabase\checks\vv_2024_auth_credentials_dry_run.sql:26:left join auth.users au on lower(au.email) = lower(c.normalized_auth_email)
 supabase\checks\vv_2024_auth_credentials_dry_run.sql:104:join auth.users au on lower(au.email) = lower(c.auth_email)
 supabase\checks\vv_2024_curriculum_import_post_check.sql:130:(select count(*) from auth.users)::bigint as auth_users_total;

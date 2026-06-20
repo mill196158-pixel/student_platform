@@ -64,21 +64,22 @@ lib\all_dart_code.txt:24696:final res = await _sb.rpc('get_profile_counters', pa
 lib\all_dart_code.txt:24722:final res = await _sb.rpc('unread_total');
 lib\all_dart_code.txt:26609:final resp = await _sb.rpc('get_my_lessons', params: {
 lib\src\core\session.dart:28:final res = await sb.rpc('get_my_profile');
-lib\src\data\subject_diary_repository_supabase.dart:71:final res = await _sb.rpc('add_subject_diary_entry', params: params);
-lib\src\data\subject_diary_repository_supabase.dart:174:final res = await _sb.rpc('get_my_subject_diary', params: params);
-lib\src\data\subject_diary_repository_supabase.dart:231:await _sb.rpc('delete_subject_diary_entry', params: {'p_entry_id': id});
-lib\src\data\subject_diary_repository_supabase.dart:247:await _sb.rpc('update_subject_diary_text', params: {
-lib\src\data\subject_diary_repository_supabase.dart:304:await _sb.rpc('remove_subject_diary_file',
-lib\src\data\subject_diary_repository_supabase.dart:366:.rpc('remove_subject_diary_file', params: {'p_file_id': fid});
-lib\src\data\subject_diary_repository_supabase.dart:380:await _sb.rpc('delete_subject_diary_entry',
-lib\src\data\subject_diary_repository_supabase.dart:406:.rpc('delete_subject_diary_entry', params: {'p_entry_id': entryId});
-lib\src\data\subject_diary_repository_supabase.dart:433:.rpc('remove_subject_diary_file', params: {'p_file_id': fid});
-lib\src\data\subject_diary_repository_supabase.dart:467:.rpc('get_subject_diary_files', params: {'p_entry_id': entryId});
-lib\src\data\subject_diary_repository_supabase.dart:544:final res = await _sb.rpc('get_my_teams');
-lib\src\data\subject_diary_repository_supabase.dart:577:final teams = await _sb.rpc('get_my_teams');
-lib\src\data\subject_diary_repository_supabase.dart:597:final resp = await _sb.rpc('get_my_lessons', params: {
-lib\src\data\subject_diary_repository_supabase.dart:643:final resp = await _sb.rpc('get_my_lessons', params: {
-lib\src\data\subject_diary_repository_supabase.dart:704:await _sb.rpc('add_subject_diary_file', params: {
+lib\src\data\personal_diary_service.dart:530:await _sb.rpc('set_assignment_done', params: {
+lib\src\data\subject_diary_repository_supabase.dart:78:final res = await _sb.rpc('add_subject_diary_entry', params: params);
+lib\src\data\subject_diary_repository_supabase.dart:254:final res = await _sb.rpc('get_my_subject_diary', params: params);
+lib\src\data\subject_diary_repository_supabase.dart:360:await _sb.rpc('delete_subject_diary_entry', params: {'p_entry_id': id});
+lib\src\data\subject_diary_repository_supabase.dart:376:await _sb.rpc('update_subject_diary_text', params: {
+lib\src\data\subject_diary_repository_supabase.dart:433:await _sb.rpc('remove_subject_diary_file',
+lib\src\data\subject_diary_repository_supabase.dart:495:.rpc('remove_subject_diary_file', params: {'p_file_id': fid});
+lib\src\data\subject_diary_repository_supabase.dart:509:await _sb.rpc('delete_subject_diary_entry',
+lib\src\data\subject_diary_repository_supabase.dart:535:.rpc('delete_subject_diary_entry', params: {'p_entry_id': entryId});
+lib\src\data\subject_diary_repository_supabase.dart:562:.rpc('remove_subject_diary_file', params: {'p_file_id': fid});
+lib\src\data\subject_diary_repository_supabase.dart:603:.rpc('get_subject_diary_files', params: {'p_entry_id': entryId});
+lib\src\data\subject_diary_repository_supabase.dart:854:final res = await _sb.rpc('get_my_teams');
+lib\src\data\subject_diary_repository_supabase.dart:887:final teams = await _sb.rpc('get_my_teams');
+lib\src\data\subject_diary_repository_supabase.dart:907:final resp = await _sb.rpc('get_my_lessons', params: {
+lib\src\data\subject_diary_repository_supabase.dart:953:final resp = await _sb.rpc('get_my_lessons', params: {
+lib\src\data\subject_diary_repository_supabase.dart:1036:await _sb.rpc('add_subject_diary_file', params: {
 lib\src\ui\authentication\screens\login_screen.dart:44:final rows = await _sb.rpc('get_my_profile') as List?;
 lib\src\ui\authentication\screens\register_screen.dart:52:await sb.rpc('register_local_user', params: {
 lib\src\ui\chats\my_chats_screen.dart:71:await sb.rpc('mark_chat_read', params: {
@@ -108,18 +109,19 @@ lib\src\ui\friends\my_friends_screen.dart:313:final res = await _sb.rpc('get_my_
 lib\src\ui\friends\my_friends_screen.dart:460:final res = await _sb.rpc('get_user_profile', params: {'p_id': id});
 lib\src\ui\friends\my_friends_screen.dart:575:final res = await _sb.rpc('search_users_global', params: {'p_q': q});
 lib\src\ui\learning\data\supabase_learning_repository.dart:34:final res = await _sb.rpc('get_my_teams');
-lib\src\ui\learning\data\supabase_learning_repository.dart:77:await _sb.rpc('join_team_by_code', params: {'p_code': code.trim()});
-lib\src\ui\learning\data\supabase_learning_repository.dart:291:final res = await _sb.rpc('get_chat_messages_for_team', params: {
-lib\src\ui\learning\data\supabase_learning_repository.dart:445:final result = await _sb.rpc('send_chat_message', params: {
-lib\src\ui\learning\data\supabase_learning_repository.dart:460:final result = await _sb.rpc('send_chat_message_for_login', params: {
-lib\src\ui\learning\data\supabase_learning_repository.dart:539:await _sb.rpc('pin_message', params: {
-lib\src\ui\learning\data\supabase_learning_repository.dart:610:await _sb.rpc('get_team_assignments', params: {'p_team_id': teamId});
+lib\src\ui\learning\data\supabase_learning_repository.dart:124:await _sb.rpc('join_team_by_code', params: {'p_code': code.trim()});
+lib\src\ui\learning\data\supabase_learning_repository.dart:353:final res = await _sb.rpc('get_chat_messages_for_team', params: {
+lib\src\ui\learning\data\supabase_learning_repository.dart:507:final result = await _sb.rpc('send_chat_message', params: {
+lib\src\ui\learning\data\supabase_learning_repository.dart:522:final result = await _sb.rpc('send_chat_message_for_login', params: {
+lib\src\ui\learning\data\supabase_learning_repository.dart:601:await _sb.rpc('pin_message', params: {
+lib\src\ui\learning\data\supabase_learning_repository.dart:687:await _sb.rpc('get_team_assignments', params: {'p_team_id': teamId});
 lib\src\ui\learning\state\team_cubit.dart:607:await Supabase.instance.client.rpc('propose_assignment', params: {
-lib\src\ui\learning\state\team_cubit.dart:665:final res = await sb.rpc('vote_assignment', params: {
-lib\src\ui\learning\state\team_cubit.dart:684:await Supabase.instance.client.rpc('publish_assignment', params: {
-lib\src\ui\learning\state\team_cubit.dart:706:await Supabase.instance.client.rpc('set_assignment_done', params: {
-lib\src\ui\learning\state\team_cubit.dart:721:await Supabase.instance.client.rpc('update_assignment', params: {
-lib\src\ui\learning\state\team_cubit.dart:733:await Supabase.instance.client.rpc('remove_assignment', params: {
+lib\src\ui\learning\state\team_cubit.dart:668:final res = await sb.rpc('vote_assignment', params: {
+lib\src\ui\learning\state\team_cubit.dart:688:await Supabase.instance.client.rpc('publish_assignment', params: {
+lib\src\ui\learning\state\team_cubit.dart:701:await Supabase.instance.client.rpc('set_assignment_done', params: {
+lib\src\ui\learning\state\team_cubit.dart:712:await Supabase.instance.client.rpc('set_assignment_done', params: {
+lib\src\ui\learning\state\team_cubit.dart:727:await Supabase.instance.client.rpc('update_assignment', params: {
+lib\src\ui\learning\state\team_cubit.dart:739:await Supabase.instance.client.rpc('remove_assignment', params: {
 lib\src\ui\learning\tabs\files_tab.dart:705:final response = await _sb.rpc('save_chat_file', params: {
 lib\src\ui\learning\tabs\files_tab.dart:722:final response = await _sb.rpc(
 lib\src\ui\learning\tabs\chat\attachments\chat_attachments_controller.dart:204:final response = await supabase.rpc('save_chat_file', params: {

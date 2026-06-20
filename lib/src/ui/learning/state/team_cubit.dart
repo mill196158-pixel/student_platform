@@ -13,6 +13,8 @@ import 'package:student_platform/src/ui/learning/models/assignment.dart';
 import 'package:student_platform/src/ui/learning/models/file_item.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/learning/models/team.dart';
+import 'package:student_platform/src/ui/chats/core/chat_message_memory_cache.dart';
+import 'package:student_platform/src/utils/safe_debug_log.dart';
 
 class TeamState {
   final Team team;
@@ -77,6 +79,7 @@ class TeamCubit extends Cubit<TeamState> {
 
   String? _myDisplayName;
   String? _myAvatarUrl;
+  String? _mainChatId;
 
   // realtime
   RealtimeChannel? _rtChat;
@@ -88,14 +91,25 @@ class TeamCubit extends Cubit<TeamState> {
   // ----------- INIT -----------
   Future<void> init() async {
     emit(state.copyWith(loading: true));
+    final chatId = await _resolveMainChatId();
+    if (chatId != null && ChatMessageMemoryCache.has(chatId)) {
+      emit(state.copyWith(
+        loading: true,
+        chat: ChatMessageMemoryCache.snapshot(chatId),
+      ));
+    }
+
     final chat = await repo.loadChat(state.team.id);
     final files = await repo.loadFiles(state.team.id);
     final ass = await repo.loadAssignments(state.team.id);
     final star = await _fetchIsStarosta(state.team.id);
+    final mergedChat = chatId == null
+        ? _dedupeAndSort(chat)
+        : ChatMessageMemoryCache.merge(chatId, chat);
 
     emit(state.copyWith(
       loading: false,
-      chat: chat,
+      chat: mergedChat,
       files: files,
       assignments: ass,
       doneAssignmentIds:
@@ -107,6 +121,114 @@ class TeamCubit extends Cubit<TeamState> {
 
     _subscribeToChat();
     _subscribeToAssignments();
+  }
+
+  Future<String?> _resolveMainChatId() async {
+    if (_mainChatId != null && _mainChatId!.isNotEmpty) return _mainChatId;
+    try {
+      final rows = await Supabase.instance.client
+          .from('chats')
+          .select('id')
+          .eq('team_id', state.team.id)
+          .eq('type', 'team_main')
+          .limit(1);
+      if (rows.isEmpty) return null;
+
+      final chatId = (rows.first['id'] ?? '').toString();
+      if (chatId.isEmpty) return null;
+
+      _mainChatId = chatId;
+      return chatId;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  List<Message> _mergeCachedChat(List<Message> messages) {
+    final chatId = _mainChatId;
+    if (chatId == null || chatId.isEmpty) return _dedupeAndSort(messages);
+    return ChatMessageMemoryCache.merge(chatId, messages);
+  }
+
+  List<Message> _reconcileCachedMessage(
+    Message serverMessage, {
+    String? clientId,
+  }) {
+    final chatId = _mainChatId;
+    if (chatId == null || chatId.isEmpty) {
+      final updated = List<Message>.from(state.chat)
+        ..removeWhere((message) {
+          if (!message.isLocal) return false;
+          if (clientId != null && clientId.isNotEmpty) {
+            return message.clientId == clientId || message.id == clientId;
+          }
+          return _isLikelySameLocalMessage(message, serverMessage);
+        })
+        ..add(
+            serverMessage.copyWith(deliveryStatus: MessageDeliveryStatus.sent));
+      return _dedupeAndSort(updated);
+    }
+    return ChatMessageMemoryCache.reconcileUpsert(
+      chatId,
+      serverMessage,
+      clientId: clientId,
+    );
+  }
+
+  List<Message> _removeCachedMessage(String messageId) {
+    final chatId = _mainChatId;
+    if (chatId == null || chatId.isEmpty) {
+      return state.chat.where((m) => m.id != messageId).toList();
+    }
+    return ChatMessageMemoryCache.remove(chatId, messageId);
+  }
+
+  List<Message> _dedupeAndSort(Iterable<Message> messages) {
+    final byId = <String, Message>{};
+    for (final message in messages) {
+      if (message.id.isEmpty) continue;
+      byId[message.id] = message;
+    }
+    final list = byId.values.toList()
+      ..sort((a, b) {
+        final byTime = a.at.compareTo(b.at);
+        return byTime != 0 ? byTime : a.id.compareTo(b.id);
+      });
+    return list;
+  }
+
+  bool _isLikelySameLocalMessage(Message local, Message server) {
+    if (!local.isLocal || server.isLocal) return false;
+    if (local.authorId.isNotEmpty &&
+        server.authorId.isNotEmpty &&
+        local.authorId != server.authorId) {
+      return false;
+    }
+    if (local.text.trim() != server.text.trim()) return false;
+    if ((local.replyToId ?? '') != (server.replyToId ?? '')) return false;
+    if (local.type != server.type) return false;
+    if ((local.fileId ?? '') != (server.fileId ?? '')) return false;
+    return local.at.difference(server.at).abs() <= const Duration(seconds: 30);
+  }
+
+  void _markLocalMessageFailed(String clientId) {
+    final updated = state.chat.map((message) {
+      if (message.clientId == clientId || message.id == clientId) {
+        return message.copyWith(deliveryStatus: MessageDeliveryStatus.failed);
+      }
+      return message;
+    }).toList();
+    emit(state.copyWith(chat: _mergeCachedChat(updated)));
+  }
+
+  Future<void> refreshMessageById(String messageId) async {
+    if (messageId.isEmpty) return;
+
+    final message = await repo.loadMessageById(state.team.id, messageId);
+    if (message == null) return;
+
+    emit(state.copyWith(chat: _reconcileCachedMessage(message)));
+    await _hydrateAssignmentIdsInChat();
   }
 
   // ----- роль старосты -----
@@ -141,8 +263,7 @@ class TeamCubit extends Cubit<TeamState> {
         final m = Map<String, dynamic>.from(jsonDecode(raw) as Map);
         final first = (m['name'] ?? '').toString();
         final last = (m['surname'] ?? '').toString();
-        final full =
-            [first, last].where((s) => s.isNotEmpty).join(' ').trim();
+        final full = [first, last].where((s) => s.isNotEmpty).join(' ').trim();
         if (full.isNotEmpty) return _myDisplayName = full;
       }
     } catch (_) {}
@@ -215,9 +336,11 @@ class TeamCubit extends Cubit<TeamState> {
     final currentUid = Supabase.instance.client.auth.currentUser?.id ?? '';
 
     // оптимистично
+    final clientId =
+        'local_${DateTime.now().microsecondsSinceEpoch}_${Random().nextInt(999)}';
     final local = Message(
-      id: '${DateTime.now().millisecondsSinceEpoch}${Random().nextInt(999)}',
-      chatId: '',
+      id: clientId,
+      chatId: _mainChatId ?? '',
       authorId: currentUid,
       authorLogin: '',
       authorName: authorName ?? await _getMyDisplayName(),
@@ -229,57 +352,73 @@ class TeamCubit extends Cubit<TeamState> {
       type: type,
       assignmentId: assignmentId,
       fileId: fileId,
+      clientId: clientId,
+      deliveryStatus: MessageDeliveryStatus.sending,
     );
-    final optimistic = [...state.chat, local];
+    final optimistic = _mergeCachedChat([...state.chat, local]);
     emit(state.copyWith(chat: optimistic));
 
-    // сервер
-    final messageId = await repo.saveChat(state.team.id, optimistic);
-    if (messageId != null) {
-      final fresh = await repo.loadChat(state.team.id);
-      if (fresh.isNotEmpty) {
-        emit(state.copyWith(chat: fresh));
+    try {
+      final messageId = await repo.saveChat(state.team.id, [local]);
+      if (messageId == null || messageId.isEmpty) {
+        _markLocalMessageFailed(clientId);
+        return null;
       }
-    }
 
-    await _hydrateAssignmentIdsInChat();
-    return messageId;
+      final serverMessage =
+          await repo.loadMessageById(state.team.id, messageId);
+      if (serverMessage != null) {
+        emit(state.copyWith(
+          chat: _reconcileCachedMessage(serverMessage, clientId: clientId),
+        ));
+      }
+      await _hydrateAssignmentIdsInChat();
+      return messageId;
+    } catch (e) {
+      _markLocalMessageFailed(clientId);
+      safeDebugLog('[TeamCubit] sendMessage failed: ${e.runtimeType}');
+      return null;
+    }
   }
 
   Future<void> removeMessage(String id) async {
     final idx = state.chat.indexWhere((m) => m.id == id);
     if (idx == -1) return;
-    
+    final previous = state.chat;
+
     // Оптимистично удаляем локально
-    final updated = List<Message>.from(state.chat)..removeAt(idx);
+    final updated = _removeCachedMessage(id);
     emit(state.copyWith(chat: updated));
-    
+
     // Удаляем с сервера
     final success = await repo.deleteMessage(id);
     if (!success) {
       // Если не удалось удалить с сервера, возвращаем сообщение обратно
-      emit(state.copyWith(chat: state.chat));
-      print('[TeamCubit] Не удалось удалить сообщение с сервера: $id');
+      emit(state.copyWith(chat: _mergeCachedChat(previous)));
+      safeDebugLog(
+          '[TeamCubit] delete message failed message=${maskDebugId(id)}');
       return;
     }
     // Перечитываем чат, чтобы зафиксировать удаление сервером (устойчиво к рейсам/RT)
     try {
       final fresh = await repo.loadChat(state.team.id);
-      if (fresh.isNotEmpty) emit(state.copyWith(chat: fresh));
+      if (fresh.isNotEmpty) emit(state.copyWith(chat: _mergeCachedChat(fresh)));
     } catch (_) {}
   }
 
   Future<List<Message>> loadOlderMessages({int limit = 50}) async {
     if (state.chat.isEmpty) return [];
     final oldest = state.chat.reduce((a, b) => a.at.isBefore(b.at) ? a : b);
-    final older = await repo.loadOlderMessages(state.team.id, oldest, limit: limit);
+    final older =
+        await repo.loadOlderMessages(state.team.id, oldest, limit: limit);
     if (older.isEmpty) return [];
 
     final existingIds = state.chat.map((m) => m.id).toSet();
     final uniqueOlder = older.where((m) => existingIds.add(m.id)).toList();
     if (uniqueOlder.isEmpty) return [];
 
-    emit(state.copyWith(chat: [...uniqueOlder, ...state.chat]));
+    final merged = _mergeCachedChat([...uniqueOlder, ...state.chat]);
+    emit(state.copyWith(chat: merged));
     return uniqueOlder;
   }
 
@@ -291,19 +430,20 @@ class TeamCubit extends Cubit<TeamState> {
     // optimistic
     final updated = List<Message>.from(state.chat);
     updated[idx] = updated[idx].copyWith(isPinned: pinned);
-    emit(state.copyWith(chat: updated));
+    emit(state.copyWith(chat: _mergeCachedChat(updated)));
 
     final ok = await repo.pinMessage(id, pinned);
     if (!ok) {
       // revert if failed
       final reverted = List<Message>.from(updated);
       reverted[idx] = reverted[idx].copyWith(isPinned: !pinned);
-      emit(state.copyWith(chat: reverted));
+      emit(state.copyWith(chat: _mergeCachedChat(reverted)));
     }
     // realtime UPDATE will also refresh list shortly
   }
 
-  String _messageIdFromPayload(PostgresChangePayload payload, {bool old = false}) {
+  String _messageIdFromPayload(PostgresChangePayload payload,
+      {bool old = false}) {
     final record = old ? payload.oldRecord : payload.newRecord;
     return (record['id'] ?? '').toString();
   }
@@ -315,7 +455,7 @@ class TeamCubit extends Cubit<TeamState> {
     final message = await repo.loadMessageById(state.team.id, id);
     if (message == null) return;
 
-    emit(state.copyWith(chat: [...state.chat, message]));
+    emit(state.copyWith(chat: _reconcileCachedMessage(message)));
     await _hydrateAssignmentIdsInChat();
   }
 
@@ -331,7 +471,7 @@ class TeamCubit extends Cubit<TeamState> {
 
     final updated = List<Message>.from(state.chat);
     updated[idx] = message;
-    emit(state.copyWith(chat: updated));
+    emit(state.copyWith(chat: _mergeCachedChat(updated)));
     await _hydrateAssignmentIdsInChat();
   }
 
@@ -339,7 +479,7 @@ class TeamCubit extends Cubit<TeamState> {
     final id = _messageIdFromPayload(payload, old: true);
     if (id.isEmpty) return;
 
-    final updated = state.chat.where((m) => m.id != id).toList();
+    final updated = _removeCachedMessage(id);
     if (updated.length == state.chat.length) return;
 
     emit(state.copyWith(chat: updated));
@@ -349,14 +489,8 @@ class TeamCubit extends Cubit<TeamState> {
   Future<void> _subscribeToChat() async {
     final sb = Supabase.instance.client;
     try {
-      final rows = await sb
-          .from('chats')
-          .select('id')
-          .eq('team_id', state.team.id)
-          .eq('type', 'team_main')
-          .limit(1);
-      if (rows.isEmpty) return;
-      final chatId = (rows.first['id'] ?? '').toString();
+      final chatId = await _resolveMainChatId();
+      if (chatId == null) return;
       if (chatId.isEmpty) return;
 
       try {
@@ -370,8 +504,7 @@ class TeamCubit extends Cubit<TeamState> {
         value: chatId,
       );
 
-      // ДЕБАГ: проверяем chatId для RT
-      print('[TeamCubit] RT: подписываемся на chat_id=$chatId');
+      safeDebugLog('[TeamCubit] RT subscribe chat=${maskDebugId(chatId)}');
 
       _rtChat!
           .onPostgresChanges(
@@ -380,7 +513,7 @@ class TeamCubit extends Cubit<TeamState> {
             table: 'messages',
             filter: filter,
             callback: (payload) async {
-              print('[TeamCubit] RT: messages INSERT');
+              safeDebugLog('[TeamCubit] RT messages INSERT');
               await _onRealtimeMessageInsert(payload);
             },
           )
@@ -390,7 +523,7 @@ class TeamCubit extends Cubit<TeamState> {
             table: 'messages',
             filter: filter,
             callback: (payload) async {
-              print('[TeamCubit] RT: messages UPDATE');
+              safeDebugLog('[TeamCubit] RT messages UPDATE');
               await _onRealtimeMessageUpdate(payload);
             },
           )
@@ -400,7 +533,7 @@ class TeamCubit extends Cubit<TeamState> {
             table: 'messages',
             filter: filter,
             callback: (payload) async {
-              print('[TeamCubit] RT: messages DELETE');
+              safeDebugLog('[TeamCubit] RT messages DELETE');
               await _onRealtimeMessageDelete(payload);
             },
           );
@@ -427,7 +560,7 @@ class TeamCubit extends Cubit<TeamState> {
                   final idx = chat.indexWhere((m) => m.id == mid);
                   if (idx != -1) {
                     chat[idx] = chat[idx].copyWith(reactions: counts);
-                    emit(state.copyWith(chat: chat));
+                    emit(state.copyWith(chat: _mergeCachedChat(chat)));
                   }
                 }
               } catch (_) {}
@@ -448,7 +581,7 @@ class TeamCubit extends Cubit<TeamState> {
                   final idx = chat.indexWhere((m) => m.id == mid);
                   if (idx != -1) {
                     chat[idx] = chat[idx].copyWith(reactions: counts);
-                    emit(state.copyWith(chat: chat));
+                    emit(state.copyWith(chat: _mergeCachedChat(chat)));
                   }
                 }
               } catch (_) {}
@@ -469,7 +602,7 @@ class TeamCubit extends Cubit<TeamState> {
     String? due,
     List<Map<String, String>> attachments = const [],
   }) async {
-    // 1) создаём черновик (RPC сам вставит карточку в messages)
+    // RPC creates the assignment and its message-row card atomically.
     final res =
         await Supabase.instance.client.rpc('propose_assignment', params: {
       'p_team_id': state.team.id,
@@ -480,15 +613,41 @@ class TeamCubit extends Cubit<TeamState> {
       'p_attachments': attachments,
     });
 
-    final createdId = (res ?? '').toString();
-    print('[TeamCubit] proposeAssignment -> $createdId');
+    final creation = _parseAssignmentCreationResult(res);
+    if (creation.assignmentId.isEmpty || creation.messageId.isEmpty) {
+      throw StateError('assignment_creation_missing_server_ids');
+    }
+    safeDebugLog(
+        '[TeamCubit] proposeAssignment created assignment=${maskDebugId(creation.assignmentId)} message=${maskDebugId(creation.messageId)} type=${creation.msgType}');
 
-    // 2) подтянем свежие задания (карточка прилетит через RT messages)
+    // Re-read both slices so the assignment bubble appears even if realtime is slow.
     await _reloadAssignments();
+    await _reloadChatFromServer(preferMessageId: creation.messageId);
   }
 
-  /// <-- ВАЖНО: Голос теперь пишем НАПРЯМУЮ в assignment_votes с value=1.
-  /// Это обходит проблему RPC, где value (smallint NOT NULL) не задавался.
+  ({String assignmentId, String messageId, String msgType, String status})
+      _parseAssignmentCreationResult(dynamic res) {
+    if (res is Map) {
+      final data = Map<String, dynamic>.from(res);
+      return (
+        assignmentId:
+            (data['assignment_id'] ?? data['assignmentId'] ?? '').toString(),
+        messageId: (data['message_id'] ?? data['messageId'] ?? '').toString(),
+        msgType: (data['msg_type'] ?? data['msgType'] ?? '').toString(),
+        status: (data['status'] ?? '').toString(),
+      );
+    }
+
+    // Legacy RPC returned only assignment id. Treat it as incomplete for chat
+    // persistence so UI does not show a fake assignment bubble.
+    return (
+      assignmentId: (res ?? '').toString(),
+      messageId: '',
+      msgType: '',
+      status: '',
+    );
+  }
+
   Future<void> voteForPending() async {
     final a = state.pending;
     if (a == null) return;
@@ -506,57 +665,44 @@ class TeamCubit extends Cubit<TeamState> {
     if (uid == null || uid.isEmpty) return;
 
     try {
-      // upsert c onConflict, чтобы не дублировать голос одного пользователя
-      await sb.from('assignment_votes').upsert(
-        {
-          'assignment_id': assignmentId,
-          'user_id': uid,
-          'value': 1, // голос "за" как smallint
-        },
-        onConflict: 'assignment_id,user_id',
-        ignoreDuplicates: true,
-      );
-
-      // Для надёжности: если голосов стало >=2, сервер сам опубликует через триггеры/RPC
-      // Здесь же просто обновим списки
+      final res = await sb.rpc('vote_assignment', params: {
+        'p_assignment_id': assignmentId,
+      });
       await _reloadAssignments();
-      print('[TeamCubit] vote OK for $assignmentId by $uid');
+      await _reloadChatFromServer();
+      safeDebugLog(
+          '[TeamCubit] vote RPC OK assignment=${maskDebugId(assignmentId)} user=${maskDebugId(uid)} resultType=${res.runtimeType}');
     } catch (e) {
-      print('[TeamCubit] vote ERROR: $e');
-
-      // --- fallback: если по какой-то причине нужна старая RPC ---
-      try {
-        final res = await sb.rpc('vote_assignment', params: {
-          'p_assignment_id': assignmentId,
-        });
-        print('[TeamCubit] vote fallback RPC -> $res');
-        await _reloadAssignments();
-      } catch (e2) {
-        print('[TeamCubit] vote fallback RPC ERROR: $e2');
-      }
+      safeDebugLog(
+          '[TeamCubit] vote failed assignment=${maskDebugId(assignmentId)} error=${e.runtimeType}');
     }
   }
 
   Future<void> publishPendingManually() async {
     final a = state.pending;
     if (a == null) return;
-
-    await Supabase.instance.client.rpc('publish_assignment', params: {
-      'p_assignment_id': a.id,
-    });
-
-    await _markDraftBubblePublished(a.id);
-    await _reloadAssignments();
+    await publishAssignment(a.id);
   }
 
-  void markAssignmentDone({required String assignmentId, required bool done}) {
-    final set = {...state.doneAssignmentIds};
-    if (done) {
-      set.add(assignmentId);
-    } else {
-      set.remove(assignmentId);
-    }
-    emit(state.copyWith(doneAssignmentIds: set));
+  Future<void> publishAssignment(String assignmentId) async {
+    await Supabase.instance.client.rpc('publish_assignment', params: {
+      'p_assignment_id': assignmentId,
+    });
+
+    await _markDraftBubblePublished(assignmentId);
+    await _reloadAssignments();
+    await _reloadChatFromServer();
+  }
+
+  Future<void> markAssignmentDone({
+    required String assignmentId,
+    required bool done,
+  }) async {
+    await Supabase.instance.client.rpc('set_assignment_done', params: {
+      'p_assignment_id': assignmentId,
+      'p_done': done,
+    });
+    await _reloadAssignments();
   }
 
   bool isAssignmentDone(String id) => state.doneAssignmentIds.contains(id);
@@ -605,7 +751,27 @@ class TeamCubit extends Cubit<TeamState> {
           ass.where((a) => a.completedByMe).map((a) => a.id).toSet(),
     ));
     await _hydrateAssignmentIdsInChat();
-    print('[TeamCubit] _reloadAssignments -> ${ass.length}');
+    safeDebugLog('[TeamCubit] assignments reloaded count=${ass.length}');
+  }
+
+  Future<void> _reloadChatFromServer({String? preferMessageId}) async {
+    try {
+      final fresh = await repo.loadChat(state.team.id);
+      var merged = _mergeCachedChat(fresh);
+      if (preferMessageId != null &&
+          preferMessageId.isNotEmpty &&
+          !merged.any((message) => message.id == preferMessageId)) {
+        final message =
+            await repo.loadMessageById(state.team.id, preferMessageId);
+        if (message != null) {
+          merged = _mergeCachedChat([...merged, message]);
+        }
+      }
+      emit(state.copyWith(chat: merged));
+      await _hydrateAssignmentIdsInChat();
+    } catch (e) {
+      safeDebugLog('[TeamCubit] chat reload failed: ${e.runtimeType}');
+    }
   }
 
   Future<void> _markDraftBubblePublished(String assignmentId) async {
@@ -618,11 +784,12 @@ class TeamCubit extends Cubit<TeamState> {
         break;
       }
     }
-    await repo.saveChat(state.team.id, chat);
-    emit(state.copyWith(chat: chat));
+    emit(state.copyWith(chat: _mergeCachedChat(chat)));
   }
 
-  // Только дописываем assignmentId/type к уже существующим сообщениям. Ничего НЕ вставляем.
+  // Only reconcile assignment message type from server-backed assignment state.
+  // Never invent assignmentId by title; new assignment bubbles must come from
+  // messages.assignment_id returned by Supabase.
   Future<void> _hydrateAssignmentIdsInChat() async {
     if (state.chat.isEmpty) return;
 
@@ -633,52 +800,26 @@ class TeamCubit extends Cubit<TeamState> {
       final m = chat[i];
       final isAssType = m.type == MessageType.assignmentDraft ||
           m.type == MessageType.assignmentPublished;
-      final looksLikeDraft =
-          m.text.trimLeft().toLowerCase().startsWith('черновик задания:');
-
-      if ((m.assignmentId == null || m.assignmentId!.isEmpty) &&
-          (isAssType || looksLikeDraft)) {
-        // пробуем найти по заголовку
-        final title = _extractTitle(m.text);
-        Assignment? a;
-        if (title != null) {
-          final same = state.assignments
-              .where((x) => x.title.trim() == title.trim())
-              .toList();
-          if (same.isNotEmpty) {
-            a = isAssType && m.type == MessageType.assignmentDraft
-                ? same.lastWhere((x) => !x.published, orElse: () => same.last)
-                : same.last;
-          }
-        }
-        if (a != null) {
-          final newType = (isAssType ? m.type : MessageType.assignmentDraft);
-          chat[i] = m.copyWith(assignmentId: a.id, type: newType);
+      if ((m.assignmentId ?? '').isNotEmpty && isAssType) {
+        final byId = state.assignments.where((x) => x.id == m.assignmentId);
+        if (byId.isNotEmpty &&
+            byId.first.published &&
+            m.type == MessageType.assignmentDraft) {
+          chat[i] = m.copyWith(type: MessageType.assignmentPublished);
           changed = true;
+          continue;
         }
       }
     }
 
     if (changed) {
-      emit(state.copyWith(chat: chat));
+      emit(state.copyWith(chat: _mergeCachedChat(chat)));
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(
         'learning_chat_${state.team.id}',
         jsonEncode(chat.map((e) => e.toJson()).toList()),
       );
     }
-  }
-
-  String? _extractTitle(String text) {
-    final t = text.trim();
-    final low = t.toLowerCase();
-    if (low.startsWith('черновик задания:')) {
-      return t.substring('Черновик задания:'.length).trim();
-    }
-    if (low.startsWith('опубликовано задание:')) {
-      return t.substring('Опубликовано задание:'.length).trim();
-    }
-    return null;
   }
 
   void _subscribeToAssignments() {

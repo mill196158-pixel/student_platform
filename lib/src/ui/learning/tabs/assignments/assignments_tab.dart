@@ -8,7 +8,8 @@ import 'assignment_card.dart';
 enum _Filter { all, active, overdue, draft }
 
 class AssignmentsTab extends StatefulWidget {
-  final Object? team; // совместимость с вызовом AssignmentsTab(team: state.team)
+  final Object?
+      team; // совместимость с вызовом AssignmentsTab(team: state.team)
   const AssignmentsTab({super.key, this.team});
 
   @override
@@ -28,7 +29,7 @@ class _AssignmentsTabState extends State<AssignmentsTab> {
         const SizedBox(height: 8),
         _Filters(
           value: _filter,
-          hasDraft: st.hasPending,
+          hasDraft: st.isStarosta && st.hasPending,
           onChanged: (v) => setState(() => _filter = v),
         ),
         Expanded(
@@ -51,8 +52,9 @@ class _AssignmentsTabState extends State<AssignmentsTab> {
                     ),
                   ),
                 ),
-                onPublish: () => context.read<TeamCubit>().publishPendingManually(),
-                onVote: () => context.read<TeamCubit>().voteForPending(),
+                onPublish: () =>
+                    context.read<TeamCubit>().publishAssignment(a.id),
+                onVote: () => context.read<TeamCubit>().voteFor(a.id),
                 onEdit: () async {
                   final res = await _editAssignmentDialog(context, a);
                   if (res == null) return;
@@ -65,7 +67,8 @@ class _AssignmentsTabState extends State<AssignmentsTab> {
                         attachments: res.$5,
                       );
                 },
-                onDelete: () => context.read<TeamCubit>().removeAssignment(a.id),
+                onDelete: () =>
+                    context.read<TeamCubit>().removeAssignment(a.id),
               );
             },
           ),
@@ -86,7 +89,9 @@ class _AssignmentsTabState extends State<AssignmentsTab> {
       return due.isBefore(DateTime(now.year, now.month, now.day));
     }
 
-    Iterable<Assignment> base = st.assignments;
+    Iterable<Assignment> base = st.isStarosta
+        ? st.assignments
+        : st.assignments.where((a) => a.published);
     switch (_filter) {
       case _Filter.all:
         break;
@@ -98,36 +103,52 @@ class _AssignmentsTabState extends State<AssignmentsTab> {
         break;
       case _Filter.draft:
         final p = st.pending;
-        base = p == null ? const Iterable.empty() : [p];
+        base = st.isStarosta && p != null ? [p] : const Iterable.empty();
         break;
     }
     return base.toList();
   }
 
-  Future<(String, String, String?, String?, List<Map<String, String>>)?> _editAssignmentDialog(
-      BuildContext context, Assignment a) async {
+  Future<(String, String, String?, String?, List<Map<String, String>>)?>
+      _editAssignmentDialog(BuildContext context, Assignment a) async {
     final title = TextEditingController(text: a.title);
-    final desc  = TextEditingController(text: a.description);
-    final link  = TextEditingController(text: a.link ?? '');
-    final due   = TextEditingController(text: a.due ?? '');
+    final desc = TextEditingController(text: a.description);
+    final link = TextEditingController(text: a.link ?? '');
+    final due = TextEditingController(text: a.due ?? '');
     final files = [...a.attachments];
 
-    return showDialog<(String, String, String?, String?, List<Map<String, String>>)>(
+    return showDialog<
+        (String, String, String?, String?, List<Map<String, String>>)>(
       context: context,
       builder: (_) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
-          title: const Center(child: Text('Редактировать задание', style: TextStyle(fontWeight: FontWeight.w700))),
+          title: const Center(
+              child: Text('Редактировать задание',
+                  style: TextStyle(fontWeight: FontWeight.w700))),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(controller: title, decoration: const InputDecoration(labelText: 'Название')),
+                TextField(
+                    controller: title,
+                    decoration: const InputDecoration(labelText: 'Название')),
                 const SizedBox(height: 8),
-                TextField(controller: desc, minLines: 3, maxLines: 6, decoration: const InputDecoration(labelText: 'Что сделать')),
+                TextField(
+                    controller: desc,
+                    minLines: 3,
+                    maxLines: 6,
+                    decoration:
+                        const InputDecoration(labelText: 'Что сделать')),
                 const SizedBox(height: 8),
-                TextField(controller: link, decoration: const InputDecoration(labelText: 'Ссылка (опц.)')),
+                TextField(
+                    controller: link,
+                    decoration:
+                        const InputDecoration(labelText: 'Ссылка (опц.)')),
                 const SizedBox(height: 8),
-                TextField(controller: due, decoration: const InputDecoration(labelText: 'Срок (напр. 20.09)')),
+                TextField(
+                    controller: due,
+                    decoration:
+                        const InputDecoration(labelText: 'Срок (напр. 20.09)')),
                 const SizedBox(height: 8),
                 for (final f in files)
                   ListTile(
@@ -140,10 +161,13 @@ class _AssignmentsTabState extends State<AssignmentsTab> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Отмена')),
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Отмена')),
             FilledButton(
               onPressed: () {
-                if (title.text.trim().isEmpty || desc.text.trim().isEmpty) return;
+                if (title.text.trim().isEmpty || desc.text.trim().isEmpty)
+                  return;
                 Navigator.pop(context, (
                   title.text.trim(),
                   desc.text.trim(),
@@ -165,7 +189,8 @@ class _Filters extends StatelessWidget {
   final _Filter value;
   final bool hasDraft;
   final ValueChanged<_Filter> onChanged;
-  const _Filters({required this.value, required this.hasDraft, required this.onChanged});
+  const _Filters(
+      {required this.value, required this.hasDraft, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {

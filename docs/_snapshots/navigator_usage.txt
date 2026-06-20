@@ -7,7 +7,7 @@ lib\all_dart_code.txt:24944:onTap: () => Navigator.push(
 lib\src\ui\learning\tabs\chat\file_message_bubble.dart:275:Navigator.push(
 lib\src\ui\learning\tabs\chat\multi_file_bubble.dart:496:Navigator.push(
 lib\src\ui\learning\widgets\file_message_bubble.dart:60:Navigator.push(
-lib\src\ui\profile\profile_screen.dart:557:onTap: () => Navigator.push(
+lib\src\ui\profile\profile_screen.dart:559:onTap: () => Navigator.push(
 scripts\collect_project_snapshot.ps1:113:Write-Search "navigator_usage.txt" @("Navigator.push", "Navigator.of", "MaterialPageRoute")
 
 ## PATTERN: Navigator.of
@@ -111,10 +111,10 @@ lib\src\ui\info\info_screen.dart:213:Navigator.of(sheetContext).pop(_UsefulSecti
 lib\src\ui\info\info_screen.dart:1052:Navigator.of(sheetContext).pop(semester);
 lib\src\ui\info\info_screen.dart:1090:Navigator.of(sheetContext).pop(filter);
 lib\src\ui\info\info_screen.dart:1523:Navigator.of(context).push(
-lib\src\ui\info\subject_info_screen.dart:127:Navigator.of(context).push(
-lib\src\ui\info\subject_info_screen.dart:138:Navigator.of(context).push(
-lib\src\ui\learning\assignment_details_screen.dart:102:Navigator.of(context).pop();
-lib\src\ui\learning\assignment_details_screen.dart:125:Navigator.of(context).pop();
+lib\src\ui\info\subject_info_screen.dart:128:Navigator.of(context).push(
+lib\src\ui\info\subject_info_screen.dart:139:Navigator.of(context).push(
+lib\src\ui\learning\assignment_details_screen.dart:130:Navigator.of(context).pop();
+lib\src\ui\learning\assignment_details_screen.dart:164:Navigator.of(context).pop();
 lib\src\ui\learning\learning_screen.dart:143:Navigator.of(context).push(
 lib\src\ui\learning\learning_screen.dart:215:onTap: () => Navigator.of(context).push(
 lib\src\ui\learning\learning_screen.dart:302:onTap: () => Navigator.of(context).push(
@@ -122,22 +122,30 @@ lib\src\ui\learning\learning_screen.dart:768:Navigator.of(context).push(
 lib\src\ui\learning\team_details_screen.dart:91:onPressed: () => Navigator.of(context).maybePop(),
 lib\src\ui\learning\team_details_screen.dart:225:onPressed: () => Navigator.of(context).maybePop(),
 lib\src\ui\learning\tabs\assignments_tab.dart:77:Navigator.of(context).push(
-lib\src\ui\learning\tabs\chat_tab.dart:1922:Navigator.of(context).push(
-lib\src\ui\learning\tabs\chat_tab.dart:1950:Navigator.of(context).push(
-lib\src\ui\learning\tabs\chat_tab.dart:2008:Navigator.of(context).push(
+lib\src\ui\learning\tabs\chat_tab.dart:1932:Navigator.of(context).push(
+lib\src\ui\learning\tabs\chat_tab.dart:1960:Navigator.of(context).push(
+lib\src\ui\learning\tabs\chat_tab.dart:2018:Navigator.of(context).push(
 lib\src\ui\learning\tabs\files_tab.dart:608:Navigator.of(context).push(
-lib\src\ui\learning\tabs\assignments\assignments_tab.dart:46:onOpen: () => Navigator.of(context).push(
-lib\src\ui\learning\tabs\chat\assignment_bubble.dart:91:Navigator.of(context).push(
-lib\src\ui\learning\tabs\chat\assignment_bubble.dart:436:Navigator.of(context).push(
+lib\src\ui\learning\tabs\assignments\assignments_tab.dart:47:onOpen: () => Navigator.of(context).push(
+lib\src\ui\learning\tabs\chat\assignment_bubble.dart:94:Navigator.of(context).push(
+lib\src\ui\learning\tabs\chat\assignment_bubble.dart:572:Navigator.of(context).push(
 lib\src\ui\learning\tabs\chat\file_message_bubble.dart:81:? () => Navigator.of(context).push(
 lib\src\ui\learning\tabs\chat\file_message_bubble.dart:322:Navigator.of(context, rootNavigator: true).pop();
 lib\src\ui\learning\tabs\chat\file_message_bubble.dart:340:Navigator.of(context, rootNavigator: true).pop();
 lib\src\ui\learning\tabs\chat\forward_group_bubble.dart:221:? () => Navigator.of(context).push(
 lib\src\ui\learning\tabs\chat\message_bubble.dart:107:? () => Navigator.of(context).push(
 lib\src\ui\learning\tabs\chat\multi_file_bubble.dart:73:? () => Navigator.of(context).push(
-lib\src\ui\learning\tabs\chat\pinned_assignment_bar.dart:55:Navigator.of(context).push(
+lib\src\ui\learning\tabs\chat\pinned_assignment_bar.dart:57:Navigator.of(context).push(
 lib\src\ui\profile\edit_profile_screen.dart:170:onPressed: () => Navigator.of(ctx).pop(),
 lib\src\ui\profile\edit_profile_screen.dart:198:Navigator.of(ctx).pop();
+lib\src\ui\profile\personal_diary_screen.dart:255:await Navigator.of(context).push(
+lib\src\ui\profile\personal_diary_screen.dart:313:Navigator.of(ctx).pop();
+lib\src\ui\profile\personal_diary_screen.dart:335:Navigator.of(ctx).pop();
+lib\src\ui\profile\personal_diary_screen.dart:474:Navigator.of(ctx).pop();
+lib\src\ui\profile\personal_diary_screen.dart:478:Navigator.of(ctx).pop();
+lib\src\ui\profile\personal_diary_screen.dart:482:Navigator.of(ctx).pop();
+lib\src\ui\profile\personal_diary_screen.dart:612:await Navigator.of(context).push(
+lib\src\ui\profile\personal_diary_screen.dart:1978:onTap: () => Navigator.of(context).maybePop(),
 lib\src\ui\profile\profile_screen.dart:525:await Navigator.of(context).push(
 lib\src\ui\profile\profile_screen.dart:533:await Navigator.of(context).push(
 lib\src\ui\schedule\all_dart_text.txt:315:onPressed: () => Navigator.of(context).maybePop(),
@@ -161,19 +169,19 @@ lib\src\ui\schedule\all_dart_text.txt:5395:if (mounted) Navigator.of(context).po
 lib\src\ui\schedule\diary_entry_details_screen.dart:315:onPressed: () => Navigator.of(context).maybePop(),
 lib\src\ui\schedule\lesson_details_screen.dart:85:Navigator.of(context).push(
 lib\src\ui\schedule\lesson_details_screen.dart:103:onTap: () => Navigator.of(context).push(
-lib\src\ui\schedule\lesson_details_screen.dart:117:onTap: () => Navigator.of(context).push(
-lib\src\ui\schedule\lesson_details_screen.dart:154:? () => Navigator.of(context).push(
-lib\src\ui\schedule\lesson_details_screen.dart:629:onPressed: () => Navigator.of(context).maybePop(),
+lib\src\ui\schedule\lesson_details_screen.dart:129:onTap: () => Navigator.of(context).push(
+lib\src\ui\schedule\lesson_details_screen.dart:178:? () => Navigator.of(context).push(
+lib\src\ui\schedule\lesson_details_screen.dart:653:onPressed: () => Navigator.of(context).maybePop(),
 lib\src\ui\schedule\schedule_screen.dart:367:onTap: () => Navigator.of(context).push(
-lib\src\ui\schedule\subject_diary_screen.dart:191:Navigator.of(context).push(MaterialPageRoute(
-lib\src\ui\schedule\subject_diary_screen.dart:200:Navigator.of(context).push(MaterialPageRoute(
-lib\src\ui\schedule\subject_diary_screen.dart:209:Navigator.of(context).push(MaterialPageRoute(
-lib\src\ui\schedule\subject_diary_screen.dart:289:final saved = await Navigator.of(context).push(
-lib\src\ui\schedule\subject_diary_screen.dart:376:onOpenDay: (day) => Navigator.of(context)
-lib\src\ui\schedule\subject_diary_screen.dart:391:onOpenDay: (day) => Navigator.of(context)
-lib\src\ui\schedule\subject_diary_screen.dart:1049:onPressed: () => Navigator.of(context).maybePop(),
+lib\src\ui\schedule\subject_diary_screen.dart:251:Navigator.of(context).push(MaterialPageRoute(
+lib\src\ui\schedule\subject_diary_screen.dart:260:Navigator.of(context).push(MaterialPageRoute(
+lib\src\ui\schedule\subject_diary_screen.dart:269:Navigator.of(context).push(MaterialPageRoute(
+lib\src\ui\schedule\subject_diary_screen.dart:467:final saved = await Navigator.of(context).push(
+lib\src\ui\schedule\subject_diary_screen.dart:611:onOpenDay: (day) => Navigator.of(context)
+lib\src\ui\schedule\subject_diary_screen.dart:630:onOpenDay: (day) => Navigator.of(context)
+lib\src\ui\schedule\subject_diary_screen.dart:1944:onPressed: () => Navigator.of(context).maybePop(),
 lib\src\ui\schedule\subject_diary\widgets.dart:384:onPressed: () => Navigator.of(context).maybePop(),
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:445:final saved = await Navigator.of(context).push(
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:451:final saved = await Navigator.of(context).push(
 lib\src\ui\schedule\widgets\calendar_icon_button.dart:260:Navigator.of(context).pop<DateTime>(d);
 lib\src\ui\schedule\widgets\calendar_icon_button.dart:349:onPressed: () => Navigator.of(context).maybePop(),
 lib\src\ui\schedule\widgets\calendar_icon_button.dart:363:if (mounted) Navigator.of(context).pop<DateTime>(t);
@@ -250,31 +258,33 @@ lib\src\ui\friends\friend_profile_screen.dart:538:MaterialPageRoute(
 lib\src\ui\friends\my_friends_screen.dart:651:MaterialPageRoute(builder: (_) => FriendProfileScreen(userId: f.id)),
 lib\src\ui\friends\my_friends_screen.dart:669:MaterialPageRoute(
 lib\src\ui\info\info_screen.dart:1524:MaterialPageRoute(
-lib\src\ui\info\subject_info_screen.dart:128:MaterialPageRoute(
-lib\src\ui\info\subject_info_screen.dart:139:MaterialPageRoute(
+lib\src\ui\info\subject_info_screen.dart:129:MaterialPageRoute(
+lib\src\ui\info\subject_info_screen.dart:140:MaterialPageRoute(
 lib\src\ui\learning\learning_screen.dart:144:MaterialPageRoute(
 lib\src\ui\learning\learning_screen.dart:216:MaterialPageRoute(builder: (_) => TeamDetailsScreen(team: team)),
 lib\src\ui\learning\learning_screen.dart:303:MaterialPageRoute(builder: (_) => TeamDetailsScreen(team: team)),
 lib\src\ui\learning\learning_screen.dart:769:MaterialPageRoute(
 lib\src\ui\learning\tabs\assignments_tab.dart:78:MaterialPageRoute(
-lib\src\ui\learning\tabs\chat_tab.dart:1923:MaterialPageRoute(
-lib\src\ui\learning\tabs\chat_tab.dart:1951:MaterialPageRoute(
-lib\src\ui\learning\tabs\chat_tab.dart:2009:MaterialPageRoute(
+lib\src\ui\learning\tabs\chat_tab.dart:1933:MaterialPageRoute(
+lib\src\ui\learning\tabs\chat_tab.dart:1961:MaterialPageRoute(
+lib\src\ui\learning\tabs\chat_tab.dart:2019:MaterialPageRoute(
 lib\src\ui\learning\tabs\files_tab.dart:609:MaterialPageRoute(
-lib\src\ui\learning\tabs\assignments\assignments_tab.dart:47:MaterialPageRoute(
-lib\src\ui\learning\tabs\chat\assignment_bubble.dart:92:MaterialPageRoute(
-lib\src\ui\learning\tabs\chat\assignment_bubble.dart:437:MaterialPageRoute(
+lib\src\ui\learning\tabs\assignments\assignments_tab.dart:48:MaterialPageRoute(
+lib\src\ui\learning\tabs\chat\assignment_bubble.dart:95:MaterialPageRoute(
+lib\src\ui\learning\tabs\chat\assignment_bubble.dart:573:MaterialPageRoute(
 lib\src\ui\learning\tabs\chat\file_message_bubble.dart:82:MaterialPageRoute(
 lib\src\ui\learning\tabs\chat\file_message_bubble.dart:277:MaterialPageRoute(
 lib\src\ui\learning\tabs\chat\forward_group_bubble.dart:222:MaterialPageRoute(builder: (_) => FriendProfileScreen(userId: authorId)),
 lib\src\ui\learning\tabs\chat\message_bubble.dart:108:MaterialPageRoute(
 lib\src\ui\learning\tabs\chat\multi_file_bubble.dart:74:MaterialPageRoute(
 lib\src\ui\learning\tabs\chat\multi_file_bubble.dart:498:MaterialPageRoute(
-lib\src\ui\learning\tabs\chat\pinned_assignment_bar.dart:56:MaterialPageRoute(
+lib\src\ui\learning\tabs\chat\pinned_assignment_bar.dart:58:MaterialPageRoute(
 lib\src\ui\learning\widgets\file_message_bubble.dart:62:MaterialPageRoute(
+lib\src\ui\profile\personal_diary_screen.dart:256:MaterialPageRoute(
+lib\src\ui\profile\personal_diary_screen.dart:613:MaterialPageRoute(
 lib\src\ui\profile\profile_screen.dart:526:MaterialPageRoute(builder: (_) => const MyChatsScreen()),
 lib\src\ui\profile\profile_screen.dart:534:MaterialPageRoute(builder: (_) => const MyFriendsScreen()),
-lib\src\ui\profile\profile_screen.dart:559:MaterialPageRoute(
+lib\src\ui\profile\profile_screen.dart:561:MaterialPageRoute(
 lib\src\ui\schedule\all_dart_text.txt:536:MaterialPageRoute(builder: (_) => const _MapSpbgasuInlineScreen()),
 lib\src\ui\schedule\all_dart_text.txt:549:MaterialPageRoute(
 lib\src\ui\schedule\all_dart_text.txt:563:MaterialPageRoute(
@@ -288,16 +298,16 @@ lib\src\ui\schedule\all_dart_text.txt:1879:.push(MaterialPageRoute(
 lib\src\ui\schedule\all_dart_text.txt:4665:MaterialPageRoute(
 lib\src\ui\schedule\lesson_details_screen.dart:86:MaterialPageRoute(
 lib\src\ui\schedule\lesson_details_screen.dart:104:MaterialPageRoute(
-lib\src\ui\schedule\lesson_details_screen.dart:118:MaterialPageRoute(
-lib\src\ui\schedule\lesson_details_screen.dart:155:MaterialPageRoute(
+lib\src\ui\schedule\lesson_details_screen.dart:130:MaterialPageRoute(
+lib\src\ui\schedule\lesson_details_screen.dart:179:MaterialPageRoute(
 lib\src\ui\schedule\schedule_screen.dart:368:MaterialPageRoute(
-lib\src\ui\schedule\subject_diary_screen.dart:191:Navigator.of(context).push(MaterialPageRoute(
-lib\src\ui\schedule\subject_diary_screen.dart:200:Navigator.of(context).push(MaterialPageRoute(
-lib\src\ui\schedule\subject_diary_screen.dart:209:Navigator.of(context).push(MaterialPageRoute(
-lib\src\ui\schedule\subject_diary_screen.dart:290:MaterialPageRoute(
-lib\src\ui\schedule\subject_diary_screen.dart:377:.push(MaterialPageRoute(
-lib\src\ui\schedule\subject_diary_screen.dart:392:.push(MaterialPageRoute(
-lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:446:MaterialPageRoute(
+lib\src\ui\schedule\subject_diary_screen.dart:251:Navigator.of(context).push(MaterialPageRoute(
+lib\src\ui\schedule\subject_diary_screen.dart:260:Navigator.of(context).push(MaterialPageRoute(
+lib\src\ui\schedule\subject_diary_screen.dart:269:Navigator.of(context).push(MaterialPageRoute(
+lib\src\ui\schedule\subject_diary_screen.dart:468:MaterialPageRoute(
+lib\src\ui\schedule\subject_diary_screen.dart:612:.push(MaterialPageRoute(
+lib\src\ui\schedule\subject_diary_screen.dart:631:.push(MaterialPageRoute(
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:452:MaterialPageRoute(
 lib\src\ui\splash\splash_screen.dart:42:MaterialPageRoute(builder: (_) => const ChangePasswordScreen()),
 scripts\collect_project_snapshot.ps1:113:Write-Search "navigator_usage.txt" @("Navigator.push", "Navigator.of", "MaterialPageRoute")
 

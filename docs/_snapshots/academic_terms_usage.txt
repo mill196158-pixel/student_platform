@@ -293,9 +293,11 @@ supabase\migrations_recovered\migration_001_core_academic_subjects.sql:150:creat
 supabase\migrations_recovered\migration_001_core_academic_subjects.sql:151:on public.student_enrollments(started_at, ended_at);
 
 ## PATTERN: subject_offerings
+lib\src\data\personal_diary_service.dart:237:.from('subject_offerings')
+lib\src\data\subject_diary_repository_supabase.dart:806:.from('subject_offerings')
 lib\src\ui\exams\exams_screen.dart:2103:.from('subject_offerings')
 lib\src\ui\info\info_screen.dart:301:.from('subject_offerings')
-lib\src\ui\info\subject_info_screen.dart:170:.from('subject_offerings')
+lib\src\ui\info\subject_info_screen.dart:181:.from('subject_offerings')
 scripts\collect_project_snapshot.ps1:115:Write-Search "academic_terms_usage.txt" @("academic_years", "academic_terms", "group_academic_profiles", "group_term_semesters", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects")
 scripts\collect_project_snapshot.ps1:116:Write-Search "table_terms_usage.txt" @("groups", "teams", "team_members", "chats", "chat_members", "messages", "chat_files", "users", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects", "schedule", "lessons", "assignments", "diary", "friends", "useful")
 scripts\import_academic_batch.js:58:curriculum  Create subject_catalog, subject_aliases, curriculum_subjects, subject_offerings
@@ -324,6 +326,7 @@ supabase\stage2_3_schedule_subject_resolver_rollback.sql:66:from public.subject_
 supabase\stage2_3_schedule_subject_resolver_rollback.sql:86:from public.subject_offerings
 supabase\stage2_3_schedule_subject_resolver_rollback.sql:107:from public.subject_offerings
 supabase\stage2_3_schedule_subject_resolver_rollback.sql:130:delete from public.subject_offerings
+supabase\stage4_2_3_personal_diary_tasks.sql:8:subject_offering_id uuid null references public.subject_offerings(id) on delete set null,
 supabase\checks\academic_rls_audit.sql:17:('subject_offerings'),
 supabase\checks\academic_rls_audit.sql:60:('subject_offerings'),
 supabase\checks\academic_rls_audit.sql:102:('subject_offerings'),
@@ -421,7 +424,7 @@ supabase\migrations_recovered\migration_002_extend_existing_tables.sql:43:add co
 lib\src\ui\exams\exams_screen.dart:2120:subject_catalog(canonical_name)
 lib\src\ui\exams\exams_screen.dart:2302:final catalog = _asMap(row['subject_catalog']);
 lib\src\ui\info\info_screen.dart:320:.from('subject_catalog')
-lib\src\ui\info\subject_info_screen.dart:186:.from('subject_catalog')
+lib\src\ui\info\subject_info_screen.dart:197:.from('subject_catalog')
 scripts\collect_project_snapshot.ps1:115:Write-Search "academic_terms_usage.txt" @("academic_years", "academic_terms", "group_academic_profiles", "group_term_semesters", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects")
 scripts\collect_project_snapshot.ps1:116:Write-Search "table_terms_usage.txt" @("groups", "teams", "team_members", "chats", "chat_members", "messages", "chat_files", "users", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects", "schedule", "lessons", "assignments", "diary", "friends", "useful")
 scripts\import_academic_batch.js:58:curriculum  Create subject_catalog, subject_aliases, curriculum_subjects, subject_offerings
@@ -519,7 +522,7 @@ supabase\migrations_recovered\migration_002_extend_existing_tables.sql:42:add co
 lib\src\ui\exams\exams_screen.dart:2110:curriculum_subjects(
 lib\src\ui\exams\exams_screen.dart:2301:final curriculum = _asMap(row['curriculum_subjects']);
 lib\src\ui\info\info_screen.dart:329:.from('curriculum_subjects')
-lib\src\ui\info\subject_info_screen.dart:195:.from('curriculum_subjects')
+lib\src\ui\info\subject_info_screen.dart:206:.from('curriculum_subjects')
 scripts\collect_project_snapshot.ps1:115:Write-Search "academic_terms_usage.txt" @("academic_years", "academic_terms", "group_academic_profiles", "group_term_semesters", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects")
 scripts\collect_project_snapshot.ps1:116:Write-Search "table_terms_usage.txt" @("groups", "teams", "team_members", "chats", "chat_members", "messages", "chat_files", "users", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects", "schedule", "lessons", "assignments", "diary", "friends", "useful")
 scripts\import_academic_batch.js:58:curriculum  Create subject_catalog, subject_aliases, curriculum_subjects, subject_offerings

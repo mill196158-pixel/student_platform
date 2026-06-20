@@ -341,3 +341,240 @@ Initial Stage 4 boundaries:
 3. Before adding write flows, decide the safe DB/RLS/RPC contract for diary entries.
 4. Keep the existing subject diary and team/chat flows reusable where possible.
 5. Resolve or explicitly isolate the function execute privilege finding before any trusted server parser/linking work.
+
+## Stage 4.0 Audit Result
+
+Stage 4.0 audited the existing subject diary before creating the personal diary:
+
+- audit doc: `docs/stage0_real/STAGE4_0_PERSONAL_DIARY_AUDIT.md`;
+- the existing subject diary is reusable, but its current Flutter API is `subjectKey`/display-name based;
+- existing subject diary screens do not accept `subject_offering_id`;
+- live `subject_diary_entries.subject_offering_id` exists but is not filled for existing entries;
+- live `subject_diary_entries.author_id` is the actual personal user link, not `user_id`;
+- live `subject_diary_files.uploaded_by` is the actual file user link, not `user_id`;
+- files/photo-conspects already exist through `subject_diary_files` and Yandex S3;
+- profile should add `Мой дневник` under `Учёба`, next to `Текущий семестр`, before `Карта СПБГАСУ`;
+- assignments were checked read-only and should not be connected in Stage 4.1.
+
+## Next Safe Stage 4.1
+
+Stage 4.1 should be:
+
+**Create the `Мой дневник` screen in profile, collect current-semester subjects and existing subject diary entries.**
+
+Scope:
+
+1. Add a profile card/button `Мой дневник` near `Текущий семестр`.
+2. Add a screen titled `Мой дневник`.
+3. Load active student group and current semester.
+4. Load current-semester `subject_offerings`.
+5. Aggregate only real, non-empty existing subject diary entries.
+6. Show per-subject entry counts, latest entry metadata, and file/photo counts where safe.
+7. Add quick transition into the existing subject diary.
+8. Do not create empty diary rows.
+9. Do not replace or rewrite the subject diary.
+
+Stage 4.1 must not include:
+
+- assignments;
+- chat assignment cards;
+- assignment votes/completion;
+- ChatScreen changes;
+- RLS/schema/table changes;
+- PDF export;
+- archive/gamification/statistics.
+
+## Next Safe Stage 4.2
+
+Stage 4.2 should be:
+
+**Connect assignments from learning/chat into the personal diary as a separate stage.**
+
+Before Stage 4.2, decide how to safely associate assignments with `subject_offering_id`, because current live assignment rows are still team-centric and the checked live row has no `subject_offering_id`.
+
+## Stage 4.1 Progress
+
+Stage 4.1 created the personal diary MVP:
+
+- added `/my-diary`;
+- added `PersonalDiaryScreen`;
+- added `PersonalDiaryService`;
+- added profile card `Мой дневник`;
+- added `SubjectDiaryArgs`;
+- kept legacy `subjectKey` fallback;
+- moved new subject diary flows toward `subject_offering_id`;
+- personal diary shows current-semester subjects, entry counts, file/photo counts, and latest real entries;
+- available semesters can be selected when `subject_offerings` exist for more than one semester;
+- the subject block is hidden when the selected semester has no subjects;
+- empty-like diary rows are filtered;
+- assignments were not connected;
+- Supabase schema/RLS were not changed;
+- `flutter build windows --debug` passed.
+
+## Next Safe Stage 4.2 After MVP
+
+Stage 4.2 remains:
+
+**Connect assignments from learning/chat into the personal diary.**
+
+Recommended boundaries:
+
+1. Audit how current assignments can be mapped to `subject_offering_id`.
+2. Keep assignment aggregation read-only first.
+3. Include personal completion status only through the existing `assignment_done` path.
+4. Do not mix assignment votes/chat-card rewrites with diary entry writes in the same step.
+5. Keep RLS/schema changes as a separate reviewed backend/security task if needed.
+
+## Stage 4.2 Audit Result
+
+Stage 4.2 performed a read-only assignment audit:
+
+- audit doc: `docs/stage0_real/STAGE4_2_ASSIGNMENTS_AND_PERSONAL_DIARY_AUDIT.md`;
+- Flutter code, Supabase schema/RLS/migrations, ChatScreen, PersonalDiaryScreen, and assignment data were not changed;
+- live assignment tables exist: `assignments`, `assignment_votes`, `assignment_done`;
+- `chat_messages` does not exist; chat assignment cards live in `messages`;
+- live assignments: 1 row, 0/1 linked to `subject_offering_id`;
+- live `assignment_votes`: 2 rows;
+- live `assignment_done`: 0 rows;
+- assignment creation currently creates an `assignmentDraft` message but does not fill `subject_offering_id`;
+- current 2-vote behavior is not reliable: the live row has 2 votes but remains draft;
+- private completion status is boolean only and should stay private.
+
+## Stage 4.2.1 Result
+
+Stage 4.2.1 completed:
+
+**Assignment data model hardening and chat bubble contract.**
+
+Result:
+
+1. New assignments are created through `propose_assignment`, which fills `subject_offering_id`, `group_id`, `subject_id`, `academic_year_id`, `academic_term_id`, and `semester_number` from `public.teams` when the team has those values.
+2. `Team` and `Assignment` Flutter models now carry nullable academic fields.
+3. `get_team_assignments` returns status, published/due timestamps, and academic fields.
+4. Assignment creation still creates a normal `messages` row with `assignment_id`.
+5. Trusted roles create `assignmentPublished`; ordinary members create `assignmentDraft`.
+6. Flutter voting now uses RPC `vote_assignment`, not direct `assignment_votes` upsert.
+7. `vote_assignment` writes `value = 1`, publishes at threshold `>= 2`, fills `published_at`, sets `status = published`, and updates the existing message row to `assignmentPublished`.
+8. `AssignmentBubble` remains inside the ordinary message list; no separate assignment card outside chat was added.
+9. `assignment_done.done` remains the only personal completion model for now.
+10. Personal diary UI integration was not done yet.
+
+Files:
+
+- `docs/stage0_real/STAGE4_2_1_ASSIGNMENT_MODEL_HARDENING.md`
+- `supabase/stage4_2_1_assignment_model_hardening.sql`
+- `supabase/stage4_2_1_assignment_model_hardening_rollback.sql`
+
+Verification:
+
+- Supabase RPC hardening applied through MCP `execute_sql`.
+- Focused analyze: no errors; 24 warnings/infos remain.
+- `flutter build windows --debug`: passed.
+- Runtime UI was not run with authenticated dart-defines and no test assignment row was created.
+
+## Stage 4.2.1B Result
+
+Stage 4.2.1B completed:
+
+**Assignment persistence fix for server-backed chat bubbles.**
+
+Result:
+
+1. Root cause found: `get_chat_messages_for_team` did not return `assignment_id`, so a message could be visible through realtime/direct fetch and then lose its assignment bubble after normal chat reload.
+2. `get_chat_messages_for_team` now returns `chat_id`, `msg_type`, `assignment_id`, `file_id`, and `created_at`.
+3. `propose_assignment` now returns JSONB with `assignment_id`, `message_id`, `msg_type`, `status`, and `published`.
+4. Flutter now treats assignment creation as successful only when the server returns both assignment and message ids.
+5. The title-based local assignment-id fallback was removed.
+6. Publish no longer calls `saveChat`, preventing duplicate assignment messages.
+7. Assignment messages remain ordinary `messages` rows and render through `MessageBuilder -> AssignmentBubble`.
+8. `AssignmentBubble` now shows a placeholder when assignment details are not hydrated yet, instead of disappearing.
+9. DB integrity check found no orphan assignment messages and no assignments without messages.
+10. Stage 4.2.2 can now read published, `subject_offering_id`-linked assignments into the personal diary.
+
+Files:
+
+- `docs/stage0_real/STAGE4_2_1B_ASSIGNMENT_PERSISTENCE_FIX.md`
+- `supabase/stage4_2_1b_assignment_persistence_fix.sql`
+- `supabase/stage4_2_1b_assignment_persistence_fix_rollback.sql`
+
+Verification:
+
+- Supabase RPC persistence fix applied through MCP `execute_sql`.
+- Focused analyze: no errors; 7 old infos remain.
+- `flutter build windows --debug`: passed.
+- IDE lints for changed files: no errors.
+
+## Stage 4.2.2 - Group Assignments In Personal Diary
+
+Stage 4.2.2 completed:
+
+1. Load only published group assignments for selected/current-semester `subject_offerings`.
+2. Show nearest deadlines in `Мой дневник` under `Ближайшие задания`.
+3. Show assignment totals in the diary summary card.
+4. Show per-subject assignment and unfinished counts.
+5. Update only the current student's private assignment status through `set_assignment_done`.
+6. Do not show the group who completed an assignment.
+7. Exclude draft assignments.
+8. Exclude legacy assignments with null `subject_offering_id`.
+
+Files:
+
+- `docs/stage0_real/STAGE4_2_2_GROUP_ASSIGNMENTS_IN_PERSONAL_DIARY.md`
+- `lib/src/data/personal_diary_service.dart`
+- `lib/src/ui/profile/personal_diary_screen.dart`
+
+Verification:
+
+- DB check: 1 diary-eligible published assignment exists.
+- Focused analyze: no errors; 7 old infos remain.
+- `flutter build windows --debug`: passed.
+- No RLS/schema changes.
+
+## Stage 4.2.3 - Personal Tasks And Subject Diary Assignments
+
+Stage 4.2.3 completed:
+
+1. Simplified `Мой дневник` hero-card and removed overloaded counters.
+2. Kept current semester and safe record book display.
+3. Added search to `Мой дневник`.
+4. Renamed the subject section to `Предметы семестра`.
+5. Added diary-only personal task model and UI.
+6. Kept personal tasks separate from group assignments and chat messages.
+7. Added `todo`, `in_progress`, and `done` statuses for personal tasks.
+8. Added published group assignments and personal tasks to `Дневник предмета`.
+9. Added search to `Дневник предмета`.
+10. Kept draft assignments and legacy null-`subject_offering_id` assignments out of diary views.
+
+Files:
+
+- `docs/stage0_real/STAGE4_2_3_PERSONAL_TASKS_AND_SUBJECT_DIARY_ASSIGNMENTS.md`
+- `lib/src/data/personal_diary_service.dart`
+- `lib/src/ui/profile/personal_diary_screen.dart`
+- `lib/src/ui/schedule/subject_diary_screen.dart`
+- `supabase/stage4_2_3_personal_diary_tasks.sql`
+- `supabase/stage4_2_3_personal_diary_tasks_rollback.sql`
+
+Verification:
+
+- Supabase remote apply/check was not completed because MCP denied schema and read-only SQL access.
+- Focused analyze: exit code 0; only existing `withOpacity` infos remain.
+- `flutter build windows --debug`: passed.
+
+## Stage 4.2.4 - Human UI Runtime Pass
+
+Stage 4.2.3B applied and verified `personal_diary_tasks` SQL in Supabase.
+
+Next safe stage:
+
+1. Drive the Windows UI with a real authenticated student.
+2. Create a personal task from `Профиль -> Мой дневник -> + -> Личная задача`.
+3. Create a subject-linked personal task from the diary UI.
+4. Verify both tasks appear in `Мой дневник`.
+5. Verify the subject-linked task appears in `Дневник предмета`.
+6. Verify status changes are visible immediately and persist after reload.
+7. Verify search in `Мой дневник` by subject, personal task, group assignment, and latest diary entry.
+8. Verify search in `Дневник предмета` by personal task, group assignment, and diary entry.
+9. Verify group assignments still show only when `published` and `subject_offering_id` is present.
+10. Verify draft and legacy null-`subject_offering_id` assignments remain hidden.
+11. Verify group assignment done toggle still writes through `assignment_done`.
+12. Verify personal tasks still do not create `messages`, `assignments`, `assignment_votes`, or `assignment_done` rows.
