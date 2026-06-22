@@ -92,16 +92,12 @@ class AcademicContextService {
 
     try {
       await AuthSession.ensureFreshSession(_sb);
-      return await _loadForUser(authUser.id).timeout(
-        const Duration(seconds: 8),
-      );
+      return await _loadForUser(authUser.id);
     } catch (e) {
       if (AuthSession.isAuthFailure(e)) {
         try {
           await _sb.auth.refreshSession();
-          return await _loadForUser(authUser.id).timeout(
-            const Duration(seconds: 8),
-          );
+          return await _loadForUser(authUser.id);
         } catch (_) {
           return AcademicContext(
             userId: authUser.id,
@@ -124,8 +120,7 @@ class AcademicContextService {
         .from('users')
         .select('id,login')
         .eq('id', authUserId)
-        .maybeSingle()
-        .timeout(const Duration(seconds: 5));
+        .maybeSingle();
     final publicUserId = (publicUser?['id'] ?? '').toString();
     final recordBookNumber = _asNullableString(publicUser?['login']);
 
@@ -136,8 +131,7 @@ class AcademicContextService {
         .eq('status', 'active')
         .filter('ended_at', 'is', null)
         .limit(1)
-        .maybeSingle()
-        .timeout(const Duration(seconds: 5));
+        .maybeSingle();
 
     if (enrollment == null) {
       return AcademicContext(
@@ -182,8 +176,7 @@ class AcademicContextService {
         .from('groups')
         .select('id,name')
         .eq('id', groupId)
-        .maybeSingle()
-        .timeout(const Duration(seconds: 4));
+        .maybeSingle();
     if (row == null) return null;
     return CurrentGroup(
       id: (row['id'] ?? '').toString(),
@@ -200,8 +193,7 @@ class AcademicContextService {
           'semester_number,academic_year_id,academic_term_id,academic_terms(is_current,starts_on,ends_on)',
         )
         .eq('group_id', groupId)
-        .order('semester_number', ascending: false)
-        .timeout(const Duration(seconds: 5));
+        .order('semester_number', ascending: false);
 
     if (rows.isEmpty) return const CurrentSemester();
 

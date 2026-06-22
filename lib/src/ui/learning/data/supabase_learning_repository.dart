@@ -31,8 +31,7 @@ class SupabaseLearningRepository implements LearningRepository {
   Future<List<Team>> loadTeams(String groupCode) async {
     try {
       debugPrint('[loadTeams] calling get_my_teams');
-      final res =
-          await _sb.rpc('get_my_teams').timeout(const Duration(seconds: 12));
+      final res = await _sb.rpc('get_my_teams');
       final baseList = (res as List)
           .map((e) => Map<String, dynamic>.from(e as Map))
           .map(_mapRowToTeam)
@@ -83,8 +82,7 @@ class SupabaseLearningRepository implements LearningRepository {
           .select(
             'id,group_id,subject_id,subject_offering_id,academic_year_id,academic_term_id,semester_number',
           )
-          .inFilter('id', ids)
-          .timeout(const Duration(seconds: 7));
+          .inFilter('id', ids);
       final byId = <String, Map<String, dynamic>>{};
       for (final raw in rows as List) {
         final row = Map<String, dynamic>.from(raw as Map);
@@ -160,12 +158,8 @@ class SupabaseLearningRepository implements LearningRepository {
     final user = _sb.auth.currentUser;
     if (user == null) return null;
     try {
-      final rows = await _sb
-          .from('users')
-          .select('login')
-          .eq('id', user.id)
-          .limit(1)
-          .timeout(const Duration(seconds: 8));
+      final rows =
+          await _sb.from('users').select('login').eq('id', user.id).limit(1);
       if (rows.isNotEmpty) {
         final m = Map<String, dynamic>.from(rows.first as Map);
         final login = (m['login'] ?? '').toString();
@@ -184,8 +178,7 @@ class SupabaseLearningRepository implements LearningRepository {
         .select('id')
         .eq('team_id', teamId)
         .eq('type', 'team_main')
-        .limit(1)
-        .timeout(const Duration(seconds: 8));
+        .limit(1);
     if (rows.isNotEmpty) {
       final id = (rows.first['id'] ?? '').toString();
       _chatIdByTeam[teamId] = id;
@@ -342,11 +335,8 @@ class SupabaseLearningRepository implements LearningRepository {
   }
 
   Future<List<ChatFile>> _loadChatFilesForMessage(String messageId) async {
-    final rows = await _sb
-        .from('chat_files')
-        .select('*')
-        .eq('message_id', messageId)
-        .timeout(const Duration(seconds: 6));
+    final rows =
+        await _sb.from('chat_files').select('*').eq('message_id', messageId);
     return (rows as List)
         .map((e) => ChatFile.fromJson(Map<String, dynamic>.from(e as Map)))
         .toList();
@@ -371,8 +361,7 @@ class SupabaseLearningRepository implements LearningRepository {
           .select('*')
           .eq('chat_id', chatId)
           .order('created_at', ascending: false)
-          .limit(50)
-          .timeout(const Duration(seconds: 12));
+          .limit(50);
 
       final list = <Message>[];
       for (final row in rows as List) {
@@ -733,8 +722,8 @@ class SupabaseLearningRepository implements LearningRepository {
   @override
   Future<List<Assignment>> loadAssignments(String teamId) async {
     try {
-      final res = await _sb.rpc('get_team_assignments',
-          params: {'p_team_id': teamId}).timeout(const Duration(seconds: 12));
+      final res =
+          await _sb.rpc('get_team_assignments', params: {'p_team_id': teamId});
       final list = (res as List)
           .map((e) => Map<String, dynamic>.from(e as Map))
           .map(_mapAssignmentRow)

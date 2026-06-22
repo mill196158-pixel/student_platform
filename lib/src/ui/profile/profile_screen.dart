@@ -302,7 +302,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   Future<(int?, int?)> _fetchFriendsAndRequests(String userId) async {
     try {
       final res = await _sb.rpc('get_profile_counters',
-          params: {'p_uid': userId}).timeout(const Duration(seconds: 10));
+          params: {'p_uid': userId}).timeout(const Duration(seconds: 30));
       debugPrint(
           '${_ts()} [Counters] rpc=get_profile_counters -> ${res.runtimeType} $res');
 
@@ -330,7 +330,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   Future<int?> _fetchUnreadTotal() async {
     try {
       final res =
-          await _sb.rpc('unread_total').timeout(const Duration(seconds: 10));
+          await _sb.rpc('unread_total').timeout(const Duration(seconds: 30));
       if (res is int) return res;
       if (res is num) return res.toInt();
       if (res is Map) {
@@ -406,7 +406,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         try {
           final chatId = await _repo
               .getMainChatId(t.id)
-              .timeout(const Duration(seconds: 6));
+              .timeout(const Duration(seconds: 20));
           if (chatId.isNotEmpty) ids.add(chatId);
         } catch (e) {
           debugPrint('${_ts()} [Profile] getMainChatId skipped: $e');

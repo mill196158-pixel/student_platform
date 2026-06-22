@@ -27,14 +27,8 @@ class HomeDashboardService {
   Future<HomeDashboardData> load() async {
     final profile = await _loadProfile();
     final results = await Future.wait<dynamic>([
-      _loadTodayLessons().timeout(
-        const Duration(seconds: 9),
-        onTimeout: () => const <Lesson>[],
-      ),
-      _loadAssignments(profile.groupName).timeout(
-        const Duration(seconds: 6),
-        onTimeout: () => const <HomeAssignmentPreview>[],
-      ),
+      _loadTodayLessons(),
+      _loadAssignments(profile.groupName),
     ]);
 
     final lessons = results[0] as List<Lesson>;
@@ -63,9 +57,7 @@ class HomeDashboardService {
     }
 
     try {
-      final rows = await _sb
-          .rpc('get_my_profile')
-          .timeout(const Duration(seconds: 6)) as List?;
+      final rows = await _sb.rpc('get_my_profile') as List?;
       if (rows != null && rows.isNotEmpty) {
         final fresh = Map<String, dynamic>.from(rows.first as Map);
         final prefs = await SharedPreferences.getInstance();
@@ -99,21 +91,11 @@ class HomeDashboardService {
     if (groupName.trim().isEmpty) return [];
 
     try {
-      final teams = await _learningRepository
-          .loadTeams(groupName)
-          .timeout(const Duration(seconds: 6));
+      final teams = await _learningRepository.loadTeams(groupName);
       final previews = <HomeAssignmentPreview>[];
 
-      final teamResults = await Future.wait(
-        teams.take(4).map(
-              (team) => _loadTeamAssignments(team).timeout(
-                const Duration(seconds: 4),
-                onTimeout: () => const <HomeAssignmentPreview>[],
-              ),
-            ),
-      );
-      for (final result in teamResults) {
-        previews.addAll(result);
+      for (final team in teams.take(8)) {
+        previews.addAll(await _loadTeamAssignments(team));
       }
 
       previews.sort(_compareAssignments);

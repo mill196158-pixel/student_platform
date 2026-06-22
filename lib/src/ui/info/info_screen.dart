@@ -87,16 +87,14 @@ class _InfoScreenState extends State<InfoScreen> {
     }
 
     if (state.warning != null) {
-      final sessionExpired = state.warning == AuthSession.sessionExpiredMessage ||
-          AuthSession.isAuthFailure(state.warning!);
+      final sessionExpired =
+          state.warning == AuthSession.sessionExpiredMessage ||
+              AuthSession.isAuthFailure(state.warning!);
       return _EmptyState(
-        text: sessionExpired
-            ? AuthSession.sessionExpiredMessage
-            : state.warning!,
+        text:
+            sessionExpired ? AuthSession.sessionExpiredMessage : state.warning!,
         actionLabel: sessionExpired ? 'Войти снова' : null,
-        onAction: sessionExpired
-            ? () => AuthService.signOut(context)
-            : null,
+        onAction: sessionExpired ? () => AuthService.signOut(context) : null,
       );
     }
 
@@ -530,76 +528,77 @@ class _UsefulHeader extends StatelessWidget {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.primary.withValues(alpha: 0.10),
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.06),
-                          blurRadius: 12,
-                          offset: const Offset(0, 4),
-                        ),
-                        BoxShadow(
-                          color: Colors.white.withValues(alpha: 0.85),
-                          blurRadius: 8,
-                          offset: const Offset(-2, -2),
-                        ),
-                      ],
-                    ),
-                    child: Icon(
-                      Icons.lightbulb_outline_rounded,
-                      color: theme.colorScheme.primary,
-                      size: 28,
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Полезная',
-                          style: theme.textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.w800,
-                            color: Colors.black,
-                            height: 1.05,
-                            shadows: [
-                              Shadow(
-                                color: Colors.black.withValues(alpha: 0.05),
-                                offset: const Offset(0, 2),
-                                blurRadius: 3,
-                              ),
-                            ],
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color:
+                            theme.colorScheme.primary.withValues(alpha: 0.10),
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.06),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
                           ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          'информация по предметам',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: Colors.black.withValues(alpha: 0.64),
-                            height: 1.25,
+                          BoxShadow(
+                            color: Colors.white.withValues(alpha: 0.85),
+                            blurRadius: 8,
+                            offset: const Offset(-2, -2),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
+                      child: Icon(
+                        Icons.lightbulb_outline_rounded,
+                        color: theme.colorScheme.primary,
+                        size: 28,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  _HeaderActionButton(
-                    icon: selectedSection == _UsefulSection.subjects
-                        ? Icons.apps_rounded
-                        : Icons.help_outline_rounded,
-                    onTap: onSectionTap,
-                  ),
-                ],
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Полезная',
+                            style: theme.textTheme.headlineSmall?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              color: Colors.black,
+                              height: 1.05,
+                              shadows: [
+                                Shadow(
+                                  color: Colors.black.withValues(alpha: 0.05),
+                                  offset: const Offset(0, 2),
+                                  blurRadius: 3,
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'информация по предметам',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: Colors.black.withValues(alpha: 0.64),
+                              height: 1.25,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    _HeaderActionButton(
+                      icon: selectedSection == _UsefulSection.subjects
+                          ? Icons.apps_rounded
+                          : Icons.help_outline_rounded,
+                      onTap: onSectionTap,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
-        ),
         ),
       ],
     );

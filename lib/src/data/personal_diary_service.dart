@@ -205,13 +205,7 @@ class PersonalDiaryService {
   final AcademicContextService _academicContextService;
 
   Future<PersonalDiaryData> load({int? semesterNumber}) async {
-    final context = await _academicContextService
-        .load()
-        .timeout(const Duration(seconds: 8), onTimeout: () {
-      return const AcademicContext.empty(
-        warning: 'Учебный контекст загружается слишком долго',
-      );
-    });
+    final context = await _academicContextService.load();
     final userId = _sb.auth.currentUser?.id ?? context.userId ?? '';
     final groupId = context.groupId ?? '';
     final currentSemester = context.currentSemesterNumber;
@@ -223,21 +217,12 @@ class PersonalDiaryService {
       );
     }
 
-    late final dynamic semesterRows;
-    try {
-      semesterRows = await _sb
-          .from('subject_offerings')
-          .select('id,display_name,subject_id,group_id,semester_number')
-          .eq('group_id', groupId)
-          .order('semester_number')
-          .order('display_name')
-          .timeout(const Duration(seconds: 8));
-    } catch (_) {
-      return _emptyData(
-        context,
-        selectedSemesterNumber: semesterNumber ?? currentSemester,
-      );
-    }
+    final semesterRows = await _sb
+        .from('subject_offerings')
+        .select('id,display_name,subject_id,group_id,semester_number')
+        .eq('group_id', groupId)
+        .order('semester_number')
+        .order('display_name');
 
     final allOfferingRows = (semesterRows as List)
         .map((row) => Map<String, dynamic>.from(row as Map))
@@ -293,8 +278,7 @@ class PersonalDiaryService {
             .eq('author_id', userId)
             .inFilter('subject_offering_id', offeringIds)
             .order('entry_date', ascending: false)
-            .order('created_at', ascending: false)
-            .timeout(const Duration(seconds: 7));
+            .order('created_at', ascending: false);
 
         entries = (entryRows as List)
             .map((row) => Map<String, dynamic>.from(row as Map))
@@ -314,8 +298,7 @@ class PersonalDiaryService {
           final fileRows = await _sb
               .from('subject_diary_files')
               .select('id,entry_id')
-              .inFilter('entry_id', entryIds)
-              .timeout(const Duration(seconds: 5));
+              .inFilter('entry_id', entryIds);
           for (final raw in fileRows as List) {
             final row = Map<String, dynamic>.from(raw as Map);
             final entryId = (row['entry_id'] ?? '').toString();
@@ -341,8 +324,7 @@ class PersonalDiaryService {
             .eq('status', 'published')
             .inFilter('subject_offering_id', offeringIds)
             .order('due_at', ascending: true, nullsFirst: false)
-            .order('created_at', ascending: true)
-            .timeout(const Duration(seconds: 7));
+            .order('created_at', ascending: true);
 
         rawAssignments = (assignmentRows as List)
             .map((row) => Map<String, dynamic>.from(row as Map))
@@ -363,8 +345,7 @@ class PersonalDiaryService {
           final messageRows = await _sb
               .from('messages')
               .select('id,assignment_id')
-              .inFilter('assignment_id', assignmentIds)
-              .timeout(const Duration(seconds: 5));
+              .inFilter('assignment_id', assignmentIds);
           for (final raw in messageRows as List) {
             final row = Map<String, dynamic>.from(raw as Map);
             final assignmentId = (row['assignment_id'] ?? '').toString();
@@ -380,8 +361,7 @@ class PersonalDiaryService {
               .from('assignment_done')
               .select('assignment_id,done,done_at')
               .eq('user_id', userId)
-              .inFilter('assignment_id', assignmentIds)
-              .timeout(const Duration(seconds: 5));
+              .inFilter('assignment_id', assignmentIds);
           for (final raw in doneRows as List) {
             final row = Map<String, dynamic>.from(raw as Map);
             final assignmentId = (row['assignment_id'] ?? '').toString();
@@ -418,9 +398,6 @@ class PersonalDiaryService {
         offeringIds: offeringIds,
         includeGeneral: true,
         subjectTitleByOffering: offeringTitleById,
-      ).timeout(
-        const Duration(seconds: 7),
-        onTimeout: () => const <PersonalDiaryTask>[],
       );
       generalTasks = personalTasks.where((task) => task.isGeneral).toList();
       for (final task in personalTasks.where((task) => !task.isGeneral)) {
@@ -536,24 +513,24 @@ class PersonalDiaryService {
     int? selectedSemesterNumber,
   }) {
     return PersonalDiaryData(
-        academicContext: context,
-        availableSemesters: availableSemesters,
+      academicContext: context,
+      availableSemesters: availableSemesters,
       selectedSemesterNumber: selectedSemesterNumber,
-        allSubjects: const [],
-        subjects: const [],
-        latestEntries: const [],
-        publishedAssignments: const [],
-        upcomingAssignments: const [],
-        personalTasks: const [],
-        upcomingPersonalTasks: const [],
-        totalEntries: 0,
-        totalFiles: 0,
-        totalAssignments: 0,
-        pendingAssignmentsCount: 0,
-        completedAssignmentsCount: 0,
-        personalTasksTotal: 0,
-        personalTasksActive: 0,
-        personalTasksDone: 0,
+      allSubjects: const [],
+      subjects: const [],
+      latestEntries: const [],
+      publishedAssignments: const [],
+      upcomingAssignments: const [],
+      personalTasks: const [],
+      upcomingPersonalTasks: const [],
+      totalEntries: 0,
+      totalFiles: 0,
+      totalAssignments: 0,
+      pendingAssignmentsCount: 0,
+      completedAssignmentsCount: 0,
+      personalTasksTotal: 0,
+      personalTasksActive: 0,
+      personalTasksDone: 0,
     );
   }
 
@@ -586,7 +563,8 @@ class PersonalDiaryService {
 
     final rawAssignments = (rows as List)
         .map((row) => Map<String, dynamic>.from(row as Map))
-        .where((row) => (row['subject_offering_id'] ?? '').toString().isNotEmpty)
+        .where(
+            (row) => (row['subject_offering_id'] ?? '').toString().isNotEmpty)
         .toList();
     final ids = rawAssignments
         .map((row) => (row['id'] ?? '').toString())
@@ -602,7 +580,8 @@ class PersonalDiaryService {
       for (final raw in doneRows as List) {
         final row = Map<String, dynamic>.from(raw as Map);
         final id = (row['assignment_id'] ?? '').toString();
-        if (id.isNotEmpty) doneByAssignment[id] = (row['done'] ?? false) == true;
+        if (id.isNotEmpty)
+          doneByAssignment[id] = (row['done'] ?? false) == true;
       }
     }
 
@@ -636,12 +615,13 @@ class PersonalDiaryService {
     if (userId.isEmpty) return const [];
 
     final rows = <Map<String, dynamic>>[];
-    try {
-      final cleanOfferingIds = offeringIds
-          .map((id) => id.trim())
-          .where((id) => id.isNotEmpty)
-          .toList();
-      if (cleanOfferingIds.isNotEmpty) {
+    final cleanOfferingIds = offeringIds
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty)
+        .toList();
+
+    if (cleanOfferingIds.isNotEmpty) {
+      try {
         final subjectRows = await _sb
             .from('personal_diary_tasks')
             .select(
@@ -650,13 +630,14 @@ class PersonalDiaryService {
             .eq('author_id', userId)
             .inFilter('subject_offering_id', cleanOfferingIds)
             .order('due_at', ascending: true, nullsFirst: false)
-            .order('created_at', ascending: true)
-            .timeout(const Duration(seconds: 5));
+            .order('created_at', ascending: true);
         rows.addAll((subjectRows as List)
             .map((row) => Map<String, dynamic>.from(row as Map)));
-      }
+      } catch (_) {}
+    }
 
-      if (includeGeneral) {
+    if (includeGeneral) {
+      try {
         final generalRows = await _sb
             .from('personal_diary_tasks')
             .select(
@@ -665,13 +646,10 @@ class PersonalDiaryService {
             .eq('author_id', userId)
             .filter('subject_offering_id', 'is', null)
             .order('due_at', ascending: true, nullsFirst: false)
-            .order('created_at', ascending: true)
-            .timeout(const Duration(seconds: 5));
+            .order('created_at', ascending: true);
         rows.addAll((generalRows as List)
             .map((row) => Map<String, dynamic>.from(row as Map)));
-      }
-    } catch (_) {
-      return const [];
+      } catch (_) {}
     }
 
     return rows
@@ -905,10 +883,8 @@ class PersonalDiaryService {
     required bool includeGeneral,
     required Map<String, String> subjectTitleByOffering,
   }) async {
-    final offeringSet = offeringIds
-        .map((id) => id.trim())
-        .where((id) => id.isNotEmpty)
-        .toSet();
+    final offeringSet =
+        offeringIds.map((id) => id.trim()).where((id) => id.isNotEmpty).toSet();
     final rows = await _loadLocalTaskRows(userId);
     return rows
         .where((row) {
