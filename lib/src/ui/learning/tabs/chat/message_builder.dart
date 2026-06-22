@@ -12,38 +12,47 @@ typedef Bubble = Widget;
 class _ForwardInfoBubble extends StatelessWidget {
   final ForwardPayloadModel payload;
   final bool isMine;
-  const _ForwardInfoBubble({required this.payload, required this.isMine});
+  final Key? boundaryKey;
+  const _ForwardInfoBubble({
+    required this.payload,
+    required this.isMine,
+    this.boundaryKey,
+  });
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: isMine
-            ? Theme.of(context).colorScheme.primary.withValues(alpha: .10)
-            : Theme.of(context)
-                .colorScheme
-                .surfaceContainerHighest
-                .withValues(alpha: .6),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-            color: Theme.of(context).dividerColor.withValues(alpha: .25)),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        if ((payload.fromChatTitle ?? '').isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Text(
-              'Переслано из: ${payload.fromChatTitle}',
-              style: t.labelSmall?.copyWith(
-                fontWeight: FontWeight.w700,
-                color: t.bodySmall?.color?.withValues(alpha: .7),
+    return Align(
+      alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        key: boundaryKey,
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: isMine
+              ? Theme.of(context).colorScheme.primary.withValues(alpha: .10)
+              : Theme.of(context)
+                  .colorScheme
+                  .surfaceContainerHighest
+                  .withValues(alpha: .6),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: Theme.of(context).dividerColor.withValues(alpha: .25)),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          if ((payload.fromChatTitle ?? '').isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text(
+                'Переслано из: ${payload.fromChatTitle}',
+                style: t.labelSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: t.bodySmall?.color?.withValues(alpha: .7),
+                ),
               ),
             ),
-          ),
-        ...payload.items.map((it) => _ForwardInfoTile(item: it)),
-      ]),
+          ...payload.items.map((it) => _ForwardInfoTile(item: it)),
+        ]),
+      ),
     );
   }
 }
@@ -157,7 +166,7 @@ Bubble buildBubble({
   bool reserveAvatarSpace = true,
   bool showAuthorLine = true,
   required String time,
-  required VoidCallback onLongPress,
+  required VoidCallback? onLongPress,
   required VoidCallback onReply,
   required void Function(String replyId) onReplyTap,
   String? replyPreview,
@@ -168,7 +177,9 @@ Bubble buildBubble({
   String? caption,
   required Map<String, Map<String, int>> reactions,
   required VoidCallback onReact,
+  VoidCallback? onRetryFailed,
   bool selected = false,
+  Key? boundaryKey,
 }) {
   // Current message reactions as counts
   final Map<String, int> currentCounts = reactions[m.id] ?? <String, int>{};
@@ -181,12 +192,17 @@ Bubble buildBubble({
       reactions: currentCounts.isNotEmpty ? currentCounts : null,
       onReact: onReact,
       onLongPress: onLongPress,
+      boundaryKey: boundaryKey,
     );
   }
 
   // Forward (server-side, msg_type = 'forward'): render compact forward bubble without root attachments
   if (m.type == MessageType.forward && m.forward != null) {
-    return _ForwardInfoBubble(payload: m.forward!, isMine: isMe);
+    return _ForwardInfoBubble(
+      payload: m.forward!,
+      isMine: isMe,
+      boundaryKey: boundaryKey,
+    );
   }
 
   // If this is a multi-forward (FG) message, always render with the universal MessageBubble
@@ -208,6 +224,7 @@ Bubble buildBubble({
           showAuthorLine: showAuthorLine,
           caption: caption,
           onLongPress: onLongPress,
+          boundaryKey: boundaryKey,
           reactions: currentCounts.isNotEmpty ? currentCounts : null,
           onReact: onReact,
           selected: selected,
@@ -225,6 +242,7 @@ Bubble buildBubble({
           showAuthorLine: showAuthorLine,
           text: m.text,
           onLongPress: onLongPress,
+          boundaryKey: boundaryKey,
           reactions: currentCounts.isNotEmpty ? currentCounts : null,
           onReact: onReact,
           selected: selected,
@@ -247,9 +265,11 @@ Bubble buildBubble({
     imagePath: m.imagePath,
     attachments: attachments ?? m.attachments,
     onLongPress: onLongPress,
+    boundaryKey: boundaryKey,
     onReplyTap: onReplyTap,
     reactions: messageReactions,
     onReact: onReact,
+    onRetryFailed: onRetryFailed,
     selected: selected,
   );
 }

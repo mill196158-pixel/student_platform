@@ -25,7 +25,7 @@ class ScheduleRepository {
         'p_from':
             DateTime(first.year, first.month, first.day).toIso8601String(),
         'p_days': days,
-      });
+      }).timeout(const Duration(seconds: 14));
 
       if (resp is List) {
         final list = resp
@@ -58,7 +58,8 @@ class ScheduleRepository {
           .select(
             'id,group_id,subject_id,subject_offering_id,academic_year_id,academic_term_id,semester_number,alias_match_status',
           )
-          .inFilter('id', ids);
+          .inFilter('id', ids)
+          .timeout(const Duration(seconds: 7));
 
       final byId = <String, Map<String, dynamic>>{};
       for (final raw in rows) {

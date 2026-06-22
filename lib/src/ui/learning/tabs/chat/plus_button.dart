@@ -4,6 +4,7 @@ import '../../../../services/file_service.dart';
 
 class PlusButton extends StatelessWidget {
   final void Function(String text)? onPinText;
+  final VoidCallback? onFind;
   final Future<void> Function(
     String title,
     String description,
@@ -12,7 +13,7 @@ class PlusButton extends StatelessWidget {
     List<Map<String, String>> attachments,
   )? onPropose;
 
-  const PlusButton({super.key, this.onPinText, this.onPropose});
+  const PlusButton({super.key, this.onPinText, this.onFind, this.onPropose});
 
   @override
   Widget build(BuildContext context) {
@@ -25,6 +26,8 @@ class PlusButton extends StatelessWidget {
           builder: (_) => SafeArea(
             child: Wrap(
               children: [
+                // Поиск перенесён в верхнюю строку — скрываем пункт в плюс-меню
+                const Divider(),
                 ListTile(
                   leading: const Icon(Icons.post_add_outlined),
                   title: const Text('Предложить задание'),
@@ -46,16 +49,7 @@ class PlusButton extends StatelessWidget {
                     );
                   },
                 ),
-                if (onPinText != null)
-                  ListTile(
-                    leading: const Icon(Icons.push_pin_outlined),
-                    title: const Text('Закрепить заметку'),
-                    onTap: () async {
-                      Navigator.pop(context);
-                      final txt = await _askText(context);
-                      if (txt != null && txt.trim().isNotEmpty) onPinText!(txt.trim());
-                    },
-                  ),
+                // скрыто: пункт «Закрепить заметку» временно отключён
                 const Divider(),
                 ListTile(
                   leading: const Icon(Icons.storage),

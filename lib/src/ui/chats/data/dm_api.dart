@@ -5,11 +5,14 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/learning/models/chat_file.dart';
 import 'package:student_platform/src/ui/learning/models/local_attach.dart';
+import 'package:student_platform/src/utils/safe_debug_log.dart';
+import '../core/chat_message_memory_cache.dart';
 
 class DmApi {
   static final SupabaseClient _sb = Supabase.instance.client;
   static final Map<String, List<Message>> _streamMessages = {};
-  static final Map<String, StreamController<List<Message>>> _streamControllers = {};
+  static final Map<String, StreamController<List<Message>>> _streamControllers =
+      {};
 
   // 1) Создать/вернуть chat_id ЛС
   static Future<String> getOrCreateChatId({required String peerId}) async {
@@ -18,22 +21,30 @@ class DmApi {
   }
 
   // 2) Загрузить сообщения (и подтянуть вложения)
-  static Future<List<Message>> loadMessages({required String chatId, int limit = 50, DateTime? since}) async {
-    final res = await _sb.rpc('get_chat_messages', params: {
-      'p_chat_id': chatId,
-      'p_limit': limit,
-      'p_since': (since ?? DateTime.fromMillisecondsSinceEpoch(0)).toIso8601String(),
-    });
-    final rows = (res is List)
-        ? res
-        : (res == null ? <dynamic>[] : <dynamic>[res]);
+  static Future<List<Message>> loadMessages(
+      {required String chatId, int limit = 50, DateTime? since}) async {
+    var query =
+        _sb.from('messages').select('*').eq('chat_id', chatId);
+
+    final sinceAt = since ?? DateTime.fromMillisecondsSinceEpoch(0);
+    query = query.gte('created_at', sinceAt.toUtc().toIso8601String());
+
+    // Последние N сообщений (DESC), затем ASC для UI.
+    final rows = await query
+        .order('created_at', ascending: false)
+        .limit(limit);
+
     if (kDebugMode) {
-      debugPrint('[DM] loadMessages chat=$chatId rows=${rows.length}');
+      debugPrint(
+          '[DM] loadMessages chat=${maskDebugId(chatId)} rows=${(rows as List).length}');
     }
 
-    final msgs = rows
-        .map((e) => _messageFromRow(Map<String, dynamic>.from(e as Map), chatId: chatId))
-        .toList();
+    final msgs = <Message>[];
+    for (final row in (rows as List).reversed) {
+      final data = Map<String, dynamic>.from(row as Map);
+      await _hydrateAuthor(data);
+      msgs.add(_messageFromRow(data, chatId: chatId));
+    }
 
     final ids = msgs.map((m) => m.id).toList();
     if (ids.isNotEmpty) {
@@ -47,7 +58,8 @@ class DmApi {
     return msgs;
   }
 
-  static Message _messageFromRow(Map<String, dynamic> m, {required String chatId}) {
+  static Message _messageFromRow(Map<String, dynamic> m,
+      {required String chatId}) {
     return Message(
       id: (m['id'] ?? '').toString(),
       chatId: (m['chat_id'] ?? chatId).toString(),
@@ -57,14 +69,20 @@ class DmApi {
       authorAvatarUrl: (m['author_avatar_url'] ?? '').toString(),
       text: (m['text'] ?? m['content'] ?? m['body'] ?? '').toString(),
       type: _typeFromServer((m['type'] ?? m['msg_type'] ?? 'text').toString()),
-      at: DateTime.tryParse((m['at'] ?? m['created_at'] ?? '').toString()) ?? DateTime.now(),
-      replyToId: (m['reply_to_id']?.toString().isNotEmpty ?? false) ? m['reply_to_id'].toString() : null,
+      at: DateTime.tryParse((m['at'] ?? m['created_at'] ?? '').toString()) ??
+          DateTime.now(),
+      replyToId: (m['reply_to_id']?.toString().isNotEmpty ?? false)
+          ? m['reply_to_id'].toString()
+          : null,
       attachments: const [],
-      reactions: (m['reactions'] is Map) ? Map<String, int>.from(m['reactions']) : null,
+      reactions: (m['reactions'] is Map)
+          ? Map<String, int>.from(m['reactions'])
+          : null,
     );
   }
 
-  static Future<Map<String, List<ChatFile>>> _loadFilesByMessage(List<String> messageIds) async {
+  static Future<Map<String, List<ChatFile>>> _loadFilesByMessage(
+      List<String> messageIds) async {
     final filesRows = await _sb
         .from('chat_files')
         .select('*')
@@ -157,6 +175,8 @@ class DmApi {
 
       older.sort((a, b) => a.at.compareTo(b.at));
       final page = older.take(limit).toList();
+      ChatMessageMemoryCache.merge(chatId, page);
+
       final current = _streamMessages[chatId];
       final ctrl = _streamControllers[chatId];
       if (current != null && ctrl != null) {
@@ -164,6 +184,9 @@ class DmApi {
         final unique = page.where((m) => existingIds.add(m.id)).toList();
         if (unique.isNotEmpty) {
           current.insertAll(0, unique);
+          current
+            ..clear()
+            ..addAll(ChatMessageMemoryCache.merge(chatId, current));
           if (!ctrl.isClosed) ctrl.add(List<Message>.unmodifiable(current));
         }
         return unique;
@@ -174,6 +197,29 @@ class DmApi {
         debugPrint('[DM] loadOlderMessages failed: $e');
       }
       return [];
+    }
+  }
+
+  static Future<void> _publishMessageById({
+    required String chatId,
+    required String messageId,
+  }) async {
+    if (messageId.isEmpty) return;
+
+    final message = await loadMessageById(chatId: chatId, messageId: messageId);
+    if (message == null) return;
+
+    final merged = ChatMessageMemoryCache.reconcileUpsert(chatId, message);
+    final current = _streamMessages[chatId];
+    if (current != null) {
+      current
+        ..clear()
+        ..addAll(merged);
+    }
+
+    final ctrl = _streamControllers[chatId];
+    if (ctrl != null && !ctrl.isClosed) {
+      ctrl.add(List<Message>.unmodifiable(merged));
     }
   }
 
@@ -194,10 +240,19 @@ class DmApi {
 
     Future<void> emitInitial() async {
       try {
+        final cached = ChatMessageMemoryCache.snapshot(chatId);
+        if (cached.isNotEmpty) {
+          current
+            ..clear()
+            ..addAll(cached);
+          if (!ctrl.isClosed) ctrl.add(List<Message>.unmodifiable(current));
+        }
+
         final list = await loadMessages(chatId: chatId);
+        final merged = ChatMessageMemoryCache.merge(chatId, list);
         current
           ..clear()
-          ..addAll(list);
+          ..addAll(merged);
         if (!ctrl.isClosed) ctrl.add(List<Message>.unmodifiable(current));
       } catch (_) {}
     }
@@ -207,7 +262,10 @@ class DmApi {
       if (id.isEmpty || current.any((m) => m.id == id)) return;
       final message = await loadMessageById(chatId: chatId, messageId: id);
       if (message == null) return;
-      current.add(message);
+      final merged = ChatMessageMemoryCache.reconcileUpsert(chatId, message);
+      current
+        ..clear()
+        ..addAll(merged);
       if (!ctrl.isClosed) ctrl.add(List<Message>.unmodifiable(current));
     }
 
@@ -219,6 +277,10 @@ class DmApi {
       final message = await loadMessageById(chatId: chatId, messageId: id);
       if (message == null) return;
       current[idx] = message;
+      final merged = ChatMessageMemoryCache.merge(chatId, current);
+      current
+        ..clear()
+        ..addAll(merged);
       if (!ctrl.isClosed) ctrl.add(List<Message>.unmodifiable(current));
     }
 
@@ -227,6 +289,7 @@ class DmApi {
       if (id.isEmpty) return;
       final before = current.length;
       current.removeWhere((m) => m.id == id);
+      ChatMessageMemoryCache.remove(chatId, id);
       if (before != current.length && !ctrl.isClosed) {
         ctrl.add(List<Message>.unmodifiable(current));
       }
@@ -271,9 +334,10 @@ class DmApi {
       ..subscribe();
 
     ctrl.onCancel = () async {
-      try { await ch.unsubscribe(); } catch (_) {}
+      try {
+        await ch.unsubscribe();
+      } catch (_) {}
       _streamControllers.remove(chatId);
-      _streamMessages.remove(chatId);
     };
 
     return ctrl.stream;
@@ -300,11 +364,22 @@ class DmApi {
         'p_reply_to': replyToId,
         'p_file_ids': hasFiles ? fileIds : <String>[],
       });
-      if (res is Map && res['id'] != null) return res['id'].toString();
-      if (res is String && res.isNotEmpty) return res;
+      if (res is Map && res['id'] != null) {
+        final id = res['id'].toString();
+        await _publishMessageById(chatId: chatId, messageId: id);
+        return id;
+      }
+      if (res is String && res.isNotEmpty) {
+        await _publishMessageById(chatId: chatId, messageId: res);
+        return res;
+      }
       if (res is List && res.isNotEmpty) {
         final m = Map<String, dynamic>.from(res.first as Map);
-        if (m['id'] != null) return m['id'].toString();
+        if (m['id'] != null) {
+          final id = m['id'].toString();
+          await _publishMessageById(chatId: chatId, messageId: id);
+          return id;
+        }
       }
     } catch (_) {
       // fallback below
@@ -328,7 +403,8 @@ class DmApi {
 
     final mid = Map<String, dynamic>.from(inserted as Map)['id'].toString();
     if (kDebugMode) {
-      debugPrint('[DM] sent mid=$mid (files=${fileIds?.length ?? 0})');
+      debugPrint(
+          '[DM] sent message=${maskDebugId(mid)} files=${fileIds?.length ?? 0}');
     }
 
     if (hasFiles) {
@@ -339,26 +415,27 @@ class DmApi {
           .eq('chat_id', chatId);
     }
 
+    await _publishMessageById(chatId: chatId, messageId: mid);
     return mid;
   }
 
   // 5) Прочитано до сообщения
-  static Future<void> markRead({required String chatId, required String messageId}) async {
+  static Future<void> markRead(
+      {required String chatId, required String messageId}) async {
     final uid = _sb.auth.currentUser?.id;
     if (uid == null) return;
-    await _sb
-        .from('chat_reads')
-        .upsert({
-          'chat_id': chatId,
-          'user_id': uid,
-          'last_message_id': messageId,
-          'seen_at': DateTime.now().toIso8601String(),
-        }, onConflict: 'chat_id,user_id');
+    await _sb.from('chat_reads').upsert({
+      'chat_id': chatId,
+      'user_id': uid,
+      'last_message_id': messageId,
+      'seen_at': DateTime.now().toIso8601String(),
+    }, onConflict: 'chat_id,user_id');
   }
 
   // 6) Метаданные непрочитанного
   static Future<Map<String, dynamic>> getUnreadMeta(String chatId) async {
-    final res = await _sb.rpc('get_unread_in_chat', params: {'p_chat_id': chatId});
+    final res =
+        await _sb.rpc('get_unread_in_chat', params: {'p_chat_id': chatId});
     if (res == null) return {'unread_count': 0, 'first_unread_id': null};
     if (res is List && res.isNotEmpty) {
       final m = Map<String, dynamic>.from(res.first as Map);
@@ -416,7 +493,11 @@ class DmApi {
 
   static Future<ChatFile?> getFile(String fileId) async {
     try {
-      final row = await _sb.from('chat_files').select('*').eq('id', fileId).maybeSingle();
+      final row = await _sb
+          .from('chat_files')
+          .select('*')
+          .eq('id', fileId)
+          .maybeSingle();
       if (row == null) return null;
       return ChatFile.fromJson(Map<String, dynamic>.from(row as Map));
     } catch (_) {

@@ -5,6 +5,7 @@ import '../state/team_cubit.dart';
 import '../models/assignment.dart';
 import '../models/team.dart';
 import '../assignment_details_screen.dart';
+import 'chat/assignments/assignment_form_dialog.dart';
 
 // общий notifier
 import 'assignments/view_mode.dart';
@@ -35,36 +36,42 @@ class AssignmentsTab extends StatelessWidget {
             });
 
             if (items.isEmpty) {
-              return const Center(child: Text('Пока нет заданий'));
+              return _AssignmentsEmptyState(
+                onCreate: () {
+                  _createAssignment(context);
+                },
+              );
             }
 
             if (asGrid) {
               return GridView.builder(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: 2,
-                  mainAxisSpacing: 10,
-                  crossAxisSpacing: 10,
-                  childAspectRatio: 1.05,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  childAspectRatio: .92,
                 ),
                 itemCount: items.length,
                 itemBuilder: (context, i) => _AssignmentCardTile(
                   a: items[i],
                   onOpen: () => _openDetails(context, items[i].id),
-                  onToggle: () => context.read<TeamCubit>().toggleCompleted(items[i].id),
+                  onToggle: () =>
+                      context.read<TeamCubit>().toggleCompleted(items[i].id),
                 ),
               );
             }
 
             // список
             return ListView.separated(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
               itemCount: items.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
               itemBuilder: (context, i) => _AssignmentRowTile(
                 a: items[i],
                 onOpen: () => _openDetails(context, items[i].id),
-                onToggle: () => context.read<TeamCubit>().toggleCompleted(items[i].id),
+                onToggle: () =>
+                    context.read<TeamCubit>().toggleCompleted(items[i].id),
               ),
             );
           },
@@ -79,6 +86,91 @@ class AssignmentsTab extends StatelessWidget {
         builder: (_) => BlocProvider.value(
           value: context.read<TeamCubit>(),
           child: AssignmentDetailsScreen(assignmentId: id),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _createAssignment(BuildContext context) async {
+    final res = await showAssignmentFormDialog(context);
+    if (res == null || !context.mounted) return;
+
+    try {
+      await context.read<TeamCubit>().proposeAssignment(
+            title: res.$1,
+            description: res.$2,
+            link: res.$3,
+            due: res.$4,
+            attachments: res.$5,
+          );
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Не удалось создать задание. Попробуйте ещё раз.'),
+        ),
+      );
+    }
+  }
+}
+
+class _AssignmentsEmptyState extends StatelessWidget {
+  final VoidCallback? onCreate;
+
+  const _AssignmentsEmptyState({
+    this.onCreate,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: cs.primaryContainer.withValues(alpha: .55),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.assignment_outlined,
+                size: 34,
+                color: cs.primary,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Заданий пока нет',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Когда староста или студент добавит задание, оно появится здесь.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: cs.onSurfaceVariant,
+                height: 1.25,
+              ),
+            ),
+            if (onCreate != null) ...[
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: onCreate,
+                icon: const Icon(Icons.assignment_add, size: 18),
+                label: const Text('Создать задание'),
+              ),
+            ],
+          ],
         ),
       ),
     );
@@ -100,121 +192,99 @@ class _AssignmentRowTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDraft = !a.published;
     final isDone = a.completedByMe;
-    final cs = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final accent = _assignmentAccent(cs, isDraft: isDraft, isDone: isDone);
 
-    Color cardColor() {
-      if (isDraft) return cs.surfaceContainerHighest.withOpacity(.5);
-      if (isDone) return Colors.green.withOpacity(.10);
-      return cs.surface;
-    }
-
-    return InkWell(
-      borderRadius: BorderRadius.circular(14),
-      onTap: onOpen,
-      child: Container(
-        decoration: BoxDecoration(
-          color: cardColor(),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: isDone ? Colors.green : cs.outlineVariant.withOpacity(.6),
-            width: 1,
-          ),
-        ),
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(
-              isDraft ? Icons.pending_outlined : Icons.assignment_outlined,
-              color: isDone ? Colors.green : cs.primary,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: onOpen,
+        child: Ink(
+          decoration: BoxDecoration(
+            color: cs.surface,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+              color: accent.withValues(alpha: isDone || isDraft ? .26 : .12),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          a.title,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.black87,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: .055),
+                blurRadius: 18,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _AssignmentIconTile(
+                icon: _assignmentIcon(isDraft: isDraft, isDone: isDone),
+                color: accent,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            a.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                              color: cs.onSurface,
+                              height: 1.12,
+                            ),
                           ),
                         ),
+                      ],
+                    ),
+                    if (a.description.isNotEmpty) ...[
+                      const SizedBox(height: 5),
+                      Text(
+                        a.description,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: cs.onSurfaceVariant,
+                          height: 1.22,
+                        ),
                       ),
-                      const SizedBox(width: 8),
-                      if ((a.due ?? '').isNotEmpty)
-                        Text('до ${a.due!}',
-                            style: const TextStyle(fontSize: 13, color: Colors.black54)),
                     ],
-                  ),
-                  if (a.description.isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    Text(
-                      a.description,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 14, color: Colors.black87),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        _StatusPill(
+                          text: _statusText(isDraft: isDraft, isDone: isDone),
+                          color: accent,
+                        ),
+                        if ((a.due ?? '').isNotEmpty) ...[
+                          const SizedBox(width: 7),
+                          _DuePill(due: a.due!, color: cs.tertiary),
+                        ],
+                        const Spacer(),
+                        if (!isDraft)
+                          _CompleteActionButton(
+                            isDone: isDone,
+                            onPressed: onToggle,
+                          ),
+                      ],
                     ),
                   ],
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      _statusChip(context, isDraft, isDone),
-                      const Spacer(),
-                      if (!isDraft)
-                        OutlinedButton.icon(
-                          icon: Icon(isDone
-                              ? Icons.check_box
-                              : Icons.check_box_outline_blank),
-                          label: Text(isDone ? 'Не выполнено' : 'Выполнено'),
-                          onPressed: onToggle,
-                        ),
-                    ],
-                  ),
-                ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
-    );
-  }
-
-  Widget _statusChip(BuildContext context, bool isDraft, bool isDone) {
-    final cs = Theme.of(context).colorScheme;
-    if (isDraft) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: cs.secondaryContainer,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: const Text('Черновик', style: TextStyle(fontSize: 12)),
-      );
-    }
-    if (isDone) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: Colors.green.withOpacity(.15),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.green),
-        ),
-        child: const Text('Выполнено', style: TextStyle(fontSize: 12, color: Colors.green)),
-      );
-    }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: cs.primaryContainer,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: const Text('Опубликовано', style: TextStyle(fontSize: 12)),
     );
   }
 }
@@ -234,93 +304,286 @@ class _AssignmentCardTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDraft = !a.published;
     final isDone = a.completedByMe;
-    final cs = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final accent = _assignmentAccent(cs, isDraft: isDraft, isDone: isDone);
 
-    Color cardColor() {
-      if (isDraft) return cs.surfaceContainerHighest.withOpacity(.5);
-      if (isDone) return Colors.green.withOpacity(.10);
-      return cs.surface;
-    }
-
-    return InkWell(
-      borderRadius: BorderRadius.circular(14),
-      onTap: onOpen,
-      child: Container(
-        decoration: BoxDecoration(
-          color: cardColor(),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: isDone ? Colors.green : cs.outlineVariant.withOpacity(.6),
-            width: 1,
-          ),
-        ),
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  isDraft ? Icons.pending_outlined : Icons.assignment_outlined,
-                  color: isDone ? Colors.green : cs.primary,
-                ),
-                const Spacer(),
-                if (!isDraft)
-                  IconButton(
-                    tooltip: isDone ? 'Отметить как не выполнено' : 'Отметить как выполнено',
-                    icon: Icon(isDone ? Icons.check_box : Icons.check_box_outline_blank, size: 22),
-                    onPressed: onToggle,
-                  ),
-              ],
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: onOpen,
+        child: Ink(
+          decoration: BoxDecoration(
+            color: cs.surface,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+              color: accent.withValues(alpha: isDone || isDraft ? .26 : .12),
             ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: Text(
-                a.title,
-                maxLines: 4,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.black87,
-                  height: 1.2,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: .055),
+                blurRadius: 18,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          padding: const EdgeInsets.all(13),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  _AssignmentIconTile(
+                    icon: _assignmentIcon(isDraft: isDraft, isDone: isDone),
+                    color: accent,
+                    size: 40,
+                  ),
+                  const Spacer(),
+                  if (!isDraft)
+                    _RoundToggleButton(
+                      isDone: isDone,
+                      color: accent,
+                      onPressed: onToggle,
+                    ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Expanded(
+                child: Text(
+                  a.title,
+                  maxLines: 5,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: cs.onSurface,
+                    height: 1.12,
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                _statusMini(isDraft, isDone, cs),
-                const Spacer(),
-                if ((a.due ?? '').isNotEmpty)
-                  Text('до ${a.due!}', style: const TextStyle(fontSize: 12, color: Colors.black54)),
-              ],
-            ),
-          ],
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  _StatusPill(
+                    text: _statusText(isDraft: isDraft, isDone: isDone),
+                    color: accent,
+                    compact: true,
+                  ),
+                  if ((a.due ?? '').isNotEmpty)
+                    _DuePill(due: a.due!, color: cs.tertiary, compact: true),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
+}
 
-  Widget _statusMini(bool isDraft, bool isDone, ColorScheme cs) {
-    Color bg;
-    String text;
-    Color? border;
-    if (isDraft) {
-      bg = cs.secondaryContainer; text = 'Черновик';
-    } else if (isDone) {
-      bg = Colors.green.withOpacity(.12); text = 'Выполнено'; border = Colors.green;
-    } else {
-      bg = cs.primaryContainer; text = 'Опубликовано';
-    }
+Color _assignmentAccent(
+  ColorScheme cs, {
+  required bool isDraft,
+  required bool isDone,
+}) {
+  if (isDone) return const Color(0xFF22A06B);
+  if (isDraft) return cs.secondary;
+  return cs.primary;
+}
+
+IconData _assignmentIcon({required bool isDraft, required bool isDone}) {
+  if (isDone) return Icons.task_alt_rounded;
+  if (isDraft) return Icons.pending_actions_rounded;
+  return Icons.assignment_rounded;
+}
+
+String _statusText({required bool isDraft, required bool isDone}) {
+  if (isDraft) return 'Черновик';
+  if (isDone) return 'Готово';
+  return 'Активно';
+}
+
+class _AssignmentIconTile extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final double size;
+
+  const _AssignmentIconTile({
+    required this.icon,
+    required this.color,
+    this.size = 44,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      width: size,
+      height: size,
       decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(8),
-        border: border != null ? Border.all(color: border) : null,
+        color: color.withValues(alpha: .12),
+        borderRadius: BorderRadius.circular(14),
       ),
-      child: Text(text, style: const TextStyle(fontSize: 11)),
+      child: Icon(icon, color: color, size: size * .55),
+    );
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  final String text;
+  final Color color;
+  final bool compact;
+
+  const _StatusPill({
+    required this.text,
+    required this.color,
+    this.compact = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 8 : 10,
+        vertical: compact ? 4 : 5,
+      ),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: .11),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w800,
+              height: 1,
+            ),
+      ),
+    );
+  }
+}
+
+class _DuePill extends StatelessWidget {
+  final String due;
+  final Color color;
+  final bool compact;
+
+  const _DuePill({
+    required this.due,
+    required this.color,
+    this.compact = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 8 : 10,
+        vertical: compact ? 4 : 5,
+      ),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: .10),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.schedule_rounded, size: compact ? 12 : 13, color: color),
+          const SizedBox(width: 4),
+          Text(
+            'до $due',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w800,
+              height: 1,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CompleteActionButton extends StatelessWidget {
+  final bool isDone;
+  final VoidCallback onPressed;
+
+  const _CompleteActionButton({
+    required this.isDone,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final color = isDone ? const Color(0xFF22A06B) : cs.primary;
+    return Material(
+      color: color.withValues(alpha: isDone ? .11 : .10),
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(999),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                isDone
+                    ? Icons.check_circle_rounded
+                    : Icons.radio_button_unchecked_rounded,
+                size: 18,
+                color: color,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                isDone ? 'Готово' : 'Выполнить',
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: color,
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RoundToggleButton extends StatelessWidget {
+  final bool isDone;
+  final Color color;
+  final VoidCallback onPressed;
+
+  const _RoundToggleButton({
+    required this.isDone,
+    required this.color,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: color.withValues(alpha: .11),
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onPressed,
+        child: SizedBox(
+          width: 38,
+          height: 38,
+          child: Icon(
+            isDone
+                ? Icons.check_circle_rounded
+                : Icons.radio_button_unchecked_rounded,
+            color: color,
+            size: 22,
+          ),
+        ),
+      ),
     );
   }
 }

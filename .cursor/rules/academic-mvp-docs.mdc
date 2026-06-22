@@ -1,0 +1,53 @@
+---
+description: Student Platform Academic MVP documentation rules
+alwaysApply: true
+---
+
+# Student Platform Academic MVP rules
+
+Correct project:
+
+`C:\student_platform`
+
+Do not use `C:\flutter_gen_ai_chat_ui` for this app.
+
+Existing documentation lives in:
+
+`docs/`
+
+Stage 0 REAL audit output lives in:
+
+`docs/stage0_real/`
+
+Before any Academic MVP work, read existing docs first, especially:
+
+* `docs/academic_architecture_for_frontend.md`
+* `docs/academic_rls_and_visibility_plan.md`
+* `docs/bulk_import_cli_usage.md`
+* `docs/bulk_import_runbook_full.md`
+* `docs/bulk_import_simple_for_beginner.md`
+* `docs/CHAT_FAQ.md`
+* `docs/legacy_to_new_academic_migration_notes.md`
+* `docs/migration_status_2026_06_08.md`
+* `docs/supabase_tables_explained.md`
+* `docs/vv_2024_import_next_steps.md`
+* `docs/vv_2024_staging_import.md`
+
+## Hard constraints
+
+* Do not overwrite existing docs.
+* Do not change Flutter code during Stage 0 REAL.
+* Do not change Supabase schema during Stage 0 REAL.
+* Do not create migrations during Stage 0 REAL.
+* Do not write RLS during Stage 0 REAL.
+* Do not run import/apply scripts.
+* Do not expose `.env` values or service role keys.
+* If live Supabase schema is not confirmed, use `UNKNOWN_DB`.
+* If docs conflict with code or DB, create a contradiction note instead of guessing.
+
+## Documentation rule
+
+After each task, update:
+
+* `docs/stage0_real/STAGE0_REAL_INDEX.md`
+* `docs/stage0_real/WORKLOG.md`

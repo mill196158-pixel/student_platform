@@ -104,6 +104,18 @@ class LessonDetailsScreen extends StatelessWidget {
                     MaterialPageRoute(
                       builder: (_) => SubjectQuickNoteScreen(
                         subjectKey: lesson.subject.trim(),
+                        args: lesson.hasSubjectLink
+                            ? SubjectDiaryArgs(
+                                subjectOfferingId: lesson.subjectOfferingId,
+                                subjectId: lesson.subjectId,
+                                subjectTitle: lesson.subject.trim(),
+                                groupId: lesson.groupId,
+                                semesterNumber: lesson.semesterNumber,
+                                lessonId: lesson.id,
+                                date: lesson.date,
+                                legacySubjectKey: lesson.subject.trim(),
+                              )
+                            : null,
                         date: lesson.date,
                       ),
                     ),
@@ -116,8 +128,20 @@ class LessonDetailsScreen extends StatelessWidget {
                   subtitle: 'Заметки и файлы, новые сверху',
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
-                      builder: (_) =>
-                          SubjectDiaryScreen(subjectKey: lesson.subject.trim()),
+                      builder: (_) => lesson.hasSubjectLink
+                          ? SubjectDiaryScreen(
+                              args: SubjectDiaryArgs(
+                                subjectOfferingId: lesson.subjectOfferingId,
+                                subjectId: lesson.subjectId,
+                                subjectTitle: lesson.subject.trim(),
+                                groupId: lesson.groupId,
+                                semesterNumber: lesson.semesterNumber,
+                                lessonId: lesson.id,
+                                date: lesson.date,
+                                legacySubjectKey: lesson.subject.trim(),
+                              ),
+                            )
+                          : SubjectDiaryScreen(subjectKey: lesson.subject.trim()),
                     ),
                   ),
                 ),

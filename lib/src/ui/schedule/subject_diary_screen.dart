@@ -79,6 +79,18 @@ class _SubjectDiaryScreenState extends State<SubjectDiaryScreen> {
     });
   }
 
+  void _refreshSubjectTasksSilently() {
+    final offeringId = (_args.subjectOfferingId ?? '').trim();
+    if (offeringId.isEmpty) return;
+    _diaryService.loadPersonalTasksForOfferings(
+      offeringIds: [offeringId],
+      subjectTitleByOffering: {offeringId: _args.displayTitle},
+    ).then((tasks) {
+      if (!mounted) return;
+      setState(() => _personalTasks = tasks);
+    });
+  }
+
   // ===== realtime =====
   RealtimeChannel? _diaryEntriesCh;
   RealtimeChannel? _diaryFilesCh;
@@ -374,7 +386,7 @@ class _SubjectDiaryScreenState extends State<SubjectDiaryScreen> {
       );
       return;
     }
-    final saved = await showModalBottomSheet<bool>(
+    final task = await showModalBottomSheet<PersonalDiaryTask>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
@@ -389,7 +401,7 @@ class _SubjectDiaryScreenState extends State<SubjectDiaryScreen> {
           String? description,
           DateTime? dueAt,
         }) async {
-          await _diaryService.createPersonalTask(
+          return _diaryService.createPersonalTask(
             title: title,
             description: description,
             subjectOfferingId: offeringId,
@@ -399,7 +411,14 @@ class _SubjectDiaryScreenState extends State<SubjectDiaryScreen> {
         },
       ),
     );
-    if (saved == true) await _load();
+    if (task == null || !mounted) return;
+    setState(() {
+      _personalTasks = [
+        task,
+        ..._personalTasks.where((existing) => existing.id != task.id),
+      ]..sort(_compareSubjectTasksForUi);
+    });
+    _refreshSubjectTasksSilently();
   }
 
   // Правый верхний плюс: ветвление "Добавить запись"
@@ -1138,7 +1157,7 @@ class _SubjectAssignmentDetailsSheet extends StatelessWidget {
 
 class _SubjectTaskFormSheet extends StatefulWidget {
   final String subjectTitle;
-  final Future<void> Function({
+  final Future<PersonalDiaryTask> Function({
     required String title,
     String? description,
     DateTime? dueAt,
@@ -1198,12 +1217,20 @@ class _SubjectTaskFormSheetState extends State<_SubjectTaskFormSheet> {
               const SizedBox(height: 14),
               TextField(
                 controller: _titleController,
+                autofocus: true,
+                cursorColor: Colors.black87,
+                style: const TextStyle(
+                  color: Colors.black87,
+                  fontWeight: FontWeight.w700,
+                ),
                 decoration: _subjectInputDecoration('Название'),
                 textInputAction: TextInputAction.next,
               ),
               const SizedBox(height: 10),
               TextField(
                 controller: _descriptionController,
+                cursorColor: Colors.black87,
+                style: const TextStyle(color: Colors.black87),
                 minLines: 2,
                 maxLines: 4,
                 decoration: _subjectInputDecoration('Описание, если нужно'),
@@ -1256,12 +1283,12 @@ class _SubjectTaskFormSheetState extends State<_SubjectTaskFormSheet> {
     }
     setState(() => _saving = true);
     try {
-      await widget.onSave(
+      final task = await widget.onSave(
         title: title,
         description: _descriptionController.text.trim(),
         dueAt: _dueAt,
       );
-      if (mounted) Navigator.pop(context, true);
+      if (mounted) Navigator.pop(context, task);
     } catch (_) {
       if (!mounted) return;
       setState(() => _saving = false);
@@ -1289,11 +1316,24 @@ BoxDecoration _subjectCardDecoration() {
 InputDecoration _subjectInputDecoration(String label) {
   return InputDecoration(
     labelText: label,
+    labelStyle: const TextStyle(color: Colors.black54),
+    floatingLabelStyle: const TextStyle(
+      color: Colors.black87,
+      fontWeight: FontWeight.w700,
+    ),
     filled: true,
     fillColor: const Color(0xFFF6F7FB),
     border: OutlineInputBorder(
       borderRadius: BorderRadius.circular(16),
       borderSide: BorderSide.none,
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(16),
+      borderSide: const BorderSide(color: Color(0xFFE1E5EF)),
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(16),
+      borderSide: const BorderSide(color: Colors.black87, width: 1.4),
     ),
   );
 }
@@ -1307,6 +1347,15 @@ String _subjectFmtDate(DateTime date) {
 String? _subjectDueLabel(DateTime? date) {
   if (date == null) return null;
   return 'до ${_subjectFmtDate(date)}';
+}
+
+int _compareSubjectTasksForUi(PersonalDiaryTask a, PersonalDiaryTask b) {
+  final aDue = a.dueAt;
+  final bDue = b.dueAt;
+  if (aDue != null && bDue != null) return aDue.compareTo(bDue);
+  if (aDue != null) return -1;
+  if (bDue != null) return 1;
+  return b.createdAt.compareTo(a.createdAt);
 }
 
 String _subjectTaskStatusLabel(String status) {

@@ -16,11 +16,13 @@ class EditProfileScreen extends StatefulWidget {
 }
 
 class _EditProfileScreenState extends State<EditProfileScreen> {
+  static const String _fixedUniversity = 'СПБГАСУ';
+
   final _formKey = GlobalKey<FormState>();
 
   final _firstName = TextEditingController();
   final _lastName = TextEditingController();
-  final _university = TextEditingController();
+  final _university = TextEditingController(text: _fixedUniversity);
   final _group = TextEditingController();
 
   final List<String> _statuses = const [
@@ -34,7 +36,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   String _status = 'Онлайн';
 
   String? _avatarPath; // локальный превью
-  String? _avatarUrl;  // url из БД
+  String? _avatarUrl; // url из БД
 
   bool _saving = false;
   Map<String, dynamic>? _user;
@@ -52,10 +54,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final userJson = prefs.getString('user');
     if (userJson != null) {
       _user = jsonDecode(userJson) as Map<String, dynamic>;
-      _firstName.text  = (_user?['name'] ?? '') as String;
-      _lastName.text   = (_user?['surname'] ?? '') as String;
-      _university.text = (_user?['university'] ?? '') as String;
-      _group.text      = (_user?['group_name'] ?? '') as String;
+      _firstName.text = (_user?['name'] ?? '') as String;
+      _lastName.text = (_user?['surname'] ?? '') as String;
+      _university.text = _fixedUniversity;
+      _group.text = (_user?['group_name'] ?? '') as String;
       final st = (_user?['status'] ?? '') as String;
       if (st.isNotEmpty) _status = st;
       _avatarUrl = (_user?['avatar_url'] as String?)?.trim();
@@ -75,7 +77,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   /// Загрузка в `<uid>/<fileName>.jpg`. Это критично для RLS.
   Future<void> _pickAvatar() async {
     final picker = ImagePicker();
-    final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
+    final picked =
+        await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
     if (picked == null || _user == null) return;
 
     setState(() => _avatarPath = picked.path);
@@ -87,13 +90,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       final path = '$id/$fileName'; // <— ВАЖНО: папка пользователя
 
       await _sb.storage.from('avatars').uploadBinary(
-        path,
-        bytes,
-        fileOptions: const FileOptions(
-          upsert: true,
-          contentType: 'image/jpeg',
-        ),
-      );
+            path,
+            bytes,
+            fileOptions: const FileOptions(
+              upsert: true,
+              contentType: 'image/jpeg',
+            ),
+          );
 
       final publicUrl = _sb.storage.from('avatars').getPublicUrl(path);
 
@@ -119,7 +122,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Future<void> _save() async {
-    // сейчас поля только для чтения — по кнопке просто выходим
     if (!mounted) return;
     context.pop();
   }
@@ -243,7 +245,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             onPressed: _saving ? null : _save,
             child: _saving
                 ? const SizedBox(
-                    width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2))
                 : const Text('Готово'),
           ),
         ],
@@ -274,7 +278,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         backgroundColor: Colors.white,
                         backgroundImage: avatarProvider,
                         child: avatarProvider == null
-                            ? const Icon(Icons.person, size: 44, color: Colors.black54)
+                            ? const Icon(Icons.person,
+                                size: 44, color: Colors.black54)
                             : null,
                       ),
                     ),
@@ -292,13 +297,17 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
-                              color: Theme.of(context).colorScheme.primary.withOpacity(.35),
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .primary
+                                  .withOpacity(.35),
                               blurRadius: 10,
                               offset: const Offset(0, 6),
                             ),
                           ],
                         ),
-                        child: const Icon(Icons.edit, color: Colors.white, size: 20),
+                        child: const Icon(Icons.edit,
+                            color: Colors.white, size: 20),
                       ),
                     ),
                   ),
@@ -308,37 +317,69 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
             const SizedBox(height: 20),
 
-            // ==== READ-ONLY FIELDS ====
-            _LabeledField(label: 'Имя',         hint: 'Введите имя',         controller: _firstName,   readOnly: true),
-            _Divider(),
-            _LabeledField(label: 'Фамилия',     hint: 'Введите фамилию',     controller: _lastName,    readOnly: true),
-            _Divider(),
-            _LabeledField(label: 'Университет', hint: 'Например: СПбГАСУ',   controller: _university,  readOnly: true),
-            _Divider(),
-            _LabeledField(label: 'Группа/курс', hint: 'Например: 1-См(ВВ)-2',controller: _group,       readOnly: true),
+            // ==== PROFILE FIELDS ====
+            _ProfileFieldsCard(
+              children: [
+                _LabeledField(
+                  label: 'Имя',
+                  hint: 'Введите имя',
+                  controller: _firstName,
+                  readOnly: true,
+                  suffixIcon: Icons.lock_outline_rounded,
+                ),
+                _Divider(),
+                _LabeledField(
+                  label: 'Фамилия',
+                  hint: 'Введите фамилию',
+                  controller: _lastName,
+                  readOnly: true,
+                  suffixIcon: Icons.lock_outline_rounded,
+                ),
+                _Divider(),
+                _LabeledField(
+                  label: 'Университет',
+                  hint: _fixedUniversity,
+                  controller: _university,
+                  readOnly: true,
+                  suffixIcon: Icons.lock_outline_rounded,
+                ),
+                _Divider(),
+                _LabeledField(
+                  label: 'Группа',
+                  hint: 'Например: 1-См(ВВ)-2',
+                  controller: _group,
+                  readOnly: true,
+                  suffixIcon: Icons.lock_outline_rounded,
+                ),
+              ],
+            ),
 
             const SizedBox(height: 12),
 
             // ==== STATUS CHIPS ====
             Text('Статус',
-                style: text.labelMedium?.copyWith(color: Colors.black54, fontWeight: FontWeight.w600)),
+                style: text.labelMedium?.copyWith(
+                    color: Colors.black54, fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
-              runSpacing: -4,
+              runSpacing: 10,
               children: _statuses.map((s) {
                 final selected = _status == s;
                 return ChoiceChip(
                   label: Text(s),
                   selected: selected,
                   onSelected: (_) => _setStatus(s),
+                  labelPadding: const EdgeInsets.symmetric(horizontal: 8),
+                  visualDensity: VisualDensity.compact,
                   labelStyle: TextStyle(
                     color: selected ? Colors.white : Colors.black87,
                     fontWeight: FontWeight.w600,
                   ),
                   selectedColor: Theme.of(context).colorScheme.primary,
                   backgroundColor: Colors.grey.shade200,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20)),
                 );
               }).toList(),
             ),
@@ -368,6 +409,8 @@ class _LabeledField extends StatelessWidget {
   final bool readOnly;
   final int maxLines;
   final TextInputType? keyboardType;
+  final String? validatorText;
+  final IconData? suffixIcon;
 
   const _LabeledField({
     required this.label,
@@ -376,6 +419,8 @@ class _LabeledField extends StatelessWidget {
     this.readOnly = false,
     this.maxLines = 1,
     this.keyboardType,
+    this.validatorText,
+    this.suffixIcon,
   });
 
   @override
@@ -386,21 +431,67 @@ class _LabeledField extends StatelessWidget {
         ?.copyWith(color: Colors.black54, fontWeight: FontWeight.w600);
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: TextFormField(
-        controller: controller,
-        readOnly: readOnly,
-        enableInteractiveSelection: true,
-        keyboardType: keyboardType,
-        maxLines: maxLines,
-        decoration: InputDecoration(
-          labelText: label,
-          labelStyle: labelStyle,
-          hintText: hint,
-          border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-        ),
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text(label, style: labelStyle),
+          ),
+          const SizedBox(height: 2),
+          TextFormField(
+            controller: controller,
+            readOnly: readOnly,
+            enableInteractiveSelection: true,
+            keyboardType: keyboardType,
+            maxLines: maxLines,
+            textInputAction: TextInputAction.next,
+            style: Theme.of(context).textTheme.bodyLarge,
+            validator: validatorText == null
+                ? null
+                : (value) {
+                    if ((value ?? '').trim().isEmpty) return validatorText;
+                    return null;
+                  },
+            decoration: InputDecoration(
+              hintText: hint,
+              suffixIcon:
+                  suffixIcon == null ? null : Icon(suffixIcon, size: 18),
+              border: InputBorder.none,
+              isDense: true,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+            ),
+          ),
+        ],
       ),
+    );
+  }
+}
+
+class _ProfileFieldsCard extends StatelessWidget {
+  final List<Widget> children;
+
+  const _ProfileFieldsCard({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.black12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(.04),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+      child: Column(children: children),
     );
   }
 }

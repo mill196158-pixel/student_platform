@@ -1,6 +1,7 @@
 // lib/src/ui/learning/tabs/chat/assignment_bubble.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'dart:math' as math;
 
 import '../../state/team_cubit.dart';
 import '../../models/message.dart';
@@ -23,6 +24,7 @@ class AssignmentBubble extends StatelessWidget {
   final VoidCallback? onPin;
   final Map<String, int>? reactions;
   final VoidCallback? onReact;
+  final Key? boundaryKey;
 
   const AssignmentBubble({
     super.key,
@@ -38,6 +40,7 @@ class AssignmentBubble extends StatelessWidget {
     this.onPin,
     this.reactions,
     this.onReact,
+    this.boundaryKey,
   });
 
   @override
@@ -57,17 +60,20 @@ class AssignmentBubble extends StatelessWidget {
         isDraft: isDraft,
         time: time,
         onLongPress: onLongPress,
+        boundaryKey: boundaryKey,
       );
     }
+    final assignment = a;
 
     final cs = Theme.of(context).colorScheme;
 
     // Сдержанные цвета без «жёлто-чёрной ленты»
     final bg = isDraft
-        ? cs.secondaryContainer.withValues(alpha: .25)
-        : cs.primary.withValues(alpha: .10);
-    final border =
-        isDraft ? cs.secondaryContainer.withValues(alpha: .9) : cs.primary;
+        ? cs.secondaryContainer.withValues(alpha: .28)
+        : cs.primary.withValues(alpha: .08);
+    final border = isDraft
+        ? cs.secondary.withValues(alpha: .45)
+        : cs.primary.withValues(alpha: .38);
     final textColor =
         Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black;
     final subColor =
@@ -95,21 +101,21 @@ class AssignmentBubble extends StatelessWidget {
         MaterialPageRoute(
           builder: (_) => BlocProvider.value(
             value: context.read<TeamCubit>(),
-            child: AssignmentDetailsScreen(assignmentId: a!.id),
+            child: AssignmentDetailsScreen(assignmentId: assignment.id),
           ),
         ),
       );
     }
 
     Future<void> _defaultPublish() async {
-      await context.read<TeamCubit>().publishAssignment(a!.id);
+      await context.read<TeamCubit>().publishAssignment(assignment.id);
     }
 
     Future<void> _defaultEdit() async {
-      final res = await showAssignmentFormDialog(context, initial: a);
+      final res = await showAssignmentFormDialog(context, initial: assignment);
       if (res == null || !context.mounted) return;
       await context.read<TeamCubit>().updateAssignment(
-            a!.id,
+            assignment.id,
             title: res.$1,
             description: res.$2,
             link: res.$3,
@@ -119,231 +125,281 @@ class AssignmentBubble extends StatelessWidget {
     }
 
     Future<void> _defaultCancel() async {
-      await context.read<TeamCubit>().removeAssignment(a!.id);
+      await context.read<TeamCubit>().removeAssignment(assignment.id);
     }
 
-    return GestureDetector(
-      onLongPress: onLongPress,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          // левая пустая зона для выравнивания системного сообщения
-          const SizedBox(width: 36),
-          Flexible(
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.70,
-              ),
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(
-                  color: bg,
-                  border: Border.all(color: border),
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // ШАПКА
-                    Row(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final rowWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : MediaQuery.sizeOf(context).width;
+        const sideOffset = 36.0;
+        final available = math.max(120.0, rowWidth - sideOffset - 8);
+        final bubbleMaxWidth = math.min(
+          rowWidth >= 700 ? 430.0 : available * 0.96,
+          available,
+        );
+
+        return GestureDetector(
+          onLongPress: onLongPress,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              // левая пустая зона для выравнивания системного сообщения
+              const SizedBox(width: 36),
+              Flexible(
+                child: ConstrainedBox(
+                  key: boundaryKey,
+                  constraints: BoxConstraints(maxWidth: bubbleMaxWidth),
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(11, 9, 11, 9),
+                    decoration: BoxDecoration(
+                      color: bg,
+                      border: Border.all(color: border, width: .7),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(
-                          isDraft
-                              ? Icons.pending_outlined
-                              : Icons.assignment_outlined,
-                          color: isDraft ? cs.secondary : cs.primary,
-                          size: 20,
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Flexible(
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: isDraft
+                                      ? cs.secondary.withValues(alpha: .12)
+                                      : cs.primary.withValues(alpha: .12),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      isDraft
+                                          ? Icons.pending_outlined
+                                          : Icons.assignment_outlined,
+                                      color:
+                                          isDraft ? cs.secondary : cs.primary,
+                                      size: 14,
+                                    ),
+                                    const SizedBox(width: 5),
+                                    Flexible(
+                                      child: ConstrainedBox(
+                                        constraints:
+                                            const BoxConstraints(maxWidth: 190),
+                                        child: Text(
+                                          headerText,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w800,
+                                            color: isDraft
+                                                ? cs.secondary
+                                                : cs.primary,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              time,
+                              style: const TextStyle(
+                                  fontSize: 11, color: Colors.black54),
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
+
+                        // КТО сделал действие
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
                           child: Text(
-                            headerText,
+                            whoDidText,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              color: textColor.withValues(alpha: .8),
-                            ),
+                            style: TextStyle(fontSize: 11, color: subColor),
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        Text(time,
-                            style: const TextStyle(
-                                fontSize: 11, color: Colors.black54)),
-                      ],
-                    ),
 
-                    // КТО сделал действие
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(
-                        whoDidText,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 11, color: subColor),
-                      ),
-                    ),
+                        const SizedBox(height: 7),
 
-                    const SizedBox(height: 4),
-
-                    // КОНТЕНТ
-                    Text(
-                      a.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        color: textColor,
-                      ),
-                    ),
-                    if ((a.due ?? '').isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 2),
-                        child: Text('до ${a.due!}',
-                            style: TextStyle(fontSize: 12, color: subColor)),
-                      ),
-                    if (a.description.trim().isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        a.description,
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                        style:
-                            TextStyle(color: textColor.withValues(alpha: .9)),
-                      ),
-                    ],
-                    if (a.attachments.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      _AssignmentAttachmentsPreview(attachments: a.attachments),
-                    ],
-
-                    const SizedBox(height: 6),
-
-                    // КНОПКИ
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        if (isDraft)
-                          Chip(
-                            label: Text('${a.votesCount}/2 голосов'),
-                            visualDensity: VisualDensity.compact,
-                            materialTapTargetSize:
-                                MaterialTapTargetSize.shrinkWrap,
+                        // КОНТЕНТ
+                        Text(
+                          assignment.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            height: 1.15,
+                            color: textColor,
                           ),
-                        if (canManageDraft) ...[
-                          TextButton.icon(
-                            onPressed: onEdit ?? _defaultEdit,
-                            icon: const Icon(Icons.edit_outlined, size: 18),
-                            label: const Text('Редактировать'),
-                            style: TextButton.styleFrom(
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 8),
+                        ),
+                        if ((assignment.due ?? '').isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 5),
+                            child: _AssignmentMetaChip(
+                              icon: Icons.schedule_rounded,
+                              label: 'до ${assignment.due!}',
+                              color: subColor,
                             ),
                           ),
-                          OutlinedButton.icon(
-                            onPressed: onCancel ?? _defaultCancel,
-                            icon: const Icon(Icons.close, size: 18),
-                            label: const Text('Отменить'),
-                            style: OutlinedButton.styleFrom(
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 10),
-                            ),
+                        if (assignment.description.trim().isNotEmpty) ...[
+                          const SizedBox(height: 3),
+                          Text(
+                            assignment.description,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                color: textColor.withValues(alpha: .9)),
                           ),
-                          FilledButton.icon(
-                            onPressed: onPublish ?? _defaultPublish,
-                            icon: const Icon(Icons.publish, size: 18),
-                            label: const Text('Опубликовать'),
-                            style: FilledButton.styleFrom(
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 10),
-                            ),
-                          ),
-                        ] else if (canVoteDraft) ...[
-                          FilledButton.icon(
-                            onPressed: onVote ??
-                                () => context.read<TeamCubit>().voteFor(a!.id),
-                            icon: const Icon(Icons.how_to_vote_outlined,
-                                size: 18),
-                            label: const Text('Голосовать'),
-                            style: FilledButton.styleFrom(
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 10),
-                            ),
-                          ),
-                          TextButton.icon(
-                            onPressed: onOpen ?? _defaultOpen,
-                            icon: const Icon(Icons.open_in_new, size: 18),
-                            label: const Text('Открыть'),
-                            style: TextButton.styleFrom(
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 8),
-                            ),
-                          ),
-                        ] else ...[
-                          TextButton.icon(
-                            onPressed: onOpen ?? _defaultOpen,
-                            icon: const Icon(Icons.open_in_new, size: 18),
-                            label: const Text('Открыть'),
-                            style: TextButton.styleFrom(
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 8),
+                        ],
+                        if (assignment.attachments.isNotEmpty) ...[
+                          const SizedBox(height: 7),
+                          _AssignmentAttachmentsPreview(
+                              attachments: assignment.attachments),
+                        ],
+
+                        const SizedBox(height: 7),
+
+                        // КНОПКИ
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 6,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            if (isDraft)
+                              _AssignmentMetaChip(
+                                icon: Icons.how_to_vote_outlined,
+                                label: '${assignment.votesCount}/2 голосов',
+                                color: subColor,
+                              ),
+                            if (!isDraft)
+                              _AssignmentMetaChip(
+                                icon: Icons.check_circle_outline,
+                                label: 'Опубликовано',
+                                color: cs.primary,
+                              ),
+                            if (canManageDraft) ...[
+                              TextButton.icon(
+                                onPressed: onEdit ?? _defaultEdit,
+                                icon: const Icon(Icons.edit_outlined, size: 18),
+                                label: const Text('Редактировать'),
+                                style: TextButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 8),
+                                ),
+                              ),
+                              OutlinedButton.icon(
+                                onPressed: onCancel ?? _defaultCancel,
+                                icon: const Icon(Icons.close, size: 18),
+                                label: const Text('Отменить'),
+                                style: OutlinedButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 10),
+                                ),
+                              ),
+                              FilledButton.icon(
+                                onPressed: onPublish ?? _defaultPublish,
+                                icon: const Icon(Icons.publish, size: 18),
+                                label: const Text('Опубликовать'),
+                                style: FilledButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 10),
+                                ),
+                              ),
+                            ] else if (canVoteDraft) ...[
+                              FilledButton.icon(
+                                onPressed: onVote ??
+                                    () => context
+                                        .read<TeamCubit>()
+                                        .voteFor(a!.id),
+                                icon: const Icon(Icons.how_to_vote_outlined,
+                                    size: 18),
+                                label: const Text('Голосовать'),
+                                style: FilledButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 10),
+                                ),
+                              ),
+                              TextButton.icon(
+                                onPressed: onOpen ?? _defaultOpen,
+                                icon: const Icon(Icons.open_in_new, size: 18),
+                                label: const Text('Открыть'),
+                                style: TextButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 8),
+                                ),
+                              ),
+                            ] else ...[
+                              TextButton.icon(
+                                onPressed: onOpen ?? _defaultOpen,
+                                icon: const Icon(Icons.open_in_new, size: 18),
+                                label: const Text('Открыть'),
+                                style: TextButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 8),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+
+                        // Ряд реакций под карточкой задания
+                        if (reactions != null && reactions!.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Wrap(
+                              spacing: 6,
+                              runSpacing: 4,
+                              children: reactions!.entries
+                                  .map((e) => GestureDetector(
+                                        onTap: onReact,
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 8, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: Colors.black
+                                                .withValues(alpha: .08),
+                                            borderRadius:
+                                                BorderRadius.circular(12),
+                                          ),
+                                          child: Text('${e.key} ${e.value}',
+                                              style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: textColor)),
+                                        ),
+                                      ))
+                                  .toList(),
                             ),
                           ),
                         ],
-                        if (!isDraft)
-                          Chip(
-                            label: const Text('Опубликовано'),
-                            visualDensity: VisualDensity.compact,
-                            materialTapTargetSize:
-                                MaterialTapTargetSize.shrinkWrap,
-                          ),
                       ],
                     ),
-
-                    // Ряд реакций под карточкой задания
-                    if (reactions != null && reactions!.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Wrap(
-                          spacing: 6,
-                          runSpacing: 4,
-                          children: reactions!.entries
-                              .map((e) => GestureDetector(
-                                    onTap: onReact,
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 8, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color:
-                                            Colors.black.withValues(alpha: .08),
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      child: Text('${e.key} ${e.value}',
-                                          style: TextStyle(
-                                              fontSize: 12, color: textColor)),
-                                    ),
-                                  ))
-                              .toList(),
-                        ),
-                      ),
-                    ],
-                  ],
+                  ),
                 ),
               ),
-            ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -352,20 +408,20 @@ class _MissingAssignmentBubble extends StatelessWidget {
   final bool isDraft;
   final String time;
   final VoidCallback? onLongPress;
+  final Key? boundaryKey;
 
   const _MissingAssignmentBubble({
     required this.isDraft,
     required this.time,
     this.onLongPress,
+    this.boundaryKey,
   });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final title = isDraft ? 'Задание загружается' : 'Задание недоступно';
-    final subtitle = isDraft
-        ? 'Карточка есть в чате, данные задания подтягиваются.'
-        : 'Сообщение найдено, но данные задания пока не пришли.';
+    const title = 'Задание загружается...';
+    const subtitle = 'Данные задания подтягиваются.';
 
     return GestureDetector(
       onLongPress: onLongPress,
@@ -375,6 +431,7 @@ class _MissingAssignmentBubble extends StatelessWidget {
           const SizedBox(width: 36),
           Flexible(
             child: ConstrainedBox(
+              key: boundaryKey,
               constraints: BoxConstraints(
                 maxWidth: MediaQuery.of(context).size.width * 0.70,
               ),
@@ -391,10 +448,7 @@ class _MissingAssignmentBubble extends StatelessWidget {
                     SizedBox(
                       width: 18,
                       height: 18,
-                      child: isDraft
-                          ? const CircularProgressIndicator(strokeWidth: 2)
-                          : Icon(Icons.assignment_late_outlined,
-                              size: 18, color: cs.error),
+                      child: const CircularProgressIndicator(strokeWidth: 2),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -443,6 +497,44 @@ class _MissingAssignmentBubble extends StatelessWidget {
                   ],
                 ),
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AssignmentMetaChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  const _AssignmentMetaChip({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: .10),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: color,
             ),
           ),
         ],

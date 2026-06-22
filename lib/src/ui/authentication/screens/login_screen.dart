@@ -5,6 +5,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'package:student_platform/src/config/auth_email_adapter.dart';
+import 'change_password_screen.dart';
+
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key, required this.toggleView});
   final VoidCallback toggleView;
@@ -22,13 +25,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
   final _sb = Supabase.instance.client;
 
-  static const _authDomain = 'app.local';
-  String _loginToEmail(String input) {
-    final v = input.trim().toLowerCase();
-    if (v.contains('@')) return v;
-    return '$v@$_authDomain';
-  }
-
   Future<void> _doLogin() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -37,9 +33,8 @@ class _LoginScreenState extends State<LoginScreen> {
     final pass = _passCtrl.text;
 
     try {
-      // 1) Auth login (email = "<login>@app.local")
-      final email = _loginToEmail(login);
-      await _sb.auth.signInWithPassword(email: email, password: pass);
+      final authEmail = normalizeLoginToAuthEmail(login);
+      await _sb.auth.signInWithPassword(email: authEmail, password: pass);
 
       // 2) Профиль. Сначала RPC (устойчиво к рассинхрону id/login),
       //    если не вернул — прямой select по id.
@@ -59,12 +54,24 @@ class _LoginScreenState extends State<LoginScreen> {
         if (uid == null) throw 'Не удалось получить сессию';
         final row = await _sb
             .from('users')
-            .select('id, login, name, surname, university, group_name, avatar_url, status, role')
+            .select(
+                'id, login, name, surname, university, group_name, avatar_url, status, role, must_change_password')
             .eq('id', uid)
             .maybeSingle();
 
         if (row == null) throw 'Профиль не найден';
         data = Map<String, dynamic>.from(row as Map);
+      }
+
+      final uid = _sb.auth.currentUser?.id;
+      if (uid != null && !data.containsKey('must_change_password')) {
+        final passwordFlag = await _sb
+            .from('users')
+            .select('must_change_password')
+            .eq('id', uid)
+            .maybeSingle();
+        data['must_change_password'] =
+            passwordFlag?['must_change_password'] == true;
       }
 
       // 3) Сохраняем локально и идём на /home
@@ -73,6 +80,14 @@ class _LoginScreenState extends State<LoginScreen> {
       await prefs.setString('user', jsonEncode(data));
 
       if (!mounted) return;
+      final mustChangePassword = data['must_change_password'] == true;
+      if (mustChangePassword) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const ChangePasswordScreen()),
+        );
+        return;
+      }
+
       try {
         context.go('/home');
       } catch (_) {
@@ -80,7 +95,8 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     } on AuthException catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
     } catch (e) {
       if (!mounted) return;
       // Показываем исходную ошибку, чтобы ловить серверные проблемы
@@ -102,7 +118,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final theme = Theme.of(context);
 
     return Scaffold(
-      resizeToAvoidBottomInset: false,
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
         title: const Text('Вход'),
         centerTitle: true,
@@ -110,7 +126,8 @@ class _LoginScreenState extends State<LoginScreen> {
       body: SafeArea(
         child: Form(
           key: _formKey,
-          child: Column(
+          child: ListView(
+            padding: EdgeInsets.zero,
             children: [
               const SizedBox(height: 8),
               SizedBox(
@@ -134,20 +151,27 @@ class _LoginScreenState extends State<LoginScreen> {
                     children: [
                       const SizedBox(height: 8),
                       _buildField(
-                        label: 'Логин (№ зачётки) или email',
+                        label: 'Логин или email',
                         controller: _loginCtrl,
                         keyboardType: TextInputType.text,
-                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Введите логин' : null,
+                        validator: (v) => (v == null || v.trim().isEmpty)
+                            ? 'Введите логин'
+                            : null,
                       ),
                       const Divider(height: 1),
                       _buildField(
                         label: 'Пароль',
                         controller: _passCtrl,
                         obscure: _hidePassword,
-                        validator: (v) => (v == null || v.trim().length < 4) ? 'Минимум 4 символа' : null,
+                        validator: (v) => (v == null || v.trim().length < 4)
+                            ? 'Минимум 4 символа'
+                            : null,
                         suffix: IconButton(
-                          onPressed: () => setState(() => _hidePassword = !_hidePassword),
-                          icon: Icon(_hidePassword ? Icons.visibility_off : Icons.visibility),
+                          onPressed: () =>
+                              setState(() => _hidePassword = !_hidePassword),
+                          icon: Icon(_hidePassword
+                              ? Icons.visibility_off
+                              : Icons.visibility),
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -169,16 +193,21 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: FilledButton(
                     onPressed: _loading ? null : _doLogin,
                     child: _loading
-                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2))
                         : const Text('Войти'),
                   ),
                 ),
               ),
-              const Spacer(),
+              const SizedBox(height: 12),
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
-                child: Text('© ${DateTime.now().year} Student Platform', style: theme.textTheme.bodySmall),
+                child: Text('© ${DateTime.now().year} Student Platform',
+                    style: theme.textTheme.bodySmall),
               ),
+              const SizedBox(height: 8),
             ],
           ),
         ),

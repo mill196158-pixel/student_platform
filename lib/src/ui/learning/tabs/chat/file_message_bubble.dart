@@ -1,203 +1,321 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
-import 'package:open_filex/open_filex.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:cached_network_image/cached_network_image.dart';
-import 'dart:io';
-import 'dart:typed_data';
-import 'package:http/http.dart' as http;
+import 'dart:math' as math;
 import '../../models/chat_file.dart';
 import '../../widgets/fullscreen_image.dart';
+import '../../widgets/file_card.dart';
+import 'profile_avatar.dart';
+import 'package:student_platform/src/ui/friends/friend_profile_screen.dart';
 
 class FileMessageBubble extends StatelessWidget {
   final ChatFile file;
   final bool isMe;
   final String time;
+  final String authorName;
+  final String? authorAvatarUrl;
+  final String? authorId;
   final VoidCallback? onLongPress;
+  final VoidCallback? onReact;
+  final bool showAvatar;
+  final bool reserveAvatarSpace;
+  final bool showAuthorLine;
+  final String? caption;
+  final Map<String, int>? reactions;
+  final bool selected;
+  final Key? boundaryKey;
 
   const FileMessageBubble({
     super.key,
     required this.file,
     required this.isMe,
     required this.time,
+    required this.authorName,
+    this.authorAvatarUrl,
+    this.authorId,
     this.onLongPress,
+    this.onReact,
+    this.showAvatar = true,
+    this.reserveAvatarSpace = true,
+    this.showAuthorLine = true,
+    this.caption,
+    this.reactions,
+    this.selected = false,
+    this.boundaryKey,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    
-    // Отладочная информация убрана для чистоты
-    
-    return GestureDetector(
-      onLongPress: onLongPress,
-      onTap: () => _handleFileTap(context),
-      child: Container(
-        margin: EdgeInsets.only(
-          left: isMe ? 50 : 12,
-          right: isMe ? 12 : 50,
-          bottom: 4,
-        ),
-        child: Row(
-          mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            if (!isMe) ...[
-              CircleAvatar(
-                radius: 16,
-                backgroundColor: theme.colorScheme.primary.withOpacity(0.2),
-                child: Text(
-                  file.uploadedBy.isNotEmpty ? file.uploadedBy[0].toUpperCase() : '?',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: theme.colorScheme.primary,
+
+    final Color baseBg = isMe
+        ? theme.colorScheme.primary.withValues(alpha: 0.22)
+        : theme.colorScheme.surfaceContainerHighest;
+    final Color bg = selected
+        ? theme.colorScheme.surface.withValues(alpha: isMe ? 0.92 : 0.86)
+        : baseBg;
+
+    final textColor = theme.colorScheme.onSurface;
+    final captionText = _realCaption(file, caption);
+    final hasCaption = captionText != null;
+    final displayTime = isMe ? '$time ✓' : time;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final rowWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : MediaQuery.sizeOf(context).width;
+        final avatarSlots = !isMe && reserveAvatarSpace ? 40.0 : 0.0;
+        final available = math.max(120.0, rowWidth - avatarSlots - 8);
+        final widthFactor = file.isImage ? 0.9 : 0.78;
+        final widthCap = file.isImage ? 360.0 : 300.0;
+        final bubbleMaxWidth = math.min(
+          rowWidth >= 700 ? widthCap : available * widthFactor,
+          available,
+        );
+        final mediaInnerWidth =
+            math.max(96.0, bubbleMaxWidth - (file.isImage ? 16 : 12));
+
+        return GestureDetector(
+          onLongPress: onLongPress,
+          onTap: () => _handleFileTap(context),
+          child: Container(
+            margin: const EdgeInsets.symmetric(vertical: 2),
+            child: Row(
+              mainAxisAlignment:
+                  isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (!isMe && reserveAvatarSpace)
+                  SizedBox(
+                    width: 40,
+                    child: showAvatar
+                        ? Row(
+                            children: [
+                              InkWell(
+                                onTap: (authorId != null &&
+                                        authorId!.isNotEmpty)
+                                    ? () => Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder: (_) => FriendProfileScreen(
+                                                userId: authorId!),
+                                          ),
+                                        )
+                                    : null,
+                                child: ProfileAvatar(
+                                  name: authorName,
+                                  imageUrl: authorAvatarUrl,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                            ],
+                          )
+                        : null,
                   ),
-                ),
-              ),
-              const SizedBox(width: 8),
-            ],
-            
-            Flexible(
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: isMe 
-                    ? theme.colorScheme.primary.withOpacity(0.22)
-                    : theme.colorScheme.surfaceContainerHighest,
-                  border: Border.all(color: Colors.black12),
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Предварительный просмотр для изображений
-                    if (file.isImage) ...[
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: CachedNetworkImage(
-                          imageUrl: file.fileUrl,
-                          width: 200,
-                          height: 150,
-                          fit: BoxFit.cover,
-                          placeholder: (context, url) => Container(
-                            width: 200,
-                            height: 150,
-                            decoration: BoxDecoration(
-                              color: Colors.grey[200],
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: const Center(
-                              child: CircularProgressIndicator(),
-                            ),
-                          ),
-                          errorWidget: (context, url, error) => Container(
-                            width: 200,
-                            height: 150,
-                            decoration: BoxDecoration(
-                              color: Colors.grey[200],
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: const Center(
-                              child: Icon(Icons.error, color: Colors.grey),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ] else ...[
-                      // Файл как гиперссылка
-                      InkWell(
-                        onTap: () => _handleFileTap(context),
-                        borderRadius: BorderRadius.circular(8),
-                        child: _buildFileCard(theme),
-                      ),
-                    ],
-                    
-                    const SizedBox(height: 8),
-                    
-                    // Информация о файле и время
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
+
+                // Bubble с динамической шириной
+                ConstrainedBox(
+                  key: boundaryKey,
+                  constraints: BoxConstraints(
+                    maxWidth: bubbleMaxWidth,
+                  ),
+                  child: Container(
+                    padding: EdgeInsets.zero,
+                    decoration: BoxDecoration(
+                      color: Colors.transparent,
+                      borderRadius: BorderRadius.circular(22),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(
-                          Icons.info_outline,
-                          size: 14,
-                          color: Colors.black54,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          file.formattedSize,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.black54,
+                        if (!isMe && showAuthorLine && hasCaption)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 2),
+                            child: Text(
+                              authorName,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: theme.colorScheme.primary,
+                                fontSize: 12,
+                              ),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          file.fileType.split('/').last.toUpperCase(),
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: Colors.black54,
-                            fontWeight: FontWeight.w500,
+
+                        if (file.isImage && !hasCaption) ...[
+                          AppNetworkImagePreview(
+                            imageUrl: file.fileUrl,
+                            fileName: file.fileName,
+                            maxWidth: mediaInnerWidth,
+                            maxHeight: 270,
+                            minHeight: 120,
+                            borderRadius: 18,
+                            fit: BoxFit.contain,
+                            onTap: () => _handleFileTap(context),
+                            overlay: Positioned(
+                              bottom: 8,
+                              right: 8,
+                              child: _timePill(displayTime),
+                            ),
                           ),
-                        ),
-                        const Spacer(),
-                        Text(
-                          time,
-                          style: TextStyle(
-                            color: Colors.black54,
-                            fontSize: 11,
+                        ] else if (!file.isImage && !hasCaption) ...[
+                          AppFileCard(
+                            fileName: file.fileName,
+                            fileSize: file.fileSize,
+                            mimeType: file.fileType,
+                            compact: true,
+                            maxNameLines: 1,
+                            statusLabel: displayTime,
+                            statusColor:
+                                textColor.withValues(alpha: isMe ? .66 : .6),
+                            backgroundColor: bg,
+                            borderColor: theme.colorScheme.outlineVariant
+                                .withValues(alpha: .18),
+                            onTap: () => _handleFileTap(context),
                           ),
-                        ),
+                        ] else ...[
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: bg,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: theme.colorScheme.outlineVariant
+                                    .withValues(alpha: .16),
+                                width: .6,
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (file.isImage)
+                                  AppNetworkImagePreview(
+                                    imageUrl: file.fileUrl,
+                                    fileName: file.fileName,
+                                    maxWidth: mediaInnerWidth - 16,
+                                    maxHeight: 270,
+                                    minHeight: 120,
+                                    borderRadius: 16,
+                                    fit: BoxFit.contain,
+                                    onTap: () => _handleFileTap(context),
+                                  )
+                                else
+                                  AppFileCard(
+                                    fileName: file.fileName,
+                                    fileSize: file.fileSize,
+                                    mimeType: file.fileType,
+                                    compact: true,
+                                    maxNameLines: 1,
+                                    statusLabel: displayTime,
+                                    statusColor: textColor.withValues(
+                                        alpha: isMe ? .66 : .6),
+                                    backgroundColor: Colors.transparent,
+                                    borderColor: Colors.transparent,
+                                    onTap: () => _handleFileTap(context),
+                                  ),
+                                if (captionText != null) ...[
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    captionText,
+                                    maxLines: 3,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: textColor,
+                                      height: 1.24,
+                                    ),
+                                  ),
+                                ],
+                                if (file.isImage) ...[
+                                  const SizedBox(height: 3),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        displayTime,
+                                        style: TextStyle(
+                                          color:
+                                              textColor.withValues(alpha: .6),
+                                          fontSize: 11,
+                                          height: 1,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ],
+
+                        // Ряд реакций под баблом
+                        if (reactions != null && reactions!.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Align(
+                            alignment: isMe
+                                ? Alignment.centerRight
+                                : Alignment.centerLeft,
+                            child: Wrap(
+                              spacing: 6,
+                              runSpacing: 4,
+                              children: reactions!.entries
+                                  .map((e) => GestureDetector(
+                                        onTap: onReact,
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 8, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: theme.colorScheme.onSurface
+                                                .withValues(
+                                                    alpha: isMe ? .15 : .08),
+                                            borderRadius:
+                                                BorderRadius.circular(12),
+                                          ),
+                                          child: Text('${e.key} ${e.value}',
+                                              style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: textColor)),
+                                        ),
+                                      ))
+                                  .toList(),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
-                  ],
+                  ),
                 ),
-              ),
+              ],
             ),
-            
-            // Время теперь внутри пузыря
-          ],
-        ),
+          ),
+        );
+      },
+    );
+  }
+
+  String? _realCaption(ChatFile file, String? value) {
+    final raw = (value ?? '').trim();
+    if (raw.isEmpty) return null;
+    final fileName = FileUiUtils.cleanFileName(file.fileName).trim();
+    final normalizedRaw = raw.toLowerCase();
+    final normalizedName = fileName.toLowerCase();
+    if (normalizedRaw == normalizedName) return null;
+    if (normalizedRaw == '📎 $normalizedName' ||
+        normalizedRaw == 'file: $normalizedName' ||
+        normalizedRaw == 'файл: $normalizedName') {
+      return null;
+    }
+    return raw;
+  }
+
+  Widget _timePill(String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.58),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(color: Colors.white, fontSize: 10),
       ),
     );
-  }
-
-  Widget _buildFileCard(ThemeData theme) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          file.icon,
-          style: const TextStyle(fontSize: 24),
-        ),
-        const SizedBox(width: 8),
-        Flexible(
-          child: Text(
-            file.fileName,
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-              color: Colors.black87,
-            ),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Future<Uint8List?> _loadImagePreview() async {
-    try {
-      final response = await http.get(Uri.parse(file.fileUrl));
-      if (response.statusCode == 200) {
-        return response.bodyBytes;
-      }
-    } catch (e) {
-      print('Ошибка загрузки превью: $e');
-    }
-    return null;
   }
 
   Future<void> _handleFileTap(BuildContext context) async {
@@ -213,140 +331,17 @@ class FileMessageBubble extends StatelessWidget {
         ),
       );
     } else {
-      // Скачиваем и открываем документ
-      await _downloadAndOpenFile(context);
-    }
-  }
-
-  void _showImageFullScreen(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => Scaffold(
-          backgroundColor: Colors.black,
-          appBar: AppBar(
-            backgroundColor: Colors.black,
-            iconTheme: const IconThemeData(color: Colors.white),
-            title: Text(
-              file.fileName,
-              style: const TextStyle(color: Colors.white),
-            ),
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.download, color: Colors.white),
-                onPressed: () => _downloadFile(context),
-              ),
-            ],
-          ),
-          body: Center(
-            child: FutureBuilder<Uint8List?>(
-              future: _loadImagePreview(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const CircularProgressIndicator(color: Colors.white);
-                }
-                
-                if (snapshot.hasData && snapshot.data != null) {
-                  return InteractiveViewer(
-                    child: Image.memory(
-                      snapshot.data!,
-                      fit: BoxFit.contain,
-                    ),
-                  );
-                }
-                
-                return const Text(
-                  'Не удалось загрузить изображение',
-                  style: TextStyle(color: Colors.white),
-                );
-              },
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _downloadAndOpenFile(BuildContext context) async {
-    try {
-      // Показываем индикатор загрузки
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const AlertDialog(
-          content: Row(
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(width: 16),
-              Text('Загружаем файл...'),
-            ],
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => FullscreenFileViewer(
+            fileUrl: file.fileUrl,
+            fileName: file.fileName,
+            fileSize: file.fileSize,
+            mimeType: file.fileType,
           ),
         ),
       );
-
-      // Скачиваем файл (file - это ChatFile модель)
-      final response = await http.get(Uri.parse(file.fileUrl));
-      if (response.statusCode != 200) {
-        throw Exception('Ошибка загрузки файла');
-      }
-
-      // Сохраняем во временную папку
-      final tempDir = await getTemporaryDirectory();
-      final filePath = '${tempDir.path}/${file.fileName}';
-      final localFile = File(filePath); // localFile - это dart:io.File
-      await localFile.writeAsBytes(response.bodyBytes);
-
-      Navigator.pop(context); // Закрываем диалог загрузки
-
-      // Открываем файл
-      final result = await OpenFilex.open(filePath);
-      if (result.type != ResultType.done) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Не удалось открыть файл: ${result.message}'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-        }
-      }
-
-    } catch (e) {
-      Navigator.pop(context); // Закрываем диалог загрузки
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Ошибка при работе с файлом: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _downloadFile(BuildContext context) async {
-    try {
-      final url = Uri.parse(file.fileUrl);
-      if (await canLaunchUrl(url)) {
-        await launchUrl(url, mode: LaunchMode.externalApplication);
-      } else {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Не удалось скачать файл: ${file.fileName}'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Ошибка при скачивании файла: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
     }
   }
 }

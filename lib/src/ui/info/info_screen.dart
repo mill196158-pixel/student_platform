@@ -3,7 +3,9 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/auth_session.dart';
 import '../../data/academic_context_service.dart';
+import '../../services/auth_service.dart';
 import 'subject_info_screen.dart';
 
 enum _UsefulFilter { all, exams, credits, practices, courseWorks }
@@ -85,7 +87,17 @@ class _InfoScreenState extends State<InfoScreen> {
     }
 
     if (state.warning != null) {
-      return _EmptyState(text: state.warning!);
+      final sessionExpired = state.warning == AuthSession.sessionExpiredMessage ||
+          AuthSession.isAuthFailure(state.warning!);
+      return _EmptyState(
+        text: sessionExpired
+            ? AuthSession.sessionExpiredMessage
+            : state.warning!,
+        actionLabel: sessionExpired ? 'Войти снова' : null,
+        onAction: sessionExpired
+            ? () => AuthService.signOut(context)
+            : null,
+      );
     }
 
     final semesters = state.semesters;
@@ -510,12 +522,14 @@ class _UsefulHeader extends StatelessWidget {
         ),
         SafeArea(
           bottom: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
-            child: Align(
-              alignment: const Alignment(-1, 0.26),
-              child: Row(
-                children: [
+          child: SizedBox.expand(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+              child: Align(
+                alignment: const Alignment(-1, 0.26),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -563,8 +577,8 @@ class _UsefulHeader extends StatelessWidget {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          'Информация и материалы по предметам',
-                          maxLines: 2,
+                          'информация по предметам',
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.bodyMedium?.copyWith(
                             color: Colors.black.withValues(alpha: 0.64),
@@ -585,6 +599,7 @@ class _UsefulHeader extends StatelessWidget {
               ),
             ),
           ),
+        ),
         ),
       ],
     );
@@ -1672,10 +1687,14 @@ class _GlowCircle extends StatelessWidget {
 class _EmptyState extends StatelessWidget {
   final String text;
   final bool compact;
+  final String? actionLabel;
+  final VoidCallback? onAction;
 
   const _EmptyState({
     required this.text,
     this.compact = false,
+    this.actionLabel,
+    this.onAction,
   });
 
   @override
@@ -1683,10 +1702,22 @@ class _EmptyState extends StatelessWidget {
     return Center(
       child: Padding(
         padding: EdgeInsets.all(compact ? 16 : 24),
-        child: Text(
-          text,
-          style: const TextStyle(fontSize: 14, color: Colors.grey),
-          textAlign: TextAlign.center,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              text,
+              style: const TextStyle(fontSize: 14, color: Colors.grey),
+              textAlign: TextAlign.center,
+            ),
+            if (actionLabel != null && onAction != null) ...[
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed: onAction,
+                child: Text(actionLabel!),
+              ),
+            ],
+          ],
         ),
       ),
     );

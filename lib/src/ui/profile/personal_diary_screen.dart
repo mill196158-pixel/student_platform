@@ -23,6 +23,13 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
     await _future;
   }
 
+  void _refreshSilently() {
+    _service.load().then((fresh) {
+      if (!mounted) return;
+      setState(() => _future = Future<PersonalDiaryData>.value(fresh));
+    });
+  }
+
   @override
   void dispose() {
     _searchController.dispose();
@@ -52,8 +59,8 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
               .where((subject) => _matchesSubject(subject, query))
               .toList();
           final activeDiarySubjects = diarySubjects
-              .where((subject) =>
-                  subject.entryCount > 0 || subject.fileCount > 0)
+              .where(
+                  (subject) => subject.entryCount > 0 || subject.fileCount > 0)
               .toList();
           final latestEntries = data.latestEntries
               .where((entry) => _matchesLatestEntry(entry, query))
@@ -97,8 +104,7 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
                       const SizedBox(height: 8),
                       if (upcomingItems.isEmpty)
                         const _EmptyCard(
-                          text:
-                              'Активных ближайших заданий пока нет.',
+                          text: 'Активных ближайших заданий пока нет.',
                         )
                       else
                         _CollapsibleTasksSection(
@@ -185,6 +191,79 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
     ].where(_isUpcomingItemDone).toList()
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return items.take(8).toList();
+  }
+
+  PersonalDiaryData _dataWithCreatedTask(
+    PersonalDiaryData data,
+    PersonalDiaryTask task,
+  ) {
+    final tasks = [
+      task,
+      ...data.personalTasks.where((existing) => existing.id != task.id),
+    ]..sort(_comparePersonalTasksForUi);
+    final upcomingTasks = tasks.take(5).toList();
+
+    return PersonalDiaryData(
+      academicContext: data.academicContext,
+      availableSemesters: data.availableSemesters,
+      selectedSemesterNumber: data.selectedSemesterNumber,
+      allSubjects: data.allSubjects
+          .map((subject) => _subjectWithCreatedTask(subject, task))
+          .toList(),
+      subjects: data.subjects
+          .map((subject) => _subjectWithCreatedTask(subject, task))
+          .toList(),
+      latestEntries: data.latestEntries,
+      publishedAssignments: data.publishedAssignments,
+      upcomingAssignments: data.upcomingAssignments,
+      personalTasks: tasks,
+      upcomingPersonalTasks: upcomingTasks,
+      totalEntries: data.totalEntries,
+      totalFiles: data.totalFiles,
+      totalAssignments: data.totalAssignments,
+      pendingAssignmentsCount: data.pendingAssignmentsCount,
+      completedAssignmentsCount: data.completedAssignmentsCount,
+      personalTasksTotal: tasks.length,
+      personalTasksActive: tasks.where((item) => !item.isDone).length,
+      personalTasksDone: tasks.where((item) => item.isDone).length,
+    );
+  }
+
+  PersonalDiarySubject _subjectWithCreatedTask(
+    PersonalDiarySubject subject,
+    PersonalDiaryTask task,
+  ) {
+    if ((task.subjectOfferingId ?? '') != subject.subjectOfferingId) {
+      return subject;
+    }
+    return PersonalDiarySubject(
+      subjectOfferingId: subject.subjectOfferingId,
+      subjectId: subject.subjectId,
+      title: subject.title,
+      groupId: subject.groupId,
+      semesterNumber: subject.semesterNumber,
+      entryCount: subject.entryCount,
+      fileCount: subject.fileCount,
+      assignmentCount: subject.assignmentCount,
+      incompleteAssignmentCount: subject.incompleteAssignmentCount,
+      personalTaskCount: subject.personalTaskCount + 1,
+      activePersonalTaskCount:
+          subject.activePersonalTaskCount + (task.isDone ? 0 : 1),
+      latestEntryDate: subject.latestEntryDate,
+      latestPreview: subject.latestPreview,
+    );
+  }
+
+  int _comparePersonalTasksForUi(
+    PersonalDiaryTask a,
+    PersonalDiaryTask b,
+  ) {
+    final aDue = a.dueAt;
+    final bDue = b.dueAt;
+    if (aDue != null && bDue != null) return aDue.compareTo(bDue);
+    if (aDue != null) return -1;
+    if (bDue != null) return 1;
+    return b.createdAt.compareTo(a.createdAt);
   }
 
   Widget _buildUpcomingCard(_UpcomingDiaryItem item) {
@@ -387,7 +466,8 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
                     icon: Icons.calendar_month_rounded,
                     title: 'Календарь дневника',
                     subtitle: 'Пары, записи и задания по датам',
-                    onTap: () => Navigator.pop(ctx, _AddEntryMode.diaryCalendar),
+                    onTap: () =>
+                        Navigator.pop(ctx, _AddEntryMode.diaryCalendar),
                   ),
                   const SizedBox(height: 8),
                   _AddModeTile(
@@ -488,7 +568,7 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
   }
 
   Future<void> _createPersonalTask(PersonalDiaryData data) async {
-    final saved = await showModalBottomSheet<bool>(
+    final task = await showModalBottomSheet<PersonalDiaryTask>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
@@ -505,7 +585,7 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
           PersonalDiarySubject? subject,
           DateTime? dueAt,
         }) async {
-          await _service.createPersonalTask(
+          return _service.createPersonalTask(
             title: title,
             description: description,
             subjectOfferingId: subject?.subjectOfferingId,
@@ -515,7 +595,12 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
         },
       ),
     );
-    if (saved == true && mounted) await _refresh();
+    if (task == null || !mounted) return;
+    setState(() {
+      _future =
+          Future<PersonalDiaryData>.value(_dataWithCreatedTask(data, task));
+    });
+    _refreshSilently();
   }
 
   Future<void> _addBySubject(
@@ -622,7 +707,13 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
   }
 }
 
-enum _AddEntryMode { diaryCalendar, personalTask, todaySubject, datedSubject, lesson }
+enum _AddEntryMode {
+  diaryCalendar,
+  personalTask,
+  todaySubject,
+  datedSubject,
+  lesson
+}
 
 class _UpcomingDiaryItem {
   final PersonalDiaryAssignment? assignment;
@@ -638,7 +729,7 @@ class _UpcomingDiaryItem {
   String? get description => assignment?.description ?? task?.description;
 }
 
-typedef _SavePersonalTask = Future<void> Function({
+typedef _SavePersonalTask = Future<PersonalDiaryTask> Function({
   required String title,
   String? description,
   PersonalDiarySubject? subject,
@@ -723,10 +814,8 @@ class _DiaryCalendarSheetState extends State<_DiaryCalendarSheet> {
               ),
               Text(
                 '${_monthName(_visibleMonth.month)} ${_visibleMonth.year}',
-                style: Theme.of(context)
-                    .textTheme
-                    .bodyMedium
-                    ?.copyWith(color: Colors.black54, fontWeight: FontWeight.w700),
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Colors.black54, fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 12),
               const _DiaryCalendarLegend(),
@@ -808,7 +897,8 @@ class _DiaryCalendarSheetState extends State<_DiaryCalendarSheet> {
         due,
         _DiaryCalendarEvent.task(
           title: task.title,
-          subtitle: 'Личная задача • ${_taskStatusLabel(widget.taskStatus(task))}',
+          subtitle:
+              'Личная задача • ${_taskStatusLabel(widget.taskStatus(task))}',
           task: task,
         ),
       );
@@ -824,7 +914,8 @@ class _DiaryCalendarSheetState extends State<_DiaryCalendarSheet> {
       );
     }
     for (final events in map.values) {
-      events.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+      events.sort(
+          (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
     }
     return map;
   }
@@ -842,9 +933,7 @@ class _DiaryCalendarSheetState extends State<_DiaryCalendarSheet> {
           .map((task) => task.dueAt)
           .whereType<DateTime>(),
       ...widget.data.latestEntries.map((entry) => entry.date),
-    ]
-        .map((date) => DateTime(date.year, date.month, date.day))
-        .toList()
+    ].map((date) => DateTime(date.year, date.month, date.day)).toList()
       ..sort((a, b) {
         final aDelta = a.difference(todayOnly).inDays.abs();
         final bDelta = b.difference(todayOnly).inDays.abs();
@@ -886,13 +975,13 @@ class _DiaryCalendarSheetState extends State<_DiaryCalendarSheet> {
   Color _eventColor(_DiaryCalendarEvent event) {
     switch (event.type) {
       case _DiaryCalendarEventType.lesson:
-        return const Color(0xFF2563EB);
+        return const Color(0xFF7C63D8);
       case _DiaryCalendarEventType.assignment:
-        return const Color(0xFFF59E0B);
+        return const Color(0xFFB58B3B);
       case _DiaryCalendarEventType.task:
-        return const Color(0xFF7C3AED);
+        return const Color(0xFF8A72D8);
       case _DiaryCalendarEventType.entry:
-        return const Color(0xFF16A34A);
+        return const Color(0xFF2F9D84);
     }
   }
 
@@ -988,10 +1077,10 @@ class _DiaryCalendarLegend extends StatelessWidget {
       spacing: 8,
       runSpacing: 6,
       children: [
-        _CalendarLegendChip(color: Color(0xFF2563EB), text: 'Пары'),
-        _CalendarLegendChip(color: Color(0xFFF59E0B), text: 'Задания'),
-        _CalendarLegendChip(color: Color(0xFF7C3AED), text: 'Личные'),
-        _CalendarLegendChip(color: Color(0xFF16A34A), text: 'Записи'),
+        _CalendarLegendChip(color: Color(0xFF7C63D8), text: 'Пары'),
+        _CalendarLegendChip(color: Color(0xFFB58B3B), text: 'Задания'),
+        _CalendarLegendChip(color: Color(0xFF8A72D8), text: 'Личные'),
+        _CalendarLegendChip(color: Color(0xFF2F9D84), text: 'Записи'),
       ],
     );
   }
@@ -1086,11 +1175,11 @@ class _MonthGrid extends StatelessWidget {
               borderRadius: BorderRadius.circular(12),
               child: Container(
                 decoration: BoxDecoration(
-                  color: selected ? const Color(0xFF254EDB) : Colors.white,
+                  color: selected ? const Color(0xFF7C63D8) : Colors.white,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: colors.isNotEmpty
-                        ? const Color(0xFF254EDB)
+                        ? const Color(0xFF7C63D8)
                         : Colors.black.withValues(alpha: .06),
                   ),
                 ),
@@ -1158,12 +1247,13 @@ class _DiaryCalendarEventTile extends StatelessWidget {
       contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       tileColor: const Color(0xFFF6F7FB),
-      leading: Icon(event.icon, color: const Color(0xFF254EDB)),
+      leading: Icon(event.icon, color: const Color(0xFF7C63D8)),
       title: Text(
         event.title,
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(color: Colors.black, fontWeight: FontWeight.w900),
+        style:
+            const TextStyle(color: Colors.black, fontWeight: FontWeight.w900),
       ),
       subtitle: Text(
         event.subtitle,
@@ -1214,92 +1304,100 @@ class _PersonalTaskFormSheetState extends State<_PersonalTaskFormSheet> {
         child: Padding(
           padding: EdgeInsets.fromLTRB(18, 6, 18, 18 + bottomInset),
           child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Личная задача',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: Colors.black,
-                      fontWeight: FontWeight.w900,
-                    ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Задача сохранится только в личном дневнике и не появится в чате.',
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(color: Colors.black54),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: _titleController,
-                decoration: _fieldDecoration('Название'),
-                textInputAction: TextInputAction.next,
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _descriptionController,
-                minLines: 2,
-                maxLines: 4,
-                decoration: _fieldDecoration('Описание, если нужно'),
-              ),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<PersonalDiarySubject?>(
-                initialValue: _subject,
-                decoration: _fieldDecoration('Предмет'),
-                isExpanded: true,
-                dropdownColor: Colors.white,
-                menuMaxHeight: maxHeight * .45,
-                iconEnabledColor: Colors.black87,
-                style: const TextStyle(
-                  color: Colors.black87,
-                  fontWeight: FontWeight.w700,
-                  overflow: TextOverflow.ellipsis,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Личная задача',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: Colors.black,
+                        fontWeight: FontWeight.w900,
+                      ),
                 ),
-                items: [
-                  const DropdownMenuItem<PersonalDiarySubject?>(
-                    value: null,
-                    child: Text(
-                      'Без предмета',
-                      style: TextStyle(color: Colors.black87),
-                    ),
+                const SizedBox(height: 6),
+                Text(
+                  'Задача сохранится только в личном дневнике и не появится в чате.',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: Colors.black54),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: _titleController,
+                  autofocus: true,
+                  cursorColor: Colors.black87,
+                  style: const TextStyle(
+                    color: Colors.black87,
+                    fontWeight: FontWeight.w700,
                   ),
-                  ...widget.subjects.map(
-                    (subject) => DropdownMenuItem<PersonalDiarySubject?>(
-                      value: subject,
+                  decoration: _fieldDecoration('Название'),
+                  textInputAction: TextInputAction.next,
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _descriptionController,
+                  cursorColor: Colors.black87,
+                  style: const TextStyle(color: Colors.black87),
+                  minLines: 2,
+                  maxLines: 4,
+                  decoration: _fieldDecoration('Описание, если нужно'),
+                ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<PersonalDiarySubject?>(
+                  initialValue: _subject,
+                  decoration: _fieldDecoration('Предмет'),
+                  isExpanded: true,
+                  dropdownColor: Colors.white,
+                  menuMaxHeight: maxHeight * .45,
+                  iconEnabledColor: Colors.black87,
+                  style: const TextStyle(
+                    color: Colors.black87,
+                    fontWeight: FontWeight.w700,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  items: [
+                    const DropdownMenuItem<PersonalDiarySubject?>(
+                      value: null,
                       child: Text(
-                        subject.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.black87),
+                        'Без предмета',
+                        style: TextStyle(color: Colors.black87),
                       ),
                     ),
-                  ),
-                ],
-                onChanged: (value) => setState(() => _subject = value),
-              ),
-              const SizedBox(height: 10),
-              OutlinedButton.icon(
-                onPressed: _pickDueDate,
-                icon: const Icon(Icons.event_outlined),
-                label: Text(_dueAt == null
-                    ? 'Добавить дедлайн'
-                    : 'Дедлайн: ${_fmtDate(_dueAt!)}'),
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: _saving ? null : _save,
-                  child: Text(_saving ? 'Сохраняем...' : 'Создать задачу'),
+                    ...widget.subjects.map(
+                      (subject) => DropdownMenuItem<PersonalDiarySubject?>(
+                        value: subject,
+                        child: Text(
+                          subject.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: Colors.black87),
+                        ),
+                      ),
+                    ),
+                  ],
+                  onChanged: (value) => setState(() => _subject = value),
                 ),
-              ),
-            ],
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: _pickDueDate,
+                  icon: const Icon(Icons.event_outlined),
+                  label: Text(_dueAt == null
+                      ? 'Добавить дедлайн'
+                      : 'Дедлайн: ${_fmtDate(_dueAt!)}'),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: _saving ? null : _save,
+                    child: Text(_saving ? 'Сохраняем...' : 'Создать задачу'),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
         ),
       ),
     );
@@ -1308,11 +1406,24 @@ class _PersonalTaskFormSheetState extends State<_PersonalTaskFormSheet> {
   InputDecoration _fieldDecoration(String label) {
     return InputDecoration(
       labelText: label,
+      labelStyle: const TextStyle(color: Colors.black54),
+      floatingLabelStyle: const TextStyle(
+        color: Colors.black87,
+        fontWeight: FontWeight.w700,
+      ),
       filled: true,
       fillColor: const Color(0xFFF6F7FB),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
         borderSide: BorderSide.none,
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: Color(0xFFE1E5EF)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: Colors.black87, width: 1.4),
       ),
     );
   }
@@ -1341,13 +1452,13 @@ class _PersonalTaskFormSheetState extends State<_PersonalTaskFormSheet> {
     }
     setState(() => _saving = true);
     try {
-      await widget.onSave(
+      final task = await widget.onSave(
         title: title,
         description: _descriptionController.text.trim(),
         subject: _subject,
         dueAt: _dueAt,
       );
-      if (mounted) Navigator.pop(context, true);
+      if (mounted) Navigator.pop(context, task);
     } catch (_) {
       if (!mounted) return;
       setState(() => _saving = false);
@@ -1787,11 +1898,11 @@ class _FilterChipButton extends StatelessWidget {
         color: selected ? Colors.white : Colors.black87,
         fontWeight: FontWeight.w800,
       ),
-      selectedColor: const Color(0xFF3D6BFF),
+      selectedColor: const Color(0xFF7C63D8),
       backgroundColor: Colors.white,
       side: BorderSide(
         color: selected
-            ? const Color(0xFF3D6BFF)
+            ? const Color(0xFF7C63D8)
             : Colors.black.withValues(alpha: .08),
       ),
     );
@@ -1906,10 +2017,10 @@ class _AddModeTile extends StatelessWidget {
         width: 42,
         height: 42,
         decoration: BoxDecoration(
-          color: const Color(0xFF3D6BFF).withValues(alpha: .10),
+          color: const Color(0xFF7C63D8).withValues(alpha: .10),
           shape: BoxShape.circle,
         ),
-        child: Icon(icon, color: const Color(0xFF254EDB)),
+        child: Icon(icon, color: const Color(0xFF7C63D8)),
       ),
       title: Text(
         title,
@@ -1939,7 +2050,7 @@ class _DiaryHeader extends StatelessWidget {
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [Color(0xFFFFFFFF), Color(0xFFEAF2FF)],
+                colors: [Color(0xFFFFFBFF), Color(0xFFF7FBFA)],
               ),
             ),
           ),
@@ -1948,7 +2059,7 @@ class _DiaryHeader extends StatelessWidget {
             top: -42,
             child: _SoftCircle(
               size: 128,
-              color: const Color(0xFF3D6BFF).withValues(alpha: .10),
+              color: const Color(0xFFEDE7F6).withValues(alpha: .72),
             ),
           ),
           Positioned(
@@ -2091,13 +2202,13 @@ class _HeaderAddButton extends StatelessWidget {
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: enabled
-                  ? const [Color(0xFF5E7CFF), Color(0xFF254EDB)]
+                  ? const [Color(0xFF7C63D8), Color(0xFF8A72D8)]
                   : const [Color(0xFFE2E5F0), Color(0xFFC8CEDD)],
             ),
             boxShadow: enabled
                 ? [
                     BoxShadow(
-                      color: const Color(0xFF3D6BFF).withValues(alpha: .28),
+                      color: const Color(0xFF7C63D8).withValues(alpha: .22),
                       blurRadius: 18,
                       offset: const Offset(0, 8),
                     ),
@@ -2125,11 +2236,11 @@ class _DiarySummaryCard extends StatelessWidget {
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF5E7CFF), Color(0xFF254EDB)],
+          colors: [Color(0xFFEDE7F6), Color(0xFFD6F5EE)],
         ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF254EDB).withValues(alpha: .22),
+            color: const Color(0xFFD9CCF5).withValues(alpha: .30),
             blurRadius: 18,
             offset: const Offset(0, 8),
           ),
@@ -2140,13 +2251,13 @@ class _DiarySummaryCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.menu_book_rounded, color: Colors.white),
+              const Icon(Icons.menu_book_rounded, color: Color(0xFF7C63D8)),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   'Текущий семестр',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: Colors.white,
+                        color: const Color(0xFF1F2937),
                         fontWeight: FontWeight.w900,
                       ),
                 ),
@@ -2161,7 +2272,7 @@ class _DiarySummaryCard extends StatelessWidget {
                 ? 'Семестр не определён'
                 : '${data.selectedSemesterNumber} семестр',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Colors.white.withValues(alpha: .92),
+                  color: const Color(0xFF1F2937).withValues(alpha: .74),
                   fontWeight: FontWeight.w700,
                 ),
           ),
@@ -2170,7 +2281,7 @@ class _DiarySummaryCard extends StatelessWidget {
             Text(
               'Зачётка № ${data.academicContext.recordBookNumber}',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Colors.white.withValues(alpha: .92),
+                    color: const Color(0xFF1F2937).withValues(alpha: .74),
                     fontWeight: FontWeight.w700,
                   ),
             ),
@@ -2179,7 +2290,7 @@ class _DiarySummaryCard extends StatelessWidget {
           Text(
             'Личные записи, задания и материалы по предметам семестра.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Colors.white.withValues(alpha: .86),
+                  color: const Color(0xFF1F2937).withValues(alpha: .66),
                   height: 1.3,
                 ),
           ),
@@ -2199,14 +2310,15 @@ class _WhitePill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: .18),
+        color: const Color(0xFF7C63D8).withValues(alpha: .12),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withValues(alpha: .30)),
+        border:
+            Border.all(color: const Color(0xFF7C63D8).withValues(alpha: .18)),
       ),
       child: Text(
         text,
         style: const TextStyle(
-          color: Colors.white,
+          color: Color(0xFF7C63D8),
           fontWeight: FontWeight.w800,
           fontSize: 12,
         ),
@@ -2277,7 +2389,7 @@ class _CollapsibleTasksSection extends StatelessWidget {
           childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
           leading: Icon(
             icon,
-            color: const Color(0xFF254EDB),
+            color: const Color(0xFF7C63D8),
           ),
           title: Text(
             title,
@@ -2325,7 +2437,7 @@ class _CollapsibleSubjectsSection extends StatelessWidget {
         child: ExpansionTile(
           tilePadding: const EdgeInsets.symmetric(horizontal: 14),
           childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
-          leading: Icon(icon, color: const Color(0xFF254EDB)),
+          leading: Icon(icon, color: const Color(0xFF7C63D8)),
           title: Text(
             title,
             style: Theme.of(context).textTheme.titleSmall?.copyWith(
@@ -2396,8 +2508,8 @@ class _AssignmentDiaryCard extends StatelessWidget {
                     height: 42,
                     decoration: BoxDecoration(
                       color: done
-                          ? const Color(0xFF16A34A).withValues(alpha: .12)
-                          : const Color(0xFF3D6BFF).withValues(alpha: .10),
+                          ? const Color(0xFF2F9D84).withValues(alpha: .12)
+                          : const Color(0xFF7C63D8).withValues(alpha: .10),
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
@@ -2405,8 +2517,8 @@ class _AssignmentDiaryCard extends StatelessWidget {
                           ? Icons.check_circle_rounded
                           : Icons.assignment_outlined,
                       color: done
-                          ? const Color(0xFF16A34A)
-                          : const Color(0xFF254EDB),
+                          ? const Color(0xFF2F9D84)
+                          : const Color(0xFF7C63D8),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -2472,7 +2584,7 @@ class _StatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = done ? const Color(0xFF16A34A) : const Color(0xFFF59E0B);
+    final color = done ? const Color(0xFF2F9D84) : const Color(0xFFB58B3B);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
@@ -2525,12 +2637,12 @@ class _PersonalTaskCard extends StatelessWidget {
                     width: 42,
                     height: 42,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF7C3AED).withValues(alpha: .10),
+                      color: const Color(0xFF7C63D8).withValues(alpha: .10),
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(
                       Icons.task_alt_rounded,
-                      color: Color(0xFF6D28D9),
+                      color: Color(0xFF7C63D8),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -2595,13 +2707,13 @@ class _KindBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
-        color: const Color(0xFF7C3AED).withValues(alpha: .10),
+        color: const Color(0xFF7C63D8).withValues(alpha: .10),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
         text,
         style: const TextStyle(
-          color: Color(0xFF6D28D9),
+          color: Color(0xFF7C63D8),
           fontWeight: FontWeight.w900,
           fontSize: 11,
         ),
@@ -2620,9 +2732,9 @@ class _TaskStatusBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final status = statusOverride ?? task.status;
     final color = switch (status) {
-      'done' => const Color(0xFF16A34A),
-      'in_progress' => const Color(0xFF2563EB),
-      _ => const Color(0xFFF59E0B),
+      'done' => const Color(0xFF2F9D84),
+      'in_progress' => const Color(0xFF7C63D8),
+      _ => const Color(0xFFB58B3B),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
@@ -2780,7 +2892,7 @@ class _AssignmentDetailsSheet extends StatelessWidget {
               Text(
                 dueText,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: const Color(0xFF254EDB),
+                      color: const Color(0xFF7C63D8),
                       fontWeight: FontWeight.w800,
                     ),
               ),
@@ -2806,9 +2918,7 @@ class _AssignmentDetailsSheet extends StatelessWidget {
                       : Icons.check_circle_outline_rounded,
                 ),
                 label: Text(
-                  done
-                      ? 'Отметить как не выполнено'
-                      : 'Отметить как выполнено',
+                  done ? 'Отметить как не выполнено' : 'Отметить как выполнено',
                 ),
               ),
             ),
@@ -2968,7 +3078,7 @@ class _SubjectInitial extends StatelessWidget {
       width: 44,
       height: 44,
       decoration: BoxDecoration(
-        color: const Color(0xFF3D6BFF).withValues(alpha: .10),
+        color: const Color(0xFF7C63D8).withValues(alpha: .10),
         shape: BoxShape.circle,
       ),
       alignment: Alignment.center,
@@ -2976,7 +3086,7 @@ class _SubjectInitial extends StatelessWidget {
         letter,
         style: Theme.of(context).textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.w900,
-              color: const Color(0xFF254EDB),
+              color: const Color(0xFF7C63D8),
             ),
       ),
     );
@@ -3014,13 +3124,13 @@ class _InfoChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
-        color: const Color(0xFF3D6BFF).withValues(alpha: .10),
+        color: const Color(0xFF7C63D8).withValues(alpha: .10),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
         text,
         style: const TextStyle(
-          color: Color(0xFF254EDB),
+          color: Color(0xFF7C63D8),
           fontWeight: FontWeight.w900,
           fontSize: 11,
         ),

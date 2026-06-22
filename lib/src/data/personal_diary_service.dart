@@ -205,40 +205,39 @@ class PersonalDiaryService {
   final AcademicContextService _academicContextService;
 
   Future<PersonalDiaryData> load({int? semesterNumber}) async {
-    final context = await _academicContextService.load();
+    final context = await _academicContextService
+        .load()
+        .timeout(const Duration(seconds: 8), onTimeout: () {
+      return const AcademicContext.empty(
+        warning: 'Учебный контекст загружается слишком долго',
+      );
+    });
     final userId = _sb.auth.currentUser?.id ?? context.userId ?? '';
     final groupId = context.groupId ?? '';
     final currentSemester = context.currentSemesterNumber;
 
     if (userId.isEmpty || groupId.isEmpty) {
-      return PersonalDiaryData(
-        academicContext: context,
-        availableSemesters: const [],
-        selectedSemesterNumber: currentSemester,
-        allSubjects: const [],
-        subjects: const [],
-        latestEntries: const [],
-        publishedAssignments: const [],
-        upcomingAssignments: const [],
-        personalTasks: const [],
-        upcomingPersonalTasks: const [],
-        totalEntries: 0,
-        totalFiles: 0,
-        totalAssignments: 0,
-        pendingAssignmentsCount: 0,
-        completedAssignmentsCount: 0,
-        personalTasksTotal: 0,
-        personalTasksActive: 0,
-        personalTasksDone: 0,
+      return _emptyData(
+        context,
+        selectedSemesterNumber: semesterNumber ?? currentSemester,
       );
     }
 
-    final semesterRows = await _sb
-        .from('subject_offerings')
-        .select('id,display_name,subject_id,group_id,semester_number')
-        .eq('group_id', groupId)
-        .order('semester_number')
-        .order('display_name');
+    late final dynamic semesterRows;
+    try {
+      semesterRows = await _sb
+          .from('subject_offerings')
+          .select('id,display_name,subject_id,group_id,semester_number')
+          .eq('group_id', groupId)
+          .order('semester_number')
+          .order('display_name')
+          .timeout(const Duration(seconds: 8));
+    } catch (_) {
+      return _emptyData(
+        context,
+        selectedSemesterNumber: semesterNumber ?? currentSemester,
+      );
+    }
 
     final allOfferingRows = (semesterRows as List)
         .map((row) => Map<String, dynamic>.from(row as Map))
@@ -255,25 +254,9 @@ class PersonalDiaryService {
         (availableSemesters.isEmpty ? null : availableSemesters.first);
 
     if (selectedSemester == null) {
-      return PersonalDiaryData(
-        academicContext: context,
+      return _emptyData(
+        context,
         availableSemesters: availableSemesters,
-        selectedSemesterNumber: null,
-        allSubjects: const [],
-        subjects: const [],
-        latestEntries: const [],
-        publishedAssignments: const [],
-        upcomingAssignments: const [],
-        personalTasks: const [],
-        upcomingPersonalTasks: const [],
-        totalEntries: 0,
-        totalFiles: 0,
-        totalAssignments: 0,
-        pendingAssignmentsCount: 0,
-        completedAssignmentsCount: 0,
-        personalTasksTotal: 0,
-        personalTasksActive: 0,
-        personalTasksDone: 0,
       );
     }
 
@@ -300,20 +283,26 @@ class PersonalDiaryService {
     var generalTasks = const <PersonalDiaryTask>[];
 
     if (offeringIds.isNotEmpty) {
-      final entryRows = await _sb
-          .from('subject_diary_entries')
-          .select(
-            'id,subject_offering_id,entry_date,text,files_count,created_at',
-          )
-          .eq('author_id', userId)
-          .inFilter('subject_offering_id', offeringIds)
-          .order('entry_date', ascending: false)
-          .order('created_at', ascending: false);
+      var entries = const <Map<String, dynamic>>[];
+      try {
+        final entryRows = await _sb
+            .from('subject_diary_entries')
+            .select(
+              'id,subject_offering_id,entry_date,text,files_count,created_at',
+            )
+            .eq('author_id', userId)
+            .inFilter('subject_offering_id', offeringIds)
+            .order('entry_date', ascending: false)
+            .order('created_at', ascending: false)
+            .timeout(const Duration(seconds: 7));
 
-      final entries = (entryRows as List)
-          .map((row) => Map<String, dynamic>.from(row as Map))
-          .where(_isRealEntry)
-          .toList();
+        entries = (entryRows as List)
+            .map((row) => Map<String, dynamic>.from(row as Map))
+            .where(_isRealEntry)
+            .toList();
+      } catch (_) {
+        entries = const [];
+      }
 
       final entryIds = entries
           .map((row) => (row['id'] ?? '').toString())
@@ -321,16 +310,19 @@ class PersonalDiaryService {
           .toList();
 
       if (entryIds.isNotEmpty) {
-        final fileRows = await _sb
-            .from('subject_diary_files')
-            .select('id,entry_id')
-            .inFilter('entry_id', entryIds);
-        for (final raw in fileRows as List) {
-          final row = Map<String, dynamic>.from(raw as Map);
-          final entryId = (row['entry_id'] ?? '').toString();
-          if (entryId.isEmpty) continue;
-          filesByEntry[entryId] = (filesByEntry[entryId] ?? 0) + 1;
-        }
+        try {
+          final fileRows = await _sb
+              .from('subject_diary_files')
+              .select('id,entry_id')
+              .inFilter('entry_id', entryIds)
+              .timeout(const Duration(seconds: 5));
+          for (final raw in fileRows as List) {
+            final row = Map<String, dynamic>.from(raw as Map);
+            final entryId = (row['entry_id'] ?? '').toString();
+            if (entryId.isEmpty) continue;
+            filesByEntry[entryId] = (filesByEntry[entryId] ?? 0) + 1;
+          }
+        } catch (_) {}
       }
 
       for (final entry in entries) {
@@ -339,21 +331,27 @@ class PersonalDiaryService {
         (entriesByOffering[offeringId] ??= []).add(entry);
       }
 
-      final assignmentRows = await _sb
-          .from('assignments')
-          .select(
-            'id,team_id,title,body,description,due_at,due_text,status,published_at,created_at,subject_offering_id',
-          )
-          .eq('status', 'published')
-          .inFilter('subject_offering_id', offeringIds)
-          .order('due_at', ascending: true, nullsFirst: false)
-          .order('created_at', ascending: true);
+      var rawAssignments = const <Map<String, dynamic>>[];
+      try {
+        final assignmentRows = await _sb
+            .from('assignments')
+            .select(
+              'id,team_id,title,body,description,due_at,due_text,status,published_at,created_at,subject_offering_id',
+            )
+            .eq('status', 'published')
+            .inFilter('subject_offering_id', offeringIds)
+            .order('due_at', ascending: true, nullsFirst: false)
+            .order('created_at', ascending: true)
+            .timeout(const Duration(seconds: 7));
 
-      final rawAssignments = (assignmentRows as List)
-          .map((row) => Map<String, dynamic>.from(row as Map))
-          .where(
-              (row) => (row['subject_offering_id'] ?? '').toString().isNotEmpty)
-          .toList();
+        rawAssignments = (assignmentRows as List)
+            .map((row) => Map<String, dynamic>.from(row as Map))
+            .where((row) =>
+                (row['subject_offering_id'] ?? '').toString().isNotEmpty)
+            .toList();
+      } catch (_) {
+        rawAssignments = const [];
+      }
 
       final assignmentIds = rawAssignments
           .map((row) => (row['id'] ?? '').toString())
@@ -361,30 +359,36 @@ class PersonalDiaryService {
           .toList();
 
       if (assignmentIds.isNotEmpty) {
-        final messageRows = await _sb
-            .from('messages')
-            .select('id,assignment_id')
-            .inFilter('assignment_id', assignmentIds);
-        for (final raw in messageRows as List) {
-          final row = Map<String, dynamic>.from(raw as Map);
-          final assignmentId = (row['assignment_id'] ?? '').toString();
-          final messageId = (row['id'] ?? '').toString();
-          if (assignmentId.isNotEmpty && messageId.isNotEmpty) {
-            messageIdByAssignment[assignmentId] = messageId;
+        try {
+          final messageRows = await _sb
+              .from('messages')
+              .select('id,assignment_id')
+              .inFilter('assignment_id', assignmentIds)
+              .timeout(const Duration(seconds: 5));
+          for (final raw in messageRows as List) {
+            final row = Map<String, dynamic>.from(raw as Map);
+            final assignmentId = (row['assignment_id'] ?? '').toString();
+            final messageId = (row['id'] ?? '').toString();
+            if (assignmentId.isNotEmpty && messageId.isNotEmpty) {
+              messageIdByAssignment[assignmentId] = messageId;
+            }
           }
-        }
+        } catch (_) {}
 
-        final doneRows = await _sb
-            .from('assignment_done')
-            .select('assignment_id,done,done_at')
-            .eq('user_id', userId)
-            .inFilter('assignment_id', assignmentIds);
-        for (final raw in doneRows as List) {
-          final row = Map<String, dynamic>.from(raw as Map);
-          final assignmentId = (row['assignment_id'] ?? '').toString();
-          if (assignmentId.isEmpty) continue;
-          doneByAssignment[assignmentId] = (row['done'] ?? false) == true;
-        }
+        try {
+          final doneRows = await _sb
+              .from('assignment_done')
+              .select('assignment_id,done,done_at')
+              .eq('user_id', userId)
+              .inFilter('assignment_id', assignmentIds)
+              .timeout(const Duration(seconds: 5));
+          for (final raw in doneRows as List) {
+            final row = Map<String, dynamic>.from(raw as Map);
+            final assignmentId = (row['assignment_id'] ?? '').toString();
+            if (assignmentId.isEmpty) continue;
+            doneByAssignment[assignmentId] = (row['done'] ?? false) == true;
+          }
+        } catch (_) {}
       }
 
       for (final row in rawAssignments) {
@@ -414,6 +418,9 @@ class PersonalDiaryService {
         offeringIds: offeringIds,
         includeGeneral: true,
         subjectTitleByOffering: offeringTitleById,
+      ).timeout(
+        const Duration(seconds: 7),
+        onTimeout: () => const <PersonalDiaryTask>[],
       );
       generalTasks = personalTasks.where((task) => task.isGeneral).toList();
       for (final task in personalTasks.where((task) => !task.isGeneral)) {
@@ -523,6 +530,33 @@ class PersonalDiaryService {
     );
   }
 
+  PersonalDiaryData _emptyData(
+    AcademicContext context, {
+    List<int> availableSemesters = const [],
+    int? selectedSemesterNumber,
+  }) {
+    return PersonalDiaryData(
+        academicContext: context,
+        availableSemesters: availableSemesters,
+      selectedSemesterNumber: selectedSemesterNumber,
+        allSubjects: const [],
+        subjects: const [],
+        latestEntries: const [],
+        publishedAssignments: const [],
+        upcomingAssignments: const [],
+        personalTasks: const [],
+        upcomingPersonalTasks: const [],
+        totalEntries: 0,
+        totalFiles: 0,
+        totalAssignments: 0,
+        pendingAssignmentsCount: 0,
+        completedAssignmentsCount: 0,
+        personalTasksTotal: 0,
+        personalTasksActive: 0,
+        personalTasksDone: 0,
+    );
+  }
+
   Future<void> setAssignmentDone({
     required String assignmentId,
     required bool done,
@@ -616,7 +650,8 @@ class PersonalDiaryService {
             .eq('author_id', userId)
             .inFilter('subject_offering_id', cleanOfferingIds)
             .order('due_at', ascending: true, nullsFirst: false)
-            .order('created_at', ascending: true);
+            .order('created_at', ascending: true)
+            .timeout(const Duration(seconds: 5));
         rows.addAll((subjectRows as List)
             .map((row) => Map<String, dynamic>.from(row as Map)));
       }
@@ -630,7 +665,8 @@ class PersonalDiaryService {
             .eq('author_id', userId)
             .filter('subject_offering_id', 'is', null)
             .order('due_at', ascending: true, nullsFirst: false)
-            .order('created_at', ascending: true);
+            .order('created_at', ascending: true)
+            .timeout(const Duration(seconds: 5));
         rows.addAll((generalRows as List)
             .map((row) => Map<String, dynamic>.from(row as Map)));
       }

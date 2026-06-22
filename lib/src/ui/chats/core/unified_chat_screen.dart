@@ -6,6 +6,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -14,8 +15,10 @@ import 'package:flutter/services.dart' as services;
 import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/learning/models/chat_file.dart';
 import 'package:student_platform/src/ui/learning/models/local_attach.dart';
+import 'package:student_platform/src/ui/learning/state/team_cubit.dart';
 
-import 'package:student_platform/src/ui/learning/tabs/chat/actions/chat_actions.dart' as ca;
+import 'package:student_platform/src/ui/learning/tabs/chat/actions/chat_actions.dart'
+    as ca;
 import 'package:student_platform/src/ui/learning/tabs/chat/widgets.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/search/chat_search_controller.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/search/inline_search_bar.dart';
@@ -61,6 +64,8 @@ class UnifiedChatScreen extends StatefulWidget {
 }
 
 class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
+  static const bool enableTypingIndicator = false;
+
   final _scroll = ScrollController();
   final _ctrl = TextEditingController();
   final _composerFocus = FocusNode();
@@ -87,7 +92,10 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
   final Set<String> _typingUsers = {};
   Timer? _myTypingOff;
-  bool get _someoneTyping => _typingUsers.isNotEmpty;
+  List<String> get _visibleTypingUsers =>
+      _typingUsers.where((name) => name != 'Вы').toList();
+  bool get _someoneTyping =>
+      enableTypingIndicator && _visibleTypingUsers.isNotEmpty;
 
   // DM-only: track if typing hook is attached
   bool _typingHookAttached = false;
@@ -117,8 +125,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
   // Блокировка повторных отправок и индикатор фоновых загрузок
   bool _isSending = false;
-  bool get _isUploadingAttachments =>
-      _att.pending.any((f) => f.path != '__FG__' && (f.uploadedFileId == null));
+  bool get _isUploadingAttachments => _att.hasActiveUploads;
+  bool get _hasFailedAttachments => _att.hasFailedUploads;
 
   // якорь для «⋯»
   final GlobalKey _kebabKey = GlobalKey();
@@ -129,7 +137,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     _chatScroll = ChatScrollController(_scroll, _messageKeys);
     _search = ChatSearchController();
     _pinsCtl = PinController();
-    _att = ChatAttachmentsController(_fileService, _globalCache, Supabase.instance.client)
+    _att = ChatAttachmentsController(
+        _fileService, _globalCache, Supabase.instance.client)
       ..addListener(() {
         if (!mounted) return;
         setState(() {});
@@ -207,7 +216,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     if (_dmTextHookAttached) {
       _ctrl.removeListener(_onTextChangedDm);
     }
-    try { _keyboardChannel.invokeMethod('dispose'); } catch (_) {}
+    try {
+      _keyboardChannel.invokeMethod('dispose');
+    } catch (_) {}
     _keyboardChannel.setMethodCallHandler(null);
     _scroll.dispose();
     _ctrl.dispose();
@@ -228,14 +239,19 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
   Future<void> _saveDraftDm() async {
     if (_currentChatIdDm == null) return;
-    final filesData = _att.pending.map((f) => {
-      'path': f.path ?? '',
-      'name': f.name ?? '',
-      'mimeType': f.mimeType ?? '',
-      'size': f.size ?? 0,
-      'isImage': f.isImage ?? false,
-      'uploadedFileId': f.uploadedFileId,
-    }).toList();
+    final filesData = _att.pending
+        .map((f) => {
+              'localId': f.localId,
+              'path': f.path,
+              'name': f.name,
+              'mimeType': f.mimeType,
+              'size': f.size,
+              'isImage': f.isImage,
+              'uploadStatus': f.uploadStatus.name,
+              'progress': f.progress,
+              'uploadedFileId': f.uploadedFileId,
+            })
+        .toList();
     await _globalCache.saveDraft(_currentChatIdDm!, _ctrl.text, filesData);
   }
 
@@ -254,13 +270,24 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     _att.pending
       ..clear()
       ..addAll(filesData.map((m) => LocalAttach(
-        path: m['path'] as String? ?? '',
-        name: m['name'] as String? ?? '',
-        mimeType: m['mimeType'] as String? ?? '',
-        size: m['size'] as int? ?? 0,
-        isImage: m['isImage'] as bool? ?? false,
-        uploadedFileId: m['uploadedFileId'] as String?,
-      )));
+            localId: m['localId'] as String?,
+            path: m['path'] as String? ?? '',
+            name: m['name'] as String? ?? '',
+            mimeType: m['mimeType'] as String? ?? '',
+            size: m['size'] as int? ?? 0,
+            isImage: m['isImage'] as bool? ?? false,
+            uploadStatus:
+                ((m['uploadedFileId'] as String?)?.isNotEmpty ?? false)
+                    ? LocalAttachUploadStatus.uploaded
+                    : LocalAttachUploadStatus.failed,
+            progress:
+                ((m['uploadedFileId'] as String?)?.isNotEmpty ?? false) ? 1 : 0,
+            errorMessage:
+                ((m['uploadedFileId'] as String?)?.isNotEmpty ?? false)
+                    ? null
+                    : 'Не удалось загрузить',
+            uploadedFileId: m['uploadedFileId'] as String?,
+          )));
     if (mounted) setState(() {});
   }
 
@@ -296,7 +323,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         final chatFile = ChatFile.fromJson(fileRow);
         await _globalCache.cacheFile(fileId, chatFile);
 
-        if ((chatFile.fileType).startsWith('image/') && chatFile.fileUrl.isNotEmpty) {
+        if ((chatFile.fileType).startsWith('image/') &&
+            chatFile.fileUrl.isNotEmpty) {
           // ignore: discarded_futures
           precacheImage(CachedNetworkImageProvider(chatFile.fileUrl), context);
         }
@@ -307,12 +335,12 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   Future<void> _initEntryBoundary() async {
     try {
       final unread = await widget.service.getUnreadMeta();
-      DateTime? entry;            // граница "видел до"
-      bool showBadge = false;     // показывать ли чип
+      DateTime? entry; // граница "видел до"
+      bool showBadge = false; // показывать ли чип
 
-      final count   = (unread['unread_count'] ?? unread['count'] ?? 0) as int;
+      final count = (unread['unread_count'] ?? unread['count'] ?? 0) as int;
       final firstId = (unread['first_unread_id'] ?? '') as String?;
-      final raw     = unread['last_read_at'];
+      final raw = unread['last_read_at'];
 
       DateTime? lastReadAt;
       if (raw is DateTime) {
@@ -329,9 +357,11 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
           final list = widget.service.currentMessages;
           final idx = list.indexWhere((m) => m.id == firstId);
           if (idx >= 0) {
-            entry = list[idx].at.toUtc().subtract(const Duration(microseconds: 1));
+            entry =
+                list[idx].at.toUtc().subtract(const Duration(microseconds: 1));
           } else if (list.isNotEmpty) {
-            entry = list.first.at.toUtc().subtract(const Duration(microseconds: 1));
+            entry =
+                list.first.at.toUtc().subtract(const Duration(microseconds: 1));
           }
         }
       }
@@ -355,7 +385,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     await _stageForwardPayload(payload, data.fileUrls, data.fileIds, chatId);
   }
 
-  Future<void> _stageForwardPayload(ForwardPayload payload, List<String> fileUrls, List<String> fileIds, String chatId) async {
+  Future<void> _stageForwardPayload(ForwardPayload payload,
+      List<String> fileUrls, List<String> fileIds, String chatId) async {
     if (!mounted) return;
 
     final sameChat = (payload.fromChatId == chatId);
@@ -442,8 +473,6 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     }
   }
 
-
-
   Future<File> _downloadToTemp(String url) async {
     final http = HttpClient();
     final req = await http.getUrl(Uri.parse(url));
@@ -457,14 +486,16 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   }
 
   // ---------- Forward helpers ----------
-  Future<List<String>> _waitUploads(List<String> paths, {int tries = 40}) async {
+  Future<List<String>> _waitUploads(List<String> paths,
+      {int tries = 40}) async {
     var left = tries;
     while (left-- > 0) {
       final ready = <String>[];
       for (final p in paths) {
         final f = _att.pending.firstWhere(
           (x) => x.path == p,
-          orElse: () => LocalAttach(path: '', name: '', mimeType: '', size: 0, isImage: false),
+          orElse: () => LocalAttach(
+              path: '', name: '', mimeType: '', size: 0, isImage: false),
         );
         if ((f.path?.isNotEmpty ?? false) && f.uploadedFileId != null) {
           ready.add(f.uploadedFileId!);
@@ -510,12 +541,17 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     final items = <ForwardItem>[];
     final fileUrls = <String>[];
     final fileIds = <String>[];
-    for (final m in selected..sort((a,b)=>a.at.compareTo(b.at))) {
+    for (final m in selected..sort((a, b) => a.at.compareTo(b.at))) {
       final files = <ForwardFileRef>[];
       for (final f in (m.attachments ?? const <ChatFile>[])) {
         final url = (f.fileUrl ?? '');
         if (url.isNotEmpty) {
-          files.add(ForwardFileRef(id: f.id, url: url, name: f.fileName, type: f.fileType, size: f.fileSize));
+          files.add(ForwardFileRef(
+              id: f.id,
+              url: url,
+              name: f.fileName,
+              type: f.fileType,
+              size: f.fileSize));
           fileUrls.add(url);
         }
         if (f.id.isNotEmpty) {
@@ -535,7 +571,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
     final fromChatId = await widget.service.ensureChatId();
     final caption = _ctrl.text.trim().isEmpty ? null : _ctrl.text.trim();
-    final payload = ForwardPayload(fromChatId: fromChatId, caption: caption, items: items);
+    final payload =
+        ForwardPayload(fromChatId: fromChatId, caption: caption, items: items);
 
     final uniqueFileUrls = fileUrls.where((u) => u.isNotEmpty).toSet().toList();
     final uniqueFileIds = fileIds.where((id) => id.isNotEmpty).toSet().toList();
@@ -545,7 +582,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
     if (target.chatId == fromChatId) {
       // Всегда staged-чип, не вставляем сырой FG-текст
-      await _stageForwardPayload(payload, uniqueFileUrls, uniqueFileIds, fromChatId);
+      await _stageForwardPayload(
+          payload, uniqueFileUrls, uniqueFileIds, fromChatId);
     } else {
       await ForwardOutbox.putForChat(
         chatId: target.chatId,
@@ -568,7 +606,11 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
   bool _isImagePath(String path) {
     final p = path.toLowerCase();
-    return p.endsWith('.jpg') || p.endsWith('.jpeg') || p.endsWith('.png') || p.endsWith('.gif') || p.endsWith('.webp');
+    return p.endsWith('.jpg') ||
+        p.endsWith('.jpeg') ||
+        p.endsWith('.png') ||
+        p.endsWith('.gif') ||
+        p.endsWith('.webp');
   }
 
   // ---------- Scroll / Read ----------
@@ -591,7 +633,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   }
 
   bool _isNearHistoryTop() {
-    if (!_scroll.hasClients || !_hasMoreOlderMessages || _loadingOlderMessages) {
+    if (!_scroll.hasClients ||
+        !_hasMoreOlderMessages ||
+        _loadingOlderMessages) {
       return false;
     }
     final position = _scroll.position;
@@ -604,14 +648,17 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     if (list.isEmpty) return;
 
     final oldest = list.reduce((a, b) => a.at.isBefore(b.at) ? a : b);
+    final anchor = _chatScroll.capturePrependAnchor();
     _loadingOlderMessages = true;
     if (mounted) setState(() {});
 
     try {
-      final loaded = await widget.service.loadOlderMessages(before: oldest, limit: 50);
+      final loaded =
+          await widget.service.loadOlderMessages(before: oldest, limit: 50);
       if (loaded.length < 50) {
         _hasMoreOlderMessages = false;
       }
+      await _chatScroll.restorePrependAnchor(anchor);
     } finally {
       _loadingOlderMessages = false;
       if (mounted) setState(() {});
@@ -629,7 +676,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
   void _scheduleSeenCheck() {
     _seenDebounce?.cancel();
-    _seenDebounce = Timer(const Duration(milliseconds: 150), _markLastSeenIfNeeded);
+    _seenDebounce =
+        Timer(const Duration(milliseconds: 150), _markLastSeenIfNeeded);
   }
 
   Future<void> _markLastSeenIfNeeded() async {
@@ -663,7 +711,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
   // ---------- Отправка ----------
   Future<void> _send(String text) async {
-    if (_isUploadingAttachments || _isSending) return;
+    if (_isUploadingAttachments || _hasFailedAttachments || _isSending) return;
 
     _isSending = true;
     setState(() {});
@@ -688,7 +736,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
             for (final p in paths) {
               final f = _att.pending.firstWhere(
                 (x) => x.path == p,
-                orElse: () => LocalAttach(path: '', name: '', mimeType: '', size: 0, isImage: false),
+                orElse: () => LocalAttach(
+                    path: '', name: '', mimeType: '', size: 0, isImage: false),
               );
               if (f.path.isNotEmpty && f.uploadedFileId != null) {
                 ready.add(f.uploadedFileId!);
@@ -743,7 +792,12 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
           for (final f in (m.attachments ?? const <ChatFile>[])) {
             final url = (f.fileUrl ?? '');
             if (url.isNotEmpty) {
-              files.add(ForwardFileRef(id: f.id, url: url, name: f.fileName, type: f.fileType, size: f.fileSize));
+              files.add(ForwardFileRef(
+                  id: f.id,
+                  url: url,
+                  name: f.fileName,
+                  type: f.fileType,
+                  size: f.fileSize));
             }
             if (f.id.isNotEmpty) fileIds.add(f.id);
           }
@@ -760,7 +814,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
         final fromChatId = await widget.service.ensureChatId();
         final caption = _ctrl.text.trim().isEmpty ? null : _ctrl.text.trim();
-        final payload = ForwardPayload(fromChatId: fromChatId, caption: caption, items: items);
+        final payload = ForwardPayload(
+            fromChatId: fromChatId, caption: caption, items: items);
 
         final uniqueFileIds = fileIds.toSet().toList();
         await widget.service.sendText(
@@ -804,7 +859,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
           for (final p in paths) {
             final f = _att.pending.firstWhere(
               (x) => x.path == p,
-              orElse: () => LocalAttach(path: '', name: '', mimeType: '', size: 0, isImage: false),
+              orElse: () => LocalAttach(
+                  path: '', name: '', mimeType: '', size: 0, isImage: false),
             );
             if ((f.path?.isNotEmpty ?? false) && f.uploadedFileId != null) {
               ready.add(f.uploadedFileId!);
@@ -820,12 +876,14 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         if (fileIds.isEmpty) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('⏳ Файлы загружаются, подождите...')),
+              const SnackBar(
+                  content: Text('⏳ Файлы загружаются, подождите...')),
             );
           }
           return;
         }
-        await widget.service.sendText(trimmed, replyToId: replyId, fileIds: fileIds);
+        await widget.service
+            .sendText(trimmed, replyToId: replyId, fileIds: fileIds);
         _att.clear();
       } else {
         await widget.service.sendText(trimmed, replyToId: replyId);
@@ -844,7 +902,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   // ---------- Пересылка ----------
   Future<void> _handleForwardFlow() async {
     final list = widget.service.currentMessages;
-    final selected = list.where((m) => _forwardSelectedIds.contains(m.id)).toList()
+    final selected = list
+        .where((m) => _forwardSelectedIds.contains(m.id))
+        .toList()
       ..sort((a, b) => a.at.compareTo(b.at));
     if (selected.isEmpty) return;
 
@@ -856,7 +916,12 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       for (final f in (m.attachments ?? const <ChatFile>[])) {
         final url = (f.fileUrl ?? '');
         if (url.isNotEmpty) {
-          files.add(ForwardFileRef(id: f.id, url: url, name: f.fileName, type: f.fileType, size: f.fileSize));
+          files.add(ForwardFileRef(
+              id: f.id,
+              url: url,
+              name: f.fileName,
+              type: f.fileType,
+              size: f.fileSize));
           fileUrls.add(url);
         }
         if (f.id.isNotEmpty) {
@@ -875,7 +940,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     }
     final fromChatId = await widget.service.ensureChatId();
     final caption = _ctrl.text.trim().isEmpty ? null : _ctrl.text.trim();
-    final payload = ForwardPayload(fromChatId: fromChatId, caption: caption, items: items);
+    final payload =
+        ForwardPayload(fromChatId: fromChatId, caption: caption, items: items);
 
     final uniqueFileUrls = fileUrls.where((u) => u.isNotEmpty).toSet().toList();
     final uniqueFileIds = fileIds.where((id) => id.isNotEmpty).toSet().toList();
@@ -911,7 +977,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     final target = RelativeRect.fromRect(
       Rect.fromPoints(
         btnBox.localToGlobal(Offset.zero, ancestor: overlay),
-        btnBox.localToGlobal(btnBox.size.bottomRight(Offset.zero), ancestor: overlay),
+        btnBox.localToGlobal(btnBox.size.bottomRight(Offset.zero),
+            ancestor: overlay),
       ),
       Offset.zero & overlay.size,
     );
@@ -931,7 +998,11 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
             children: [
               Icon(Icons.search, size: 20, color: Colors.black),
               SizedBox(width: 10),
-              Text('Поиск сообщений', style: TextStyle(color: Colors.black, fontSize: 16, fontWeight: FontWeight.w500)),
+              Text('Поиск сообщений',
+                  style: TextStyle(
+                      color: Colors.black,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500)),
             ],
           ),
         ),
@@ -940,18 +1011,24 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
     if (selected == 'search') {
       // ⚠️ фикс «первого нажатия»: принудительно перерисовываем экран
-      setState(() { _search.setActive(true); });
+      setState(() {
+        _search.setActive(true);
+      });
     }
   }
 
   // ---------- UI ----------
   @override
   Widget build(BuildContext context) {
-    final titleText = widget.title ?? (widget.service.mode == ChatMode.dm ? 'Личный чат' : 'Чат');
+    final titleText = widget.title ??
+        (widget.service.mode == ChatMode.dm ? 'Личный чат' : 'Чат');
     final safeBottom = MediaQuery.of(context).padding.bottom;
     final theme = Theme.of(context);
 
     final isDm = widget.service.mode == ChatMode.dm;
+    final canProposeAssignments = !isDm &&
+        widget.service.supportsAssignments &&
+        _canManageAssignments(context);
 
     return Scaffold(
       appBar: AppBar(
@@ -967,7 +1044,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                         isScrollControlled: true,
                         useSafeArea: true,
                         backgroundColor: theme.colorScheme.surface,
-                        builder: (_) => ChatMediaSheet(messagesStream: messages),
+                        builder: (_) =>
+                            ChatMediaSheet(messagesStream: messages),
                       );
                     },
               )
@@ -1006,8 +1084,12 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
             final newLastId = list.last.id;
             final changed = (newLastId != _lastRenderedLastId);
             _lastRenderedLastId = newLastId;
-            if (changed && _chatScroll.atBottom()) {
-              WidgetsBinding.instance.addPostFrameCallback((_) => _scheduleSeenCheck());
+            if (changed && _chatScroll.nearBottom()) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return;
+                _jumpToBottom();
+                _scheduleSeenCheck();
+              });
             }
           }
 
@@ -1043,8 +1125,13 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                 PinnedStripContainer(
                   pins: pins,
                   controller: _pinsCtl,
-                  onOpen: (p) { if (p.refId != null) _chatScroll.scrollToMessage(p.refId!); },
-                  onUnpin: (p) async { if (p.type == PinType.message && p.refId != null) await widget.service.pinMessage(p.refId!, false); },
+                  onOpen: (p) {
+                    if (p.refId != null) _chatScroll.scrollToMessage(p.refId!);
+                  },
+                  onUnpin: (p) async {
+                    if (p.type == PinType.message && p.refId != null)
+                      await widget.service.pinMessage(p.refId!, false);
+                  },
                 ),
 
               Expanded(
@@ -1060,7 +1147,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                   child: Stack(
                     children: [
                       Padding(
-                        padding: EdgeInsets.only(bottom: _selecting ? (safeBottom + 64 + 12) : 8.0),
+                        padding: EdgeInsets.only(
+                            bottom: _selecting ? (safeBottom + 64 + 12) : 8.0),
                         child: ChatMessageList(
                           messages: list,
                           controller: _scroll,
@@ -1074,16 +1162,30 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                           noAvatarSpacing: isDm,
                           hideAuthorLine: isDm,
                           onReply: (m) => setState(() => _replyTo = m),
-                          onLongPress: (ctx, m, rect, bytes, replyPreview) =>
-                              _showMessageActions(ctx, m, targetRect: rect, bubbleBytes: bytes, replyPreview: replyPreview),
+                          onLongPress:
+                              (ctx, m, rect, bytes, replyPreview, fallback) =>
+                                  _showMessageActions(ctx, m,
+                                      targetRect: rect,
+                                      bubbleBytes: bytes,
+                                      replyPreview: replyPreview,
+                                      fallbackPosition: fallback),
                           onReplyTap: (id) => _chatScroll.scrollToMessage(id),
-                          onReact: (ctx, id) => ca.ChatActions.showReactionPicker(ctx, (emoji) => widget.service.toggleReaction(id, emoji)),
+                          onReact: (ctx, id) =>
+                              ca.ChatActions.showReactionPicker(
+                                  ctx,
+                                  (emoji) =>
+                                      widget.service.toggleReaction(id, emoji)),
+                          onReactionSelected: widget.service.toggleReaction,
+                          canDeleteMessage: _canDelete,
+                          onMenuAction: _handlePackageMenuAction,
                           selectingMessages: _selecting,
                           selectedMessageIds: _selectedIds,
                           onToggleSelect: (id) {
                             setState(() {
-                              if (_selectedIds.contains(id)) _selectedIds.remove(id);
-                              else _selectedIds.add(id);
+                              if (_selectedIds.contains(id))
+                                _selectedIds.remove(id);
+                              else
+                                _selectedIds.add(id);
                               if (_selectedIds.isEmpty) _selecting = false;
                             });
                           },
@@ -1091,7 +1193,6 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                           forceHideAvatars: widget.hideAvatars || isDm,
                         ),
                       ),
-
                       if (_loadingOlderMessages)
                         const Positioned(
                           top: 8,
@@ -1105,27 +1206,38 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                             ),
                           ),
                         ),
-
                       if (_selecting)
                         Positioned(
-                          top: 0, left: 0, right: 0,
+                          top: 0,
+                          left: 0,
+                          right: 0,
                           child: TopSelectionBar(
                             count: _selectedIds.length,
-                            onCancel: () { _selectedIds.clear(); setState(() => _selecting = false); },
-                          ),
-                        ),
-
-                      if (_selecting)
-                        Positioned(
-                          left: 0, right: 0, bottom: 0,
-                          child: BottomSelectionBar(
-                            onForward: _selectedIds.isEmpty ? null : () async {
-                              final sel = list.where((m) => _selectedIds.contains(m.id)).toList();
+                            onCancel: () {
                               _selectedIds.clear();
                               setState(() => _selecting = false);
-                              await _startForwardSelection(sel);
                             },
-                            onDelete: (!_selectedIds.every((id) => _canDelete(list.firstWhere((m) => m.id == id))))
+                          ),
+                        ),
+                      if (_selecting)
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: BottomSelectionBar(
+                            onForward: _selectedIds.isEmpty
+                                ? null
+                                : () async {
+                                    final sel = list
+                                        .where(
+                                            (m) => _selectedIds.contains(m.id))
+                                        .toList();
+                                    _selectedIds.clear();
+                                    setState(() => _selecting = false);
+                                    await _startForwardSelection(sel);
+                                  },
+                            onDelete: (!_selectedIds.every((id) => _canDelete(
+                                    list.firstWhere((m) => m.id == id))))
                                 ? null
                                 : () async {
                                     for (final id in _selectedIds.toList()) {
@@ -1136,11 +1248,12 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                                   },
                           ),
                         ),
-
                       if (_showJump)
                         Positioned(
                           right: 12,
-                          bottom: _selecting ? (safeBottom + 64 + 20) : (safeBottom + 82.0),
+                          bottom: _selecting
+                              ? (safeBottom + 64 + 20)
+                              : (safeBottom + 82.0),
                           child: ScrollToBottomButton(onTap: _jumpToBottom),
                         ),
                     ],
@@ -1164,22 +1277,34 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                         focusNode: _composerFocus,
                         replyTo: _replyTo,
                         onCloseReply: () => setState(() => _replyTo = null),
-                        // DM: disable typing indicator
+                        // DM: typing UI is intentionally hidden until the feature is ready.
                         someoneTyping: false,
                         typingNames: const [],
-                        attachedFiles: _att.pending.map((f) => AttachedFile(
-                          path: f.path ?? '',
-                          name: f.name ?? '',
-                          isImage: f.isImage ?? false,
-                          size: f.size ?? 0,
-                        )).toList(),
+                        attachedFiles: _att.pending
+                            .map((f) => AttachedFile(
+                                  localId: f.localId,
+                                  path: f.path,
+                                  name: f.name,
+                                  isImage: f.isImage,
+                                  size: f.size,
+                                  uploadStatus: f.uploadStatus,
+                                  progress: f.progress,
+                                  errorMessage: f.errorMessage,
+                                  uploadedFileId: f.uploadedFileId,
+                                ))
+                            .toList(),
                         isUploading: _isUploadingAttachments,
+                        hasFailedUploads: _hasFailedAttachments,
                         isSending: _isSending,
                         onAddFile: (ui) {
                           _att.add(LocalAttach(
-                            path: ui.path, name: ui.name,
-                            mimeType: ui.isImage ? 'image/jpeg' : 'application/octet-stream',
-                            size: ui.size, isImage: ui.isImage,
+                            path: ui.path,
+                            name: ui.name,
+                            mimeType: ui.isImage
+                                ? 'image/jpeg'
+                                : 'application/octet-stream',
+                            size: ui.size,
+                            isImage: ui.isImage,
                           ));
                           _saveDraftDmDebounced();
                         },
@@ -1190,21 +1315,38 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                               _stagedForward = null;
                               _forwardSelectedIds.clear();
                               _stagedForwardFileIds.clear();
-                              _att.pending.removeWhere((x) => x.path == '__FG__');
+                              _att.pending
+                                  .removeWhere((x) => x.path == '__FG__');
                             });
                           } else {
-                            final local = _att.pending.firstWhere((f) => f.path == ui.path);
-                            _att.remove(local);
+                            final local = _att.pending
+                                .firstWhere((f) => f.localId == ui.localId);
+                            if (local.canCancel) {
+                              _att.cancel(local);
+                            } else {
+                              _att.remove(local);
+                            }
                           }
+                          _saveDraftDmDebounced();
+                        },
+                        onRetryFile: (ui) async {
+                          final local = _att.pending
+                              .firstWhere((f) => f.localId == ui.localId);
+                          final cid = await widget.service.ensureChatId();
+                          await _att.retry(local, teamId: null, chatId: cid);
                           _saveDraftDmDebounced();
                         },
                         onSend: () => _send(_ctrl.text),
                         onPickImage: () async {
-                          final res = await ImagePicker().pickImage(source: ImageSource.gallery);
+                          final res = await ImagePicker()
+                              .pickImage(source: ImageSource.gallery);
                           if (res != null) {
                             final file = LocalAttach(
-                              path: res.path, name: res.path.split('/').last,
-                              mimeType: 'image/jpeg', size: await File(res.path).length(), isImage: true,
+                              path: res.path,
+                              name: res.path.split('/').last,
+                              mimeType: 'image/jpeg',
+                              size: await File(res.path).length(),
+                              isImage: true,
                             );
                             _att.add(file);
                             final cid = await widget.service.ensureChatId();
@@ -1214,7 +1356,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                         },
                         onOpenEmoji: () {
                           _composerFocus.requestFocus();
-                          services.SystemChannels.textInput.invokeMethod('TextInput.show');
+                          services.SystemChannels.textInput
+                              .invokeMethod('TextInput.show');
                         },
                         onAttachFile: () async {
                           final file = await _fileService.pickFile();
@@ -1240,20 +1383,32 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                         replyTo: _replyTo,
                         onCloseReply: () => setState(() => _replyTo = null),
                         someoneTyping: _someoneTyping,
-                        typingNames: _typingUsers.toList(),
-                        attachedFiles: _att.pending.map((f) => AttachedFile(
-                          path: f.path ?? '',
-                          name: f.name ?? '',
-                          isImage: f.isImage ?? false,
-                          size: f.size ?? 0,
-                        )).toList(),
+                        typingNames: _visibleTypingUsers,
+                        attachedFiles: _att.pending
+                            .map((f) => AttachedFile(
+                                  localId: f.localId,
+                                  path: f.path,
+                                  name: f.name,
+                                  isImage: f.isImage,
+                                  size: f.size,
+                                  uploadStatus: f.uploadStatus,
+                                  progress: f.progress,
+                                  errorMessage: f.errorMessage,
+                                  uploadedFileId: f.uploadedFileId,
+                                ))
+                            .toList(),
                         isUploading: _isUploadingAttachments,
+                        hasFailedUploads: _hasFailedAttachments,
                         isSending: _isSending,
                         onAddFile: (ui) {
                           _att.add(LocalAttach(
-                            path: ui.path, name: ui.name,
-                            mimeType: ui.isImage ? 'image/jpeg' : 'application/octet-stream',
-                            size: ui.size, isImage: ui.isImage,
+                            path: ui.path,
+                            name: ui.name,
+                            mimeType: ui.isImage
+                                ? 'image/jpeg'
+                                : 'application/octet-stream',
+                            size: ui.size,
+                            isImage: ui.isImage,
                           ));
                         },
                         onRemoveFile: (ui) {
@@ -1263,20 +1418,36 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                               _stagedForward = null;
                               _forwardSelectedIds.clear();
                               _stagedForwardFileIds.clear();
-                              _att.pending.removeWhere((x) => x.path == '__FG__');
+                              _att.pending
+                                  .removeWhere((x) => x.path == '__FG__');
                             });
                           } else {
-                            final local = _att.pending.firstWhere((f) => f.path == ui.path);
-                            _att.remove(local);
+                            final local = _att.pending
+                                .firstWhere((f) => f.localId == ui.localId);
+                            if (local.canCancel) {
+                              _att.cancel(local);
+                            } else {
+                              _att.remove(local);
+                            }
                           }
+                        },
+                        onRetryFile: (ui) async {
+                          final local = _att.pending
+                              .firstWhere((f) => f.localId == ui.localId);
+                          final cid = await widget.service.ensureChatId();
+                          await _att.retry(local, teamId: null, chatId: cid);
                         },
                         onSend: () => _send(_ctrl.text),
                         onPickImage: () async {
-                          final res = await ImagePicker().pickImage(source: ImageSource.gallery);
+                          final res = await ImagePicker()
+                              .pickImage(source: ImageSource.gallery);
                           if (res != null) {
                             final file = LocalAttach(
-                              path: res.path, name: res.path.split('/').last,
-                              mimeType: 'image/jpeg', size: await File(res.path).length(), isImage: true,
+                              path: res.path,
+                              name: res.path.split('/').last,
+                              mimeType: 'image/jpeg',
+                              size: await File(res.path).length(),
+                              isImage: true,
                             );
                             _att.add(file);
                             final cid = await widget.service.ensureChatId();
@@ -1303,18 +1474,19 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                         onFind: () async {
                           FocusScope.of(context).unfocus();
                           _search.setActive(true);
-                          setState((){}); // на всякий случай перерисовка
+                          setState(() {}); // на всякий случай перерисовка
                         },
-                        onPropose: (title, description, link, due, attachments) async {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                widget.service.supportsAssignments
-                                    ? 'Задания подключим после бэка ЛС'
-                                    : 'Задания недоступны в этом чате',
-                              ),
-                            ),
-                          );
+                        showProposeInPlus: canProposeAssignments,
+                        onPropose:
+                            (title, description, link, due, attachments) async {
+                          if (!canProposeAssignments) return;
+                          await context.read<TeamCubit>().proposeAssignment(
+                                title: title,
+                                description: description,
+                                link: link,
+                                due: due,
+                                attachments: attachments,
+                              );
                         },
                       ),
             ],
@@ -1324,29 +1496,50 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     );
   }
 
-  void _showMessageActions(BuildContext ctx, Message m, {Rect? targetRect, Uint8List? bubbleBytes, String? replyPreview}) async {
-    setState(() => _hoveredMessageId = m.id);
+  bool _canManageAssignments(BuildContext context) {
     try {
-      // Коррекция targetRect: используем прямоугольник ИМЕННО баббла в координатах Overlay
-      Rect? finalRect = targetRect;
-      if (finalRect == null) {
-        final bubbleKey = _bubbleBoundaryKeys[m.id];
-        if (bubbleKey?.currentContext != null) {
-          final bubbleBox = bubbleKey!.currentContext!.findRenderObject() as RenderBox;
-          final overlayBox = Overlay.of(ctx, rootOverlay: true).context.findRenderObject() as RenderBox;
-          final topLeft = bubbleBox.localToGlobal(Offset.zero, ancestor: overlayBox);
-          finalRect = topLeft & bubbleBox.size;
+      return context.select((TeamCubit cubit) => cubit.state.isStarosta);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _showMessageActions(BuildContext ctx, Message m,
+      {Rect? targetRect,
+      Uint8List? bubbleBytes,
+      String? replyPreview,
+      Offset? fallbackPosition}) async {
+    Rect? finalRect = targetRect;
+    if (finalRect == null) {
+      final bubbleKey = _bubbleBoundaryKeys[m.id];
+      if (bubbleKey?.currentContext != null) {
+        final renderObject = bubbleKey!.currentContext!.findRenderObject();
+        if (renderObject is RenderBox && renderObject.hasSize) {
+          final overlayBox = Overlay.of(ctx, rootOverlay: true)
+              .context
+              .findRenderObject() as RenderBox;
+          final topLeft = renderObject.localToGlobal(
+            Offset.zero,
+            ancestor: overlayBox,
+          );
+          finalRect = topLeft & renderObject.size;
         }
       }
+    }
 
+    setState(() => _hoveredMessageId = m.id);
+    try {
       await ca.ChatActions.showMessageActions(
         ctx,
         m,
         targetRect: finalRect,
         bubbleBytes: bubbleBytes,
         replyPreview: replyPreview,
+        fallbackPosition: fallbackPosition,
         onReply: () => setState(() => _replyTo = m),
-        onForward: () async { await _startForwardSelection([m]); },
+        onForward: () async {
+          await _startForwardSelection([m]);
+        },
         onTogglePin: () async => widget.service.pinMessage(m.id, !m.isPinned),
         onDeleteIfAllowed: () async => widget.service.deleteMessage(m.id),
         onReact: (emoji) => widget.service.toggleReaction(m.id, emoji),
@@ -1357,6 +1550,36 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       );
     } finally {
       if (mounted) setState(() => _hoveredMessageId = null);
+    }
+  }
+
+  Future<void> _handlePackageMenuAction(Message m, String action) async {
+    switch (action) {
+      case 'Ответить':
+        setState(() => _replyTo = m);
+        break;
+      case 'Скопировать':
+        final text = m.text.trim();
+        if (text.isNotEmpty) {
+          await services.Clipboard.setData(services.ClipboardData(text: text));
+        }
+        break;
+      case 'Закрепить':
+      case 'Открепить':
+        await widget.service.pinMessage(m.id, !m.isPinned);
+        break;
+      case 'Переслать':
+        await _startForwardSelection([m]);
+        break;
+      case 'Удалить':
+        if (_canDelete(m)) {
+          await widget.service.deleteMessage(m.id);
+        }
+        break;
+      case 'Выбрать':
+        _selectedIds.add(m.id);
+        setState(() => _selecting = true);
+        break;
     }
   }
 
@@ -1371,7 +1594,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       final ext = f.fileName.split('.').last.toLowerCase();
       if (ext.contains(q)) return true;
     }
-    final ts = '${m.at.hour.toString().padLeft(2,'0')}:${m.at.minute.toString().padLeft(2,'0')}';
+    final ts =
+        '${m.at.hour.toString().padLeft(2, '0')}:${m.at.minute.toString().padLeft(2, '0')}';
     if (ts.contains(q)) return true;
     final words = q.split(' ');
     if (words.length > 1) {
@@ -1379,8 +1603,11 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       final authorLower = m.authorName.toLowerCase();
       bool all = true;
       for (final w in words) {
-        if (w.length > 2 && !textLower.contains(w) && !authorLower.contains(w)) {
-          all = false; break;
+        if (w.length > 2 &&
+            !textLower.contains(w) &&
+            !authorLower.contains(w)) {
+          all = false;
+          break;
         }
       }
       if (all) return true;
@@ -1419,7 +1646,10 @@ class _DmTitle extends StatelessWidget {
               title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.black, fontSize: 18, fontWeight: FontWeight.w600),
+              style: const TextStyle(
+                  color: Colors.black,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600),
             ),
           ),
         ],
@@ -1427,4 +1657,3 @@ class _DmTitle extends StatelessWidget {
     );
   }
 }
-

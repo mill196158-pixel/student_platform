@@ -31,7 +31,8 @@ class SupabaseLearningRepository implements LearningRepository {
   Future<List<Team>> loadTeams(String groupCode) async {
     try {
       debugPrint('[loadTeams] calling get_my_teams');
-      final res = await _sb.rpc('get_my_teams');
+      final res =
+          await _sb.rpc('get_my_teams').timeout(const Duration(seconds: 12));
       final baseList = (res as List)
           .map((e) => Map<String, dynamic>.from(e as Map))
           .map(_mapRowToTeam)
@@ -82,7 +83,8 @@ class SupabaseLearningRepository implements LearningRepository {
           .select(
             'id,group_id,subject_id,subject_offering_id,academic_year_id,academic_term_id,semester_number',
           )
-          .inFilter('id', ids);
+          .inFilter('id', ids)
+          .timeout(const Duration(seconds: 7));
       final byId = <String, Map<String, dynamic>>{};
       for (final raw in rows as List) {
         final row = Map<String, dynamic>.from(raw as Map);
@@ -158,8 +160,12 @@ class SupabaseLearningRepository implements LearningRepository {
     final user = _sb.auth.currentUser;
     if (user == null) return null;
     try {
-      final rows =
-          await _sb.from('users').select('login').eq('id', user.id).limit(1);
+      final rows = await _sb
+          .from('users')
+          .select('login')
+          .eq('id', user.id)
+          .limit(1)
+          .timeout(const Duration(seconds: 8));
       if (rows.isNotEmpty) {
         final m = Map<String, dynamic>.from(rows.first as Map);
         final login = (m['login'] ?? '').toString();
@@ -178,7 +184,8 @@ class SupabaseLearningRepository implements LearningRepository {
         .select('id')
         .eq('team_id', teamId)
         .eq('type', 'team_main')
-        .limit(1);
+        .limit(1)
+        .timeout(const Duration(seconds: 8));
     if (rows.isNotEmpty) {
       final id = (rows.first['id'] ?? '').toString();
       _chatIdByTeam[teamId] = id;
@@ -335,8 +342,11 @@ class SupabaseLearningRepository implements LearningRepository {
   }
 
   Future<List<ChatFile>> _loadChatFilesForMessage(String messageId) async {
-    final rows =
-        await _sb.from('chat_files').select('*').eq('message_id', messageId);
+    final rows = await _sb
+        .from('chat_files')
+        .select('*')
+        .eq('message_id', messageId)
+        .timeout(const Duration(seconds: 6));
     return (rows as List)
         .map((e) => ChatFile.fromJson(Map<String, dynamic>.from(e as Map)))
         .toList();
@@ -347,22 +357,62 @@ class SupabaseLearningRepository implements LearningRepository {
     try {
       final me = _sb.auth.currentUser;
       final chatId = await _getTeamMainChatId(teamId);
+      if (chatId == null || chatId.isEmpty) {
+        await _saveChatLocal(teamId, const []);
+        return const [];
+      }
 
       safeDebugLog(
           '[loadChat] team=${maskDebugId(teamId)} chat=${maskDebugId(chatId)}');
-      final res = await _sb.rpc('get_chat_messages_for_team', params: {
-        'p_team_id': teamId,
-        'p_limit': 50,
-      });
 
-      final list = (res as List).map<Message>((e) {
-        final m = Map<String, dynamic>.from(e as Map);
-        return _mapMessageRow(
-          m,
-          chatId: chatId ?? '',
+      // Последние 50 сообщений (DESC), затем ASC для UI: старые сверху, новые снизу.
+      final rows = await _sb
+          .from('messages')
+          .select('*')
+          .eq('chat_id', chatId)
+          .order('created_at', ascending: false)
+          .limit(50)
+          .timeout(const Duration(seconds: 12));
+
+      final list = <Message>[];
+      for (final row in rows as List) {
+        final data = Map<String, dynamic>.from(row as Map);
+        final id = (data['id'] ?? '').toString();
+        if (id.isEmpty) continue;
+
+        final attachments = await _loadChatFilesForMessage(id);
+        if (attachments.isNotEmpty) {
+          data['attachments'] = attachments.map((e) => e.toJson()).toList();
+        }
+
+        final authorId = (data['author_id'] ?? '').toString();
+        if (authorId.isNotEmpty) {
+          try {
+            final user = await _sb
+                .from('users')
+                .select('login,name,surname,avatar_url')
+                .eq('id', authorId)
+                .maybeSingle();
+            if (user != null) {
+              final u = Map<String, dynamic>.from(user as Map);
+              data['author_login'] = (u['login'] ?? '').toString();
+              data['author_name'] = [
+                (u['name'] ?? '').toString(),
+                (u['surname'] ?? '').toString(),
+              ].where((s) => s.isNotEmpty).join(' ').trim();
+              data['author_avatar_url'] = (u['avatar_url'] ?? '').toString();
+            }
+          } catch (_) {}
+        }
+
+        list.add(_mapMessageRow(
+          data,
+          chatId: chatId,
           currentUserId: me?.id ?? '',
-        );
-      }).toList();
+        ));
+      }
+
+      list.sort((a, b) => a.at.compareTo(b.at));
 
       // Всегда синхронизируем локальный кэш с серверным ответом,
       // даже если список пуст — это важно, чтобы удалённое последнее
@@ -683,8 +733,8 @@ class SupabaseLearningRepository implements LearningRepository {
   @override
   Future<List<Assignment>> loadAssignments(String teamId) async {
     try {
-      final res =
-          await _sb.rpc('get_team_assignments', params: {'p_team_id': teamId});
+      final res = await _sb.rpc('get_team_assignments',
+          params: {'p_team_id': teamId}).timeout(const Duration(seconds: 12));
       final list = (res as List)
           .map((e) => Map<String, dynamic>.from(e as Map))
           .map(_mapAssignmentRow)

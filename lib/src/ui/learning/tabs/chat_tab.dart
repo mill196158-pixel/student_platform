@@ -24,9 +24,12 @@ import 'chat/actions/chat_actions.dart' as ca;
 import '../global_cache.dart';
 import '../../../services/image_cache_service.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:super_clipboard/super_clipboard.dart';
 // Рефакторенные виджеты и контроллеры
 import 'chat/widgets.dart';
 import 'chat/search/inline_search_bar.dart';
+import 'chat/assignments/assignment_form_dialog.dart';
 import 'chat/assignments/edit_assignment_dialog.dart';
 import 'chat/selection_bars.dart';
 import '../../chats/core/forward_payload.dart';
@@ -34,6 +37,33 @@ import '../../chats/forward/forward_outbox.dart';
 import '../../chats/forward/forward_picker.dart';
 import '../../chats/forward/forward_pick_nav.dart';
 import '../../../utils/safe_debug_log.dart';
+import '../utils/chat_copied_file_cache.dart';
+
+class _ClipboardFileKind {
+  final FileFormat format;
+  final String extension;
+  final String mimeType;
+  final bool isImage;
+
+  const _ClipboardFileKind(
+    this.format,
+    this.extension,
+    this.mimeType,
+    this.isImage,
+  );
+}
+
+class _ClipboardFilePayload {
+  final Uint8List bytes;
+  final String? fileName;
+  final _ClipboardFileKind kind;
+
+  const _ClipboardFilePayload({
+    required this.bytes,
+    required this.fileName,
+    required this.kind,
+  });
+}
 
 class ChatTab extends StatefulWidget {
   final ValueChanged<bool>? onSelectingChanged;
@@ -44,6 +74,60 @@ class ChatTab extends StatefulWidget {
 
 class _ChatTabState extends State<ChatTab> {
   static const bool enableTypingIndicator = false;
+  static const List<_ClipboardFileKind> _clipboardFileKinds = [
+    _ClipboardFileKind(Formats.png, 'png', 'image/png', true),
+    _ClipboardFileKind(Formats.jpeg, 'jpg', 'image/jpeg', true),
+    _ClipboardFileKind(Formats.gif, 'gif', 'image/gif', true),
+    _ClipboardFileKind(Formats.webp, 'webp', 'image/webp', true),
+    _ClipboardFileKind(Formats.bmp, 'bmp', 'image/bmp', true),
+    _ClipboardFileKind(Formats.svg, 'svg', 'image/svg+xml', true),
+    _ClipboardFileKind(Formats.pdf, 'pdf', 'application/pdf', false),
+    _ClipboardFileKind(Formats.doc, 'doc', 'application/msword', false),
+    _ClipboardFileKind(
+      Formats.docx,
+      'docx',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      false,
+    ),
+    _ClipboardFileKind(Formats.xls, 'xls', 'application/vnd.ms-excel', false),
+    _ClipboardFileKind(
+      Formats.xlsx,
+      'xlsx',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      false,
+    ),
+    _ClipboardFileKind(
+      Formats.ppt,
+      'ppt',
+      'application/vnd.ms-powerpoint',
+      false,
+    ),
+    _ClipboardFileKind(
+      Formats.pptx,
+      'pptx',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      false,
+    ),
+    _ClipboardFileKind(Formats.csv, 'csv', 'text/csv', false),
+    _ClipboardFileKind(Formats.md, 'md', 'text/markdown', false),
+    _ClipboardFileKind(Formats.plainTextFile, 'txt', 'text/plain', false),
+    _ClipboardFileKind(Formats.zip, 'zip', 'application/zip', false),
+    _ClipboardFileKind(
+        Formats.rar, 'rar', 'application/x-rar-compressed', false),
+    _ClipboardFileKind(
+      Formats.sevenZip,
+      '7z',
+      'application/x-7z-compressed',
+      false,
+    ),
+  ];
+  static final _ClipboardFileKind _genericClipboardImageKind =
+      _ClipboardFileKind(
+    SimpleFileFormat(mimeTypes: const ['image/*']),
+    'png',
+    'image/png',
+    true,
+  );
 
   final _ctrl = TextEditingController();
   late final ScrollController _scroll;
@@ -113,6 +197,7 @@ class _ChatTabState extends State<ChatTab> {
   DateTime? _entrySeenAt;
   // Показывать ли «Новые сообщения» в эту сессию (замораживаем на входе)
   bool _showEntryNewBadge = false;
+  String _lastPrecachedImageSignature = '';
 
   // Глобальный кэш
   final GlobalCache _globalCache = GlobalCache();
@@ -418,6 +503,31 @@ class _ChatTabState extends State<ChatTab> {
     }
   }
 
+  void _precacheRecentChatImages(List<Message> messages) {
+    final urls = <String>[];
+    for (final message in messages.reversed) {
+      for (final file in message.attachments ?? const <ChatFile>[]) {
+        if (file.isImage && file.fileUrl.isNotEmpty) {
+          urls.add(file.fileUrl);
+          if (urls.length >= 6) break;
+        }
+      }
+      if (urls.length >= 6) break;
+    }
+
+    if (urls.isEmpty) return;
+    final signature = urls.join('|');
+    if (signature == _lastPrecachedImageSignature) return;
+    _lastPrecachedImageSignature = signature;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      for (final url in urls) {
+        precacheImage(CachedNetworkImageProvider(url), context);
+      }
+    });
+  }
+
   bool _isNearHistoryTop() {
     if (!_scroll.hasClients ||
         !_hasMoreOlderMessages ||
@@ -460,6 +570,275 @@ class _ChatTabState extends State<ChatTab> {
     }
   }
 
+  Future<void> _pickAndUploadFileForComposer() async {
+    final file = await _fileService.pickFile();
+    if (file == null || !mounted) return;
+
+    final attached = LocalAttach(
+      path: file.path,
+      name: file.path.split('/').last,
+      mimeType: 'application/octet-stream',
+      size: await file.length(),
+      isImage: false,
+    );
+    _att.add(attached);
+    final teamId = context.read<TeamCubit>().state.team.id;
+    final chatId = await _getChatIdForTeam(teamId);
+    // ignore: unawaited_futures
+    _att.upload(attached, teamId: teamId, chatId: chatId);
+  }
+
+  Future<void> _queueAndUploadAttachments(List<LocalAttach> files) async {
+    if (files.isEmpty || !mounted) return;
+
+    final teamId = context.read<TeamCubit>().state.team.id;
+    final chatId = await _getChatIdForTeam(teamId);
+    var added = 0;
+    var skipped = 0;
+
+    for (final file in files) {
+      if (_att.add(file)) {
+        added++;
+        unawaited(_att.upload(file, teamId: teamId, chatId: chatId));
+      } else {
+        skipped++;
+      }
+    }
+
+    if (skipped > 0 && mounted) {
+      final message = added > 0
+          ? 'Добавлено $added. Остальное: лимит ${ChatAttachmentsController.maxFiles} файла или дубль.'
+          : 'Можно добавить не больше ${ChatAttachmentsController.maxFiles} файлов, дубли не добавляются';
+      _showSnack(message);
+    }
+  }
+
+  Future<void> _queueAndUploadAttachment(LocalAttach file) async {
+    await _queueAndUploadAttachments([file]);
+  }
+
+  Future<void> _pasteFileFromClipboard() async {
+    try {
+      final cached = await ChatCopiedFileCache.peek();
+      if (cached != null) {
+        final file = File(cached.path);
+        safeDebugLog(
+            '[ChatTab] paste using internal copied file name=${cached.name}');
+        await _attachClipboardFile(
+          file: file,
+          name: cached.name,
+          mimeType: cached.mimeType,
+          isImage: cached.isImage,
+        );
+        return;
+      }
+
+      safeDebugLog('[ChatTab] paste fallback to system clipboard');
+      final clipboard = SystemClipboard.instance;
+      if (clipboard == null) {
+        _showSnack('Буфер обмена недоступен на этом устройстве');
+        return;
+      }
+
+      final reader = await clipboard.read();
+      final pasted = await _readClipboardFile(reader);
+      if (pasted == null) {
+        await _pastePlainTextFromClipboard();
+        return;
+      }
+
+      final dir = await getTemporaryDirectory();
+      final pasteDir =
+          Directory('${dir.path}${Platform.pathSeparator}chat_clipboard');
+      if (!await pasteDir.exists()) {
+        await pasteDir.create(recursive: true);
+      }
+
+      final fileName = _safeClipboardFileName(
+        pasted.fileName,
+        pasted.kind.extension,
+      );
+      final uniqueName = '${DateTime.now().microsecondsSinceEpoch}_$fileName';
+      final file = File('${pasteDir.path}${Platform.pathSeparator}$uniqueName');
+      await file.writeAsBytes(pasted.bytes, flush: true);
+
+      await _attachClipboardFile(
+        file: file,
+        name: fileName,
+        mimeType: pasted.kind.mimeType,
+        isImage: pasted.kind.isImage,
+      );
+    } catch (e) {
+      safeDebugLog('[ChatTab] paste file failed: ${e.runtimeType}');
+      if (!mounted) return;
+      _showSnack('Не удалось вставить файл из буфера');
+    }
+  }
+
+  Future<void> _pastePlainTextFromClipboard() async {
+    final data =
+        await services.Clipboard.getData(services.Clipboard.kTextPlain);
+    final text = data?.text;
+    if (text == null || text.isEmpty) {
+      _showSnack('В буфере нет файла, изображения или текста');
+      return;
+    }
+
+    final selection = _ctrl.selection;
+    final value = _ctrl.text;
+    final start = selection.isValid
+        ? selection.start.clamp(0, value.length)
+        : value.length;
+    final end =
+        selection.isValid ? selection.end.clamp(0, value.length) : value.length;
+    final nextText = value.replaceRange(start, end, text);
+    final cursor = start + text.length;
+    _ctrl.value = TextEditingValue(
+      text: nextText,
+      selection: TextSelection.collapsed(offset: cursor),
+    );
+  }
+
+  Future<void> _attachClipboardFile({
+    required File file,
+    required String name,
+    required String mimeType,
+    required bool isImage,
+  }) async {
+    final attached = LocalAttach(
+      path: file.path,
+      name: name,
+      mimeType: mimeType,
+      size: await file.length(),
+      isImage: isImage,
+    );
+    safeDebugLog(
+        '[ChatTab] pasted attachment queued name=$name size=${attached.size}');
+    await _queueAndUploadAttachment(attached);
+  }
+
+  Future<_ClipboardFilePayload?> _readClipboardFile(
+    ClipboardReader reader,
+  ) async {
+    final suggestedName = await reader.getSuggestedName();
+
+    for (final kind in _clipboardFileKinds) {
+      final bytes = await _readClipboardBytes(reader, kind.format);
+      if (bytes != null && bytes.isNotEmpty) {
+        return _ClipboardFilePayload(
+          bytes: bytes,
+          fileName: suggestedName,
+          kind: kind,
+        );
+      }
+    }
+    final genericImageBytes =
+        await _readClipboardBytes(reader, _genericClipboardImageKind.format);
+    if (genericImageBytes != null && genericImageBytes.isNotEmpty) {
+      return _ClipboardFilePayload(
+        bytes: genericImageBytes,
+        fileName: suggestedName,
+        kind: _genericClipboardImageKind,
+      );
+    }
+
+    final fileUri = await reader.readValue(Formats.fileUri);
+    if (fileUri != null && fileUri.isScheme('file')) {
+      final file = File(fileUri.toFilePath());
+      if (await file.exists()) {
+        final name = file.uri.pathSegments.isNotEmpty
+            ? file.uri.pathSegments.last
+            : suggestedName;
+        final kind = _kindFromName(name ?? file.path);
+        return _ClipboardFilePayload(
+          bytes: await file.readAsBytes(),
+          fileName: name,
+          kind: kind,
+        );
+      }
+    }
+
+    return null;
+  }
+
+  Future<Uint8List?> _readClipboardBytes(
+    ClipboardReader reader,
+    FileFormat format,
+  ) {
+    final completer = Completer<Uint8List?>();
+    final progress = reader.getFile(
+      format,
+      (file) async {
+        try {
+          completer.complete(await file.readAll());
+        } catch (e) {
+          completer.completeError(e);
+        }
+      },
+      onError: (error) => completer.completeError(error),
+    );
+    if (progress == null) {
+      completer.complete(null);
+    }
+    return completer.future;
+  }
+
+  _ClipboardFileKind _kindFromName(String name) {
+    final lower = name.toLowerCase();
+    for (final kind in _clipboardFileKinds) {
+      if (lower.endsWith('.${kind.extension}')) return kind;
+    }
+    return _ClipboardFileKind(
+      SimpleFileFormat(mimeTypes: const ['application/octet-stream']),
+      'bin',
+      'application/octet-stream',
+      false,
+    );
+  }
+
+  String _safeClipboardFileName(String? rawName, String extension) {
+    final fallback = 'clipboard_${DateTime.now().millisecondsSinceEpoch}';
+    var name = (rawName ?? fallback).trim();
+    if (name.isEmpty) name = fallback;
+    name = name.split('?').first.split(RegExp(r'[\\/]')).last.trim();
+    name = name.replaceAll(RegExp(r'[<>:"|?*\x00-\x1F]'), '_');
+    if (!name.toLowerCase().endsWith('.$extension')) {
+      name = '$name.$extension';
+    }
+    return name;
+  }
+
+  void _showSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  Future<void> _createAssignmentFromComposerAction() async {
+    final res = await showAssignmentFormDialog(context);
+    if (res == null || !mounted) return;
+
+    try {
+      await context.read<TeamCubit>().proposeAssignment(
+            title: res.$1,
+            description: res.$2,
+            link: res.$3,
+            due: res.$4,
+            attachments: res.$5,
+          );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Не удалось создать задание в чате. Попробуйте ещё раз.',
+          ),
+        ),
+      );
+    }
+  }
+
   void _onMyTyping() {
     // Обновляем typing без setState для избежания лишних обновлений
     _typingUsers.add('Вы');
@@ -491,6 +870,18 @@ class _ChatTabState extends State<ChatTab> {
 
   Future<void> _jumpToBottom() async {
     await _chatScroll.jumpToBottom();
+  }
+
+  Future<void> _jumpToBottomAfterSend() async {
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    await _jumpToBottom();
+    await Future<void>.delayed(const Duration(milliseconds: 180));
+    if (!mounted) return;
+    await _jumpToBottom();
+    await Future<void>.delayed(const Duration(milliseconds: 420));
+    if (!mounted) return;
+    await _jumpToBottom();
   }
 
   // ➜ NEW: debounce + проверка «видим ли нижний край», затем отметить прочитанным
@@ -608,11 +999,21 @@ class _ChatTabState extends State<ChatTab> {
 
     _isSending = true;
     setState(() {});
+    var shouldJumpAfterSend = false;
     try {
       // если это пакет из другого чата (есть _stagedForward)
       if (_stagedForward != null && _forwardPackageAttached) {
         final teamId = context.read<TeamCubit>().state.team.id;
-        final forwardText = _stagedForward!.encodeForText();
+        final forwardPayload = _stagedForward!;
+        final rawComposerText = _ctrl.text.trim();
+        final caption = ForwardPayload.isForwardText(rawComposerText)
+            ? null
+            : rawComposerText;
+        final forwardText = ForwardPayload(
+          fromChatId: forwardPayload.fromChatId,
+          caption: caption ?? forwardPayload.caption,
+          items: forwardPayload.items,
+        ).encodeForText();
 
         // ждём загрузки всех реальных pending-файлов (кроме '__FG__')
         final pending = _att.pending.where((x) => x.path != '__FG__').toList();
@@ -655,6 +1056,7 @@ class _ChatTabState extends State<ChatTab> {
           _att.clear();
           _ctrl.clear();
         });
+        await _jumpToBottomAfterSend();
         return;
       }
       // same-chat forward: как в ЛС — обычный ForwardPayload + encodeForText()
@@ -717,6 +1119,7 @@ class _ChatTabState extends State<ChatTab> {
         });
         FocusScope.of(context).unfocus();
         await _clearDraft();
+        await _jumpToBottomAfterSend();
         return;
       }
 
@@ -735,7 +1138,7 @@ class _ChatTabState extends State<ChatTab> {
         if (!ok) return; // Ждём загрузку файлов, не чистим поля
       } else {
         // Только текст
-        context.read<TeamCubit>().sendMessage(
+        await context.read<TeamCubit>().sendMessage(
               'me',
               text,
               replyToId: replyId,
@@ -750,9 +1153,13 @@ class _ChatTabState extends State<ChatTab> {
 
       // Скрываем клавиатуру после отправки
       FocusScope.of(context).unfocus();
+      shouldJumpAfterSend = true;
     } finally {
       _isSending = false;
       if (mounted) setState(() {});
+      if (shouldJumpAfterSend) {
+        await _jumpToBottomAfterSend();
+      }
     }
   }
 
@@ -923,6 +1330,8 @@ class _ChatTabState extends State<ChatTab> {
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
+      isDismissible: true,
+      enableDrag: true,
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -972,18 +1381,21 @@ class _ChatTabState extends State<ChatTab> {
           // Обновляем только если изменился чат или команда
           return previous.chat != current.chat ||
               previous.team != current.team ||
-              previous.assignments != current.assignments;
+              previous.assignments != current.assignments ||
+              previous.loading != current.loading;
         },
         builder: (context, state) {
           final safeBottom = MediaQuery.of(context).padding.bottom;
           const bottomActionsContent =
               64.0; // кнопки ~44 + вертикальные паддинги
-          final listPadBottom =
-              _selectingMessages ? safeBottom + bottomActionsContent + 12 : 8.0;
+          const listPadBottom = 8.0;
           final jumpBottom = _selectingMessages
               ? (safeBottom + bottomActionsContent + 20)
               : (safeBottom + 82.0);
           final list = state.chat;
+          if (list.isNotEmpty) {
+            _precacheRecentChatImages(list);
+          }
           final pins = _pinsCtl.buildFromState(state);
           // prune keys to avoid leaks
           _pruneMessageKeys(list.map((m) => m.id).toSet());
@@ -1035,10 +1447,14 @@ class _ChatTabState extends State<ChatTab> {
 
               Expanded(
                 child: GestureDetector(
-                  behavior: HitTestBehavior.deferToChild,
+                  behavior: HitTestBehavior.translucent,
                   onTap: () {
                     FocusScope.of(context).unfocus();
                     _forceSaveDraft();
+                    if (_search.isActive) {
+                      _search.clear();
+                      _search.setActive(false);
+                    }
                     if (_selectingMessages) {
                       _selectedMessageIds.clear();
                       _setSelecting(false);
@@ -1059,18 +1475,40 @@ class _ChatTabState extends State<ChatTab> {
                           entrySeenAt: _entrySeenAt,
                           showEntryNewBadge: _showEntryNewBadge,
                           hoveredMessageId: _actionsHoverId,
+                          initialLoading: state.loading && state.chat.isEmpty,
                           onReply: (m) {
                             setState(() => _replyTo = m);
                           },
-                          onLongPress: (ctx, m, rect, bytes, replyPreview) =>
-                              _showMessageActions(ctx, m,
-                                  targetRect: rect,
-                                  bubbleBytes: bytes,
-                                  replyPreview: replyPreview),
+                          onLongPress:
+                              (ctx, m, rect, bytes, replyPreview, fallback) =>
+                                  _showMessageActions(ctx, m,
+                                      targetRect: rect,
+                                      bubbleBytes: bytes,
+                                      replyPreview: replyPreview,
+                                      fallbackPosition: fallback),
                           onReplyTap: (id) => _scrollToMessage(id),
                           onReact: (ctx, id) =>
                               ca.ChatActions.showReactionPicker(
                                   ctx, (emoji) => _addReaction(id, emoji)),
+                          onReactionSelected: _addReaction,
+                          canDeleteMessage: _canDeleteMessage,
+                          onMenuAction: _handlePackageMenuAction,
+                          onRetryFailedText: (m) => context
+                              .read<TeamCubit>()
+                              .retryFailedTextMessage(m),
+                          onFocusComposer: () {
+                            _composerFocus.requestFocus();
+                            services.SystemChannels.textInput
+                                .invokeMethod('TextInput.show');
+                          },
+                          onAttachFile: () {
+                            // ignore: unawaited_futures
+                            _pickAndUploadFileForComposer();
+                          },
+                          onCreateAssignment: () {
+                            // ignore: unawaited_futures
+                            _createAssignmentFromComposerAction();
+                          },
                           selectingMessages: _selectingMessages,
                           selectedMessageIds: _selectedMessageIds,
                           onToggleSelect: (id) {
@@ -1190,6 +1628,21 @@ class _ChatTabState extends State<ChatTab> {
                   onCloseReply: () {
                     setState(() => _replyTo = null);
                   },
+                  forwardCount: _forwardPackageAttached
+                      ? (_stagedForward?.items.length ??
+                          _forwardSelectedIds.length)
+                      : 0,
+                  onCancelForward: _forwardPackageAttached
+                      ? () {
+                          setState(() {
+                            _forwardPackageAttached = false;
+                            _stagedForward = null;
+                            _forwardSelectedIds.clear();
+                            _stagedForwardFileIds.clear();
+                            _att.pending.removeWhere((x) => x.path == '__FG__');
+                          });
+                        }
+                      : null,
                   someoneTyping: _someoneTyping,
                   typingNames: _visibleTypingUsers,
                   attachedFiles: _att.pending.map((f) {
@@ -1247,22 +1700,20 @@ class _ChatTabState extends State<ChatTab> {
                     }
                   },
                   onPickImage: () async {
-                    final res = await ImagePicker()
-                        .pickImage(source: ImageSource.gallery);
-                    if (res != null) {
-                      final file = LocalAttach(
-                        path: res.path,
-                        name: res.path.split('/').last,
-                        mimeType: 'image/jpeg',
-                        size: await File(res.path).length(),
-                        isImage: true,
+                    final images = await _fileService.pickImages();
+                    final attachments = <LocalAttach>[];
+                    for (final image in images) {
+                      attachments.add(
+                        LocalAttach(
+                          path: image.path,
+                          name: image.path.split(RegExp(r'[\\/]')).last,
+                          mimeType: 'image/jpeg',
+                          size: await image.length(),
+                          isImage: true,
+                        ),
                       );
-                      _att.add(file);
-                      final teamId = context.read<TeamCubit>().state.team.id;
-                      final chatId = await _getChatIdForTeam(teamId);
-                      // ignore: unawaited_futures
-                      _att.upload(file, teamId: teamId, chatId: chatId);
                     }
+                    await _queueAndUploadAttachments(attachments);
                   },
                   onOpenEmoji: () {
                     _composerFocus.requestFocus();
@@ -1270,22 +1721,22 @@ class _ChatTabState extends State<ChatTab> {
                         .invokeMethod('TextInput.show');
                   },
                   onAttachFile: () async {
-                    final file = await _fileService.pickFile();
-                    if (file != null) {
-                      final attached = LocalAttach(
-                        path: file.path,
-                        name: file.path.split('/').last,
-                        mimeType: 'application/octet-stream',
-                        size: await file.length(),
-                        isImage: false,
+                    final files = await _fileService.pickFiles();
+                    final attachments = <LocalAttach>[];
+                    for (final file in files) {
+                      attachments.add(
+                        LocalAttach(
+                          path: file.path,
+                          name: file.path.split(RegExp(r'[\\/]')).last,
+                          mimeType: 'application/octet-stream',
+                          size: await file.length(),
+                          isImage: false,
+                        ),
                       );
-                      _att.add(attached);
-                      final teamId = context.read<TeamCubit>().state.team.id;
-                      final chatId = await _getChatIdForTeam(teamId);
-                      // ignore: unawaited_futures
-                      _att.upload(attached, teamId: teamId, chatId: chatId);
                     }
+                    await _queueAndUploadAttachments(attachments);
                   },
+                  onPasteFile: _pasteFileFromClipboard,
                   onPinText: (text) => _pinsCtl.pinText(text),
                   onFind: () async {
                     // Показать ТОЛЬКО верхнюю строку поиска, без нижнего листа
@@ -1323,58 +1774,30 @@ class _ChatTabState extends State<ChatTab> {
 
   // Функция показа действий с сообщением - используется в ChatActions
   void _showMessageActions(BuildContext context, Message m,
-      {Rect? targetRect, Uint8List? bubbleBytes, String? replyPreview}) async {
-    // включаем временную подсветку «как будто выделено»
-    setState(() => _actionsHoverId = m.id);
-
-    // If the popup won't fit below the message, nudge the list up slightly so it fits.
-    final media = MediaQuery.of(context);
-    final screenH = media.size.height;
-    final safeBottom = media.padding.bottom + 8;
-    const panelDesiredHeight = 160.0; // emoji pill + actions approx
-
+      {Rect? targetRect,
+      Uint8List? bubbleBytes,
+      String? replyPreview,
+      Offset? fallbackPosition}) async {
     Rect? finalRect = targetRect;
-
-    if (targetRect != null) {
-      final availableBelow = screenH - targetRect.bottom - safeBottom;
-      if (availableBelow < panelDesiredHeight) {
-        final need = (panelDesiredHeight - availableBelow) + 8.0;
-        final maxScroll = _scroll.position.maxScrollExtent;
-        final to = (_scroll.offset + need).clamp(0.0, maxScroll);
-        try {
-          await _scroll.animateTo(to,
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeInOut);
-        } catch (_) {}
-
-        // recompute rect from BUBBLE boundary key after scroll, in Overlay coordinates
-        final bubbleKey = _bubbleBoundaryKeys[m.id];
-        if (bubbleKey?.currentContext != null) {
-          final bubbleBox =
-              bubbleKey!.currentContext!.findRenderObject() as RenderBox;
-          final overlayBox = Overlay.of(context, rootOverlay: true)
-              .context
-              .findRenderObject() as RenderBox;
-          final topLeft =
-              bubbleBox.localToGlobal(Offset.zero, ancestor: overlayBox);
-          finalRect = topLeft & bubbleBox.size;
-        }
-      }
-    }
-    // If we weren't given a targetRect (or after scroll without need), compute from bubble key now as well
     if (finalRect == null) {
       final bubbleKey = _bubbleBoundaryKeys[m.id];
       if (bubbleKey?.currentContext != null) {
-        final bubbleBox =
-            bubbleKey!.currentContext!.findRenderObject() as RenderBox;
-        final overlayBox = Overlay.of(context, rootOverlay: true)
-            .context
-            .findRenderObject() as RenderBox;
-        final topLeft =
-            bubbleBox.localToGlobal(Offset.zero, ancestor: overlayBox);
-        finalRect = topLeft & bubbleBox.size;
+        final renderObject = bubbleKey!.currentContext!.findRenderObject();
+        if (renderObject is RenderBox && renderObject.hasSize) {
+          final overlayBox = Overlay.of(context, rootOverlay: true)
+              .context
+              .findRenderObject() as RenderBox;
+          final topLeft = renderObject.localToGlobal(
+            Offset.zero,
+            ancestor: overlayBox,
+          );
+          finalRect = topLeft & renderObject.size;
+        }
       }
     }
+
+    // включаем временную подсветку «как будто выделено»
+    setState(() => _actionsHoverId = m.id);
 
     try {
       await ca.ChatActions.showMessageActions(
@@ -1383,6 +1806,7 @@ class _ChatTabState extends State<ChatTab> {
         targetRect: finalRect,
         bubbleBytes: null,
         replyPreview: replyPreview,
+        fallbackPosition: fallbackPosition,
         onReply: () {
           _replyTo = m;
           setState(() {});
@@ -1401,6 +1825,36 @@ class _ChatTabState extends State<ChatTab> {
       );
     } finally {
       if (mounted) setState(() => _actionsHoverId = null);
+    }
+  }
+
+  Future<void> _handlePackageMenuAction(Message m, String action) async {
+    switch (action) {
+      case 'Ответить':
+        setState(() => _replyTo = m);
+        break;
+      case 'Скопировать':
+        final text = m.text.trim();
+        if (text.isNotEmpty) {
+          await services.Clipboard.setData(services.ClipboardData(text: text));
+        }
+        break;
+      case 'Закрепить':
+      case 'Открепить':
+        await context.read<TeamCubit>().pinMessage(m.id, !m.isPinned);
+        break;
+      case 'Переслать':
+        await _startForwardSelection(<Message>[m]);
+        break;
+      case 'Удалить':
+        if (_canDeleteMessage(m)) {
+          await context.read<TeamCubit>().removeMessage(m.id);
+        }
+        break;
+      case 'Выбрать':
+        _selectedMessageIds.add(m.id);
+        _setSelecting(true);
+        break;
     }
   }
 
@@ -1475,7 +1929,7 @@ class _ChatTabState extends State<ChatTab> {
     if (sameChat) {
       setState(() {
         _forwardPackageAttached = true;
-        _stagedForward = null;
+        _stagedForward = payload;
         _forwardSelectedIds
           ..clear()
           ..addAll(payload.items.map((e) => e.messageId));
@@ -1589,17 +2043,7 @@ class _ChatTabState extends State<ChatTab> {
     if (target == null) return;
 
     if (target.chatId == fromChatId) {
-      // Без staged чипов и перезакачек — просто вставим FG в композер
-      _ctrl.text = payload.encodeForText();
-      _ctrl.selection = TextSelection.fromPosition(
-        TextPosition(offset: _ctrl.text.length),
-      );
-      setState(() {
-        _forwardPackageAttached = false;
-        _stagedForward = null;
-        _forwardSelectedIds.clear();
-        _stagedForwardFileIds.clear();
-      });
+      await _stageForwardPayload(payload, uniqueFileUrls, target.chatId);
     } else {
       await ForwardOutbox.putForChat(
         chatId: target.chatId,
@@ -1890,6 +2334,8 @@ class _ChatTabState extends State<ChatTab> {
     await showModalBottomSheet(
       context: context,
       showDragHandle: true,
+      isDismissible: true,
+      enableDrag: true,
       builder: (_) => SafeArea(
         child: ListView(
           shrinkWrap: true,

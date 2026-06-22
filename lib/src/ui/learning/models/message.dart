@@ -295,13 +295,13 @@ class Message {
 
     if (attachments is List) {
       return attachments
-          .where((item) => item is Map<String, dynamic>)
-          .map((item) => ChatFile.fromJson(item as Map<String, dynamic>))
+          .whereType<Map>()
+          .map((item) => ChatFile.fromJson(Map<String, dynamic>.from(item)))
           .toList();
     }
 
-    if (attachments is Map<String, dynamic>) {
-      return [ChatFile.fromJson(attachments)];
+    if (attachments is Map) {
+      return [ChatFile.fromJson(Map<String, dynamic>.from(attachments))];
     }
 
     return null;

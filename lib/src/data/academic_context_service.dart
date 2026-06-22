@@ -1,5 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/auth_session.dart';
+
 class ActiveEnrollment {
   final String id;
   final String userId;
@@ -89,59 +91,26 @@ class AcademicContextService {
     }
 
     try {
-      final publicUser = await _sb
-          .from('users')
-          .select('id,login')
-          .eq('id', authUser.id)
-          .maybeSingle();
-      final publicUserId = (publicUser?['id'] ?? '').toString();
-      final recordBookNumber = _asNullableString(publicUser?['login']);
-
-      final enrollment = await _sb
-          .from('student_enrollments')
-          .select('id,user_id,group_id')
-          .eq('user_id', authUser.id)
-          .eq('status', 'active')
-          .filter('ended_at', 'is', null)
-          .limit(1)
-          .maybeSingle();
-
-      if (enrollment == null) {
-        return AcademicContext(
-          userId: authUser.id,
-          publicUserId: publicUserId.isEmpty ? null : publicUserId,
-          recordBookNumber: recordBookNumber,
-          hasActiveEnrollment: false,
-          loadWarning: 'Активное зачисление не найдено',
-        );
-      }
-
-      final activeEnrollment = ActiveEnrollment(
-        id: (enrollment['id'] ?? '').toString(),
-        userId: (enrollment['user_id'] ?? '').toString(),
-        groupId: (enrollment['group_id'] ?? '').toString(),
-      );
-
-      final group = await _loadGroup(activeEnrollment.groupId);
-      final semester = await _loadCurrentSemester(activeEnrollment.groupId);
-
-      return AcademicContext(
-        userId: authUser.id,
-        publicUserId: publicUserId.isEmpty ? null : publicUserId,
-        recordBookNumber: recordBookNumber,
-        activeEnrollmentId:
-            activeEnrollment.id.isEmpty ? null : activeEnrollment.id,
-        groupId:
-            activeEnrollment.groupId.isEmpty ? null : activeEnrollment.groupId,
-        groupName: group?.name,
-        currentSemesterNumber: semester.number,
-        academicYearId: semester.academicYearId,
-        academicTermId: semester.academicTermId,
-        hasActiveEnrollment: true,
-        loadWarning:
-            group == null ? 'Группа активного зачисления не найдена' : null,
+      await AuthSession.ensureFreshSession(_sb);
+      return await _loadForUser(authUser.id).timeout(
+        const Duration(seconds: 8),
       );
     } catch (e) {
+      if (AuthSession.isAuthFailure(e)) {
+        try {
+          await _sb.auth.refreshSession();
+          return await _loadForUser(authUser.id).timeout(
+            const Duration(seconds: 8),
+          );
+        } catch (_) {
+          return AcademicContext(
+            userId: authUser.id,
+            hasActiveEnrollment: false,
+            loadWarning: AuthSession.sessionExpiredMessage,
+          );
+        }
+      }
+
       return AcademicContext(
         userId: authUser.id,
         hasActiveEnrollment: false,
@@ -150,13 +119,71 @@ class AcademicContextService {
     }
   }
 
+  Future<AcademicContext> _loadForUser(String authUserId) async {
+    final publicUser = await _sb
+        .from('users')
+        .select('id,login')
+        .eq('id', authUserId)
+        .maybeSingle()
+        .timeout(const Duration(seconds: 5));
+    final publicUserId = (publicUser?['id'] ?? '').toString();
+    final recordBookNumber = _asNullableString(publicUser?['login']);
+
+    final enrollment = await _sb
+        .from('student_enrollments')
+        .select('id,user_id,group_id')
+        .eq('user_id', authUserId)
+        .eq('status', 'active')
+        .filter('ended_at', 'is', null)
+        .limit(1)
+        .maybeSingle()
+        .timeout(const Duration(seconds: 5));
+
+    if (enrollment == null) {
+      return AcademicContext(
+        userId: authUserId,
+        publicUserId: publicUserId.isEmpty ? null : publicUserId,
+        recordBookNumber: recordBookNumber,
+        hasActiveEnrollment: false,
+        loadWarning: 'Активное зачисление не найдено',
+      );
+    }
+
+    final activeEnrollment = ActiveEnrollment(
+      id: (enrollment['id'] ?? '').toString(),
+      userId: (enrollment['user_id'] ?? '').toString(),
+      groupId: (enrollment['group_id'] ?? '').toString(),
+    );
+
+    final group = await _loadGroup(activeEnrollment.groupId);
+    final semester = await _loadCurrentSemester(activeEnrollment.groupId);
+
+    return AcademicContext(
+      userId: authUserId,
+      publicUserId: publicUserId.isEmpty ? null : publicUserId,
+      recordBookNumber: recordBookNumber,
+      activeEnrollmentId:
+          activeEnrollment.id.isEmpty ? null : activeEnrollment.id,
+      groupId:
+          activeEnrollment.groupId.isEmpty ? null : activeEnrollment.groupId,
+      groupName: group?.name,
+      currentSemesterNumber: semester.number,
+      academicYearId: semester.academicYearId,
+      academicTermId: semester.academicTermId,
+      hasActiveEnrollment: true,
+      loadWarning:
+          group == null ? 'Группа активного зачисления не найдена' : null,
+    );
+  }
+
   Future<CurrentGroup?> _loadGroup(String groupId) async {
     if (groupId.isEmpty) return null;
     final row = await _sb
         .from('groups')
         .select('id,name')
         .eq('id', groupId)
-        .maybeSingle();
+        .maybeSingle()
+        .timeout(const Duration(seconds: 4));
     if (row == null) return null;
     return CurrentGroup(
       id: (row['id'] ?? '').toString(),
@@ -173,7 +200,8 @@ class AcademicContextService {
           'semester_number,academic_year_id,academic_term_id,academic_terms(is_current,starts_on,ends_on)',
         )
         .eq('group_id', groupId)
-        .order('semester_number', ascending: false);
+        .order('semester_number', ascending: false)
+        .timeout(const Duration(seconds: 5));
 
     if (rows.isEmpty) return const CurrentSemester();
 

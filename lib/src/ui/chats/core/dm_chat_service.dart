@@ -5,6 +5,7 @@ import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/learning/models/local_attach.dart';
 import 'package:student_platform/src/ui/learning/models/chat_file.dart';
 import '../data/dm_api.dart';
+import 'chat_message_memory_cache.dart';
 import 'i_chat_service.dart';
 
 class DmChatService implements IChatService {
@@ -23,7 +24,8 @@ class DmChatService implements IChatService {
   bool get supportsNotes => false; // по ТЗ “заметки” не нужны в ЛС
 
   @override
-  String get currentUserId => Supabase.instance.client.auth.currentUser?.id ?? '';
+  String get currentUserId =>
+      Supabase.instance.client.auth.currentUser?.id ?? '';
 
   @override
   String? get chatId => _chatId;
@@ -32,13 +34,20 @@ class DmChatService implements IChatService {
   Future<String> ensureChatId() async {
     if (_chatId != null && _chatId!.isNotEmpty) return _chatId!;
     _chatId = await DmApi.getOrCreateChatId(peerId: peerId);
-    // debugPrint('[DM] ensureChatId for peer=$peerId -> $_chatId');
     return _chatId!;
   }
 
   @override
   Stream<List<Message>> watchMessages() async* {
     final cid = await ensureChatId();
+    final cached = ChatMessageMemoryCache.snapshot(cid);
+    if (cached.isNotEmpty) {
+      _cache
+        ..clear()
+        ..addAll(cached);
+      yield cached;
+    }
+
     await for (final list in DmApi.watchMessages(chatId: cid)) {
       _cache
         ..clear()
@@ -48,11 +57,13 @@ class DmChatService implements IChatService {
   }
 
   @override
-  List<Message> get currentMessages => _cache;
+  List<Message> get currentMessages =>
+      _chatId == null ? _cache : ChatMessageMemoryCache.snapshot(_chatId!);
   final List<Message> _cache = <Message>[]; // можно наполнять из watchMessages
 
   @override
-  Future<List<Message>> loadOlderMessages({required Message before, int limit = 50}) async {
+  Future<List<Message>> loadOlderMessages(
+      {required Message before, int limit = 50}) async {
     final cid = await ensureChatId();
     return DmApi.loadOlderMessages(chatId: cid, before: before, limit: limit);
   }
@@ -62,7 +73,8 @@ class DmChatService implements IChatService {
     final sb = Supabase.instance.client;
     final chatId = await ensureChatId();
     try {
-      final res = await sb.rpc('get_unread_meta', params: {'p_chat_id': chatId});
+      final res =
+          await sb.rpc('get_unread_meta', params: {'p_chat_id': chatId});
       final m = (res is List && res.isNotEmpty)
           ? Map<String, dynamic>.from(res.first as Map)
           : (res is Map ? Map<String, dynamic>.from(res) : <String, dynamic>{});
@@ -73,8 +85,10 @@ class DmChatService implements IChatService {
       };
     } catch (_) {
       // Фоллбэк на старую функцию + last_read_at из chat_reads
-      final r1 = await sb.rpc('get_unread_in_chat', params: {'p_chat_id': chatId});
-      int unread = 0; String? first;
+      final r1 =
+          await sb.rpc('get_unread_in_chat', params: {'p_chat_id': chatId});
+      int unread = 0;
+      String? first;
       if (r1 is List && r1.isNotEmpty) {
         final mm = Map<String, dynamic>.from(r1.first as Map);
         unread = (mm['unread_count'] ?? 0) as int;
@@ -110,9 +124,11 @@ class DmChatService implements IChatService {
   }
 
   @override
-  Future<String> sendText(String text, {String? replyToId, List<String>? fileIds}) async {
+  Future<String> sendText(String text,
+      {String? replyToId, List<String>? fileIds}) async {
     final cid = await ensureChatId();
-    return DmApi.sendText(chatId: cid, text: text, replyToId: replyToId, fileIds: fileIds);
+    return DmApi.sendText(
+        chatId: cid, text: text, replyToId: replyToId, fileIds: fileIds);
   }
 
   @override

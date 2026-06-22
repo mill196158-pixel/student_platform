@@ -1,9 +1,9 @@
-﻿class YandexStorageConfig {
-  // Client-side Flutter code must never contain Yandex Cloud secret keys.
-  // TODO: replace direct S3 upload with backend-issued presigned upload URLs.
+class YandexStorageConfig {
+  // Legacy/private direct S3 configuration. Flutter code must never contain or
+  // expose Yandex Cloud secret keys; chat uploads use backend presigned URLs.
   static const String _accessKey = '';
-  static const String _secretKey = '';
-  static const String _bucketName = String.fromEnvironment('YANDEX_STORAGE_BUCKET');
+  static const String _bucketName =
+      String.fromEnvironment('YANDEX_STORAGE_BUCKET');
   static const String _region = String.fromEnvironment(
     'YANDEX_STORAGE_REGION',
     defaultValue: 'ru-central1',
@@ -14,7 +14,7 @@
   );
 
   static String get accessKey => _accessKey;
-  static String get secretKey => _secretKey;
+  static String get secretKey => '';
   static String get bucketName => _bucketName;
   static String get region => _region;
   static String get endpoint => _endpoint;

@@ -9,7 +9,7 @@ class ProfileRepository {
     if (uid == null) return null;
     return await _sb
         .from('users')
-        .select<Map<String, dynamic>>()
+        .select()
         .eq('id', uid)
         .maybeSingle();
   }

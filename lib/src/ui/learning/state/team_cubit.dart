@@ -73,9 +73,22 @@ class TeamState {
 
 class TeamCubit extends Cubit<TeamState> {
   final LearningRepository repo;
+  static final Map<String, List<Message>> _messagesByTeamId = {};
+  static final Map<String, List<Assignment>> _assignmentsByTeamId = {};
+
   TeamCubit(Team team)
       : repo = SupabaseLearningRepository(),
-        super(TeamState(team: team));
+        super(TeamState(
+          team: team,
+          chat: List<Message>.unmodifiable(
+              _messagesByTeamId[team.id] ?? const <Message>[]),
+          assignments: List<Assignment>.unmodifiable(
+              _assignmentsByTeamId[team.id] ?? const <Assignment>[]),
+          doneAssignmentIds: (_assignmentsByTeamId[team.id] ?? const [])
+              .where((a) => a.completedByMe)
+              .map((a) => a.id)
+              .toSet(),
+        ));
 
   String? _myDisplayName;
   String? _myAvatarUrl;
@@ -90,13 +103,49 @@ class TeamCubit extends Cubit<TeamState> {
 
   // ----------- INIT -----------
   Future<void> init() async {
-    emit(state.copyWith(loading: true));
+    if (state.chat.isEmpty) {
+      final persistedByTeam = await _loadPersistedTeamChatSnapshot();
+      if (persistedByTeam.isNotEmpty) {
+        _rememberTeamChat(persistedByTeam);
+        emit(state.copyWith(
+          loading: false,
+          chat: persistedByTeam,
+        ));
+      } else {
+        emit(state.copyWith(loading: true));
+      }
+    }
+    if (state.assignments.isEmpty) {
+      final persistedAssignments = await _loadPersistedAssignmentsSnapshot();
+      if (persistedAssignments.isNotEmpty) {
+        _rememberAssignments(persistedAssignments);
+        emit(state.copyWith(
+          assignments: persistedAssignments,
+          doneAssignmentIds: persistedAssignments
+              .where((a) => a.completedByMe)
+              .map((a) => a.id)
+              .toSet(),
+        ));
+      }
+    }
     final chatId = await _resolveMainChatId();
     if (chatId != null && ChatMessageMemoryCache.has(chatId)) {
+      final cached = ChatMessageMemoryCache.snapshot(chatId);
+      _rememberTeamChat(cached);
       emit(state.copyWith(
-        loading: true,
-        chat: ChatMessageMemoryCache.snapshot(chatId),
+        loading: false,
+        chat: cached,
       ));
+    } else if (chatId != null) {
+      final persisted = await _loadPersistedChatSnapshot(chatId);
+      if (persisted.isNotEmpty) {
+        final cached = ChatMessageMemoryCache.replace(chatId, persisted);
+        _rememberTeamChat(cached);
+        emit(state.copyWith(
+          loading: false,
+          chat: cached,
+        ));
+      }
     }
 
     final chat = await repo.loadChat(state.team.id);
@@ -106,6 +155,12 @@ class TeamCubit extends Cubit<TeamState> {
     final mergedChat = chatId == null
         ? _dedupeAndSort(chat)
         : ChatMessageMemoryCache.merge(chatId, chat);
+    if (chatId != null) {
+      unawaited(_persistChatSnapshot(chatId, mergedChat));
+    }
+    _rememberTeamChat(mergedChat);
+    _rememberAssignments(ass);
+    unawaited(_persistAssignmentsSnapshot(ass));
 
     emit(state.copyWith(
       loading: false,
@@ -121,6 +176,21 @@ class TeamCubit extends Cubit<TeamState> {
 
     _subscribeToChat();
     _subscribeToAssignments();
+  }
+
+  void _rememberAssignments(Iterable<Assignment> assignments) {
+    final stable = assignments.where((a) => a.id.isNotEmpty).toList()
+      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    if (stable.isEmpty) return;
+    _assignmentsByTeamId[state.team.id] = List<Assignment>.unmodifiable(stable);
+  }
+
+  void _rememberTeamChat(Iterable<Message> messages) {
+    final stable = _dedupeAndSort(messages).where((m) => !m.isLocal).toList();
+    if (stable.isEmpty) return;
+    final tail =
+        stable.length > 120 ? stable.sublist(stable.length - 120) : stable;
+    _messagesByTeamId[state.team.id] = List<Message>.unmodifiable(tail);
   }
 
   Future<String?> _resolveMainChatId() async {
@@ -146,8 +216,108 @@ class TeamCubit extends Cubit<TeamState> {
 
   List<Message> _mergeCachedChat(List<Message> messages) {
     final chatId = _mainChatId;
-    if (chatId == null || chatId.isEmpty) return _dedupeAndSort(messages);
-    return ChatMessageMemoryCache.merge(chatId, messages);
+    if (chatId == null || chatId.isEmpty) {
+      final sorted = _dedupeAndSort(messages);
+      _rememberTeamChat(sorted);
+      return sorted;
+    }
+    final merged = ChatMessageMemoryCache.merge(chatId, messages);
+    _rememberTeamChat(merged);
+    unawaited(_persistChatSnapshot(chatId, merged));
+    return merged;
+  }
+
+  String _chatSnapshotKey(String chatId) => 'chat_snapshot_v1_$chatId';
+  String get _teamChatSnapshotKey => 'team_chat_snapshot_v1_${state.team.id}';
+  String get _assignmentsSnapshotKey =>
+      'team_assignment_snapshot_v1_${state.team.id}';
+
+  Future<List<Message>> _loadPersistedTeamChatSnapshot() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_teamChatSnapshotKey);
+      if (raw == null || raw.isEmpty) return const [];
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const [];
+      return decoded
+          .whereType<Map>()
+          .map((item) => Message.fromJson(Map<String, dynamic>.from(item)))
+          .where((message) => message.id.isNotEmpty)
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<List<Assignment>> _loadPersistedAssignmentsSnapshot() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_assignmentsSnapshotKey);
+      if (raw == null || raw.isEmpty) return const [];
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const [];
+      return decoded
+          .whereType<Map>()
+          .map((item) => Assignment.fromJson(Map<String, dynamic>.from(item)))
+          .where((assignment) => assignment.id.isNotEmpty)
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<List<Message>> _loadPersistedChatSnapshot(String chatId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_chatSnapshotKey(chatId));
+      if (raw == null || raw.isEmpty) return const [];
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const [];
+      return decoded
+          .whereType<Map>()
+          .map((item) => Message.fromJson(Map<String, dynamic>.from(item)))
+          .where((message) => message.id.isNotEmpty)
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> _persistChatSnapshot(
+    String chatId,
+    Iterable<Message> messages,
+  ) async {
+    try {
+      final stable = messages
+          .where((message) => !message.isLocal && message.id.isNotEmpty)
+          .toList()
+        ..sort((a, b) => a.at.compareTo(b.at));
+      final tail =
+          stable.length > 120 ? stable.sublist(stable.length - 120) : stable;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        _chatSnapshotKey(chatId),
+        jsonEncode(tail.map((message) => message.toJson()).toList()),
+      );
+      await prefs.setString(
+        _teamChatSnapshotKey,
+        jsonEncode(tail.map((message) => message.toJson()).toList()),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _persistAssignmentsSnapshot(
+    Iterable<Assignment> assignments,
+  ) async {
+    try {
+      final stable = assignments.where((a) => a.id.isNotEmpty).toList()
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        _assignmentsSnapshotKey,
+        jsonEncode(stable.map((assignment) => assignment.toJson()).toList()),
+      );
+    } catch (_) {}
   }
 
   List<Message> _reconcileCachedMessage(
@@ -381,6 +551,22 @@ class TeamCubit extends Cubit<TeamState> {
     }
   }
 
+  Future<void> retryFailedTextMessage(Message message) async {
+    if (!message.isFailed || message.type != MessageType.text) return;
+    final text = message.text.trim();
+    if (text.isEmpty) return;
+
+    // Drop the stale local bubble before retrying so a successful retry cannot
+    // leave both the failed local row and the server row in the list.
+    emit(state.copyWith(chat: _removeCachedMessage(message.id)));
+    await sendMessage(
+      'me',
+      text,
+      replyToId: message.replyToId,
+      type: MessageType.text,
+    );
+  }
+
   Future<void> removeMessage(String id) async {
     final idx = state.chat.indexWhere((m) => m.id == id);
     if (idx == -1) return;
@@ -556,10 +742,17 @@ class TeamCubit extends Cubit<TeamState> {
                 if (mid != null && mid.isNotEmpty) {
                   final res = await repo.loadReactionsForMessage(mid);
                   final counts = Map<String, int>.from(res['counts'] ?? {});
+                  final userReactions =
+                      (res['userReactions'] as List? ?? const [])
+                          .map((emoji) => emoji.toString())
+                          .toList();
                   final chat = [...state.chat];
                   final idx = chat.indexWhere((m) => m.id == mid);
                   if (idx != -1) {
-                    chat[idx] = chat[idx].copyWith(reactions: counts);
+                    chat[idx] = chat[idx].copyWith(
+                      reactions: counts,
+                      userReactions: userReactions,
+                    );
                     emit(state.copyWith(chat: _mergeCachedChat(chat)));
                   }
                 }
@@ -577,10 +770,17 @@ class TeamCubit extends Cubit<TeamState> {
                 if (mid != null && mid.isNotEmpty) {
                   final res = await repo.loadReactionsForMessage(mid);
                   final counts = Map<String, int>.from(res['counts'] ?? {});
+                  final userReactions =
+                      (res['userReactions'] as List? ?? const [])
+                          .map((emoji) => emoji.toString())
+                          .toList();
                   final chat = [...state.chat];
                   final idx = chat.indexWhere((m) => m.id == mid);
                   if (idx != -1) {
-                    chat[idx] = chat[idx].copyWith(reactions: counts);
+                    chat[idx] = chat[idx].copyWith(
+                      reactions: counts,
+                      userReactions: userReactions,
+                    );
                     emit(state.copyWith(chat: _mergeCachedChat(chat)));
                   }
                 }
@@ -745,6 +945,8 @@ class TeamCubit extends Cubit<TeamState> {
   // ---------------------- ВНУТРЕННЕЕ ----------------------
   Future<void> _reloadAssignments() async {
     final ass = await repo.loadAssignments(state.team.id);
+    _rememberAssignments(ass);
+    unawaited(_persistAssignmentsSnapshot(ass));
     emit(state.copyWith(
       assignments: ass,
       doneAssignmentIds:

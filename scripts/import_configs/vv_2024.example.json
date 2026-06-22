@@ -1,0 +1,20 @@
+{
+  "batch": "vv_2024_sem4",
+  "admission_year": 2024,
+  "current_course": 2,
+  "current_semester_number": 4,
+  "current_academic_year": "2025/2026",
+  "current_term_code": "20252",
+  "groups": [
+    "1-См(ВВ)-2",
+    "2-См(ВВ)-2"
+  ],
+  "students_stage_table": "stage_students_vv_2024",
+  "curriculum_stage_table": "stage_curriculum_vv_2024",
+  "auth_credentials_stage_table": "stage_student_auth_credentials_vv_2024",
+  "technical_email_domain": "student.local",
+  "initial_password_strategy": "login",
+  "create_teams_for_current_semester": true,
+  "create_teams_for_past_semesters": false,
+  "create_teams_for_electives": false
+}

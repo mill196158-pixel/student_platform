@@ -16,9 +16,16 @@ migrate_working_dir/
 .env
 .env.*
 !.env.example
+.env.local
 *.env.local
+*.local
 *.secrets
 *.secrets.*
+private/
+
+# Local code dumps (may contain outdated secrets)
+**/all_dart_code.txt
+**/all_dart_text.txt
 
 # IntelliJ related
 *.iml
@@ -40,6 +47,11 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
+
+# iOS / CocoaPods (see also ios/.gitignore)
+ios/Pods/
+ios/.symlinks/
+DerivedData/
 
 # Symbolication related
 app.*.symbols

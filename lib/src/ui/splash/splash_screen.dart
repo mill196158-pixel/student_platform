@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:student_platform/src/core/auth_session.dart';
 import 'package:student_platform/src/core/session.dart';
-
+import 'package:student_platform/src/ui/authentication/screens/change_password_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -22,22 +24,42 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _bootstrap() async {
-    // Небольшая пауза для анимации
     await Future.delayed(const Duration(milliseconds: 600));
-    await AppSession.loadFromServer();
 
+    final client = Supabase.instance.client;
     final prefs = await SharedPreferences.getInstance();
-
     final loggedIn = prefs.getBool('loggedIn') ?? false;
     final userJson = prefs.getString('user');
-    final hasUser = userJson != null && jsonDecode(userJson) is Map;
+    final decodedUser = userJson == null ? null : jsonDecode(userJson);
+    final hasUser = decodedUser is Map;
+    final mustChangePassword =
+        decodedUser is Map && decodedUser['must_change_password'] == true;
+
+    final sessionOk = await AuthSession.tryRestoreSession(client);
+
+    if (sessionOk) {
+      await AppSession.loadFromServer();
+    }
 
     if (!mounted) return;
-    if (loggedIn && hasUser) {
+
+    if (sessionOk) {
+      if (mustChangePassword) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const ChangePasswordScreen()),
+        );
+        return;
+      }
       context.go('/home');
-    } else {
-      context.go('/login');
+      return;
     }
+
+    if (loggedIn && hasUser) {
+      await prefs.remove('loggedIn');
+      await prefs.remove('user');
+    }
+
+    context.go('/login');
   }
 
   @override

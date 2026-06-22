@@ -6,6 +6,7 @@ import '../info/info_screen.dart';
 import '../learning/learning_screen.dart';
 import '../schedule/schedule_screen.dart';
 import '../profile/profile_screen.dart';
+import 'modern_bottom_nav.dart';
 
 class NavigationScreen extends StatefulWidget {
   const NavigationScreen({super.key});
@@ -17,6 +18,7 @@ class NavigationScreen extends StatefulWidget {
 class _NavigationScreenState extends State<NavigationScreen> {
   int _currentIndex = 0;
   final PageStorageBucket _bucket = PageStorageBucket();
+  final ValueNotifier<bool> _profileActive = ValueNotifier<bool>(false);
 
   late final List<Widget> _tabs = <Widget>[
     const _KeepAlive(storageKey: 'tab_home', child: HomeScreen()),
@@ -27,30 +29,69 @@ class _NavigationScreenState extends State<NavigationScreen> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _profileActive.value = _currentIndex == 4;
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
+      extendBody: false,
       body: PageStorage(
         bucket: _bucket,
         child: IndexedStack(
           index: _currentIndex,
-          children: _tabs,
+          children: [
+            _tab(active: _currentIndex == 0, child: _tabs[0]),
+            _tab(active: _currentIndex == 1, child: _tabs[1]),
+            _tab(active: _currentIndex == 2, child: _tabs[2]),
+            _tab(active: _currentIndex == 3, child: _tabs[3]),
+            _tab(
+              active: _currentIndex == 4,
+              child: _KeepAlive(
+                storageKey: 'tab_profile',
+                child: ProfileScreen(activeListenable: _profileActive),
+              ),
+            ),
+          ],
         ),
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        type: BottomNavigationBarType.fixed,
+      bottomNavigationBar: ModernBottomNav(
         currentIndex: _currentIndex,
-        onTap: (index) => setState(() => _currentIndex = index),
-        selectedItemColor: Colors.blue,
-        unselectedItemColor: Colors.grey,
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Главная'),
-          BottomNavigationBarItem(icon: Icon(Icons.info_outline), label: 'Полезная'),
-          BottomNavigationBarItem(icon: Icon(Icons.menu_book), label: 'Обучение'),
-          BottomNavigationBarItem(icon: Icon(Icons.calendar_today), label: 'Расписание'),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Профиль'),
+          ModernBottomNavItem(icon: Icons.home_rounded, label: 'Главная'),
+          ModernBottomNavItem(
+              icon: Icons.info_outline_rounded, label: 'Полезная'),
+          ModernBottomNavItem(icon: Icons.menu_book_rounded, label: 'Обучение'),
+          ModernBottomNavItem(
+              icon: Icons.calendar_today_rounded, label: 'Расписание'),
+          ModernBottomNavItem(icon: Icons.person_rounded, label: 'Профиль'),
         ],
+        onTap: (index) {
+          if (index != _currentIndex) {
+            setState(() => _currentIndex = index);
+            _profileActive.value = (index == 4);
+          }
+        },
       ),
     );
+  }
+
+  Widget _tab({required bool active, required Widget child}) {
+    return Offstage(
+      offstage: !active,
+      child: TickerMode(
+        enabled: active,
+        child: child,
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _profileActive.dispose();
+    super.dispose();
   }
 }
 
@@ -60,7 +101,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
 class _KeepAlive extends StatefulWidget {
   final Widget child;
   final String storageKey;
-  const _KeepAlive({super.key, required this.child, required this.storageKey});
+  const _KeepAlive({required this.child, required this.storageKey});
 
   @override
   State<_KeepAlive> createState() => _KeepAliveState();

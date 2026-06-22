@@ -124,9 +124,13 @@ class _ChipItem extends StatelessWidget {
               ),
               if (!entry.isAuto) ...[
                 const SizedBox(width: 6),
-                GestureDetector(
+                InkWell(
                   onTap: onClose,
-                  child: const Icon(Icons.close, size: 16),
+                  customBorder: const CircleBorder(),
+                  child: const Padding(
+                    padding: EdgeInsets.all(2),
+                    child: Icon(Icons.close, size: 16),
+                  ),
                 ),
               ],
             ],

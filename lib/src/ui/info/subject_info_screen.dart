@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../learning/models/team.dart';
 import '../learning/team_details_screen.dart';
+import '../schedule/subject_diary/subject_diary.dart';
 import '../schedule/subject_diary_screen.dart';
 
 class SubjectInfoScreen extends StatefulWidget {
@@ -137,7 +138,17 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
   void _openDiary(BuildContext context, _SubjectInfoData data) {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => SubjectDiaryScreen(subjectKey: data.displayTitle),
+        builder: (_) => SubjectDiaryScreen(
+          args: SubjectDiaryArgs(
+            subjectOfferingId: data.subjectOfferingId,
+            subjectId: data.subjectId,
+            subjectTitle: data.displayTitle,
+            groupId: data.groupId,
+            semesterNumber: data.semesterNumber,
+            lessonId: widget.lessonId,
+            legacySubjectKey: data.displayTitle,
+          ),
+        ),
       ),
     );
   }

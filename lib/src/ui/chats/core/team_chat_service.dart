@@ -32,7 +32,8 @@ class TeamChatService implements IChatService {
   bool get supportsNotes => true; // для команды — да (у вас так)
 
   @override
-  String get currentUserId => Supabase.instance.client.auth.currentUser?.id ?? '';
+  String get currentUserId =>
+      Supabase.instance.client.auth.currentUser?.id ?? '';
 
   @override
   String? get chatId => _chatId;
@@ -53,7 +54,8 @@ class TeamChatService implements IChatService {
   List<Message> get currentMessages => context.read<TeamCubit>().state.chat;
 
   @override
-  Future<List<Message>> loadOlderMessages({required Message before, int limit = 50}) =>
+  Future<List<Message>> loadOlderMessages(
+          {required Message before, int limit = 50}) =>
       context.read<TeamCubit>().loadOlderMessages(limit: limit);
 
   @override
@@ -69,16 +71,18 @@ class TeamChatService implements IChatService {
   }
 
   @override
-  Future<String> sendText(String text, {String? replyToId, List<String>? fileIds}) async {
+  Future<String> sendText(String text,
+      {String? replyToId, List<String>? fileIds}) async {
     // Если есть файлы — используем вашу RPC
     final teamId = context.read<TeamCubit>().state.team.id;
     if ((fileIds?.isNotEmpty ?? false)) {
       return await _repo.sendMessageWithFiles(teamId, text, fileIds!);
     }
     // Иначе — используем текущую отправку через TeamCubit
-    await context.read<TeamCubit>().sendMessage('me', text, replyToId: replyToId);
-    // Возвращаем фейковый id (не критично для UI, т.к. realtime/поллинг обновит ленту)
-    return 'tmp_${DateTime.now().microsecondsSinceEpoch}';
+    return await context
+            .read<TeamCubit>()
+            .sendMessage('me', text, replyToId: replyToId) ??
+        '';
   }
 
   @override
