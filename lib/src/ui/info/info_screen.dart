@@ -10,7 +10,11 @@ import 'subject_info_screen.dart';
 
 enum _UsefulFilter { all, exams, credits, practices, courseWorks }
 
-enum _UsefulSection { subjects, help }
+enum _UsefulSection { subjects, help, jobs }
+
+BoxConstraints _fullWidthSheetConstraints(BuildContext context) {
+  return BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width);
+}
 
 class InfoScreen extends StatefulWidget {
   const InfoScreen({super.key});
@@ -24,6 +28,9 @@ class _InfoScreenState extends State<InfoScreen> {
   int? _selectedSemester;
   _UsefulFilter _filter = _UsefulFilter.all;
   _UsefulSection _section = _UsefulSection.subjects;
+  bool _filtersExpanded = false;
+  bool _controlGroupsTouched = false;
+  final Set<String> _collapsedControlGroups = {};
 
   Future<_UsefulPlanState> _load() async {
     final contextData = await AcademicContextService().load();
@@ -62,6 +69,7 @@ class _InfoScreenState extends State<InfoScreen> {
                 child: _UsefulHeader(
                   selectedSection: _section,
                   onSectionTap: () => _showSectionSheet(context),
+                  onInfoTap: () => _showInfoSheet(context),
                 ),
               ),
               Expanded(
@@ -80,6 +88,20 @@ class _InfoScreenState extends State<InfoScreen> {
   ) {
     if (snapshot.connectionState != ConnectionState.done) {
       return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_section == _UsefulSection.help) {
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        children: const [_HelpSection()],
+      );
+    }
+
+    if (_section == _UsefulSection.jobs) {
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        children: const [_JobsSection()],
+      );
     }
 
     if (state == null) {
@@ -112,6 +134,11 @@ class _InfoScreenState extends State<InfoScreen> {
     final visibleSubjects = semesterSubjects
         .where((item) => _matchesFilter(item, _filter))
         .toList();
+    final controlGroupLabels =
+        _groupSubjectsByControl(visibleSubjects).keys.toList();
+    final effectiveCollapsedControlGroups = _controlGroupsTouched
+        ? _collapsedControlGroups
+        : controlGroupLabels.skip(1).toSet();
 
     return RefreshIndicator(
       onRefresh: () async {
@@ -121,47 +148,69 @@ class _InfoScreenState extends State<InfoScreen> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
-          if (_section == _UsefulSection.help)
-            const _HelpSection()
+          if (state.subjects.isEmpty)
+            const _EmptyState(
+              text: 'Предметы учебного плана пока не найдены',
+              compact: true,
+            )
           else ...[
-            if (state.subjects.isEmpty)
+            _AcademicContextStrip(
+              contextData: state.contextData,
+              selectedSemester: selectedSemester,
+              currentSemester: currentSemester,
+            ),
+            const SizedBox(height: 10),
+            _SubjectControlsCard(
+              semesters: semesters,
+              currentSemester: currentSemester,
+              selectedSemester: selectedSemester,
+              selectedFilter: _filter,
+              expanded: _filtersExpanded,
+              onToggleExpanded: () {
+                setState(() => _filtersExpanded = !_filtersExpanded);
+              },
+              onSemesterSelected: (value) {
+                setState(() {
+                  _selectedSemester = value;
+                  _filter = _UsefulFilter.all;
+                  _controlGroupsTouched = false;
+                  _collapsedControlGroups.clear();
+                });
+              },
+              onFilterSelected: (value) {
+                setState(() {
+                  _filter = value;
+                  _controlGroupsTouched = false;
+                  _collapsedControlGroups.clear();
+                });
+              },
+            ),
+            const SizedBox(height: 12),
+            if (visibleSubjects.isEmpty)
               const _EmptyState(
-                text: 'Предметы учебного плана пока не найдены',
+                text: 'В этом фильтре предметы не найдены',
                 compact: true,
               )
-            else ...[
-              _AcademicContextStrip(
-                contextData: state.contextData,
-                selectedSemester: selectedSemester,
+            else
+              _SemesterSubjectsSection(
+                semester: selectedSemester,
                 currentSemester: currentSemester,
-              ),
-              const SizedBox(height: 10),
-              _FilterRow(
-                semesters: semesters,
-                currentSemester: currentSemester,
-                selectedSemester: selectedSemester,
-                selectedFilter: _filter,
-                onSemesterSelected: (value) {
+                subjects: visibleSubjects,
+                collapsedGroups: effectiveCollapsedControlGroups,
+                onGroupTap: (label) {
                   setState(() {
-                    _selectedSemester = value;
-                    _filter = _UsefulFilter.all;
+                    if (!_controlGroupsTouched) {
+                      _controlGroupsTouched = true;
+                      _collapsedControlGroups
+                        ..clear()
+                        ..addAll(effectiveCollapsedControlGroups);
+                    }
+                    if (!_collapsedControlGroups.add(label)) {
+                      _collapsedControlGroups.remove(label);
+                    }
                   });
                 },
-                onFilterSelected: (value) => setState(() => _filter = value),
               ),
-              const SizedBox(height: 12),
-              if (visibleSubjects.isEmpty)
-                const _EmptyState(
-                  text: 'В этом фильтре предметы не найдены',
-                  compact: true,
-                )
-              else
-                _SemesterSubjectsSection(
-                  semester: selectedSemester,
-                  currentSemester: currentSemester,
-                  subjects: visibleSubjects,
-                ),
-            ],
           ],
         ],
       ),
@@ -188,48 +237,113 @@ class _InfoScreenState extends State<InfoScreen> {
     final selected = await showModalBottomSheet<_UsefulSection>(
       context: context,
       showDragHandle: true,
+      constraints: _fullWidthSheetConstraints(context),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (sheetContext) {
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 22),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Раздел',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w900,
-                    ),
-              ),
-              const SizedBox(height: 10),
-              _SectionChoiceTile(
-                icon: Icons.school_outlined,
-                title: 'Предметы',
-                subtitle: 'Информация и материалы по дисциплинам',
-                selected: _section == _UsefulSection.subjects,
-                onTap: () {
-                  Navigator.of(sheetContext).pop(_UsefulSection.subjects);
-                },
-              ),
-              _SectionChoiceTile(
-                icon: Icons.help_outline_rounded,
-                title: 'Справка',
-                subtitle: 'Бытовые вопросы и инструкции по учёбе',
-                selected: _section == _UsefulSection.help,
-                onTap: () {
-                  Navigator.of(sheetContext).pop(_UsefulSection.help);
-                },
-              ),
-            ],
+        return SizedBox(
+          width: double.infinity,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 22),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Раздел',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: Colors.black,
+                        fontWeight: FontWeight.w900,
+                      ),
+                ),
+                const SizedBox(height: 10),
+                _SectionChoiceTile(
+                  icon: Icons.school_outlined,
+                  title: 'Предметы',
+                  subtitle: 'Учебный план',
+                  selected: _section == _UsefulSection.subjects,
+                  onTap: () {
+                    Navigator.of(sheetContext).pop(_UsefulSection.subjects);
+                  },
+                ),
+                _SectionChoiceTile(
+                  icon: Icons.help_outline_rounded,
+                  title: 'Справочный раздел',
+                  subtitle: 'Инструкции, документы и ответы на учебные вопросы',
+                  selected: _section == _UsefulSection.help,
+                  onTap: () {
+                    Navigator.of(sheetContext).pop(_UsefulSection.help);
+                  },
+                ),
+                _SectionChoiceTile(
+                  icon: Icons.work_outline_rounded,
+                  title: 'Вакансии',
+                  subtitle: 'Работа и стажировки',
+                  selected: _section == _UsefulSection.jobs,
+                  onTap: () {
+                    Navigator.of(sheetContext).pop(_UsefulSection.jobs);
+                  },
+                ),
+              ],
+            ),
           ),
         );
       },
     );
     if (!mounted || selected == null || selected == _section) return;
     setState(() => _section = selected);
+  }
+
+  void _showInfoSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      constraints: _fullWidthSheetConstraints(context),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) {
+        return SizedBox(
+          width: double.infinity,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 4, 18, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                _InfoSheetHeader(),
+                SizedBox(height: 14),
+                _InfoSheetPoint(
+                  icon: Icons.school_outlined,
+                  title: 'Предметы',
+                  text:
+                      'Здесь собраны дисциплины по семестрам. Внутри предмета будут файлы, материалы и учебная информация.',
+                ),
+                _InfoSheetPoint(
+                  icon: Icons.help_outline_rounded,
+                  title: 'Справочный раздел',
+                  text:
+                      'Короткие инструкции по документам, доступам, аудиториям и частым учебным вопросам.',
+                ),
+                _InfoSheetPoint(
+                  icon: Icons.work_outline_rounded,
+                  title: 'Вакансии',
+                  text:
+                      'Место для стажировок, подработок и проектных задач, которые могут быть полезны студентам.',
+                ),
+                _InfoSheetPoint(
+                  icon: Icons.swap_horiz_rounded,
+                  title: 'Как переключаться',
+                  text:
+                      'Нажми круглую кнопку с иконкой раздела вверху экрана и выбери нужный блок.',
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 }
 
@@ -269,6 +383,16 @@ int _controlGroupOrder(String label) {
   ];
   final index = order.indexOf(label);
   return index == -1 ? order.length : index;
+}
+
+Color _controlAccent(String label) {
+  final text = label.toLowerCase();
+  if (text.contains('экзам')) return const Color(0xFFE16B5C);
+  if (text.contains('зач')) return const Color(0xFF2F80ED);
+  if (text.contains('практ')) return const Color(0xFF2EAD6B);
+  if (text.contains('курс') || text.contains('кр'))
+    return const Color(0xFFF2994A);
+  return const Color(0xFF5667B0);
 }
 
 Map<String, List<_UsefulSubject>> _groupSubjectsByControl(
@@ -467,13 +591,37 @@ class _UsefulSubject {
   bool get hasChat => chatId != null && teamId != null;
 }
 
+String _sectionSubtitle(_UsefulSection section) {
+  switch (section) {
+    case _UsefulSection.subjects:
+      return 'учебный план';
+    case _UsefulSection.help:
+      return 'справочный раздел';
+    case _UsefulSection.jobs:
+      return 'работа и стажировки';
+  }
+}
+
+IconData _sectionIcon(_UsefulSection section) {
+  switch (section) {
+    case _UsefulSection.subjects:
+      return Icons.school_outlined;
+    case _UsefulSection.help:
+      return Icons.help_outline_rounded;
+    case _UsefulSection.jobs:
+      return Icons.work_outline_rounded;
+  }
+}
+
 class _UsefulHeader extends StatelessWidget {
   final _UsefulSection selectedSection;
   final VoidCallback onSectionTap;
+  final VoidCallback onInfoTap;
 
   const _UsefulHeader({
     required this.selectedSection,
     required this.onSectionTap,
+    required this.onInfoTap,
   });
 
   @override
@@ -560,7 +708,7 @@ class _UsefulHeader extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Полезная',
+                            'Информация',
                             style: theme.textTheme.headlineSmall?.copyWith(
                               fontWeight: FontWeight.w800,
                               color: Colors.black,
@@ -576,7 +724,7 @@ class _UsefulHeader extends StatelessWidget {
                           ),
                           const SizedBox(height: 6),
                           Text(
-                            'информация по предметам',
+                            _sectionSubtitle(selectedSection),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodyMedium?.copyWith(
@@ -589,9 +737,12 @@ class _UsefulHeader extends StatelessWidget {
                     ),
                     const SizedBox(width: 10),
                     _HeaderActionButton(
-                      icon: selectedSection == _UsefulSection.subjects
-                          ? Icons.apps_rounded
-                          : Icons.help_outline_rounded,
+                      icon: Icons.info_outline_rounded,
+                      onTap: onInfoTap,
+                    ),
+                    const SizedBox(width: 8),
+                    _HeaderActionButton(
+                      icon: _sectionIcon(selectedSection),
                       onTap: onSectionTap,
                     ),
                   ],
@@ -601,6 +752,85 @@ class _UsefulHeader extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _InfoSheetHeader extends StatelessWidget {
+  const _InfoSheetHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      'Что внутри раздела',
+      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+            color: Colors.black,
+            fontWeight: FontWeight.w900,
+          ),
+    );
+  }
+}
+
+class _InfoSheetPoint extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String text;
+
+  const _InfoSheetPoint({
+    required this.icon,
+    required this.title,
+    required this.text,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8F4FF),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primary.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: theme.colorScheme.primary, size: 19),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: Colors.black,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  text,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: Colors.black.withValues(alpha: 0.64),
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -731,43 +961,77 @@ class _AcademicContextStrip extends StatelessWidget {
         semester == null ? 'семестр уточняется' : '$semester семестр';
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 34,
-            height: 34,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: theme.colorScheme.primary.withValues(alpha: 0.10),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              Icons.school_outlined,
-              color: theme.colorScheme.primary,
-              size: 19,
-            ),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Colors.white, Color(0xFFF8F4FF)],
+        ),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+            color: theme.colorScheme.primary.withValues(alpha: 0.10)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 14,
+            offset: const Offset(0, 5),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                _ContextPill(text: groupName),
-                _ContextPill(text: semesterText),
-                _ContextPill(
-                  text: recordBookNumber == null
-                      ? 'Номер не указан'
-                      : recordBookNumber,
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(14),
                 ),
-              ],
-            ),
+                child: Icon(
+                  Icons.account_balance_wallet_outlined,
+                  color: theme.colorScheme.primary,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Учебный профиль',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: Colors.black,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _ContextPill(
+                icon: Icons.groups_2_outlined,
+                label: 'Группа',
+                text: groupName,
+              ),
+              _ContextPill(
+                icon: Icons.calendar_month_outlined,
+                label: 'Семестр',
+                text: semesterText,
+              ),
+              _ContextPill(
+                icon: Icons.confirmation_number_outlined,
+                label: '№ зачётки',
+                text:
+                    recordBookNumber == null ? 'не указана' : recordBookNumber,
+              ),
+            ],
           ),
         ],
       ),
@@ -776,24 +1040,55 @@ class _AcademicContextStrip extends StatelessWidget {
 }
 
 class _ContextPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
   final String text;
 
-  const _ContextPill({required this.text});
+  const _ContextPill({
+    required this.icon,
+    required this.label,
+    required this.text,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: const Color(0xFFF7F1FF),
-        borderRadius: BorderRadius.circular(999),
+        color: Colors.white.withValues(alpha: 0.86),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
       ),
-      child: Text(
-        text,
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: Colors.black87,
-              fontWeight: FontWeight.w800,
-            ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: theme.colorScheme.primary, size: 16),
+          const SizedBox(width: 6),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: Colors.black45,
+                  fontWeight: FontWeight.w800,
+                  height: 1,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                text,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: Colors.black87,
+                  fontWeight: FontWeight.w900,
+                  height: 1,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -803,11 +1098,15 @@ class _SemesterSubjectsSection extends StatelessWidget {
   final int? semester;
   final int? currentSemester;
   final List<_UsefulSubject> subjects;
+  final Set<String> collapsedGroups;
+  final ValueChanged<String> onGroupTap;
 
   const _SemesterSubjectsSection({
     required this.semester,
     required this.currentSemester,
     required this.subjects,
+    required this.collapsedGroups,
+    required this.onGroupTap,
   });
 
   @override
@@ -817,10 +1116,10 @@ class _SemesterSubjectsSection extends StatelessWidget {
     final title =
         isCurrent ? 'Текущий семестр' : '${semester ?? '-'}-й семестр';
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(24),
         border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Column(
@@ -870,7 +1169,12 @@ class _SemesterSubjectsSection extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           for (final entry in grouped.entries) ...[
-            _ControlGroupBlock(label: entry.key, subjects: entry.value),
+            _ControlGroupBlock(
+              label: entry.key,
+              subjects: entry.value,
+              collapsed: collapsedGroups.contains(entry.key),
+              onTap: () => onGroupTap(entry.key),
+            ),
             const SizedBox(height: 6),
           ],
         ],
@@ -882,46 +1186,72 @@ class _SemesterSubjectsSection extends StatelessWidget {
 class _ControlGroupBlock extends StatelessWidget {
   final String label;
   final List<_UsefulSubject> subjects;
+  final bool collapsed;
+  final VoidCallback onTap;
 
   const _ControlGroupBlock({
     required this.label,
     required this.subjects,
+    required this.collapsed,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
+    final accent = _controlAccent(label);
+    final theme = Theme.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(2, 6, 2, 8),
-          child: Row(
-            children: [
-              const Icon(
-                Icons.label_important_outline_rounded,
-                color: Colors.black54,
-                size: 18,
-              ),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: const TextStyle(
-                  color: Colors.black87,
-                  fontWeight: FontWeight.w900,
+        InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            margin: EdgeInsets.fromLTRB(0, 4, 0, collapsed ? 4 : 10),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.09),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.label_important_outline_rounded,
+                  color: accent,
+                  size: 18,
                 ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                '${subjects.length}',
-                style: const TextStyle(
-                  color: Colors.black45,
-                  fontWeight: FontWeight.w800,
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      color: Colors.black87,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(width: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.82),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    '${subjects.length}',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: accent,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-        for (final subject in subjects) _SubjectCard(item: subject),
+        if (!collapsed)
+          for (final subject in subjects) _SubjectCard(item: subject),
       ],
     );
   }
@@ -993,47 +1323,140 @@ class _HelpSummaryCard extends StatelessWidget {
   }
 }
 
-class _FilterRow extends StatelessWidget {
+class _SubjectControlsCard extends StatelessWidget {
   final List<int> semesters;
   final int? currentSemester;
   final int? selectedSemester;
   final _UsefulFilter selectedFilter;
+  final bool expanded;
+  final VoidCallback onToggleExpanded;
   final ValueChanged<int> onSemesterSelected;
   final ValueChanged<_UsefulFilter> onFilterSelected;
 
-  const _FilterRow({
+  const _SubjectControlsCard({
     required this.semesters,
     required this.currentSemester,
     required this.selectedSemester,
     required this.selectedFilter,
+    required this.expanded,
+    required this.onToggleExpanded,
     required this.onSemesterSelected,
     required this.onFilterSelected,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _FilterPill(
-            text: selectedSemester == null
-                ? 'Семестр'
-                : selectedSemester == currentSemester
-                    ? '$selectedSemester семестр • текущий'
-                    : '$selectedSemester семестр',
-            icon: Icons.school_outlined,
-            onTap: () => _showSemesterSheet(context),
+    final theme = Theme.of(context);
+    final semesterText = selectedSemester == null
+        ? 'Семестр'
+        : selectedSemester == currentSemester
+            ? '$selectedSemester семестр, текущий'
+            : '$selectedSemester семестр';
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.025),
+            blurRadius: 14,
+            offset: const Offset(0, 5),
           ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _FilterPill(
-            text: _filterLabel(selectedFilter),
-            icon: Icons.tune_rounded,
-            onTap: () => _showTypeSheet(context),
+        ],
+      ),
+      child: Column(
+        children: [
+          InkWell(
+            onTap: onToggleExpanded,
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+              child: Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primary.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    child: Icon(
+                      Icons.grid_view_rounded,
+                      color: theme.colorScheme.primary,
+                      size: 19,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Предметы семестра',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            color: Colors.black,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '$semesterText • ${_filterLabel(selectedFilter)}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: Colors.black54,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  AnimatedRotation(
+                    turns: expanded ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 180),
+                    child: const Icon(
+                      Icons.keyboard_arrow_down_rounded,
+                      color: Colors.black54,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
-        ),
-      ],
+          AnimatedCrossFade(
+            firstChild: const SizedBox.shrink(),
+            secondChild: Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _FilterPill(
+                      text: semesterText,
+                      icon: Icons.school_outlined,
+                      onTap: () => _showSemesterSheet(context),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _FilterPill(
+                      text: _filterLabel(selectedFilter),
+                      icon: Icons.fact_check_outlined,
+                      onTap: () => _showTypeSheet(context),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            crossFadeState:
+                expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+            duration: const Duration(milliseconds: 180),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1041,33 +1464,38 @@ class _FilterRow extends StatelessWidget {
     final selected = await showModalBottomSheet<int>(
       context: context,
       showDragHandle: true,
+      constraints: _fullWidthSheetConstraints(context),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (sheetContext) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 22),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Семестр',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w900,
-                  ),
-            ),
-            const SizedBox(height: 10),
-            ...semesters.map(
-              (semester) => _ChoiceSheetTile(
-                title: 'Семестр $semester',
-                subtitle: semester == currentSemester ? 'текущий' : null,
-                selected: semester == selectedSemester,
-                onTap: () {
-                  Navigator.of(sheetContext).pop(semester);
-                },
+      builder: (sheetContext) => SizedBox(
+        width: double.infinity,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 22),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Семестр',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: Colors.black,
+                      fontWeight: FontWeight.w900,
+                    ),
               ),
-            ),
-          ],
+              const SizedBox(height: 10),
+              ...semesters.map(
+                (semester) => _ChoiceSheetTile(
+                  title: 'Семестр $semester',
+                  subtitle: semester == currentSemester ? 'текущий' : null,
+                  selected: semester == selectedSemester,
+                  onTap: () {
+                    Navigator.of(sheetContext).pop(semester);
+                  },
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1080,32 +1508,37 @@ class _FilterRow extends StatelessWidget {
     final selected = await showModalBottomSheet<_UsefulFilter>(
       context: context,
       showDragHandle: true,
+      constraints: _fullWidthSheetConstraints(context),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (sheetContext) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 22),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Тип',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w900,
-                  ),
-            ),
-            const SizedBox(height: 10),
-            ..._UsefulFilter.values.map(
-              (filter) => _ChoiceSheetTile(
-                title: _filterLabel(filter),
-                selected: filter == selectedFilter,
-                onTap: () {
-                  Navigator.of(sheetContext).pop(filter);
-                },
+      builder: (sheetContext) => SizedBox(
+        width: double.infinity,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 22),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Тип',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: Colors.black,
+                      fontWeight: FontWeight.w900,
+                    ),
               ),
-            ),
-          ],
+              const SizedBox(height: 10),
+              ..._UsefulFilter.values.map(
+                (filter) => _ChoiceSheetTile(
+                  title: _filterLabel(filter),
+                  selected: filter == selectedFilter,
+                  onTap: () {
+                    Navigator.of(sheetContext).pop(filter);
+                  },
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1316,6 +1749,549 @@ class _HelpSection extends StatelessWidget {
   }
 }
 
+const _demoJobs = [
+  _DemoJob(
+    title: 'Junior Flutter Developer',
+    company: 'Campus Lab',
+    type: 'Стажировка',
+    city: 'Гибрид',
+    salary: 'от 35 000 ₽',
+    deadline: 'до 30 июня',
+    description:
+        'Помощь с мобильным приложением, простые экраны, фиксы UI и работа с наставником.',
+    tags: ['Flutter', 'Dart', 'UI'],
+    accent: Color(0xFF6A4BBC),
+  ),
+  _DemoJob(
+    title: 'Ассистент преподавателя по программированию',
+    company: 'Кафедра ИТ',
+    type: 'Подработка',
+    city: 'Университет',
+    salary: 'по договорённости',
+    deadline: 'на этой неделе',
+    description:
+        'Проверка лабораторных, помощь первокурсникам и подготовка коротких материалов.',
+    tags: ['Python', 'Алгоритмы', 'Коммуникация'],
+    accent: Color(0xFF2F80ED),
+  ),
+  _DemoJob(
+    title: 'Дизайнер презентаций и лендингов',
+    company: 'Студенческий проект',
+    type: 'Проект',
+    city: 'Удалённо',
+    salary: 'за задачу',
+    deadline: 'можно сегодня',
+    description:
+        'Нужно красиво упаковывать идеи: презентации, простые макеты и визуалы для демо.',
+    tags: ['Figma', 'Canva', 'Визуал'],
+    accent: Color(0xFFE16B8C),
+  ),
+];
+
+class _DemoJob {
+  final String title;
+  final String company;
+  final String type;
+  final String city;
+  final String salary;
+  final String deadline;
+  final String description;
+  final List<String> tags;
+  final Color accent;
+
+  const _DemoJob({
+    required this.title,
+    required this.company,
+    required this.type,
+    required this.city,
+    required this.salary,
+    required this.deadline,
+    required this.description,
+    required this.tags,
+    required this.accent,
+  });
+}
+
+class _JobsSection extends StatelessWidget {
+  const _JobsSection();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _JobsHeroCard(),
+        const SizedBox(height: 12),
+        const _JobBoardStats(),
+        const SizedBox(height: 12),
+        _JobsGroupSection(
+          title: 'Свежие предложения',
+          jobs: _demoJobs,
+        ),
+      ],
+    );
+  }
+}
+
+class _JobsHeroCard extends StatelessWidget {
+  const _JobsHeroCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(26),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            primary.withValues(alpha: 0.92),
+            const Color(0xFF8E6BE8),
+          ],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: primary.withValues(alpha: 0.22),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Icon(
+                  Icons.work_outline_rounded,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Доска вакансий',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                      ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Здесь студенты смогут искать подработки, стажировки и проектные задачи. Публикацию и правила модерации подключим отдельным шагом.',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.88),
+                  height: 1.35,
+                ),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: () => _showPostJobPlaceholder(context),
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('Оставить вакансию'),
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: primary,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showPostJobPlaceholder(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      constraints: _fullWidthSheetConstraints(context),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Размещение вакансии',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Форма появится позже. Пока можно показать идею: студент или модератор добавляет вакансию, а мы решаем правила публикации.',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _JobBoardStats extends StatelessWidget {
+  const _JobBoardStats();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Row(
+      children: [
+        Expanded(
+          child: _JobStatPill(
+            icon: Icons.flash_on_rounded,
+            title: '3',
+            subtitle: 'активные',
+          ),
+        ),
+        SizedBox(width: 10),
+        Expanded(
+          child: _JobStatPill(
+            icon: Icons.verified_user_outlined,
+            title: 'скоро',
+            subtitle: 'модерация',
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _JobStatPill extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  const _JobStatPill({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: primary.withValues(alpha: 0.10),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: primary, size: 19),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: Colors.black,
+                        fontWeight: FontWeight.w900,
+                      ),
+                ),
+                Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: Colors.black54,
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _JobsGroupSection extends StatelessWidget {
+  final String title;
+  final List<_DemoJob> jobs;
+
+  const _JobsGroupSection({
+    required this.title,
+    required this.jobs,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 2),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.local_fire_department_outlined,
+                  color: Colors.black54,
+                  size: 18,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.black87,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                Text(
+                  '${jobs.length}',
+                  style: const TextStyle(
+                    color: Colors.black45,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          for (final job in jobs) _JobCard(job: job),
+        ],
+      ),
+    );
+  }
+}
+
+class _JobCard extends StatelessWidget {
+  final _DemoJob job;
+
+  const _JobCard({required this.job});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: () => _showDetails(context),
+      borderRadius: BorderRadius.circular(24),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              theme.colorScheme.surface,
+              const Color(0xFFF8F4FF),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.045),
+              blurRadius: 18,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: job.accent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                  child: Icon(
+                    Icons.business_center_outlined,
+                    color: job.accent,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        job.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: Colors.black,
+                          fontWeight: FontWeight.w900,
+                          height: 1.12,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${job.company} • ${job.city}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: Colors.black54,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Icon(Icons.chevron_right_rounded, color: Colors.black38),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              job.description,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: Colors.black.withValues(alpha: 0.62),
+                height: 1.32,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _JobChip(text: job.type, color: job.accent),
+                _JobChip(text: job.salary, color: job.accent),
+                _JobChip(text: job.deadline, color: job.accent),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showDetails(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      constraints: _fullWidthSheetConstraints(context),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => SizedBox(
+        width: double.infinity,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                job.title,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: Colors.black,
+                      fontWeight: FontWeight.w900,
+                    ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '${job.company} • ${job.city}',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Colors.black54,
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+              const SizedBox(height: 14),
+              Text(job.description),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final tag in job.tags)
+                    _JobChip(text: tag, color: job.accent),
+                ],
+              ),
+              const SizedBox(height: 18),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Понятно'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _JobChip extends StatelessWidget {
+  final String text;
+  final Color color;
+
+  const _JobChip({
+    required this.text,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.09),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w900,
+            ),
+      ),
+    );
+  }
+}
+
 class _HelpGroupSection extends StatelessWidget {
   final String title;
   final List<Widget> cards;
@@ -1436,24 +2412,28 @@ class _HelpCard extends StatelessWidget {
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
+      constraints: _fullWidthSheetConstraints(context),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (context) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w900,
-                  ),
-            ),
-            const SizedBox(height: 8),
-            const Text('Информация будет добавлена позже.'),
-          ],
+      builder: (context) => SizedBox(
+        width: double.infinity,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
+              ),
+              const SizedBox(height: 8),
+              const Text('Подробную инструкцию добавим в справочник.'),
+            ],
+          ),
         ),
       ),
     );
@@ -1468,65 +2448,67 @@ class _SubjectCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final subtitle = item.teacherName.isNotEmpty
-        ? item.teacherName
-        : item.description.isNotEmpty
-            ? item.description
-            : 'Информация будет добавлена позже';
+    final controlText = item.controlForm.isEmpty
+        ? 'Форма контроля уточняется'
+        : item.controlForm;
+    final accent = _controlAccent(controlText);
 
     return InkWell(
       onTap: () => _open(context),
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(22),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(12),
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: const Color(0xFFFBFAFF),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.black.withValues(alpha: 0.04)),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Colors.white,
+              accent.withValues(alpha: 0.055),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: accent.withValues(alpha: 0.12)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.035),
+              blurRadius: 16,
+              offset: const Offset(0, 5),
+            ),
+          ],
         ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _SubjectAvatar(title: item.title, size: 38),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _SubjectAvatar(title: item.title, size: 40, accent: accent),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
                     item.title,
-                    maxLines: 2,
+                    maxLines: 3,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.titleSmall?.copyWith(
                       color: Colors.black,
                       fontWeight: FontWeight.w900,
-                      height: 1.12,
+                      height: 1.16,
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.black54,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  _MiniControlPill(
-                    text: item.controlForm.isEmpty
-                        ? 'Форма контроля уточняется'
-                        : item.controlForm,
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            _SubjectStatusIcons(hasChat: item.hasChat),
-            const SizedBox(width: 4),
-            const Icon(Icons.chevron_right_rounded, color: Colors.black38),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _MiniControlPill(text: controlText, color: accent),
+                _SubjectPlanPill(color: accent),
+              ],
+            ),
           ],
         ),
       ),
@@ -1551,10 +2533,12 @@ class _SubjectCard extends StatelessWidget {
 class _SubjectAvatar extends StatelessWidget {
   final String title;
   final double size;
+  final Color accent;
 
   const _SubjectAvatar({
     required this.title,
     this.size = 44,
+    this.accent = const Color(0xFF6A4BBC),
   });
 
   @override
@@ -1567,14 +2551,14 @@ class _SubjectAvatar extends StatelessWidget {
       height: size,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        gradient: const LinearGradient(
+        gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF8E6BE8), Color(0xFF6A4BBC)],
+          colors: [accent.withValues(alpha: 0.78), accent],
         ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF6A4BBC).withValues(alpha: 0.20),
+            color: accent.withValues(alpha: 0.20),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -1593,64 +2577,61 @@ class _SubjectAvatar extends StatelessWidget {
   }
 }
 
-class _SubjectStatusIcons extends StatelessWidget {
-  final bool hasChat;
+class _MiniControlPill extends StatelessWidget {
+  final String text;
+  final Color color;
 
-  const _SubjectStatusIcons({required this.hasChat});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const _TinySubjectIcon(icon: Icons.folder_outlined),
-        const SizedBox(width: 4),
-        const _TinySubjectIcon(icon: Icons.menu_book_outlined),
-        const SizedBox(width: 4),
-        _TinySubjectIcon(
-          icon: Icons.chat_bubble_outline_rounded,
-          enabled: hasChat,
-        ),
-      ],
-    );
-  }
-}
-
-class _TinySubjectIcon extends StatelessWidget {
-  final IconData icon;
-  final bool enabled;
-
-  const _TinySubjectIcon({
-    required this.icon,
-    this.enabled = true,
+  const _MiniControlPill({
+    required this.text,
+    required this.color,
   });
 
   @override
   Widget build(BuildContext context) {
-    final color = enabled ? const Color(0xFF6A4BBC) : Colors.black26;
-    return Icon(icon, size: 16, color: color);
-  }
-}
-
-class _MiniControlPill extends StatelessWidget {
-  final String text;
-
-  const _MiniControlPill({required this.text});
-
-  @override
-  Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
-        color: const Color(0xFF6A4BBC).withValues(alpha: 0.08),
+        color: color.withValues(alpha: 0.11),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
         text,
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: const Color(0xFF6A4BBC),
-              fontWeight: FontWeight.w800,
+              color: color,
+              fontWeight: FontWeight.w900,
             ),
+      ),
+    );
+  }
+}
+
+class _SubjectPlanPill extends StatelessWidget {
+  final Color color;
+
+  const _SubjectPlanPill({required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.88),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.14)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.assignment_outlined, color: color, size: 14),
+          const SizedBox(width: 4),
+          Text(
+            'Учебный план',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w900,
+                ),
+          ),
+        ],
       ),
     );
   }
