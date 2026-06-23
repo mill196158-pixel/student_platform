@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' as services;
 import 'package:flutter_chat_reactions/flutter_chat_reactions.dart' as fcr;
@@ -484,13 +485,27 @@ class _ChatMessageInteractionWrapper extends StatelessWidget {
     final controller = _buildPackageController();
     ValueNotifier<Offset?>? dragPosition;
     ValueNotifier<int>? dragRelease;
+    PointerRoute? dragPointerRoute;
+    int? dragPointer;
     var dragDisposed = true;
+    var dragReleased = false;
+
+    void detachPointerRoute() {
+      final route = dragPointerRoute;
+      final pointer = dragPointer;
+      if (route != null && pointer != null) {
+        GestureBinding.instance.pointerRouter.removeRoute(pointer, route);
+      }
+      dragPointerRoute = null;
+      dragPointer = null;
+    }
 
     void ensureDragNotifiers() {
       if (!dragDisposed) return;
       dragPosition = ValueNotifier<Offset?>(null);
       dragRelease = ValueNotifier<int>(0);
       dragDisposed = false;
+      dragReleased = false;
     }
 
     void setDragPosition(Offset? position) {
@@ -499,16 +514,38 @@ class _ChatMessageInteractionWrapper extends StatelessWidget {
     }
 
     void releaseDragAt(Offset position) {
-      if (dragDisposed) return;
+      if (dragDisposed || dragReleased) return;
+      dragReleased = true;
       dragPosition?.value = position;
       final release = dragRelease;
       if (release != null) {
         release.value = release.value + 1;
       }
+      detachPointerRoute();
+    }
+
+    void attachPointerRoute(PointerDownEvent downEvent) {
+      detachPointerRoute();
+      dragPointer = downEvent.pointer;
+      dragPointerRoute = (event) {
+        if (event is PointerMoveEvent) {
+          setDragPosition(event.position);
+        } else if (event is PointerUpEvent) {
+          releaseDragAt(event.position);
+        } else if (event is PointerCancelEvent) {
+          setDragPosition(null);
+          detachPointerRoute();
+        }
+      };
+      GestureBinding.instance.pointerRouter.addRoute(
+        downEvent.pointer,
+        dragPointerRoute!,
+      );
     }
 
     void disposeDragNotifiers() {
       if (dragDisposed) return;
+      detachPointerRoute();
       dragDisposed = true;
       dragPosition?.dispose();
       dragRelease?.dispose();
@@ -516,87 +553,102 @@ class _ChatMessageInteractionWrapper extends StatelessWidget {
       dragRelease = null;
     }
 
-    final visualChild = GestureDetector(
+    final visualChild = Listener(
       behavior: HitTestBehavior.translucent,
-      onTap: selectingMessages ? onToggleSelect : null,
-      onLongPressStart: selectingMessages
+      onPointerDown: selectingMessages ? null : attachPointerRoute,
+      onPointerCancel: selectingMessages
           ? null
-          : (details) {
-              services.HapticFeedback.mediumImpact();
-              ensureDragNotifiers();
-              setDragPosition(details.globalPosition);
-              _showPackageActionsDialog(
-                context,
-                details.globalPosition,
-                _measureMessageRect(context),
-                dragPosition: dragPosition!,
-                dragRelease: dragRelease!,
-              ).whenComplete(disposeDragNotifiers);
+          : (event) {
+              setDragPosition(null);
+              detachPointerRoute();
             },
-      onLongPressMoveUpdate: selectingMessages
-          ? null
-          : (details) => setDragPosition(details.globalPosition),
-      onLongPressEnd: selectingMessages
-          ? null
-          : (details) => releaseDragAt(details.globalPosition),
-      onLongPressCancel: selectingMessages ? null : () => setDragPosition(null),
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          if (applyHighlight)
-            Positioned.fill(
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 140),
-                margin: EdgeInsets.only(
-                  left: isMine ? 44 : 0,
-                  right: isMine ? 0 : 44,
-                ),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.primary.withValues(
-                    alpha: isSelected ? 0.075 : 0.045,
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: selectingMessages ? onToggleSelect : null,
+        onLongPressStart: selectingMessages
+            ? null
+            : (details) {
+                services.HapticFeedback.mediumImpact();
+                ensureDragNotifiers();
+                setDragPosition(details.globalPosition);
+                _showPackageActionsDialog(
+                  context,
+                  details.globalPosition,
+                  _measureMessageRect(context),
+                  dragPosition: dragPosition!,
+                  dragRelease: dragRelease!,
+                ).whenComplete(disposeDragNotifiers);
+              },
+        onLongPressMoveUpdate: selectingMessages
+            ? null
+            : (details) => setDragPosition(details.globalPosition),
+        onLongPressEnd: selectingMessages
+            ? null
+            : (details) => releaseDragAt(details.globalPosition),
+        onLongPressCancel: selectingMessages
+            ? null
+            : () {
+                setDragPosition(null);
+                detachPointerRoute();
+              },
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            if (applyHighlight)
+              Positioned.fill(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 140),
+                  margin: EdgeInsets.only(
+                    left: isMine ? 44 : 0,
+                    right: isMine ? 0 : 44,
                   ),
-                  borderRadius: BorderRadius.circular(20),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.primary.withValues(
+                      alpha: isSelected ? 0.075 : 0.045,
+                    ),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
                 ),
               ),
+            IgnorePointer(
+              ignoring: selectingMessages,
+              child: child,
             ),
-          IgnorePointer(
-            ignoring: selectingMessages,
-            child: child,
-          ),
-          if (selectingMessages)
-            Positioned(
-              top: 6,
-              left: isMine ? null : 8,
-              right: isMine ? 8 : null,
-              child: _SelectionIndicator(
-                selected: isSelected,
+            if (selectingMessages)
+              Positioned(
+                top: 6,
+                left: isMine ? null : 8,
+                right: isMine ? 8 : null,
+                child: _SelectionIndicator(
+                  selected: isSelected,
+                ),
               ),
-            ),
-          if (hasReactions)
-            Positioned(
-              left: reactionLeft,
-              right: reactionRight,
-              bottom: -10,
-              child: fcr.StackedReactions(
-                messageId: message.id,
-                controller: controller,
-                size: 27,
-                stackedValue: 5,
-                maxReactionsToShow: 4,
-                direction: isMine ? TextDirection.rtl : TextDirection.ltr,
-                reactionBackgroundColor: theme.colorScheme.surface,
-                onTap: onReact,
-                customReactionBuilder: (emoji, count, isUserReacted) {
-                  return _MessageReactionBubble(
-                    emoji: emoji,
-                    count: count,
-                    selected: isUserReacted,
-                    isMine: isMine,
-                  );
-                },
+            if (hasReactions)
+              Positioned(
+                left: reactionLeft,
+                right: reactionRight,
+                bottom: -10,
+                child: fcr.StackedReactions(
+                  messageId: message.id,
+                  controller: controller,
+                  size: 27,
+                  stackedValue: 5,
+                  maxReactionsToShow: 4,
+                  direction: isMine ? TextDirection.rtl : TextDirection.ltr,
+                  reactionBackgroundColor: theme.colorScheme.surface,
+                  onTap: onReact,
+                  customReactionBuilder: (emoji, count, isUserReacted) {
+                    return _MessageReactionBubble(
+                      emoji: emoji,
+                      count: count,
+                      selected: isUserReacted,
+                      isMine: isMine,
+                    );
+                  },
+                ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
 
@@ -999,8 +1051,10 @@ class _PackageActionsMenu extends StatefulWidget {
 
 class _PackageActionsMenuState extends State<_PackageActionsMenu> {
   late List<GlobalKey> _itemKeys;
+  final _menuKey = GlobalKey();
   int? _selectedIndex;
   int _handledReleaseTick = 0;
+  bool _menuPointerActive = false;
 
   @override
   void initState() {
@@ -1038,12 +1092,28 @@ class _PackageActionsMenuState extends State<_PackageActionsMenu> {
   void _handleDragPosition() {
     if (!mounted) return;
     final position = widget.dragPosition.value;
-    final nextIndex = position == null ? null : _hitTest(position);
+    _selectIndex(position == null ? null : _hitTest(position));
+  }
+
+  void _selectIndex(int? nextIndex, {bool haptic = true}) {
     if (nextIndex == _selectedIndex) return;
     setState(() => _selectedIndex = nextIndex);
-    if (nextIndex != null) {
+    if (haptic && nextIndex != null) {
       services.HapticFeedback.selectionClick();
     }
+  }
+
+  void _selectAtMenuPosition(
+    Offset globalPosition, {
+    bool haptic = true,
+  }) {
+    _selectIndex(_hitTest(globalPosition), haptic: haptic);
+  }
+
+  void _activateSelected() {
+    final index = _selectedIndex;
+    if (index == null || index < 0 || index >= widget.menuItems.length) return;
+    widget.onTap(widget.menuItems[index]);
   }
 
   void _handleDragRelease() {
@@ -1058,13 +1128,41 @@ class _PackageActionsMenuState extends State<_PackageActionsMenu> {
   }
 
   int? _hitTest(Offset globalPosition) {
-    for (var i = 0; i < _itemKeys.length; i++) {
-      final context = _itemKeys[i].currentContext;
+    Rect? menuBounds;
+    final rowRects = <Rect>[];
+
+    for (final key in _itemKeys) {
+      final context = key.currentContext;
       final renderObject = context?.findRenderObject();
       if (renderObject is! RenderBox || !renderObject.hasSize) continue;
       final topLeft = renderObject.localToGlobal(Offset.zero);
       final rect = topLeft & renderObject.size;
-      if (rect.contains(globalPosition)) return i;
+      rowRects.add(rect);
+      menuBounds = menuBounds == null ? rect : menuBounds.expandToInclude(rect);
+    }
+
+    for (var i = 0; i < rowRects.length; i++) {
+      if (rowRects[i].contains(globalPosition)) return i;
+    }
+
+    final bounds = menuBounds;
+    if (bounds == null) return null;
+
+    // Long-press selection on a phone should feel forgiving: after the menu
+    // opens, users often keep their finger near the message edge rather than
+    // exactly inside the narrow action panel. Match rows by vertical position
+    // while allowing a horizontal gutter around the menu.
+    const horizontalSlop = 140.0;
+    if (globalPosition.dx < bounds.left - horizontalSlop ||
+        globalPosition.dx > bounds.right + horizontalSlop) {
+      return null;
+    }
+
+    for (var i = 0; i < rowRects.length; i++) {
+      final row = rowRects[i];
+      if (globalPosition.dy >= row.top && globalPosition.dy <= row.bottom) {
+        return i;
+      }
     }
     return null;
   }
@@ -1078,51 +1176,70 @@ class _PackageActionsMenuState extends State<_PackageActionsMenu> {
 
     return SizedBox(
       width: widget.width,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: widget.isDark ? const Color(0xFF1D1D1F) : Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.18),
-              blurRadius: 18,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: Stack(
-            children: [
-              if (selectedIndex != null)
-                AnimatedPositioned(
-                  duration: const Duration(milliseconds: 130),
-                  curve: Curves.easeOutCubic,
-                  left: 5,
-                  right: 5,
-                  top: selectedIndex * _packageMenuItemHeight + 4,
-                  height: _packageMenuItemHeight - 8,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: highlightColor,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                ),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  for (var i = 0; i < widget.menuItems.length; i++)
-                    _PackageMenuItemTile(
-                      key: _itemKeys[i],
-                      item: widget.menuItems[i],
-                      selected: selectedIndex == i,
-                      onTapDown: () => setState(() => _selectedIndex = i),
-                      onTap: () => widget.onTap(widget.menuItems[i]),
-                    ),
-                ],
+      child: Listener(
+        key: _menuKey,
+        behavior: HitTestBehavior.opaque,
+        onPointerDown: (event) {
+          _menuPointerActive = true;
+          _selectAtMenuPosition(event.position, haptic: false);
+        },
+        onPointerMove: (event) {
+          if (!_menuPointerActive) return;
+          _selectAtMenuPosition(event.position);
+        },
+        onPointerUp: (event) {
+          if (!_menuPointerActive) return;
+          _selectAtMenuPosition(event.position, haptic: false);
+          _menuPointerActive = false;
+          _activateSelected();
+        },
+        onPointerCancel: (_) {
+          _menuPointerActive = false;
+        },
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: widget.isDark ? const Color(0xFF1D1D1F) : Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.18),
+                blurRadius: 18,
+                offset: const Offset(0, 8),
               ),
             ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: Stack(
+              children: [
+                if (selectedIndex != null)
+                  AnimatedPositioned(
+                    duration: const Duration(milliseconds: 130),
+                    curve: Curves.easeOutCubic,
+                    left: 5,
+                    right: 5,
+                    top: selectedIndex * _packageMenuItemHeight + 4,
+                    height: _packageMenuItemHeight - 8,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: highlightColor,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (var i = 0; i < widget.menuItems.length; i++)
+                      _PackageMenuItemTile(
+                        key: _itemKeys[i],
+                        item: widget.menuItems[i],
+                        selected: selectedIndex == i,
+                      ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1133,15 +1250,11 @@ class _PackageActionsMenuState extends State<_PackageActionsMenu> {
 class _PackageMenuItemTile extends StatelessWidget {
   final fcr.MenuItem item;
   final bool selected;
-  final VoidCallback onTapDown;
-  final VoidCallback onTap;
 
   const _PackageMenuItemTile({
     super.key,
     required this.item,
     required this.selected,
-    required this.onTapDown,
-    required this.onTap,
   });
 
   @override
@@ -1154,34 +1267,26 @@ class _PackageMenuItemTile extends StatelessWidget {
 
     return Material(
       color: Colors.transparent,
-      child: InkWell(
-        onTapDown: (_) {
-          onTapDown();
-          services.HapticFeedback.selectionClick();
-        },
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: SizedBox(
-          height: _packageMenuItemHeight,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            child: Row(
-              children: [
-                Icon(item.icon, color: color, size: 18),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    item.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: color,
-                          fontWeight: fontWeight,
-                        ),
-                  ),
+      child: SizedBox(
+        height: _packageMenuItemHeight,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Row(
+            children: [
+              Icon(item.icon, color: color, size: 18),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  item.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: color,
+                        fontWeight: fontWeight,
+                      ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),

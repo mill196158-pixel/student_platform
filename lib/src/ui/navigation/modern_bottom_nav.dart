@@ -42,7 +42,8 @@ class _ModernBottomNavState extends State<ModernBottomNav> {
     widget.onTap(index);
   }
 
-  void _previewPosition(Offset localPosition, double width) {
+  void _previewPosition(Offset localPosition, double width,
+      {bool haptic = true}) {
     final index = _indexFromLocalPosition(localPosition, width);
     if (index == null) return;
 
@@ -50,7 +51,7 @@ class _ModernBottomNavState extends State<ModernBottomNav> {
       setState(() => _previewIndex = index);
     }
 
-    if (_lastFeedbackIndex != index && index != widget.currentIndex) {
+    if (haptic && _lastFeedbackIndex != index && index != widget.currentIndex) {
       _lastFeedbackIndex = index;
       HapticFeedback.selectionClick();
     }
@@ -108,8 +109,11 @@ class _ModernBottomNavState extends State<ModernBottomNav> {
         builder: (context, constraints) {
           return GestureDetector(
             behavior: HitTestBehavior.translucent,
-            onPanDown: (details) =>
-                _previewPosition(details.localPosition, constraints.maxWidth),
+            onPanDown: (details) => _previewPosition(
+              details.localPosition,
+              constraints.maxWidth,
+              haptic: false,
+            ),
             onPanUpdate: (details) =>
                 _previewPosition(details.localPosition, constraints.maxWidth),
             onPanEnd: (_) => _finishDrag(),

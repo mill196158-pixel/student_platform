@@ -117,6 +117,9 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final keyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
+    final animationHeight = keyboardVisible ? 88.0 : 200.0;
+    final contentTopPadding = keyboardVisible ? 10.0 : 0.0;
+    final buttonTopGap = keyboardVisible ? 10.0 : 12.0;
 
     return Scaffold(
       resizeToAvoidBottomInset: true,
@@ -138,21 +141,23 @@ class _LoginScreenState extends State<LoginScreen> {
                     duration: const Duration(milliseconds: 260),
                     curve: Curves.easeOutCubic,
                     alignment: keyboardVisible
-                        ? const Alignment(0, -0.72)
+                        ? Alignment.topCenter
                         : Alignment.center,
                     child: AnimatedPadding(
                       duration: const Duration(milliseconds: 260),
                       curve: Curves.easeOutCubic,
                       padding: EdgeInsets.only(
-                        top: keyboardVisible ? 8 : 0,
-                        bottom: keyboardVisible ? 24 : 0,
+                        top: contentTopPadding,
+                        bottom: keyboardVisible ? 16 : 0,
                       ),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const SizedBox(height: 8),
-                          SizedBox(
-                            height: 200,
+                          SizedBox(height: keyboardVisible ? 4 : 8),
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 220),
+                            curve: Curves.easeOutCubic,
+                            height: animationHeight,
                             child: Lottie.asset(
                               'assets/lottie/cat_sleeping.json',
                             ),
@@ -165,7 +170,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 borderRadius: BorderRadius.circular(12),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: Colors.black.withOpacity(0.05),
+                                    color: Colors.black.withValues(alpha: 0.05),
                                     blurRadius: 10,
                                   ),
                                 ],
@@ -207,13 +212,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                             ),
                           ),
-                          const SizedBox(height: 12),
-                          TextButton(
-                            onPressed: widget.toggleView,
-                            child:
-                                const Text('Нет аккаунта? Зарегистрироваться'),
-                          ),
-                          const SizedBox(height: 6),
+                          SizedBox(height: buttonTopGap),
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 16),
                             child: SizedBox(
@@ -233,15 +232,34 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                             ),
                           ),
-                          const SizedBox(height: 12),
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: Text(
-                              '© ${DateTime.now().year} Student Platform',
-                              style: theme.textTheme.bodySmall,
-                            ),
+                          AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 180),
+                            child: keyboardVisible
+                                ? const SizedBox.shrink()
+                                : Column(
+                                    key: const ValueKey('loginFooter'),
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const SizedBox(height: 12),
+                                      TextButton(
+                                        onPressed: widget.toggleView,
+                                        child: const Text(
+                                          'Нет аккаунта? Зарегистрироваться',
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Padding(
+                                        padding:
+                                            const EdgeInsets.only(bottom: 12),
+                                        child: Text(
+                                          '© ${DateTime.now().year} Student Platform',
+                                          style: theme.textTheme.bodySmall,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                    ],
+                                  ),
                           ),
-                          const SizedBox(height: 8),
                         ],
                       ),
                     ),
