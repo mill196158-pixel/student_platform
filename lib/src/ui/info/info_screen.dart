@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/auth_session.dart';
@@ -24,7 +26,7 @@ class InfoScreen extends StatefulWidget {
 }
 
 class _InfoScreenState extends State<InfoScreen> {
-  late Future<_UsefulPlanState> _future = _load();
+  late Future<_UsefulPlanState> _future = _loadWithCache();
   int? _selectedSemester;
   _UsefulFilter _filter = _UsefulFilter.all;
   _UsefulSection _section = _UsefulSection.subjects;
@@ -32,8 +34,8 @@ class _InfoScreenState extends State<InfoScreen> {
   bool _controlGroupsTouched = false;
   final Set<String> _collapsedControlGroups = {};
 
-  Future<_UsefulPlanState> _load() async {
-    final contextData = await AcademicContextService().load();
+  Future<_UsefulPlanState> _loadFresh() async {
+    final contextData = await AcademicContextService().loadFresh();
     final groupId = contextData.groupId;
 
     if (groupId == null) {
@@ -50,6 +52,158 @@ class _InfoScreenState extends State<InfoScreen> {
       contextData: contextData,
       subjects: subjects,
     );
+  }
+
+  Future<_UsefulPlanState> _loadWithCache() async {
+    final cached = await _readCachedPlan();
+    if (cached != null) {
+      _refreshSilently();
+      return cached;
+    }
+    return _loadFreshAndCache();
+  }
+
+  Future<_UsefulPlanState> _loadFreshAndCache() async {
+    final fresh = await _loadFresh();
+    if (fresh.warning == null) await _saveCachedPlan(fresh);
+    return fresh;
+  }
+
+  void _refreshSilently() {
+    _loadFreshAndCache().then((fresh) {
+      if (!mounted) return;
+      setState(() => _future = Future<_UsefulPlanState>.value(fresh));
+    });
+  }
+
+  Future<_UsefulPlanState?> _readCachedPlan() async {
+    final userId = Supabase.instance.client.auth.currentUser?.id ?? '';
+    if (userId.isEmpty) return null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_infoCacheKey(userId));
+      if (raw == null || raw.trim().isEmpty) return null;
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return null;
+      return _planFromJson(Map<String, dynamic>.from(decoded));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _saveCachedPlan(_UsefulPlanState state) async {
+    final userId = Supabase.instance.client.auth.currentUser?.id ??
+        state.contextData.userId ??
+        '';
+    if (userId.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+          _infoCacheKey(userId), jsonEncode(_planToJson(state)));
+    } catch (_) {}
+  }
+
+  String _infoCacheKey(String userId) => 'info_subjects_cache_v2_$userId';
+
+  Map<String, dynamic> _planToJson(_UsefulPlanState state) => {
+        'contextData': _academicContextToJson(state.contextData),
+        'subjects': state.subjects.map(_subjectToJson).toList(),
+        'warning': state.warning,
+      };
+
+  _UsefulPlanState _planFromJson(Map<String, dynamic> json) {
+    return _UsefulPlanState(
+      contextData: _academicContextFromJson(_mapFrom(json['contextData'])),
+      subjects: _listFrom(json['subjects']).map(_subjectFromJson).toList(),
+      warning: _nullIfEmpty(json['warning']),
+    );
+  }
+
+  Map<String, dynamic> _academicContextToJson(AcademicContext context) => {
+        'userId': context.userId,
+        'publicUserId': context.publicUserId,
+        'recordBookNumber': context.recordBookNumber,
+        'activeEnrollmentId': context.activeEnrollmentId,
+        'groupId': context.groupId,
+        'groupName': context.groupName,
+        'currentSemesterNumber': context.currentSemesterNumber,
+        'academicYearId': context.academicYearId,
+        'academicTermId': context.academicTermId,
+        'hasActiveEnrollment': context.hasActiveEnrollment,
+        'loadWarning': context.loadWarning,
+      };
+
+  AcademicContext _academicContextFromJson(Map<String, dynamic> json) {
+    return AcademicContext(
+      userId: _nullIfEmpty(json['userId']),
+      publicUserId: _nullIfEmpty(json['publicUserId']),
+      recordBookNumber: _nullIfEmpty(json['recordBookNumber']),
+      activeEnrollmentId: _nullIfEmpty(json['activeEnrollmentId']),
+      groupId: _nullIfEmpty(json['groupId']),
+      groupName: _nullIfEmpty(json['groupName']),
+      currentSemesterNumber: _intOrNull(json['currentSemesterNumber']),
+      academicYearId: _nullIfEmpty(json['academicYearId']),
+      academicTermId: _nullIfEmpty(json['academicTermId']),
+      hasActiveEnrollment: json['hasActiveEnrollment'] == true,
+      loadWarning: _nullIfEmpty(json['loadWarning']),
+    );
+  }
+
+  Map<String, dynamic> _subjectToJson(_UsefulSubject subject) => {
+        'id': subject.id,
+        'title': subject.title,
+        'subjectId': subject.subjectId,
+        'groupId': subject.groupId,
+        'semesterNumber': subject.semesterNumber,
+        'controlForm': subject.controlForm,
+        'description': subject.description,
+        'teacherName': subject.teacherName,
+        'teamId': subject.teamId,
+        'teamName': subject.teamName,
+        'teamIcon': subject.teamIcon,
+        'teamGroupName': subject.teamGroupName,
+        'chatId': subject.chatId,
+      };
+
+  _UsefulSubject _subjectFromJson(Map<String, dynamic> json) {
+    return _UsefulSubject(
+      id: (json['id'] ?? '').toString(),
+      title: (json['title'] ?? '').toString(),
+      subjectId: _nullIfEmpty(json['subjectId']),
+      groupId: _nullIfEmpty(json['groupId']),
+      semesterNumber: _intOrNull(json['semesterNumber']),
+      controlForm: (json['controlForm'] ?? '').toString(),
+      description: (json['description'] ?? '').toString(),
+      teacherName: (json['teacherName'] ?? '').toString(),
+      teamId: _nullIfEmpty(json['teamId']),
+      teamName: (json['teamName'] ?? '').toString(),
+      teamIcon: (json['teamIcon'] ?? '').toString(),
+      teamGroupName: (json['teamGroupName'] ?? '').toString(),
+      chatId: _nullIfEmpty(json['chatId']),
+    );
+  }
+
+  Map<String, dynamic> _mapFrom(dynamic value) {
+    if (value is Map) return Map<String, dynamic>.from(value);
+    return const <String, dynamic>{};
+  }
+
+  List<Map<String, dynamic>> _listFrom(dynamic value) {
+    if (value is! List) return const [];
+    return value
+        .whereType<Map>()
+        .map((row) => Map<String, dynamic>.from(row))
+        .toList();
+  }
+
+  int? _intOrNull(dynamic value) {
+    if (value is int) return value;
+    return int.tryParse((value ?? '').toString());
+  }
+
+  String? _nullIfEmpty(dynamic value) {
+    final text = (value ?? '').toString().trim();
+    return text.isEmpty ? null : text;
   }
 
   @override
@@ -142,7 +296,7 @@ class _InfoScreenState extends State<InfoScreen> {
 
     return RefreshIndicator(
       onRefresh: () async {
-        setState(() => _future = _load());
+        setState(() => _future = _loadFreshAndCache());
         await _future;
       },
       child: ListView(

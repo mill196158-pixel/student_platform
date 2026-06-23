@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:async'; // ← for Timer
-import 'package:characters/characters.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -19,7 +18,6 @@ import 'package:student_platform/src/ui/chats/forward/forward_picker.dart'
 import 'package:student_platform/src/ui/chats/data/dm_api.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/widgets.dart'; // ChatMessageList
 import 'package:student_platform/src/ui/learning/models/message.dart'; // модель сообщения
-import 'package:student_platform/src/ui/learning/tabs/chat/search/chat_search_controller.dart';
 import 'package:student_platform/src/ui/learning/state/team_cubit.dart';
 import 'package:student_platform/src/utils/safe_debug_log.dart';
 
@@ -30,7 +28,8 @@ class MyChatsScreen extends StatefulWidget {
   State<MyChatsScreen> createState() => _MyChatsScreenState();
 }
 
-class _MyChatsScreenState extends State<MyChatsScreen> {
+class _MyChatsScreenState extends State<MyChatsScreen>
+    with WidgetsBindingObserver {
   final _repo = SupabaseLearningRepository();
   bool _loading = true;
 
@@ -40,7 +39,7 @@ class _MyChatsScreenState extends State<MyChatsScreen> {
 
   RealtimeChannel? _channel; // общий канал с несколькими фильтрами
   Timer? _pollTimer; // ➜ NEW
-  static const _pollEvery = Duration(seconds: 3); // ➜ NEW
+  static const _pollEvery = Duration(seconds: 8); // ➜ NEW
   bool _pollInFlight = false; // ➜ NEW: защита от гонок
 
   bool _hydrated = false; // есть ли быстрый кеш на старте
@@ -54,7 +53,13 @@ class _MyChatsScreenState extends State<MyChatsScreen> {
     setState(fn);
   }
 
-  static const _cacheKey = 'my_chats_cache_v1';
+  static const _cacheKeyPrefix = 'my_chats_cache_v2';
+
+  String _cacheKeyForCurrentUser() {
+    final userId = Supabase.instance.client.auth.currentUser?.id ?? 'anonymous';
+    return '${_cacheKeyPrefix}_$userId';
+  }
+
   Future<void> _markChatReadServerSide(String chatId) async {
     // ➜ NEW
     try {
@@ -80,6 +85,7 @@ class _MyChatsScreenState extends State<MyChatsScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _hydrateFromCache(); // мгновенно показываем старый список
     _load(); // параллельно тянем актуальные данные
     // ➜ NEW: запуск поллера сразу и мгновенный первый опрос
@@ -90,6 +96,7 @@ class _MyChatsScreenState extends State<MyChatsScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
     _channel?.unsubscribe();
     _searchDebounce?.cancel();
@@ -99,6 +106,20 @@ class _MyChatsScreenState extends State<MyChatsScreen> {
     _filterDebounce = null;
     _sub = null;
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _startPolling();
+      unawaited(_pollOnce());
+      return;
+    }
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      _pollTimer?.cancel();
+    }
   }
 
   Future<void> _load() async {
@@ -129,9 +150,19 @@ class _MyChatsScreenState extends State<MyChatsScreen> {
       // подкачиваем ЛС
       final dmSummaries = await _loadDms();
 
-      // общий список
-      final list = <_ChatSummary>[...teamSummaries, ...dmSummaries]
-        ..sort(_compareChats);
+      // общий список: сервер обновляет содержимое, локальные настройки
+      // превью (закреплено/без звука) переносим из кеша/текущего состояния.
+      final localStateByKey = <String, _ChatSummary>{
+        for (final item in _all) _summaryIdentity(item): item,
+      };
+      final list = <_ChatSummary>[...teamSummaries, ...dmSummaries];
+      for (final item in list) {
+        final local = localStateByKey[_summaryIdentity(item)];
+        if (local == null) continue;
+        item.pinned = local.pinned;
+        item.muted = local.muted;
+      }
+      list.sort(_compareChats);
 
       if (!mounted) return;
       _safeSetState(() {
@@ -292,6 +323,21 @@ class _MyChatsScreenState extends State<MyChatsScreen> {
             '[MyChatsScreen] togglePin chat=${maskDebugId(c.chatId)} pinned=${_all[idx].pinned}');
         _all.sort(_compareChats);
         _applyFilter();
+        _saveCache(_all);
+      }
+    });
+  }
+
+  void _toggleMuteChat(_ChatSummary c) {
+    setState(() {
+      final idx =
+          _all.indexWhere((e) => _summaryIdentity(e) == _summaryIdentity(c));
+      if (idx != -1) {
+        _all[idx].muted = !_all[idx].muted;
+        safeDebugLog(
+            '[MyChatsScreen] toggleMute chat=${maskDebugId(c.chatId)} muted=${_all[idx].muted}');
+        _applyFilter();
+        _saveCache(_all);
       }
     });
   }
@@ -499,6 +545,66 @@ class _MyChatsScreenState extends State<MyChatsScreen> {
           ? lastMessageId
           : null,
     );
+  }
+
+  String _summaryIdentity(_ChatSummary c) {
+    final chatId = c.chatId;
+    if (chatId != null && chatId.isNotEmpty) return 'chat:$chatId';
+    if (c.isDm && (c.peerId ?? '').isNotEmpty) return 'dm:${c.peerId}';
+    if (c.team.id.isNotEmpty) return 'team:${c.team.id}';
+    return 'title:${c.title}';
+  }
+
+  Future<void> _openChat(_ChatSummary c) async {
+    Navigator.of(context).pop();
+    if (c.isDm && (c.peerId?.isNotEmpty ?? false)) {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => BlocProvider.value(
+            value: context.read<TeamCubit>(),
+            child: DirectChatScreen(
+              peerId: c.peerId!,
+              peerName: c.title,
+              peerAvatarUrl: c.avatarUrl,
+            ),
+          ),
+        ),
+      );
+      if (c.chatId != null && c.chatId!.isNotEmpty) {
+        await _refreshUnreadFor(c.chatId!);
+      }
+      return;
+    }
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => TeamDetailsScreen(
+          team: c.team,
+          initialTabIndex: 1,
+        ),
+      ),
+    );
+
+    final chatId = c.chatId;
+    if (chatId != null && chatId.isNotEmpty) {
+      await _refreshUnreadFor(chatId);
+    }
+  }
+
+  Future<void> _markChatRead(_ChatSummary c) async {
+    final chatId = c.chatId;
+    Navigator.of(context).pop();
+    setState(() {
+      final idx =
+          _all.indexWhere((e) => _summaryIdentity(e) == _summaryIdentity(c));
+      if (idx != -1) _all[idx].unread = 0;
+      _applyFilter();
+    });
+    await _saveCache(_all);
+    if (chatId != null && chatId.isNotEmpty) {
+      await _markChatReadServerSide(chatId);
+      await _refreshUnreadFor(chatId);
+    }
   }
 
   void _applyFilter() {
@@ -767,9 +873,7 @@ class _MyChatsScreenState extends State<MyChatsScreen> {
               final sideGap = (maxW - previewW) / 2.0;
               final topOffset = safeTop + sideGap;
 
-              // ↓↓↓ ОЦЕНКА высоты КОНТЕКСТНОГО МЕНЮ (чёрная плашка)
-              // чтобы под превью было место и ничего не «выпирало»
-              const double kMenuEst = 260.0; // ~высота списка действий
+              const double kMenuEst = _peekMenuItemHeight * 4;
               const double kGapPreviewToMenu = 10.0;
 
               // итог: оставляем место под меню + нижнюю безопасную зону
@@ -806,88 +910,34 @@ class _MyChatsScreenState extends State<MyChatsScreen> {
                           Navigator.of(context).pop();
                         },
                         onToggleMute: () {
-                          setState(() {
-                            final idx =
-                                _all.indexWhere((e) => e.chatId == c.chatId);
-                            if (idx != -1) _all[idx].muted = !_all[idx].muted;
-                            _applyFilter();
-                          });
+                          _toggleMuteChat(c);
                           Navigator.of(context).pop();
                         },
-                        onMarkRead: () async {
-                          if (c.chatId != null && c.chatId!.isNotEmpty) {
-                            await _markChatReadServerSide(c.chatId!);
-                            await _refreshUnreadFor(c.chatId!);
-                          } else {
-                            setState(() {
-                              final idx = _all
-                                  .indexWhere((e) => e.team.id == c.team.id);
-                              if (idx != -1) _all[idx].unread = 0;
-                              _applyFilter();
-                            });
-                          }
-                          Navigator.of(context).pop();
-                        },
-                        onOpenChat: () {
-                          Navigator.of(context).pop();
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => TeamDetailsScreen(
-                                team: c.team,
-                                initialTabIndex: 1,
-                              ),
-                            ),
-                          );
-                        },
+                        onMarkRead: () async => _markChatRead(c),
+                        onOpenChat: () => _openChat(c),
                       ),
                     ),
                   ),
 
-                  // ЧЁРНОЕ всплывающее меню: ПОД превью и СДВИНУТО ВПРАВО
                   Positioned(
-                    // ставим ровно под карточку
                     top: topOffset + previewH + kGapPreviewToMenu,
-                    // правый край выравниваем по правому краю карточки
                     right: sideGap,
                     child: _PeekContextMenu(
                       pinned: c.pinned,
-                      onReply: () {
-                        Navigator.of(context).pop();
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => TeamDetailsScreen(
-                              team: c.team,
-                              initialTabIndex: 1,
-                            ),
-                          ),
-                        );
-                      },
-                      onCopy: () {
-                        HapticFeedback.selectionClick();
-                        debugPrint('[MyChatsScreen] preview: copy action');
-                      },
+                      muted: c.muted,
+                      hasUnread: c.unread > 0,
+                      onOpen: () => _openChat(c),
                       onTogglePin: () {
                         _togglePinChat(c);
                         Navigator.of(context).pop();
                       },
-                      onForward: () {
-                        HapticFeedback.selectionClick();
-                        debugPrint('[MyChatsScreen] preview: forward action');
+                      onToggleMute: () {
+                        _toggleMuteChat(c);
+                        Navigator.of(context).pop();
                       },
-                      onDelete: () {
-                        HapticFeedback.mediumImpact();
-                        debugPrint(
-                            '[MyChatsScreen] preview: delete action (no-op)');
-                      },
-                      onSelect: () {
-                        HapticFeedback.selectionClick();
-                        debugPrint(
-                            '[MyChatsScreen] preview: select action (no-op)');
-                      },
+                      onMarkRead: () => _markChatRead(c),
                     ),
                   ),
-
-                  // ❌ НИЖНЮЮ ПАНЕЛЬ ДЕЙСТВИЙ УБИРАЕМ — больше не нужна
                 ],
               );
             },
@@ -964,7 +1014,7 @@ class _MyChatsScreenState extends State<MyChatsScreen> {
   Future<void> _hydrateFromCache() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final s = prefs.getString(_cacheKey);
+      final s = prefs.getString(_cacheKeyForCurrentUser());
       if (s == null || s.isEmpty) return;
       final raw = (jsonDecode(s) as List).cast<Map<String, dynamic>>();
       final list = raw.map(_summaryFromMap).toList()..sort(_compareChats);
@@ -981,7 +1031,7 @@ class _MyChatsScreenState extends State<MyChatsScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final data = jsonEncode(list.map(_summaryToMap).toList());
-      await prefs.setString(_cacheKey, data);
+      await prefs.setString(_cacheKeyForCurrentUser(), data);
     } catch (_) {}
   }
 
@@ -1119,7 +1169,10 @@ class _ChatRow extends StatelessWidget {
     final t = theme.textTheme;
     final onSurface = theme.colorScheme.onSurface;
     final onSurfaceVar =
-        (t.bodyMedium?.color ?? Colors.black).withOpacity(0.72);
+        (t.bodyMedium?.color ?? Colors.black).withValues(alpha: 0.72);
+    final unread = data.unread > 0;
+    final muted = data.muted;
+    final accent = Theme.of(context).colorScheme.primary;
 
     final time = data.lastTime != null ? _formatTime(data.lastTime!) : '';
 
@@ -1177,7 +1230,8 @@ class _ChatRow extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: t.bodySmall?.copyWith(
-                          color: onSurfaceVar,
+                          color: unread && !muted ? onSurface : onSurfaceVar,
+                          fontWeight: unread && !muted ? FontWeight.w700 : null,
                           height: 1.05,
                         ),
                       ),
@@ -1197,13 +1251,15 @@ class _ChatRow extends StatelessWidget {
                         Text(
                           time,
                           style: t.labelSmall?.copyWith(
-                            color: onSurfaceVar,
-                            fontWeight: FontWeight.w600,
+                            color: unread && !muted ? accent : onSurfaceVar,
+                            fontWeight: unread && !muted
+                                ? FontWeight.w800
+                                : FontWeight.w600,
                           ),
                         ),
                       const SizedBox(height: 6),
                       if (data.unread > 0)
-                        _UnreadBadge(count: data.unread)
+                        _UnreadBadge(count: data.unread, muted: data.muted)
                       else if (data.pinned)
                         Icon(Icons.push_pin, size: 16, color: onSurfaceVar),
                     ],
@@ -1344,15 +1400,19 @@ class _BubbleAvatar extends StatelessWidget {
 
 class _UnreadBadge extends StatelessWidget {
   final int count;
-  const _UnreadBadge({required this.count});
+  final bool muted;
+  const _UnreadBadge({required this.count, required this.muted});
 
   @override
   Widget build(BuildContext context) {
     final txt = count > 999 ? '999+' : '$count';
+    final color = muted
+        ? Theme.of(context).colorScheme.outline.withValues(alpha: 0.65)
+        : Theme.of(context).colorScheme.primary;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.primary,
+        color: color,
         borderRadius: BorderRadius.circular(11),
       ),
       child: Text(
@@ -1619,90 +1679,273 @@ class _ActionTile extends StatelessWidget {
   }
 }
 
-/// Всплывающее контекстное меню «как в чат tab / iMessage»
-class _PeekContextMenu extends StatelessWidget {
+const double _peekMenuItemHeight = 42.0;
+
+class _PeekMenuAction {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool danger;
+
+  const _PeekMenuAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.danger = false,
+  });
+}
+
+/// Всплывающее контекстное меню превью чата — тем же стилем, что меню сообщений.
+class _PeekContextMenu extends StatefulWidget {
   final bool pinned;
-  final VoidCallback onReply;
-  final VoidCallback onCopy;
+  final bool muted;
+  final bool hasUnread;
+  final VoidCallback onOpen;
   final VoidCallback onTogglePin;
-  final VoidCallback onForward;
-  final VoidCallback onDelete;
-  final VoidCallback onSelect;
+  final VoidCallback onToggleMute;
+  final VoidCallback onMarkRead;
 
   const _PeekContextMenu({
     required this.pinned,
-    required this.onReply,
-    required this.onCopy,
+    required this.muted,
+    required this.hasUnread,
+    required this.onOpen,
     required this.onTogglePin,
-    required this.onForward,
-    required this.onDelete,
-    required this.onSelect,
+    required this.onToggleMute,
+    required this.onMarkRead,
+  });
+
+  @override
+  State<_PeekContextMenu> createState() => _PeekContextMenuState();
+}
+
+class _PeekContextMenuState extends State<_PeekContextMenu> {
+  late List<GlobalKey> _itemKeys;
+  int? _selectedIndex;
+  bool _pointerActive = false;
+
+  List<_PeekMenuAction> get _actions => [
+        _PeekMenuAction(
+          icon: Icons.open_in_new_rounded,
+          label: 'Открыть чат',
+          onTap: widget.onOpen,
+        ),
+        _PeekMenuAction(
+          icon: widget.pinned ? Icons.push_pin : Icons.push_pin_outlined,
+          label: widget.pinned ? 'Открепить' : 'Закрепить',
+          onTap: widget.onTogglePin,
+        ),
+        _PeekMenuAction(
+          icon:
+              widget.muted ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+          label: widget.muted ? 'Со звуком' : 'Без звука',
+          onTap: widget.onToggleMute,
+        ),
+        _PeekMenuAction(
+          icon: Icons.mark_chat_read_outlined,
+          label: widget.hasUnread ? 'Прочитано' : 'Обновить прочитано',
+          onTap: widget.onMarkRead,
+        ),
+      ];
+
+  @override
+  void initState() {
+    super.initState();
+    _itemKeys = List.generate(_actions.length, (_) => GlobalKey());
+  }
+
+  @override
+  void didUpdateWidget(covariant _PeekContextMenu oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.pinned != widget.pinned ||
+        oldWidget.muted != widget.muted ||
+        oldWidget.hasUnread != widget.hasUnread) {
+      _itemKeys = List.generate(_actions.length, (_) => GlobalKey());
+      _selectedIndex = null;
+    }
+  }
+
+  void _selectIndex(int? nextIndex, {bool haptic = true}) {
+    if (nextIndex == _selectedIndex) return;
+    setState(() => _selectedIndex = nextIndex);
+    if (haptic && nextIndex != null) {
+      HapticFeedback.selectionClick();
+    }
+  }
+
+  void _selectAtPosition(Offset globalPosition, {bool haptic = true}) {
+    _selectIndex(_hitTest(globalPosition), haptic: haptic);
+  }
+
+  void _activateSelected() {
+    final index = _selectedIndex;
+    final actions = _actions;
+    if (index == null || index < 0 || index >= actions.length) return;
+    actions[index].onTap();
+  }
+
+  int? _hitTest(Offset globalPosition) {
+    Rect? menuBounds;
+    final rowRects = <Rect>[];
+
+    for (final key in _itemKeys) {
+      final context = key.currentContext;
+      final renderObject = context?.findRenderObject();
+      if (renderObject is! RenderBox || !renderObject.hasSize) continue;
+      final topLeft = renderObject.localToGlobal(Offset.zero);
+      final rect = topLeft & renderObject.size;
+      rowRects.add(rect);
+      menuBounds = menuBounds == null ? rect : menuBounds.expandToInclude(rect);
+    }
+
+    for (var i = 0; i < rowRects.length; i++) {
+      if (rowRects[i].contains(globalPosition)) return i;
+    }
+
+    final bounds = menuBounds;
+    if (bounds == null) return null;
+
+    const horizontalSlop = 140.0;
+    if (globalPosition.dx < bounds.left - horizontalSlop ||
+        globalPosition.dx > bounds.right + horizontalSlop) {
+      return null;
+    }
+
+    for (var i = 0; i < rowRects.length; i++) {
+      final row = rowRects[i];
+      if (globalPosition.dy >= row.top && globalPosition.dy <= row.bottom) {
+        return i;
+      }
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final actions = _actions;
+    final selectedIndex = _selectedIndex;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final background = isDark ? const Color(0xFF1D1D1F) : Colors.white;
+    final highlightColor = isDark
+        ? Colors.white.withValues(alpha: 0.10)
+        : Colors.black.withValues(alpha: 0.07);
+
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minWidth: 188, maxWidth: 240),
+      child: Listener(
+        behavior: HitTestBehavior.opaque,
+        onPointerDown: (event) {
+          _pointerActive = true;
+          _selectAtPosition(event.position, haptic: false);
+        },
+        onPointerMove: (event) {
+          if (!_pointerActive) return;
+          _selectAtPosition(event.position);
+        },
+        onPointerUp: (event) {
+          if (!_pointerActive) return;
+          _selectAtPosition(event.position, haptic: false);
+          _pointerActive = false;
+          _activateSelected();
+        },
+        onPointerCancel: (_) {
+          _pointerActive = false;
+        },
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: background,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.18),
+                blurRadius: 18,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: SizedBox(
+              height: actions.length * _peekMenuItemHeight,
+              child: Stack(
+                children: [
+                  if (selectedIndex != null)
+                    AnimatedPositioned(
+                      duration: const Duration(milliseconds: 130),
+                      curve: Curves.easeOutCubic,
+                      left: 5,
+                      right: 5,
+                      top: selectedIndex * _peekMenuItemHeight + 4,
+                      height: _peekMenuItemHeight - 8,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: highlightColor,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (var i = 0; i < actions.length; i++)
+                        _PeekMenuItemTile(
+                          key: _itemKeys[i],
+                          action: actions[i],
+                          selected: selectedIndex == i,
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PeekMenuItemTile extends StatelessWidget {
+  final _PeekMenuAction action;
+  final bool selected;
+
+  const _PeekMenuItemTile({
+    super.key,
+    required this.action,
+    required this.selected,
   });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final bg = Colors.black.withOpacity(0.92);
-    final text = Colors.white.withOpacity(.95);
-    final textMuted = Colors.white.withOpacity(.85);
-    final divider = Colors.white.withOpacity(.12);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final color = action.danger
+        ? Colors.redAccent
+        : (isDark ? Colors.white : Colors.black87);
+    final fontWeight = selected ? FontWeight.w700 : FontWeight.w500;
 
-    Widget item(IconData icon, String label, VoidCallback onTap,
-        {Color? color}) {
-      return InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+    return Material(
+      color: Colors.transparent,
+      child: SizedBox(
+        height: _peekMenuItemHeight,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 14),
           child: Row(
-            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 18, color: color ?? textMuted),
-              const SizedBox(width: 10),
-              Flexible(
+              Icon(action.icon, color: color, size: 18),
+              const SizedBox(width: 12),
+              Expanded(
                 child: Text(
-                  label,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: color ?? text,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: -.1,
-                  ),
+                  action.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: color,
+                        fontWeight: fontWeight,
+                      ),
                 ),
               ),
             ],
           ),
-        ),
-      );
-    }
-
-    Widget sep() => Container(height: 1, color: divider);
-
-    return IntrinsicWidth(
-      stepWidth: 0,
-      child: Material(
-        color: bg,
-        elevation: 18,
-        shadowColor: Colors.black.withOpacity(.45),
-        borderRadius: BorderRadius.circular(14),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            item(Icons.reply_rounded, 'Ответить', onReply),
-            sep(),
-            item(Icons.copy_rounded, 'Скопировать', onCopy),
-            sep(),
-            item(pinned ? Icons.push_pin : Icons.push_pin_outlined,
-                pinned ? 'Открепить' : 'Закрепить', onTogglePin),
-            sep(),
-            item(Icons.forward_to_inbox_rounded, 'Переслать', onForward),
-            sep(),
-            item(Icons.delete_rounded, 'Удалить', onDelete,
-                color: Colors.redAccent),
-            sep(),
-            item(Icons.check_rounded, 'Выбрать', onSelect),
-          ],
         ),
       ),
     );
@@ -1752,6 +1995,83 @@ class _ChatPeekSheetState extends State<_ChatPeekSheet> {
   DateTime? _entrySeenAt;
   bool _showEntryNewBadge = false;
 
+  String? get _effectiveChatId {
+    final id = widget.chatId;
+    if (id != null && id.isNotEmpty) return id;
+    if (widget.team.id.isNotEmpty) return 'team_${widget.team.id}';
+    return null;
+  }
+
+  String? get _cacheKey {
+    final id = _effectiveChatId;
+    if (id == null || id.isEmpty) return null;
+    return 'chat_peek_messages_cache_v2_$id';
+  }
+
+  Future<void> _hydrateFromCache() async {
+    final key = _cacheKey;
+    if (key == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(key);
+      if (raw == null || raw.trim().isEmpty) return;
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return;
+      final messages = decoded
+          .whereType<Map>()
+          .map((row) => _messageFromCache(Map<String, dynamic>.from(row)))
+          .toList()
+        ..sort((a, b) => a.at.compareTo(b.at));
+      if (messages.isEmpty || !mounted) return;
+      setState(() {
+        _messages = messages.length > 30
+            ? messages.sublist(messages.length - 30)
+            : messages;
+        _loading = false;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Future.delayed(const Duration(milliseconds: 1), _jumpToBottom);
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _savePeekCache(List<Message> messages) async {
+    final key = _cacheKey;
+    if (key == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final last = messages.length > 30
+          ? messages.sublist(messages.length - 30)
+          : messages;
+      await prefs.setString(
+        key,
+        jsonEncode(last.map(_messageToCache).toList()),
+      );
+    } catch (_) {}
+  }
+
+  Map<String, dynamic> _messageToCache(Message message) => {
+        'id': message.id,
+        'chatId': message.chatId,
+        'authorId': message.authorId,
+        'authorLogin': message.authorLogin,
+        'authorName': message.authorName,
+        'text': message.text,
+        'at': message.at.toIso8601String(),
+      };
+
+  Message _messageFromCache(Map<String, dynamic> row) {
+    return Message(
+      id: (row['id'] ?? '').toString(),
+      chatId: (row['chatId'] ?? '').toString(),
+      authorId: (row['authorId'] ?? '').toString(),
+      authorLogin: (row['authorLogin'] ?? '').toString(),
+      authorName: (row['authorName'] ?? '').toString(),
+      text: (row['text'] ?? '').toString(),
+      at: DateTime.tryParse((row['at'] ?? '').toString()) ?? DateTime.now(),
+    );
+  }
+
   void _jumpToBottom() {
     if (!_scroll.hasClients) return;
     final pos = _scroll.position;
@@ -1769,6 +2089,7 @@ class _ChatPeekSheetState extends State<_ChatPeekSheet> {
   @override
   void initState() {
     super.initState();
+    _hydrateFromCache();
     _load();
   }
 
@@ -1861,6 +2182,7 @@ class _ChatPeekSheetState extends State<_ChatPeekSheet> {
       // последние 30
       msgs.sort((a, b) => a.at.compareTo(b.at));
       final last = msgs.length > 30 ? msgs.sublist(msgs.length - 30) : msgs;
+      await _savePeekCache(last);
 
       // --- граница «Новые сообщения» ---
       DateTime? boundary;

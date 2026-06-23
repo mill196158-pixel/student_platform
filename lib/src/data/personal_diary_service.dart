@@ -204,8 +204,48 @@ class PersonalDiaryService {
   final SupabaseClient _sb;
   final AcademicContextService _academicContextService;
 
+  Future<PersonalDiaryData?> loadCached({int? semesterNumber}) async {
+    final userId = _sb.auth.currentUser?.id ?? '';
+    if (userId.isEmpty) return null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_cacheKey(userId, semesterNumber));
+      if (raw == null || raw.trim().isEmpty) return null;
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return null;
+      return _dataFromJson(Map<String, dynamic>.from(decoded));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<PersonalDiaryData> loadAndCache({int? semesterNumber}) async {
+    final data = await load(semesterNumber: semesterNumber);
+    await saveCached(data, semesterNumber: semesterNumber);
+    return data;
+  }
+
+  Future<void> saveCached(
+    PersonalDiaryData data, {
+    int? semesterNumber,
+  }) async {
+    final userId =
+        _sb.auth.currentUser?.id ?? data.academicContext.userId ?? '';
+    if (userId.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        _cacheKey(userId, semesterNumber),
+        jsonEncode(_dataToJson(data)),
+      );
+    } catch (_) {}
+  }
+
+  String _cacheKey(String userId, int? semesterNumber) =>
+      'personal_diary_data_cache_v2_${userId}_${semesterNumber ?? 'auto'}';
+
   Future<PersonalDiaryData> load({int? semesterNumber}) async {
-    final context = await _academicContextService.load();
+    final context = await _academicContextService.loadFresh();
     final userId = _sb.auth.currentUser?.id ?? context.userId ?? '';
     final groupId = context.groupId ?? '';
     final currentSemester = context.currentSemesterNumber;
@@ -534,6 +574,228 @@ class PersonalDiaryService {
     );
   }
 
+  Map<String, dynamic> _dataToJson(PersonalDiaryData data) => {
+        'academicContext': _academicContextToJson(data.academicContext),
+        'availableSemesters': data.availableSemesters,
+        'selectedSemesterNumber': data.selectedSemesterNumber,
+        'allSubjects': data.allSubjects.map(_subjectToJson).toList(),
+        'subjects': data.subjects.map(_subjectToJson).toList(),
+        'latestEntries': data.latestEntries.map(_latestEntryToJson).toList(),
+        'publishedAssignments':
+            data.publishedAssignments.map(_assignmentToJson).toList(),
+        'upcomingAssignments':
+            data.upcomingAssignments.map(_assignmentToJson).toList(),
+        'personalTasks': data.personalTasks.map(_taskToJson).toList(),
+        'upcomingPersonalTasks':
+            data.upcomingPersonalTasks.map(_taskToJson).toList(),
+        'totalEntries': data.totalEntries,
+        'totalFiles': data.totalFiles,
+        'totalAssignments': data.totalAssignments,
+        'pendingAssignmentsCount': data.pendingAssignmentsCount,
+        'completedAssignmentsCount': data.completedAssignmentsCount,
+        'personalTasksTotal': data.personalTasksTotal,
+        'personalTasksActive': data.personalTasksActive,
+        'personalTasksDone': data.personalTasksDone,
+      };
+
+  PersonalDiaryData _dataFromJson(Map<String, dynamic> json) {
+    return PersonalDiaryData(
+      academicContext: _academicContextFromJson(
+        _mapFrom(json['academicContext']),
+      ),
+      availableSemesters: _intListFrom(json['availableSemesters']),
+      selectedSemesterNumber: _asInt(json['selectedSemesterNumber']),
+      allSubjects:
+          _listFrom(json['allSubjects']).map(_subjectFromJson).toList(),
+      subjects: _listFrom(json['subjects']).map(_subjectFromJson).toList(),
+      latestEntries:
+          _listFrom(json['latestEntries']).map(_latestEntryFromJson).toList(),
+      publishedAssignments: _listFrom(json['publishedAssignments'])
+          .map(_assignmentFromJson)
+          .toList(),
+      upcomingAssignments: _listFrom(json['upcomingAssignments'])
+          .map(_assignmentFromJson)
+          .toList(),
+      personalTasks:
+          _listFrom(json['personalTasks']).map(_taskFromJson).toList(),
+      upcomingPersonalTasks:
+          _listFrom(json['upcomingPersonalTasks']).map(_taskFromJson).toList(),
+      totalEntries: _asInt(json['totalEntries']) ?? 0,
+      totalFiles: _asInt(json['totalFiles']) ?? 0,
+      totalAssignments: _asInt(json['totalAssignments']) ?? 0,
+      pendingAssignmentsCount: _asInt(json['pendingAssignmentsCount']) ?? 0,
+      completedAssignmentsCount: _asInt(json['completedAssignmentsCount']) ?? 0,
+      personalTasksTotal: _asInt(json['personalTasksTotal']) ?? 0,
+      personalTasksActive: _asInt(json['personalTasksActive']) ?? 0,
+      personalTasksDone: _asInt(json['personalTasksDone']) ?? 0,
+    );
+  }
+
+  Map<String, dynamic> _academicContextToJson(AcademicContext context) => {
+        'userId': context.userId,
+        'publicUserId': context.publicUserId,
+        'recordBookNumber': context.recordBookNumber,
+        'activeEnrollmentId': context.activeEnrollmentId,
+        'groupId': context.groupId,
+        'groupName': context.groupName,
+        'currentSemesterNumber': context.currentSemesterNumber,
+        'academicYearId': context.academicYearId,
+        'academicTermId': context.academicTermId,
+        'hasActiveEnrollment': context.hasActiveEnrollment,
+        'loadWarning': context.loadWarning,
+      };
+
+  AcademicContext _academicContextFromJson(Map<String, dynamic> json) {
+    return AcademicContext(
+      userId: _nullIfEmpty(json['userId']),
+      publicUserId: _nullIfEmpty(json['publicUserId']),
+      recordBookNumber: _nullIfEmpty(json['recordBookNumber']),
+      activeEnrollmentId: _nullIfEmpty(json['activeEnrollmentId']),
+      groupId: _nullIfEmpty(json['groupId']),
+      groupName: _nullIfEmpty(json['groupName']),
+      currentSemesterNumber: _asInt(json['currentSemesterNumber']),
+      academicYearId: _nullIfEmpty(json['academicYearId']),
+      academicTermId: _nullIfEmpty(json['academicTermId']),
+      hasActiveEnrollment: json['hasActiveEnrollment'] == true,
+      loadWarning: _nullIfEmpty(json['loadWarning']),
+    );
+  }
+
+  Map<String, dynamic> _subjectToJson(PersonalDiarySubject subject) => {
+        'subjectOfferingId': subject.subjectOfferingId,
+        'subjectId': subject.subjectId,
+        'title': subject.title,
+        'groupId': subject.groupId,
+        'semesterNumber': subject.semesterNumber,
+        'entryCount': subject.entryCount,
+        'fileCount': subject.fileCount,
+        'assignmentCount': subject.assignmentCount,
+        'incompleteAssignmentCount': subject.incompleteAssignmentCount,
+        'personalTaskCount': subject.personalTaskCount,
+        'activePersonalTaskCount': subject.activePersonalTaskCount,
+        'latestEntryDate': subject.latestEntryDate?.toIso8601String(),
+        'latestPreview': subject.latestPreview,
+      };
+
+  PersonalDiarySubject _subjectFromJson(Map<String, dynamic> json) {
+    return PersonalDiarySubject(
+      subjectOfferingId: (json['subjectOfferingId'] ?? '').toString(),
+      subjectId: (json['subjectId'] ?? '').toString(),
+      title: _cleanTitle(json['title']),
+      groupId: _nullIfEmpty(json['groupId']),
+      semesterNumber: _asInt(json['semesterNumber']),
+      entryCount: _asInt(json['entryCount']) ?? 0,
+      fileCount: _asInt(json['fileCount']) ?? 0,
+      assignmentCount: _asInt(json['assignmentCount']) ?? 0,
+      incompleteAssignmentCount: _asInt(json['incompleteAssignmentCount']) ?? 0,
+      personalTaskCount: _asInt(json['personalTaskCount']) ?? 0,
+      activePersonalTaskCount: _asInt(json['activePersonalTaskCount']) ?? 0,
+      latestEntryDate: _nullableDate(json['latestEntryDate']),
+      latestPreview: _nullIfEmpty(json['latestPreview']),
+    );
+  }
+
+  Map<String, dynamic> _assignmentToJson(PersonalDiaryAssignment assignment) =>
+      {
+        'id': assignment.id,
+        'subjectOfferingId': assignment.subjectOfferingId,
+        'subjectTitle': assignment.subjectTitle,
+        'title': assignment.title,
+        'description': assignment.description,
+        'dueAt': assignment.dueAt?.toIso8601String(),
+        'dueText': assignment.dueText,
+        'status': assignment.status,
+        'completedByMe': assignment.completedByMe,
+        'teamId': assignment.teamId,
+        'messageId': assignment.messageId,
+        'createdAt': assignment.createdAt.toIso8601String(),
+        'publishedAt': assignment.publishedAt?.toIso8601String(),
+      };
+
+  PersonalDiaryAssignment _assignmentFromJson(Map<String, dynamic> json) {
+    return PersonalDiaryAssignment(
+      id: (json['id'] ?? '').toString(),
+      subjectOfferingId: (json['subjectOfferingId'] ?? '').toString(),
+      subjectTitle: _cleanTitle(json['subjectTitle']),
+      title: _cleanTitle(json['title']),
+      description: (json['description'] ?? '').toString(),
+      dueAt: _nullableDate(json['dueAt']),
+      dueText: _nullIfEmpty(json['dueText']),
+      status: (json['status'] ?? 'published').toString(),
+      completedByMe: json['completedByMe'] == true,
+      teamId: _nullIfEmpty(json['teamId']),
+      messageId: _nullIfEmpty(json['messageId']),
+      createdAt: _nullableDate(json['createdAt']) ?? DateTime.now(),
+      publishedAt: _nullableDate(json['publishedAt']),
+    );
+  }
+
+  Map<String, dynamic> _taskToJson(PersonalDiaryTask task) => {
+        'id': task.id,
+        'subjectOfferingId': task.subjectOfferingId,
+        'subjectTitle': task.subjectTitle,
+        'title': task.title,
+        'description': task.description,
+        'dueAt': task.dueAt?.toIso8601String(),
+        'status': task.status,
+        'createdAt': task.createdAt.toIso8601String(),
+        'updatedAt': task.updatedAt.toIso8601String(),
+        'completedAt': task.completedAt?.toIso8601String(),
+      };
+
+  PersonalDiaryTask _taskFromJson(Map<String, dynamic> json) {
+    return PersonalDiaryTask(
+      id: (json['id'] ?? '').toString(),
+      subjectOfferingId: _nullIfEmpty(json['subjectOfferingId']),
+      subjectTitle: _cleanTitle(json['subjectTitle']),
+      title: (json['title'] ?? '').toString(),
+      description: _nullIfEmpty(json['description']),
+      dueAt: _nullableDate(json['dueAt']),
+      status: (json['status'] ?? 'todo').toString(),
+      createdAt: _nullableDate(json['createdAt']) ?? DateTime.now(),
+      updatedAt: _nullableDate(json['updatedAt']) ?? DateTime.now(),
+      completedAt: _nullableDate(json['completedAt']),
+    );
+  }
+
+  Map<String, dynamic> _latestEntryToJson(PersonalDiaryLatestEntry entry) => {
+        'id': entry.id,
+        'subjectOfferingId': entry.subjectOfferingId,
+        'subjectTitle': entry.subjectTitle,
+        'date': entry.date.toIso8601String(),
+        'preview': entry.preview,
+        'fileCount': entry.fileCount,
+      };
+
+  PersonalDiaryLatestEntry _latestEntryFromJson(Map<String, dynamic> json) {
+    return PersonalDiaryLatestEntry(
+      id: (json['id'] ?? '').toString(),
+      subjectOfferingId: (json['subjectOfferingId'] ?? '').toString(),
+      subjectTitle: _cleanTitle(json['subjectTitle']),
+      date: _nullableDate(json['date']) ?? DateTime.now(),
+      preview: _nullIfEmpty(json['preview']),
+      fileCount: _asInt(json['fileCount']) ?? 0,
+    );
+  }
+
+  static Map<String, dynamic> _mapFrom(dynamic value) {
+    if (value is Map) return Map<String, dynamic>.from(value);
+    return const <String, dynamic>{};
+  }
+
+  static List<Map<String, dynamic>> _listFrom(dynamic value) {
+    if (value is! List) return const [];
+    return value
+        .whereType<Map>()
+        .map((row) => Map<String, dynamic>.from(row))
+        .toList();
+  }
+
+  static List<int> _intListFrom(dynamic value) {
+    if (value is! List) return const [];
+    return value.map(_asInt).whereType<int>().toList();
+  }
+
   Future<void> setAssignmentDone({
     required String assignmentId,
     required bool done,
@@ -736,7 +998,7 @@ class PersonalDiaryService {
   }
 
   Future<List<PersonalDiaryLesson>> loadScheduleLessons() async {
-    final context = await _academicContextService.load();
+    final context = await _academicContextService.loadFresh();
     final groupId = context.groupId ?? '';
     if (groupId.isEmpty) return const [];
 

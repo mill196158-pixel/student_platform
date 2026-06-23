@@ -1,3 +1,7 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/auth_session.dart';
@@ -83,37 +87,91 @@ class AcademicContextService {
 
   final SupabaseClient _sb;
 
-  Future<AcademicContext> load() async {
+  Future<AcademicContext> load({bool preferCache = true}) async {
     final authUser = _sb.auth.currentUser;
     if (authUser == null) {
       return const AcademicContext.empty(
           warning: 'Пользователь не авторизован');
     }
 
+    if (preferCache) {
+      final cached = await loadCached(authUser.id);
+      if (cached != null) {
+        unawaited(_loadFreshAndCache(authUser.id));
+        return cached;
+      }
+    }
+
+    return _loadFreshAndCache(authUser.id);
+  }
+
+  Future<AcademicContext> loadFresh() async {
+    final authUser = _sb.auth.currentUser;
+    if (authUser == null) {
+      return const AcademicContext.empty(
+          warning: 'Пользователь не авторизован');
+    }
+    return _loadFreshAndCache(authUser.id);
+  }
+
+  Future<AcademicContext?> loadCached([String? userId]) async {
+    final id = userId ?? _sb.auth.currentUser?.id ?? '';
+    if (id.isEmpty) return null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_cacheKey(id));
+      if (raw == null || raw.trim().isEmpty) return null;
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return null;
+      return _contextFromJson(Map<String, dynamic>.from(decoded));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<AcademicContext> _loadFreshAndCache(String authUserId) async {
     try {
       await AuthSession.ensureFreshSession(_sb);
-      return await _loadForUser(authUser.id);
+      final context = await _loadForUser(authUserId);
+      if (context.loadWarning == null) await _saveCached(context);
+      return context;
     } catch (e) {
       if (AuthSession.isAuthFailure(e)) {
         try {
           await _sb.auth.refreshSession();
-          return await _loadForUser(authUser.id);
+          final context = await _loadForUser(authUserId);
+          if (context.loadWarning == null) await _saveCached(context);
+          return context;
         } catch (_) {
           return AcademicContext(
-            userId: authUser.id,
+            userId: authUserId,
             hasActiveEnrollment: false,
             loadWarning: AuthSession.sessionExpiredMessage,
           );
         }
       }
 
+      final cached = await loadCached(authUserId);
+      if (cached != null) return cached;
       return AcademicContext(
-        userId: authUser.id,
+        userId: authUserId,
         hasActiveEnrollment: false,
         loadWarning: 'Не удалось загрузить учебный контекст: $e',
       );
     }
   }
+
+  Future<void> _saveCached(AcademicContext context) async {
+    final userId = context.userId ?? _sb.auth.currentUser?.id ?? '';
+    if (userId.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+          _cacheKey(userId), jsonEncode(_contextToJson(context)));
+    } catch (_) {}
+  }
+
+  String _cacheKey(String userId) => 'academic_context_cache_v2_$userId';
 
   Future<AcademicContext> _loadForUser(String authUserId) async {
     final publicUser = await _sb
@@ -226,6 +284,36 @@ class AcademicContextService {
       number: _asInt(selected['semester_number']),
       academicYearId: _asNullableString(selected['academic_year_id']),
       academicTermId: _asNullableString(selected['academic_term_id']),
+    );
+  }
+
+  Map<String, dynamic> _contextToJson(AcademicContext context) => {
+        'userId': context.userId,
+        'publicUserId': context.publicUserId,
+        'recordBookNumber': context.recordBookNumber,
+        'activeEnrollmentId': context.activeEnrollmentId,
+        'groupId': context.groupId,
+        'groupName': context.groupName,
+        'currentSemesterNumber': context.currentSemesterNumber,
+        'academicYearId': context.academicYearId,
+        'academicTermId': context.academicTermId,
+        'hasActiveEnrollment': context.hasActiveEnrollment,
+        'loadWarning': context.loadWarning,
+      };
+
+  AcademicContext _contextFromJson(Map<String, dynamic> json) {
+    return AcademicContext(
+      userId: _asNullableString(json['userId']),
+      publicUserId: _asNullableString(json['publicUserId']),
+      recordBookNumber: _asNullableString(json['recordBookNumber']),
+      activeEnrollmentId: _asNullableString(json['activeEnrollmentId']),
+      groupId: _asNullableString(json['groupId']),
+      groupName: _asNullableString(json['groupName']),
+      currentSemesterNumber: _asInt(json['currentSemesterNumber']),
+      academicYearId: _asNullableString(json['academicYearId']),
+      academicTermId: _asNullableString(json['academicTermId']),
+      hasActiveEnrollment: json['hasActiveEnrollment'] == true,
+      loadWarning: _asNullableString(json['loadWarning']),
     );
   }
 

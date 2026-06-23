@@ -16,15 +16,24 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
   final _searchController = TextEditingController();
   final _assignmentDoneOverrides = <String, bool>{};
   final _taskStatusOverrides = <String, String>{};
-  late Future<PersonalDiaryData> _future = _service.load();
+  late Future<PersonalDiaryData> _future = _loadWithCache();
+
+  Future<PersonalDiaryData> _loadWithCache() async {
+    final cached = await _service.loadCached();
+    if (cached != null) {
+      _refreshSilently();
+      return cached;
+    }
+    return _service.loadAndCache();
+  }
 
   Future<void> _refresh() async {
-    setState(() => _future = _service.load());
+    setState(() => _future = _service.loadAndCache());
     await _future;
   }
 
   void _refreshSilently() {
-    _service.load().then((fresh) {
+    _service.loadAndCache().then((fresh) {
       if (!mounted) return;
       setState(() => _future = Future<PersonalDiaryData>.value(fresh));
     });
@@ -596,9 +605,10 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
       ),
     );
     if (task == null || !mounted) return;
+    final updated = _dataWithCreatedTask(data, task);
+    await _service.saveCached(updated);
     setState(() {
-      _future =
-          Future<PersonalDiaryData>.value(_dataWithCreatedTask(data, task));
+      _future = Future<PersonalDiaryData>.value(updated);
     });
     _refreshSilently();
   }

@@ -25,38 +25,6 @@ class ChatActions {
     return DateTime.now().difference(m.at) <= const Duration(hours: 12);
   }
 
-  // компактный пункт меню
-  static Widget _tile(
-    BuildContext ctx, {
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-    bool danger = false,
-  }) {
-    final color = danger ? Colors.red : Colors.white;
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        height: 40,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        child: Row(
-          children: [
-            Icon(icon, color: danger ? Colors.red : Colors.white70, size: 20),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: color, fontSize: 14),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   // посчитать “естественную” ширину панели по самому длинному тексту
   static double _calcPanelWidth({
     required BuildContext context,
@@ -112,7 +80,7 @@ class ChatActions {
         const gapBubble = 4.0;
         const gapBetween = 6.0;
         const reactionH = 48.0;
-        const tileH = 40.0;
+        const tileH = _contextMenuItemHeight;
 
         final hasDelete = _canDelete(message);
         final hasText = message.text.trim().isNotEmpty;
@@ -129,7 +97,7 @@ class ChatActions {
         ];
 
         final tilesCount = labels.length;
-        final actionsFullH = tilesCount * tileH + 8.0;
+        final actionsFullH = tilesCount * tileH;
 
         final noRect = targetRect == null;
 
@@ -628,6 +596,249 @@ class ChatActions {
   }
 }
 
+const double _contextMenuItemHeight = 42.0;
+
+class _ContextAction {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool danger;
+
+  const _ContextAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.danger = false,
+  });
+}
+
+class _ContextActionsMenu extends StatefulWidget {
+  final List<_ContextAction> actions;
+  final double width;
+  final double maxHeight;
+
+  const _ContextActionsMenu({
+    required this.actions,
+    required this.width,
+    required this.maxHeight,
+  });
+
+  @override
+  State<_ContextActionsMenu> createState() => _ContextActionsMenuState();
+}
+
+class _ContextActionsMenuState extends State<_ContextActionsMenu> {
+  late List<GlobalKey> _itemKeys;
+  int? _selectedIndex;
+  bool _pointerActive = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _itemKeys = List.generate(widget.actions.length, (_) => GlobalKey());
+  }
+
+  @override
+  void didUpdateWidget(covariant _ContextActionsMenu oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.actions.length != widget.actions.length) {
+      _itemKeys = List.generate(widget.actions.length, (_) => GlobalKey());
+      _selectedIndex = null;
+    }
+  }
+
+  void _selectIndex(int? nextIndex, {bool haptic = true}) {
+    if (nextIndex == _selectedIndex) return;
+    setState(() => _selectedIndex = nextIndex);
+    if (haptic && nextIndex != null) {
+      services.HapticFeedback.selectionClick();
+    }
+  }
+
+  void _selectAtPosition(Offset globalPosition, {bool haptic = true}) {
+    _selectIndex(_hitTest(globalPosition), haptic: haptic);
+  }
+
+  void _activateSelected() {
+    final index = _selectedIndex;
+    if (index == null || index < 0 || index >= widget.actions.length) return;
+    widget.actions[index].onTap();
+  }
+
+  int? _hitTest(Offset globalPosition) {
+    Rect? menuBounds;
+    final rowRects = <Rect>[];
+
+    for (final key in _itemKeys) {
+      final context = key.currentContext;
+      final renderObject = context?.findRenderObject();
+      if (renderObject is! RenderBox || !renderObject.hasSize) continue;
+      final topLeft = renderObject.localToGlobal(Offset.zero);
+      final rect = topLeft & renderObject.size;
+      rowRects.add(rect);
+      menuBounds = menuBounds == null ? rect : menuBounds.expandToInclude(rect);
+    }
+
+    for (var i = 0; i < rowRects.length; i++) {
+      if (rowRects[i].contains(globalPosition)) return i;
+    }
+
+    final bounds = menuBounds;
+    if (bounds == null) return null;
+
+    const horizontalSlop = 140.0;
+    if (globalPosition.dx < bounds.left - horizontalSlop ||
+        globalPosition.dx > bounds.right + horizontalSlop) {
+      return null;
+    }
+
+    for (var i = 0; i < rowRects.length; i++) {
+      final row = rowRects[i];
+      if (globalPosition.dy >= row.top && globalPosition.dy <= row.bottom) {
+        return i;
+      }
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedIndex = _selectedIndex;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final background = isDark ? const Color(0xFF1D1D1F) : Colors.white;
+    final highlightColor = isDark
+        ? Colors.white.withValues(alpha: 0.10)
+        : Colors.black.withValues(alpha: 0.07);
+    final contentHeight = widget.actions.length * _contextMenuItemHeight;
+
+    return SizedBox(
+      width: widget.width,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: widget.maxHeight),
+        child: Listener(
+          behavior: HitTestBehavior.opaque,
+          onPointerDown: (event) {
+            _pointerActive = true;
+            _selectAtPosition(event.position, haptic: false);
+          },
+          onPointerMove: (event) {
+            if (!_pointerActive) return;
+            _selectAtPosition(event.position);
+          },
+          onPointerUp: (event) {
+            if (!_pointerActive) return;
+            _selectAtPosition(event.position, haptic: false);
+            _pointerActive = false;
+            _activateSelected();
+          },
+          onPointerCancel: (_) {
+            _pointerActive = false;
+          },
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: background,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.18),
+                  blurRadius: 18,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                child: SizedBox(
+                  height: contentHeight,
+                  child: Stack(
+                    children: [
+                      if (selectedIndex != null)
+                        AnimatedPositioned(
+                          duration: const Duration(milliseconds: 130),
+                          curve: Curves.easeOutCubic,
+                          left: 5,
+                          right: 5,
+                          top: selectedIndex * _contextMenuItemHeight + 4,
+                          height: _contextMenuItemHeight - 8,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: highlightColor,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                        ),
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (var i = 0; i < widget.actions.length; i++)
+                            _ContextMenuItemTile(
+                              key: _itemKeys[i],
+                              action: widget.actions[i],
+                              selected: selectedIndex == i,
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ContextMenuItemTile extends StatelessWidget {
+  final _ContextAction action;
+  final bool selected;
+
+  const _ContextMenuItemTile({
+    super.key,
+    required this.action,
+    required this.selected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final color = action.danger
+        ? Colors.redAccent
+        : (isDark ? Colors.white : Colors.black87);
+    final fontWeight = selected ? FontWeight.w700 : FontWeight.w500;
+
+    return Material(
+      color: Colors.transparent,
+      child: SizedBox(
+        height: _contextMenuItemHeight,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Row(
+            children: [
+              Icon(action.icon, color: color, size: 18),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  action.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: color,
+                        fontWeight: fontWeight,
+                      ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Внутренний стек: смайлы, действия, и клон бабла под ними для фокуса.
 class _OverlayStack extends StatelessWidget {
   final Rect bubbleRect;
@@ -724,74 +935,50 @@ class _OverlayStack extends StatelessWidget {
           ),
         ),
 
-        // Панель действий — фикс. ширина по тексту
+        // Панель действий — такой же список, как в основном чате,
+        // с выбором пункта при движении пальца по меню.
         Positioned(
           left: actionsRect.left,
           top: actionsRect.top,
           width: actionsRect.width,
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: actionsRect.height,
-              minWidth: actionsRect.width,
-            ),
-            child: Material(
-              color: Colors.transparent,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.82),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: SingleChildScrollView(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        ChatActions._tile(
-                          context,
-                          icon: Icons.reply,
-                          label: 'Ответить',
-                          onTap: onReply,
-                        ),
-                        if (onCopy != null)
-                          ChatActions._tile(
-                            context,
-                            icon: Icons.copy,
-                            label: 'Скопировать',
-                            onTap: () async => await onCopy!.call(),
-                          ),
-                        ChatActions._tile(
-                          context,
-                          icon: Icons.push_pin,
-                          label: pinLabel,
-                          onTap: onPin,
-                        ),
-                        ChatActions._tile(
-                          context,
-                          icon: Icons.reply_outlined,
-                          label: 'Переслать',
-                          onTap: onForward,
-                        ),
-                        if (onDelete != null)
-                          ChatActions._tile(
-                            context,
-                            icon: Icons.delete,
-                            label: 'Удалить',
-                            onTap: () async => await onDelete!.call(),
-                            danger: true,
-                          ),
-                        ChatActions._tile(
-                          context,
-                          icon: Icons.check,
-                          label: 'Выбрать',
-                          onTap: onSelect,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+          child: _ContextActionsMenu(
+            actions: [
+              _ContextAction(
+                icon: Icons.reply,
+                label: 'Ответить',
+                onTap: onReply,
               ),
-            ),
+              if (onCopy != null)
+                _ContextAction(
+                  icon: Icons.copy,
+                  label: 'Скопировать',
+                  onTap: () async => await onCopy!.call(),
+                ),
+              _ContextAction(
+                icon: Icons.push_pin,
+                label: pinLabel,
+                onTap: onPin,
+              ),
+              _ContextAction(
+                icon: Icons.reply_outlined,
+                label: 'Переслать',
+                onTap: onForward,
+              ),
+              if (onDelete != null)
+                _ContextAction(
+                  icon: Icons.delete,
+                  label: 'Удалить',
+                  onTap: () async => await onDelete!.call(),
+                  danger: true,
+                ),
+              _ContextAction(
+                icon: Icons.check,
+                label: 'Выбрать',
+                onTap: onSelect,
+              ),
+            ],
+            width: actionsRect.width,
+            maxHeight: actionsRect.height,
           ),
         ),
 
