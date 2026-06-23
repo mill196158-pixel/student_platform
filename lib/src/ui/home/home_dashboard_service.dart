@@ -183,7 +183,7 @@ class HomeDashboardService {
         title: 'Материалы',
         subtitle: 'Полезные файлы появятся по семестрам',
         body:
-            'Полезные ссылки, файлы и материалы по предметам будут доступны в разделе «Полезная».',
+            'Полезные ссылки, файлы и материалы по предметам будут доступны в разделе «Информация».',
         icon: Icons.folder_copy_outlined,
         gradientColors: const [Color(0xFFC5EFE5), Color(0xFFAEE3D8)],
         type: HomeNewsType.materials,

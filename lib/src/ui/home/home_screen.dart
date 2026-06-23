@@ -184,7 +184,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       const _NotificationLine(
         title: 'Материалы',
-        text: 'Новые материалы появятся в разделе «Полезная»',
+        text: 'Новые материалы появятся в разделе «Информация»',
         time: 'сегодня',
         icon: Icons.folder_copy_outlined,
         color: Color(0xFF2F9D84),
