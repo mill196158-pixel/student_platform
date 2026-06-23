@@ -9,6 +9,7 @@ import 'package:student_platform/src/ui/learning/data/supabase_learning_reposito
 import 'package:student_platform/src/ui/learning/models/team.dart';
 import 'package:student_platform/src/ui/schedule/models/lesson.dart';
 import 'package:student_platform/src/ui/schedule/schedule_screen.dart';
+import 'package:student_platform/src/ui/schedule/utils/msk_date.dart';
 
 class HomeDashboardService {
   HomeDashboardService({
@@ -25,22 +26,56 @@ class HomeDashboardService {
   final SupabaseLearningRepository _learningRepository;
 
   Future<HomeDashboardData> load() async {
+    final scheduleDate = MskDate.today();
     final profile = await _loadProfile();
     final results = await Future.wait<dynamic>([
-      _loadTodayLessons(),
+      _loadTodayLessons(scheduleDate),
       _loadAssignments(profile.groupName),
+      _loadReadNotificationIds(),
     ]);
 
     final lessons = results[0] as List<Lesson>;
     final assignments = results[1] as List<HomeAssignmentPreview>;
+    final readNotificationIds = results[2] as Set<String>;
 
     return HomeDashboardData(
       profile: profile,
+      scheduleDate: scheduleDate,
       todayLessons: lessons,
       assignments: assignments.take(4).toList(),
       news: _localNews(),
+      readNotificationIds: readNotificationIds,
       unreadMessagesCount: 0,
     );
+  }
+
+  Future<void> setAssignmentDone({
+    required String assignmentId,
+    required bool done,
+  }) async {
+    await _sb.rpc('set_assignment_done', params: {
+      'p_assignment_id': assignmentId,
+      'p_done': done,
+    });
+  }
+
+  Future<void> markNotificationRead(String notificationId) async {
+    final userId = _sb.auth.currentUser?.id;
+    final trimmedId = notificationId.trim();
+    if (userId == null || trimmedId.isEmpty) return;
+
+    try {
+      await _sb.from('home_notification_reads').upsert(
+        {
+          'user_id': userId,
+          'notification_id': trimmedId,
+          'read_at': DateTime.now().toUtc().toIso8601String(),
+        },
+        onConflict: 'user_id,notification_id',
+      );
+    } catch (e) {
+      debugPrint('[home] mark notification read failed: $e');
+    }
   }
 
   Future<HomeUserProfile> _loadProfile() async {
@@ -73,12 +108,30 @@ class HomeDashboardService {
     return const HomeUserProfile();
   }
 
-  Future<List<Lesson>> _loadTodayLessons() async {
+  Future<Set<String>> _loadReadNotificationIds() async {
+    final userId = _sb.auth.currentUser?.id;
+    if (userId == null) return {};
+
     try {
-      final today = _nowMsk();
-      final monthLessons = await _scheduleRepository.loadMonth(today);
-      return monthLessons
-          .where((lesson) => _isSameDate(lesson.date, today))
+      final rows = await _sb
+          .from('home_notification_reads')
+          .select('notification_id')
+          .eq('user_id', userId);
+      return rows
+          .map((row) => (row['notification_id'] ?? '').toString().trim())
+          .where((id) => id.isNotEmpty)
+          .toSet();
+    } catch (e) {
+      debugPrint('[home] notification reads load failed: $e');
+      return {};
+    }
+  }
+
+  Future<List<Lesson>> _loadTodayLessons(DateTime today) async {
+    try {
+      final todayLessons = await _scheduleRepository.loadRange(today, days: 1);
+      return todayLessons
+          .where((lesson) => MskDate.isSameCalendarDate(lesson.date, today))
           .toList()
         ..sort(_compareLessons);
     } catch (e) {
@@ -143,12 +196,6 @@ class HomeDashboardService {
     if (aDue == null) return 1;
     if (bDue == null) return -1;
     return aDue.compareTo(bDue);
-  }
-
-  DateTime _nowMsk() => DateTime.now().toUtc().add(const Duration(hours: 3));
-
-  bool _isSameDate(DateTime a, DateTime b) {
-    return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 
   List<HomeNewsItem> _localNews() {

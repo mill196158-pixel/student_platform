@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'package:student_platform/src/ui/schedule/utils/msk_date.dart';
+
 enum LessonType { lecture, practice, lab, other }
 
 class Lesson {
@@ -51,10 +53,7 @@ class Lesson {
     }
 
     DateTime parseDate(dynamic value) {
-      if (value is DateTime) return value;
-      final s = value?.toString();
-      if (s == null || s.isEmpty) return DateTime.now();
-      return DateTime.parse(s);
+      return MskDate.parseDatabaseDate(value);
     }
 
     int parseInt(dynamic value) {
@@ -134,16 +133,25 @@ class Lesson {
     );
   }
 
-  /// Очищенное название без "(л.)/(пр.)/(лаб.)"
+  /// Очищенное название без суффикса типа занятия.
   String get subject =>
-      subjectRaw.replaceAll(RegExp(r'\((л|пр|лаб)\.\)\s*$'), '').trim();
+      subjectRaw.replaceAll(RegExp(r'\((л|пр|лаб|сем)\.\)\s*$'), '').trim();
 
-  /// Тип по суффиксу
+  /// Тип по суффиксу/ключевым словам из импортированного расписания.
   LessonType get type {
     final s = subjectRaw.toLowerCase();
-    if (s.contains('(лаб.)')) return LessonType.lab;
-    if (s.contains('(пр.)')) return LessonType.practice;
-    if (s.contains('(л.)')) return LessonType.lecture;
+    if (s.contains('(лаб.)') || s.contains('лаборатор')) {
+      return LessonType.lab;
+    }
+    if (s.contains('(пр.)') ||
+        s.contains('(сем.)') ||
+        s.contains('практика') ||
+        s.contains('семинар')) {
+      return LessonType.practice;
+    }
+    if (s.contains('(л.)') || s.contains('лекция')) {
+      return LessonType.lecture;
+    }
     return LessonType.other;
   }
 

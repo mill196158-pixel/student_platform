@@ -9,6 +9,7 @@ class ChatCopiedFileEntry {
   final String name;
   final String mimeType;
   final bool isImage;
+  final String? fileId;
   final DateTime copiedAt;
 
   const ChatCopiedFileEntry({
@@ -16,6 +17,7 @@ class ChatCopiedFileEntry {
     required this.name,
     required this.mimeType,
     required this.isImage,
+    this.fileId,
     required this.copiedAt,
   });
 
@@ -35,6 +37,7 @@ class ChatCopiedFileCache {
   static const _keyName = 'chat_copied_file_name';
   static const _keyMime = 'chat_copied_file_mime';
   static const _keyIsImage = 'chat_copied_file_is_image';
+  static const _keyFileId = 'chat_copied_file_file_id';
   static const _keyCopiedAt = 'chat_copied_file_copied_at';
 
   static ChatCopiedFileEntry? _last;
@@ -44,12 +47,14 @@ class ChatCopiedFileCache {
     required String name,
     required String mimeType,
     required bool isImage,
+    String? fileId,
   }) {
     final entry = ChatCopiedFileEntry(
       path: path,
       name: name,
       mimeType: mimeType,
       isImage: isImage,
+      fileId: fileId,
       copiedAt: DateTime.now(),
     );
     _last = entry;
@@ -74,6 +79,11 @@ class ChatCopiedFileCache {
     return entry;
   }
 
+  static Future<void> clear() async {
+    _last = null;
+    await _clear();
+  }
+
   static Future<void> _persist(ChatCopiedFileEntry entry) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -81,6 +91,12 @@ class ChatCopiedFileCache {
       await prefs.setString(_keyName, entry.name);
       await prefs.setString(_keyMime, entry.mimeType);
       await prefs.setBool(_keyIsImage, entry.isImage);
+      final fileId = entry.fileId;
+      if (fileId != null && fileId.isNotEmpty) {
+        await prefs.setString(_keyFileId, fileId);
+      } else {
+        await prefs.remove(_keyFileId);
+      }
       await prefs.setString(_keyCopiedAt, entry.copiedAt.toIso8601String());
     } catch (_) {}
   }
@@ -91,6 +107,7 @@ class ChatCopiedFileCache {
       final path = prefs.getString(_keyPath);
       final name = prefs.getString(_keyName);
       final mime = prefs.getString(_keyMime);
+      final fileId = prefs.getString(_keyFileId);
       final copiedAt = DateTime.tryParse(prefs.getString(_keyCopiedAt) ?? '');
       if (path == null ||
           path.isEmpty ||
@@ -106,6 +123,7 @@ class ChatCopiedFileCache {
         name: name,
         mimeType: mime,
         isImage: prefs.getBool(_keyIsImage) ?? mime.startsWith('image/'),
+        fileId: fileId,
         copiedAt: copiedAt,
       );
     } catch (_) {
@@ -120,6 +138,7 @@ class ChatCopiedFileCache {
       await prefs.remove(_keyName);
       await prefs.remove(_keyMime);
       await prefs.remove(_keyIsImage);
+      await prefs.remove(_keyFileId);
       await prefs.remove(_keyCopiedAt);
     } catch (_) {}
   }

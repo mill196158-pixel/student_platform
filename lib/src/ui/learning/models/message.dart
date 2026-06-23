@@ -11,13 +11,21 @@ enum MessageDeliveryStatus { sent, sending, failed }
 
 // ==== Forward models (общая для ДМ и групп) ====
 class ForwardAttachmentModel {
+  final String? id;
   final String url;
   final String? name;
   final String? mime;
   final int? size;
-  ForwardAttachmentModel({required this.url, this.name, this.mime, this.size});
+  ForwardAttachmentModel({
+    this.id,
+    required this.url,
+    this.name,
+    this.mime,
+    this.size,
+  });
   factory ForwardAttachmentModel.fromJson(Map<String, dynamic> j) =>
       ForwardAttachmentModel(
+        id: (j['id'] ?? j['file_id'] ?? j['fid'])?.toString(),
         url: (j['url'] ?? '').toString(),
         name: j['name'] as String?,
         mime: j['mime'] as String?,
@@ -255,12 +263,17 @@ class Message {
       textVal = (j['content'] ?? j['text'] ?? '').toString();
     }
 
+    final authorName = (j['author_name'] ?? '').toString().trim();
+    final authorLogin = (j['author_login'] ?? '').toString().trim();
+
     return Message(
       id: (j['id'] ?? '').toString(),
       chatId: (j['chat_id'] ?? '').toString(),
       authorId: (j['author_id'] ?? '').toString(),
-      authorLogin: (j['author_login'] ?? '').toString(),
-      authorName: (j['author_name'] ?? 'Студент').toString(),
+      authorLogin: authorLogin,
+      authorName: authorName.isNotEmpty
+          ? authorName
+          : (authorLogin.isNotEmpty ? authorLogin : 'Студент'),
       text: textVal,
       at: DateTime.tryParse((j['created_at'] ?? j['at'] ?? '').toString()) ??
           DateTime.fromMillisecondsSinceEpoch(0),

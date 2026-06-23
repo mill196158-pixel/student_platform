@@ -666,8 +666,10 @@ class _AssignmentImageGrid extends StatelessWidget {
         builder: (_) => FullscreenImage(
           imageUrl: _attachmentUrl(image),
           fileName: _attachmentName(image),
+          sourceFileId: _attachmentId(image),
           galleryUrls: images.map(_attachmentUrl).toList(),
           galleryFileNames: images.map(_attachmentName).toList(),
+          galleryFileIds: images.map(_attachmentId).toList(),
           initialIndex: initialIndex < 0 ? 0 : initialIndex,
         ),
       ),
@@ -706,6 +708,11 @@ String _attachmentUrl(Map<String, String> attachment) {
           attachment['link'] ??
           attachment['href'] ??
           '')
+      .trim();
+}
+
+String _attachmentId(Map<String, String> attachment) {
+  return (attachment['id'] ?? attachment['file_id'] ?? attachment['fid'] ?? '')
       .trim();
 }
 

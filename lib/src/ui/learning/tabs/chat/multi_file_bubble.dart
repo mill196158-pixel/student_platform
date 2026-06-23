@@ -473,6 +473,7 @@ class MultiFileBubble extends StatelessWidget {
           fileName: file.fileName,
           fileSize: file.fileSize,
           mimeType: file.fileType,
+          sourceFileId: file.id,
         ),
       ),
     );
@@ -490,8 +491,10 @@ class MultiFileBubble extends StatelessWidget {
         builder: (_) => FullscreenImage(
           imageUrl: file.fileUrl,
           fileName: file.fileName,
+          sourceFileId: file.id,
           galleryUrls: images.map((e) => e.fileUrl).toList(),
           galleryFileNames: images.map((e) => e.fileName).toList(),
+          galleryFileIds: images.map((e) => e.id).toList(),
           initialIndex: currentIndexInImages < 0 ? 0 : currentIndexInImages,
         ),
       ),

@@ -23,16 +23,13 @@ class DmApi {
   // 2) Загрузить сообщения (и подтянуть вложения)
   static Future<List<Message>> loadMessages(
       {required String chatId, int limit = 50, DateTime? since}) async {
-    var query =
-        _sb.from('messages').select('*').eq('chat_id', chatId);
+    var query = _sb.from('messages').select('*').eq('chat_id', chatId);
 
     final sinceAt = since ?? DateTime.fromMillisecondsSinceEpoch(0);
     query = query.gte('created_at', sinceAt.toUtc().toIso8601String());
 
     // Последние N сообщений (DESC), затем ASC для UI.
-    final rows = await query
-        .order('created_at', ascending: false)
-        .limit(limit);
+    final rows = await query.order('created_at', ascending: false).limit(limit);
 
     if (kDebugMode) {
       debugPrint(
@@ -60,12 +57,16 @@ class DmApi {
 
   static Message _messageFromRow(Map<String, dynamic> m,
       {required String chatId}) {
+    final authorName = (m['author_name'] ?? '').toString().trim();
+    final authorLogin = (m['author_login'] ?? '').toString().trim();
     return Message(
       id: (m['id'] ?? '').toString(),
       chatId: (m['chat_id'] ?? chatId).toString(),
       authorId: (m['author_id'] ?? '').toString(),
-      authorLogin: (m['author_login'] ?? '').toString(),
-      authorName: (m['author_name'] ?? 'Студент').toString(),
+      authorLogin: authorLogin,
+      authorName: authorName.isNotEmpty
+          ? authorName
+          : (authorLogin.isNotEmpty ? authorLogin : 'Студент'),
       authorAvatarUrl: (m['author_avatar_url'] ?? '').toString(),
       text: (m['text'] ?? m['content'] ?? m['body'] ?? '').toString(),
       type: _typeFromServer((m['type'] ?? m['msg_type'] ?? 'text').toString()),
@@ -113,7 +114,8 @@ class DmApi {
         (u['surname'] ?? '').toString(),
       ].where((s) => s.isNotEmpty).join(' ').trim();
       data['author_login'] = (u['login'] ?? '').toString();
-      if (fullName.isNotEmpty) data['author_name'] = fullName;
+      data['author_name'] =
+          fullName.isNotEmpty ? fullName : (u['login'] ?? '').toString();
       data['author_avatar_url'] = (u['avatar_url'] ?? '').toString();
     } catch (_) {}
   }

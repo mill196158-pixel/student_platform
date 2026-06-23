@@ -168,16 +168,20 @@ void _showShortCopiedSnack(BuildContext context) {
 class FullscreenImage extends StatefulWidget {
   final String imageUrl;
   final String? fileName;
+  final String? sourceFileId;
   final List<String>? galleryUrls;
   final List<String>? galleryFileNames;
+  final List<String>? galleryFileIds;
   final int initialIndex;
 
   const FullscreenImage({
     super.key,
     required this.imageUrl,
     this.fileName,
+    this.sourceFileId,
     this.galleryUrls,
     this.galleryFileNames,
+    this.galleryFileIds,
     this.initialIndex = 0,
   });
 
@@ -208,6 +212,19 @@ class _FullscreenImageState extends State<FullscreenImage> {
 
   String get _currentUrl =>
       _isGallery ? widget.galleryUrls![_currentIndex] : widget.imageUrl;
+
+  String? get _currentFileId {
+    if (_isGallery) {
+      final ids = widget.galleryFileIds;
+      if (ids != null && _currentIndex < ids.length) {
+        final id = ids[_currentIndex].trim();
+        if (id.isNotEmpty) return id;
+      }
+      return null;
+    }
+    final id = widget.sourceFileId?.trim();
+    return (id == null || id.isEmpty) ? null : id;
+  }
 
   String get _currentName {
     if (_isGallery) {
@@ -284,6 +301,7 @@ class _FullscreenImageState extends State<FullscreenImage> {
         name: meta.name,
         mimeType: meta.mimeType,
         isImage: meta.isImage,
+        fileId: _currentFileId,
       );
       if (mounted) _showShortCopiedSnack(context);
     } catch (e) {
@@ -426,6 +444,7 @@ class FullscreenFileViewer extends StatefulWidget {
   final String fileName;
   final int fileSize;
   final String? mimeType;
+  final String? sourceFileId;
 
   const FullscreenFileViewer({
     super.key,
@@ -433,6 +452,7 @@ class FullscreenFileViewer extends StatefulWidget {
     required this.fileName,
     required this.fileSize,
     this.mimeType,
+    this.sourceFileId,
   });
 
   @override
@@ -512,6 +532,7 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
         name: meta.name,
         mimeType: meta.mimeType,
         isImage: meta.isImage,
+        fileId: widget.sourceFileId,
       );
       if (mounted) _showShortCopiedSnack(context);
     } catch (e) {

@@ -722,11 +722,12 @@ class _MyChatsScreenState extends State<MyChatsScreen> {
                                 await _refreshUnreadFor(chatId);
                               }
                             },
-                            onLongPress: () {
+                            onLongPressStart: (details) {
                               safeDebugLog(
                                   '[MyChatsScreen] onLongPress chat=${maskDebugId(c.chatId)}');
                               HapticFeedback.mediumImpact();
-                              _showPeek(c);
+                              _showPeek(c,
+                                  pressPosition: details.globalPosition);
                             },
                           ),
                         );
@@ -739,17 +740,15 @@ class _MyChatsScreenState extends State<MyChatsScreen> {
     );
   }
 
-  void _showPeek(_ChatSummary c) {
-    // Вибрация как в чате
-    HapticFeedback.mediumImpact();
+  void _showPeek(_ChatSummary c, {Offset? pressPosition}) {
     debugPrint('[MyChatsScreen] _showPeek: ${c.title}');
 
     showGeneralDialog(
       context: context,
       barrierDismissible: true,
       barrierLabel: 'peek',
-      barrierColor: Colors.black54,
-      transitionDuration: const Duration(milliseconds: 180),
+      barrierColor: Colors.black.withValues(alpha: 0.24),
+      transitionDuration: const Duration(milliseconds: 160),
       pageBuilder: (_, __, ___) => const SizedBox.shrink(),
       transitionBuilder: (_, anim, __, ___) {
         final curved =
@@ -1106,12 +1105,12 @@ class _ChatSummary {
 class _ChatRow extends StatelessWidget {
   final _ChatSummary data;
   final VoidCallback onTap;
-  final VoidCallback? onLongPress;
+  final GestureLongPressStartCallback? onLongPressStart;
 
   const _ChatRow({
     required this.data,
     required this.onTap,
-    this.onLongPress,
+    this.onLongPressStart,
   });
 
   @override
@@ -1126,90 +1125,92 @@ class _ChatRow extends StatelessWidget {
 
     return Material(
       color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        onLongPress: onLongPress,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          child: Row(
-            children: [
-              _BubbleAvatar(
-                  label: data.title,
-                  muted: data.muted,
-                  avatarUrl: data.avatarUrl),
-              const SizedBox(width: 12),
+      child: GestureDetector(
+        onLongPressStart: onLongPressStart,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            child: Row(
+              children: [
+                _BubbleAvatar(
+                    label: data.title,
+                    muted: data.muted,
+                    avatarUrl: data.avatarUrl),
+                const SizedBox(width: 12),
 
-              // центр: 3 строки (заголовок / автор / сообщение)
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // 1) Название
-                    Text(
-                      data.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: t.titleMedium?.copyWith(
-                        color: onSurface,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -.1,
-                        height: 1.1,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    // 2) Автор (или подпись чата, если автора нет)
-                    Text(
-                      (data.lastAuthor?.isNotEmpty ?? false)
-                          ? data.lastAuthor!
-                          : (data.subtitle ?? ''),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: t.bodySmall?.copyWith(
-                        color: onSurfaceVar,
-                        fontWeight: FontWeight.w600,
-                        height: 1.05,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    // 3) Превью сообщения
-                    Text(
-                      data.lastMsgPreview ?? '',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: t.bodySmall?.copyWith(
-                        color: onSurfaceVar,
-                        height: 1.05,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(width: 8),
-
-              // справа: время + бейдж
-              SizedBox(
-                width: 56,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    if (time.isNotEmpty)
+                // центр: 3 строки (заголовок / автор / сообщение)
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // 1) Название
                       Text(
-                        time,
-                        style: t.labelSmall?.copyWith(
-                          color: onSurfaceVar,
-                          fontWeight: FontWeight.w600,
+                        data.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: t.titleMedium?.copyWith(
+                          color: onSurface,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -.1,
+                          height: 1.1,
                         ),
                       ),
-                    const SizedBox(height: 6),
-                    if (data.unread > 0)
-                      _UnreadBadge(count: data.unread)
-                    else if (data.pinned)
-                      Icon(Icons.push_pin, size: 16, color: onSurfaceVar),
-                  ],
+                      const SizedBox(height: 2),
+                      // 2) Автор (или подпись чата, если автора нет)
+                      Text(
+                        (data.lastAuthor?.isNotEmpty ?? false)
+                            ? data.lastAuthor!
+                            : (data.subtitle ?? ''),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: t.bodySmall?.copyWith(
+                          color: onSurfaceVar,
+                          fontWeight: FontWeight.w600,
+                          height: 1.05,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      // 3) Превью сообщения
+                      Text(
+                        data.lastMsgPreview ?? '',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: t.bodySmall?.copyWith(
+                          color: onSurfaceVar,
+                          height: 1.05,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+
+                const SizedBox(width: 8),
+
+                // справа: время + бейдж
+                SizedBox(
+                  width: 56,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      if (time.isNotEmpty)
+                        Text(
+                          time,
+                          style: t.labelSmall?.copyWith(
+                            color: onSurfaceVar,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      const SizedBox(height: 6),
+                      if (data.unread > 0)
+                        _UnreadBadge(count: data.unread)
+                      else if (data.pinned)
+                        Icon(Icons.push_pin, size: 16, color: onSurfaceVar),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

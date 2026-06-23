@@ -1,5 +1,5 @@
-import 'dart:typed_data';
 import 'dart:ui';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' as services;
 import 'package:flutter_chat_reactions/flutter_chat_reactions.dart' as fcr;
@@ -482,6 +482,39 @@ class _ChatMessageInteractionWrapper extends StatelessWidget {
     final applyHighlight = (selectingMessages && isSelected) || isHovered;
     final hasReactions = reactions.isNotEmpty;
     final controller = _buildPackageController();
+    ValueNotifier<Offset?>? dragPosition;
+    ValueNotifier<int>? dragRelease;
+    var dragDisposed = true;
+
+    void ensureDragNotifiers() {
+      if (!dragDisposed) return;
+      dragPosition = ValueNotifier<Offset?>(null);
+      dragRelease = ValueNotifier<int>(0);
+      dragDisposed = false;
+    }
+
+    void setDragPosition(Offset? position) {
+      if (dragDisposed) return;
+      dragPosition?.value = position;
+    }
+
+    void releaseDragAt(Offset position) {
+      if (dragDisposed) return;
+      dragPosition?.value = position;
+      final release = dragRelease;
+      if (release != null) {
+        release.value = release.value + 1;
+      }
+    }
+
+    void disposeDragNotifiers() {
+      if (dragDisposed) return;
+      dragDisposed = true;
+      dragPosition?.dispose();
+      dragRelease?.dispose();
+      dragPosition = null;
+      dragRelease = null;
+    }
 
     final visualChild = GestureDetector(
       behavior: HitTestBehavior.translucent,
@@ -490,12 +523,23 @@ class _ChatMessageInteractionWrapper extends StatelessWidget {
           ? null
           : (details) {
               services.HapticFeedback.mediumImpact();
+              ensureDragNotifiers();
+              setDragPosition(details.globalPosition);
               _showPackageActionsDialog(
                 context,
                 details.globalPosition,
                 _measureMessageRect(context),
-              );
+                dragPosition: dragPosition!,
+                dragRelease: dragRelease!,
+              ).whenComplete(disposeDragNotifiers);
             },
+      onLongPressMoveUpdate: selectingMessages
+          ? null
+          : (details) => setDragPosition(details.globalPosition),
+      onLongPressEnd: selectingMessages
+          ? null
+          : (details) => releaseDragAt(details.globalPosition),
+      onLongPressCancel: selectingMessages ? null : () => setDragPosition(null),
       child: Stack(
         clipBehavior: Clip.none,
         children: [
@@ -633,8 +677,10 @@ class _ChatMessageInteractionWrapper extends StatelessWidget {
   Future<void> _showPackageActionsDialog(
     BuildContext context,
     Offset pressPosition,
-    Rect? targetRect,
-  ) {
+    Rect? targetRect, {
+    required ValueListenable<Offset?> dragPosition,
+    required ValueListenable<int> dragRelease,
+  }) {
     final menuItems = _buildMenuItems();
 
     return showGeneralDialog<void>(
@@ -715,6 +761,8 @@ class _ChatMessageInteractionWrapper extends StatelessWidget {
                               width: menuW,
                               isDark: Theme.of(dialogContext).brightness ==
                                   Brightness.dark,
+                              dragPosition: dragPosition,
+                              dragRelease: dragRelease,
                               onTap: (item) {
                                 Navigator.of(dialogContext).pop();
                                 onMenuAction?.call(item.label);
@@ -765,6 +813,8 @@ class _ChatMessageInteractionWrapper extends StatelessWidget {
                               width: menuW,
                               isDark: Theme.of(dialogContext).brightness ==
                                   Brightness.dark,
+                              dragPosition: dragPosition,
+                              dragRelease: dragRelease,
                               onTap: (item) {
                                 Navigator.of(dialogContext).pop();
                                 onMenuAction?.call(item.label);
@@ -924,26 +974,113 @@ class _SelectionIndicator extends StatelessWidget {
   }
 }
 
-class _PackageActionsMenu extends StatelessWidget {
+const double _packageMenuItemHeight = 42.0;
+
+class _PackageActionsMenu extends StatefulWidget {
   final List<fcr.MenuItem> menuItems;
   final double width;
   final bool isDark;
+  final ValueListenable<Offset?> dragPosition;
+  final ValueListenable<int> dragRelease;
   final void Function(fcr.MenuItem item) onTap;
 
   const _PackageActionsMenu({
     required this.menuItems,
     required this.width,
     required this.isDark,
+    required this.dragPosition,
+    required this.dragRelease,
     required this.onTap,
   });
 
   @override
+  State<_PackageActionsMenu> createState() => _PackageActionsMenuState();
+}
+
+class _PackageActionsMenuState extends State<_PackageActionsMenu> {
+  late List<GlobalKey> _itemKeys;
+  int? _selectedIndex;
+  int _handledReleaseTick = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _itemKeys = List.generate(widget.menuItems.length, (_) => GlobalKey());
+    widget.dragPosition.addListener(_handleDragPosition);
+    widget.dragRelease.addListener(_handleDragRelease);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _handleDragPosition());
+  }
+
+  @override
+  void didUpdateWidget(covariant _PackageActionsMenu oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.dragPosition != widget.dragPosition) {
+      oldWidget.dragPosition.removeListener(_handleDragPosition);
+      widget.dragPosition.addListener(_handleDragPosition);
+    }
+    if (oldWidget.dragRelease != widget.dragRelease) {
+      oldWidget.dragRelease.removeListener(_handleDragRelease);
+      widget.dragRelease.addListener(_handleDragRelease);
+    }
+    if (oldWidget.menuItems.length != widget.menuItems.length) {
+      _itemKeys = List.generate(widget.menuItems.length, (_) => GlobalKey());
+      _selectedIndex = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.dragPosition.removeListener(_handleDragPosition);
+    widget.dragRelease.removeListener(_handleDragRelease);
+    super.dispose();
+  }
+
+  void _handleDragPosition() {
+    if (!mounted) return;
+    final position = widget.dragPosition.value;
+    final nextIndex = position == null ? null : _hitTest(position);
+    if (nextIndex == _selectedIndex) return;
+    setState(() => _selectedIndex = nextIndex);
+    if (nextIndex != null) {
+      services.HapticFeedback.selectionClick();
+    }
+  }
+
+  void _handleDragRelease() {
+    if (!mounted || widget.dragRelease.value == _handledReleaseTick) return;
+    _handledReleaseTick = widget.dragRelease.value;
+
+    final position = widget.dragPosition.value;
+    final index =
+        _selectedIndex ?? (position == null ? null : _hitTest(position));
+    if (index == null) return;
+    widget.onTap(widget.menuItems[index]);
+  }
+
+  int? _hitTest(Offset globalPosition) {
+    for (var i = 0; i < _itemKeys.length; i++) {
+      final context = _itemKeys[i].currentContext;
+      final renderObject = context?.findRenderObject();
+      if (renderObject is! RenderBox || !renderObject.hasSize) continue;
+      final topLeft = renderObject.localToGlobal(Offset.zero);
+      final rect = topLeft & renderObject.size;
+      if (rect.contains(globalPosition)) return i;
+    }
+    return null;
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final selectedIndex = _selectedIndex;
+    final highlightColor = widget.isDark
+        ? Colors.white.withValues(alpha: 0.10)
+        : Colors.black.withValues(alpha: 0.07);
+
     return SizedBox(
-      width: width,
+      width: widget.width,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1D1D1F) : Colors.white,
+          color: widget.isDark ? const Color(0xFF1D1D1F) : Colors.white,
           borderRadius: BorderRadius.circular(14),
           boxShadow: [
             BoxShadow(
@@ -955,14 +1092,36 @@ class _PackageActionsMenu extends StatelessWidget {
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(14),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+          child: Stack(
             children: [
-              for (final item in menuItems)
-                _PackageMenuItemTile(
-                  item: item,
-                  onTap: () => onTap(item),
+              if (selectedIndex != null)
+                AnimatedPositioned(
+                  duration: const Duration(milliseconds: 130),
+                  curve: Curves.easeOutCubic,
+                  left: 5,
+                  right: 5,
+                  top: selectedIndex * _packageMenuItemHeight + 4,
+                  height: _packageMenuItemHeight - 8,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: highlightColor,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
                 ),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var i = 0; i < widget.menuItems.length; i++)
+                    _PackageMenuItemTile(
+                      key: _itemKeys[i],
+                      item: widget.menuItems[i],
+                      selected: selectedIndex == i,
+                      onTapDown: () => setState(() => _selectedIndex = i),
+                      onTap: () => widget.onTap(widget.menuItems[i]),
+                    ),
+                ],
+              ),
             ],
           ),
         ),
@@ -973,10 +1132,15 @@ class _PackageActionsMenu extends StatelessWidget {
 
 class _PackageMenuItemTile extends StatelessWidget {
   final fcr.MenuItem item;
+  final bool selected;
+  final VoidCallback onTapDown;
   final VoidCallback onTap;
 
   const _PackageMenuItemTile({
+    super.key,
     required this.item,
+    required this.selected,
+    required this.onTapDown,
     required this.onTap,
   });
 
@@ -986,31 +1150,38 @@ class _PackageMenuItemTile extends StatelessWidget {
     final color = item.isDestructive
         ? Colors.redAccent
         : (isDark ? Colors.white : Colors.black87);
+    final fontWeight = selected ? FontWeight.w700 : FontWeight.w500;
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTapDown: (_) => services.HapticFeedback.selectionClick(),
+        onTapDown: (_) {
+          onTapDown();
+          services.HapticFeedback.selectionClick();
+        },
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          child: Row(
-            children: [
-              Icon(item.icon, color: color, size: 18),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  item.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: color,
-                        fontWeight: FontWeight.w500,
-                      ),
+        child: SizedBox(
+          height: _packageMenuItemHeight,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: Row(
+              children: [
+                Icon(item.icon, color: color, size: 18),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    item.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: color,
+                          fontWeight: fontWeight,
+                        ),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

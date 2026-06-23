@@ -174,9 +174,9 @@ class _BodyState extends State<_Body> {
                       // СЕТКА — padding внутри самого GridView
                       return GridView.builder(
                         padding: _kContentPadding,
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount:
+                              MediaQuery.sizeOf(context).width >= 700 ? 3 : 2,
                           mainAxisSpacing: 12,
                           crossAxisSpacing: 12,
                           childAspectRatio: 1.6,
@@ -250,8 +250,10 @@ class _TeamTile extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     team.teacher,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.black.withOpacity(0.62),
+                      color: Colors.black.withValues(alpha: 0.62),
                     ),
                   ),
                 ],
@@ -298,87 +300,118 @@ class _TeamGridCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return InkWell(
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => TeamDetailsScreen(team: team)),
-      ),
-      borderRadius: BorderRadius.circular(18),
-      child: Container(
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surface,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 170;
+        final avatarSize = compact ? 32.0 : 36.0;
+
+        return InkWell(
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => TeamDetailsScreen(team: team)),
+          ),
           borderRadius: BorderRadius.circular(18),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.06),
-              blurRadius: 14,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _TeamAvatar(icon: team.icon, name: team.name, size: 44),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    team.name,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: Colors.black,
-                      height: 1.12,
-                    ),
-                  ),
+          child: Container(
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surface,
+              borderRadius: BorderRadius.circular(18),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.06),
+                  blurRadius: 14,
+                  offset: const Offset(0, 3),
                 ),
               ],
             ),
-            const SizedBox(height: 6),
-            Text(
-              team.teacher,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: Colors.black.withOpacity(0.62)),
-            ),
-            const Spacer(),
-            if (team.unread > 0)
-              Align(
-                alignment: Alignment.bottomRight,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [theme.colorScheme.primary, Colors.black],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
+            padding: EdgeInsets.all(compact ? 9 : 11),
+            child: Stack(
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        _TeamAvatar(
+                          icon: team.icon,
+                          name: team.name,
+                          size: avatarSize,
+                        ),
+                        const Spacer(),
+                      ],
                     ),
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.12),
-                        blurRadius: 10,
-                        offset: const Offset(0, 3),
+                    SizedBox(height: compact ? 6 : 8),
+                    Text(
+                      team.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: Colors.black,
+                        height: 1.08,
+                        fontSize: compact ? 13 : 14,
                       ),
-                    ],
-                  ),
-                  child: Text(
-                    '${team.unread}',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.2,
                     ),
-                  ),
+                    const Spacer(),
+                    Text(
+                      team.teacher.trim().isEmpty
+                          ? 'Преподаватель не указан'
+                          : team.teacher,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: Colors.black.withValues(alpha: 0.58),
+                        height: 1.1,
+                        fontSize: compact ? 11 : 12,
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-          ],
+                if (team.unread > 0)
+                  Positioned(
+                    top: 0,
+                    right: 0,
+                    child: _UnreadBadge(count: team.unread),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _UnreadBadge extends StatelessWidget {
+  final int count;
+
+  const _UnreadBadge({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [theme.colorScheme.primary, Colors.black],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Text(
+        '$count',
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.2,
         ),
       ),
     );
@@ -395,8 +428,7 @@ class _TeamAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final initials =
-        (name.isNotEmpty ? name.trim().characters.first.toUpperCase() : 'T');
+    final initials = _teamInitials(name);
     final colorSeed = initials.codeUnitAt(0);
     final hue = (colorSeed % 360).toDouble();
     final bgColor = HSLColor.fromAHSL(1, hue, 0.55, 0.48).toColor();
@@ -428,16 +460,41 @@ class _TeamAvatar extends StatelessWidget {
       ),
       alignment: Alignment.center,
       child: !_isUrl
-          ? Text(
-              initials,
-              style: TextStyle(
-                fontWeight: FontWeight.w800,
-                color: Colors.white,
-                fontSize: size * 0.44,
+          ? Padding(
+              padding: EdgeInsets.all(size * 0.16),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  initials,
+                  maxLines: 1,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                    fontSize: size * 0.46,
+                    height: 1,
+                  ),
+                ),
               ),
             )
           : null,
     );
+  }
+
+  String _teamInitials(String value) {
+    final words = value
+        .trim()
+        .split(RegExp(r'[\s\-.]+'))
+        .where((word) => word.trim().isNotEmpty)
+        .toList();
+
+    if (words.isEmpty) return 'T';
+
+    final buffer = StringBuffer();
+    for (final word in words.take(2)) {
+      buffer.write(word.characters.first.toUpperCase());
+    }
+
+    return buffer.toString();
   }
 }
 

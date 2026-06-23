@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../../models/message.dart';
 import '../../models/chat_file.dart';
+import '../../widgets/fullscreen_image.dart';
 import 'assignment_bubble.dart';
 import 'file_message_bubble.dart';
 import 'multi_file_bubble.dart';
@@ -75,6 +75,42 @@ class _ForwardInfoTile extends StatelessWidget {
     return '$dd.$mo ${dt.year}';
   }
 
+  bool _isImage(ForwardAttachmentModel attachment) {
+    final name = (attachment.name ?? '').toLowerCase();
+    final mime = (attachment.mime ?? '').toLowerCase();
+    return mime.startsWith('image/') ||
+        name.endsWith('.jpg') ||
+        name.endsWith('.jpeg') ||
+        name.endsWith('.png') ||
+        name.endsWith('.gif') ||
+        name.endsWith('.webp');
+  }
+
+  void _openAttachment(
+      BuildContext context, ForwardAttachmentModel attachment) {
+    final url = attachment.url;
+    if (url.isEmpty) return;
+
+    final name = (attachment.name ?? 'file').trim();
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => _isImage(attachment)
+            ? FullscreenImage(
+                imageUrl: url,
+                fileName: name,
+                sourceFileId: attachment.id,
+              )
+            : FullscreenFileViewer(
+                fileUrl: url,
+                fileName: name,
+                fileSize: attachment.size ?? 0,
+                mimeType: attachment.mime,
+                sourceFileId: attachment.id,
+              ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
@@ -122,15 +158,7 @@ class _ForwardInfoTile extends StatelessWidget {
                       final name = (a.name ?? 'file');
                       return InkWell(
                         borderRadius: BorderRadius.circular(8),
-                        onTap: () async {
-                          final url = a.url;
-                          if (url.isEmpty) return;
-                          final uri = Uri.tryParse(url);
-                          if (uri != null) {
-                            await launchUrl(uri,
-                                mode: LaunchMode.externalApplication);
-                          }
-                        },
+                        onTap: () => _openAttachment(context, a),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 8, vertical: 6),

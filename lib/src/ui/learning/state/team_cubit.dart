@@ -111,6 +111,7 @@ class TeamCubit extends Cubit<TeamState> {
           loading: false,
           chat: persistedByTeam,
         ));
+        unawaited(_hydrateChatAuthorIdentities());
       } else {
         emit(state.copyWith(loading: true));
       }
@@ -136,6 +137,7 @@ class TeamCubit extends Cubit<TeamState> {
         loading: false,
         chat: cached,
       ));
+      unawaited(_hydrateChatAuthorIdentities());
     } else if (chatId != null) {
       final persisted = await _loadPersistedChatSnapshot(chatId);
       if (persisted.isNotEmpty) {
@@ -145,6 +147,7 @@ class TeamCubit extends Cubit<TeamState> {
           loading: false,
           chat: cached,
         ));
+        unawaited(_hydrateChatAuthorIdentities());
       }
     }
 
@@ -171,6 +174,7 @@ class TeamCubit extends Cubit<TeamState> {
           ass.where((a) => a.completedByMe).map((a) => a.id).toSet(),
       isStarosta: star,
     ));
+    unawaited(_hydrateChatAuthorIdentities());
 
     await _hydrateAssignmentIdsInChat();
 
@@ -191,6 +195,74 @@ class TeamCubit extends Cubit<TeamState> {
     final tail =
         stable.length > 120 ? stable.sublist(stable.length - 120) : stable;
     _messagesByTeamId[state.team.id] = List<Message>.unmodifiable(tail);
+  }
+
+  Future<void> _hydrateChatAuthorIdentities() async {
+    final chat = state.chat;
+    if (chat.isEmpty) return;
+
+    final authorIds = chat
+        .where((message) {
+          if (message.authorId.isEmpty || message.isSystem) return false;
+          final name = message.authorName.trim();
+          final avatar = message.authorAvatarUrl?.trim() ?? '';
+          return name.isEmpty || name == 'Студент' || avatar.isEmpty;
+        })
+        .map((message) => message.authorId)
+        .toSet()
+        .toList();
+    if (authorIds.isEmpty) return;
+
+    try {
+      final rows = await Supabase.instance.client
+          .from('users')
+          .select('id,login,name,surname,avatar_url')
+          .inFilter('id', authorIds);
+      final byId = <String, Map<String, dynamic>>{};
+      for (final row in rows as List) {
+        final map = Map<String, dynamic>.from(row as Map);
+        final id = (map['id'] ?? '').toString();
+        if (id.isNotEmpty) byId[id] = map;
+      }
+      if (byId.isEmpty || isClosed) return;
+
+      var changed = false;
+      final updated = state.chat.map((message) {
+        final user = byId[message.authorId];
+        if (user == null) return message;
+
+        final name = [
+          (user['name'] ?? '').toString(),
+          (user['surname'] ?? '').toString(),
+        ].where((part) => part.trim().isNotEmpty).join(' ').trim();
+        final login = (user['login'] ?? '').toString().trim();
+        final avatar = (user['avatar_url'] ?? '').toString().trim();
+
+        final currentName = message.authorName.trim();
+        final nextName =
+            name.isNotEmpty ? name : (login.isNotEmpty ? login : currentName);
+        final nextAvatar = avatar.isNotEmpty ? avatar : message.authorAvatarUrl;
+        final nextLogin = login.isNotEmpty ? login : message.authorLogin;
+
+        if (nextName == message.authorName &&
+            nextAvatar == message.authorAvatarUrl &&
+            nextLogin == message.authorLogin) {
+          return message;
+        }
+
+        changed = true;
+        return message.copyWith(
+          authorLogin: nextLogin,
+          authorName: nextName,
+          authorAvatarUrl: nextAvatar,
+        );
+      }).toList();
+
+      if (!changed || isClosed) return;
+      emit(state.copyWith(chat: _mergeCachedChat(updated)));
+    } catch (e) {
+      safeDebugLog('[TeamCubit] hydrate authors failed: ${e.runtimeType}');
+    }
   }
 
   Future<String?> _resolveMainChatId() async {

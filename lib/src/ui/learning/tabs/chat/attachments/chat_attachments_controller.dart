@@ -28,7 +28,14 @@ class ChatAttachmentsController extends ChangeNotifier {
       return false;
     }
 
-    pending.add(file.copyWith(uploadStatus: LocalAttachUploadStatus.queued));
+    final status = (file.uploadedFileId?.isNotEmpty ?? false)
+        ? LocalAttachUploadStatus.uploaded
+        : LocalAttachUploadStatus.queued;
+    pending.add(file.copyWith(
+      uploadStatus: status,
+      progress: status == LocalAttachUploadStatus.uploaded ? 1 : file.progress,
+      clearError: true,
+    ));
     notifyListeners();
     return true;
   }

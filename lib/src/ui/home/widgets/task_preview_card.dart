@@ -6,11 +6,15 @@ import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
 class TaskPreviewCard extends StatelessWidget {
   final HomeAssignmentPreview item;
   final VoidCallback onTap;
+  final VoidCallback? onDoneTap;
+  final bool markingDone;
 
   const TaskPreviewCard({
     super.key,
     required this.item,
     required this.onTap,
+    this.onDoneTap,
+    this.markingDone = false,
   });
 
   @override
@@ -49,14 +53,11 @@ class TaskPreviewCard extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: statusColor.withValues(alpha: isDark ? 0.18 : 0.12),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Icon(Icons.task_alt_rounded, color: statusColor),
+            _DoneCheckButton(
+              done: item.isDone,
+              loading: markingDone,
+              color: statusColor,
+              onTap: onDoneTap,
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -128,6 +129,78 @@ class TaskPreviewCard extends StatelessWidget {
       default:
         return item.assignment.status!;
     }
+  }
+}
+
+class _DoneCheckButton extends StatelessWidget {
+  final bool done;
+  final bool loading;
+  final Color color;
+  final VoidCallback? onTap;
+
+  const _DoneCheckButton({
+    required this.done,
+    required this.loading,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final fillColor = done
+        ? const Color(0xFF2F9D84)
+        : color.withValues(alpha: isDark ? 0.20 : 0.13);
+    final iconColor = done ? Colors.white : color;
+
+    return Tooltip(
+      message: done ? 'Задание выполнено' : 'Отметить выполненным',
+      child: Semantics(
+        button: true,
+        label: done ? 'Задание выполнено' : 'Отметить задание выполненным',
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: loading ? null : onTap,
+            borderRadius: BorderRadius.circular(16),
+            splashColor: color.withValues(alpha: 0.12),
+            highlightColor: color.withValues(alpha: 0.08),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: fillColor,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: done
+                      ? const Color(0xFF2F9D84)
+                      : color.withValues(alpha: isDark ? 0.38 : 0.30),
+                  width: 1.4,
+                ),
+              ),
+              child: Center(
+                child: loading
+                    ? SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.2,
+                          color: iconColor,
+                        ),
+                      )
+                    : Icon(
+                        Icons.check_rounded,
+                        color: iconColor,
+                        size: 27,
+                      ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

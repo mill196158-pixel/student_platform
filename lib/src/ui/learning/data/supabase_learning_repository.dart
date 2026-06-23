@@ -304,13 +304,17 @@ class SupabaseLearningRepository implements LearningRepository {
   }) {
     final authorId = (m['author_id']?.toString() ?? '');
     final amI = currentUserId.isNotEmpty && authorId == currentUserId;
+    final authorName = (m['author_name'] ?? '').toString().trim();
+    final authorLogin = (m['author_login'] ?? '').toString().trim();
 
     return Message(
       id: (m['id'] ?? '').toString(),
       chatId: (m['chat_id'] ?? chatId).toString(),
       authorId: authorId,
-      authorLogin: (m['author_login'] ?? 'system').toString(),
-      authorName: (m['author_name'] ?? (amI ? 'Вы' : 'Студент')).toString(),
+      authorLogin: authorLogin.isNotEmpty ? authorLogin : 'system',
+      authorName: authorName.isNotEmpty
+          ? authorName
+          : (authorLogin.isNotEmpty ? authorLogin : (amI ? 'Вы' : 'Студент')),
       text: (m['text'] ?? m['content'] ?? m['body'] ?? '').toString(),
       at: DateTime.tryParse((m['at'] ?? m['created_at'] ?? '').toString()) ??
           DateTime.now(),
@@ -389,6 +393,9 @@ class SupabaseLearningRepository implements LearningRepository {
                 (u['name'] ?? '').toString(),
                 (u['surname'] ?? '').toString(),
               ].where((s) => s.isNotEmpty).join(' ').trim();
+              if ((data['author_name'] ?? '').toString().trim().isEmpty) {
+                data['author_name'] = (u['login'] ?? '').toString();
+              }
               data['author_avatar_url'] = (u['avatar_url'] ?? '').toString();
             }
           } catch (_) {}
@@ -449,6 +456,9 @@ class SupabaseLearningRepository implements LearningRepository {
               (u['name'] ?? '').toString(),
               (u['surname'] ?? '').toString(),
             ].where((s) => s.isNotEmpty).join(' ').trim();
+            if ((data['author_name'] ?? '').toString().trim().isEmpty) {
+              data['author_name'] = (u['login'] ?? '').toString();
+            }
             data['author_avatar_url'] = (u['avatar_url'] ?? '').toString();
           }
         } catch (_) {}
@@ -506,6 +516,9 @@ class SupabaseLearningRepository implements LearningRepository {
                 (u['name'] ?? '').toString(),
                 (u['surname'] ?? '').toString(),
               ].where((s) => s.isNotEmpty).join(' ').trim();
+              if ((data['author_name'] ?? '').toString().trim().isEmpty) {
+                data['author_name'] = (u['login'] ?? '').toString();
+              }
               data['author_avatar_url'] = (u['avatar_url'] ?? '').toString();
             }
           } catch (_) {}

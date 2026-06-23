@@ -63,6 +63,7 @@ class FileMessageBubble extends StatelessWidget {
             builder: (_) => FullscreenImage(
               imageUrl: file.fileUrl,
               fileName: file.fileName,
+              sourceFileId: file.id,
             ),
           ),
         );

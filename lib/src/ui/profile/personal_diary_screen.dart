@@ -2196,6 +2196,7 @@ class _HeaderAddButton extends StatelessWidget {
         child: Container(
           width: 44,
           height: 44,
+          alignment: Alignment.center,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             gradient: LinearGradient(
@@ -2215,7 +2216,7 @@ class _HeaderAddButton extends StatelessWidget {
                   ]
                 : null,
           ),
-          child: const Icon(Icons.add_rounded, color: Colors.white, size: 26),
+          child: const Icon(Icons.add, color: Colors.white, size: 24),
         ),
       ),
     );

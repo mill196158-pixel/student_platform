@@ -116,6 +116,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final keyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
 
     return Scaffold(
       resizeToAvoidBottomInset: true,
@@ -124,92 +125,131 @@ class _LoginScreenState extends State<LoginScreen> {
         centerTitle: true,
       ),
       body: SafeArea(
-        child: Form(
-          key: _formKey,
-          child: ListView(
-            padding: EdgeInsets.zero,
-            children: [
-              const SizedBox(height: 8),
-              SizedBox(
-                height: 200,
-                child: Lottie.asset('assets/lottie/cat_sleeping.json'),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: theme.cardColor,
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.05),
-                        blurRadius: 10,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return Form(
+              key: _formKey,
+              child: SingleChildScrollView(
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                  child: AnimatedAlign(
+                    duration: const Duration(milliseconds: 260),
+                    curve: Curves.easeOutCubic,
+                    alignment: keyboardVisible
+                        ? const Alignment(0, -0.72)
+                        : Alignment.center,
+                    child: AnimatedPadding(
+                      duration: const Duration(milliseconds: 260),
+                      curve: Curves.easeOutCubic,
+                      padding: EdgeInsets.only(
+                        top: keyboardVisible ? 8 : 0,
+                        bottom: keyboardVisible ? 24 : 0,
                       ),
-                    ],
-                  ),
-                  child: Column(
-                    children: [
-                      const SizedBox(height: 8),
-                      _buildField(
-                        label: 'Логин или email',
-                        controller: _loginCtrl,
-                        keyboardType: TextInputType.text,
-                        validator: (v) => (v == null || v.trim().isEmpty)
-                            ? 'Введите логин'
-                            : null,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            height: 200,
+                            child: Lottie.asset(
+                              'assets/lottie/cat_sleeping.json',
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: theme.cardColor,
+                                borderRadius: BorderRadius.circular(12),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.05),
+                                    blurRadius: 10,
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                children: [
+                                  const SizedBox(height: 8),
+                                  _buildField(
+                                    label: 'Логин или email',
+                                    controller: _loginCtrl,
+                                    keyboardType: TextInputType.text,
+                                    validator: (v) =>
+                                        (v == null || v.trim().isEmpty)
+                                            ? 'Введите логин'
+                                            : null,
+                                  ),
+                                  const Divider(height: 1),
+                                  _buildField(
+                                    label: 'Пароль',
+                                    controller: _passCtrl,
+                                    obscure: _hidePassword,
+                                    validator: (v) =>
+                                        (v == null || v.trim().length < 4)
+                                            ? 'Минимум 4 символа'
+                                            : null,
+                                    suffix: IconButton(
+                                      onPressed: () => setState(
+                                        () => _hidePassword = !_hidePassword,
+                                      ),
+                                      icon: Icon(
+                                        _hidePassword
+                                            ? Icons.visibility_off
+                                            : Icons.visibility,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextButton(
+                            onPressed: widget.toggleView,
+                            child:
+                                const Text('Нет аккаунта? Зарегистрироваться'),
+                          ),
+                          const SizedBox(height: 6),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: SizedBox(
+                              width: double.infinity,
+                              height: 48,
+                              child: FilledButton(
+                                onPressed: _loading ? null : _doLogin,
+                                child: _loading
+                                    ? const SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Text('Войти'),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: Text(
+                              '© ${DateTime.now().year} Student Platform',
+                              style: theme.textTheme.bodySmall,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                        ],
                       ),
-                      const Divider(height: 1),
-                      _buildField(
-                        label: 'Пароль',
-                        controller: _passCtrl,
-                        obscure: _hidePassword,
-                        validator: (v) => (v == null || v.trim().length < 4)
-                            ? 'Минимум 4 символа'
-                            : null,
-                        suffix: IconButton(
-                          onPressed: () =>
-                              setState(() => _hidePassword = !_hidePassword),
-                          icon: Icon(_hidePassword
-                              ? Icons.visibility_off
-                              : Icons.visibility),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                    ],
+                    ),
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
-              TextButton(
-                onPressed: widget.toggleView,
-                child: const Text('Нет аккаунта? Зарегистрироваться'),
-              ),
-              const SizedBox(height: 6),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: FilledButton(
-                    onPressed: _loading ? null : _doLogin,
-                    child: _loading
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Text('Войти'),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Text('© ${DateTime.now().year} Student Platform',
-                    style: theme.textTheme.bodySmall),
-              ),
-              const SizedBox(height: 8),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );

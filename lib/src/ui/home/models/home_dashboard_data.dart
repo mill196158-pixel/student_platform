@@ -2,39 +2,55 @@ import 'package:flutter/material.dart';
 
 import 'package:student_platform/src/ui/learning/models/assignment.dart';
 import 'package:student_platform/src/ui/schedule/models/lesson.dart';
+import 'package:student_platform/src/ui/schedule/utils/msk_date.dart';
 
 class HomeDashboardData {
   final HomeUserProfile profile;
+  final DateTime scheduleDate;
   final List<Lesson> todayLessons;
   final List<HomeAssignmentPreview> assignments;
   final List<HomeNewsItem> news;
+  final Set<String> readNotificationIds;
   final int unreadMessagesCount;
   final String? warning;
 
   const HomeDashboardData({
     required this.profile,
+    required this.scheduleDate,
     required this.todayLessons,
     required this.assignments,
     required this.news,
+    this.readNotificationIds = const {},
     this.unreadMessagesCount = 0,
     this.warning,
   });
 
-  int get lessonsCount => todayLessons.length;
+  int get lessonsCount => remainingLessons.length;
   int get assignmentsCount => assignments.length;
-  bool get hasLessonsToday => todayLessons.isNotEmpty;
+  int get totalLessonsToday => todayLessons.length;
+  bool get hasLessonsToday => remainingLessons.isNotEmpty;
+  bool get isScheduleForToday =>
+      MskDate.isSameCalendarDate(scheduleDate, MskDate.today());
+  bool get lessonsFinishedForToday =>
+      isScheduleForToday && todayLessons.isNotEmpty && remainingLessons.isEmpty;
+
+  List<Lesson> get remainingLessons {
+    if (!isScheduleForToday) return [];
+
+    final now = MskDate.now();
+    final today = MskDate.today();
+    final nowMinutes = MskDate.minutesOfDay(now);
+    return todayLessons.where((lesson) {
+      if (!MskDate.isSameCalendarDate(lesson.date, today)) return false;
+      final endMinutes = lesson.end.hour * 60 + lesson.end.minute;
+      return nowMinutes < endMinutes;
+    }).toList();
+  }
 
   Lesson? get nextLesson {
-    if (todayLessons.isEmpty) return null;
-
-    final now = TimeOfDay.now();
-    final nowMinutes = now.hour * 60 + now.minute;
-    for (final lesson in todayLessons) {
-      final lessonMinutes = lesson.start.hour * 60 + lesson.start.minute;
-      if (lessonMinutes >= nowMinutes) return lesson;
-    }
-
-    return todayLessons.last;
+    final upcoming = remainingLessons;
+    if (upcoming.isEmpty) return null;
+    return upcoming.first;
   }
 }
 

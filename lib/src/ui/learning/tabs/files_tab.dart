@@ -665,6 +665,7 @@ class _FilesTabState extends State<FilesTab>
             fileName: names[initialIndex],
             galleryUrls: urls,
             galleryFileNames: names,
+            galleryFileIds: list.map((e) => e.id).toList(),
             initialIndex: initialIndex),
       ),
     );
@@ -678,6 +679,7 @@ class _FilesTabState extends State<FilesTab>
           fileName: file.fileName,
           fileSize: file.fileSize,
           mimeType: file.fileType,
+          sourceFileId: file.id,
         ),
       ),
     );

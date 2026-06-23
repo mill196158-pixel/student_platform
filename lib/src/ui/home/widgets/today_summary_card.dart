@@ -5,124 +5,145 @@ import 'package:student_platform/src/ui/schedule/models/lesson.dart';
 
 class TodaySummaryCard extends StatelessWidget {
   final HomeDashboardData data;
+  final VoidCallback onTap;
 
   const TodaySummaryCard({
     super.key,
     required this.data,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final remaining = data.remainingLessons;
     final title = data.hasLessonsToday
-        ? 'Сегодня ${data.lessonsCount} ${_lessonWord(data.lessonsCount)}'
-        : 'Сегодня выходной';
+        ? 'Сегодня ${remaining.length} ${_lessonWord(remaining.length)}'
+        : data.lessonsFinishedForToday
+            ? 'Пары закончились'
+            : 'Сегодня выходной';
     final subtitle = data.hasLessonsToday
         ? 'Кратко по расписанию на день'
-        : 'Пар нет, можно закрыть задания или отдохнуть';
-    final lessons = data.todayLessons.take(2).toList();
+        : data.lessonsFinishedForToday
+            ? 'На сегодня больше ничего нет'
+            : 'Пар нет, можно закрыть задания или отдохнуть';
+    final lessons = remaining.take(2).toList();
+    final emptyPreviewText = data.lessonsFinishedForToday
+        ? 'Пары на сегодня закончились'
+        : 'Сегодня пар нет';
     final foreground = isDark ? Colors.white : const Color(0xFF1F2937);
     final mutedForeground = foreground.withValues(alpha: isDark ? 0.78 : 0.68);
     final accent = isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C63D8);
 
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 20),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: isDark
-              ? const [Color(0xFF203041), Color(0xFF12202E)]
-              : const [Color(0xFFDCD0FA), Color(0xFFC5EFE5)],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: (isDark ? Colors.black : const Color(0xFFD9CCF5))
-                .withValues(alpha: isDark ? 0.28 : 0.36),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: Stack(
-        children: [
-          Positioned(
-            right: -20,
-            top: -36,
-            child: _BlurBubble(size: 104, opacity: isDark ? 0.08 : 0.18),
-          ),
-          Positioned(
-            right: 38,
-            bottom: -36,
-            child: _BlurBubble(size: 76, opacity: isDark ? 0.06 : 0.13),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(24),
+          child: Ink(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(24),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: isDark
+                    ? const [Color(0xFF203041), Color(0xFF12202E)]
+                    : const [Color(0xFFDCD0FA), Color(0xFFC5EFE5)],
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: (isDark ? Colors.black : const Color(0xFFD9CCF5))
+                      .withValues(alpha: isDark ? 0.28 : 0.36),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Stack(
                 children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: isDark
-                          ? Colors.white.withValues(alpha: 0.18)
-                          : Colors.white.withValues(alpha: 0.64),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Icon(
-                      Icons.auto_awesome_rounded,
-                      color: accent,
-                    ),
+                  Positioned(
+                    right: -20,
+                    top: -36,
+                    child: _BlurBubble(size: 104, opacity: isDark ? 0.08 : 0.18),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      'Сводка дня',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        color: mutedForeground,
-                        fontWeight: FontWeight.w800,
+                  Positioned(
+                    right: 38,
+                    bottom: -36,
+                    child: _BlurBubble(size: 76, opacity: isDark ? 0.06 : 0.13),
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? Colors.white.withValues(alpha: 0.18)
+                                  : Colors.white.withValues(alpha: 0.64),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Icon(
+                              Icons.auto_awesome_rounded,
+                              color: accent,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'Сводка дня',
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                color: mutedForeground,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
+                      const SizedBox(height: 14),
+                      Text(
+                        title,
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          color: foreground,
+                          fontWeight: FontWeight.w900,
+                          height: 1.08,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: mutedForeground,
+                          height: 1.35,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      if (lessons.isEmpty)
+                        _NoLessonsPreview(text: emptyPreviewText)
+                      else
+                        ...lessons.map(
+                          (lesson) => Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: _LessonPreview(lesson: lesson),
+                          ),
+                        ),
+                    ],
                   ),
                 ],
               ),
-              const SizedBox(height: 14),
-              Text(
-                title,
-                style: theme.textTheme.titleLarge?.copyWith(
-                  color: foreground,
-                  fontWeight: FontWeight.w900,
-                  height: 1.08,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                subtitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: mutedForeground,
-                  height: 1.35,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 12),
-              if (lessons.isEmpty)
-                const _NoLessonsPreview()
-              else
-                ...lessons.map(
-                  (lesson) => Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: _LessonPreview(lesson: lesson),
-                  ),
-                ),
-            ],
+            ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -223,7 +244,9 @@ class _LessonPreview extends StatelessWidget {
 }
 
 class _NoLessonsPreview extends StatelessWidget {
-  const _NoLessonsPreview();
+  final String text;
+
+  const _NoLessonsPreview({required this.text});
 
   @override
   Widget build(BuildContext context) {
@@ -247,7 +270,7 @@ class _NoLessonsPreview extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Сегодня пар нет',
+              text,
               style: TextStyle(
                 color: foreground.withValues(alpha: 0.82),
                 fontWeight: FontWeight.w800,

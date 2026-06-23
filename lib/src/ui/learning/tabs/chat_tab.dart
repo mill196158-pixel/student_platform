@@ -619,6 +619,15 @@ class _ChatTabState extends State<ChatTab> {
 
   Future<void> _pasteFileFromClipboard() async {
     try {
+      final plainText =
+          await services.Clipboard.getData(services.Clipboard.kTextPlain);
+      final text = plainText?.text;
+      if (text != null && text.isNotEmpty) {
+        await ChatCopiedFileCache.clear();
+        _insertPlainText(text);
+        return;
+      }
+
       final cached = await ChatCopiedFileCache.peek();
       if (cached != null) {
         final file = File(cached.path);
@@ -629,6 +638,7 @@ class _ChatTabState extends State<ChatTab> {
           name: cached.name,
           mimeType: cached.mimeType,
           isImage: cached.isImage,
+          existingFileId: cached.fileId,
         );
         return;
       }
@@ -684,6 +694,11 @@ class _ChatTabState extends State<ChatTab> {
       return;
     }
 
+    await ChatCopiedFileCache.clear();
+    _insertPlainText(text);
+  }
+
+  void _insertPlainText(String text) {
     final selection = _ctrl.selection;
     final value = _ctrl.text;
     final start = selection.isValid
@@ -704,16 +719,34 @@ class _ChatTabState extends State<ChatTab> {
     required String name,
     required String mimeType,
     required bool isImage,
+    String? existingFileId,
   }) async {
+    final reusedFileId = existingFileId?.trim();
     final attached = LocalAttach(
       path: file.path,
       name: name,
       mimeType: mimeType,
       size: await file.length(),
       isImage: isImage,
+      uploadStatus: (reusedFileId != null && reusedFileId.isNotEmpty)
+          ? LocalAttachUploadStatus.uploaded
+          : LocalAttachUploadStatus.queued,
+      progress: (reusedFileId != null && reusedFileId.isNotEmpty) ? 1 : 0,
+      uploadedFileId: (reusedFileId != null && reusedFileId.isNotEmpty)
+          ? reusedFileId
+          : null,
     );
     safeDebugLog(
         '[ChatTab] pasted attachment queued name=$name size=${attached.size}');
+    if (reusedFileId != null && reusedFileId.isNotEmpty) {
+      if (_att.add(attached)) {
+        setState(() {});
+      } else {
+        _showSnack(
+            'Можно добавить не больше ${ChatAttachmentsController.maxFiles} файлов или это дубль');
+      }
+      return;
+    }
     await _queueAndUploadAttachment(attached);
   }
 

@@ -4,13 +4,15 @@
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/chat_file.dart';
 import '../../models/message.dart';
+import '../../widgets/fullscreen_image.dart';
 
 import 'profile_avatar.dart';
 import 'package:student_platform/src/ui/friends/friend_profile_screen.dart';
+
+const _forwardGroupMark = '__FG__:';
 
 String _fmtIsoLocal(String iso, {bool long = false}) {
   try {
@@ -23,6 +25,33 @@ String _fmtIsoLocal(String iso, {bool long = false}) {
   } catch (_) {
     return '';
   }
+}
+
+/// Извлекаем JSON-пакет безопасно.
+/// Поддерживаем текст до маркера и не ломаемся на вложенных "__FG__" внутри JSON.
+Map<String, dynamic>? _parseForwardPayload(String raw) {
+  if (raw.isEmpty) return null;
+
+  var searchFrom = 0;
+  while (searchFrom < raw.length) {
+    final idx = raw.indexOf(_forwardGroupMark, searchFrom);
+    if (idx < 0) return null;
+
+    final jsonPart = raw.substring(idx + _forwardGroupMark.length).trim();
+    if (jsonPart.isEmpty) return null;
+
+    try {
+      final decoded = json.decode(jsonPart);
+      if (decoded is Map && decoded['fg'] == 1) {
+        return Map<String, dynamic>.from(decoded);
+      }
+    } catch (_) {
+      searchFrom = idx + _forwardGroupMark.length;
+      continue;
+    }
+  }
+
+  return null;
 }
 
 /// Бабл пересланной пачки сообщений.
@@ -52,27 +81,9 @@ class ForwardGroupBubble extends StatelessWidget {
     this.reactions,
   });
 
-  static const _mark = '__FG__:';
-
-  /// Извлекаем JSON-пакет безопасно.
-  /// Поддерживаем варианты, если кто-то по ошибке приписал текст до/после.
-  Map<String, dynamic>? _parsePayload(String raw) {
-    if (raw.isEmpty) return null;
-    final idx = raw.lastIndexOf(_mark);
-    if (idx < 0) return null;
-    final jsonPart = raw.substring(idx + _mark.length).trim();
-    if (jsonPart.isEmpty) return null;
-    try {
-      final decoded = json.decode(jsonPart);
-      if (decoded is Map && decoded['fg'] == 1)
-        return Map<String, dynamic>.from(decoded);
-    } catch (_) {}
-    return null;
-  }
-
   @override
   Widget build(BuildContext context) {
-    final fg = _parsePayload(message.text);
+    final fg = _parseForwardPayload(message.text);
     if (fg == null) return const SizedBox.shrink();
 
     final theme = Theme.of(context);
@@ -123,6 +134,7 @@ class ForwardGroupBubble extends StatelessWidget {
                     map: m,
                     idToFile: idToFile,
                     onOpenOriginal: onOpenOriginal,
+                    depth: 0,
                   )),
 
               if (caption.isNotEmpty) ...[
@@ -180,19 +192,14 @@ class _ForwardItem extends StatelessWidget {
   final Map<String, dynamic> map;
   final Map<String, ChatFile> idToFile;
   final void Function(String srcMessageId)? onOpenOriginal;
+  final int depth;
 
   const _ForwardItem({
     required this.map,
     required this.idToFile,
     this.onOpenOriginal,
+    this.depth = 0,
   });
-
-  Future<void> _openUrl(String url) async {
-    if (url.isEmpty) return;
-    final uri = Uri.tryParse(url);
-    if (uri == null) return;
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -208,6 +215,7 @@ class _ForwardItem extends StatelessWidget {
     final prettyLong = atIso.isNotEmpty ? _fmtIsoLocal(atIso, long: true) : '';
 
     final body = (map['x'] ?? '').toString();
+    final nestedForward = depth < 3 ? _parseForwardPayload(body) : null;
     final rawF = (map['f'] as List?) ?? const [];
     final fileIds = rawF.whereType<String>().toList();
     final fileObjs =
@@ -259,7 +267,14 @@ class _ForwardItem extends StatelessWidget {
                 ),
             ],
           ),
-          if (body.trim().isNotEmpty) ...[
+          if (nestedForward != null) ...[
+            const SizedBox(height: 6),
+            _NestedForwardPreview(
+              payload: nestedForward,
+              idToFile: idToFile,
+              depth: depth + 1,
+            ),
+          ] else if (body.trim().isNotEmpty) ...[
             const SizedBox(height: 6),
             InkWell(
               onTap: (srcId.isNotEmpty && onOpenOriginal != null)
@@ -275,7 +290,6 @@ class _ForwardItem extends StatelessWidget {
               ids: fileIds,
               idToFile: idToFile,
               fileObjects: fileObjs,
-              onOpenUrl: _openUrl,
             ),
           ],
           if (prettyLong.isNotEmpty) ...[
@@ -289,17 +303,81 @@ class _ForwardItem extends StatelessWidget {
   }
 }
 
+class _NestedForwardPreview extends StatelessWidget {
+  final Map<String, dynamic> payload;
+  final Map<String, ChatFile> idToFile;
+  final int depth;
+
+  const _NestedForwardPreview({
+    required this.payload,
+    required this.idToFile,
+    required this.depth,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final items = List<Map<String, dynamic>>.from(payload['items'] ?? const []);
+    final caption = (payload['caption'] as String?)?.trim() ?? '';
+
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: .38),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.black.withValues(alpha: .08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: const [
+              Icon(Icons.forward_rounded, size: 14, color: Colors.black54),
+              SizedBox(width: 5),
+              Text(
+                'Вложенная пересылка',
+                style: TextStyle(
+                  color: Colors.black87,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ...items.map(
+            (m) => _ForwardItem(
+              map: m,
+              idToFile: idToFile,
+              onOpenOriginal: null,
+              depth: depth,
+            ),
+          ),
+          if (caption.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              caption,
+              style: const TextStyle(
+                color: Colors.black87,
+                fontStyle: FontStyle.italic,
+                height: 1.22,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _ForwardFilesList extends StatelessWidget {
   final List<String> ids;
   final Map<String, ChatFile> idToFile;
   final List<Map<String, dynamic>>? fileObjects;
-  final Future<void> Function(String url)? onOpenUrl;
 
   const _ForwardFilesList({
     required this.ids,
     required this.idToFile,
     this.fileObjects,
-    this.onOpenUrl,
   });
 
   @override
@@ -311,11 +389,11 @@ class _ForwardFilesList extends StatelessWidget {
         children: [
           for (final file in files)
             _ForwardFileChip(
+              fileId: file.id,
               name: file.fileName,
               type: file.fileType,
               size: file.fileSize,
               url: file.fileUrl,
-              onOpenUrl: onOpenUrl,
             ),
         ],
       );
@@ -329,13 +407,14 @@ class _ForwardFilesList extends StatelessWidget {
           final name = (o['name'] ?? 'Вложение').toString();
           final type = (o['type'] ?? '').toString();
           final url = (o['url'] ?? '').toString();
+          final fileId = (o['fid'] ?? o['file_id'] ?? o['id'])?.toString();
           final size = int.tryParse((o['size'] ?? '').toString()) ?? 0;
           return _ForwardFileChip(
+            fileId: fileId,
             name: name,
             type: type,
             size: size,
             url: url,
-            onOpenUrl: onOpenUrl,
           );
         }).toList(),
       );
@@ -346,28 +425,59 @@ class _ForwardFilesList extends StatelessWidget {
 }
 
 class _ForwardFileChip extends StatelessWidget {
+  final String? fileId;
   final String name;
   final String type;
   final int size;
   final String url;
-  final Future<void> Function(String url)? onOpenUrl;
 
   const _ForwardFileChip({
+    this.fileId,
     required this.name,
     required this.type,
     required this.size,
     required this.url,
-    this.onOpenUrl,
   });
 
-  bool get _isImage => type.startsWith('image/');
+  bool get _isImage {
+    final lowerName = name.toLowerCase();
+    return type.startsWith('image/') ||
+        lowerName.endsWith('.jpg') ||
+        lowerName.endsWith('.jpeg') ||
+        lowerName.endsWith('.png') ||
+        lowerName.endsWith('.gif') ||
+        lowerName.endsWith('.webp');
+  }
+
   bool get _isPdf =>
       type.contains('pdf') || name.toLowerCase().endsWith('.pdf');
+
+  void _openPreview(BuildContext context, String displayName) {
+    if (url.isEmpty) return;
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => _isImage
+            ? FullscreenImage(
+                imageUrl: url,
+                fileName: displayName,
+                sourceFileId: fileId,
+              )
+            : FullscreenFileViewer(
+                fileUrl: url,
+                fileName: displayName,
+                fileSize: size,
+                mimeType: type,
+                sourceFileId: fileId,
+              ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final canOpen = url.isNotEmpty && onOpenUrl != null;
+    final canOpen = url.isNotEmpty;
     final icon = _isImage
         ? Icons.image_outlined
         : _isPdf
@@ -381,7 +491,7 @@ class _ForwardFileChip extends StatelessWidget {
         color: Colors.white.withValues(alpha: .42),
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
-          onTap: canOpen ? () => onOpenUrl?.call(url) : null,
+          onTap: canOpen ? () => _openPreview(context, displayName) : null,
           borderRadius: BorderRadius.circular(12),
           child: Container(
             constraints: const BoxConstraints(minHeight: 44),
@@ -437,7 +547,7 @@ class _ForwardFileChip extends StatelessWidget {
                 if (canOpen) ...[
                   const SizedBox(width: 6),
                   Icon(
-                    Icons.open_in_new_rounded,
+                    Icons.visibility_rounded,
                     size: 15,
                     color: Colors.black.withValues(alpha: .46),
                   ),

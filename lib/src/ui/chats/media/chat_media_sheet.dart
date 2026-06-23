@@ -129,8 +129,10 @@ class _ImagesGrid extends StatelessWidget {
                   builder: (_) => FullscreenImage(
                     imageUrl: f.fileUrl,
                     fileName: f.fileName,
+                    sourceFileId: f.id,
                     galleryUrls: files.map((e) => e.fileUrl).toList(),
                     galleryFileNames: files.map((e) => e.fileName).toList(),
+                    galleryFileIds: files.map((e) => e.id).toList(),
                     initialIndex: i,
                   ),
                 ),

@@ -9,6 +9,7 @@ import 'package:student_platform/src/ui/home/widgets/home_header.dart';
 import 'package:student_platform/src/ui/home/widgets/news_feed_section.dart';
 import 'package:student_platform/src/ui/home/widgets/news_story_sheet.dart';
 import 'package:student_platform/src/ui/home/widgets/task_preview_card.dart';
+import 'package:student_platform/src/ui/navigation/main_tab_scope.dart';
 import 'package:student_platform/src/ui/home/widgets/today_summary_card.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -24,6 +25,9 @@ class _HomeScreenState extends State<HomeScreen> {
   HomeDashboardData? _data;
   Object? _error;
   bool _loading = true;
+  final Set<String> _hiddenDoneAssignmentIds = {};
+  final Set<String> _markingDoneAssignmentIds = {};
+  final Set<String> _locallyReadNotificationIds = {};
 
   @override
   void initState() {
@@ -95,6 +99,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final data = _data;
     if (data == null) return const SizedBox.shrink();
+    if (!data.isScheduleForToday && !_loading) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_loading) _load();
+      });
+    }
 
     return CustomScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
@@ -102,6 +111,8 @@ class _HomeScreenState extends State<HomeScreen> {
         SliverToBoxAdapter(
           child: HomeHeader(
             profile: data.profile,
+            currentDate: data.scheduleDate,
+            notificationCount: _unreadNotificationsCount(data),
             onNotificationsTap: () => _showNotifications(data),
           ),
         ),
@@ -117,7 +128,10 @@ class _HomeScreenState extends State<HomeScreen> {
         SliverToBoxAdapter(
           child: _AnimatedEntry(
             delay: const Duration(milliseconds: 70),
-            child: TodaySummaryCard(data: data),
+            child: TodaySummaryCard(
+              data: data,
+              onTap: () => MainTabScope.switchToTab(context, MainTab.schedule),
+            ),
           ),
         ),
         SliverToBoxAdapter(
@@ -125,8 +139,11 @@ class _HomeScreenState extends State<HomeScreen> {
             delay: const Duration(milliseconds: 120),
             child: _AssignmentsSection(
               data: data,
+              hiddenAssignmentIds: _hiddenDoneAssignmentIds,
+              markingDoneAssignmentIds: _markingDoneAssignmentIds,
               onOpen: () => context.push('/my-diary'),
               onAssignmentTap: _showAssignmentDetails,
+              onAssignmentDoneTap: _markAssignmentDone,
             ),
           ),
         ),
@@ -140,6 +157,188 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         const SliverToBoxAdapter(child: SizedBox(height: 96)),
       ],
+    );
+  }
+
+  Future<void> _markAssignmentDone(HomeAssignmentPreview item) async {
+    final assignmentId = item.assignment.id;
+    if (assignmentId.isEmpty ||
+        _markingDoneAssignmentIds.contains(assignmentId) ||
+        item.isDone) {
+      return;
+    }
+
+    final confirmed = await _confirmAssignmentDone(item);
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _hiddenDoneAssignmentIds.add(assignmentId);
+      _markingDoneAssignmentIds.add(assignmentId);
+    });
+
+    try {
+      await _service.setAssignmentDone(
+        assignmentId: assignmentId,
+        done: true,
+      );
+      if (!mounted) return;
+      setState(() => _markingDoneAssignmentIds.remove(assignmentId));
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: const Text('Задание отмечено выполненным'),
+            behavior: SnackBarBehavior.floating,
+            action: SnackBarAction(
+              label: 'Отменить',
+              onPressed: () => _undoAssignmentDone(item),
+            ),
+          ),
+        );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _hiddenDoneAssignmentIds.remove(assignmentId);
+        _markingDoneAssignmentIds.remove(assignmentId);
+      });
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('Не удалось отметить задание. Попробуйте ещё раз.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+    }
+  }
+
+  Future<void> _undoAssignmentDone(HomeAssignmentPreview item) async {
+    final assignmentId = item.assignment.id;
+    if (assignmentId.isEmpty) return;
+
+    setState(() {
+      _hiddenDoneAssignmentIds.remove(assignmentId);
+      _markingDoneAssignmentIds.add(assignmentId);
+    });
+
+    try {
+      await _service.setAssignmentDone(
+        assignmentId: assignmentId,
+        done: false,
+      );
+    } finally {
+      if (!mounted) return;
+      setState(() => _markingDoneAssignmentIds.remove(assignmentId));
+      await _load();
+    }
+  }
+
+  Future<bool?> _confirmAssignmentDone(HomeAssignmentPreview item) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final assignment = item.assignment;
+    final sheetColor = isDark ? const Color(0xFF182331) : Colors.white;
+    final titleColor = isDark ? Colors.white : const Color(0xFF111827);
+    final bodyColor = titleColor.withValues(alpha: isDark ? 0.74 : 0.64);
+    final accent = const Color(0xFF2F9D84);
+
+    return showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: sheetColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: accent.withValues(alpha: isDark ? 0.20 : 0.12),
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: const Icon(
+                        Icons.check_rounded,
+                        color: Color(0xFF2F9D84),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Отметить выполненным?',
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          color: titleColor,
+                          fontWeight: FontWeight.w900,
+                          height: 1.12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  assignment.title,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: titleColor,
+                    fontWeight: FontWeight.w800,
+                    height: 1.22,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Задание исчезнет из ближайших на главной и будет отмечено выполненным в дневнике.',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: bodyColor,
+                    height: 1.38,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.of(sheetContext).pop(false),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: titleColor,
+                          side: BorderSide(
+                            color: titleColor.withValues(alpha: 0.22),
+                          ),
+                        ),
+                        child: const Text('Отмена'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: () => Navigator.of(sheetContext).pop(true),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: accent,
+                          foregroundColor: Colors.white,
+                        ),
+                        icon: const Icon(Icons.check_rounded),
+                        label: const Text('Выполнено'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -159,44 +358,75 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _showNotifications(HomeDashboardData data) {
+  int _unreadNotificationsCount(HomeDashboardData data) {
+    return _buildNotifications(data)
+        .where((item) => !_isNotificationRead(data, item.id))
+        .length;
+  }
+
+  bool _isNotificationRead(HomeDashboardData data, String notificationId) {
+    return data.readNotificationIds.contains(notificationId) ||
+        _locallyReadNotificationIds.contains(notificationId);
+  }
+
+  List<_HomeNotificationItem> _buildNotifications(HomeDashboardData data) {
     final lessonsText = data.hasLessonsToday
         ? 'Сегодня ${data.lessonsCount} ${_lessonWord(data.lessonsCount)}'
-        : 'Сегодня пар нет';
+        : data.lessonsFinishedForToday
+            ? 'Пары на сегодня закончились'
+            : 'Сегодня пар нет';
     final assignmentsText = data.assignmentsCount > 0
         ? 'Есть ${data.assignmentsCount} ближайшие ${_assignmentWord(data.assignmentsCount)}'
         : 'Ближайших дедлайнов пока нет';
     final time = DateFormat('HH:mm', 'ru_RU').format(DateTime.now());
-    final notifications = <Widget>[
-      _NotificationLine(
+    return [
+      _HomeNotificationItem(
+        id: 'schedule_${data.lessonsCount}_${data.lessonsFinishedForToday}_${data.totalLessonsToday}',
         title: 'Расписание',
         text: lessonsText,
         time: time,
         icon: Icons.today_rounded,
         color: const Color(0xFF7C63D8),
+        actionLabel: 'Открыть расписание',
+        targetTab: MainTab.schedule,
       ),
-      _NotificationLine(
+      _HomeNotificationItem(
+        id: 'assignments_${data.assignmentsCount}',
         title: 'Задания',
         text: assignmentsText,
         time: time,
         icon: Icons.task_alt_rounded,
         color: const Color(0xFFB58B3B),
+        actionLabel:
+            data.assignmentsCount > 0 ? 'Открыть дневник' : 'Открыть команды',
+        route: data.assignmentsCount > 0 ? '/my-diary' : null,
+        targetTab: data.assignmentsCount > 0 ? null : MainTab.learning,
       ),
-      const _NotificationLine(
+      const _HomeNotificationItem(
+        id: 'materials',
         title: 'Материалы',
         text: 'Новые материалы появятся в разделе «Информация»',
         time: 'сегодня',
         icon: Icons.folder_copy_outlined,
         color: Color(0xFF2F9D84),
+        actionLabel: 'Открыть информацию',
+        targetTab: MainTab.info,
       ),
-      const _NotificationLine(
+      const _HomeNotificationItem(
+        id: 'home_update',
         title: 'Система',
         text: 'Главная страница обновлена',
         time: 'сегодня',
         icon: Icons.auto_awesome_rounded,
         color: Color(0xFF8A72D8),
+        actionLabel: 'Остаться на главной',
+        targetTab: MainTab.home,
       ),
     ];
+  }
+
+  void _showNotifications(HomeDashboardData data) {
+    final notifications = _buildNotifications(data);
 
     _showDetailsSheet(
       title: 'Уведомления',
@@ -206,8 +436,32 @@ class _HomeScreenState extends State<HomeScreen> {
           ? const [
               _NotificationEmptyState(),
             ]
-          : notifications,
+          : notifications
+              .map(
+                (item) => _NotificationLine(
+                  item: item,
+                  unread: !_isNotificationRead(data, item.id),
+                  onTap: () => _openNotification(item),
+                ),
+              )
+              .toList(),
     );
+  }
+
+  void _openNotification(_HomeNotificationItem item) {
+    if (mounted) {
+      setState(() => _locallyReadNotificationIds.add(item.id));
+    }
+    _service.markNotificationRead(item.id);
+
+    Navigator.of(context).pop();
+
+    if (item.targetTab != null) {
+      MainTabScope.switchToTab(context, item.targetTab!);
+    }
+    if (item.route != null) {
+      context.push(item.route!);
+    }
   }
 
   void _showAssignmentDetails(HomeAssignmentPreview item) {
@@ -361,49 +615,162 @@ class _HomeScreenState extends State<HomeScreen> {
 
 class _AssignmentsSection extends StatelessWidget {
   final HomeDashboardData data;
+  final Set<String> hiddenAssignmentIds;
+  final Set<String> markingDoneAssignmentIds;
   final VoidCallback onOpen;
   final ValueChanged<HomeAssignmentPreview> onAssignmentTap;
+  final ValueChanged<HomeAssignmentPreview> onAssignmentDoneTap;
 
   const _AssignmentsSection({
     required this.data,
+    required this.hiddenAssignmentIds,
+    required this.markingDoneAssignmentIds,
     required this.onOpen,
     required this.onAssignmentTap,
+    required this.onAssignmentDoneTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final assignments = data.assignments.take(4).toList();
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final assignments = data.assignments
+        .where((item) => !hiddenAssignmentIds.contains(item.assignment.id))
+        .take(4)
+        .toList();
+    final foreground = isDark ? Colors.white : const Color(0xFF1F2937);
+    final mutedForeground = foreground.withValues(alpha: isDark ? 0.76 : 0.66);
+    final accent = isDark ? const Color(0xFFF3C774) : const Color(0xFFB58B3B);
+    final subtitle = assignments.isEmpty
+        ? 'Здесь появятся ближайшие дедлайны'
+        : '${data.assignmentsCount} ${_assignmentWord(data.assignmentsCount)} в списке';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _SectionTitle(
-            title: 'Ближайшие задания',
-            actionLabel: 'Открыть',
-            onAction: onOpen,
-          ),
-          const SizedBox(height: 12),
-          if (assignments.isEmpty)
-            const _EmptyState(
-              title: 'Пока нет ближайших заданий',
-              text: 'Если староста добавит задание в чат, оно появится здесь',
-              icon: Icons.check_circle_outline_rounded,
-            )
-          else
-            ...assignments.map(
-              (item) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: TaskPreviewCard(
-                  item: item,
-                  onTap: () => onAssignmentTap(item),
-                ),
-              ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(24),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(24),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: isDark
+                  ? const [Color(0xFF2B2932), Color(0xFF182331)]
+                  : const [Color(0xFFFFF1D2), Color(0xFFEAF7F2)],
             ),
-        ],
+            boxShadow: [
+              BoxShadow(
+                color: (isDark ? Colors.black : const Color(0xFFEFD9AC))
+                    .withValues(alpha: isDark ? 0.24 : 0.28),
+                blurRadius: 18,
+                offset: const Offset(0, 9),
+              ),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Stack(
+              children: [
+                Positioned(
+                  right: -28,
+                  top: -34,
+                  child: _AssignmentsGlow(
+                    size: 104,
+                    color: Colors.white.withValues(alpha: isDark ? 0.06 : 0.24),
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    InkWell(
+                      onTap: onOpen,
+                      borderRadius: BorderRadius.circular(16),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: Colors.white
+                                    .withValues(alpha: isDark ? 0.15 : 0.58),
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child:
+                                  Icon(Icons.task_alt_rounded, color: accent),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Ближайшие задания',
+                                    style: theme.textTheme.titleLarge?.copyWith(
+                                      color: foreground,
+                                      fontWeight: FontWeight.w900,
+                                      height: 1.1,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    subtitle,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: mutedForeground,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (assignments.isEmpty)
+                      const _EmptyState(
+                        title: 'Пока нет ближайших заданий',
+                        text:
+                            'Если староста добавит задание в чат, оно появится здесь',
+                        icon: Icons.check_circle_outline_rounded,
+                      )
+                    else
+                      ...assignments.map(
+                        (item) => Padding(
+                          padding: EdgeInsets.only(
+                            bottom: item == assignments.last ? 0 : 10,
+                          ),
+                          child: TaskPreviewCard(
+                            item: item,
+                            onTap: () => onAssignmentTap(item),
+                            onDoneTap: () => onAssignmentDoneTap(item),
+                            markingDone: markingDoneAssignmentIds
+                                .contains(item.assignment.id),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
+  }
+
+  String _assignmentWord(int count) {
+    if (count % 10 == 1 && count % 100 != 11) return 'задание';
+    if ([2, 3, 4].contains(count % 10) && ![12, 13, 14].contains(count % 100)) {
+      return 'задания';
+    }
+    return 'заданий';
   }
 }
 
@@ -452,83 +819,143 @@ class _InfoLine extends StatelessWidget {
 }
 
 class _NotificationLine extends StatelessWidget {
-  final String title;
-  final String text;
-  final String time;
-  final IconData icon;
-  final Color color;
+  final _HomeNotificationItem item;
+  final bool unread;
+  final VoidCallback onTap;
 
   const _NotificationLine({
-    required this.title,
-    required this.text,
-    required this.time,
-    required this.icon,
-    required this.color,
+    required this.item,
+    required this.unread,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(18),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(14),
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: item.color.withValues(alpha: unread ? 0.11 : 0.06),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: item.color.withValues(alpha: unread ? 0.18 : 0.08),
             ),
-            child: Icon(icon, color: color, size: 21),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+          child: Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: item.color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(item.icon, color: item.color, size: 21),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Text(
-                        title,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w900,
-                          color: theme.colorScheme.onSurface,
+                    Row(
+                      children: [
+                        if (unread) ...[
+                          Container(
+                            width: 7,
+                            height: 7,
+                            decoration: BoxDecoration(
+                              color: item.color,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                        ],
+                        Expanded(
+                          child: Text(
+                            item.title,
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              color: theme.colorScheme.onSurface,
+                            ),
+                          ),
                         ),
+                        Text(
+                          item.time,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.onSurface
+                                .withValues(alpha: 0.48),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      item.text,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color:
+                            theme.colorScheme.onSurface.withValues(alpha: 0.64),
+                        height: 1.3,
                       ),
                     ),
-                    Text(
-                      time,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color:
-                            theme.colorScheme.onSurface.withValues(alpha: 0.48),
-                        fontWeight: FontWeight.w700,
-                      ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Text(
+                          item.actionLabel,
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: item.color,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(width: 2),
+                        Icon(
+                          Icons.chevron_right_rounded,
+                          size: 18,
+                          color: item.color,
+                        ),
+                      ],
                     ),
                   ],
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  text,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurface.withValues(alpha: 0.64),
-                    height: 1.3,
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
+}
+
+class _HomeNotificationItem {
+  final String id;
+  final String title;
+  final String text;
+  final String time;
+  final IconData icon;
+  final Color color;
+  final String actionLabel;
+  final MainTab? targetTab;
+  final String? route;
+
+  const _HomeNotificationItem({
+    required this.id,
+    required this.title,
+    required this.text,
+    required this.time,
+    required this.icon,
+    required this.color,
+    required this.actionLabel,
+    this.targetTab,
+    this.route,
+  });
 }
 
 class _NotificationEmptyState extends StatelessWidget {
@@ -555,54 +982,6 @@ class _NotificationEmptyState extends StatelessWidget {
               fontWeight: FontWeight.w900,
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SectionTitle extends StatelessWidget {
-  final String title;
-  final String? actionLabel;
-  final VoidCallback? onAction;
-
-  const _SectionTitle({
-    required this.title,
-    this.actionLabel,
-    this.onAction,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final titleColor = isDark ? Colors.white : const Color(0xFF111827);
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 0),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              title,
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w900,
-                height: 1.1,
-                color: titleColor,
-              ),
-            ),
-          ),
-          if (actionLabel != null && onAction != null)
-            TextButton(
-              onPressed: onAction,
-              style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFF7C63D8),
-              ),
-              child: Text(
-                actionLabel!,
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-            ),
         ],
       ),
     );
@@ -664,6 +1043,28 @@ class _EmptyState extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _AssignmentsGlow extends StatelessWidget {
+  final double size;
+  final Color color;
+
+  const _AssignmentsGlow({
+    required this.size,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: color,
       ),
     );
   }
