@@ -10,6 +10,15 @@ class MiniCalendar extends StatelessWidget {
   final VoidCallback onNextWeek;
   final ValueChanged<DateTime> onSelect;
 
+  /// В недельном режиме вместо 7 ячеек-дней показываем диапазон недели.
+  final bool weekMode;
+
+  /// Подпись диапазона недели, например «22–28 июня» (без года).
+  final String? weekLabel;
+
+  /// Год недели рядом с диапазоном (приглушённо).
+  final String? weekYearLabel;
+
   const MiniCalendar({
     super.key,
     required this.weekDays,
@@ -18,32 +27,111 @@ class MiniCalendar extends StatelessWidget {
     required this.onPrevWeek,
     required this.onNextWeek,
     required this.onSelect,
+    this.weekMode = false,
+    this.weekLabel,
+    this.weekYearLabel,
   });
+
+  bool _sameDate(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
+  Widget _arrow(IconData icon, VoidCallback onTap) => IconButton(
+        onPressed: onTap,
+        icon: Icon(icon, size: 22),
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+        splashRadius: 18,
+      );
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    const daysShort = ['ПН','ВТ','СР','ЧТ','ПТ','СБ','ВС'];
+    return weekMode ? _buildWeekBar(context) : _buildDayStrip(context);
+  }
 
-    Widget arrow(IconData icon, VoidCallback onTap) => IconButton(
-      onPressed: onTap,
-      icon: Icon(icon, size: 22),
-      padding: EdgeInsets.zero,
-      constraints: const BoxConstraints.tightFor(width: 36, height: 36),
-      splashRadius: 18,
-    );
+  /// Полоса недели: стрелки по краям + диапазон дат прямо на месте чисел.
+  Widget _buildWeekBar(BuildContext context) {
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 2, 12, 8),
       child: Row(
         children: [
-          arrow(Icons.chevron_left, onPrevWeek),
+          _arrow(Icons.chevron_left, onPrevWeek),
+          const SizedBox(width: 2),
           Expanded(
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: weekDays.map((d) {
-                final isSelected = d.year == selectedDay.year && d.month == selectedDay.month && d.day == selectedDay.day;
-                final colors = eventColors(d);
+            child: Container(
+              height: 44,
+              alignment: Alignment.center,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    primary.withValues(alpha: 0.12),
+                    primary.withValues(alpha: 0.04),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: primary.withValues(alpha: 0.16)),
+                boxShadow: [
+                  BoxShadow(
+                    color: primary.withValues(alpha: 0.10),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.calendar_view_week_rounded,
+                      size: 18, color: primary),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      weekLabel ?? '',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: Colors.black,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                  ),
+                  if ((weekYearLabel ?? '').isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    Text(
+                      weekYearLabel!,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: Colors.black.withValues(alpha: 0.45),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 2),
+          _arrow(Icons.chevron_right, onNextWeek),
+        ],
+      ),
+    );
+  }
+
+  /// Классическая полоса на 7 дней с индикаторами событий (режим «По дням»).
+  Widget _buildDayStrip(BuildContext context) {
+    final theme = Theme.of(context);
+    const daysShort = ['ПН','ВТ','СР','ЧТ','ПТ','СБ','ВС'];
+
+    final daysRow = Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: weekDays.map((d) {
+        final bool isSelected = _sameDate(d, selectedDay);
+        final colors = eventColors(d);
 
                 return GestureDetector(
                   onTap: () => onSelect(d),
@@ -51,7 +139,7 @@ class MiniCalendar extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(daysShort[d.weekday - 1],
-                          style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Colors.black.withOpacity(0.72))),
+                          style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Colors.black.withValues(alpha: 0.72))),
                       const SizedBox(height: 6),
                       Container(
                         width: 36, height: 36, alignment: Alignment.center,
@@ -60,11 +148,11 @@ class MiniCalendar extends StatelessWidget {
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
                             color: colors.isNotEmpty
-                                ? theme.colorScheme.primary.withOpacity(0.55)
+                                ? theme.colorScheme.primary.withValues(alpha: 0.55)
                                 : theme.dividerColor,
                           ),
                           boxShadow: isSelected
-                              ? [BoxShadow(color: theme.colorScheme.primary.withOpacity(0.25), blurRadius: 12, offset: const Offset(0, 4))]
+                              ? [BoxShadow(color: theme.colorScheme.primary.withValues(alpha: 0.25), blurRadius: 12, offset: const Offset(0, 4))]
                               : null,
                         ),
                         child: Text(
@@ -94,9 +182,15 @@ class MiniCalendar extends StatelessWidget {
                   ),
                 );
               }).toList(),
-            ),
-          ),
-          arrow(Icons.chevron_right, onNextWeek),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 2, 12, 8),
+      child: Row(
+        children: [
+          _arrow(Icons.chevron_left, onPrevWeek),
+          Expanded(child: daysRow),
+          _arrow(Icons.chevron_right, onNextWeek),
         ],
       ),
     );
@@ -106,13 +200,18 @@ class MiniCalendar extends StatelessWidget {
 /// Небольшая легенда под календарём
 class CalendarLegend extends StatelessWidget {
   final Map<Color, String> items;
-  const CalendarLegend({super.key, required this.items});
+  final EdgeInsetsGeometry padding;
+  const CalendarLegend({
+    super.key,
+    required this.items,
+    this.padding = const EdgeInsets.fromLTRB(16, 0, 16, 10),
+  });
 
   @override
   Widget build(BuildContext context) {
     final chips = items.entries.map((e) => _LegendChip(color: e.key, text: e.value)).toList();
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      padding: padding,
       child: Wrap(spacing: 10, runSpacing: 6, children: chips),
     );
   }

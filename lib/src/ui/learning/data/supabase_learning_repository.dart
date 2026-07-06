@@ -350,6 +350,53 @@ class SupabaseLearningRepository implements LearningRepository {
   Future<List<Message>> loadChat(String teamId) async {
     try {
       final me = _sb.auth.currentUser;
+
+      // Основной путь: SECURITY DEFINER RPC, который джойнит имя/логин/аватар
+      // автора на сервере в обход RLS. Прямое чтение public.users клиентом
+      // запрещено политиками (виден только собственный ряд id = auth.uid()),
+      // из-за чего у чужих сообщений имя не подтягивалось и падало в «Студент».
+      final rpcRows = await _sb.rpc('get_chat_messages_for_team', params: {
+        'p_team_id': teamId,
+        'p_limit': 200,
+      });
+
+      final list = <Message>[];
+      for (final row in rpcRows as List) {
+        final data = Map<String, dynamic>.from(row as Map);
+        final id = (data['id'] ?? '').toString();
+        if (id.isEmpty) continue;
+
+        final attachments = await _loadChatFilesForMessage(id);
+        if (attachments.isNotEmpty) {
+          data['attachments'] = attachments.map((e) => e.toJson()).toList();
+        }
+
+        list.add(_mapMessageRow(
+          data,
+          chatId: (data['chat_id'] ?? '').toString(),
+          currentUserId: me?.id ?? '',
+        ));
+      }
+
+      list.sort((a, b) => a.at.compareTo(b.at));
+
+      // Всегда синхронизируем локальный кэш с серверным ответом,
+      // даже если список пуст — это важно, чтобы удалённое последнее
+      // сообщение не «воскресало» из локального кэша.
+      await _saveChatLocal(teamId, list);
+      return list;
+    } catch (e, st) {
+      debugPrint('[loadChat] rpc failed, fallback to direct tables: $e\n$st');
+      return _loadChatViaTables(teamId);
+    }
+  }
+
+  /// Fallback-путь загрузки чата напрямую из таблиц (используется, если RPC
+  /// `get_chat_messages_for_team` недоступен). Имена чужих авторов здесь могут
+  /// не резолвиться из-за RLS на public.users — тогда сработает заглушка.
+  Future<List<Message>> _loadChatViaTables(String teamId) async {
+    try {
+      final me = _sb.auth.currentUser;
       final chatId = await _getTeamMainChatId(teamId);
       if (chatId == null || chatId.isEmpty) {
         await _saveChatLocal(teamId, const []);
@@ -378,28 +425,7 @@ class SupabaseLearningRepository implements LearningRepository {
           data['attachments'] = attachments.map((e) => e.toJson()).toList();
         }
 
-        final authorId = (data['author_id'] ?? '').toString();
-        if (authorId.isNotEmpty) {
-          try {
-            final user = await _sb
-                .from('users')
-                .select('login,name,surname,avatar_url')
-                .eq('id', authorId)
-                .maybeSingle();
-            if (user != null) {
-              final u = Map<String, dynamic>.from(user as Map);
-              data['author_login'] = (u['login'] ?? '').toString();
-              data['author_name'] = [
-                (u['name'] ?? '').toString(),
-                (u['surname'] ?? '').toString(),
-              ].where((s) => s.isNotEmpty).join(' ').trim();
-              if ((data['author_name'] ?? '').toString().trim().isEmpty) {
-                data['author_name'] = (u['login'] ?? '').toString();
-              }
-              data['author_avatar_url'] = (u['avatar_url'] ?? '').toString();
-            }
-          } catch (_) {}
-        }
+        await _applyAuthorIdentity(data, (data['author_id'] ?? '').toString());
 
         list.add(_mapMessageRow(
           data,
@@ -410,15 +436,63 @@ class SupabaseLearningRepository implements LearningRepository {
 
       list.sort((a, b) => a.at.compareTo(b.at));
 
-      // Всегда синхронизируем локальный кэш с серверным ответом,
-      // даже если список пуст — это важно, чтобы удалённое последнее
-      // сообщение не «воскресало» из локального кэша.
       await _saveChatLocal(teamId, list);
       return list;
     } catch (e, st) {
       debugPrint('[loadChat] error: $e\n$st');
       return _loadChatLocal(teamId);
     }
+  }
+
+  /// Заполняет `author_login`/`author_name`/`author_avatar_url` в [data].
+  /// Сначала пытается прочитать public.users напрямую (работает только для
+  /// собственного ряда из-за RLS), а при отсутствии данных использует
+  /// SECURITY DEFINER RPC `get_user_profile`, который обходит RLS.
+  Future<void> _applyAuthorIdentity(
+    Map<String, dynamic> data,
+    String authorId,
+  ) async {
+    if (authorId.isEmpty) return;
+
+    try {
+      final user = await _sb
+          .from('users')
+          .select('login,name,surname,avatar_url')
+          .eq('id', authorId)
+          .maybeSingle();
+      if (user != null) {
+        final u = Map<String, dynamic>.from(user as Map);
+        final name = [
+          (u['name'] ?? '').toString(),
+          (u['surname'] ?? '').toString(),
+        ].where((s) => s.trim().isNotEmpty).join(' ').trim();
+        data['author_login'] = (u['login'] ?? '').toString();
+        data['author_name'] =
+            name.isNotEmpty ? name : (u['login'] ?? '').toString();
+        data['author_avatar_url'] = (u['avatar_url'] ?? '').toString();
+        return;
+      }
+    } catch (_) {}
+
+    // RLS скрыл чужой ряд — берём профиль через RPC в обход RLS.
+    try {
+      final res = await _sb.rpc('get_user_profile', params: {'p_id': authorId});
+      Map<String, dynamic>? u;
+      if (res is List && res.isNotEmpty) {
+        u = Map<String, dynamic>.from(res.first as Map);
+      } else if (res is Map) {
+        u = Map<String, dynamic>.from(res);
+      }
+      if (u == null) return;
+
+      final name = [
+        (u['name'] ?? '').toString(),
+        (u['surname'] ?? '').toString(),
+      ].where((s) => s.trim().isNotEmpty).join(' ').trim();
+      if (name.isNotEmpty) data['author_name'] = name;
+      final avatar = (u['avatar_url'] ?? '').toString();
+      if (avatar.isNotEmpty) data['author_avatar_url'] = avatar;
+    } catch (_) {}
   }
 
   @override
@@ -441,28 +515,7 @@ class SupabaseLearningRepository implements LearningRepository {
         data['attachments'] = attachments.map((e) => e.toJson()).toList();
       }
 
-      final authorId = (data['author_id'] ?? '').toString();
-      if (authorId.isNotEmpty) {
-        try {
-          final user = await _sb
-              .from('users')
-              .select('login,name,surname,avatar_url')
-              .eq('id', authorId)
-              .maybeSingle();
-          if (user != null) {
-            final u = Map<String, dynamic>.from(user as Map);
-            data['author_login'] = (u['login'] ?? '').toString();
-            data['author_name'] = [
-              (u['name'] ?? '').toString(),
-              (u['surname'] ?? '').toString(),
-            ].where((s) => s.isNotEmpty).join(' ').trim();
-            if ((data['author_name'] ?? '').toString().trim().isEmpty) {
-              data['author_name'] = (u['login'] ?? '').toString();
-            }
-            data['author_avatar_url'] = (u['avatar_url'] ?? '').toString();
-          }
-        } catch (_) {}
-      }
+      await _applyAuthorIdentity(data, (data['author_id'] ?? '').toString());
 
       return _mapMessageRow(
         data,
@@ -501,28 +554,7 @@ class SupabaseLearningRepository implements LearningRepository {
           data['attachments'] = attachments.map((e) => e.toJson()).toList();
         }
 
-        final authorId = (data['author_id'] ?? '').toString();
-        if (authorId.isNotEmpty) {
-          try {
-            final user = await _sb
-                .from('users')
-                .select('login,name,surname,avatar_url')
-                .eq('id', authorId)
-                .maybeSingle();
-            if (user != null) {
-              final u = Map<String, dynamic>.from(user as Map);
-              data['author_login'] = (u['login'] ?? '').toString();
-              data['author_name'] = [
-                (u['name'] ?? '').toString(),
-                (u['surname'] ?? '').toString(),
-              ].where((s) => s.isNotEmpty).join(' ').trim();
-              if ((data['author_name'] ?? '').toString().trim().isEmpty) {
-                data['author_name'] = (u['login'] ?? '').toString();
-              }
-              data['author_avatar_url'] = (u['avatar_url'] ?? '').toString();
-            }
-          } catch (_) {}
-        }
+        await _applyAuthorIdentity(data, (data['author_id'] ?? '').toString());
 
         older.add(_mapMessageRow(
           data,

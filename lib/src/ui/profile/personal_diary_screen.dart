@@ -16,7 +16,21 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
   final _searchController = TextEditingController();
   final _assignmentDoneOverrides = <String, bool>{};
   final _taskStatusOverrides = <String, String>{};
-  late Future<PersonalDiaryData> _future = _loadWithCache();
+  late Future<PersonalDiaryData> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    // Instant RAM cache: if we already loaded the diary this session, show it
+    // on the first frame (no spinner) and refresh quietly in the background.
+    final memoryCached = _service.peekCached();
+    if (memoryCached != null) {
+      _future = Future<PersonalDiaryData>.value(memoryCached);
+      _refreshSilently();
+    } else {
+      _future = _loadWithCache();
+    }
+  }
 
   Future<PersonalDiaryData> _loadWithCache() async {
     final cached = await _service.loadCached();
@@ -2226,7 +2240,10 @@ class _HeaderAddButton extends StatelessWidget {
                   ]
                 : null,
           ),
-          child: const Icon(Icons.add, color: Colors.white, size: 24),
+          child: Transform.translate(
+            offset: const Offset(0, -1.5),
+            child: const Icon(Icons.add, color: Colors.white, size: 24),
+          ),
         ),
       ),
     );

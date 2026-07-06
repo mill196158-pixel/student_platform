@@ -204,16 +204,34 @@ class PersonalDiaryService {
   final SupabaseClient _sb;
   final AcademicContextService _academicContextService;
 
+  // In-memory (RAM) layer of the cache. Survives across screen re-creations
+  // within one app session, so re-opening the diary tab is instant with no
+  // loading spinner. The SharedPreferences layer keeps data across restarts.
+  static final Map<String, PersonalDiaryData> _memoryCache = {};
+
+  /// Synchronous peek into the RAM cache. Returns instantly (no await), so the
+  /// UI can render cached data on the very first frame.
+  PersonalDiaryData? peekCached({int? semesterNumber}) {
+    final userId = _sb.auth.currentUser?.id ?? '';
+    if (userId.isEmpty) return null;
+    return _memoryCache[_cacheKey(userId, semesterNumber)];
+  }
+
   Future<PersonalDiaryData?> loadCached({int? semesterNumber}) async {
     final userId = _sb.auth.currentUser?.id ?? '';
     if (userId.isEmpty) return null;
+    final key = _cacheKey(userId, semesterNumber);
+    final memory = _memoryCache[key];
+    if (memory != null) return memory;
     try {
       final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_cacheKey(userId, semesterNumber));
+      final raw = prefs.getString(key);
       if (raw == null || raw.trim().isEmpty) return null;
       final decoded = jsonDecode(raw);
       if (decoded is! Map) return null;
-      return _dataFromJson(Map<String, dynamic>.from(decoded));
+      final data = _dataFromJson(Map<String, dynamic>.from(decoded));
+      _memoryCache[key] = data;
+      return data;
     } catch (_) {
       return null;
     }
@@ -232,12 +250,11 @@ class PersonalDiaryService {
     final userId =
         _sb.auth.currentUser?.id ?? data.academicContext.userId ?? '';
     if (userId.isEmpty) return;
+    final key = _cacheKey(userId, semesterNumber);
+    _memoryCache[key] = data;
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
-        _cacheKey(userId, semesterNumber),
-        jsonEncode(_dataToJson(data)),
-      );
+      await prefs.setString(key, jsonEncode(_dataToJson(data)));
     } catch (_) {}
   }
 

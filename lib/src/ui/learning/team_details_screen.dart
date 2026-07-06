@@ -73,6 +73,11 @@ class _BodyState extends State<_Body> with SingleTickerProviderStateMixin {
     final theme = Theme.of(context);
 
     final showAssignmentsActions = _tabController.index == 0;
+    // Когда открыта клавиатура (набор сообщения в чате), скрываем крупную
+    // шапку с названием команды, чтобы освободить место композеру и не
+    // получить overflow при добавлении вложений. Полоска вкладок остаётся.
+    final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
+    final showHeader = !_selecting && !keyboardOpen;
 
     return Scaffold(
       body: Column(
@@ -80,15 +85,22 @@ class _BodyState extends State<_Body> with SingleTickerProviderStateMixin {
         children: [
           // В режиме выделения сообщений шапку полностью заменяет floating selection bar внутри чата.
           if (!_selecting) ...[
-            SizedBox(
-              height: _kHeaderHeight,
-              child: _TeamHeader(
-                team: team,
-                leading: const _RoundBackButton(), // назад слева в шапке
-                trailing: showAssignmentsActions
-                    ? const AssignmentsViewModeButton()
-                    : null,
-              ),
+            AnimatedSize(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOut,
+              alignment: Alignment.topCenter,
+              child: showHeader
+                  ? SizedBox(
+                      height: _kHeaderHeight,
+                      child: _TeamHeader(
+                        team: team,
+                        leading: const _RoundBackButton(), // назад слева в шапке
+                        trailing: showAssignmentsActions
+                            ? const AssignmentsViewModeButton()
+                            : null,
+                      ),
+                    )
+                  : const SizedBox(width: double.infinity, height: 0),
             ),
             const SizedBox(height: _kTabsTopGap),
             // Сильно сжатый сегмент-контрол для вкладок (уменьшен на ~60%)

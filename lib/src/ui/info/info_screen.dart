@@ -26,13 +26,32 @@ class InfoScreen extends StatefulWidget {
 }
 
 class _InfoScreenState extends State<InfoScreen> {
-  late Future<_UsefulPlanState> _future = _loadWithCache();
+  // In-memory (RAM) layer of the cache. Survives across screen re-creations
+  // within one app session, so re-opening the tab is instant with no spinner.
+  // The SharedPreferences layer keeps data across app restarts.
+  static final Map<String, _UsefulPlanState> _memoryCache = {};
+
+  late Future<_UsefulPlanState> _future;
   int? _selectedSemester;
   _UsefulFilter _filter = _UsefulFilter.all;
   _UsefulSection _section = _UsefulSection.subjects;
   bool _filtersExpanded = false;
   bool _controlGroupsTouched = false;
   final Set<String> _collapsedControlGroups = {};
+
+  @override
+  void initState() {
+    super.initState();
+    // Instant RAM cache: show already-loaded subjects on the first frame and
+    // refresh quietly in the background.
+    final memoryCached = _peekMemoryCache();
+    if (memoryCached != null) {
+      _future = Future<_UsefulPlanState>.value(memoryCached);
+      _refreshSilently();
+    } else {
+      _future = _loadWithCache();
+    }
+  }
 
   Future<_UsefulPlanState> _loadFresh() async {
     final contextData = await AcademicContextService().loadFresh();
@@ -76,16 +95,27 @@ class _InfoScreenState extends State<InfoScreen> {
     });
   }
 
+  _UsefulPlanState? _peekMemoryCache() {
+    final userId = Supabase.instance.client.auth.currentUser?.id ?? '';
+    if (userId.isEmpty) return null;
+    return _memoryCache[_infoCacheKey(userId)];
+  }
+
   Future<_UsefulPlanState?> _readCachedPlan() async {
     final userId = Supabase.instance.client.auth.currentUser?.id ?? '';
     if (userId.isEmpty) return null;
+    final key = _infoCacheKey(userId);
+    final memory = _memoryCache[key];
+    if (memory != null) return memory;
     try {
       final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_infoCacheKey(userId));
+      final raw = prefs.getString(key);
       if (raw == null || raw.trim().isEmpty) return null;
       final decoded = jsonDecode(raw);
       if (decoded is! Map) return null;
-      return _planFromJson(Map<String, dynamic>.from(decoded));
+      final plan = _planFromJson(Map<String, dynamic>.from(decoded));
+      _memoryCache[key] = plan;
+      return plan;
     } catch (_) {
       return null;
     }
@@ -96,10 +126,11 @@ class _InfoScreenState extends State<InfoScreen> {
         state.contextData.userId ??
         '';
     if (userId.isEmpty) return;
+    final key = _infoCacheKey(userId);
+    _memoryCache[key] = state;
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
-          _infoCacheKey(userId), jsonEncode(_planToJson(state)));
+      await prefs.setString(key, jsonEncode(_planToJson(state)));
     } catch (_) {}
   }
 

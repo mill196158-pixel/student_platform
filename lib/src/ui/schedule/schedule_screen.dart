@@ -1,4 +1,5 @@
 // lib/src/ui/schedule/schedule_screen.dart
+import 'dart:async';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -339,10 +340,19 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   late DateTime _selectedWeekStart;
   late DateTime _selectedDay;
   bool _loading = true;
+  bool _weekMode = false; // режим «День»/«Неделя»
   List<Lesson> _all = [];
   List<ScheduleAssignment> _assignments = [];
   RealtimeChannel? _channel;
   RealtimeChannel? _assignmentsChannel;
+
+  // недельный режим: прокрутка + якорь на «сегодня»
+  final ScrollController _weekScrollController = ScrollController();
+  final GlobalKey _todaySectionKey = GlobalKey();
+  // свёрнутые дни в недельной ленте (ключ — ISO-дата дня)
+  final Set<String> _collapsedDays = {};
+  // «тик» раз в минуту — чтобы индикатор «идёт сейчас/следующая» был живым
+  Timer? _liveTick;
 
   // свайп-трекинг
   double _dragDx = 0.0;
@@ -361,6 +371,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     _selectedWeekStart = _mondayOf(now);
     _loadMonth(anchor: _selectedDay);
 
+    // Обновляем «живые» индикаторы пар раз в минуту.
+    _liveTick = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() {});
+    });
+
     // Realtime (если включено на сервере)
     _channel = Supabase.instance.client
         .channel('public:lessons')
@@ -368,7 +383,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           event: PostgresChangeEvent.all,
           schema: 'public',
           table: 'lessons',
-          callback: (_) => _loadMonth(anchor: _selectedDay),
+          callback: (_) => _reload(),
         )
         .subscribe();
     _assignmentsChannel = Supabase.instance.client
@@ -377,7 +392,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           event: PostgresChangeEvent.all,
           schema: 'public',
           table: 'assignments',
-          callback: (_) => _loadMonth(anchor: _selectedDay),
+          callback: (_) => _reload(),
         )
         .subscribe();
   }
@@ -386,6 +401,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   void dispose() {
     _channel?.unsubscribe();
     _assignmentsChannel?.unsubscribe();
+    _liveTick?.cancel();
+    _weekScrollController.dispose();
     super.dispose();
   }
 
@@ -400,6 +417,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
   bool _isSameDate(DateTime a, DateTime b) =>
       MskDate.isSameCalendarDate(a, b);
+
+  /// Единая точка перезагрузки данных под текущий режим.
+  Future<void> _reload() {
+    return _weekMode ? _loadWeek() : _loadMonth(anchor: _selectedDay);
+  }
 
   Future<void> _loadMonth({required DateTime anchor}) async {
     setState(() => _loading = true);
@@ -416,14 +438,49 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     // ВАЖНО: не меняем _selectedDay и не «подскакиваем» к другой дате.
   }
 
+  /// Грузим данные для всей видимой недели. Неделя может пересекать границу
+  /// месяца — тогда подтягиваем оба месяца и объединяем по id.
+  Future<void> _loadWeek() async {
+    setState(() => _loading = true);
+    final weekStart = _selectedWeekStart;
+    final weekEnd = weekStart.add(const Duration(days: 6));
+    final anchors = <DateTime>{
+      DateTime(weekStart.year, weekStart.month, 1),
+      DateTime(weekEnd.year, weekEnd.month, 1),
+    };
+
+    final lessonsById = <String, Lesson>{};
+    final assignmentsById = <String, ScheduleAssignment>{};
+    for (final anchor in anchors) {
+      final data = await Future.wait<dynamic>([
+        _repo.loadMonth(anchor),
+        _repo.loadMonthAssignments(anchor),
+      ]);
+      for (final l in data[0] as List<Lesson>) {
+        lessonsById[l.id] = l;
+      }
+      for (final a in data[1] as List<ScheduleAssignment>) {
+        assignmentsById[a.id] = a;
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _all = lessonsById.values.toList();
+      _assignments = assignmentsById.values.toList();
+      _loading = false;
+    });
+  }
+
   void _shiftWeek(int deltaWeeks) {
     final nextStart = _selectedWeekStart.add(Duration(days: 7 * deltaWeeks));
-    final nextDay = nextStart; // выбрали понедельник той недели
     setState(() {
       _selectedWeekStart = nextStart;
-      _selectedDay = nextDay;
+      // В режиме дня выбираем понедельник новой недели, чтобы лента дня
+      // соответствовала календарю. В режиме недели «выбранный день» не виден.
+      _selectedDay = nextStart;
     });
-    _loadMonth(anchor: _selectedDay); // если месяц поменялся — подтянем данные
+    _reload(); // если месяц/неделя поменялись — подтянем данные
   }
 
   void _shiftDay(int deltaDays) {
@@ -436,11 +493,38 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     _loadMonth(anchor: next);
   }
 
+  /// Переключение режима «День» ⇄ «Неделя».
+  void _setWeekMode(bool week) {
+    if (_weekMode == week) return;
+    setState(() {
+      _weekMode = week;
+      if (week) {
+        _selectedWeekStart = _mondayOf(_selectedDay);
+      }
+    });
+    _reload();
+    if (week) _scrollToTodaySoon();
+  }
+
+  /// Плавно подкручиваем ленту недели к секции «сегодня» (если она в неделе).
+  void _scrollToTodaySoon() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _todaySectionKey.currentContext;
+      if (ctx == null) return;
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.02,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
+
   List<DateTime> get _weekDays =>
       List.generate(7, (i) => _selectedWeekStart.add(Duration(days: i)));
 
-  List<Lesson> get _forSelectedDay {
-    return _all.where((l) => _isSameDate(l.date, _selectedDay)).toList()
+  List<Lesson> _lessonsForDay(DateTime day) {
+    return _all.where((l) => _isSameDate(l.date, day)).toList()
       ..sort((a, b) {
         final t = a.pairNum.compareTo(b.pairNum);
         if (t != 0) return t;
@@ -450,17 +534,45 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       });
   }
 
-  List<ScheduleAssignment> get _assignmentsForSelectedDay {
+  List<ScheduleAssignment> _assignmentsForDay(DateTime day) {
     return _assignments
         .where((assignment) =>
-            assignment.dueAt != null &&
-            _isSameDate(assignment.dueAt!, _selectedDay))
+            assignment.dueAt != null && _isSameDate(assignment.dueAt!, day))
         .toList()
-      ..sort((a, b) {
-        final aDue = a.dueAt!;
-        final bDue = b.dueAt!;
-        return aDue.compareTo(bDue);
-      });
+      ..sort((a, b) => a.dueAt!.compareTo(b.dueAt!));
+  }
+
+  List<Lesson> get _forSelectedDay => _lessonsForDay(_selectedDay);
+
+  List<ScheduleAssignment> get _assignmentsForSelectedDay =>
+      _assignmentsForDay(_selectedDay);
+
+  /// Живые статусы пар для дня: все идущие сейчас + одна ближайшая следующая.
+  /// Пусто, если [day] — не сегодня. [dayLessons] должен быть отсортирован.
+  Map<String, LessonLiveStatus> _liveStatusFor(
+    List<Lesson> dayLessons,
+    DateTime day,
+    DateTime now,
+  ) {
+    final result = <String, LessonLiveStatus>{};
+    if (!_isSameDate(day, now)) return result;
+    final nowMin = now.hour * 60 + now.minute;
+
+    for (final l in dayLessons) {
+      final s = l.start.hour * 60 + l.start.minute;
+      final e = l.end.hour * 60 + l.end.minute;
+      if (nowMin >= s && nowMin < e) {
+        result[l.id] = LessonLiveStatus.ongoing;
+      }
+    }
+    for (final l in dayLessons) {
+      final s = l.start.hour * 60 + l.start.minute;
+      if (s > nowMin) {
+        result.putIfAbsent(l.id, () => LessonLiveStatus.next);
+        break;
+      }
+    }
+    return result;
   }
 
   List<Color> _colorsForDay(DateTime d) {
@@ -493,31 +605,30 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   void _onMenuSelected(String key) {
     switch (key) {
       case 'today':
+        // «Сегодня» уважает текущий режим: в неделе → текущая неделя,
+        // в дне → сегодняшний день. И там и там подскроллим к сегодня.
         final now = _nowMsk();
         setState(() {
           _selectedDay = now;
           _selectedWeekStart = _mondayOf(now);
         });
-        _loadMonth(anchor: _selectedDay);
+        _reload();
+        if (_weekMode) _scrollToTodaySoon();
         break;
-      case 'this_week':
-        final now = _nowMsk();
-        setState(() {
-          _selectedWeekStart = _mondayOf(now);
-          _selectedDay = _selectedWeekStart;
-        });
-        _loadMonth(anchor: _selectedDay);
+      case 'view_day':
+        _setWeekMode(false);
         break;
-      case 'sort_time':
-        setState(() {});
+      case 'view_week':
+        _setWeekMode(true);
         break;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final monthText = _monthName(_selectedDay.month);
-    final yearText = _selectedDay.year.toString();
+    final subtitle = '${_monthName(_selectedDay.month)} ${_selectedDay.year}';
+
+    void handleSwipe(int dir) => _weekMode ? _shiftWeek(dir) : _shiftDay(dir);
 
     return Scaffold(
       body: GestureDetector(
@@ -528,18 +639,14 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           final v = d.primaryVelocity ?? 0;
           // быстрый флик по скорости
           if (v.abs() > 250) {
-            if (v < 0) {
-              _shiftDay(1); // влево → следующий день
-            } else {
-              _shiftDay(-1); // вправо → предыдущий день
-            }
+            handleSwipe(v < 0 ? 1 : -1); // влево → вперёд, вправо → назад
             return;
           }
           // медленный свайп по смещению
           if (_dragDx < -40) {
-            _shiftDay(1);
+            handleSwipe(1);
           } else if (_dragDx > 40) {
-            _shiftDay(-1);
+            handleSwipe(-1);
           }
           _dragDx = 0.0;
         },
@@ -551,7 +658,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               height: _kHeaderExpandedHeight,
               child: _ScheduleHeader(
                 title: 'Расписание',
-                subtitle: '$monthText $yearText',
+                subtitle: subtitle,
 
                 // ↓↓↓ иконка-календарь + меню
                 day: _selectedDay,
@@ -564,6 +671,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                 },
                 onDatePicked: (picked) {
                   setState(() {
+                    _weekMode = false;
                     _selectedDay = picked;
                     _selectedWeekStart = _mondayOf(picked);
                   });
@@ -572,21 +680,28 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                 onEnsureMonthLoaded: (monthStart) =>
                     _loadMonth(anchor: monthStart),
 
-                menuBuilder: (ctx) =>
-                    _ScheduleHeaderMenu(onSelected: _onMenuSelected),
+                menuBuilder: (ctx) => _ScheduleHeaderMenu(
+                  onSelected: _onMenuSelected,
+                  weekMode: _weekMode,
+                ),
               ),
             ),
             const SizedBox(height: _kHeaderSpacing),
 
-            // ===== мини-календарь (фикс) =====
+            // ===== мини-календарь / полоса недели (фикс) =====
             MiniCalendar(
               weekDays: _weekDays,
               selectedDay: _selectedDay,
+              weekMode: _weekMode,
+              weekLabel: _weekRangeShort(),
+              weekYearLabel: _weekYearLabel(),
               eventColors: _colorsForDay,
               onPrevWeek: () => _shiftWeek(-1),
               onNextWeek: () => _shiftWeek(1),
               onSelect: (d) {
+                // Тап по дню — всегда переход в подробный режим дня.
                 setState(() {
+                  _weekMode = false;
                   _selectedDay = d;
                   _selectedWeekStart = _mondayOf(d);
                 });
@@ -605,45 +720,164 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             const Divider(height: 1),
 
             // ===== лента — единственная прокручиваемая часть =====
-            Expanded(
-              child: _loading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _forSelectedDay.isEmpty &&
-                          _assignmentsForSelectedDay.isEmpty
-                      ? const _EmptyCat()
-                      : ListView(
-                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-                          children: [
-                            for (final l in _forSelectedDay) ...[
-                              LessonCard(
-                                lesson: l,
-                                onTap: () => Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                      builder: (_) =>
-                                          LessonDetailsScreen(lesson: l)),
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                            ],
-                            if (_assignmentsForSelectedDay.isNotEmpty) ...[
-                              const _ScheduleSectionLabel(
-                                  title: 'Задания к дате'),
-                              const SizedBox(height: 10),
-                              for (final assignment
-                                  in _assignmentsForSelectedDay) ...[
-                                ScheduleAssignmentCard(
-                                  assignment: assignment,
-                                  onTap: () =>
-                                      _openAssignmentDetails(assignment),
-                                ),
-                                const SizedBox(height: 12),
-                              ],
-                            ],
-                          ],
-                        ),
-            ),
+            Expanded(child: _buildBody(context)),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildBody(BuildContext context) {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    return _weekMode ? _buildWeekBody(context) : _buildDayBody(context);
+  }
+
+  Widget _buildDayBody(BuildContext context) {
+    final lessons = _forSelectedDay;
+    final assignments = _assignmentsForSelectedDay;
+    if (lessons.isEmpty && assignments.isEmpty) {
+      return const _EmptyCat();
+    }
+    final live = _liveStatusFor(lessons, _selectedDay, _nowMsk());
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      children: [
+        for (final l in lessons) ...[
+          LessonCard(
+            lesson: l,
+            status: live[l.id] ?? LessonLiveStatus.none,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => LessonDetailsScreen(lesson: l),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+        if (assignments.isNotEmpty) ...[
+          const _ScheduleSectionLabel(title: 'Задания к дате'),
+          const SizedBox(height: 10),
+          for (final assignment in assignments) ...[
+            ScheduleAssignmentCard(
+              assignment: assignment,
+              onTap: () => _openAssignmentDetails(assignment),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ],
+      ],
+    );
+  }
+
+  Widget _buildWeekBody(BuildContext context) {
+    final today = _nowMsk();
+    final days = _weekDays;
+
+    // Показываем только дни с парами/заданиями — пустые дни не рисуем.
+    final contentDays = days
+        .where((d) =>
+            _lessonsForDay(d).isNotEmpty || _assignmentsForDay(d).isNotEmpty)
+        .toList();
+
+    // Вся неделя пустая — показываем понятную заглушку.
+    if (contentDays.isEmpty) {
+      return const _EmptyCat(message: 'На этой неделе занятий нет');
+    }
+
+    return ListView(
+      controller: _weekScrollController,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+      children: [
+        for (final d in contentDays)
+          _buildWeekDaySection(context, d, isToday: _isSameDate(d, today)),
+      ],
+    );
+  }
+
+  String _dayKey(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-'
+      '${d.day.toString().padLeft(2, '0')}';
+
+  void _toggleDayCollapsed(DateTime day) {
+    final key = _dayKey(day);
+    setState(() {
+      if (!_collapsedDays.remove(key)) _collapsedDays.add(key);
+    });
+  }
+
+  Widget _buildWeekDaySection(
+    BuildContext context,
+    DateTime day, {
+    required bool isToday,
+  }) {
+    final lessons = _lessonsForDay(day);
+    final assignments = _assignmentsForDay(day);
+
+    final collapsed = _collapsedDays.contains(_dayKey(day));
+    final live = _liveStatusFor(lessons, day, _nowMsk());
+
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 10),
+        for (final l in lessons) ...[
+          LessonCard(
+            lesson: l,
+            status: live[l.id] ?? LessonLiveStatus.none,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => LessonDetailsScreen(lesson: l),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+        if (assignments.isNotEmpty) ...[
+          const _ScheduleSectionLabel(title: 'Задания к дате'),
+          const SizedBox(height: 10),
+          for (final assignment in assignments) ...[
+            ScheduleAssignmentCard(
+              assignment: assignment,
+              onTap: () => _openAssignmentDetails(assignment),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ],
+      ],
+    );
+
+    return Padding(
+      key: isToday ? _todaySectionKey : null,
+      padding: const EdgeInsets.only(bottom: 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _WeekDayHeader(
+            date: day,
+            weekdayName: _weekdayFull(day.weekday),
+            dateLabel: '${day.day} ${_monthGenitive(day.month)}',
+            lessonCount: lessons.length,
+            assignmentCount: assignments.length,
+            isToday: isToday,
+            collapsed: collapsed,
+            onTap: () => _toggleDayCollapsed(day),
+          ),
+          // Плавное сворачивание содержимого дня.
+          AnimatedSize(
+            duration: const Duration(milliseconds: 240),
+            curve: Curves.easeInOutCubic,
+            alignment: Alignment.topCenter,
+            child: ClipRect(
+              child: Align(
+                alignment: Alignment.topCenter,
+                heightFactor: collapsed ? 0.0 : 1.0,
+                child: content,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -664,6 +898,54 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       'Декабрь'
     ];
     return ru[m - 1];
+  }
+
+  static const _monthsGenitive = [
+    'января',
+    'февраля',
+    'марта',
+    'апреля',
+    'мая',
+    'июня',
+    'июля',
+    'августа',
+    'сентября',
+    'октября',
+    'ноября',
+    'декабря',
+  ];
+
+  static const _weekdaysFull = [
+    'Понедельник',
+    'Вторник',
+    'Среда',
+    'Четверг',
+    'Пятница',
+    'Суббота',
+    'Воскресенье',
+  ];
+
+  String _monthGenitive(int m) => _monthsGenitive[m - 1];
+
+  String _weekdayFull(int weekday) => _weekdaysFull[weekday - 1];
+
+  /// Короткий диапазон недели для мини-календаря (без года): «22–28 июня»
+  /// или «29 июня – 5 июля» при переходе через месяц.
+  String _weekRangeShort() {
+    final s = _selectedWeekStart;
+    final e = s.add(const Duration(days: 6));
+    if (s.month == e.month) {
+      return '${s.day}–${e.day} ${_monthGenitive(s.month)}';
+    }
+    return '${s.day} ${_monthGenitive(s.month)} – '
+        '${e.day} ${_monthGenitive(e.month)}';
+  }
+
+  /// Год недели для мини-календаря (приглушённо рядом с диапазоном).
+  String _weekYearLabel() {
+    final s = _selectedWeekStart;
+    final e = s.add(const Duration(days: 6));
+    return s.year == e.year ? '${s.year}' : '${s.year}/${e.year}';
   }
 
   void _openAssignmentDetails(ScheduleAssignment assignment) {
@@ -804,6 +1086,170 @@ class _ScheduleSectionLabel extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Заголовок дня в недельной ленте: дата-плашка, день недели, счётчик пар.
+class _WeekDayHeader extends StatelessWidget {
+  final DateTime date;
+  final String weekdayName;
+  final String dateLabel;
+  final int lessonCount;
+  final int assignmentCount;
+  final bool isToday;
+  final bool collapsed;
+  final VoidCallback onTap;
+
+  const _WeekDayHeader({
+    required this.date,
+    required this.weekdayName,
+    required this.dateLabel,
+    required this.lessonCount,
+    required this.assignmentCount,
+    required this.isToday,
+    required this.collapsed,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
+    final accent = isToday ? primary : Colors.black.withValues(alpha: 0.82);
+
+    final countText = lessonCount == 0
+        ? (assignmentCount > 0 ? 'Только задания' : 'Нет пар')
+        : '$lessonCount ${_ruPlural(lessonCount, 'пара', 'пары', 'пар')}';
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: isToday ? primary.withValues(alpha: 0.06) : Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+          border: isToday
+              ? Border.all(color: primary.withValues(alpha: 0.14))
+              : null,
+        ),
+        child: Row(
+          children: [
+            // Дата-плашка
+            Container(
+              width: 46,
+              height: 46,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: isToday ? primary : theme.colorScheme.surface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: isToday
+                      ? primary
+                      : primary.withValues(alpha: 0.16),
+                ),
+                boxShadow: isToday
+                    ? [
+                        BoxShadow(
+                          color: primary.withValues(alpha: 0.28),
+                          blurRadius: 12,
+                          offset: const Offset(0, 5),
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Text(
+                '${date.day}',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  color: isToday ? Colors.white : Colors.black,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          weekdayName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            color: accent,
+                            height: 1.05,
+                          ),
+                        ),
+                      ),
+                      if (isToday) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: primary,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Text(
+                            'Сегодня',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '$dateLabel · $countText',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: Colors.black.withValues(alpha: 0.55),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // Индикатор сворачивания — анимированный шеврон в мягком круге.
+            Container(
+              width: 30,
+              height: 30,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: primary.withValues(alpha: 0.08),
+                shape: BoxShape.circle,
+              ),
+              child: AnimatedRotation(
+                turns: collapsed ? -0.25 : 0.0,
+                duration: const Duration(milliseconds: 240),
+                curve: Curves.easeInOutCubic,
+                child: Icon(
+                  Icons.expand_more_rounded,
+                  size: 22,
+                  color: primary.withValues(alpha: 0.9),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Русское склонение числительных.
+String _ruPlural(int n, String one, String few, String many) {
+  final mod10 = n % 10;
+  final mod100 = n % 100;
+  if (mod10 == 1 && mod100 != 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
 }
 
 class ScheduleAssignmentCard extends StatelessWidget {
@@ -1108,7 +1554,8 @@ class _ScheduleHeader extends StatelessWidget {
                   ),
                   menuBuilder != null
                       ? menuBuilder!(context)
-                      : _ScheduleHeaderMenu(onSelected: (_) {}),
+                      : _ScheduleHeaderMenu(
+                          onSelected: (_) {}, weekMode: false),
                 ],
               ),
             ),
@@ -1121,8 +1568,12 @@ class _ScheduleHeader extends StatelessWidget {
 
 class _ScheduleHeaderMenu extends StatelessWidget {
   final ValueChanged<String> onSelected;
+  final bool weekMode;
 
-  const _ScheduleHeaderMenu({required this.onSelected});
+  const _ScheduleHeaderMenu({
+    required this.onSelected,
+    required this.weekMode,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1142,36 +1593,45 @@ class _ScheduleHeaderMenu extends StatelessWidget {
         borderRadius: BorderRadius.circular(22),
         side: BorderSide(color: primary.withValues(alpha: 0.08)),
       ),
-      constraints: const BoxConstraints(minWidth: 238),
-      itemBuilder: (ctx) => const [
+      constraints: const BoxConstraints(minWidth: 244),
+      itemBuilder: (ctx) => [
         PopupMenuItem(
           value: 'today',
           height: 58,
-          padding: EdgeInsets.symmetric(horizontal: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: weekMode
+              ? const _ScheduleMenuItem(
+                  icon: Icons.date_range_rounded,
+                  title: 'Текущая неделя',
+                  subtitle: 'Вернуться к этой неделе',
+                )
+              : const _ScheduleMenuItem(
+                  icon: Icons.today_rounded,
+                  title: 'Сегодня',
+                  subtitle: 'Вернуться к текущему дню',
+                ),
+        ),
+        const PopupMenuDivider(height: 8),
+        PopupMenuItem(
+          value: 'view_day',
+          height: 58,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
           child: _ScheduleMenuItem(
-            icon: Icons.today_rounded,
-            title: 'Сегодня',
-            subtitle: 'Вернуться к текущему дню',
+            icon: Icons.calendar_view_day_rounded,
+            title: 'По дням',
+            subtitle: 'Подробно, один день',
+            active: !weekMode,
           ),
         ),
         PopupMenuItem(
-          value: 'this_week',
+          value: 'view_week',
           height: 58,
-          padding: EdgeInsets.symmetric(horizontal: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
           child: _ScheduleMenuItem(
-            icon: Icons.view_week_rounded,
-            title: 'Текущая неделя',
-            subtitle: 'Показать эту учебную неделю',
-          ),
-        ),
-        PopupMenuItem(
-          value: 'sort_time',
-          height: 58,
-          padding: EdgeInsets.symmetric(horizontal: 8),
-          child: _ScheduleMenuItem(
-            icon: Icons.sort_rounded,
-            title: 'По времени',
-            subtitle: 'Упорядочить пары по началу',
+            icon: Icons.calendar_view_week_rounded,
+            title: 'По неделям',
+            subtitle: 'Обзор всей недели',
+            active: weekMode,
           ),
         ),
       ],
@@ -1200,11 +1660,13 @@ class _ScheduleMenuItem extends StatelessWidget {
   final IconData icon;
   final String title;
   final String subtitle;
+  final bool active;
 
   const _ScheduleMenuItem({
     required this.icon,
     required this.title,
     required this.subtitle,
+    this.active = false,
   });
 
   @override
@@ -1218,7 +1680,7 @@ class _ScheduleMenuItem extends StatelessWidget {
           width: 38,
           height: 38,
           decoration: BoxDecoration(
-            color: primary.withValues(alpha: 0.10),
+            color: primary.withValues(alpha: active ? 0.16 : 0.10),
             borderRadius: BorderRadius.circular(14),
           ),
           child: Icon(icon, color: primary, size: 20),
@@ -1234,7 +1696,7 @@ class _ScheduleMenuItem extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodyMedium?.copyWith(
-                  color: const Color(0xFF111827),
+                  color: active ? primary : const Color(0xFF111827),
                   fontWeight: FontWeight.w800,
                   height: 1.05,
                 ),
@@ -1252,6 +1714,10 @@ class _ScheduleMenuItem extends StatelessWidget {
             ],
           ),
         ),
+        if (active) ...[
+          const SizedBox(width: 8),
+          Icon(Icons.check_circle_rounded, color: primary, size: 20),
+        ],
       ],
     );
   }
@@ -1275,7 +1741,8 @@ class _GlowCircle extends StatelessWidget {
 
 /// Пустое состояние — котик
 class _EmptyCat extends StatelessWidget {
-  const _EmptyCat();
+  final String message;
+  const _EmptyCat({this.message = 'Здесь пока пусто'});
   @override
   Widget build(BuildContext context) {
     return Center(
@@ -1283,8 +1750,8 @@ class _EmptyCat extends StatelessWidget {
         Lottie.asset('assets/lottie/cat_sleeping.json',
             width: 180, height: 180, repeat: true),
         const SizedBox(height: 12),
-        const Text('Здесь пока пусто',
-            style: TextStyle(fontSize: 14, color: Colors.grey)),
+        Text(message,
+            style: const TextStyle(fontSize: 14, color: Colors.grey)),
       ]),
     );
   }

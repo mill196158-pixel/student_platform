@@ -1,10 +1,21 @@
 import 'package:flutter/material.dart';
 import '../models/lesson.dart';
 
+/// Живой статус пары относительно текущего времени.
+enum LessonLiveStatus { none, ongoing, next }
+
+const Color _kOngoingColor = Color(0xFF10B981);
+
 class LessonCard extends StatelessWidget {
   final Lesson lesson;
   final VoidCallback onTap;
-  const LessonCard({super.key, required this.lesson, required this.onTap});
+  final LessonLiveStatus status;
+  const LessonCard({
+    super.key,
+    required this.lesson,
+    required this.onTap,
+    this.status = LessonLiveStatus.none,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -12,26 +23,42 @@ class LessonCard extends StatelessWidget {
     final time = '${_fmt(lesson.start)} – ${_fmt(lesson.end)}';
     final (label, color) = _badgeFor(lesson);
 
+    final isOngoing = status == LessonLiveStatus.ongoing;
+    final isNext = status == LessonLiveStatus.next;
+    final borderColor = isOngoing ? _kOngoingColor : color;
+
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(18),
       child: Container(
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
         decoration: BoxDecoration(
-          color: theme.colorScheme.surface,
+          color: isOngoing
+              ? _kOngoingColor.withValues(alpha: 0.06)
+              : theme.colorScheme.surface,
           borderRadius: BorderRadius.circular(18),
           boxShadow: [
             BoxShadow(
-                color: Colors.black.withOpacity(0.06),
+                color: (isOngoing ? _kOngoingColor : Colors.black)
+                    .withValues(alpha: isOngoing ? 0.14 : 0.06),
                 blurRadius: 14,
                 offset: const Offset(0, 3)),
           ],
           border: Border(
-              left: BorderSide(color: color.withOpacity(0.85), width: 4)),
+              left: BorderSide(
+                  color: borderColor.withValues(alpha: 0.85),
+                  width: isOngoing ? 5 : 4)),
         ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (isOngoing || isNext) ...[
+              _LiveRibbon(ongoing: isOngoing),
+              const SizedBox(height: 10),
+            ],
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
             // Время
             SizedBox(
               width: 86,
@@ -45,7 +72,7 @@ class LessonCard extends StatelessWidget {
                   const SizedBox(height: 6),
                   Text('${lesson.pairNum}-я пара',
                       style: theme.textTheme.labelSmall
-                          ?.copyWith(color: Colors.black.withOpacity(0.55))),
+                          ?.copyWith(color: Colors.black.withValues(alpha: 0.55))),
                 ],
               ),
             ),
@@ -80,8 +107,8 @@ class LessonCard extends StatelessWidget {
                         lesson.teacher!,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: Colors.black.withOpacity(0.70)),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                            color: Colors.black.withValues(alpha: 0.70)),
                       )),
                     ]),
                   if ((lesson.room ?? '').isNotEmpty) ...[
@@ -94,14 +121,16 @@ class LessonCard extends StatelessWidget {
                         lesson.room!,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: Colors.black.withOpacity(0.70)),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                            color: Colors.black.withValues(alpha: 0.70)),
                       )),
                     ]),
                   ],
                 ],
               ),
             ),
+          ],
+        ),
           ],
         ),
       ),
@@ -125,6 +154,109 @@ class LessonCard extends StatelessWidget {
       '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 }
 
+/// Лента статуса пары: «Идёт сейчас» (с пульсацией) / «Следующая пара».
+class _LiveRibbon extends StatelessWidget {
+  final bool ongoing;
+  const _LiveRibbon({required this.ongoing});
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    final color = ongoing ? _kOngoingColor : primary;
+    final text = ongoing ? 'Идёт сейчас' : 'Следующая пара';
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ongoing
+                ? _PulseDot(color: color)
+                : Container(
+                    width: 8,
+                    height: 8,
+                    decoration:
+                        BoxDecoration(color: color, shape: BoxShape.circle),
+                  ),
+            const SizedBox(width: 7),
+            Text(
+              text,
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w800,
+                fontSize: 11,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PulseDot extends StatefulWidget {
+  final Color color;
+  const _PulseDot({required this.color});
+
+  @override
+  State<_PulseDot> createState() => _PulseDotState();
+}
+
+class _PulseDotState extends State<_PulseDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1100),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 14,
+      height: 14,
+      child: AnimatedBuilder(
+        animation: _c,
+        builder: (_, __) {
+          final t = _c.value;
+          return Stack(
+            alignment: Alignment.center,
+            children: [
+              Container(
+                width: 8 + 6 * t,
+                height: 8 + 6 * t,
+                decoration: BoxDecoration(
+                  color: widget.color.withValues(alpha: 0.28 * (1 - t)),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: widget.color,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
 class _Badge extends StatelessWidget {
   final String text;
   final Color color;
@@ -139,7 +271,7 @@ class _Badge extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
         boxShadow: [
           BoxShadow(
-              color: color.withOpacity(0.28),
+              color: color.withValues(alpha: 0.28),
               blurRadius: 8,
               offset: const Offset(0, 3))
         ],

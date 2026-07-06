@@ -101,22 +101,46 @@ class DmApi {
   static Future<void> _hydrateAuthor(Map<String, dynamic> data) async {
     final authorId = (data['author_id'] ?? '').toString();
     if (authorId.isEmpty) return;
+
+    // Прямое чтение public.users работает только для собственного ряда
+    // (RLS). Для чужих авторов имя приходит пустым и в UI подставляется
+    // «Студент», поэтому дочитываем профиль через SECURITY DEFINER RPC.
     try {
       final user = await _sb
           .from('users')
           .select('login,name,surname,avatar_url')
           .eq('id', authorId)
           .maybeSingle();
-      if (user == null) return;
-      final u = Map<String, dynamic>.from(user as Map);
+      if (user != null) {
+        final u = Map<String, dynamic>.from(user as Map);
+        final fullName = [
+          (u['name'] ?? '').toString(),
+          (u['surname'] ?? '').toString(),
+        ].where((s) => s.isNotEmpty).join(' ').trim();
+        data['author_login'] = (u['login'] ?? '').toString();
+        data['author_name'] =
+            fullName.isNotEmpty ? fullName : (u['login'] ?? '').toString();
+        data['author_avatar_url'] = (u['avatar_url'] ?? '').toString();
+        return;
+      }
+    } catch (_) {}
+
+    try {
+      final res = await _sb.rpc('get_user_profile', params: {'p_id': authorId});
+      Map<String, dynamic>? u;
+      if (res is List && res.isNotEmpty) {
+        u = Map<String, dynamic>.from(res.first as Map);
+      } else if (res is Map) {
+        u = Map<String, dynamic>.from(res);
+      }
+      if (u == null) return;
       final fullName = [
         (u['name'] ?? '').toString(),
         (u['surname'] ?? '').toString(),
-      ].where((s) => s.isNotEmpty).join(' ').trim();
-      data['author_login'] = (u['login'] ?? '').toString();
-      data['author_name'] =
-          fullName.isNotEmpty ? fullName : (u['login'] ?? '').toString();
-      data['author_avatar_url'] = (u['avatar_url'] ?? '').toString();
+      ].where((s) => s.trim().isNotEmpty).join(' ').trim();
+      if (fullName.isNotEmpty) data['author_name'] = fullName;
+      final avatar = (u['avatar_url'] ?? '').toString();
+      if (avatar.isNotEmpty) data['author_avatar_url'] = avatar;
     } catch (_) {}
   }
 

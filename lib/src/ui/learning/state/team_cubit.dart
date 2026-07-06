@@ -214,15 +214,23 @@ class TeamCubit extends Cubit<TeamState> {
     if (authorIds.isEmpty) return;
 
     try {
-      final rows = await Supabase.instance.client
-          .from('users')
-          .select('id,login,name,surname,avatar_url')
-          .inFilter('id', authorIds);
+      // Прямое чтение public.users по чужим id заблокировано RLS (виден только
+      // собственный ряд), поэтому профили берём через SECURITY DEFINER RPC
+      // get_user_profile, который обходит RLS.
+      final client = Supabase.instance.client;
       final byId = <String, Map<String, dynamic>>{};
-      for (final row in rows as List) {
-        final map = Map<String, dynamic>.from(row as Map);
-        final id = (map['id'] ?? '').toString();
-        if (id.isNotEmpty) byId[id] = map;
+      for (final authorId in authorIds) {
+        try {
+          final res =
+              await client.rpc('get_user_profile', params: {'p_id': authorId});
+          Map<String, dynamic>? map;
+          if (res is List && res.isNotEmpty) {
+            map = Map<String, dynamic>.from(res.first as Map);
+          } else if (res is Map) {
+            map = Map<String, dynamic>.from(res);
+          }
+          if (map != null) byId[authorId] = map;
+        } catch (_) {}
       }
       if (byId.isEmpty || isClosed) return;
 
@@ -1192,6 +1200,7 @@ class TeamCubit extends Cubit<TeamState> {
   Future<void> close() async {
     try {
       await _rtChat?.unsubscribe();
+      await _rtReactions?.unsubscribe();
       await _rtAssignments?.unsubscribe();
       await _rtVotes?.unsubscribe();
       await _rtDone?.unsubscribe();
