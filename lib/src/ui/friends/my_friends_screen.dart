@@ -137,7 +137,8 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
     final futs = ids.map((id) async {
       try {
         final res = await _sb.rpc('get_user_profile', params: {'p_id': id});
-        if (res is List && res.isNotEmpty) return Map<String, dynamic>.from(res.first as Map);
+        if (res is List && res.isNotEmpty)
+          return Map<String, dynamic>.from(res.first as Map);
         if (res is Map) return Map<String, dynamic>.from(res as Map);
       } catch (e) {
         debugPrint('[Friends] get_user_profile($id) error: $e');
@@ -181,14 +182,16 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
           event: PostgresChangeEvent.insert,
           schema: 'public',
           table: 'friend_requests',
-          filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'to_id', value: uid),
+          filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq, column: 'to_id', value: uid),
           callback: (_) => _reloadRequestsOnly(),
         )
         .onPostgresChanges(
           event: PostgresChangeEvent.delete,
           schema: 'public',
           table: 'friend_requests',
-          filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'to_id', value: uid),
+          filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq, column: 'to_id', value: uid),
           callback: (_) => _reloadRequestsOnly(),
         )
         .subscribe();
@@ -201,14 +204,16 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
           event: PostgresChangeEvent.insert,
           schema: 'public',
           table: 'friends',
-          filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'user_id', value: uid),
+          filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq, column: 'user_id', value: uid),
           callback: (_) => _loadFriends(),
         )
         .onPostgresChanges(
           event: PostgresChangeEvent.delete,
           schema: 'public',
           table: 'friends',
-          filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'user_id', value: uid),
+          filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq, column: 'user_id', value: uid),
           callback: (_) => _loadFriends(),
         )
         .subscribe();
@@ -220,14 +225,20 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
           event: PostgresChangeEvent.insert,
           schema: 'public',
           table: 'friends',
-          filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'friend_id', value: uid),
+          filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: 'friend_id',
+              value: uid),
           callback: (_) => _loadFriends(),
         )
         .onPostgresChanges(
           event: PostgresChangeEvent.delete,
           schema: 'public',
           table: 'friends',
-          filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'friend_id', value: uid),
+          filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: 'friend_id',
+              value: uid),
           callback: (_) => _loadFriends(),
         )
         .subscribe();
@@ -312,9 +323,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
     try {
       final res = await _sb.rpc('get_my_classmates');
       if (res is! List) return const [];
-      return res
-          .map((row) => Map<String, dynamic>.from(row as Map))
-          .toList();
+      return res.map((row) => Map<String, dynamic>.from(row as Map)).toList();
     } catch (e) {
       debugPrint('[Friends] get_my_classmates RPC unavailable: $e');
       return const [];
@@ -380,7 +389,8 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
 
       final users = await _sb
           .from('users')
-          .select('id, name, surname, avatar_url, status, university, city, group_name, primary_group_id')
+          .select(
+              'id, name, surname, avatar_url, status, university, city, group_name, primary_group_id')
           .inFilter('id', ids.toList())
           .order('surname', ascending: true);
 
@@ -400,7 +410,8 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
     try {
       final users = await _sb
           .from('users')
-          .select('id, name, surname, avatar_url, status, university, city, group_name, primary_group_id')
+          .select(
+              'id, name, surname, avatar_url, status, university, city, group_name, primary_group_id')
           .eq('group_name', groupName)
           .neq('id', uid)
           .order('surname', ascending: true)
@@ -458,7 +469,8 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
       final futs = ids.map((id) async {
         try {
           final res = await _sb.rpc('get_user_profile', params: {'p_id': id});
-          if (res is List && res.isNotEmpty) return Map<String, dynamic>.from(res.first as Map);
+          if (res is List && res.isNotEmpty)
+            return Map<String, dynamic>.from(res.first as Map);
           if (res is Map) return Map<String, dynamic>.from(res as Map);
         } catch (e) {
           debugPrint('[Friends] get_user_profile($id) error: $e');
@@ -490,15 +502,24 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
   Future<void> _acceptRequest(_Friend f) async {
     final uid = _sb.auth.currentUser?.id;
     if (uid == null) return;
+    if (_pendingReq.contains(f.id)) return;
     setState(() => _pendingReq.add(f.id));
     try {
-      await _sb.from('friends').insert({'user_id': uid, 'friend_id': f.id});
-      await _sb.from('friend_requests').delete().match({'from_id': f.id, 'to_id': uid});
+      await _sb.rpc(
+        'accept_friend_request',
+        params: {'p_user_id': f.id},
+      );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Заявка принята')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Заявка принята')));
       }
     } catch (e) {
       debugPrint('[Friends] accept error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Не удалось принять заявку')),
+        );
+      }
     } finally {
       await Future.wait([_reloadRequestsOnly(), _loadFriends()]);
       if (mounted) {
@@ -513,14 +534,24 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
   Future<void> _declineRequest(_Friend f) async {
     final uid = _sb.auth.currentUser?.id;
     if (uid == null) return;
+    if (_pendingReq.contains(f.id)) return;
     setState(() => _pendingReq.add(f.id));
     try {
-      await _sb.from('friend_requests').delete().match({'from_id': f.id, 'to_id': uid});
+      await _sb.rpc(
+        'decline_friend_request',
+        params: {'p_user_id': f.id},
+      );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Заявка отклонена')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Заявка отклонена')));
       }
     } catch (e) {
       debugPrint('[Friends] decline error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Не удалось отклонить заявку')),
+        );
+      }
     } finally {
       await _reloadRequestsOnly();
       await _loadFriends();
@@ -535,7 +566,9 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
       _visible = List.of(_friends);
     } else {
       final q = _query.toLowerCase();
-      _visible = _friends.where((f) => ('${f.name} ${f.surname}'.toLowerCase().contains(q))).toList();
+      _visible = _friends
+          .where((f) => ('${f.name} ${f.surname}'.toLowerCase().contains(q)))
+          .toList();
     }
   }
 
@@ -581,12 +614,17 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
       }
 
       if (rows.isEmpty) {
-        final safe = q.replaceAll('%', '').replaceAll('*', '').replaceAll(',', ' ').trim();
+        final safe = q
+            .replaceAll('%', '')
+            .replaceAll('*', '')
+            .replaceAll(',', ' ')
+            .trim();
         final pattern = '*${Uri.encodeComponent(safe)}*';
         try {
           rows = await _sb
               .from('users')
-              .select('id, name, surname, avatar_url, status, university, group_name')
+              .select(
+                  'id, name, surname, avatar_url, status, university, group_name')
               .or('name.ilike.$pattern,surname.ilike.$pattern')
               .limit(50);
         } catch (_) {
@@ -597,7 +635,8 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
           try {
             rows = await _sb
                 .from('users')
-                .select('id, name, surname, avatar_url, status, university, group_name')
+                .select(
+                    'id, name, surname, avatar_url, status, university, group_name')
                 .eq('group_name', myGroup)
                 .or('name.ilike.$pattern,surname.ilike.$pattern')
                 .limit(50);
@@ -671,7 +710,10 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
           value: context.read<TeamCubit>(),
           child: DirectChatScreen(
             peerId: f.id,
-            peerName: [f.name, f.surname].where((s) => s.trim().isNotEmpty).join(' ').trim(),
+            peerName: [f.name, f.surname]
+                .where((s) => s.trim().isNotEmpty)
+                .join(' ')
+                .trim(),
             peerAvatarUrl: f.avatarUrl.isNotEmpty ? f.avatarUrl : null,
           ),
         ),
@@ -703,13 +745,19 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
               style: TextStyle(color: theme.colorScheme.onSurface),
               decoration: InputDecoration(
                 hintText: 'Поиск',
-                hintStyle: TextStyle(color: theme.colorScheme.onSurface.withOpacity(.6)),
-                prefixIcon: Icon(Icons.search, size: 20, color: theme.colorScheme.onSurface.withOpacity(.9)),
+                hintStyle: TextStyle(
+                    color: theme.colorScheme.onSurface.withOpacity(.6)),
+                prefixIcon: Icon(Icons.search,
+                    size: 20,
+                    color: theme.colorScheme.onSurface.withOpacity(.9)),
                 isDense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                 filled: true,
                 fillColor: theme.colorScheme.surface,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide.none),
               ),
             ),
           ),
@@ -735,10 +783,15 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
       const SizedBox(height: 8),
       Row(
         children: [
-          Expanded(child: _SectionHeader(title: searchingMode ? 'Результаты' : 'Мои друзья')),
+          Expanded(
+              child: _SectionHeader(
+                  title: searchingMode ? 'Результаты' : 'Мои друзья')),
           if (_searching) ...[
             const SizedBox(width: 8),
-            const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+            const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2)),
             const SizedBox(width: 12),
           ],
         ],
@@ -758,7 +811,11 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
       if (_searching)
         const Padding(
           padding: EdgeInsets.symmetric(vertical: 8),
-          child: Center(child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))),
+          child: Center(
+              child: SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2))),
         ),
     ];
 
@@ -802,20 +859,29 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
     if (searchingMode && !_searching && list.isEmpty) {
       children.add(const Padding(
         padding: EdgeInsets.symmetric(vertical: 22),
-        child: Center(child: Text('Ничего не найдено', style: TextStyle(color: Colors.black54))),
+        child: Center(
+            child: Text('Ничего не найдено',
+                style: TextStyle(color: Colors.black54))),
       ));
     }
 
     return Scaffold(
       appBar: AppBar(centerTitle: true, title: const Text('Друзья')),
       body: Theme(
-        data: theme.copyWith(textTheme: theme.textTheme.apply(bodyColor: theme.colorScheme.onSurface, displayColor: theme.colorScheme.onSurface)),
+        data: theme.copyWith(
+            textTheme: theme.textTheme.apply(
+                bodyColor: theme.colorScheme.onSurface,
+                displayColor: theme.colorScheme.onSurface)),
         child: RefreshIndicator(
           onRefresh: _load,
           child: ListView(
             key: const PageStorageKey('friends_list'),
             physics: const AlwaysScrollableScrollPhysics(),
-            padding: EdgeInsets.only(left: 8, right: 8, top: 4, bottom: MediaQuery.of(context).padding.bottom + 12),
+            padding: EdgeInsets.only(
+                left: 8,
+                right: 8,
+                top: 4,
+                bottom: MediaQuery.of(context).padding.bottom + 12),
             children: children,
           ),
         ),
@@ -855,7 +921,8 @@ class _FriendsTabSwitch extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 9),
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: selected ? cs.primary.withOpacity(.12) : Colors.transparent,
+              color:
+                  selected ? cs.primary.withOpacity(.12) : Colors.transparent,
               borderRadius: BorderRadius.circular(14),
             ),
             child: Text(
@@ -907,7 +974,8 @@ class _Friend {
     required this.groupName,
   });
 
-  String get fullName => [name, surname].where((e) => e.trim().isNotEmpty).join(' ').trim();
+  String get fullName =>
+      [name, surname].where((e) => e.trim().isNotEmpty).join(' ').trim();
 
   _Friend copyWith({String? avatarUrl, String? status}) => _Friend(
         id: id,
@@ -926,7 +994,8 @@ class _FriendRow extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onChat;
 
-  const _FriendRow({required this.data, required this.onTap, required this.onChat});
+  const _FriendRow(
+      {required this.data, required this.onTap, required this.onChat});
 
   @override
   Widget build(BuildContext context) {
@@ -949,16 +1018,23 @@ class _FriendRow extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(data.fullName, maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: t.titleMedium?.copyWith(fontWeight: FontWeight.w700, height: 1.1)),
+                  Text(data.fullName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w700, height: 1.1)),
                   const SizedBox(height: 2),
                   if (subtitle.isNotEmpty)
-                    Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis,
+                    Text(subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: t.bodySmall?.copyWith(color: Colors.black54)),
                   if (data.status.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
-                      child: Text(data.status, maxLines: 1, overflow: TextOverflow.ellipsis,
+                      child: Text(data.status,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: t.bodySmall?.copyWith(color: Colors.black45)),
                     ),
                 ],
@@ -966,7 +1042,10 @@ class _FriendRow extends StatelessWidget {
             ),
             Row(
               children: [
-                IconButton(icon: const Icon(Icons.chat_bubble_outline), tooltip: 'Написать', onPressed: onChat),
+                IconButton(
+                    icon: const Icon(Icons.chat_bubble_outline),
+                    tooltip: 'Написать',
+                    onPressed: onChat),
               ],
             ),
           ],
@@ -1012,11 +1091,16 @@ class _RequestRow extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(data.fullName, maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: t.titleMedium?.copyWith(fontWeight: FontWeight.w700, height: 1.1)),
+                  Text(data.fullName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w700, height: 1.1)),
                   const SizedBox(height: 2),
                   if (subtitle.isNotEmpty)
-                    Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis,
+                    Text(subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: t.bodySmall?.copyWith(color: Colors.black54)),
                 ],
               ),
@@ -1078,13 +1162,21 @@ class _GIconChip extends StatelessWidget {
       width: 36,
       height: 36,
       decoration: BoxDecoration(
-        gradient: LinearGradient(colors: gradient, begin: Alignment.topLeft, end: Alignment.bottomRight),
+        gradient: LinearGradient(
+            colors: gradient,
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight),
         borderRadius: radius,
-        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2))],
+        boxShadow: const [
+          BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2))
+        ],
       ),
       child: Center(
         child: busy
-            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2))
             : Icon(icon, size: 18, color: fg),
       ),
     );
@@ -1118,14 +1210,18 @@ class _BubbleAvatar extends StatelessWidget {
   Widget build(BuildContext context) {
     final surface = Theme.of(context).colorScheme.surface;
     final colors = _gradientFromString(label);
-    final ch = (label.trim().isNotEmpty ? label.trim().characters.first : '•').toUpperCase();
+    final ch = (label.trim().isNotEmpty ? label.trim().characters.first : '•')
+        .toUpperCase();
 
     return Container(
       width: 52,
       height: 52,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(26),
-        gradient: LinearGradient(colors: colors, begin: Alignment.topLeft, end: Alignment.bottomRight),
+        gradient: LinearGradient(
+            colors: colors,
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight),
       ),
       alignment: Alignment.center,
       child: Container(
@@ -1134,14 +1230,22 @@ class _BubbleAvatar extends StatelessWidget {
         decoration: BoxDecoration(
           color: surface,
           borderRadius: BorderRadius.circular(22),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(.06), blurRadius: 6, offset: const Offset(0, 2))],
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withOpacity(.06),
+                blurRadius: 6,
+                offset: const Offset(0, 2))
+          ],
         ),
         alignment: Alignment.center,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(22),
           child: imageUrl.isNotEmpty
-              ? Image.network(imageUrl, width: 44, height: 44, fit: BoxFit.cover)
-              : Text(ch, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+              ? Image.network(imageUrl,
+                  width: 44, height: 44, fit: BoxFit.cover)
+              : Text(ch,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w800, fontSize: 18)),
         ),
       ),
     );
@@ -1150,7 +1254,8 @@ class _BubbleAvatar extends StatelessWidget {
   List<Color> _gradientFromString(String s) {
     final h = s.codeUnits.fold<int>(0, (p, e) => (p * 31 + e) & 0xFFFFFFFF);
     final c1 = HSVColor.fromAHSV(1, (h % 360).toDouble(), .62, .92).toColor();
-    final c2 = HSVColor.fromAHSV(1, ((h >> 4) % 360).toDouble(), .62, .78).toColor();
+    final c2 =
+        HSVColor.fromAHSV(1, ((h >> 4) % 360).toDouble(), .62, .78).toColor();
     return [c1, c2];
   }
 }
@@ -1168,13 +1273,19 @@ class _SectionHeader extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
-          Text(title, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+          Text(title,
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w700)),
           const Spacer(),
           if (actionText != null)
             TextButton(
               onPressed: onAction,
-              style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), minimumSize: Size.zero),
-              child: Text(actionText!, style: const TextStyle(fontWeight: FontWeight.w600)),
+              style: TextButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  minimumSize: Size.zero),
+              child: Text(actionText!,
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
             ),
         ],
       ),
@@ -1188,7 +1299,10 @@ class _ThinDivider extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(left: 72, right: 12),
-      child: Divider(height: 0, thickness: .6, color: Theme.of(context).dividerColor.withOpacity(.28)),
+      child: Divider(
+          height: 0,
+          thickness: .6,
+          color: Theme.of(context).dividerColor.withOpacity(.28)),
     );
   }
 }
@@ -1205,7 +1319,12 @@ class _SkeletonList extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 10),
         child: Row(
           children: [
-            Container(width: 52, height: 52, decoration: BoxDecoration(color: Colors.black12, borderRadius: BorderRadius.circular(26))),
+            Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                    color: Colors.black12,
+                    borderRadius: BorderRadius.circular(26))),
             const SizedBox(width: 12),
             Expanded(
               child: Column(

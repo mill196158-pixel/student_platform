@@ -41,6 +41,7 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
 
   // состояние дружбы со мной
   _FriendshipState _state = _FriendshipState.unknown;
+  bool _friendActionBusy = false;
 
   // прокрутка и якорь «Друзья»
   final ScrollController _scroll = ScrollController();
@@ -243,10 +244,36 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
     _state = _FriendshipState.none;
   }
 
+  bool _beginFriendAction() {
+    if (_friendActionBusy) return false;
+    if (mounted) {
+      setState(() => _friendActionBusy = true);
+    } else {
+      _friendActionBusy = true;
+    }
+    return true;
+  }
+
+  void _endFriendAction() {
+    if (mounted) {
+      setState(() => _friendActionBusy = false);
+    } else {
+      _friendActionBusy = false;
+    }
+  }
+
+  void _showFriendActionError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
   Future<void> _sendFriendRequest() async {
     final me = _myId;
     final other = widget.userId;
     if (me == null || me.isEmpty || me == other) return;
+    if (!_beginFriendAction()) return;
 
     try {
       await _loadFriendshipState();
@@ -254,20 +281,26 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
         if (mounted) setState(() {});
         return;
       }
-      await _sb.from('friend_requests').insert({
-        'from_id': me,
-        'to_id': other,
-      });
+      await _sb.rpc(
+        'send_friend_request',
+        params: {'p_user_id': other},
+      );
+      await _onFriendsChangedRealtime();
       if (!mounted) return;
-      setState(() => _state = _FriendshipState.requestSent);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Заявка отправлена')),
+        SnackBar(
+          content: Text(
+            _state == _FriendshipState.friends
+                ? 'Теперь вы друзья'
+                : 'Заявка отправлена',
+          ),
+        ),
       );
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось отправить заявку: $e')),
-      );
+      debugPrint('[FriendProfile] send request error: $e');
+      _showFriendActionError('Не удалось отправить заявку');
+    } finally {
+      _endFriendAction();
     }
   }
 
@@ -275,27 +308,17 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
     final me = _myId;
     final other = widget.userId;
     if (me == null || me.isEmpty || other.isEmpty) return;
+    if (!_beginFriendAction()) return;
 
     try {
-      final existing = await _sb
-          .from('friends')
-          .select('user_id, friend_id')
-          .or('and(user_id.eq.$me,friend_id.eq.$other),and(user_id.eq.$other,friend_id.eq.$me)')
-          .limit(1);
-
-      if (existing.isEmpty) {
-        await _sb.from('friends').insert({'user_id': me, 'friend_id': other});
-      }
-      await _sb
-          .from('friend_requests')
-          .delete()
-          .eq('from_id', other)
-          .eq('to_id', me);
+      await _sb.rpc(
+        'accept_friend_request',
+        params: {'p_user_id': other},
+      );
 
       // локально обновим состояние и список + прокрутим к секции
       await _onFriendsChangedRealtime();
       if (!mounted) return;
-      setState(() => _state = _FriendshipState.friends);
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('Теперь вы друзья')));
 
@@ -308,10 +331,10 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
         }
       });
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось принять заявку: $e')),
-      );
+      debugPrint('[FriendProfile] accept request error: $e');
+      _showFriendActionError('Не удалось принять заявку');
+    } finally {
+      _endFriendAction();
     }
   }
 
@@ -319,20 +342,23 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
     final me = _myId;
     final other = widget.userId;
     if (me == null || me.isEmpty || other.isEmpty) return;
+    if (!_beginFriendAction()) return;
 
     try {
-      await _sb.from('friends').delete().or(
-          'and(user_id.eq.$me,friend_id.eq.$other),and(user_id.eq.$other,friend_id.eq.$me))');
+      await _sb.rpc(
+        'remove_friend',
+        params: {'p_user_id': other},
+      );
 
       await _onFriendsChangedRealtime();
       if (!mounted) return;
-      setState(() => _state = _FriendshipState.none);
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('Удалено из друзей')));
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Не удалось удалить: $e')));
+      debugPrint('[FriendProfile] remove friend error: $e');
+      _showFriendActionError('Не удалось удалить');
+    } finally {
+      _endFriendAction();
     }
   }
 
@@ -340,21 +366,22 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
     final me = _myId;
     final other = widget.userId;
     if (me == null || me.isEmpty || other.isEmpty) return;
+    if (!_beginFriendAction()) return;
 
     try {
-      await _sb
-          .from('friend_requests')
-          .delete()
-          .match({'from_id': me, 'to_id': other});
+      await _sb.rpc(
+        'cancel_friend_request',
+        params: {'p_user_id': other},
+      );
       await _onFriendsChangedRealtime();
       if (!mounted) return;
-      setState(() => _state = _FriendshipState.none);
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('Заявка отменена')));
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Не удалось отменить: $e')));
+      debugPrint('[FriendProfile] cancel request error: $e');
+      _showFriendActionError('Не удалось отменить заявку');
+    } finally {
+      _endFriendAction();
     }
   }
 
@@ -362,21 +389,22 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
     final me = _myId;
     final other = widget.userId;
     if (me == null || me.isEmpty || other.isEmpty) return;
+    if (!_beginFriendAction()) return;
 
     try {
-      await _sb
-          .from('friend_requests')
-          .delete()
-          .match({'from_id': other, 'to_id': me});
+      await _sb.rpc(
+        'decline_friend_request',
+        params: {'p_user_id': other},
+      );
       await _onFriendsChangedRealtime();
       if (!mounted) return;
-      setState(() => _state = _FriendshipState.none);
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('Заявка отклонена')));
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Не удалось отклонить: $e')));
+      debugPrint('[FriendProfile] decline request error: $e');
+      _showFriendActionError('Не удалось отклонить заявку');
+    } finally {
+      _endFriendAction();
     }
   }
 
