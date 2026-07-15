@@ -706,3 +706,63 @@
 - Supabase advisors: security/performance advisors were run after apply; output contains broad pre-existing project notices, while targeted verification for `home_notification_reads` passed.
 - Focused analyze: `dart analyze lib/src/ui/home/home_screen.dart lib/src/ui/home/home_dashboard_service.dart lib/src/ui/home/models/home_dashboard_data.dart` passed with no issues.
 - Git add/commit run: no.
+
+## Direct chat info - profile navigation and card refresh
+
+- Date: 2026-07-15
+- Trigger: user requested Stage 1 update for personal chat info profile navigation and design.
+- Flutter code changed: yes, limited to `lib/src/ui/chats/direct_chat_info_screen.dart`.
+- `DirectChatScreen` inspected: existing `BlocProvider.value` wrapper for `DirectChatInfoScreen` remains unchanged.
+- `FriendProfileScreen` inspected: real profile route is `FriendProfileScreen(userId: ...)`, matching friends-list navigation.
+- Removed separate `ListTile` action `Перейти в профиль пользователя`.
+- Removed temporary profile `Scaffold` fallback.
+- New behavior: tapping the large avatar/name card opens `FriendProfileScreen(userId: peerId)`.
+- Media behavior: `Фото и файлы диалога` remains available as a separate card and still opens `ChatMediaSheet(messagesStream: service.watchMessages())`.
+- Format: `dart format lib/src/ui/chats/direct_chat_info_screen.dart` passed.
+- Focused analyze: `flutter analyze --no-pub lib/src/ui/chats/direct_chat_info_screen.dart` passed with no issues.
+- Full analyze: `flutter analyze --no-pub` was run; it exits with existing project diagnostics outside this change, including missing `subject_quick_note_screen.dart` and undefined `getTemporaryDirectory`/`File` in `lib/src/ui/schedule/diary_entry_details_screen.dart`.
+- Git add/commit run: no.
+
+## Android debug build - AGP/NDK compatibility fix
+
+- Date: 2026-07-15
+- Trigger: Android emulator debug build failed because newer AndroidX AAR metadata requires Android Gradle Plugin `8.9.1+`, while the project used `8.7.3`; plugin `jni` also required Android NDK `28.2.13676358`.
+- Android build config changed: `android/settings.gradle.kts` now uses `com.android.application` `8.9.1`.
+- Android build config changed: `android/app/build.gradle.kts` now uses NDK `28.2.13676358`.
+- Asset validation fix: added `assets/images/.gitkeep` because `pubspec.yaml` declares `assets/images/`.
+- Verification: `flutter build apk --debug` passed and produced `build/app/outputs/flutter-apk/app-debug.apk` after a long first Gradle build.
+- Git add/commit run: no.
+
+## Direct chat info - minimal edge-to-edge redesign
+
+- Date: 2026-07-15
+- Trigger: user requested a cleaner modern personal chat info screen where only the avatar opens the user profile.
+- Flutter code changed: yes, limited to `lib/src/ui/chats/direct_chat_info_screen.dart`.
+- `DirectChatScreen` inspected: existing `BlocProvider.value` wrapper and header tap opening `DirectChatInfoScreen` remain unchanged.
+- `FriendProfileScreen` inspected: real profile route remains `FriendProfileScreen(userId: ...)`, matching friends-list navigation.
+- Removed standard app bar, `Профиль диалога`, `Личный чат`, and `Открыть профиль`.
+- New behavior: only tapping the large avatar calls `HapticFeedback.selectionClick()` and opens `FriendProfileScreen(userId: peerId)`.
+- Name behavior: display-only, theme-contrast color, two-line limit with ellipsis.
+- Back behavior: custom blurred circular back button calls `Navigator.maybePop(context)` and accounts for top SafeArea.
+- Media behavior: compact `Фото и файлы` card still opens `ChatMediaSheet(messagesStream: service.watchMessages())`.
+- Format: `dart format lib/src/ui/chats/direct_chat_info_screen.dart` passed.
+- Focused analyze: `flutter analyze --no-pub lib/src/ui/chats/direct_chat_info_screen.dart` passed with no issues.
+- Full analyze: `flutter analyze` was run; it exits with existing project diagnostics outside this change, including missing `subject_quick_note_screen.dart` and undefined `getTemporaryDirectory`/`File` in `lib/src/ui/schedule/diary_entry_details_screen.dart`.
+- Git add/commit run: no.
+
+## Direct chat info and friend profile - back button and spacing polish
+
+- Date: 2026-07-15
+- Trigger: user requested keeping the latest design direction but moving back navigation to the normal top-left SafeArea position and tightening profile vertical spacing.
+- Flutter code changed: yes, limited to `lib/src/ui/chats/direct_chat_info_screen.dart` and `lib/src/ui/friends/friend_profile_screen.dart`.
+- `DirectChatInfoScreen`: removed avatar-level blurred back button, kept the edge-to-edge gradient, avatar, display-only name, and compact `Фото и файлы` card.
+- `DirectChatInfoScreen`: header now uses content padding instead of a large fixed height, with tighter avatar/name/header-bottom/media-card spacing.
+- `DirectChatInfoScreen`: profile navigation remains only on the large avatar; `ChatMediaSheet(messagesStream: service.watchMessages())` remains unchanged.
+- `FriendProfileScreen`: removed standard `AppBar` and `Профиль` title from loading, error, and loaded states.
+- `FriendProfileScreen`: added matching top-left 48x48 `arrow_back_rounded` button using `Navigator.maybePop(context)`.
+- `FriendProfileScreen`: lifted avatar/name/group/status, action buttons, metrics, and friends section while preserving existing friendship, request, message, metric, and list logic.
+- Overflow handling: long name/group/status text now has line limits and ellipsis in the profile header.
+- Format: `dart format lib/src/ui/chats/direct_chat_info_screen.dart lib/src/ui/friends/friend_profile_screen.dart` passed.
+- Focused analyze: `flutter analyze --no-pub lib/src/ui/chats/direct_chat_info_screen.dart lib/src/ui/friends/friend_profile_screen.dart` ran; no new compile errors, existing `FriendProfileScreen` warnings/infos remain.
+- Full analyze: `flutter analyze` was run; it exits with existing project diagnostics outside this change, including missing `subject_quick_note_screen.dart` and undefined `getTemporaryDirectory`/`File` in `lib/src/ui/schedule/diary_entry_details_screen.dart`.
+- Git add/commit run: no.

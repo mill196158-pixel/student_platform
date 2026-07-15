@@ -582,3 +582,65 @@ Verification:
 - focused Dart analyze passed for changed home files;
 - remote Supabase migration was applied through MCP to project `gwdanmwluhrcfxbnplwd`;
 - remote check confirmed the table exists, RLS is enabled, self-only policies exist, and indexes include `user_id` plus unique `(user_id, notification_id)`.
+
+## Direct Chat Info Profile Navigation Refresh
+
+Direct personal chat info now opens the real friend profile from the user card:
+
+- screen: `lib/src/ui/chats/direct_chat_info_screen.dart`;
+- removed the separate `ListTile` profile action and temporary profile `Scaffold`;
+- tapping the large avatar/name card opens `FriendProfileScreen(userId: peerId)`;
+- the media section still opens the existing `ChatMediaSheet`;
+- `DirectChatScreen` continues to provide `DirectChatInfoScreen` through the existing `BlocProvider.value` path.
+
+Verification:
+
+- `dart format lib/src/ui/chats/direct_chat_info_screen.dart` passed;
+- `flutter analyze --no-pub lib/src/ui/chats/direct_chat_info_screen.dart` passed;
+- full `flutter analyze --no-pub` was run and still reports pre-existing project diagnostics outside this change, including `lib/src/ui/schedule/diary_entry_details_screen.dart`.
+
+## Android Debug Build Toolchain Refresh
+
+Android debug builds now match the plugin toolchain requirements seen during emulator testing:
+
+- Android Gradle Plugin: `8.7.3 -> 8.9.1`;
+- Android NDK: `27.0.12077973 -> 28.2.13676358`;
+- added `assets/images/.gitkeep` so the `assets/images/` directory declared in `pubspec.yaml` exists.
+
+Verification:
+
+- `flutter build apk --debug` passed and produced `build/app/outputs/flutter-apk/app-debug.apk`.
+
+## Direct Chat Info Minimal Header Redesign
+
+Direct personal chat info now uses a minimal edge-to-edge header:
+
+- screen: `lib/src/ui/chats/direct_chat_info_screen.dart`;
+- removed the standard app bar, `Профиль диалога`, `Личный чат`, and `Открыть профиль` UI;
+- only the large avatar opens `FriendProfileScreen(userId: peerId)`;
+- the name is display-only and limited to two lines;
+- the compact media card still opens the existing `ChatMediaSheet` with `service.watchMessages()`;
+- `DirectChatScreen` and its existing `BlocProvider.value` navigation path remain unchanged.
+
+Verification:
+
+- `dart format lib/src/ui/chats/direct_chat_info_screen.dart` passed;
+- `flutter analyze --no-pub lib/src/ui/chats/direct_chat_info_screen.dart` passed;
+- full `flutter analyze` was run and still reports pre-existing project diagnostics outside this change, including `lib/src/ui/schedule/diary_entry_details_screen.dart`.
+
+## Direct Chat And Friend Profile Back/Spacing Polish
+
+Direct chat info and friend profile screens now share the same top-left back button placement:
+
+- screens: `lib/src/ui/chats/direct_chat_info_screen.dart`, `lib/src/ui/friends/friend_profile_screen.dart`;
+- removed the avatar-level custom back button from direct chat info;
+- removed the standard `AppBar`/`Профиль` title from friend profile states;
+- both screens use a 48x48 `arrow_back_rounded` hit target at the SafeArea top-left;
+- direct chat info keeps the current gradient, avatar, name, and `Фото и файлы` card, with tighter vertical spacing;
+- friend profile keeps existing friendship, message, metric, and friends-list logic while lifting the header/actions/metrics upward.
+
+Verification:
+
+- `dart format lib/src/ui/chats/direct_chat_info_screen.dart lib/src/ui/friends/friend_profile_screen.dart` passed;
+- focused analyze for both changed screens was run and reported no new compile errors, with pre-existing `FriendProfileScreen` warnings/infos still present;
+- full `flutter analyze` was run and still reports pre-existing project diagnostics outside this change, including `lib/src/ui/schedule/diary_entry_details_screen.dart`.

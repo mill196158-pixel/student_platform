@@ -76,7 +76,8 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
       }
 
       // гость — через SECURITY DEFINER RPC, обходящий RLS
-      final res = await _sb.rpc('get_user_profile', params: {'p_id': widget.userId});
+      final res =
+          await _sb.rpc('get_user_profile', params: {'p_id': widget.userId});
       Map<String, dynamic>? g;
       if (res is List) {
         if (res.isNotEmpty) g = Map<String, dynamic>.from(res.first as Map);
@@ -285,18 +286,25 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
       if (existing.isEmpty) {
         await _sb.from('friends').insert({'user_id': me, 'friend_id': other});
       }
-      await _sb.from('friend_requests').delete().eq('from_id', other).eq('to_id', me);
+      await _sb
+          .from('friend_requests')
+          .delete()
+          .eq('from_id', other)
+          .eq('to_id', me);
 
       // локально обновим состояние и список + прокрутим к секции
       await _onFriendsChangedRealtime();
       if (!mounted) return;
       setState(() => _state = _FriendshipState.friends);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Теперь вы друзья')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Теперь вы друзья')));
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final ctx = _friendsKey.currentContext;
         if (ctx != null) {
-          Scrollable.ensureVisible(ctx, duration: const Duration(milliseconds: 380), curve: Curves.easeOut);
+          Scrollable.ensureVisible(ctx,
+              duration: const Duration(milliseconds: 380),
+              curve: Curves.easeOut);
         }
       });
     } catch (e) {
@@ -313,18 +321,18 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
     if (me == null || me.isEmpty || other.isEmpty) return;
 
     try {
-      await _sb
-          .from('friends')
-          .delete()
-          .or('and(user_id.eq.$me,friend_id.eq.$other),and(user_id.eq.$other,friend_id.eq.$me))');
+      await _sb.from('friends').delete().or(
+          'and(user_id.eq.$me,friend_id.eq.$other),and(user_id.eq.$other,friend_id.eq.$me))');
 
       await _onFriendsChangedRealtime();
       if (!mounted) return;
       setState(() => _state = _FriendshipState.none);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Удалено из друзей')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Удалено из друзей')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Не удалось удалить: $e')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Не удалось удалить: $e')));
     }
   }
 
@@ -334,14 +342,19 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
     if (me == null || me.isEmpty || other.isEmpty) return;
 
     try {
-      await _sb.from('friend_requests').delete().match({'from_id': me, 'to_id': other});
+      await _sb
+          .from('friend_requests')
+          .delete()
+          .match({'from_id': me, 'to_id': other});
       await _onFriendsChangedRealtime();
       if (!mounted) return;
       setState(() => _state = _FriendshipState.none);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Заявка отменена')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Заявка отменена')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Не удалось отменить: $e')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Не удалось отменить: $e')));
     }
   }
 
@@ -351,14 +364,19 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
     if (me == null || me.isEmpty || other.isEmpty) return;
 
     try {
-      await _sb.from('friend_requests').delete().match({'from_id': other, 'to_id': me});
+      await _sb
+          .from('friend_requests')
+          .delete()
+          .match({'from_id': other, 'to_id': me});
       await _onFriendsChangedRealtime();
       if (!mounted) return;
       setState(() => _state = _FriendshipState.none);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Заявка отклонена')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Заявка отклонена')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Не удалось отклонить: $e')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Не удалось отклонить: $e')));
     }
   }
 
@@ -443,16 +461,42 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final colorScheme = Theme.of(context).colorScheme;
+
     if (_loading) {
       return Scaffold(
-        appBar: AppBar(centerTitle: true, title: const Text('Профиль')),
-        body: const Center(child: CircularProgressIndicator()),
+        backgroundColor: colorScheme.surface,
+        body: Stack(
+          children: [
+            const Center(child: CircularProgressIndicator()),
+            PositionedDirectional(
+              start: 4,
+              top: media.padding.top + 4,
+              child: const _TopBackButton(),
+            ),
+          ],
+        ),
       );
     }
     if (_error || _guest == null) {
       return Scaffold(
-        appBar: AppBar(centerTitle: true, title: const Text('Профиль')),
-        body: const Center(child: Text('Пользователь не найден')),
+        backgroundColor: colorScheme.surface,
+        body: Stack(
+          children: [
+            Center(
+              child: Text(
+                'Пользователь не найден',
+                style: TextStyle(color: colorScheme.onSurface),
+              ),
+            ),
+            PositionedDirectional(
+              start: 4,
+              top: media.padding.top + 4,
+              child: const _TopBackButton(),
+            ),
+          ],
+        ),
       );
     }
 
@@ -464,86 +508,92 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
     final status = (g['status'] ?? '').toString();
 
     return Scaffold(
-      appBar: AppBar(centerTitle: true, title: const Text('Профиль')),
-      body: Theme(
-        data: Theme.of(context).copyWith(
-          textTheme: Theme.of(context).textTheme.apply(
-                bodyColor: Colors.black,
-                displayColor: Colors.black,
+      backgroundColor: colorScheme.surface,
+      body: Stack(
+        children: [
+          RefreshIndicator(
+            onRefresh: _refresh,
+            child: ListView(
+              controller: _scroll,
+              padding: EdgeInsets.fromLTRB(
+                16,
+                media.padding.top + 50,
+                16,
+                24 + media.padding.bottom,
               ),
-        ),
-        child: RefreshIndicator(
-          onRefresh: _refresh,
-          child: ListView(
-            controller: _scroll,
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-            children: [
-              _Header(
-                fullName: fullName.isEmpty ? 'Без имени' : fullName,
-                university: university,
-                groupName: group,
-                status: status,
-                avatarUrl: avatar.isEmpty ? null : avatar,
-              ),
-              const SizedBox(height: 16),
-
-              // Главное действие: дружба
-              if (_myId != null && _myId != widget.userId)
-                _FriendAction(
-                  state: _state,
-                  onAdd: _sendFriendRequest,
-                  onAccept: _acceptFriendRequest,
-                  onRemove: _removeFriend,
-                  onCancelRequest: _cancelFriendRequest,
-                  onDecline: _declineIncomingRequest,
+              children: [
+                _Header(
+                  fullName: fullName.isEmpty ? 'Без имени' : fullName,
+                  university: university,
+                  groupName: group,
+                  status: status,
+                  avatarUrl: avatar.isEmpty ? null : avatar,
                 ),
-              if (_myId != null && _myId != widget.userId) ...[
+                const SizedBox(height: 15),
+
+                // Главное действие: дружба
+                if (_myId != null && _myId != widget.userId)
+                  _FriendAction(
+                    state: _state,
+                    onAdd: _sendFriendRequest,
+                    onAccept: _acceptFriendRequest,
+                    onRemove: _removeFriend,
+                    onCancelRequest: _cancelFriendRequest,
+                    onDecline: _declineIncomingRequest,
+                  ),
+                if (_myId != null && _myId != widget.userId) ...[
+                  const SizedBox(height: 10),
+                  _GActionLarge(
+                    onTap: _openDirectChat,
+                    gradient: _gradBlue,
+                    icon: Icons.chat_bubble_outline,
+                    text: 'Сообщение',
+                  ),
+                ],
+
+                const SizedBox(height: 12),
+
+                // Метрики (рейтинг пока "—")
+                _MetricsRowGuest(
+                  rating: '—',
+                  friends: '${_friends.length}',
+                ),
+
+                const SizedBox(height: 15),
+                Padding(
+                  key: _friendsKey,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Text(
+                    'Друзья',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: colorScheme.onSurface,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                ),
+
                 const SizedBox(height: 10),
-                _GActionLarge(
-                  onTap: _openDirectChat,
-                  gradient: _gradBlue,
-                  icon: Icons.chat_bubble_outline,
-                  text: 'Сообщение',
+                _ProfileListSection(
+                  users: _friends,
+                  emptyText: 'Друзья не найдены',
+                  onOpenUser: (id) {
+                    if (id == widget.userId) return;
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => FriendProfileScreen(userId: id),
+                      ),
+                    );
+                  },
                 ),
               ],
-
-              const SizedBox(height: 12),
-
-              // Метрики (рейтинг пока "—")
-              _MetricsRowGuest(
-                rating: '—',
-                friends: '${_friends.length}',
-              ),
-
-              const SizedBox(height: 16),
-              Padding(
-                key: _friendsKey,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Text(
-                  'Друзья',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: Colors.black87,
-                        fontWeight: FontWeight.w700,
-                      ),
-                ),
-              ),
-
-              const SizedBox(height: 10),
-              _ProfileListSection(
-                users: _friends,
-                emptyText: 'Друзья не найдены',
-                onOpenUser: (id) {
-                  if (id == widget.userId) return;
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => FriendProfileScreen(userId: id),
-                    ),
-                  );
-                },
-              ),
-            ],
+            ),
           ),
-        ),
+          PositionedDirectional(
+            start: 4,
+            top: media.padding.top + 4,
+            child: const _TopBackButton(),
+          ),
+        ],
       ),
     );
   }
@@ -556,6 +606,33 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
 }
 
 // ---- UI pieces ----
+
+class _TopBackButton extends StatelessWidget {
+  const _TopBackButton();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Material(
+      color: Colors.transparent,
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: () => Navigator.maybePop(context),
+        child: SizedBox(
+          width: 48,
+          height: 48,
+          child: Icon(
+            Icons.arrow_back_rounded,
+            color: scheme.onSurface,
+            size: 24,
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class _Header extends StatelessWidget {
   final String fullName;
@@ -574,7 +651,9 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final text = theme.textTheme;
 
     ImageProvider? avatarProvider;
     if (avatarUrl != null && avatarUrl!.isNotEmpty) {
@@ -585,33 +664,44 @@ class _Header extends StatelessWidget {
       children: [
         CircleAvatar(
           radius: 44,
-          backgroundColor: Colors.deepPurple.shade100,
+          backgroundColor: colorScheme.secondaryContainer,
           backgroundImage: avatarProvider,
           child: avatarProvider == null
-              ? const Icon(Icons.person, size: 44)
+              ? Icon(
+                  Icons.person,
+                  size: 44,
+                  color: colorScheme.onSecondaryContainer,
+                )
               : null,
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         Text(
           fullName,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
           style: text.titleLarge?.copyWith(
             fontWeight: FontWeight.w800,
-            color: Colors.black,
+            color: colorScheme.onSurface,
           ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 5),
         Text(
           [
             if (university.isNotEmpty) university,
             if (groupName.isNotEmpty) 'группа $groupName',
           ].where((e) => e.isNotEmpty).join(', '),
-          style: text.bodyMedium?.copyWith(color: Colors.black),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: text.bodyMedium?.copyWith(color: colorScheme.onSurfaceVariant),
           textAlign: TextAlign.center,
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 7),
         Text(
           status.isEmpty ? 'Статус не указан' : status,
-          style: text.bodyLarge,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: text.bodyLarge?.copyWith(color: colorScheme.onSurface),
           textAlign: TextAlign.center,
         ),
       ],
@@ -738,7 +828,12 @@ class _MetricsRowGuest extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = Theme.of(context).colorScheme.primary.withOpacity(.08);
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final bg = Color.alphaBlend(
+      colorScheme.primary.withAlpha(20),
+      colorScheme.surface,
+    );
 
     Widget cell({
       required IconData icon,
@@ -751,17 +846,22 @@ class _MetricsRowGuest extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 22, color: Colors.black),
+              Icon(icon, size: 22, color: colorScheme.onSurface),
               const SizedBox(height: 8),
               Text(
                 value,
-                style: Theme.of(context)
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(fontWeight: FontWeight.w700, color: Colors.black),
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: colorScheme.onSurface,
+                ),
               ),
               const SizedBox(height: 2),
-              Text(label, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.black87)),
+              Text(
+                label,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
             ],
           ),
         ),
@@ -828,6 +928,7 @@ class _FriendRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     final subtitle = [
       if (data.university.isNotEmpty) data.university,
@@ -850,7 +951,7 @@ class _FriendRow extends StatelessWidget {
                   Text(
                     data.fullName,
                     style: theme.textTheme.titleMedium?.copyWith(
-                      color: Colors.black87,
+                      color: colorScheme.onSurface,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -859,14 +960,14 @@ class _FriendRow extends StatelessWidget {
                     Text(
                       subtitle,
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: Colors.black54,
+                        color: colorScheme.onSurfaceVariant,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right, color: Colors.black54),
+            Icon(Icons.chevron_right, color: colorScheme.onSurfaceVariant),
           ],
         ),
       ),
@@ -891,13 +992,15 @@ class _Empty extends StatelessWidget {
   const _Empty({required this.text});
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 22),
       alignment: Alignment.center,
       child: Text(
         text,
-        style: const TextStyle(
-          color: Colors.black54,
+        style: TextStyle(
+          color: colorScheme.onSurfaceVariant,
           fontWeight: FontWeight.w500,
         ),
       ),
@@ -935,13 +1038,18 @@ class _Avatar extends StatelessWidget {
       ),
       child: Text(
         initials,
-        style: TextStyle(fontWeight: FontWeight.w800, color: Colors.white, fontSize: size * 0.38, letterSpacing: .2),
+        style: TextStyle(
+            fontWeight: FontWeight.w800,
+            color: Colors.white,
+            fontSize: size * 0.38,
+            letterSpacing: .2),
       ),
     );
   }
 
   static String _initials(String s) {
-    final parts = s.trim().split(RegExp(r'\s+')).where((e) => e.isNotEmpty).toList();
+    final parts =
+        s.trim().split(RegExp(r'\s+')).where((e) => e.isNotEmpty).toList();
     if (parts.isEmpty) return '👤';
     final a = parts[0].characters.first.toUpperCase();
     final b = parts.length > 1 ? parts[1].characters.first.toUpperCase() : '';
@@ -974,7 +1082,8 @@ class _MiniUser {
     required this.university,
     required this.groupName,
   });
-  String get fullName => [name, surname].where((e) => e.trim().isNotEmpty).join(' ').trim();
+  String get fullName =>
+      [name, surname].where((e) => e.trim().isNotEmpty).join(' ').trim();
 }
 
 enum _FriendshipState {
@@ -986,9 +1095,12 @@ enum _FriendshipState {
 }
 
 // Градиенты в фирменной мягкой гамме
-const _gradPurple = [Color(0xFFEDE7F6), Color(0xFFD1C4E9)]; // добавить/в друзьях
-const _gradGrey   = [Color(0xFFF5F5F5), Color(0xFFE0E0E0)]; // убрать/отменить
-const _gradBlue   = [Color(0xFFE3F2FD), Color(0xFFBBDEFB)]; // заявка отправлена
+const _gradPurple = [
+  Color(0xFFEDE7F6),
+  Color(0xFFD1C4E9)
+]; // добавить/в друзьях
+const _gradGrey = [Color(0xFFF5F5F5), Color(0xFFE0E0E0)]; // убрать/отменить
+const _gradBlue = [Color(0xFFE3F2FD), Color(0xFFBBDEFB)]; // заявка отправлена
 
 /// Универсальная большая «чип-кнопка» с градиентом
 class _GActionLarge extends StatelessWidget {
@@ -996,18 +1108,19 @@ class _GActionLarge extends StatelessWidget {
   final List<Color> gradient;
   final IconData icon;
   final String text;
-  final Color fg;
   const _GActionLarge({
     required this.onTap,
     required this.gradient,
     required this.icon,
     required this.text,
-    this.fg = Colors.black87,
   });
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final fg = colorScheme.onSurface;
     final radius = BorderRadius.circular(16);
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -1017,9 +1130,18 @@ class _GActionLarge extends StatelessWidget {
           duration: const Duration(milliseconds: 180),
           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
           decoration: BoxDecoration(
-            gradient: LinearGradient(colors: gradient, begin: Alignment.topLeft, end: Alignment.bottomRight),
+            gradient: LinearGradient(
+                colors: gradient,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight),
             borderRadius: radius,
-            boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2))],
+            boxShadow: [
+              BoxShadow(
+                color: colorScheme.shadow.withAlpha(28),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              )
+            ],
           ),
           child: Row(
             children: [
@@ -1028,7 +1150,8 @@ class _GActionLarge extends StatelessWidget {
               Expanded(
                 child: Text(
                   text,
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: fg),
+                  style: TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w700, color: fg),
                 ),
               ),
             ],
