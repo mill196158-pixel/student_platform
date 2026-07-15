@@ -565,3 +565,20 @@ Not driven interactively by the agent:
 Next stage:
 
 **Stage 4.2.4 - human UI runtime pass for personal tasks/search/group assignment diary behavior, then continue only after the checkpoint is accepted.**
+
+## Home Notifications Persisted Read State
+
+Home dashboard notifications now have a prepared persisted read-state layer:
+
+- migration: `supabase/migrations/20260623094000_home_notification_reads.sql`;
+- table: `public.home_notification_reads`;
+- state key: stable Flutter-generated `notification_id`;
+- RLS: users can read/insert/update only their own notification read markers;
+- Flutter loads persisted read ids through `HomeDashboardService.load()`;
+- tapping a notification immediately reduces the badge and upserts the read marker.
+
+Verification:
+
+- focused Dart analyze passed for changed home files;
+- remote Supabase migration was applied through MCP to project `gwdanmwluhrcfxbnplwd`;
+- remote check confirmed the table exists, RLS is enabled, self-only policies exist, and indexes include `user_id` plus unique `(user_id, notification_id)`.

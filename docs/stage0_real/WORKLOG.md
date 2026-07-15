@@ -690,3 +690,19 @@
 - Build: `flutter build windows --debug` passed.
 - UI runtime was not driven interactively by the agent.
 - New report: `docs/stage0_real/STAGE4_2_3B_PERSONAL_TASKS_SQL_AND_RUNTIME_CHECK.md`.
+
+## Home notifications - persisted read state
+
+- Date: 2026-06-23
+- Trigger: runtime feedback that local-only notification read state forces repeated taps after reload/restart.
+- Flutter code changed: yes, limited to home dashboard notification read state.
+- Supabase schema migration written: yes, `supabase/migrations/20260623094000_home_notification_reads.sql`.
+- New table design: `public.home_notification_reads` stores one row per `(user_id, notification_id)` with `read_at`.
+- RLS design: enabled on `home_notification_reads`; authenticated users can select, insert, and update only their own rows.
+- Client behavior: `HomeDashboardService.load()` reads persisted notification ids; tapping a notification updates UI optimistically and upserts the read marker.
+- Fallback behavior: if the remote table is not applied yet or a write fails, the UI still works locally for the current session and logs the Supabase error.
+- Supabase remote apply: completed through Supabase MCP `apply_migration` on project `gwdanmwluhrcfxbnplwd`.
+- Remote verification: `public.home_notification_reads` exists, RLS is enabled, select/insert/update policies are scoped to `auth.uid()`, and indexes include primary key, `user_id`, and unique `(user_id, notification_id)`.
+- Supabase advisors: security/performance advisors were run after apply; output contains broad pre-existing project notices, while targeted verification for `home_notification_reads` passed.
+- Focused analyze: `dart analyze lib/src/ui/home/home_screen.dart lib/src/ui/home/home_dashboard_service.dart lib/src/ui/home/models/home_dashboard_data.dart` passed with no issues.
+- Git add/commit run: no.
