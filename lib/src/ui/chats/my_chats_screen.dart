@@ -30,7 +30,6 @@ class MyChatsScreen extends StatefulWidget {
 
 class _MyChatsScreenState extends State<MyChatsScreen>
     with WidgetsBindingObserver {
-  final _repo = SupabaseLearningRepository();
   bool _loading = true;
 
   List<_ChatSummary> _all = [];
@@ -88,10 +87,6 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     WidgetsBinding.instance.addObserver(this);
     _hydrateFromCache(); // мгновенно показываем старый список
     _load(); // параллельно тянем актуальные данные
-    // ➜ NEW: запуск поллера сразу и мгновенный первый опрос
-    _startPolling();
-    // ignore: discarded_futures
-    _pollOnce();
   }
 
   @override
@@ -125,15 +120,10 @@ class _MyChatsScreenState extends State<MyChatsScreen>
   Future<void> _load() async {
     _safeSetState(() => _loading = true);
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString('user');
-      String group = '';
-      if (raw != null && raw.isNotEmpty) {
-        final m = jsonDecode(raw) as Map<String, dynamic>;
-        group = (m['group_name'] ?? '') as String;
-      }
-      if (group.isEmpty) {
-        setState(() {
+      final sb = Supabase.instance.client;
+      final me = sb.auth.currentUser?.id;
+      if (me == null || me.isEmpty) {
+        _safeSetState(() {
           _all = [];
           _visible = [];
           _loading = false;
@@ -141,28 +131,53 @@ class _MyChatsScreenState extends State<MyChatsScreen>
         return;
       }
 
-      // команды пользователя = наши чаты
-      final teams = await _repo.loadTeams(group);
+      final res = await sb.rpc('get_my_chat_summaries');
+      final rows = (res as List? ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
 
-      // сводки по чатам (реальное lastMsg/lastTime из репозитория)
-      final teamSummaries = await Future.wait(teams.map(_buildSummaryForTeam));
-
-      // подкачиваем ЛС
-      final dmSummaries = await _loadDms();
-
-      // общий список: сервер обновляет содержимое; локальный кеш — быстрый старт.
-      // pinned/muted с сервера — источник истины (локальные без строки — migrate once).
+      // Локальный кеш — быстрый старт; pin/mute с сервера — источник истины.
+      // settings_exists=false → один раз перенести старые локальные pin/mute.
       final localStateByKey = <String, _ChatSummary>{
         for (final item in _all) _summaryIdentity(item): item,
       };
-      final list = <_ChatSummary>[...teamSummaries, ...dmSummaries];
-      for (final item in list) {
-        final local = localStateByKey[_summaryIdentity(item)];
-        if (local == null) continue;
-        item.pinned = local.pinned;
-        item.muted = local.muted;
+      final list = <_ChatSummary>[];
+      final toMigrate = <Map<String, dynamic>>[];
+
+      for (final row in rows) {
+        final item = _summaryFromRpcRow(row);
+        if (item.isDm && (item.peerId == null || item.peerId!.isEmpty)) {
+          continue;
+        }
+
+        final settingsExists = row['settings_exists'] == true;
+        if (!settingsExists) {
+          final local = localStateByKey[_summaryIdentity(item)];
+          if (local != null) {
+            item.pinned = local.pinned;
+            item.muted = local.muted;
+          }
+          final chatId = item.chatId;
+          if (chatId != null && chatId.isNotEmpty) {
+            toMigrate.add({
+              'user_id': me,
+              'chat_id': chatId,
+              'is_pinned': item.pinned,
+              'is_muted': item.muted,
+              'updated_at': DateTime.now().toUtc().toIso8601String(),
+            });
+          }
+        }
+        list.add(item);
       }
-      await _syncChatUserSettings(list);
+
+      if (toMigrate.isNotEmpty) {
+        await sb.from('chat_user_settings').upsert(
+              toMigrate,
+              onConflict: 'user_id,chat_id',
+            );
+      }
+
       list.sort(_compareChats);
 
       if (!mounted) return;
@@ -171,11 +186,10 @@ class _MyChatsScreenState extends State<MyChatsScreen>
         _applyFilter();
         _loading = false;
       });
-      _saveCache(_all); // сохранить кеш после загрузки
+      _saveCache(_all);
 
       _subscribeChatSettingsRealtime();
-      _startPolling(); // ➜ NEW
-      await _pollOnce(); // ➜ NEW: мгновенный опрос после наполнения списка
+      _startPolling();
     } catch (_) {
       _safeSetState(() => _loading = false);
     }
@@ -188,131 +202,61 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     return bb.compareTo(aa); // новые выше
   }
 
-  // ===== DM list loader =====
-  Future<List<_ChatSummary>> _loadDms() async {
-    try {
-      final sb = Supabase.instance.client;
-      final me = sb.auth.currentUser?.id;
-      if (me == null || me.isEmpty) return const [];
+  _ChatSummary _summaryFromRpcRow(Map<String, dynamic> row) {
+    final chatType = (row['chat_type'] ?? '').toString();
+    final isDm = chatType == 'dm';
+    final teamId = (row['team_id'] ?? '').toString();
+    final teamName = (row['team_name'] ?? '').toString();
+    final teamIcon = (row['team_icon'] ?? '').toString();
+    final teamTeacher = (row['team_teacher'] ?? '').toString();
+    final teamGroupName = (row['team_group_name'] ?? '').toString();
+    final titleRaw = (row['title'] ?? '').toString().trim();
+    final peerId = (row['peer_id'] ?? '').toString();
+    final avatarRaw = (row['avatar_url'] ?? '').toString().trim();
+    final chatId = (row['chat_id'] ?? '').toString();
+    final lastMessageId = (row['last_message_id'] ?? '').toString();
+    final lastAt = DateTime.tryParse((row['last_message_at'] ?? '').toString());
+    final lastAuthorName = (row['last_author_name'] ?? '').toString().trim();
+    final unread = (row['unread_count'] as num?)?.toInt() ?? 0;
+    final hasLastMessage = lastMessageId.isNotEmpty;
+    final preview = hasLastMessage
+        ? _buildPreviewFromRow({
+            'body': row['body'],
+            'content': row['content'],
+            'msg_type': row['msg_type'],
+          })
+        : 'Сообщений пока нет';
 
-      // Debug: show raw membership
-      final test = await sb
-          .from('chat_members')
-          .select('chat_id, user_id')
-          .eq('user_id', me);
-      safeDebugLog(
-          '[MyChatsScreen] DM memberships loaded user=${maskDebugId(me)} count=${(test as List? ?? const []).length}');
+    final title = titleRaw.isNotEmpty
+        ? titleRaw
+        : (isDm ? 'Личный чат' : (teamName.isNotEmpty ? teamName : 'Чат'));
 
-      final chatIds = (test as List? ?? const [])
-          .map((r) => (r['chat_id'] ?? '').toString())
-          .where((s) => s.isNotEmpty)
-          .toList();
-      if (chatIds.isEmpty) return const [];
-
-      // Fetch chats for these ids and keep only dm
-      final chatsRes =
-          await sb.from('chats').select('id,type').inFilter('id', chatIds);
-      final dmIds = (chatsRes as List? ?? const [])
-          .where((c) => ((c['type'] ?? '').toString() == 'dm'))
-          .map((c) => (c['id'] ?? '').toString())
-          .where((id) => id.isNotEmpty)
-          .toList();
-      safeDebugLog('[MyChatsScreen] DM chat ids loaded count=${dmIds.length}');
-      if (dmIds.isEmpty) return const [];
-
-      final list = <_ChatSummary>[];
-      for (final chatId in dmIds) {
-        // DM peer profile via RPC
-        String peerId = '';
-        String title = 'Личный чат';
-        String? avatarUrl;
-        try {
-          final prof = await sb
-              .rpc('get_dm_peer_profile', params: {'p_chat_id': chatId});
-          Map<String, dynamic>? row;
-          if (prof is List && prof.isNotEmpty) {
-            row = Map<String, dynamic>.from(prof.first as Map);
-          } else if (prof is Map) {
-            row = Map<String, dynamic>.from(prof);
-          }
-          if (row != null) {
-            peerId = (row['peer_id'] ?? '').toString();
-            final t = (row['title'] ?? '').toString().trim();
-            if (t.isNotEmpty) title = t;
-            final av = (row['avatar_url'] ?? '').toString().trim();
-            if (av.isNotEmpty) avatarUrl = av;
-          }
-        } catch (_) {}
-
-        if (peerId.isEmpty) {
-          // без peerId нельзя открыть DirectChatScreen — скипаем
-          continue;
-        }
-
-        // last message row
-        DateTime? lastAt;
-        String? lastMessageId;
-        String? lastPreview;
-        try {
-          final res = await sb
-              .rpc('get_last_message_row', params: {'p_chat_id': chatId});
-          Map<String, dynamic>? row;
-          if (res is List && res.isNotEmpty) {
-            row = Map<String, dynamic>.from(res.first as Map);
-          } else if (res is Map) {
-            row = Map<String, dynamic>.from(res);
-          }
-          if (row != null) {
-            lastMessageId = (row['id'] ?? '').toString();
-            lastAt = DateTime.tryParse((row['created_at'] ?? '').toString());
-            lastPreview = _buildPreviewFromRow(row);
-          }
-        } catch (_) {}
-
-        // unread count
-        int unread = 0;
-        try {
-          final res =
-              await sb.rpc('get_unread_in_chat', params: {'p_chat_id': chatId});
-          if (res is List && res.isNotEmpty) {
-            final m = Map<String, dynamic>.from(res.first as Map);
-            unread = (m['unread_count'] ?? 0) as int;
-          } else if (res is Map) {
-            final m = Map<String, dynamic>.from(res);
-            unread = (m['unread_count'] ?? 0) as int;
-          }
-        } catch (_) {}
-
-        list.add(_ChatSummary(
-          team: Team(
-              id: '',
-              name: title.isEmpty ? 'Личный чат' : title,
-              icon: '',
-              teacher: '',
-              groupCode: ''),
-          title: title.isEmpty ? 'Личный чат' : title,
-          subtitle: null,
-          lastAuthor: null,
-          lastMsgPreview: lastPreview ?? 'Сообщений пока нет',
-          lastTime: lastAt,
-          unread: unread,
-          pinned: false,
-          muted: false,
-          chatId: chatId,
-          lastMessageId:
-              (lastMessageId?.isNotEmpty ?? false) ? lastMessageId : null,
-          isDm: true,
-          peerId: peerId,
-          avatarUrl: avatarUrl,
-        ));
-      }
-
-      safeDebugLog('[MyChatsScreen] DM summaries ready count=${list.length}');
-      return list;
-    } catch (e) {
-      debugPrint('[DM] _loadDms error: $e');
-      return const [];
-    }
+    return _ChatSummary(
+      team: Team(
+        id: isDm ? '' : teamId,
+        name: isDm ? title : (teamName.isNotEmpty ? teamName : title),
+        icon: teamIcon,
+        teacher: teamTeacher,
+        groupCode: teamGroupName,
+      ),
+      title: title,
+      subtitle: isDm
+          ? null
+          : (teamTeacher.isNotEmpty
+              ? teamTeacher
+              : (teamGroupName.isNotEmpty ? teamGroupName : null)),
+      lastAuthor: lastAuthorName.isNotEmpty ? lastAuthorName : null,
+      lastMsgPreview: preview,
+      lastTime: lastAt,
+      unread: unread,
+      pinned: row['is_pinned'] == true,
+      muted: row['is_muted'] == true,
+      chatId: chatId.isNotEmpty ? chatId : null,
+      lastMessageId: hasLastMessage ? lastMessageId : null,
+      isDm: isDm,
+      peerId: peerId.isNotEmpty ? peerId : null,
+      avatarUrl: avatarRaw.isNotEmpty ? avatarRaw : null,
+    );
   }
 
   Future<void> _togglePinChat(_ChatSummary c) async {
@@ -403,47 +347,6 @@ class _MyChatsScreenState extends State<MyChatsScreen>
       byChatId[chatId] = m;
     }
     return byChatId;
-  }
-
-  /// Серверные pinned/muted — источник истины; локальные без строки — once migrate.
-  Future<void> _syncChatUserSettings(List<_ChatSummary> list) async {
-    final sb = Supabase.instance.client;
-    final me = sb.auth.currentUser?.id;
-    if (me == null || me.isEmpty) return;
-
-    try {
-      final byChatId = await _fetchChatUserSettings(me);
-      final toMigrate = <Map<String, dynamic>>[];
-
-      for (final item in list) {
-        final chatId = item.chatId;
-        if (chatId == null || chatId.isEmpty) continue;
-
-        final server = byChatId[chatId];
-        if (server != null) {
-          item.pinned = server['is_pinned'] == true;
-          item.muted = server['is_muted'] == true;
-          continue;
-        }
-
-        // Первая миграция: создать строку для каждого чата, сохранив локальные значения.
-        toMigrate.add({
-          'user_id': me,
-          'chat_id': chatId,
-          'is_pinned': item.pinned,
-          'is_muted': item.muted,
-          'updated_at': DateTime.now().toUtc().toIso8601String(),
-        });
-      }
-
-      if (toMigrate.isEmpty) return;
-      await sb.from('chat_user_settings').upsert(
-            toMigrate,
-            onConflict: 'user_id,chat_id',
-          );
-    } catch (e) {
-      debugPrint('[MyChatsScreen] sync chat_user_settings error: $e');
-    }
   }
 
   Future<void> _reloadChatSettingsFromServer() async {
@@ -573,201 +476,31 @@ class _MyChatsScreenState extends State<MyChatsScreen>
   }
 
   Future<void> _pollOnce() async {
-    if (_pollInFlight) return; // ➜ NEW: анти-дубль
-    _pollInFlight = true; // ➜ NEW
-    final ids = _all
-        .map((e) => e.chatId)
-        .where((id) => id != null && id!.isNotEmpty)
-        .cast<String>()
-        .toList();
-    if (ids.isEmpty) {
-      _pollInFlight = false;
-      return;
-    }
-
-    final sb = Supabase.instance.client;
-    final futures = <Future>[];
-
-    for (final id in ids) {
-      futures.add(sb
-          .rpc('get_unread_in_chat', params: {'p_chat_id': id}).catchError((e) {
-        safeDebugLog(
-            '[poll] get_unread_in_chat failed chat=${maskDebugId(id)} error=${e.runtimeType}');
-        return null;
-      }).then((res) {
-        int unread = 0;
-        if (res is List && res.isNotEmpty) {
-          final m = Map<String, dynamic>.from(res.first as Map);
-          unread = (m['unread_count'] ?? 0) as int;
-        } else if (res is Map) {
-          final m = Map<String, dynamic>.from(res);
-          unread = (m['unread_count'] ?? 0) as int;
-        }
-        final idx = _all.indexWhere((e) => e.chatId == id);
-        if (idx != -1) _all[idx].unread = unread;
-      }).catchError((_) {}));
-
-      futures.add(sb.rpc('get_last_message_row',
-          params: {'p_chat_id': id}).then((res) async {
-        Map<String, dynamic>? row;
-        if (res is List && res.isNotEmpty) {
-          row = Map<String, dynamic>.from(res.first as Map);
-        } else if (res is Map) {
-          row = Map<String, dynamic>.from(res);
-        }
-        if (row == null) return;
-        final lastId = (row['id'] ?? '').toString();
-        final createdAt =
-            DateTime.tryParse((row['created_at'] ?? '').toString());
-        String authorName = '';
-        final authorId = (row['author_id'] ?? '').toString();
-        if (authorId.isNotEmpty) {
-          try {
-            final u = await sb
-                .from('users')
-                .select('name,surname')
-                .eq('id', authorId)
-                .maybeSingle();
-            if (u != null && u is Map) {
-              final name = (u['name'] ?? '').toString();
-              final sur = (u['surname'] ?? '').toString();
-              authorName =
-                  [name, sur].where((s) => s.isNotEmpty).join(' ').trim();
-            }
-          } catch (_) {}
-        }
-        final idx = _all.indexWhere((e) => e.chatId == id);
-        if (idx != -1) {
-          final c = _all[idx];
-          final isNewMessage =
-              (lastId.isNotEmpty && lastId != (c.lastMessageId ?? ''));
-          final isNewerTime = (c.lastTime == null ||
-              (createdAt != null && createdAt.isAfter(c.lastTime!)));
-          if (isNewMessage || isNewerTime) {
-            c.lastMessageId = lastId;
-            c.lastTime = createdAt ?? c.lastTime;
-            safeDebugLog(
-                '[poll/messages] updated chat=${maskDebugId(id)} message=${maskDebugId(lastId)}');
-            c.lastMsgPreview = _buildPreviewFromRow(row);
-            if (authorName.isNotEmpty) c.lastAuthor = authorName;
-          }
-        }
-      }).catchError((e) {
-        safeDebugLog(
-            '[poll/messages] failed chat=${maskDebugId(id)} error=${e.runtimeType}');
-      }));
-    }
-
-    await Future.wait(futures);
-
-    if (!mounted) {
-      _pollInFlight = false;
-      return;
-    }
-    setState(() {
-      _all.sort(_compareChats);
-      _applyFilter();
-    });
-    _saveCache(_all);
-    _pollInFlight = false; // ➜ NEW
-  }
-
-  // сводка для одной команды
-  Future<_ChatSummary> _buildSummaryForTeam(Team t) async {
-    final seed = _hash32(t.name);
-
-    String? lastText;
-    String? lastAuthor;
-    DateTime? lastAt;
-    String? chatId;
-    String? lastMessageId; // ➜ NEW
-
+    if (_pollInFlight) return;
+    _pollInFlight = true;
     try {
-      // chat id
-      try {
-        final res = await Supabase.instance.client
-            .from('chats')
-            .select('id')
-            .eq('team_id', t.id)
-            .eq('type', 'team_main')
-            .limit(1)
-            .maybeSingle();
-        if (res != null && res is Map) {
-          chatId = (res['id'] ?? '').toString();
-        }
-      } catch (_) {}
+      final sb = Supabase.instance.client;
+      if (sb.auth.currentUser == null) return;
 
-      // ➜ NEW: тянем только последний ряд и строим превью (через RPC, мимо RLS)
-      if (chatId != null && chatId!.isNotEmpty) {
-        final sb = Supabase.instance.client;
-        final res = await sb.rpc('get_last_message_row',
-            params: {'p_chat_id': chatId}).catchError((e) {
-          safeDebugLog(
-              '[summary/messages] failed chat=${maskDebugId(chatId)} error=${e.runtimeType}');
-          return null;
-        });
-        Map<String, dynamic>? lastRow;
-        if (res is List && res.isNotEmpty) {
-          lastRow = Map<String, dynamic>.from(res.first as Map);
-        } else if (res is Map) {
-          lastRow = Map<String, dynamic>.from(res);
-        }
-        if (lastRow != null) {
-          lastAt = DateTime.tryParse((lastRow['created_at'] ?? '').toString());
-          lastText = _buildPreviewFromRow(lastRow);
-          lastMessageId = (lastRow['id'] ?? '').toString();
-          final authorId = (lastRow['author_id'] ?? '').toString();
-          if (authorId.isNotEmpty) {
-            try {
-              final u = await sb
-                  .from('users')
-                  .select('name,surname')
-                  .eq('id', authorId)
-                  .maybeSingle();
-              if (u != null && u is Map) {
-                final name = (u['name'] ?? '').toString();
-                final sur = (u['surname'] ?? '').toString();
-                lastAuthor =
-                    [name, sur].where((s) => s.isNotEmpty).join(' ').trim();
-              }
-            } catch (_) {}
-          }
-        }
-      }
-    } catch (_) {}
+      final res = await sb.rpc('get_my_chat_summaries');
+      final list = (res as List? ?? const [])
+          .map((e) => _summaryFromRpcRow(Map<String, dynamic>.from(e as Map)))
+          .where((c) => !c.isDm || (c.peerId?.isNotEmpty ?? false))
+          .toList()
+        ..sort(_compareChats);
 
-    int unread = 0; // ➜ NEW
-    try {
-      if (chatId != null && chatId!.isNotEmpty) {
-        final res = await Supabase.instance.client
-            .rpc('get_unread_in_chat', params: {'p_chat_id': chatId});
-        if (res is List && res.isNotEmpty) {
-          final m = Map<String, dynamic>.from(res.first as Map);
-          unread = (m['unread_count'] ?? 0) as int;
-        } else if (res is Map) {
-          final m = Map<String, dynamic>.from(res);
-          unread = (m['unread_count'] ?? 0) as int;
-        }
-      }
-    } catch (_) {}
-
-    return _ChatSummary(
-      team: t,
-      title: t.name,
-      subtitle: t.teacher.isNotEmpty
-          ? t.teacher
-          : (t.groupCode.isNotEmpty ? t.groupCode : null),
-      lastAuthor: lastAuthor,
-      lastMsgPreview: lastText ?? 'Сообщений пока нет',
-      lastTime: lastAt,
-      unread: unread,
-      pinned: false,
-      muted: false,
-      chatId: chatId,
-      lastMessageId: (lastMessageId != null && lastMessageId!.isNotEmpty)
-          ? lastMessageId
-          : null,
-    );
+      if (!mounted) return;
+      setState(() {
+        _all = list;
+        _applyFilter();
+      });
+      _saveCache(_all);
+    } catch (e) {
+      safeDebugLog(
+          '[poll] get_my_chat_summaries failed error=${e.runtimeType}');
+    } finally {
+      _pollInFlight = false;
+    }
   }
 
   String _summaryIdentity(_ChatSummary c) {
@@ -1170,10 +903,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     );
   }
 
-  int _hash32(String s) =>
-      s.codeUnits.fold<int>(0, (p, e) => (p * 31 + e) & 0xFFFFFFFF);
-
-  // ➜ NEW: билдер превью по ряду messages
+  // билдер превью по ряду messages / RPC summary
   String _buildPreviewFromRow(Map row) {
     String? fgPreviewFromText(String s) {
       final idx = s.indexOf('__FG__:');
