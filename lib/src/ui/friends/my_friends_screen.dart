@@ -113,64 +113,25 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
       return;
     }
 
-    // пары, где участвует текущий пользователь
-    final rows = await _sb
-        .from('friends')
-        .select('user_id, friend_id, created_at')
-        .or('user_id.eq.$uid,friend_id.eq.$uid')
-        .order('created_at', ascending: false);
+    try {
+      final res = await _sb.rpc('get_my_friends_bulk');
+      final rows = res is List
+          ? res.map((e) => Map<String, dynamic>.from(e as Map)).toList()
+          : const <Map<String, dynamic>>[];
 
-    final ids = <String>{};
-    for (final r in (rows as List)) {
-      final a = (r['user_id'] ?? '').toString();
-      final b = (r['friend_id'] ?? '').toString();
-      final other = a == uid ? b : a;
-      if (other.isNotEmpty) ids.add(other);
-    }
+      final list = rows.map(_friendFromMap).toList()
+        ..sort((a, b) => a.surname.compareTo(b.surname));
 
-    if (ids.isEmpty) {
+      setState(() {
+        _friends = list;
+        if (_query.trim().length < 2 || _remote.isEmpty) {
+          _applyFilter();
+        }
+      });
+    } catch (e) {
+      debugPrint('[Friends] get_my_friends_bulk error: $e');
       setState(() => _friends = []);
-      return;
     }
-
-    // Подтягиваем карточки профилей через RPC (обходит RLS users)
-    final futs = ids.map((id) async {
-      try {
-        final res = await _sb.rpc('get_user_profile', params: {'p_id': id});
-        if (res is List && res.isNotEmpty)
-          return Map<String, dynamic>.from(res.first as Map);
-        if (res is Map) return Map<String, dynamic>.from(res as Map);
-      } catch (e) {
-        debugPrint('[Friends] get_user_profile($id) error: $e');
-      }
-      return null;
-    }).toList();
-
-    final profiles = await Future.wait(futs);
-
-    final list = <_Friend>[];
-    for (final u in profiles.whereType<Map<String, dynamic>>()) {
-      list.add(_Friend(
-        id: (u['id'] ?? '').toString(),
-        name: (u['name'] ?? '').toString(),
-        surname: (u['surname'] ?? '').toString(),
-        avatarUrl: (u['avatar_url'] ?? '').toString(),
-        status: (u['status'] ?? '').toString(),
-        university: (u['university'] ?? '').toString(),
-        city: (u['city'] ?? '').toString(), // если есть
-        groupName: (u['group_name'] ?? '').toString(),
-      ));
-    }
-
-    // сортируем по фамилии
-    list.sort((a, b) => a.surname.compareTo(b.surname));
-
-    setState(() {
-      _friends = list;
-      if (_query.trim().length < 2 || _remote.isEmpty) {
-        _applyFilter();
-      }
-    });
   }
 
   void _subscribeRealtime(String uid) {
@@ -449,52 +410,14 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
         return;
       }
 
-      final frRows = await _sb
-          .from('friend_requests')
-          .select('from_id, created_at')
-          .eq('to_id', uid)
-          .order('created_at', ascending: false);
+      final res = await _sb.rpc('get_my_incoming_friend_requests');
+      final rows = res is List
+          ? res.map((e) => Map<String, dynamic>.from(e as Map)).toList()
+          : const <Map<String, dynamic>>[];
 
-      final ids = <String>[];
-      for (final r in (frRows as List)) {
-        final id = (r['from_id'] ?? '').toString();
-        if (id.isNotEmpty) ids.add(id);
-      }
-
-      if (ids.isEmpty) {
-        setState(() => _requests = const []);
-        return;
-      }
-
-      final futs = ids.map((id) async {
-        try {
-          final res = await _sb.rpc('get_user_profile', params: {'p_id': id});
-          if (res is List && res.isNotEmpty)
-            return Map<String, dynamic>.from(res.first as Map);
-          if (res is Map) return Map<String, dynamic>.from(res as Map);
-        } catch (e) {
-          debugPrint('[Friends] get_user_profile($id) error: $e');
-        }
-        return null;
-      }).toList();
-
-      final profiles = await Future.wait(futs);
-      final reqs = <_Friend>[];
-      for (final u in profiles.whereType<Map<String, dynamic>>()) {
-        reqs.add(_Friend(
-          id: (u['id'] ?? '').toString(),
-          name: (u['name'] ?? '').toString(),
-          surname: (u['surname'] ?? '').toString(),
-          avatarUrl: (u['avatar_url'] ?? '').toString(),
-          status: (u['status'] ?? '').toString(),
-          university: (u['university'] ?? '').toString(),
-          city: (u['city'] ?? '').toString(),
-          groupName: (u['group_name'] ?? '').toString(),
-        ));
-      }
-      setState(() => _requests = reqs);
+      setState(() => _requests = rows.map(_friendFromMap).toList());
     } catch (e) {
-      debugPrint('[Friends] load requests error: $e');
+      debugPrint('[Friends] get_my_incoming_friend_requests error: $e');
       setState(() => _requests = const []);
     }
   }
