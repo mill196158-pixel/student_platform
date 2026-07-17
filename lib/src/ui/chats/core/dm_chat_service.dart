@@ -51,7 +51,8 @@ class DmChatService implements IChatService {
       }
       rethrow;
     }
-    final cached = ChatMessageMemoryCache.snapshot(cid);
+    final clearedAt = await DmApi.loadClearedAt(cid);
+    final cached = ChatMessageMemoryCache.pruneAtOrBefore(cid, clearedAt);
     if (cached.isNotEmpty) {
       _cache
         ..clear()

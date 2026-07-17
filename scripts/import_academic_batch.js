@@ -221,6 +221,15 @@ class SupabaseRest {
     });
   }
 
+  async rpc(fnName, args = {}) {
+    assertSafeIdentifier(fnName, 'rpc name');
+    return this.request(`${this.url}/rest/v1/rpc/${fnName}`, {
+      method: 'POST',
+      headers: { prefer: 'return=representation' },
+      body: JSON.stringify(args),
+    });
+  }
+
   async createAuthUser(payload) {
     return this.request(`${this.url}/auth/v1/admin/users`, {
       method: 'POST',
@@ -897,7 +906,25 @@ async function applyTeams(ctx) {
       await db.patchById('teams', team.id, { group_name: group.name });
     }
   }
-  return { step: 'teams:apply', teamsInserted: teamRows.length, teamMembersInserted: memberRows.length };
+
+  // Safe/idempotent: move previous-semester team_main chats into academic archive.
+  let archivedChats = 0;
+  try {
+    const archived = await db.rpc('archive_completed_academic_chats');
+    archivedChats = typeof archived === 'number' ? archived : Number(archived) || 0;
+  } catch (error) {
+    console.warn(
+      '[teams:apply] archive_completed_academic_chats skipped:',
+      error?.message || error,
+    );
+  }
+
+  return {
+    step: 'teams:apply',
+    teamsInserted: teamRows.length,
+    teamMembersInserted: memberRows.length,
+    archivedCompletedAcademicChats: archivedChats,
+  };
 }
 
 async function postcheckSummary(ctx) {

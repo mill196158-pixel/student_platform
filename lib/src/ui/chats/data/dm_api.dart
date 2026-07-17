@@ -15,19 +15,66 @@ class DmApi {
   static final Map<String, StreamController<List<Message>>> _streamControllers =
       {};
 
+  /// Per-chat clear boundary for the current user (one settings fetch).
+  static final Map<String, DateTime?> _clearedAtByChat = {};
+
   // 1) Создать/вернуть chat_id ЛС
   static Future<String> getOrCreateChatId({required String peerId}) async {
     final res = await _sb.rpc('ensure_dm_chat', params: {'p_partner': peerId});
     return (res ?? '').toString();
   }
 
+  /// One settings row for auth.uid() + chat. Null = never cleared.
+  static Future<DateTime?> loadClearedAt(String chatId) async {
+    if (_clearedAtByChat.containsKey(chatId)) {
+      return _clearedAtByChat[chatId];
+    }
+    final me = _sb.auth.currentUser?.id;
+    if (me == null || me.isEmpty || chatId.isEmpty) {
+      _clearedAtByChat[chatId] = null;
+      return null;
+    }
+    try {
+      final row = await _sb
+          .from('chat_user_settings')
+          .select('cleared_at')
+          .eq('user_id', me)
+          .eq('chat_id', chatId)
+          .maybeSingle();
+      final cleared = row == null
+          ? null
+          : DateTime.tryParse((row['cleared_at'] ?? '').toString());
+      _clearedAtByChat[chatId] = cleared;
+      return cleared;
+    } catch (_) {
+      _clearedAtByChat[chatId] = null;
+      return null;
+    }
+  }
+
+  static void invalidateClearedAt(String chatId) {
+    _clearedAtByChat.remove(chatId);
+  }
+
   // 2) Загрузить сообщения (и подтянуть вложения)
-  static Future<List<Message>> loadMessages(
-      {required String chatId, int limit = 50, DateTime? since}) async {
+  static Future<List<Message>> loadMessages({
+    required String chatId,
+    int limit = 50,
+    DateTime? since,
+    DateTime? clearedAt,
+  }) async {
+    final clearFloor = clearedAt ?? await loadClearedAt(chatId);
+    ChatMessageMemoryCache.pruneAtOrBefore(chatId, clearFloor);
+
     var query = _sb.from('messages').select('*').eq('chat_id', chatId);
 
     final sinceAt = since ?? DateTime.fromMillisecondsSinceEpoch(0);
-    query = query.gte('created_at', sinceAt.toUtc().toIso8601String());
+    // cleared_at: only messages with created_at > cleared_at.
+    if (clearFloor != null && !sinceAt.isAfter(clearFloor)) {
+      query = query.gt('created_at', clearFloor.toUtc().toIso8601String());
+    } else {
+      query = query.gte('created_at', sinceAt.toUtc().toIso8601String());
+    }
 
     // Последние N сообщений (DESC), затем ASC для UI.
     final rows = await query.order('created_at', ascending: false).limit(limit);
@@ -41,7 +88,9 @@ class DmApi {
     for (final row in (rows as List).reversed) {
       final data = Map<String, dynamic>.from(row as Map);
       await _hydrateAuthor(data);
-      msgs.add(_messageFromRow(data, chatId: chatId));
+      final message = _messageFromRow(data, chatId: chatId);
+      if (clearFloor != null && !message.at.isAfter(clearFloor)) continue;
+      msgs.add(message);
     }
 
     final ids = msgs.map((m) => m.id).toList();
@@ -181,13 +230,17 @@ class DmApi {
     int limit = 50,
   }) async {
     try {
-      final rows = await _sb
+      final clearedAt = await loadClearedAt(chatId);
+      var query = _sb
           .from('messages')
           .select('*')
           .eq('chat_id', chatId)
-          .lte('created_at', before.at.toUtc().toIso8601String())
-          .order('created_at', ascending: false)
-          .limit(limit + 1);
+          .lte('created_at', before.at.toUtc().toIso8601String());
+      if (clearedAt != null) {
+        query = query.gt('created_at', clearedAt.toUtc().toIso8601String());
+      }
+      final rows =
+          await query.order('created_at', ascending: false).limit(limit + 1);
 
       final older = <Message>[];
       for (final row in rows as List) {
@@ -196,8 +249,10 @@ class DmApi {
         if (id.isEmpty || id == before.id) continue;
 
         await _hydrateAuthor(data);
+        final message = _messageFromRow(data, chatId: chatId);
+        if (clearedAt != null && !message.at.isAfter(clearedAt)) continue;
         final files = await _loadFilesByMessage([id]);
-        older.add(_messageFromRow(data, chatId: chatId).copyWith(
+        older.add(message.copyWith(
           attachments: files[id] ?? const [],
         ));
       }
@@ -205,6 +260,7 @@ class DmApi {
       older.sort((a, b) => a.at.compareTo(b.at));
       final page = older.take(limit).toList();
       ChatMessageMemoryCache.merge(chatId, page);
+      ChatMessageMemoryCache.pruneAtOrBefore(chatId, clearedAt);
 
       final current = _streamMessages[chatId];
       final ctrl = _streamControllers[chatId];
@@ -213,9 +269,12 @@ class DmApi {
         final unique = page.where((m) => existingIds.add(m.id)).toList();
         if (unique.isNotEmpty) {
           current.insertAll(0, unique);
+          ChatMessageMemoryCache.merge(chatId, current);
+          final visible =
+              ChatMessageMemoryCache.pruneAtOrBefore(chatId, clearedAt);
           current
             ..clear()
-            ..addAll(ChatMessageMemoryCache.merge(chatId, current));
+            ..addAll(visible);
           if (!ctrl.isClosed) ctrl.add(List<Message>.unmodifiable(current));
         }
         return unique;
@@ -269,19 +328,24 @@ class DmApi {
 
     Future<void> emitInitial() async {
       try {
-        final cached = ChatMessageMemoryCache.snapshot(chatId);
-        if (cached.isNotEmpty) {
+        invalidateClearedAt(chatId);
+        final clearedAt = await loadClearedAt(chatId);
+        final prunedCache =
+            ChatMessageMemoryCache.pruneAtOrBefore(chatId, clearedAt);
+        if (prunedCache.isNotEmpty) {
           current
             ..clear()
-            ..addAll(cached);
+            ..addAll(prunedCache);
           if (!ctrl.isClosed) ctrl.add(List<Message>.unmodifiable(current));
         }
 
-        final list = await loadMessages(chatId: chatId);
-        final merged = ChatMessageMemoryCache.merge(chatId, list);
+        final list = await loadMessages(chatId: chatId, clearedAt: clearedAt);
+        ChatMessageMemoryCache.merge(chatId, list);
+        final visible =
+            ChatMessageMemoryCache.pruneAtOrBefore(chatId, clearedAt);
         current
           ..clear()
-          ..addAll(merged);
+          ..addAll(visible);
         if (!ctrl.isClosed) ctrl.add(List<Message>.unmodifiable(current));
       } catch (_) {}
     }
@@ -289,12 +353,15 @@ class DmApi {
     Future<void> insertOne(PostgresChangePayload payload) async {
       final id = idFromPayload(payload);
       if (id.isEmpty || current.any((m) => m.id == id)) return;
+      final clearedAt = await loadClearedAt(chatId);
       final message = await loadMessageById(chatId: chatId, messageId: id);
       if (message == null) return;
-      final merged = ChatMessageMemoryCache.reconcileUpsert(chatId, message);
+      if (clearedAt != null && !message.at.isAfter(clearedAt)) return;
+      ChatMessageMemoryCache.reconcileUpsert(chatId, message);
+      final visible = ChatMessageMemoryCache.pruneAtOrBefore(chatId, clearedAt);
       current
         ..clear()
-        ..addAll(merged);
+        ..addAll(visible);
       if (!ctrl.isClosed) ctrl.add(List<Message>.unmodifiable(current));
     }
 

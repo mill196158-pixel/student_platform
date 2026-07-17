@@ -69,7 +69,14 @@ class _ClipboardFilePayload {
 
 class ChatTab extends StatefulWidget {
   final ValueChanged<bool>? onSelectingChanged;
-  const ChatTab({super.key, this.onSelectingChanged});
+
+  /// Completed-semester academic chat: view history/files only.
+  final bool readOnly;
+  const ChatTab({
+    super.key,
+    this.onSelectingChanged,
+    this.readOnly = false,
+  });
   @override
   State<ChatTab> createState() => _ChatTabState();
 }
@@ -1493,8 +1500,49 @@ class _ChatTabState extends State<ChatTab> {
 
           // initialScrollOffset уже сдвигает в конец, доп.скролл не нужен
 
+          final readOnly = widget.readOnly;
+
           return Column(
             children: [
+              if (readOnly)
+                Material(
+                  color: Theme.of(context)
+                      .colorScheme
+                      .surfaceContainerHighest
+                      .withValues(alpha: 0.72),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 8,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.lock_outline_rounded,
+                          size: 16,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withValues(alpha: 0.62),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Семестр завершён. Чат доступен только для просмотра',
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurface
+                                          .withValues(alpha: 0.72),
+                                    ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               if (_search.isActive)
                 InlineSearchBar(
                   controller: _search,
@@ -1507,13 +1555,15 @@ class _ChatTabState extends State<ChatTab> {
                   pins: pins,
                   controller: _pinsCtl,
                   onOpen: _onOpen,
-                  onUnpin: (p) async {
-                    if (p.type == PinType.message && p.refId != null) {
-                      await context
-                          .read<TeamCubit>()
-                          .pinMessage(p.refId!, false);
-                    }
-                  },
+                  onUnpin: readOnly
+                      ? null
+                      : (p) async {
+                          if (p.type == PinType.message && p.refId != null) {
+                            await context
+                                .read<TeamCubit>()
+                                .pinMessage(p.refId!, false);
+                          }
+                        },
                 ),
 
               Expanded(
@@ -1552,24 +1602,33 @@ class _ChatTabState extends State<ChatTab> {
                           onRevealBlockedMessage: (id) {
                             setState(() => _revealedBlockedMessageIds.add(id));
                           },
-                          onReply: (m) {
-                            setState(() => _replyTo = m);
-                          },
-                          onLongPress:
-                              (ctx, m, rect, bytes, replyPreview, fallback) =>
+                          onReply: readOnly
+                              ? (_) {}
+                              : (m) {
+                                  setState(() => _replyTo = m);
+                                },
+                          onLongPress: readOnly
+                              ? (_, __, ___, ____, _____, ______) {}
+                              : (ctx, m, rect, bytes, replyPreview, fallback) =>
                                   _showMessageActions(ctx, m,
                                       targetRect: rect,
                                       bubbleBytes: bytes,
                                       replyPreview: replyPreview,
                                       fallbackPosition: fallback),
                           onReplyTap: (id) => _scrollToMessage(id),
-                          onReact: (ctx, id) =>
-                              ca.ChatActions.showReactionPicker(
-                                  ctx, (emoji) => _addReaction(id, emoji)),
-                          onReactionSelected: _addReaction,
-                          canDeleteMessage: _canDeleteMessage,
-                          canEditMessage: _canEditMessage,
-                          onMenuAction: _handlePackageMenuAction,
+                          onReact: readOnly
+                              ? (_, __) {}
+                              : (ctx, id) => ca.ChatActions.showReactionPicker(
+                                    ctx,
+                                    (emoji) => _addReaction(id, emoji),
+                                  ),
+                          onReactionSelected: readOnly ? null : _addReaction,
+                          canDeleteMessage:
+                              readOnly ? (_) => false : _canDeleteMessage,
+                          canEditMessage:
+                              readOnly ? (_) => false : _canEditMessage,
+                          onMenuAction:
+                              readOnly ? null : _handlePackageMenuAction,
                           onRetryFailedText: (m) => context
                               .read<TeamCubit>()
                               .retryFailedTextMessage(m),
@@ -1697,7 +1756,7 @@ class _ChatTabState extends State<ChatTab> {
                     : const SizedBox.shrink(),
               ),
 
-              if (!_selectingMessages)
+              if (!_selectingMessages && !readOnly)
                 ChatComposerBar(
                   controller: _ctrl,
                   focusNode: _composerFocus,

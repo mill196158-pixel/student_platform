@@ -61,6 +61,23 @@ class ChatMessageMemoryCache {
     return List<Message>.unmodifiable(next);
   }
 
+  /// Drop messages at/before personal clear boundary (hide/clear for me).
+  static List<Message> pruneAtOrBefore(String chatId, DateTime? clearedAt) {
+    if (clearedAt == null) {
+      return snapshot(chatId);
+    }
+    final current = _messagesByChatId[chatId];
+    if (current == null || current.isEmpty) return const <Message>[];
+
+    final next = current.where((m) => m.at.isAfter(clearedAt)).toList();
+    _messagesByChatId[chatId] = next;
+    return List<Message>.unmodifiable(next);
+  }
+
+  static void clearChat(String chatId) {
+    _messagesByChatId.remove(chatId);
+  }
+
   static List<Message> _dedupeAndSort(Iterable<Message> messages) {
     final byId = <String, Message>{};
     for (final message in messages) {

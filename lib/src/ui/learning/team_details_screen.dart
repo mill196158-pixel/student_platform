@@ -18,8 +18,15 @@ import 'tabs/assignments/view_mode.dart';
 class TeamDetailsScreen extends StatelessWidget {
   final Team team;
   final int initialTabIndex;
-  const TeamDetailsScreen(
-      {super.key, required this.team, this.initialTabIndex = 1});
+
+  /// Completed-semester academic chats: history/files readable, no composer.
+  final bool readOnly;
+  const TeamDetailsScreen({
+    super.key,
+    required this.team,
+    this.initialTabIndex = 1,
+    this.readOnly = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -29,14 +36,19 @@ class TeamDetailsScreen extends StatelessWidget {
         c.init();
         return c;
       },
-      child: _Body(initialTabIndex: initialTabIndex),
+      child: _Body(initialTabIndex: initialTabIndex, readOnly: readOnly),
     );
   }
 }
 
 class _Body extends StatefulWidget {
   final int initialTabIndex;
-  const _Body({super.key, this.initialTabIndex = 1});
+  final bool readOnly;
+  const _Body({
+    super.key,
+    this.initialTabIndex = 1,
+    this.readOnly = false,
+  });
 
   @override
   State<_Body> createState() => _BodyState();
@@ -94,7 +106,8 @@ class _BodyState extends State<_Body> with SingleTickerProviderStateMixin {
                       height: _kHeaderHeight,
                       child: _TeamHeader(
                         team: team,
-                        leading: const _RoundBackButton(), // назад слева в шапке
+                        leading:
+                            const _RoundBackButton(), // назад слева в шапке
                         trailing: showAssignmentsActions
                             ? const AssignmentsViewModeButton()
                             : null,
@@ -172,8 +185,9 @@ class _BodyState extends State<_Body> with SingleTickerProviderStateMixin {
                   AssignmentsTab(team: team),
                   // Чат сообщает о режиме выделения, шапка исчезает — логика сохранена
                   ChatTab(
-                      onSelectingChanged: (v) =>
-                          setState(() => _selecting = v)),
+                    onSelectingChanged: (v) => setState(() => _selecting = v),
+                    readOnly: widget.readOnly,
+                  ),
                   const FilesTab(), // без отступов сверху — прижато к табам
                 ],
               ),

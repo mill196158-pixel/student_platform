@@ -10,11 +10,13 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:student_platform/src/ui/learning/data/supabase_learning_repository.dart';
 import 'package:student_platform/src/ui/learning/models/team.dart';
 import 'package:student_platform/src/ui/learning/team_details_screen.dart';
+import 'package:student_platform/src/ui/chats/archive_screen.dart';
 import 'package:student_platform/src/ui/chats/direct_chat_screen.dart';
 import 'package:student_platform/src/ui/chats/core/i_chat_service.dart'
     show ChatMode;
 import 'package:student_platform/src/ui/chats/forward/forward_picker.dart'
     show ForwardTarget;
+import 'package:student_platform/src/ui/chats/data/chat_archive_api.dart';
 import 'package:student_platform/src/ui/chats/data/dm_api.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/widgets.dart'; // ChatMessageList
 import 'package:student_platform/src/ui/learning/models/message.dart'; // модель сообщения
@@ -381,6 +383,72 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     }
   }
 
+  Future<void> _archivePersonalChat(_ChatSummary c) async {
+    final chatId = c.chatId;
+    if (chatId == null || chatId.isEmpty || !c.isDm) return;
+    try {
+      await ChatArchiveApi.setPersonalChatArchived(
+        chatId: chatId,
+        archived: true,
+      );
+      if (!mounted) return;
+      _safeSetState(() {
+        _all.removeWhere((e) => e.chatId == chatId);
+        _applyFilter();
+      });
+      await _saveCache(_all);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось отправить в архив')),
+      );
+    }
+  }
+
+  Future<void> _hidePersonalChat(_ChatSummary c) async {
+    final chatId = c.chatId;
+    if (chatId == null || chatId.isEmpty || !c.isDm) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Удалить переписку у себя?'),
+        content: const Text(
+          'Переписка исчезнет только у вас. Если собеседник напишет снова, диалог появится в сообщениях.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Отмена'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await ChatArchiveApi.hidePersonalChatForMe(chatId: chatId);
+      if (!mounted) return;
+      _safeSetState(() {
+        _all.removeWhere((e) => e.chatId == chatId);
+        _applyFilter();
+      });
+      await _saveCache(_all);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось удалить переписку')),
+      );
+    }
+  }
+
   void _scheduleSummariesReload() {
     _reloadDebounce?.cancel();
     _reloadDebounce = Timer(_reloadDebounceEvery, () {
@@ -635,7 +703,39 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
-        title: const Text('Чаты'),
+        title: const Text('Сообщения'),
+        actions: [
+          PopupMenuButton<String>(
+            tooltip: 'Ещё',
+            padding: EdgeInsets.zero,
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) {
+              if (value == 'archive') {
+                unawaited(
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => BlocProvider.value(
+                        value: context.read<TeamCubit>(),
+                        child: const ArchiveScreen(),
+                      ),
+                    ),
+                  ),
+                );
+              }
+            },
+            itemBuilder: (ctx) => const [
+              PopupMenuItem<String>(
+                value: 'archive',
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.archive_outlined),
+                  title: Text('Архив'),
+                  dense: true,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -870,7 +970,8 @@ class _MyChatsScreenState extends State<MyChatsScreen>
               final sideGap = (maxW - previewW) / 2.0;
               final topOffset = safeTop + sideGap;
 
-              const double kMenuEst = _peekMenuItemHeight * 4;
+              final menuItems = c.isDm ? 6 : 4;
+              final double kMenuEst = _peekMenuItemHeight * menuItems;
               const double kGapPreviewToMenu = 10.0;
 
               // итог: оставляем место под меню + нижнюю безопасную зону
@@ -923,6 +1024,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
                       pinned: c.pinned,
                       muted: c.muted,
                       hasUnread: c.unread > 0,
+                      isDm: c.isDm,
                       onOpen: () => _openChat(c),
                       onTogglePin: () {
                         _togglePinChat(c);
@@ -933,6 +1035,18 @@ class _MyChatsScreenState extends State<MyChatsScreen>
                         Navigator.of(context).pop();
                       },
                       onMarkRead: () => _markChatRead(c),
+                      onArchive: c.isDm
+                          ? () {
+                              Navigator.of(context).pop();
+                              unawaited(_archivePersonalChat(c));
+                            }
+                          : null,
+                      onHideForMe: c.isDm
+                          ? () {
+                              Navigator.of(context).pop();
+                              unawaited(_hidePersonalChat(c));
+                            }
+                          : null,
                     ),
                   ),
                 ],
@@ -1694,19 +1808,25 @@ class _PeekContextMenu extends StatefulWidget {
   final bool pinned;
   final bool muted;
   final bool hasUnread;
+  final bool isDm;
   final VoidCallback onOpen;
   final VoidCallback onTogglePin;
   final VoidCallback onToggleMute;
   final VoidCallback onMarkRead;
+  final VoidCallback? onArchive;
+  final VoidCallback? onHideForMe;
 
   const _PeekContextMenu({
     required this.pinned,
     required this.muted,
     required this.hasUnread,
+    this.isDm = false,
     required this.onOpen,
     required this.onTogglePin,
     required this.onToggleMute,
     required this.onMarkRead,
+    this.onArchive,
+    this.onHideForMe,
   });
 
   @override
@@ -1718,29 +1838,50 @@ class _PeekContextMenuState extends State<_PeekContextMenu> {
   int? _selectedIndex;
   bool _pointerActive = false;
 
-  List<_PeekMenuAction> get _actions => [
+  List<_PeekMenuAction> get _actions {
+    final items = <_PeekMenuAction>[
+      _PeekMenuAction(
+        icon: Icons.open_in_new_rounded,
+        label: 'Открыть чат',
+        onTap: widget.onOpen,
+      ),
+      _PeekMenuAction(
+        icon: widget.pinned ? Icons.push_pin : Icons.push_pin_outlined,
+        label: widget.pinned ? 'Открепить' : 'Закрепить',
+        onTap: widget.onTogglePin,
+      ),
+      _PeekMenuAction(
+        icon: widget.muted ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+        label: widget.muted ? 'Со звуком' : 'Без звука',
+        onTap: widget.onToggleMute,
+      ),
+      _PeekMenuAction(
+        icon: Icons.mark_chat_read_outlined,
+        label: widget.hasUnread ? 'Прочитано' : 'Обновить прочитано',
+        onTap: widget.onMarkRead,
+      ),
+    ];
+    if (widget.isDm && widget.onArchive != null) {
+      items.add(
         _PeekMenuAction(
-          icon: Icons.open_in_new_rounded,
-          label: 'Открыть чат',
-          onTap: widget.onOpen,
+          icon: Icons.archive_outlined,
+          label: 'В архив',
+          onTap: widget.onArchive!,
         ),
+      );
+    }
+    if (widget.isDm && widget.onHideForMe != null) {
+      items.add(
         _PeekMenuAction(
-          icon: widget.pinned ? Icons.push_pin : Icons.push_pin_outlined,
-          label: widget.pinned ? 'Открепить' : 'Закрепить',
-          onTap: widget.onTogglePin,
+          icon: Icons.delete_outline,
+          label: 'Удалить у себя',
+          onTap: widget.onHideForMe!,
+          danger: true,
         ),
-        _PeekMenuAction(
-          icon:
-              widget.muted ? Icons.volume_up_rounded : Icons.volume_off_rounded,
-          label: widget.muted ? 'Со звуком' : 'Без звука',
-          onTap: widget.onToggleMute,
-        ),
-        _PeekMenuAction(
-          icon: Icons.mark_chat_read_outlined,
-          label: widget.hasUnread ? 'Прочитано' : 'Обновить прочитано',
-          onTap: widget.onMarkRead,
-        ),
-      ];
+      );
+    }
+    return items;
+  }
 
   @override
   void initState() {
@@ -1753,7 +1894,8 @@ class _PeekContextMenuState extends State<_PeekContextMenu> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.pinned != widget.pinned ||
         oldWidget.muted != widget.muted ||
-        oldWidget.hasUnread != widget.hasUnread) {
+        oldWidget.hasUnread != widget.hasUnread ||
+        oldWidget.isDm != widget.isDm) {
       _itemKeys = List.generate(_actions.length, (_) => GlobalKey());
       _selectedIndex = null;
     }
