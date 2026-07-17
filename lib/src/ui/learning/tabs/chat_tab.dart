@@ -34,6 +34,7 @@ import 'chat/assignments/assignment_form_dialog.dart';
 import 'chat/assignments/edit_assignment_dialog.dart';
 import 'chat/selection_bars.dart';
 import '../../chats/core/forward_payload.dart';
+import '../../chats/data/blocks_api.dart';
 import '../../chats/forward/forward_outbox.dart';
 import '../../chats/forward/forward_picker.dart';
 import '../../chats/forward/forward_pick_nav.dart';
@@ -151,6 +152,9 @@ class _ChatTabState extends State<ChatTab> {
   // Selection of messages
   bool _selectingMessages = false;
   final Set<String> _selectedMessageIds = {};
+  // Authors I blocked — one RPC per screen open (no N+1).
+  Set<String> _blockedUserIds = <String>{};
+  final Set<String> _revealedBlockedMessageIds = <String>{};
   bool _loadingOlderMessages = false;
   bool _hasMoreOlderMessages = true;
   // флаг и чип превью «пакет сообщений» в композере
@@ -348,6 +352,16 @@ class _ChatTabState extends State<ChatTab> {
     } catch (_) {}
   }
 
+  Future<void> _loadBlockedUserIds() async {
+    try {
+      final ids = await BlocksApi.getMyBlockedUserIds();
+      if (!mounted) return;
+      setState(() => _blockedUserIds = ids);
+    } catch (e) {
+      debugPrint('[ChatTab] getMyBlockedUserIds error: $e');
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -395,6 +409,10 @@ class _ChatTabState extends State<ChatTab> {
 
     // Загружаем файлы для старых сообщений
     _loadOldFiles();
+
+    // One blocked-authors snapshot for this group/team screen.
+    // ignore: discarded_futures
+    _loadBlockedUserIds();
 
     // Показываем статистику кэша
     _globalCache.showCacheStats();
@@ -1529,6 +1547,11 @@ class _ChatTabState extends State<ChatTab> {
                           showEntryNewBadge: _showEntryNewBadge,
                           hoveredMessageId: _actionsHoverId,
                           initialLoading: state.loading && state.chat.isEmpty,
+                          blockedUserIds: _blockedUserIds,
+                          revealedBlockedMessageIds: _revealedBlockedMessageIds,
+                          onRevealBlockedMessage: (id) {
+                            setState(() => _revealedBlockedMessageIds.add(id));
+                          },
                           onReply: (m) {
                             setState(() => _replyTo = m);
                           },

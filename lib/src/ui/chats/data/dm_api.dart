@@ -7,6 +7,7 @@ import 'package:student_platform/src/ui/learning/models/chat_file.dart';
 import 'package:student_platform/src/ui/learning/models/local_attach.dart';
 import 'package:student_platform/src/utils/safe_debug_log.dart';
 import '../core/chat_message_memory_cache.dart';
+import 'blocks_api.dart';
 
 class DmApi {
   static final SupabaseClient _sb = Supabase.instance.client;
@@ -409,7 +410,8 @@ class DmApi {
           return id;
         }
       }
-    } catch (_) {
+    } catch (e) {
+      if (BlocksApi.isDmBlockedError(e)) rethrow;
       // fallback below
     }
 

@@ -36,6 +36,7 @@ import '../forward/forward_pick_nav.dart';
 import 'forward_payload.dart';
 import '../forward/forward_outbox.dart';
 import '../data/dm_api.dart';
+import '../data/blocks_api.dart';
 
 import 'i_chat_service.dart';
 import 'dm_chat_service.dart';
@@ -134,6 +135,15 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   bool get _isUploadingAttachments => _att.hasActiveUploads;
   bool get _hasFailedAttachments => _att.hasFailedUploads;
 
+  // DM block relationship (one RPC on open; no realtime on user_blocks)
+  bool _dmBlockLoaded = false;
+  bool _iBlockedPeer = false;
+  bool _dmAvailable = true;
+  bool _blockActionBusy = false;
+
+  bool get _canComposeDm =>
+      !_isDm || (_dmBlockLoaded && _dmAvailable && !_blockActionBusy);
+
   // якорь для «⋯»
   final GlobalKey _kebabKey = GlobalKey();
 
@@ -168,7 +178,24 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final cid = await widget.service.ensureChatId();
+      if (_isDm) {
+        await _loadDmBlockRelationship();
+      }
+      String cid;
+      try {
+        cid = await widget.service.ensureChatId();
+      } catch (e) {
+        if (_isDm && BlocksApi.isDmBlockedError(e)) {
+          if (!mounted) return;
+          setState(() {
+            _dmAvailable = false;
+            _dmBlockLoaded = true;
+          });
+          _showDmBlockedSnack();
+          return;
+        }
+        rethrow;
+      }
       _currentChatIdDm = cid;
       _restoreDraftDm();
       await _initEntryBoundary();
@@ -193,6 +220,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       if (call.method == 'onKeyboardImagePicked' || call.method == 'onPicked') {
         final path = (call.arguments ?? '') as String;
         if (path.isNotEmpty && mounted) {
+          if (!_canComposeDm) return null;
           final file = LocalAttach(
             path: path,
             name: path.split('/').last,
@@ -241,6 +269,84 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     final s = widget.service;
     if (s is DmChatService) return s.peerId;
     return null;
+  }
+
+  Future<void> _loadDmBlockRelationship() async {
+    final peerId = _dmPeerId;
+    if (!_isDm || peerId == null || peerId.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _dmBlockLoaded = true;
+          _dmAvailable = true;
+          _iBlockedPeer = false;
+        });
+      }
+      return;
+    }
+    try {
+      final rel = await BlocksApi.getBlockRelationship(peerId);
+      if (!mounted) return;
+      setState(() {
+        _iBlockedPeer = rel.iBlocked;
+        _dmAvailable = rel.dmAvailable;
+        _dmBlockLoaded = true;
+      });
+    } catch (e) {
+      debugPrint('[UnifiedChat] get_block_relationship error: $e');
+      if (!mounted) return;
+      setState(() {
+        // Fail-open for reading; send path still has server checks.
+        _dmBlockLoaded = true;
+        _dmAvailable = true;
+        _iBlockedPeer = false;
+      });
+    }
+  }
+
+  void _showDmBlockedSnack() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Личные сообщения недоступны')),
+    );
+  }
+
+  Future<void> _unblockPeerFromDm() async {
+    final peerId = _dmPeerId;
+    if (!_isDm || peerId == null || peerId.isEmpty || _blockActionBusy) return;
+    setState(() => _blockActionBusy = true);
+    try {
+      await BlocksApi.unblockUser(peerId);
+      if (!mounted) return;
+      setState(() {
+        _iBlockedPeer = false;
+        _dmAvailable = true;
+        _dmBlockLoaded = true;
+      });
+    } catch (e) {
+      debugPrint('[UnifiedChat] unblock error: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            BlocksApi.shortErrorMessage(e,
+                fallback: 'Не удалось разблокировать'),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _blockActionBusy = false);
+    }
+  }
+
+  Future<void> _applyDmBlockedFromServer() async {
+    await _loadDmBlockRelationship();
+    if (!mounted) return;
+    if (!_dmAvailable) {
+      _att.clear();
+      _ctrl.clear();
+      setState(() => _replyTo = null);
+      _showDmBlockedSnack();
+    }
   }
 
   Future<void> _initDmPeerReadReceipts(String chatId) async {
@@ -813,6 +919,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   // ---------- Отправка ----------
   Future<void> _send(String text) async {
     if (_isUploadingAttachments || _hasFailedAttachments || _isSending) return;
+    if (!_canComposeDm) return;
 
     _isSending = true;
     setState(() {});
@@ -994,6 +1101,12 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       setState(() => _replyTo = null);
       FocusScope.of(context).unfocus();
       await _clearDraftDm();
+    } catch (e) {
+      if (_isDm && BlocksApi.isDmBlockedError(e)) {
+        await _applyDmBlockedFromServer();
+        return;
+      }
+      rethrow;
     } finally {
       _isSending = false;
       if (mounted) setState(() {});
@@ -1375,224 +1488,239 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
               if (!_selecting)
                 // ⚠️ ЛС и группы используют разные композеры
-                (isDm)
-                    ? DmComposerBar(
-                        controller: _ctrl,
-                        focusNode: _composerFocus,
-                        replyTo: _replyTo,
-                        onCloseReply: () => setState(() => _replyTo = null),
-                        // DM: typing UI is intentionally hidden until the feature is ready.
-                        someoneTyping: false,
-                        typingNames: const [],
-                        attachedFiles: _att.pending
-                            .map((f) => AttachedFile(
-                                  localId: f.localId,
-                                  path: f.path,
-                                  name: f.name,
-                                  isImage: f.isImage,
-                                  size: f.size,
-                                  uploadStatus: f.uploadStatus,
-                                  progress: f.progress,
-                                  errorMessage: f.errorMessage,
-                                  uploadedFileId: f.uploadedFileId,
-                                ))
-                            .toList(),
-                        isUploading: _isUploadingAttachments,
-                        hasFailedUploads: _hasFailedAttachments,
-                        isSending: _isSending,
-                        onAddFile: (ui) {
-                          _att.add(LocalAttach(
-                            path: ui.path,
-                            name: ui.name,
-                            mimeType: ui.isImage
-                                ? 'image/jpeg'
-                                : 'application/octet-stream',
-                            size: ui.size,
-                            isImage: ui.isImage,
-                          ));
-                          _saveDraftDmDebounced();
-                        },
-                        onRemoveFile: (ui) {
-                          if (ui.path == '__FG__') {
-                            setState(() {
-                              _forwardPackageAttached = false;
-                              _stagedForward = null;
-                              _forwardSelectedIds.clear();
-                              _stagedForwardFileIds.clear();
-                              _att.pending
-                                  .removeWhere((x) => x.path == '__FG__');
-                            });
-                          } else {
-                            final local = _att.pending
-                                .firstWhere((f) => f.localId == ui.localId);
-                            if (local.canCancel) {
-                              _att.cancel(local);
-                            } else {
-                              _att.remove(local);
-                            }
-                          }
-                          _saveDraftDmDebounced();
-                        },
-                        onRetryFile: (ui) async {
-                          final local = _att.pending
-                              .firstWhere((f) => f.localId == ui.localId);
-                          final cid = await widget.service.ensureChatId();
-                          await _att.retry(local, teamId: null, chatId: cid);
-                          _saveDraftDmDebounced();
-                        },
-                        onSend: () => _send(_ctrl.text),
-                        onPickImage: () async {
-                          final res = await ImagePicker()
-                              .pickImage(source: ImageSource.gallery);
-                          if (res != null) {
-                            final file = LocalAttach(
-                              path: res.path,
-                              name: res.path.split('/').last,
-                              mimeType: 'image/jpeg',
-                              size: await File(res.path).length(),
-                              isImage: true,
-                            );
-                            _att.add(file);
-                            final cid = await widget.service.ensureChatId();
-                            _att.upload(file, teamId: null, chatId: cid);
-                            _saveDraftDmDebounced();
-                          }
-                        },
-                        onOpenEmoji: () {
-                          _composerFocus.requestFocus();
-                          services.SystemChannels.textInput
-                              .invokeMethod('TextInput.show');
-                        },
-                        onAttachFile: () async {
-                          final file = await _fileService.pickFile();
-                          if (file != null) {
-                            final attached = LocalAttach(
-                              path: file.path,
-                              name: file.path.split('/').last,
-                              mimeType: 'application/octet-stream',
-                              size: await file.length(),
-                              isImage: false,
-                            );
-                            _att.add(attached);
-                            final cid = await widget.service.ensureChatId();
-                            _att.upload(attached, teamId: null, chatId: cid);
-                            _saveDraftDmDebounced();
-                          }
-                        },
-                        onPinText: (text) => _pinsCtl.pinText(text),
+                (isDm && _dmBlockLoaded && !_dmAvailable)
+                    ? _DmBlockedComposerBar(
+                        iBlocked: _iBlockedPeer,
+                        busy: _blockActionBusy,
+                        onUnblock: _iBlockedPeer ? _unblockPeerFromDm : null,
                       )
-                    : ChatComposerBar(
-                        controller: _ctrl,
-                        focusNode: _composerFocus,
-                        replyTo: _replyTo,
-                        onCloseReply: () => setState(() => _replyTo = null),
-                        someoneTyping: _someoneTyping,
-                        typingNames: _visibleTypingUsers,
-                        attachedFiles: _att.pending
-                            .map((f) => AttachedFile(
-                                  localId: f.localId,
-                                  path: f.path,
-                                  name: f.name,
-                                  isImage: f.isImage,
-                                  size: f.size,
-                                  uploadStatus: f.uploadStatus,
-                                  progress: f.progress,
-                                  errorMessage: f.errorMessage,
-                                  uploadedFileId: f.uploadedFileId,
-                                ))
-                            .toList(),
-                        isUploading: _isUploadingAttachments,
-                        hasFailedUploads: _hasFailedAttachments,
-                        isSending: _isSending,
-                        onAddFile: (ui) {
-                          _att.add(LocalAttach(
-                            path: ui.path,
-                            name: ui.name,
-                            mimeType: ui.isImage
-                                ? 'image/jpeg'
-                                : 'application/octet-stream',
-                            size: ui.size,
-                            isImage: ui.isImage,
-                          ));
-                        },
-                        onRemoveFile: (ui) {
-                          if (ui.path == '__FG__') {
-                            setState(() {
-                              _forwardPackageAttached = false;
-                              _stagedForward = null;
-                              _forwardSelectedIds.clear();
-                              _stagedForwardFileIds.clear();
-                              _att.pending
-                                  .removeWhere((x) => x.path == '__FG__');
-                            });
-                          } else {
-                            final local = _att.pending
-                                .firstWhere((f) => f.localId == ui.localId);
-                            if (local.canCancel) {
-                              _att.cancel(local);
-                            } else {
-                              _att.remove(local);
-                            }
-                          }
-                        },
-                        onRetryFile: (ui) async {
-                          final local = _att.pending
-                              .firstWhere((f) => f.localId == ui.localId);
-                          final cid = await widget.service.ensureChatId();
-                          await _att.retry(local, teamId: null, chatId: cid);
-                        },
-                        onSend: () => _send(_ctrl.text),
-                        onPickImage: () async {
-                          final res = await ImagePicker()
-                              .pickImage(source: ImageSource.gallery);
-                          if (res != null) {
-                            final file = LocalAttach(
-                              path: res.path,
-                              name: res.path.split('/').last,
-                              mimeType: 'image/jpeg',
-                              size: await File(res.path).length(),
-                              isImage: true,
-                            );
-                            _att.add(file);
-                            final cid = await widget.service.ensureChatId();
-                            _att.upload(file, teamId: null, chatId: cid);
-                          }
-                        },
-                        onOpenEmoji: () => _composerFocus.requestFocus(),
-                        onAttachFile: () async {
-                          final file = await _fileService.pickFile();
-                          if (file != null) {
-                            final attached = LocalAttach(
-                              path: file.path,
-                              name: file.path.split('/').last,
-                              mimeType: 'application/octet-stream',
-                              size: await file.length(),
-                              isImage: false,
-                            );
-                            _att.add(attached);
-                            final cid = await widget.service.ensureChatId();
-                            _att.upload(attached, teamId: null, chatId: cid);
-                          }
-                        },
-                        onPinText: (text) => _pinsCtl.pinText(text),
-                        onFind: () async {
-                          FocusScope.of(context).unfocus();
-                          _search.setActive(true);
-                          setState(() {}); // на всякий случай перерисовка
-                        },
-                        showProposeInPlus: canProposeAssignments,
-                        onPropose:
-                            (title, description, link, due, attachments) async {
-                          if (!canProposeAssignments) return;
-                          await context.read<TeamCubit>().proposeAssignment(
-                                title: title,
-                                description: description,
-                                link: link,
-                                due: due,
-                                attachments: attachments,
-                              );
-                        },
-                      ),
+                    : (isDm)
+                        ? DmComposerBar(
+                            controller: _ctrl,
+                            focusNode: _composerFocus,
+                            replyTo: _replyTo,
+                            onCloseReply: () => setState(() => _replyTo = null),
+                            // DM: typing UI is intentionally hidden until the feature is ready.
+                            someoneTyping: false,
+                            typingNames: const [],
+                            attachedFiles: _att.pending
+                                .map((f) => AttachedFile(
+                                      localId: f.localId,
+                                      path: f.path,
+                                      name: f.name,
+                                      isImage: f.isImage,
+                                      size: f.size,
+                                      uploadStatus: f.uploadStatus,
+                                      progress: f.progress,
+                                      errorMessage: f.errorMessage,
+                                      uploadedFileId: f.uploadedFileId,
+                                    ))
+                                .toList(),
+                            isUploading: _isUploadingAttachments,
+                            hasFailedUploads: _hasFailedAttachments,
+                            isSending: _isSending,
+                            onAddFile: (ui) {
+                              if (!_canComposeDm) return;
+                              _att.add(LocalAttach(
+                                path: ui.path,
+                                name: ui.name,
+                                mimeType: ui.isImage
+                                    ? 'image/jpeg'
+                                    : 'application/octet-stream',
+                                size: ui.size,
+                                isImage: ui.isImage,
+                              ));
+                              _saveDraftDmDebounced();
+                            },
+                            onRemoveFile: (ui) {
+                              if (ui.path == '__FG__') {
+                                setState(() {
+                                  _forwardPackageAttached = false;
+                                  _stagedForward = null;
+                                  _forwardSelectedIds.clear();
+                                  _stagedForwardFileIds.clear();
+                                  _att.pending
+                                      .removeWhere((x) => x.path == '__FG__');
+                                });
+                              } else {
+                                final local = _att.pending
+                                    .firstWhere((f) => f.localId == ui.localId);
+                                if (local.canCancel) {
+                                  _att.cancel(local);
+                                } else {
+                                  _att.remove(local);
+                                }
+                              }
+                              _saveDraftDmDebounced();
+                            },
+                            onRetryFile: (ui) async {
+                              if (!_canComposeDm) return;
+                              final local = _att.pending
+                                  .firstWhere((f) => f.localId == ui.localId);
+                              final cid = await widget.service.ensureChatId();
+                              await _att.retry(local,
+                                  teamId: null, chatId: cid);
+                              _saveDraftDmDebounced();
+                            },
+                            onSend: () => _send(_ctrl.text),
+                            onPickImage: () async {
+                              if (!_canComposeDm) return;
+                              final res = await ImagePicker()
+                                  .pickImage(source: ImageSource.gallery);
+                              if (res != null) {
+                                final file = LocalAttach(
+                                  path: res.path,
+                                  name: res.path.split('/').last,
+                                  mimeType: 'image/jpeg',
+                                  size: await File(res.path).length(),
+                                  isImage: true,
+                                );
+                                _att.add(file);
+                                final cid = await widget.service.ensureChatId();
+                                _att.upload(file, teamId: null, chatId: cid);
+                                _saveDraftDmDebounced();
+                              }
+                            },
+                            onOpenEmoji: () {
+                              if (!_canComposeDm) return;
+                              _composerFocus.requestFocus();
+                              services.SystemChannels.textInput
+                                  .invokeMethod('TextInput.show');
+                            },
+                            onAttachFile: () async {
+                              if (!_canComposeDm) return;
+                              final file = await _fileService.pickFile();
+                              if (file != null) {
+                                final attached = LocalAttach(
+                                  path: file.path,
+                                  name: file.path.split('/').last,
+                                  mimeType: 'application/octet-stream',
+                                  size: await file.length(),
+                                  isImage: false,
+                                );
+                                _att.add(attached);
+                                final cid = await widget.service.ensureChatId();
+                                _att.upload(attached,
+                                    teamId: null, chatId: cid);
+                                _saveDraftDmDebounced();
+                              }
+                            },
+                            onPinText: (text) => _pinsCtl.pinText(text),
+                          )
+                        : ChatComposerBar(
+                            controller: _ctrl,
+                            focusNode: _composerFocus,
+                            replyTo: _replyTo,
+                            onCloseReply: () => setState(() => _replyTo = null),
+                            someoneTyping: _someoneTyping,
+                            typingNames: _visibleTypingUsers,
+                            attachedFiles: _att.pending
+                                .map((f) => AttachedFile(
+                                      localId: f.localId,
+                                      path: f.path,
+                                      name: f.name,
+                                      isImage: f.isImage,
+                                      size: f.size,
+                                      uploadStatus: f.uploadStatus,
+                                      progress: f.progress,
+                                      errorMessage: f.errorMessage,
+                                      uploadedFileId: f.uploadedFileId,
+                                    ))
+                                .toList(),
+                            isUploading: _isUploadingAttachments,
+                            hasFailedUploads: _hasFailedAttachments,
+                            isSending: _isSending,
+                            onAddFile: (ui) {
+                              _att.add(LocalAttach(
+                                path: ui.path,
+                                name: ui.name,
+                                mimeType: ui.isImage
+                                    ? 'image/jpeg'
+                                    : 'application/octet-stream',
+                                size: ui.size,
+                                isImage: ui.isImage,
+                              ));
+                            },
+                            onRemoveFile: (ui) {
+                              if (ui.path == '__FG__') {
+                                setState(() {
+                                  _forwardPackageAttached = false;
+                                  _stagedForward = null;
+                                  _forwardSelectedIds.clear();
+                                  _stagedForwardFileIds.clear();
+                                  _att.pending
+                                      .removeWhere((x) => x.path == '__FG__');
+                                });
+                              } else {
+                                final local = _att.pending
+                                    .firstWhere((f) => f.localId == ui.localId);
+                                if (local.canCancel) {
+                                  _att.cancel(local);
+                                } else {
+                                  _att.remove(local);
+                                }
+                              }
+                            },
+                            onRetryFile: (ui) async {
+                              final local = _att.pending
+                                  .firstWhere((f) => f.localId == ui.localId);
+                              final cid = await widget.service.ensureChatId();
+                              await _att.retry(local,
+                                  teamId: null, chatId: cid);
+                            },
+                            onSend: () => _send(_ctrl.text),
+                            onPickImage: () async {
+                              final res = await ImagePicker()
+                                  .pickImage(source: ImageSource.gallery);
+                              if (res != null) {
+                                final file = LocalAttach(
+                                  path: res.path,
+                                  name: res.path.split('/').last,
+                                  mimeType: 'image/jpeg',
+                                  size: await File(res.path).length(),
+                                  isImage: true,
+                                );
+                                _att.add(file);
+                                final cid = await widget.service.ensureChatId();
+                                _att.upload(file, teamId: null, chatId: cid);
+                              }
+                            },
+                            onOpenEmoji: () => _composerFocus.requestFocus(),
+                            onAttachFile: () async {
+                              final file = await _fileService.pickFile();
+                              if (file != null) {
+                                final attached = LocalAttach(
+                                  path: file.path,
+                                  name: file.path.split('/').last,
+                                  mimeType: 'application/octet-stream',
+                                  size: await file.length(),
+                                  isImage: false,
+                                );
+                                _att.add(attached);
+                                final cid = await widget.service.ensureChatId();
+                                _att.upload(attached,
+                                    teamId: null, chatId: cid);
+                              }
+                            },
+                            onPinText: (text) => _pinsCtl.pinText(text),
+                            onFind: () async {
+                              FocusScope.of(context).unfocus();
+                              _search.setActive(true);
+                              setState(() {}); // на всякий случай перерисовка
+                            },
+                            showProposeInPlus: canProposeAssignments,
+                            onPropose: (title, description, link, due,
+                                attachments) async {
+                              if (!canProposeAssignments) return;
+                              await context.read<TeamCubit>().proposeAssignment(
+                                    title: title,
+                                    description: description,
+                                    link: link,
+                                    due: due,
+                                    attachments: attachments,
+                                  );
+                            },
+                          ),
             ],
           );
         },
@@ -1723,6 +1851,67 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       if (all) return true;
     }
     return false;
+  }
+}
+
+class _DmBlockedComposerBar extends StatelessWidget {
+  const _DmBlockedComposerBar({
+    required this.iBlocked,
+    required this.busy,
+    this.onUnblock,
+  });
+
+  final bool iBlocked;
+  final bool busy;
+  final Future<void> Function()? onUnblock;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final label = iBlocked
+        ? 'Вы заблокировали пользователя'
+        : 'Личные сообщения недоступны';
+
+    return SafeArea(
+      top: false,
+      child: Container(
+        width: double.infinity,
+        margin: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest.withValues(alpha: 0.7),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: scheme.outline.withValues(alpha: 0.22)),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.block, size: 18, color: scheme.onSurfaceVariant),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                label,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: scheme.onSurface,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            if (iBlocked && onUnblock != null)
+              TextButton(
+                onPressed: busy ? null : () => onUnblock!.call(),
+                child: busy
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Разблокировать'),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

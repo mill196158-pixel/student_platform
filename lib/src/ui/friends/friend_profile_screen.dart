@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:student_platform/src/ui/chats/data/blocks_api.dart';
 import 'package:student_platform/src/ui/chats/direct_chat_screen.dart';
 import 'package:student_platform/src/ui/learning/state/team_cubit.dart';
 
@@ -42,6 +43,10 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
   // состояние дружбы со мной
   _FriendshipState _state = _FriendshipState.unknown;
   bool _friendActionBusy = false;
+
+  // блокировка (отдельно от дружбы)
+  bool _iBlocked = false;
+  bool _blockActionBusy = false;
 
   // прокрутка и якорь «Друзья»
   final ScrollController _scroll = ScrollController();
@@ -98,6 +103,7 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
       await Future.wait([
         _loadFriendshipStateSafe(),
         _loadGuestFriendsSafe(),
+        _loadBlockStateSafe(),
       ]);
 
       setState(() {
@@ -408,6 +414,97 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
     }
   }
 
+  Future<void> _loadBlockStateSafe() async {
+    final me = _myId;
+    if (me == null || me.isEmpty || me == widget.userId) {
+      _iBlocked = false;
+      return;
+    }
+    try {
+      final rel = await BlocksApi.getBlockRelationship(widget.userId);
+      _iBlocked = rel.iBlocked;
+    } catch (e) {
+      debugPrint('[FriendProfile] get_block_relationship error: $e');
+      _iBlocked = false;
+    }
+  }
+
+  Future<void> _confirmAndBlock() async {
+    if (_blockActionBusy || _myId == null || _myId == widget.userId) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Заблокировать?'),
+        content: const Text(
+          'Пользователь не сможет писать вам в личные сообщения. '
+          'История чата сохранится. Дружба и заявки не удаляются.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Заблокировать'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    setState(() => _blockActionBusy = true);
+    try {
+      await BlocksApi.blockUser(widget.userId);
+      if (!mounted) return;
+      setState(() => _iBlocked = true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Пользователь заблокирован')),
+      );
+    } catch (e) {
+      debugPrint('[FriendProfile] block_user error: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            BlocksApi.shortErrorMessage(e,
+                fallback: 'Не удалось заблокировать'),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _blockActionBusy = false);
+    }
+  }
+
+  Future<void> _unblockUser() async {
+    if (_blockActionBusy || _myId == null || _myId == widget.userId) return;
+    setState(() => _blockActionBusy = true);
+    try {
+      await BlocksApi.unblockUser(widget.userId);
+      if (!mounted) return;
+      setState(() => _iBlocked = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Пользователь разблокирован')),
+      );
+    } catch (e) {
+      debugPrint('[FriendProfile] unblock_user error: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            BlocksApi.shortErrorMessage(
+              e,
+              fallback: 'Не удалось разблокировать',
+            ),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _blockActionBusy = false);
+    }
+  }
+
   Future<void> _openDirectChat() async {
     final me = _myId;
     if (me == null || me.isEmpty || me == widget.userId) return;
@@ -432,7 +529,25 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
       // DirectChatScreen сам использует ensure_dm_chat; TeamCubit нужен только для экрана медиа по тапу на заголовок.
     }
 
-    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
+    try {
+      await Navigator.of(context)
+          .push(MaterialPageRoute(builder: (_) => screen));
+    } catch (e) {
+      debugPrint('[FriendProfile] open DM error: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            BlocksApi.isDmBlockedError(e)
+                ? 'Личные сообщения недоступны'
+                : BlocksApi.shortErrorMessage(
+                    e,
+                    fallback: 'Не удалось открыть чат',
+                  ),
+          ),
+        ),
+      );
+    }
   }
 
   // --- GUEST FRIENDS LIST (или fallback на одногруппников) ---
@@ -621,6 +736,17 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
             top: media.padding.top + 4,
             child: const _TopBackButton(),
           ),
+          if (_myId != null && _myId != widget.userId)
+            PositionedDirectional(
+              end: 4,
+              top: media.padding.top + 4,
+              child: _ProfileActionsMenu(
+                iBlocked: _iBlocked,
+                busy: _blockActionBusy,
+                onBlock: _confirmAndBlock,
+                onUnblock: _unblockUser,
+              ),
+            ),
         ],
       ),
     );
@@ -657,6 +783,53 @@ class _TopBackButton extends StatelessWidget {
             size: 24,
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _ProfileActionsMenu extends StatelessWidget {
+  const _ProfileActionsMenu({
+    required this.iBlocked,
+    required this.busy,
+    required this.onBlock,
+    required this.onUnblock,
+  });
+
+  final bool iBlocked;
+  final bool busy;
+  final VoidCallback onBlock;
+  final VoidCallback onUnblock;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Material(
+      color: Colors.transparent,
+      shape: const CircleBorder(),
+      child: PopupMenuButton<String>(
+        enabled: !busy,
+        tooltip: 'Действия',
+        padding: EdgeInsets.zero,
+        icon: Icon(Icons.more_vert_rounded, color: scheme.onSurface),
+        onSelected: (value) {
+          if (busy) return;
+          if (value == 'block') onBlock();
+          if (value == 'unblock') onUnblock();
+        },
+        itemBuilder: (context) => [
+          if (iBlocked)
+            const PopupMenuItem<String>(
+              value: 'unblock',
+              child: Text('Разблокировать'),
+            )
+          else
+            const PopupMenuItem<String>(
+              value: 'block',
+              child: Text('Заблокировать'),
+            ),
+        ],
       ),
     );
   }

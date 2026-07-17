@@ -60,6 +60,13 @@ class ChatMessageList extends StatelessWidget {
   final VoidCallback? onCreateAssignment;
   final bool initialLoading;
 
+  /// Authors blocked by the current user (group/team only). One set for the screen.
+  final Set<String>? blockedUserIds;
+
+  /// Locally revealed blocked-message ids for this screen session.
+  final Set<String>? revealedBlockedMessageIds;
+  final void Function(String messageId)? onRevealBlockedMessage;
+
   const ChatMessageList({
     super.key,
     required this.messages,
@@ -93,6 +100,9 @@ class ChatMessageList extends StatelessWidget {
     this.onAttachFile,
     this.onCreateAssignment,
     this.initialLoading = false,
+    this.blockedUserIds,
+    this.revealedBlockedMessageIds,
+    this.onRevealBlockedMessage,
   });
 
   @override
@@ -171,24 +181,30 @@ class ChatMessageList extends StatelessWidget {
                   )
                 : null;
             String? replyPreviewText;
-            if (reply != null) {
-              final t = (reply.text).toString().trim();
-              if (t.isNotEmpty) {
-                replyPreviewText = t;
+            if (reply != null && reply.id != '0') {
+              if (_isBlockedAuthorContentHidden(reply)) {
+                replyPreviewText = 'Сообщение заблокированного пользователя';
               } else {
-                final atts = reply.attachments ?? const [];
-                if (atts.isNotEmpty) {
-                  final firstName = (atts.first.fileName).toString();
-                  if (atts.length == 1) {
-                    replyPreviewText =
-                        firstName.isNotEmpty ? firstName : 'Вложение';
-                  } else {
-                    replyPreviewText =
-                        '${firstName.isNotEmpty ? firstName : 'Вложения'} +${atts.length - 1}';
+                final t = (reply.text).toString().trim();
+                if (t.isNotEmpty) {
+                  replyPreviewText = t;
+                } else {
+                  final atts = reply.attachments ?? const [];
+                  if (atts.isNotEmpty) {
+                    final firstName = (atts.first.fileName).toString();
+                    if (atts.length == 1) {
+                      replyPreviewText =
+                          firstName.isNotEmpty ? firstName : 'Вложение';
+                    } else {
+                      replyPreviewText =
+                          '${firstName.isNotEmpty ? firstName : 'Вложения'} +${atts.length - 1}';
+                    }
                   }
                 }
               }
             }
+
+            final collapseBlocked = _shouldCollapseBlockedMessage(m);
 
             final currentReactions = m.reactions ?? const <String, int>{};
             final hasReactions = currentReactions.isNotEmpty;
@@ -315,63 +331,73 @@ class ChatMessageList extends StatelessWidget {
                     SizedBox(key: key, height: 0),
                     Padding(
                       padding: EdgeInsets.only(
-                        bottom:
-                            hasReactions ? 18 : (isGroupedWithPrevious ? 1 : 5),
+                        bottom: collapseBlocked
+                            ? 5
+                            : (hasReactions
+                                ? 18
+                                : (isGroupedWithPrevious ? 1 : 5)),
                       ),
-                      child: SwipeToReply(
-                        onReply: () => onReply(m),
-                        child: SearchHighlight(
-                          active: search.isActive,
-                          isCurrent: m.id == search.currentTargetId,
-                          onTap: () {
-                            final key = messageKeys[m.id];
-                            if (key?.currentContext != null) {
-                              try {
-                                Scrollable.ensureVisible(
-                                  key!.currentContext!,
-                                  duration: const Duration(milliseconds: 240),
-                                  alignment: 0.12,
-                                  curve: Curves.easeOutCubic,
-                                );
-                              } catch (_) {}
-                            }
-                          },
-                          child: _ChatMessageInteractionWrapper(
-                            message: m,
-                            isMine: isMine,
-                            currentUserId: currentUserId,
-                            selectingMessages: selectingMessages,
-                            isSelected:
-                                selectedMessageIds?.contains(m.id) ?? false,
-                            isHovered: hoveredMessageId == m.id,
-                            reactions: currentReactions,
-                            canDelete: canDeleteMessage?.call(m) ?? false,
-                            canEdit: canEditMessage?.call(m) ?? false,
-                            reactionLeft: isMine
-                                ? null
-                                : (hideSenderIdentity ||
-                                        noAvatarSpacing ||
-                                        !reserveAvatarSpaceForChip
-                                    ? 12
-                                    : 52),
-                            reactionRight: isMine ? 12 : null,
-                            onToggleSelect: () => onToggleSelect?.call(m.id),
-                            onReact: () => onReact(ctx, m.id),
-                            onReactionSelected: (emoji) {
-                              final handler = onReactionSelected;
-                              if (handler != null) {
-                                handler(m.id, emoji);
-                              } else {
-                                onReact(ctx, m.id);
-                              }
-                            },
-                            onMenuAction: (action) =>
-                                onMenuAction?.call(m, action),
-                            child: bubbleWithKey,
-                            previewChild: previewBubble,
-                          ),
-                        ),
-                      ),
+                      child: collapseBlocked
+                          ? _BlockedAuthorMessagePlaceholder(
+                              onShow: () => onRevealBlockedMessage?.call(m.id),
+                            )
+                          : SwipeToReply(
+                              onReply: () => onReply(m),
+                              child: SearchHighlight(
+                                active: search.isActive,
+                                isCurrent: m.id == search.currentTargetId,
+                                onTap: () {
+                                  final key = messageKeys[m.id];
+                                  if (key?.currentContext != null) {
+                                    try {
+                                      Scrollable.ensureVisible(
+                                        key!.currentContext!,
+                                        duration:
+                                            const Duration(milliseconds: 240),
+                                        alignment: 0.12,
+                                        curve: Curves.easeOutCubic,
+                                      );
+                                    } catch (_) {}
+                                  }
+                                },
+                                child: _ChatMessageInteractionWrapper(
+                                  message: m,
+                                  isMine: isMine,
+                                  currentUserId: currentUserId,
+                                  selectingMessages: selectingMessages,
+                                  isSelected:
+                                      selectedMessageIds?.contains(m.id) ??
+                                          false,
+                                  isHovered: hoveredMessageId == m.id,
+                                  reactions: currentReactions,
+                                  canDelete: canDeleteMessage?.call(m) ?? false,
+                                  canEdit: canEditMessage?.call(m) ?? false,
+                                  reactionLeft: isMine
+                                      ? null
+                                      : (hideSenderIdentity ||
+                                              noAvatarSpacing ||
+                                              !reserveAvatarSpaceForChip
+                                          ? 12
+                                          : 52),
+                                  reactionRight: isMine ? 12 : null,
+                                  onToggleSelect: () =>
+                                      onToggleSelect?.call(m.id),
+                                  onReact: () => onReact(ctx, m.id),
+                                  onReactionSelected: (emoji) {
+                                    final handler = onReactionSelected;
+                                    if (handler != null) {
+                                      handler(m.id, emoji);
+                                    } else {
+                                      onReact(ctx, m.id);
+                                    }
+                                  },
+                                  onMenuAction: (action) =>
+                                      onMenuAction?.call(m, action),
+                                  child: bubbleWithKey,
+                                  previewChild: previewBubble,
+                                ),
+                              ),
+                            ),
                     ),
                   ],
                 ),
@@ -396,6 +422,36 @@ class ChatMessageList extends StatelessWidget {
 
   bool _isSameDay(DateTime a, DateTime b) {
     return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  bool _isNeverCollapsedType(Message m) {
+    if (m.isSystem) return true;
+    if (m.type == MessageType.assignmentDraft ||
+        m.type == MessageType.assignmentPublished) {
+      return true;
+    }
+    if ((m.assignmentId ?? '').isNotEmpty) return true;
+    return false;
+  }
+
+  bool _isBlockedAuthor(Message m) {
+    final blocked = blockedUserIds;
+    if (blocked == null || blocked.isEmpty) return false;
+    final authorId = m.authorId.trim();
+    if (authorId.isEmpty) return false;
+    return blocked.contains(authorId);
+  }
+
+  bool _isBlockedAuthorContentHidden(Message m) {
+    if (_isNeverCollapsedType(m)) return false;
+    if (!_isBlockedAuthor(m)) return false;
+    final revealed = revealedBlockedMessageIds;
+    if (revealed != null && revealed.contains(m.id)) return false;
+    return true;
+  }
+
+  bool _shouldCollapseBlockedMessage(Message m) {
+    return _isBlockedAuthorContentHidden(m);
   }
 
   bool _shouldShowAvatar(List<Message> messages, int currentIndex) {
@@ -1638,6 +1694,47 @@ class _NewMessagesChip extends StatelessWidget {
               height: 1,
               color: theme.colorScheme.outline.withValues(alpha: 0.2),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BlockedAuthorMessagePlaceholder extends StatelessWidget {
+  const _BlockedAuthorMessagePlaceholder({required this.onShow});
+
+  final VoidCallback onShow;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: scheme.outline.withValues(alpha: 0.2),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              'Сообщение заблокированного пользователя',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: onShow,
+            child: const Text('Показать'),
           ),
         ],
       ),

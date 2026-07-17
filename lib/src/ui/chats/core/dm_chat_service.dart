@@ -5,6 +5,7 @@ import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/learning/models/local_attach.dart';
 import 'package:student_platform/src/ui/learning/models/chat_file.dart';
 import '../data/dm_api.dart';
+import '../data/blocks_api.dart';
 import 'chat_message_memory_cache.dart';
 import 'i_chat_service.dart';
 
@@ -39,7 +40,17 @@ class DmChatService implements IChatService {
 
   @override
   Stream<List<Message>> watchMessages() async* {
-    final cid = await ensureChatId();
+    String cid;
+    try {
+      cid = await ensureChatId();
+    } catch (e) {
+      // Blocked pair with no existing DM: keep screen readable, empty history.
+      if (BlocksApi.isDmBlockedError(e)) {
+        yield const <Message>[];
+        return;
+      }
+      rethrow;
+    }
     final cached = ChatMessageMemoryCache.snapshot(cid);
     if (cached.isNotEmpty) {
       _cache
