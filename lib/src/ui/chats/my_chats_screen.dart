@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'dart:math' as math;
-import 'dart:async'; // ← for Timer
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -36,10 +36,11 @@ class _MyChatsScreenState extends State<MyChatsScreen>
   List<_ChatSummary> _visible = [];
   String _query = '';
 
-  RealtimeChannel? _channel; // общий канал с несколькими фильтрами
-  Timer? _pollTimer; // ➜ NEW
-  static const _pollEvery = Duration(seconds: 8); // ➜ NEW
-  bool _pollInFlight = false; // ➜ NEW: защита от гонок
+  RealtimeChannel? _channel; // один общий канал для списка чатов
+  Timer? _reloadDebounce;
+  static const _reloadDebounceEvery = Duration(milliseconds: 300);
+  bool _summariesInFlight = false;
+  bool _summariesQueued = false;
 
   bool _hydrated = false; // есть ли быстрый кеш на старте
   Timer? _searchDebounce;
@@ -92,8 +93,10 @@ class _MyChatsScreenState extends State<MyChatsScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _pollTimer?.cancel();
+    _reloadDebounce?.cancel();
+    _reloadDebounce = null;
     _channel?.unsubscribe();
+    _channel = null;
     _searchDebounce?.cancel();
     _filterDebounce?.cancel();
     _sub?.cancel();
@@ -106,19 +109,13 @@ class _MyChatsScreenState extends State<MyChatsScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _startPolling();
-      unawaited(_pollOnce());
-      return;
-    }
-    if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.detached) {
-      _pollTimer?.cancel();
+      unawaited(_reloadSummariesFromRpc());
     }
   }
 
   Future<void> _load() async {
     _safeSetState(() => _loading = true);
+    _summariesInFlight = true;
     try {
       final sb = Supabase.instance.client;
       final me = sb.auth.currentUser?.id;
@@ -188,10 +185,15 @@ class _MyChatsScreenState extends State<MyChatsScreen>
       });
       _saveCache(_all);
 
-      _subscribeChatSettingsRealtime();
-      _startPolling();
+      _subscribeChatsRealtime();
     } catch (_) {
       _safeSetState(() => _loading = false);
+    } finally {
+      _summariesInFlight = false;
+      if (_summariesQueued) {
+        _summariesQueued = false;
+        unawaited(_reloadSummariesFromRpc());
+      }
     }
   }
 
@@ -333,95 +335,6 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     );
   }
 
-  Future<Map<String, Map<String, dynamic>>> _fetchChatUserSettings(
-      String userId) async {
-    final rows = await Supabase.instance.client
-        .from('chat_user_settings')
-        .select('chat_id, is_pinned, is_muted')
-        .eq('user_id', userId);
-    final byChatId = <String, Map<String, dynamic>>{};
-    for (final row in (rows as List)) {
-      final m = Map<String, dynamic>.from(row as Map);
-      final chatId = (m['chat_id'] ?? '').toString();
-      if (chatId.isEmpty) continue;
-      byChatId[chatId] = m;
-    }
-    return byChatId;
-  }
-
-  Future<void> _reloadChatSettingsFromServer() async {
-    final me = Supabase.instance.client.auth.currentUser?.id;
-    if (me == null || me.isEmpty || !mounted) return;
-
-    try {
-      final byChatId = await _fetchChatUserSettings(me);
-      if (!mounted) return;
-
-      _safeSetState(() {
-        for (final item in _all) {
-          final chatId = item.chatId;
-          if (chatId == null || chatId.isEmpty) continue;
-          final server = byChatId[chatId];
-          if (server != null) {
-            item.pinned = server['is_pinned'] == true;
-            item.muted = server['is_muted'] == true;
-          } else {
-            item.pinned = false;
-            item.muted = false;
-          }
-        }
-        _all.sort(_compareChats);
-        _applyFilter();
-      });
-      await _saveCache(_all);
-    } catch (e) {
-      debugPrint('[MyChatsScreen] reload chat_user_settings error: $e');
-    }
-  }
-
-  void _subscribeChatSettingsRealtime() {
-    final uid = Supabase.instance.client.auth.currentUser?.id;
-    if (uid == null || uid.isEmpty) return;
-
-    _channel?.unsubscribe();
-    _channel = Supabase.instance.client
-        .channel('public:chat_user_settings:user:$uid')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.insert,
-          schema: 'public',
-          table: 'chat_user_settings',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'user_id',
-            value: uid,
-          ),
-          callback: (_) => unawaited(_reloadChatSettingsFromServer()),
-        )
-        .onPostgresChanges(
-          event: PostgresChangeEvent.update,
-          schema: 'public',
-          table: 'chat_user_settings',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'user_id',
-            value: uid,
-          ),
-          callback: (_) => unawaited(_reloadChatSettingsFromServer()),
-        )
-        .onPostgresChanges(
-          event: PostgresChangeEvent.delete,
-          schema: 'public',
-          table: 'chat_user_settings',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'user_id',
-            value: uid,
-          ),
-          callback: (_) => unawaited(_reloadChatSettingsFromServer()),
-        )
-        .subscribe();
-  }
-
   Future<bool> _updateChatUserPinned({
     required String chatId,
     required bool isPinned,
@@ -468,39 +381,167 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     }
   }
 
-  // ===== realtime by chat_id (фильтры на уровне сервера) =====
-  // ➜ NEW: polling instead of realtime
-  void _startPolling() {
-    _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(_pollEvery, (_) => _pollOnce());
+  void _scheduleSummariesReload() {
+    _reloadDebounce?.cancel();
+    _reloadDebounce = Timer(_reloadDebounceEvery, () {
+      unawaited(_reloadSummariesFromRpc());
+    });
   }
 
-  Future<void> _pollOnce() async {
-    if (_pollInFlight) return;
-    _pollInFlight = true;
+  Future<void> _reloadSummariesFromRpc() async {
+    if (_summariesInFlight) {
+      _summariesQueued = true;
+      return;
+    }
+    _summariesInFlight = true;
     try {
-      final sb = Supabase.instance.client;
-      if (sb.auth.currentUser == null) return;
+      do {
+        _summariesQueued = false;
+        final sb = Supabase.instance.client;
+        if (sb.auth.currentUser == null) break;
 
-      final res = await sb.rpc('get_my_chat_summaries');
-      final list = (res as List? ?? const [])
-          .map((e) => _summaryFromRpcRow(Map<String, dynamic>.from(e as Map)))
-          .where((c) => !c.isDm || (c.peerId?.isNotEmpty ?? false))
-          .toList()
-        ..sort(_compareChats);
+        final res = await sb.rpc('get_my_chat_summaries');
+        final list = (res as List? ?? const [])
+            .map((e) => _summaryFromRpcRow(Map<String, dynamic>.from(e as Map)))
+            .where((c) => !c.isDm || (c.peerId?.isNotEmpty ?? false))
+            .toList()
+          ..sort(_compareChats);
 
-      if (!mounted) return;
-      setState(() {
-        _all = list;
-        _applyFilter();
-      });
-      _saveCache(_all);
+        if (!mounted) break;
+        _safeSetState(() {
+          _all = list;
+          _applyFilter();
+        });
+        await _saveCache(_all);
+      } while (_summariesQueued && mounted);
     } catch (e) {
       safeDebugLog(
-          '[poll] get_my_chat_summaries failed error=${e.runtimeType}');
+          '[realtime] get_my_chat_summaries failed error=${e.runtimeType}');
     } finally {
-      _pollInFlight = false;
+      final needsAnother = _summariesQueued && mounted;
+      _summariesQueued = false;
+      _summariesInFlight = false;
+      if (needsAnother) {
+        unawaited(_reloadSummariesFromRpc());
+      }
     }
+  }
+
+  void _subscribeChatsRealtime() {
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    if (uid == null || uid.isEmpty) return;
+    if (_channel != null) return;
+
+    void onChange(PostgresChangePayload _) => _scheduleSummariesReload();
+
+    final userFilter = PostgresChangeFilter(
+      type: PostgresChangeFilterType.eq,
+      column: 'user_id',
+      value: uid,
+    );
+
+    _channel = Supabase.instance.client
+        .channel('public:my_chats:$uid')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'messages',
+          callback: onChange,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'messages',
+          callback: onChange,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.delete,
+          schema: 'public',
+          table: 'messages',
+          callback: onChange,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'chat_reads',
+          filter: userFilter,
+          callback: onChange,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'chat_reads',
+          filter: userFilter,
+          callback: onChange,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.delete,
+          schema: 'public',
+          table: 'chat_reads',
+          filter: userFilter,
+          callback: onChange,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'chat_user_settings',
+          filter: userFilter,
+          callback: onChange,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'chat_user_settings',
+          filter: userFilter,
+          callback: onChange,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.delete,
+          schema: 'public',
+          table: 'chat_user_settings',
+          filter: userFilter,
+          callback: onChange,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'chat_members',
+          filter: userFilter,
+          callback: onChange,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'chat_members',
+          filter: userFilter,
+          callback: onChange,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.delete,
+          schema: 'public',
+          table: 'chat_members',
+          filter: userFilter,
+          callback: onChange,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'chats',
+          callback: onChange,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'chats',
+          callback: onChange,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.delete,
+          schema: 'public',
+          table: 'chats',
+          callback: onChange,
+        )
+        .subscribe();
   }
 
   String _summaryIdentity(_ChatSummary c) {
