@@ -431,25 +431,52 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
 
   Future<void> _confirmAndBlock() async {
     if (_blockActionBusy || _myId == null || _myId == widget.userId) return;
+    final g = _guest;
+    final displayName = g == null ? '' : _fullName(g['name'], g['surname']);
+    final titleName = displayName.isEmpty ? 'пользователя' : displayName;
+
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Заблокировать?'),
-        content: const Text(
-          'Пользователь не сможет писать вам в личные сообщения. '
-          'История чата сохранится. Дружба и заявки не удаляются.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Отмена'),
+      builder: (ctx) {
+        final scheme = Theme.of(ctx).colorScheme;
+        final text = Theme.of(ctx).textTheme;
+        return AlertDialog(
+          backgroundColor: scheme.surface,
+          surfaceTintColor: Colors.transparent,
+          title: Text(
+            'Заблокировать $titleName?',
+            style: text.titleMedium?.copyWith(
+              color: scheme.onSurface,
+              fontWeight: FontWeight.w700,
+            ),
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Заблокировать'),
+          content: Text(
+            'Вы больше не сможете обмениваться личными сообщениями. '
+            'В общих чатах его сообщения будут скрыты.',
+            style: text.bodyMedium?.copyWith(
+              color: scheme.onSurfaceVariant,
+              height: 1.35,
+            ),
           ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(
+                'Отмена',
+                style: TextStyle(color: scheme.onSurfaceVariant),
+              ),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: scheme.error,
+                foregroundColor: scheme.onError,
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Заблокировать'),
+            ),
+          ],
+        );
+      },
     );
     if (ok != true || !mounted) return;
 
@@ -479,6 +506,51 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
 
   Future<void> _unblockUser() async {
     if (_blockActionBusy || _myId == null || _myId == widget.userId) return;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final scheme = Theme.of(ctx).colorScheme;
+        final text = Theme.of(ctx).textTheme;
+        return AlertDialog(
+          backgroundColor: scheme.surface,
+          surfaceTintColor: Colors.transparent,
+          title: Text(
+            'Разблокировать пользователя?',
+            style: text.titleMedium?.copyWith(
+              color: scheme.onSurface,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          content: Text(
+            'Вы снова сможете обмениваться личными сообщениями.',
+            style: text.bodyMedium?.copyWith(
+              color: scheme.onSurfaceVariant,
+              height: 1.35,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(
+                'Отмена',
+                style: TextStyle(color: scheme.onSurfaceVariant),
+              ),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: scheme.primary,
+                foregroundColor: scheme.onPrimary,
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Разблокировать'),
+            ),
+          ],
+        );
+      },
+    );
+    if (ok != true || !mounted) return;
+
     setState(() => _blockActionBusy = true);
     try {
       await BlocksApi.unblockUser(widget.userId);
@@ -808,28 +880,78 @@ class _ProfileActionsMenu extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       shape: const CircleBorder(),
+      clipBehavior: Clip.antiAlias,
       child: PopupMenuButton<String>(
         enabled: !busy,
         tooltip: 'Действия',
         padding: EdgeInsets.zero,
-        icon: Icon(Icons.more_vert_rounded, color: scheme.onSurface),
+        offset: const Offset(0, 4),
+        position: PopupMenuPosition.under,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        color: scheme.surface,
+        surfaceTintColor: Colors.transparent,
         onSelected: (value) {
           if (busy) return;
           if (value == 'block') onBlock();
           if (value == 'unblock') onUnblock();
         },
-        itemBuilder: (context) => [
-          if (iBlocked)
-            const PopupMenuItem<String>(
-              value: 'unblock',
-              child: Text('Разблокировать'),
-            )
-          else
-            const PopupMenuItem<String>(
+        itemBuilder: (context) {
+          if (iBlocked) {
+            return [
+              PopupMenuItem<String>(
+                value: 'unblock',
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.lock_open_outlined,
+                      size: 20,
+                      color: scheme.primary,
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      'Разблокировать',
+                      style: TextStyle(
+                        color: scheme.primary,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ];
+          }
+          return [
+            PopupMenuItem<String>(
               value: 'block',
-              child: Text('Заблокировать'),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.block_outlined,
+                    size: 20,
+                    color: scheme.error,
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Заблокировать',
+                    style: TextStyle(
+                      color: scheme.error,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
             ),
-        ],
+          ];
+        },
+        child: SizedBox(
+          width: 48,
+          height: 48,
+          child: Icon(
+            Icons.more_vert_rounded,
+            color: scheme.onSurface,
+            size: 24,
+          ),
+        ),
       ),
     );
   }
