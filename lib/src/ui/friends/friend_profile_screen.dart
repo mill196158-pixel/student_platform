@@ -452,7 +452,7 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
           ),
           content: Text(
             'Вы больше не сможете обмениваться личными сообщениями. '
-            'В общих чатах его сообщения будут скрыты.',
+            'В общих чатах сообщения будут скрыты.',
             style: text.bodyMedium?.copyWith(
               color: scheme.onSurfaceVariant,
               height: 1.35,
