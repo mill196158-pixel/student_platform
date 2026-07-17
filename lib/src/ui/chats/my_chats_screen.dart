@@ -150,8 +150,8 @@ class _MyChatsScreenState extends State<MyChatsScreen>
       // подкачиваем ЛС
       final dmSummaries = await _loadDms();
 
-      // общий список: сервер обновляет содержимое, локальные настройки
-      // превью (закреплено/без звука) переносим из кеша/текущего состояния.
+      // общий список: сервер обновляет содержимое; локальный кеш — быстрый старт.
+      // pinned/muted с сервера — источник истины (локальные без строки — migrate once).
       final localStateByKey = <String, _ChatSummary>{
         for (final item in _all) _summaryIdentity(item): item,
       };
@@ -162,6 +162,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
         item.pinned = local.pinned;
         item.muted = local.muted;
       }
+      await _syncChatUserSettings(list);
       list.sort(_compareChats);
 
       if (!mounted) return;
@@ -172,7 +173,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
       });
       _saveCache(_all); // сохранить кеш после загрузки
 
-      // _subscribeRealtime(list); // realtime disabled
+      _subscribeChatSettingsRealtime();
       _startPolling(); // ➜ NEW
       await _pollOnce(); // ➜ NEW: мгновенный опрос после наполнения списка
     } catch (_) {
@@ -314,32 +315,254 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     }
   }
 
-  void _togglePinChat(_ChatSummary c) {
-    setState(() {
-      final idx = _all.indexWhere((e) => e.chatId == c.chatId);
-      if (idx != -1) {
-        _all[idx].pinned = !_all[idx].pinned;
-        safeDebugLog(
-            '[MyChatsScreen] togglePin chat=${maskDebugId(c.chatId)} pinned=${_all[idx].pinned}');
-        _all.sort(_compareChats);
-        _applyFilter();
-        _saveCache(_all);
-      }
+  Future<void> _togglePinChat(_ChatSummary c) async {
+    final idx =
+        _all.indexWhere((e) => _summaryIdentity(e) == _summaryIdentity(c));
+    if (idx == -1) return;
+
+    final prev = _all[idx].pinned;
+    final next = !prev;
+    _safeSetState(() {
+      _all[idx].pinned = next;
+      safeDebugLog(
+          '[MyChatsScreen] togglePin chat=${maskDebugId(c.chatId)} pinned=$next');
+      _all.sort(_compareChats);
+      _applyFilter();
     });
+    await _saveCache(_all);
+
+    final chatId = c.chatId;
+    if (chatId == null || chatId.isEmpty)
+      return; // без chatId — только локально
+
+    final ok = await _updateChatUserPinned(chatId: chatId, isPinned: next);
+    if (ok || !mounted) return;
+
+    _safeSetState(() {
+      final i =
+          _all.indexWhere((e) => _summaryIdentity(e) == _summaryIdentity(c));
+      if (i == -1) return;
+      _all[i].pinned = prev;
+      _all.sort(_compareChats);
+      _applyFilter();
+    });
+    await _saveCache(_all);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Не удалось закрепить')),
+    );
   }
 
-  void _toggleMuteChat(_ChatSummary c) {
-    setState(() {
-      final idx =
-          _all.indexWhere((e) => _summaryIdentity(e) == _summaryIdentity(c));
-      if (idx != -1) {
-        _all[idx].muted = !_all[idx].muted;
-        safeDebugLog(
-            '[MyChatsScreen] toggleMute chat=${maskDebugId(c.chatId)} muted=${_all[idx].muted}');
-        _applyFilter();
-        _saveCache(_all);
-      }
+  Future<void> _toggleMuteChat(_ChatSummary c) async {
+    final idx =
+        _all.indexWhere((e) => _summaryIdentity(e) == _summaryIdentity(c));
+    if (idx == -1) return;
+
+    final prev = _all[idx].muted;
+    final next = !prev;
+    _safeSetState(() {
+      _all[idx].muted = next;
+      safeDebugLog(
+          '[MyChatsScreen] toggleMute chat=${maskDebugId(c.chatId)} muted=$next');
+      _applyFilter();
     });
+    await _saveCache(_all);
+
+    final chatId = c.chatId;
+    if (chatId == null || chatId.isEmpty)
+      return; // без chatId — только локально
+
+    final ok = await _updateChatUserMuted(chatId: chatId, isMuted: next);
+    if (ok || !mounted) return;
+
+    _safeSetState(() {
+      final i =
+          _all.indexWhere((e) => _summaryIdentity(e) == _summaryIdentity(c));
+      if (i == -1) return;
+      _all[i].muted = prev;
+      _applyFilter();
+    });
+    await _saveCache(_all);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Не удалось изменить звук')),
+    );
+  }
+
+  Future<Map<String, Map<String, dynamic>>> _fetchChatUserSettings(
+      String userId) async {
+    final rows = await Supabase.instance.client
+        .from('chat_user_settings')
+        .select('chat_id, is_pinned, is_muted')
+        .eq('user_id', userId);
+    final byChatId = <String, Map<String, dynamic>>{};
+    for (final row in (rows as List)) {
+      final m = Map<String, dynamic>.from(row as Map);
+      final chatId = (m['chat_id'] ?? '').toString();
+      if (chatId.isEmpty) continue;
+      byChatId[chatId] = m;
+    }
+    return byChatId;
+  }
+
+  /// Серверные pinned/muted — источник истины; локальные без строки — once migrate.
+  Future<void> _syncChatUserSettings(List<_ChatSummary> list) async {
+    final sb = Supabase.instance.client;
+    final me = sb.auth.currentUser?.id;
+    if (me == null || me.isEmpty) return;
+
+    try {
+      final byChatId = await _fetchChatUserSettings(me);
+      final toMigrate = <Map<String, dynamic>>[];
+
+      for (final item in list) {
+        final chatId = item.chatId;
+        if (chatId == null || chatId.isEmpty) continue;
+
+        final server = byChatId[chatId];
+        if (server != null) {
+          item.pinned = server['is_pinned'] == true;
+          item.muted = server['is_muted'] == true;
+          continue;
+        }
+
+        // Первая миграция: создать строку для каждого чата, сохранив локальные значения.
+        toMigrate.add({
+          'user_id': me,
+          'chat_id': chatId,
+          'is_pinned': item.pinned,
+          'is_muted': item.muted,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        });
+      }
+
+      if (toMigrate.isEmpty) return;
+      await sb.from('chat_user_settings').upsert(
+            toMigrate,
+            onConflict: 'user_id,chat_id',
+          );
+    } catch (e) {
+      debugPrint('[MyChatsScreen] sync chat_user_settings error: $e');
+    }
+  }
+
+  Future<void> _reloadChatSettingsFromServer() async {
+    final me = Supabase.instance.client.auth.currentUser?.id;
+    if (me == null || me.isEmpty || !mounted) return;
+
+    try {
+      final byChatId = await _fetchChatUserSettings(me);
+      if (!mounted) return;
+
+      _safeSetState(() {
+        for (final item in _all) {
+          final chatId = item.chatId;
+          if (chatId == null || chatId.isEmpty) continue;
+          final server = byChatId[chatId];
+          if (server != null) {
+            item.pinned = server['is_pinned'] == true;
+            item.muted = server['is_muted'] == true;
+          } else {
+            item.pinned = false;
+            item.muted = false;
+          }
+        }
+        _all.sort(_compareChats);
+        _applyFilter();
+      });
+      await _saveCache(_all);
+    } catch (e) {
+      debugPrint('[MyChatsScreen] reload chat_user_settings error: $e');
+    }
+  }
+
+  void _subscribeChatSettingsRealtime() {
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    if (uid == null || uid.isEmpty) return;
+
+    _channel?.unsubscribe();
+    _channel = Supabase.instance.client
+        .channel('public:chat_user_settings:user:$uid')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'chat_user_settings',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: uid,
+          ),
+          callback: (_) => unawaited(_reloadChatSettingsFromServer()),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'chat_user_settings',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: uid,
+          ),
+          callback: (_) => unawaited(_reloadChatSettingsFromServer()),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.delete,
+          schema: 'public',
+          table: 'chat_user_settings',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: uid,
+          ),
+          callback: (_) => unawaited(_reloadChatSettingsFromServer()),
+        )
+        .subscribe();
+  }
+
+  Future<bool> _updateChatUserPinned({
+    required String chatId,
+    required bool isPinned,
+  }) async {
+    final me = Supabase.instance.client.auth.currentUser?.id;
+    if (me == null || me.isEmpty) return false;
+    try {
+      final rows = await Supabase.instance.client
+          .from('chat_user_settings')
+          .update({
+            'is_pinned': isPinned,
+            'updated_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .eq('user_id', me)
+          .eq('chat_id', chatId)
+          .select('chat_id');
+      return rows.isNotEmpty;
+    } catch (e) {
+      debugPrint('[MyChatsScreen] update chat_user_settings pin error: $e');
+      return false;
+    }
+  }
+
+  Future<bool> _updateChatUserMuted({
+    required String chatId,
+    required bool isMuted,
+  }) async {
+    final me = Supabase.instance.client.auth.currentUser?.id;
+    if (me == null || me.isEmpty) return false;
+    try {
+      final rows = await Supabase.instance.client
+          .from('chat_user_settings')
+          .update({
+            'is_muted': isMuted,
+            'updated_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .eq('user_id', me)
+          .eq('chat_id', chatId)
+          .select('chat_id');
+      return rows.isNotEmpty;
+    } catch (e) {
+      debugPrint('[MyChatsScreen] update chat_user_settings mute error: $e');
+      return false;
+    }
   }
 
   // ===== realtime by chat_id (фильтры на уровне сервера) =====
