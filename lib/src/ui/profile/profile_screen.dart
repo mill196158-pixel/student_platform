@@ -490,7 +490,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         '${_ts()} [Profile] build ui -> friends=$_friendsCount req=$_requestsCount unread=$_unreadTotal loading=$_loading');
     if (_loading) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Профиль'), centerTitle: true),
+        appBar: AppBar(),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
@@ -504,13 +504,18 @@ class _ProfileScreenState extends State<ProfileScreen>
     final avatar = (u?['avatar_url'] as String?)?.trim();
     final fullName = [first, last].where((s) => s.isNotEmpty).join(' ').trim();
 
+    // Поднять шапку профиля ~28px: аватар слегка заходит в центр AppBar.
+    final headerTopPad =
+        MediaQuery.paddingOf(context).top + kToolbarHeight - 16;
+
     return Scaffold(
       backgroundColor: const Color(0xFFFAF8FC),
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        backgroundColor: const Color(0xFFFAF8FC),
+        backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
-        title: const Text('Профиль'),
-        centerTitle: true,
+        elevation: 0,
+        scrolledUnderElevation: 0,
         leading: IconButton(
           tooltip: 'Редактировать',
           icon: const Icon(Icons.tune),
@@ -544,7 +549,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         child: RefreshIndicator(
           onRefresh: _refreshFromServer,
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+            padding: EdgeInsets.fromLTRB(16, headerTopPad, 16, 24),
             children: [
               _Header(
                 fullName: fullName.isEmpty ? 'Без имени' : fullName,
