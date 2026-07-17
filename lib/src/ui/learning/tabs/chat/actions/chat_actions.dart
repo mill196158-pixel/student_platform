@@ -25,6 +25,19 @@ class ChatActions {
     return DateTime.now().difference(m.at) <= const Duration(hours: 12);
   }
 
+  // редактировать — свои текстовые младше 12 часов
+  static bool _canEdit(Message m) {
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    if (uid == null || uid.isEmpty || m.authorId != uid) return false;
+    if (m.isSystem || m.isLocal) return false;
+    if (m.type != MessageType.text) return false;
+    if (m.forward != null) return false;
+    if (m.text.contains('__FG__:')) return false;
+    if (m.attachments != null && m.attachments!.isNotEmpty) return false;
+    if (m.text.trim().isEmpty) return false;
+    return DateTime.now().difference(m.at) <= const Duration(hours: 12);
+  }
+
   // посчитать “естественную” ширину панели по самому длинному тексту
   static double _calcPanelWidth({
     required BuildContext context,
@@ -61,6 +74,7 @@ class ChatActions {
     required VoidCallback onForward,
     required Future<void> Function() onTogglePin,
     required Future<void> Function() onDeleteIfAllowed,
+    Future<void> Function()? onEditIfAllowed,
     required void Function(String emoji) onReact,
     required void Function() onSelect,
   }) async {
@@ -83,6 +97,7 @@ class ChatActions {
         const tileH = _contextMenuItemHeight;
 
         final hasDelete = _canDelete(message);
+        final hasEdit = _canEdit(message) && onEditIfAllowed != null;
         final hasText = message.text.trim().isNotEmpty;
         final isPinned = message.isPinned;
 
@@ -90,6 +105,7 @@ class ChatActions {
         final labels = <String>[
           'Ответить',
           if (hasText) 'Скопировать',
+          if (hasEdit) 'Изменить',
           isPinned ? 'Открепить' : 'Закрепить',
           'Переслать',
           if (hasDelete) 'Удалить',
@@ -142,6 +158,7 @@ class ChatActions {
                           onReact: onReact,
                           onTogglePin: onTogglePin,
                           onDeleteIfAllowed: onDeleteIfAllowed,
+                          onEditIfAllowed: hasEdit ? onEditIfAllowed : null,
                           onSelect: onSelect,
                         )
                       else
@@ -165,6 +182,7 @@ class ChatActions {
                           onReact: onReact,
                           onTogglePin: onTogglePin,
                           onDeleteIfAllowed: onDeleteIfAllowed,
+                          onEditIfAllowed: hasEdit ? onEditIfAllowed : null,
                           onSelect: onSelect,
                         ),
                     ],
@@ -199,6 +217,7 @@ class ChatActions {
     required void Function(String) onReact,
     required Future<void> Function() onTogglePin,
     required Future<void> Function() onDeleteIfAllowed,
+    Future<void> Function()? onEditIfAllowed,
     required VoidCallback onSelect,
   }) {
     final double panelMaxW = (screenW - 32).clamp(160.0, 520.0).toDouble();
@@ -251,6 +270,12 @@ class ChatActions {
               }
             }
           : null,
+      onEdit: onEditIfAllowed == null
+          ? null
+          : () async {
+              Navigator.pop(ctx);
+              await onEditIfAllowed();
+            },
       onPin: () async {
         Navigator.pop(ctx);
         await onTogglePin();
@@ -288,6 +313,7 @@ class ChatActions {
     required void Function(String) onReact,
     required Future<void> Function() onTogglePin,
     required Future<void> Function() onDeleteIfAllowed,
+    Future<void> Function()? onEditIfAllowed,
     required VoidCallback onSelect,
   }) {
     const double edgeGap = 8.0;
@@ -378,6 +404,12 @@ class ChatActions {
               }
             }
           : null,
+      onEdit: onEditIfAllowed == null
+          ? null
+          : () async {
+              Navigator.pop(ctx);
+              await onEditIfAllowed();
+            },
       onPin: () async {
         Navigator.pop(ctx);
         await onTogglePin();
@@ -852,6 +884,7 @@ class _OverlayStack extends StatelessWidget {
   final ValueChanged<String> onReact;
   final VoidCallback onReply;
   final Future<void> Function()? onDelete; // nullable
+  final Future<void> Function()? onEdit; // nullable
   final VoidCallback onPin;
   final VoidCallback onForward;
   final Future<void> Function()? onCopy; // nullable
@@ -869,6 +902,7 @@ class _OverlayStack extends StatelessWidget {
     required this.onPin,
     required this.onForward,
     required this.onDelete,
+    required this.onEdit,
     required this.onCopy,
     required this.onSelect,
   });
@@ -953,6 +987,12 @@ class _OverlayStack extends StatelessWidget {
                   icon: Icons.copy,
                   label: 'Скопировать',
                   onTap: () async => await onCopy!.call(),
+                ),
+              if (onEdit != null)
+                _ContextAction(
+                  icon: Icons.edit,
+                  label: 'Изменить',
+                  onTap: () async => await onEdit!.call(),
                 ),
               _ContextAction(
                 icon: Icons.push_pin,

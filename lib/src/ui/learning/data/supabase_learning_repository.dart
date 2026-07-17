@@ -318,6 +318,8 @@ class SupabaseLearningRepository implements LearningRepository {
       text: (m['text'] ?? m['content'] ?? m['body'] ?? '').toString(),
       at: DateTime.tryParse((m['at'] ?? m['created_at'] ?? '').toString()) ??
           DateTime.now(),
+      editedAt:
+          DateTime.tryParse((m['edited_at'] ?? m['editedAt'] ?? '').toString()),
       imagePath: _firstAttachmentUrl(m['image_path'] ?? m['attachments']),
       replyToId: m['reply_to_id']?.toString(),
       type: _typeFromServer((m['type'] ?? m['msg_type'])?.toString()),
@@ -674,6 +676,41 @@ class SupabaseLearningRepository implements LearningRepository {
     } catch (e, st) {
       debugPrint('[deleteMessage] error: $e\n$st');
       return false;
+    }
+  }
+
+  @override
+  Future<Message?> editOwnMessage(String messageId, String text) async {
+    try {
+      safeDebugLog('[editOwnMessage] message=${maskDebugId(messageId)}');
+      final res = await _sb.rpc('edit_own_message', params: {
+        'p_message_id': messageId,
+        'p_text': text,
+      });
+
+      Map<String, dynamic>? row;
+      if (res is Map) {
+        row = Map<String, dynamic>.from(res);
+      } else if (res is List && res.isNotEmpty) {
+        row = Map<String, dynamic>.from(res.first as Map);
+      }
+      if (row == null) return null;
+
+      final chatId = (row['chat_id'] ?? '').toString();
+      final attachments = await _loadChatFilesForMessage(messageId);
+      if (attachments.isNotEmpty) {
+        row['attachments'] = attachments.map((e) => e.toJson()).toList();
+      }
+      await _applyAuthorIdentity(row, (row['author_id'] ?? '').toString());
+
+      return _mapMessageRow(
+        row,
+        chatId: chatId,
+        currentUserId: _sb.auth.currentUser?.id ?? '',
+      );
+    } catch (e, st) {
+      debugPrint('[editOwnMessage] error: $e\n$st');
+      rethrow;
     }
   }
 

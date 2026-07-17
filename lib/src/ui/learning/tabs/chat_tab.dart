@@ -20,6 +20,7 @@ import '../assignment_details_screen.dart';
 import '../../../services/file_service.dart';
 import 'chat/data/chat_repository.dart';
 import 'chat/actions/chat_actions.dart' as ca;
+import 'chat/edit_message_dialog.dart';
 // ChatActions приходит через реэкспорт из widgets.dart
 import '../global_cache.dart';
 import '../../../services/image_cache_service.dart';
@@ -160,6 +161,25 @@ class _ChatTabState extends State<ChatTab> {
     final uid = Supabase.instance.client.auth.currentUser?.id;
     if (uid == null || uid.isEmpty || m.authorId != uid) return false;
     return DateTime.now().difference(m.at) <= const Duration(hours: 12);
+  }
+
+  bool _canEditMessage(Message m) => canEditOwnTextMessage(
+        m,
+        Supabase.instance.client.auth.currentUser?.id,
+      );
+
+  Future<void> _editMessage(Message m) async {
+    await showEditMessageDialog(
+      context,
+      initialText: m.text,
+      onSave: (text) async {
+        final updated =
+            await context.read<TeamCubit>().editOwnMessage(m.id, text);
+        if (updated == null) {
+          throw Exception('edit_failed');
+        }
+      },
+    );
   }
 
   void _setSelecting(bool value) {
@@ -1525,6 +1545,7 @@ class _ChatTabState extends State<ChatTab> {
                                   ctx, (emoji) => _addReaction(id, emoji)),
                           onReactionSelected: _addReaction,
                           canDeleteMessage: _canDeleteMessage,
+                          canEditMessage: _canEditMessage,
                           onMenuAction: _handlePackageMenuAction,
                           onRetryFailedText: (m) => context
                               .read<TeamCubit>()
@@ -1850,6 +1871,7 @@ class _ChatTabState extends State<ChatTab> {
         onTogglePin: () =>
             context.read<TeamCubit>().pinMessage(m.id, !m.isPinned),
         onDeleteIfAllowed: () => context.read<TeamCubit>().removeMessage(m.id),
+        onEditIfAllowed: _canEditMessage(m) ? () => _editMessage(m) : null,
         onReact: (emoji) => _addReaction(m.id, emoji),
         onSelect: () {
           _selectedMessageIds.add(m.id);
@@ -1870,6 +1892,11 @@ class _ChatTabState extends State<ChatTab> {
         final text = m.text.trim();
         if (text.isNotEmpty) {
           await services.Clipboard.setData(services.ClipboardData(text: text));
+        }
+        break;
+      case 'Изменить':
+        if (_canEditMessage(m)) {
+          await _editMessage(m);
         }
         break;
       case 'Закрепить':

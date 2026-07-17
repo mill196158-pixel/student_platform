@@ -688,6 +688,34 @@ class TeamCubit extends Cubit<TeamState> {
     return uniqueOlder;
   }
 
+  /// Edit own text message via RPC and patch local cache from the response.
+  Future<Message?> editOwnMessage(String messageId, String text) async {
+    final updated = await repo.editOwnMessage(messageId, text);
+    if (updated == null) return null;
+
+    final idx = state.chat.indexWhere((m) => m.id == messageId);
+    if (idx == -1) {
+      emit(state.copyWith(chat: _reconcileCachedMessage(updated)));
+      return updated;
+    }
+
+    final next = List<Message>.from(state.chat);
+    final prev = next[idx];
+    next[idx] = updated.copyWith(
+      authorLogin:
+          prev.authorLogin.isNotEmpty ? prev.authorLogin : updated.authorLogin,
+      authorName:
+          prev.authorName.isNotEmpty ? prev.authorName : updated.authorName,
+      authorAvatarUrl: prev.authorAvatarUrl ?? updated.authorAvatarUrl,
+      attachments: prev.attachments ?? updated.attachments,
+      reactions: prev.reactions ?? updated.reactions,
+      userReactions: prev.userReactions ?? updated.userReactions,
+      replyToId: prev.replyToId ?? updated.replyToId,
+    );
+    emit(state.copyWith(chat: _mergeCachedChat(next)));
+    return next[idx];
+  }
+
   // Toggle server-side pin for a message with optimistic UI
   Future<void> pinMessage(String id, bool pinned) async {
     final idx = state.chat.indexWhere((m) => m.id == id);

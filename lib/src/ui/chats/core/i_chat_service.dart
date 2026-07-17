@@ -9,7 +9,7 @@ enum ChatMode { team, dm }
 abstract class IChatService {
   ChatMode get mode;
   bool get supportsAssignments; // для DM => false
-  bool get supportsNotes;       // “заметки” — для DM => false
+  bool get supportsNotes; // “заметки” — для DM => false
 
   String get currentUserId;
 
@@ -26,7 +26,8 @@ abstract class IChatService {
   List<Message> get currentMessages;
 
   /// Загрузить более старые сообщения перед указанным сообщением.
-  Future<List<Message>> loadOlderMessages({required Message before, int limit = 50});
+  Future<List<Message>> loadOlderMessages(
+      {required Message before, int limit = 50});
 
   /// Метаданные непрочитанных (например, first_unread_id, count)
   Future<Map<String, dynamic>> getUnreadMeta();
@@ -35,7 +36,8 @@ abstract class IChatService {
   Future<void> markRead(String lastMessageId);
 
   /// Отправка текста с опцией ответа и списком id загруженных файлов
-  Future<String> sendText(String text, {String? replyToId, List<String>? fileIds});
+  Future<String> sendText(String text,
+      {String? replyToId, List<String>? fileIds});
 
   /// Триггернуть реакцию (тоггл)
   Future<void> toggleReaction(String messageId, String emoji);
@@ -45,6 +47,9 @@ abstract class IChatService {
 
   /// Удалить (мягко)
   Future<void> deleteMessage(String messageId);
+
+  /// Редактировать собственное текстовое сообщение
+  Future<Message> editOwnMessage(String messageId, String text);
 
   /// Загрузка локального файла в сторадж/БД -> вернуть chat_files.id
   Future<String> upload(LocalAttach local);

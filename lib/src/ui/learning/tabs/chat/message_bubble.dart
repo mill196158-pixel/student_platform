@@ -85,6 +85,7 @@ class MessageBubble extends StatelessWidget {
       time: time,
       isMe: isMe,
       receiptTicks: receiptTicks,
+      isEdited: message.isEdited,
     );
 
     final bool hasFgMarker = message.text.contains('__FG__:');

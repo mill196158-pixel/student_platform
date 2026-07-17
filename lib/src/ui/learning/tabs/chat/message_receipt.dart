@@ -25,10 +25,12 @@ String formatMessageTimeLabel({
   required String time,
   required bool isMe,
   int? receiptTicks,
+  bool isEdited = false,
 }) {
-  if (!isMe) return time;
+  final labeled = isEdited ? 'изм. $time' : time;
+  if (!isMe) return labeled;
   final ticks = receiptTicks ?? 1;
-  if (ticks <= 0) return time;
-  if (ticks >= 2) return '$time ✓✓';
-  return '$time ✓';
+  if (ticks <= 0) return labeled;
+  if (ticks >= 2) return '$labeled ✓✓';
+  return '$labeled ✓';
 }

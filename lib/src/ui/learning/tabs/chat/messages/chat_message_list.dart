@@ -50,6 +50,7 @@ class ChatMessageList extends StatelessWidget {
   final void Function(String messageId, String emoji)? onReactionSelected;
   final void Function(Message m, String action)? onMenuAction;
   final bool Function(Message m)? canDeleteMessage;
+  final bool Function(Message m)? canEditMessage;
   final bool selectingMessages;
   final Set<String>? selectedMessageIds;
   final void Function(String id)? onToggleSelect;
@@ -83,6 +84,7 @@ class ChatMessageList extends StatelessWidget {
     this.onReactionSelected,
     this.onMenuAction,
     this.canDeleteMessage,
+    this.canEditMessage,
     required this.selectingMessages,
     required this.selectedMessageIds,
     required this.onToggleSelect,
@@ -344,6 +346,7 @@ class ChatMessageList extends StatelessWidget {
                             isHovered: hoveredMessageId == m.id,
                             reactions: currentReactions,
                             canDelete: canDeleteMessage?.call(m) ?? false,
+                            canEdit: canEditMessage?.call(m) ?? false,
                             reactionLeft: isMine
                                 ? null
                                 : (hideSenderIdentity ||
@@ -466,6 +469,7 @@ class _ChatMessageInteractionWrapper extends StatelessWidget {
   final bool isHovered;
   final Map<String, int> reactions;
   final bool canDelete;
+  final bool canEdit;
   final double? reactionLeft;
   final double? reactionRight;
   final VoidCallback onToggleSelect;
@@ -484,6 +488,7 @@ class _ChatMessageInteractionWrapper extends StatelessWidget {
     required this.isHovered,
     required this.reactions,
     required this.canDelete,
+    required this.canEdit,
     required this.reactionLeft,
     required this.reactionRight,
     required this.onToggleSelect,
@@ -916,6 +921,10 @@ class _ChatMessageInteractionWrapper extends StatelessWidget {
 
     if (message.text.trim().isNotEmpty) {
       items.add(const fcr.MenuItem(label: 'Скопировать', icon: Icons.copy));
+    }
+
+    if (canEdit) {
+      items.add(const fcr.MenuItem(label: 'Изменить', icon: Icons.edit));
     }
 
     items.addAll([

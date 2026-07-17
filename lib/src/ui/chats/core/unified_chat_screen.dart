@@ -19,6 +19,7 @@ import 'package:student_platform/src/ui/learning/state/team_cubit.dart';
 
 import 'package:student_platform/src/ui/learning/tabs/chat/actions/chat_actions.dart'
     as ca;
+import 'package:student_platform/src/ui/learning/tabs/chat/edit_message_dialog.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/widgets.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/search/chat_search_controller.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/search/inline_search_bar.dart';
@@ -796,6 +797,19 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     return DateTime.now().difference(m.at) <= const Duration(hours: 12);
   }
 
+  bool _canEdit(Message m) =>
+      canEditOwnTextMessage(m, widget.service.currentUserId);
+
+  Future<void> _editMessage(Message m) async {
+    await showEditMessageDialog(
+      context,
+      initialText: m.text,
+      onSave: (text) async {
+        await widget.service.editOwnMessage(m.id, text);
+      },
+    );
+  }
+
   // ---------- Отправка ----------
   Future<void> _send(String text) async {
     if (_isUploadingAttachments || _hasFailedAttachments || _isSending) return;
@@ -1266,6 +1280,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                                       widget.service.toggleReaction(id, emoji)),
                           onReactionSelected: widget.service.toggleReaction,
                           canDeleteMessage: _canDelete,
+                          canEditMessage: _canEdit,
                           onMenuAction: _handlePackageMenuAction,
                           selectingMessages: _selecting,
                           selectedMessageIds: _selectedIds,
@@ -1631,6 +1646,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         },
         onTogglePin: () async => widget.service.pinMessage(m.id, !m.isPinned),
         onDeleteIfAllowed: () async => widget.service.deleteMessage(m.id),
+        onEditIfAllowed: _canEdit(m) ? () => _editMessage(m) : null,
         onReact: (emoji) => widget.service.toggleReaction(m.id, emoji),
         onSelect: () {
           _selectedIds.add(m.id);
@@ -1651,6 +1667,11 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         final text = m.text.trim();
         if (text.isNotEmpty) {
           await services.Clipboard.setData(services.ClipboardData(text: text));
+        }
+        break;
+      case 'Изменить':
+        if (_canEdit(m)) {
+          await _editMessage(m);
         }
         break;
       case 'Закрепить':

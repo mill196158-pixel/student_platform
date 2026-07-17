@@ -98,6 +98,16 @@ class TeamChatService implements IChatService {
       context.read<TeamCubit>().removeMessage(messageId);
 
   @override
+  Future<Message> editOwnMessage(String messageId, String text) async {
+    final updated =
+        await context.read<TeamCubit>().editOwnMessage(messageId, text);
+    if (updated == null) {
+      throw Exception('edit_failed');
+    }
+    return updated;
+  }
+
+  @override
   Future<String> upload(LocalAttach local) async {
     // Ваша загрузка уже инкапсулирована в ChatAttachmentsController + FileService,
     // но для совместимости дадим простой путь через repo.saveChatFile, если нужен:

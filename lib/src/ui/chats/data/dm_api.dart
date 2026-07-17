@@ -72,6 +72,8 @@ class DmApi {
       type: _typeFromServer((m['type'] ?? m['msg_type'] ?? 'text').toString()),
       at: DateTime.tryParse((m['at'] ?? m['created_at'] ?? '').toString()) ??
           DateTime.now(),
+      editedAt:
+          DateTime.tryParse((m['edited_at'] ?? m['editedAt'] ?? '').toString()),
       replyToId: (m['reply_to_id']?.toString().isNotEmpty ?? false)
           ? m['reply_to_id'].toString()
           : null,
@@ -515,6 +517,53 @@ class DmApi {
 
   static Future<void> deleteMessage(String messageId) async {
     await _sb.from('messages').delete().eq('id', messageId);
+  }
+
+  /// Edit own plain-text message via SECURITY DEFINER RPC.
+  /// Returns the updated message and publishes it into the local stream.
+  static Future<Message> editOwnMessage({
+    required String messageId,
+    required String text,
+  }) async {
+    final res = await _sb.rpc('edit_own_message', params: {
+      'p_message_id': messageId,
+      'p_text': text,
+    });
+
+    Map<String, dynamic>? row;
+    if (res is Map) {
+      row = Map<String, dynamic>.from(res);
+    } else if (res is List && res.isNotEmpty) {
+      row = Map<String, dynamic>.from(res.first as Map);
+    }
+    if (row == null) {
+      throw Exception('empty_edit_response');
+    }
+
+    final chatId = (row['chat_id'] ?? '').toString();
+    await _hydrateAuthor(row);
+    final files = chatId.isEmpty
+        ? <String, List<ChatFile>>{}
+        : await _loadFilesByMessage([messageId]);
+    final message = _messageFromRow(row, chatId: chatId).copyWith(
+      attachments: files[messageId] ?? const [],
+    );
+
+    if (chatId.isNotEmpty) {
+      final merged = ChatMessageMemoryCache.reconcileUpsert(chatId, message);
+      final current = _streamMessages[chatId];
+      if (current != null) {
+        current
+          ..clear()
+          ..addAll(merged);
+      }
+      final ctrl = _streamControllers[chatId];
+      if (ctrl != null && !ctrl.isClosed) {
+        ctrl.add(List<Message>.unmodifiable(merged));
+      }
+    }
+
+    return message;
   }
 
   // 9) Upload: у нас уже есть FileService через ChatAttachmentsController

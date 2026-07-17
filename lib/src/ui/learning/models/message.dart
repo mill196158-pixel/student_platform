@@ -94,6 +94,7 @@ class Message {
   final String authorName; // имя для отображения
   final String text; // контент сообщения
   final DateTime at; // created_at
+  final DateTime? editedAt; // edited_at (null = never edited)
 
   // опционально
   final String? authorAvatarUrl; // URL аватарки автора (из users.avatar_url)
@@ -118,6 +119,7 @@ class Message {
     required this.authorName,
     required this.text,
     required this.at,
+    this.editedAt,
     this.authorAvatarUrl,
     this.imagePath,
     this.replyToId,
@@ -145,6 +147,8 @@ class Message {
   bool get isSending => deliveryStatus == MessageDeliveryStatus.sending;
   bool get isFailed => deliveryStatus == MessageDeliveryStatus.failed;
 
+  bool get isEdited => editedAt != null;
+
   Message copyWith({
     String? id,
     String? chatId,
@@ -153,6 +157,7 @@ class Message {
     String? authorName,
     String? text,
     DateTime? at,
+    DateTime? editedAt,
     String? authorAvatarUrl,
     String? imagePath,
     String? replyToId,
@@ -175,6 +180,7 @@ class Message {
       authorName: authorName ?? this.authorName,
       text: text ?? this.text,
       at: at ?? this.at,
+      editedAt: editedAt ?? this.editedAt,
       authorAvatarUrl: authorAvatarUrl ?? this.authorAvatarUrl,
       imagePath: imagePath ?? this.imagePath,
       replyToId: replyToId ?? this.replyToId,
@@ -199,6 +205,7 @@ class Message {
         'author_name': authorName,
         'content': text,
         'created_at': at.toIso8601String(),
+        'edited_at': editedAt?.toIso8601String(),
         'author_avatar_url': authorAvatarUrl,
         'imagePath': imagePath,
         'replyToId': replyToId,
@@ -277,6 +284,8 @@ class Message {
       text: textVal,
       at: DateTime.tryParse((j['created_at'] ?? j['at'] ?? '').toString()) ??
           DateTime.fromMillisecondsSinceEpoch(0),
+      editedAt:
+          DateTime.tryParse((j['edited_at'] ?? j['editedAt'] ?? '').toString()),
       authorAvatarUrl:
           (j['author_avatar_url'] ?? j['avatar_url'] ?? j['authorAvatarUrl'])
               ?.toString(),

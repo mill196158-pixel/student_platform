@@ -144,6 +144,10 @@ class DmChatService implements IChatService {
       DmApi.deleteMessage(messageId);
 
   @override
+  Future<Message> editOwnMessage(String messageId, String text) =>
+      DmApi.editOwnMessage(messageId: messageId, text: text);
+
+  @override
   Future<String> upload(LocalAttach local) async {
     final cid = await ensureChatId();
     return DmApi.upload(local, cid);
