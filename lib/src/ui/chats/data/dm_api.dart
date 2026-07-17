@@ -458,6 +458,26 @@ class DmApi {
     }, onConflict: 'chat_id,user_id');
   }
 
+  /// Peer read cursor for DM receipts (`peer.last_read_at >= message.created_at`).
+  static Future<DateTime?> getPeerLastReadAt({
+    required String chatId,
+    required String peerId,
+  }) async {
+    if (chatId.isEmpty || peerId.isEmpty) return null;
+    final row = await _sb
+        .from('chat_reads')
+        .select('last_read_at')
+        .eq('chat_id', chatId)
+        .eq('user_id', peerId)
+        .maybeSingle();
+    final raw = row?['last_read_at'];
+    if (raw is DateTime) return raw.toUtc();
+    if (raw is String && raw.isNotEmpty) {
+      return DateTime.tryParse(raw)?.toUtc();
+    }
+    return null;
+  }
+
   // 6) Метаданные непрочитанного
   static Future<Map<String, dynamic>> getUnreadMeta(String chatId) async {
     final res =

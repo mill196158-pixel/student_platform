@@ -37,6 +37,7 @@ import '../forward/forward_outbox.dart';
 import '../data/dm_api.dart';
 
 import 'i_chat_service.dart';
+import 'dm_chat_service.dart';
 
 // ⤵️ DM-композер (новый файл ниже)
 import 'dm_composer_bar.dart';
@@ -115,6 +116,10 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   DateTime? _entrySeenAt;
   bool _showEntryNewBadge = false;
 
+  // DM-only: peer read cursor for delivery/read ticks
+  DateTime? _peerLastReadAt;
+  RealtimeChannel? _dmPeerReadsChannel;
+
   bool _selecting = false;
   final Set<String> _selectedIds = {};
 
@@ -166,6 +171,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       _currentChatIdDm = cid;
       _restoreDraftDm();
       await _initEntryBoundary();
+      if (_isDm) {
+        await _initDmPeerReadReceipts(cid);
+      }
       await _consumeForwardOutboxIfAny(cid);
       // smooth previews like in ChatTab
       // ignore: discarded_futures
@@ -209,6 +217,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     } catch (_) {}
     _forceSaveDraftDm();
     _seenDebounce?.cancel();
+    _unsubscribeDmPeerReadReceipts();
     _scroll.removeListener(_onScroll);
     if (_typingHookAttached) {
       _ctrl.removeListener(_onTyping);
@@ -225,6 +234,84 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     _composerFocus.dispose();
     _myTypingOff?.cancel();
     super.dispose();
+  }
+
+  String? get _dmPeerId {
+    final s = widget.service;
+    if (s is DmChatService) return s.peerId;
+    return null;
+  }
+
+  Future<void> _initDmPeerReadReceipts(String chatId) async {
+    final peerId = _dmPeerId;
+    if (!_isDm || chatId.isEmpty || peerId == null || peerId.isEmpty) return;
+
+    try {
+      final at = await DmApi.getPeerLastReadAt(chatId: chatId, peerId: peerId);
+      if (mounted) setState(() => _peerLastReadAt = at);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[UnifiedChat] peer last_read_at load error: $e');
+      }
+    }
+
+    _subscribeDmPeerReadReceipts(chatId: chatId, peerId: peerId);
+  }
+
+  void _subscribeDmPeerReadReceipts({
+    required String chatId,
+    required String peerId,
+  }) {
+    _unsubscribeDmPeerReadReceipts();
+
+    void onPeerReadChange(PostgresChangePayload payload) {
+      final row = payload.newRecord;
+      final uid = (row['user_id'] ?? '').toString();
+      if (uid != peerId) return;
+      final raw = row['last_read_at'];
+      DateTime? at;
+      if (raw is DateTime) {
+        at = raw.toUtc();
+      } else if (raw is String && raw.isNotEmpty) {
+        at = DateTime.tryParse(raw)?.toUtc();
+      }
+      if (!mounted) return;
+      if (_peerLastReadAt == at) return;
+      setState(() => _peerLastReadAt = at);
+    }
+
+    final filter = PostgresChangeFilter(
+      type: PostgresChangeFilterType.eq,
+      column: 'chat_id',
+      value: chatId,
+    );
+
+    _dmPeerReadsChannel = Supabase.instance.client
+        .channel('dm:chat_reads:$chatId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'chat_reads',
+          filter: filter,
+          callback: onPeerReadChange,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'chat_reads',
+          filter: filter,
+          callback: onPeerReadChange,
+        )
+        .subscribe();
+  }
+
+  void _unsubscribeDmPeerReadReceipts() {
+    final ch = _dmPeerReadsChannel;
+    _dmPeerReadsChannel = null;
+    if (ch == null) return;
+    try {
+      ch.unsubscribe();
+    } catch (_) {}
   }
 
   // ===== DM Draft helpers =====
@@ -1161,6 +1248,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                           hoveredMessageId: _hoveredMessageId,
                           noAvatarSpacing: isDm,
                           hideAuthorLine: isDm,
+                          enableDmReceipts: isDm,
+                          peerLastReadAt: isDm ? _peerLastReadAt : null,
                           onReply: (m) => setState(() => _replyTo = m),
                           onLongPress:
                               (ctx, m, rect, bytes, replyPreview, fallback) =>

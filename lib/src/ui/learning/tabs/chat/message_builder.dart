@@ -208,6 +208,7 @@ Bubble buildBubble({
   VoidCallback? onRetryFailed,
   bool selected = false,
   Key? boundaryKey,
+  int? receiptTicks,
 }) {
   // Current message reactions as counts
   final Map<String, int> currentCounts = reactions[m.id] ?? <String, int>{};
@@ -256,6 +257,7 @@ Bubble buildBubble({
           reactions: currentCounts.isNotEmpty ? currentCounts : null,
           onReact: onReact,
           selected: selected,
+          receiptTicks: receiptTicks,
         );
       } else {
         return MultiFileBubble(
@@ -274,6 +276,7 @@ Bubble buildBubble({
           reactions: currentCounts.isNotEmpty ? currentCounts : null,
           onReact: onReact,
           selected: selected,
+          receiptTicks: receiptTicks,
         );
       }
     }
@@ -299,5 +302,6 @@ Bubble buildBubble({
     onReact: onReact,
     onRetryFailed: onRetryFailed,
     selected: selected,
+    receiptTicks: receiptTicks,
   );
 }

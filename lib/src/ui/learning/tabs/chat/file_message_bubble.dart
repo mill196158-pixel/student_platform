@@ -5,6 +5,7 @@ import '../../widgets/fullscreen_image.dart';
 import '../../widgets/file_card.dart';
 import 'profile_avatar.dart';
 import 'package:student_platform/src/ui/friends/friend_profile_screen.dart';
+import 'message_receipt.dart';
 
 class FileMessageBubble extends StatelessWidget {
   final ChatFile file;
@@ -23,6 +24,9 @@ class FileMessageBubble extends StatelessWidget {
   final bool selected;
   final Key? boundaryKey;
 
+  /// DM receipts: null = legacy single ✓; 0/1/2 = none/delivered/read.
+  final int? receiptTicks;
+
   const FileMessageBubble({
     super.key,
     required this.file,
@@ -40,6 +44,7 @@ class FileMessageBubble extends StatelessWidget {
     this.reactions,
     this.selected = false,
     this.boundaryKey,
+    this.receiptTicks,
   });
 
   @override
@@ -56,7 +61,11 @@ class FileMessageBubble extends StatelessWidget {
     final textColor = theme.colorScheme.onSurface;
     final captionText = _realCaption(file, caption);
     final hasCaption = captionText != null;
-    final displayTime = isMe ? '$time ✓' : time;
+    final displayTime = formatMessageTimeLabel(
+      time: time,
+      isMe: isMe,
+      receiptTicks: receiptTicks,
+    );
     return LayoutBuilder(
       builder: (context, constraints) {
         final rowWidth = constraints.maxWidth.isFinite

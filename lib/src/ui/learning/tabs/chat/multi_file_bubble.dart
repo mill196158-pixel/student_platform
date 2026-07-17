@@ -5,6 +5,7 @@ import '../../widgets/file_card.dart';
 import 'profile_avatar.dart'; // ДОБАВЛЕНО
 import 'package:student_platform/src/ui/friends/friend_profile_screen.dart';
 import '../../widgets/fullscreen_image.dart'; // ДОБАВЛЕНО
+import 'message_receipt.dart';
 
 class MultiFileBubble extends StatelessWidget {
   final List<ChatFile> files;
@@ -23,6 +24,9 @@ class MultiFileBubble extends StatelessWidget {
   final bool selected;
   final Key? boundaryKey;
 
+  /// DM receipts: null = legacy single ✓; 0/1/2 = none/delivered/read.
+  final int? receiptTicks;
+
   const MultiFileBubble({
     super.key,
     required this.files,
@@ -40,7 +44,14 @@ class MultiFileBubble extends StatelessWidget {
     this.onReact,
     this.selected = false,
     this.boundaryKey,
+    this.receiptTicks,
   });
+
+  String get _displayTime => formatMessageTimeLabel(
+        time: time,
+        isMe: isMe,
+        receiptTicks: receiptTicks,
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -49,7 +60,7 @@ class MultiFileBubble extends StatelessWidget {
     final theme = Theme.of(context);
     final isAllImages = files.every((f) => f.isImage);
     final isAllDocuments = files.every((f) => !f.isImage);
-    final displayTime = isMe ? '$time ✓' : time;
+    final displayTime = _displayTime;
     final captionText = _realCaption;
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -306,7 +317,7 @@ class MultiFileBubble extends StatelessWidget {
             ? Positioned(
                 bottom: 8,
                 right: 8,
-                child: _timePill(isMe ? '$time ✓' : time),
+                child: _timePill(_displayTime),
               )
             : null,
       );
@@ -391,7 +402,7 @@ class MultiFileBubble extends StatelessWidget {
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
-                isMe ? '$time ✓' : time,
+                _displayTime,
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 10,

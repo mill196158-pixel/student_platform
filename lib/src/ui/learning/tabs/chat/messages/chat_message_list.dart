@@ -10,6 +10,7 @@ import '../swipe_to_reply.dart';
 import '../search/chat_search_controller.dart';
 import '../search/search_highlight.dart';
 import '../message_builder.dart';
+import '../message_receipt.dart';
 
 class ChatMessageList extends StatelessWidget {
   final List<Message> messages;
@@ -30,6 +31,9 @@ class ChatMessageList extends StatelessWidget {
   final bool hideAuthorLine;
   // NEW: полностью скрыть идентификаторы отправителей (аватар/инициалы/имя)
   final bool hideSenderIdentity;
+  // DM-only: one/two checkmarks from peer chat_reads.last_read_at
+  final bool enableDmReceipts;
+  final DateTime? peerLastReadAt;
   // Временная подсветка сообщения при открытом меню действий
   final String? hoveredMessageId;
 
@@ -69,6 +73,8 @@ class ChatMessageList extends StatelessWidget {
     this.noAvatarSpacing = false,
     this.hideAuthorLine = false,
     this.hideSenderIdentity = false,
+    this.enableDmReceipts = false,
+    this.peerLastReadAt,
     this.hoveredMessageId,
     required this.onReply,
     required this.onLongPress,
@@ -196,6 +202,15 @@ class ChatMessageList extends StatelessWidget {
             final isGroupedWithPrevious =
                 idx > 0 && !_shouldShowAvatar(list, idx);
 
+            final receiptTicks = dmReceiptTicks(
+              isMine: isMine,
+              enableDmReceipts: enableDmReceipts,
+              messageAt: m.at,
+              peerLastReadAt: peerLastReadAt,
+              isSending: m.isSending,
+              isFailed: m.isFailed,
+            );
+
             final bubble = buildBubble(
               m: m,
               // скрыть любые идентификаторы отправителей, если требуется (превью ЛС)
@@ -225,6 +240,7 @@ class ChatMessageList extends StatelessWidget {
                       (selectedMessageIds?.contains(m.id) ?? false)) ||
                   hoveredMessageId == m.id),
               boundaryKey: null,
+              receiptTicks: receiptTicks,
             );
 
             final previewBubble = buildBubble(
@@ -251,6 +267,7 @@ class ChatMessageList extends StatelessWidget {
                   m.isFailed ? () => onRetryFailedText?.call(m) : null,
               selected: true,
               boundaryKey: null,
+              receiptTicks: receiptTicks,
             );
 
             final bubbleWithKey = bubble;

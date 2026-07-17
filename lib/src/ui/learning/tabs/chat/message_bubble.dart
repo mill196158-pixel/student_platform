@@ -14,6 +14,7 @@ import 'profile_avatar.dart';
 import 'multi_file_bubble.dart';
 import 'package:student_platform/src/ui/friends/friend_profile_screen.dart';
 import 'forward_group_bubble.dart';
+import 'message_receipt.dart';
 
 class MessageBubble extends StatelessWidget {
   final Message message;
@@ -32,6 +33,9 @@ class MessageBubble extends StatelessWidget {
   final Key? boundaryKey;
   final bool selected;
 
+  /// DM receipts: null = legacy single ✓; 0/1/2 = none/delivered/read.
+  final int? receiptTicks;
+
   const MessageBubble({
     super.key,
     required this.message,
@@ -49,6 +53,7 @@ class MessageBubble extends StatelessWidget {
     this.onReplyTap,
     this.boundaryKey,
     this.selected = false,
+    this.receiptTicks,
   });
 
   Map<String, dynamic>? _parseForwardGroup(String text) {
@@ -76,7 +81,11 @@ class MessageBubble extends StatelessWidget {
         selected ? Colors.white.withValues(alpha: isMe ? 0.85 : 0.78) : baseBg;
 
     final textColor = Colors.black87;
-    final displayTime = isMe ? '$time ✓' : time;
+    final displayTime = formatMessageTimeLabel(
+      time: time,
+      isMe: isMe,
+      receiptTicks: receiptTicks,
+    );
 
     final bool hasFgMarker = message.text.contains('__FG__:');
     final fg = _parseForwardGroup(message.text);
@@ -303,6 +312,7 @@ class MessageBubble extends StatelessWidget {
                             text: message.text.isNotEmpty ? message.text : null,
                             showAvatar: false,
                             authorName: message.authorName,
+                            receiptTicks: receiptTicks,
                           ),
                         ],
 
