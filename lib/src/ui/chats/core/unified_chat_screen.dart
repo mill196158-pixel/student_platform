@@ -27,6 +27,7 @@ import 'package:student_platform/src/ui/learning/tabs/chat/selection_bars.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/composer.dart';
 
 import 'package:student_platform/src/services/file_service.dart';
+import 'package:student_platform/src/services/push/active_chat_tracker.dart';
 import 'package:student_platform/src/ui/learning/global_cache.dart';
 import 'package:student_platform/src/services/image_cache_service.dart';
 
@@ -197,6 +198,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         rethrow;
       }
       _currentChatIdDm = cid;
+      ActiveChatTracker.instance.enter(cid);
       _restoreDraftDm();
       await _initEntryBoundary();
       if (_isDm) {
@@ -240,6 +242,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
   @override
   void dispose() {
+    ActiveChatTracker.instance.leave(_currentChatIdDm);
     try {
       final list = widget.service.currentMessages;
       if (list.isNotEmpty) _markReadSafely(list.last.id);

@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:student_platform/src/config/auth_email_adapter.dart';
 import 'package:student_platform/src/core/session.dart';
+import 'package:student_platform/src/services/push/push_notification_service.dart';
 import 'package:student_platform/src/ui/authentication/screens/change_password_screen.dart';
 
 class AuthService {
@@ -45,6 +46,7 @@ class AuthService {
   }
 
   static Future<void> signOut(BuildContext context) async {
+    await PushNotificationService.instance.onLogout();
     await _sb.auth.signOut();
     AppSession.clear();
     if (context.mounted) context.go('/login');

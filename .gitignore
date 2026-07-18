@@ -22,6 +22,8 @@ migrate_working_dir/
 *.secrets
 *.secrets.*
 private/
+**/firebase-service-account*.json
+**/serviceAccount*.json
 
 # Local code dumps (may contain outdated secrets)
 **/all_dart_code.txt

@@ -22,14 +22,20 @@ import 'src/ui/profile/edit_profile_screen.dart';
 import 'src/ui/profile/personal_diary_screen.dart';
 import 'src/ui/exams/exams_screen.dart';
 import 'src/ui/schedule/subject_diary/subject_diary.dart';
+import 'src/ui/notifications/notification_settings_screen.dart';
+import 'src/ui/notifications/push_session_host.dart';
 import 'src/config/supabase_config.dart';
 import 'src/core/session_keeper.dart';
+import 'src/services/push/push_notification_service.dart';
 import 'router_observer.dart';
 import 'src/ui/learning/state/team_cubit.dart';
 import 'src/ui/learning/models/team.dart';
 
+final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
+
 /// ===== GoRouter =====
 final GoRouter appRouter = GoRouter(
+  navigatorKey: rootNavigatorKey,
   initialLocation: '/splash',
   observers: [routeObserver],
   routes: [
@@ -43,7 +49,7 @@ final GoRouter appRouter = GoRouter(
     ),
     GoRoute(
       path: '/home',
-      builder: (_, __) => const NavigationScreen(),
+      builder: (_, __) => const PushSessionHost(child: NavigationScreen()),
     ),
     GoRoute(
       path: '/change-password',
@@ -65,6 +71,10 @@ final GoRouter appRouter = GoRouter(
       path: '/my-diary',
       builder: (_, __) => const PersonalDiaryScreen(),
     ),
+    GoRoute(
+      path: '/notification-settings',
+      builder: (_, __) => const NotificationSettingsScreen(),
+    ),
   ],
 );
 
@@ -82,6 +92,10 @@ Future<void> main() async {
       autoRefreshToken: true,
     ),
   );
+
+  // Mobile-only Firebase bootstrap (no-op on Windows/desktop / missing config).
+  PushNotificationService.instance.bindNavigatorKey(rootNavigatorKey);
+  await PushNotificationService.instance.bootstrapFirebase();
 
   // Инициализируем глобальный кэш
   await GlobalCache().initialize();

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import 'package:student_platform/src/services/push/app_notifications_api.dart';
 import 'package:student_platform/src/ui/home/home_dashboard_service.dart';
 import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
 import 'package:student_platform/src/ui/home/widgets/help_card.dart';
@@ -11,6 +12,7 @@ import 'package:student_platform/src/ui/home/widgets/news_story_sheet.dart';
 import 'package:student_platform/src/ui/home/widgets/task_preview_card.dart';
 import 'package:student_platform/src/ui/navigation/main_tab_scope.dart';
 import 'package:student_platform/src/ui/home/widgets/today_summary_card.dart';
+import 'package:student_platform/src/ui/notifications/notification_center_sheet.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -21,13 +23,14 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final HomeDashboardService _service = HomeDashboardService();
+  final AppNotificationsApi _notificationsApi = AppNotificationsApi();
 
   HomeDashboardData? _data;
   Object? _error;
   bool _loading = true;
+  int _unreadNotificationCount = 0;
   final Set<String> _hiddenDoneAssignmentIds = {};
   final Set<String> _markingDoneAssignmentIds = {};
-  final Set<String> _locallyReadNotificationIds = {};
 
   @override
   void initState() {
@@ -44,9 +47,15 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     try {
-      final data = await _service.load();
+      final results = await Future.wait<Object?>([
+        _service.load(),
+        _notificationsApi.unreadCount(),
+      ]);
       if (!mounted) return;
-      setState(() => _data = data);
+      setState(() {
+        _data = results[0] as HomeDashboardData;
+        _unreadNotificationCount = results[1] as int;
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e);
@@ -112,8 +121,14 @@ class _HomeScreenState extends State<HomeScreen> {
           child: HomeHeader(
             profile: data.profile,
             currentDate: data.scheduleDate,
-            notificationCount: _unreadNotificationsCount(data),
-            onNotificationsTap: () => _showNotifications(data),
+            notificationCount: _unreadNotificationCount,
+            onNotificationsTap: () async {
+              await showNotificationCenterSheet(context);
+              if (!mounted) return;
+              final count = await _notificationsApi.unreadCount();
+              if (!mounted) return;
+              setState(() => _unreadNotificationCount = count);
+            },
           ),
         ),
         SliverToBoxAdapter(
@@ -358,112 +373,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  int _unreadNotificationsCount(HomeDashboardData data) {
-    return _buildNotifications(data)
-        .where((item) => !_isNotificationRead(data, item.id))
-        .length;
-  }
-
-  bool _isNotificationRead(HomeDashboardData data, String notificationId) {
-    return data.readNotificationIds.contains(notificationId) ||
-        _locallyReadNotificationIds.contains(notificationId);
-  }
-
-  List<_HomeNotificationItem> _buildNotifications(HomeDashboardData data) {
-    final lessonsText = data.hasLessonsToday
-        ? 'Сегодня ${data.lessonsCount} ${_lessonWord(data.lessonsCount)}'
-        : data.lessonsFinishedForToday
-            ? 'Пары на сегодня закончились'
-            : 'Сегодня пар нет';
-    final assignmentsText = data.assignmentsCount > 0
-        ? 'Есть ${data.assignmentsCount} ближайшие ${_assignmentWord(data.assignmentsCount)}'
-        : 'Ближайших дедлайнов пока нет';
-    final time = DateFormat('HH:mm', 'ru_RU').format(DateTime.now());
-    return [
-      _HomeNotificationItem(
-        id: 'schedule_${data.lessonsCount}_${data.lessonsFinishedForToday}_${data.totalLessonsToday}',
-        title: 'Расписание',
-        text: lessonsText,
-        time: time,
-        icon: Icons.today_rounded,
-        color: const Color(0xFF7C63D8),
-        actionLabel: 'Открыть расписание',
-        targetTab: MainTab.schedule,
-      ),
-      _HomeNotificationItem(
-        id: 'assignments_${data.assignmentsCount}',
-        title: 'Задания',
-        text: assignmentsText,
-        time: time,
-        icon: Icons.task_alt_rounded,
-        color: const Color(0xFFB58B3B),
-        actionLabel:
-            data.assignmentsCount > 0 ? 'Открыть дневник' : 'Открыть команды',
-        route: data.assignmentsCount > 0 ? '/my-diary' : null,
-        targetTab: data.assignmentsCount > 0 ? null : MainTab.learning,
-      ),
-      const _HomeNotificationItem(
-        id: 'materials',
-        title: 'Материалы',
-        text: 'Новые материалы появятся в разделе «Информация»',
-        time: 'сегодня',
-        icon: Icons.folder_copy_outlined,
-        color: Color(0xFF2F9D84),
-        actionLabel: 'Открыть информацию',
-        targetTab: MainTab.info,
-      ),
-      const _HomeNotificationItem(
-        id: 'home_update',
-        title: 'Система',
-        text: 'Главная страница обновлена',
-        time: 'сегодня',
-        icon: Icons.auto_awesome_rounded,
-        color: Color(0xFF8A72D8),
-        actionLabel: 'Остаться на главной',
-        targetTab: MainTab.home,
-      ),
-    ];
-  }
-
-  void _showNotifications(HomeDashboardData data) {
-    final notifications = _buildNotifications(data);
-
-    _showDetailsSheet(
-      title: 'Уведомления',
-      icon: Icons.notifications_none_rounded,
-      accent: const Color(0xFF7C63D8),
-      children: notifications.isEmpty
-          ? const [
-              _NotificationEmptyState(),
-            ]
-          : notifications
-              .map(
-                (item) => _NotificationLine(
-                  item: item,
-                  unread: !_isNotificationRead(data, item.id),
-                  onTap: () => _openNotification(item),
-                ),
-              )
-              .toList(),
-    );
-  }
-
-  void _openNotification(_HomeNotificationItem item) {
-    if (mounted) {
-      setState(() => _locallyReadNotificationIds.add(item.id));
-    }
-    _service.markNotificationRead(item.id);
-
-    Navigator.of(context).pop();
-
-    if (item.targetTab != null) {
-      MainTabScope.switchToTab(context, item.targetTab!);
-    }
-    if (item.route != null) {
-      context.push(item.route!);
-    }
-  }
-
   void _showAssignmentDetails(HomeAssignmentPreview item) {
     final assignment = item.assignment;
     _showDetailsSheet(
@@ -594,22 +503,6 @@ class _HomeScreenState extends State<HomeScreen> {
       default:
         return item.assignment.status!;
     }
-  }
-
-  String _lessonWord(int count) {
-    if (count % 10 == 1 && count % 100 != 11) return 'пара';
-    if ([2, 3, 4].contains(count % 10) && ![12, 13, 14].contains(count % 100)) {
-      return 'пары';
-    }
-    return 'пар';
-  }
-
-  String _assignmentWord(int count) {
-    if (count % 10 == 1 && count % 100 != 11) return 'задание';
-    if ([2, 3, 4].contains(count % 10) && ![12, 13, 14].contains(count % 100)) {
-      return 'задания';
-    }
-    return 'заданий';
   }
 }
 
@@ -810,176 +703,6 @@ class _InfoLine extends StatelessWidget {
                 fontWeight: FontWeight.w800,
                 height: 1.3,
               ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _NotificationLine extends StatelessWidget {
-  final _HomeNotificationItem item;
-  final bool unread;
-  final VoidCallback onTap;
-
-  const _NotificationLine({
-    required this.item,
-    required this.unread,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(18),
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 10),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: item.color.withValues(alpha: unread ? 0.11 : 0.06),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(
-              color: item.color.withValues(alpha: unread ? 0.18 : 0.08),
-            ),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: item.color.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Icon(item.icon, color: item.color, size: 21),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        if (unread) ...[
-                          Container(
-                            width: 7,
-                            height: 7,
-                            decoration: BoxDecoration(
-                              color: item.color,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                        ],
-                        Expanded(
-                          child: Text(
-                            item.title,
-                            style: theme.textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w900,
-                              color: theme.colorScheme.onSurface,
-                            ),
-                          ),
-                        ),
-                        Text(
-                          item.time,
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: theme.colorScheme.onSurface
-                                .withValues(alpha: 0.48),
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      item.text,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color:
-                            theme.colorScheme.onSurface.withValues(alpha: 0.64),
-                        height: 1.3,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Text(
-                          item.actionLabel,
-                          style: theme.textTheme.labelMedium?.copyWith(
-                            color: item.color,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                        const SizedBox(width: 2),
-                        Icon(
-                          Icons.chevron_right_rounded,
-                          size: 18,
-                          color: item.color,
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _HomeNotificationItem {
-  final String id;
-  final String title;
-  final String text;
-  final String time;
-  final IconData icon;
-  final Color color;
-  final String actionLabel;
-  final MainTab? targetTab;
-  final String? route;
-
-  const _HomeNotificationItem({
-    required this.id,
-    required this.title,
-    required this.text,
-    required this.time,
-    required this.icon,
-    required this.color,
-    required this.actionLabel,
-    this.targetTab,
-    this.route,
-  });
-}
-
-class _NotificationEmptyState extends StatelessWidget {
-  const _NotificationEmptyState();
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 20),
-      child: Column(
-        children: [
-          Icon(
-            Icons.notifications_off_outlined,
-            size: 42,
-            color: theme.colorScheme.onSurface.withValues(alpha: 0.34),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            'Пока нет уведомлений',
-            style: theme.textTheme.titleSmall?.copyWith(
-              color: theme.colorScheme.onSurface,
-              fontWeight: FontWeight.w900,
             ),
           ),
         ],
