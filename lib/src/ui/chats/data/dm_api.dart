@@ -1,5 +1,6 @@
 // FILE: lib/src/ui/chats/data/dm_api.dart
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
@@ -80,8 +81,11 @@ class DmApi {
     final rows = await query.order('created_at', ascending: false).limit(limit);
 
     if (kDebugMode) {
+      final boundary = clearFloor?.toUtc().toIso8601String() ?? '<none>';
       debugPrint(
-          '[DM] loadMessages chat=${maskDebugId(chatId)} rows=${(rows as List).length}');
+        '[DM] loadMessages chat=${maskDebugId(chatId)} rows=${(rows as List).length} '
+        'since=${sinceAt.toUtc().toIso8601String()} clearedAt=$boundary',
+      );
     }
 
     final msgs = <Message>[];
@@ -311,10 +315,105 @@ class DmApi {
     }
   }
 
+  static String _publishOptimisticMessage({
+    required String chatId,
+    required String userId,
+    required String text,
+    String? replyToId,
+  }) {
+    final clientId =
+        'local_${DateTime.now().microsecondsSinceEpoch}_${Random().nextInt(999)}';
+    final local = Message(
+      id: clientId,
+      chatId: chatId,
+      authorId: userId,
+      authorLogin: '',
+      authorName: 'Вы',
+      text: text,
+      at: DateTime.now(),
+      replyToId: replyToId,
+      clientId: clientId,
+      deliveryStatus: MessageDeliveryStatus.sending,
+    );
+    final merged = ChatMessageMemoryCache.upsert(chatId, local);
+    final current = _streamMessages.putIfAbsent(chatId, () => <Message>[]);
+    current
+      ..clear()
+      ..addAll(merged);
+    final ctrl = _streamControllers[chatId];
+    if (ctrl != null && !ctrl.isClosed) {
+      ctrl.add(List<Message>.unmodifiable(merged));
+    }
+    return clientId;
+  }
+
+  static void _markOptimisticFailed({
+    required String chatId,
+    required String clientId,
+  }) {
+    final current = ChatMessageMemoryCache.snapshot(chatId);
+    if (current.isEmpty) return;
+    final next = current.map((message) {
+      if (message.clientId == clientId || message.id == clientId) {
+        return message.copyWith(deliveryStatus: MessageDeliveryStatus.failed);
+      }
+      return message;
+    }).toList();
+    final merged = ChatMessageMemoryCache.replace(chatId, next);
+    final streamCurrent = _streamMessages.putIfAbsent(chatId, () => <Message>[]);
+    streamCurrent
+      ..clear()
+      ..addAll(merged);
+    final ctrl = _streamControllers[chatId];
+    if (ctrl != null && !ctrl.isClosed) {
+      ctrl.add(List<Message>.unmodifiable(merged));
+    }
+  }
+
+  static Future<List<Message>> refreshStream({required String chatId}) async {
+    if (chatId.isEmpty) return const <Message>[];
+    try {
+      invalidateClearedAt(chatId);
+      final clearedAt = await loadClearedAt(chatId);
+      final list = await loadMessages(chatId: chatId, clearedAt: clearedAt);
+      ChatMessageMemoryCache.merge(chatId, list);
+      final visible = ChatMessageMemoryCache.pruneAtOrBefore(chatId, clearedAt);
+
+      final current = _streamMessages.putIfAbsent(chatId, () => <Message>[]);
+      current
+        ..clear()
+        ..addAll(visible);
+
+      final ctrl = _streamControllers[chatId];
+      if (ctrl != null && !ctrl.isClosed) {
+        ctrl.add(List<Message>.unmodifiable(current));
+      }
+      return List<Message>.unmodifiable(current);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[DM] refreshStream failed chat=${maskDebugId(chatId)}: $e');
+      }
+      return const <Message>[];
+    }
+  }
+
   // 3) Realtime подписка по chat_id
   static Stream<List<Message>> watchMessages({required String chatId}) {
     if (_streamControllers.containsKey(chatId)) {
-      return _streamControllers[chatId]!.stream;
+      final ctrl = _streamControllers[chatId]!;
+      final current = _streamMessages[chatId] ?? const <Message>[];
+      unawaited(refreshStream(chatId: chatId));
+      return Stream<List<Message>>.multi((controller) {
+        if (current.isNotEmpty) {
+          controller.add(List<Message>.unmodifiable(current));
+        }
+        final sub = ctrl.stream.listen(
+          controller.add,
+          onError: controller.addError,
+          onDone: controller.close,
+        );
+        controller.onCancel = sub.cancel;
+      });
     }
 
     final ctrl = StreamController<List<Message>>.broadcast();
@@ -451,6 +550,14 @@ class DmApi {
       throw Exception('Not authenticated');
     }
     final hasFiles = (fileIds != null && fileIds.isNotEmpty);
+    final optimisticId = hasFiles
+        ? null
+        : _publishOptimisticMessage(
+            chatId: chatId,
+            userId: uid,
+            text: text,
+            replyToId: replyToId,
+          );
 
     // Try RPC first (if present on server)
     try {
@@ -478,25 +585,38 @@ class DmApi {
         }
       }
     } catch (e) {
-      if (BlocksApi.isDmBlockedError(e)) rethrow;
+      if (BlocksApi.isDmBlockedError(e)) {
+        if (optimisticId != null) {
+          _markOptimisticFailed(chatId: chatId, clientId: optimisticId);
+        }
+        rethrow;
+      }
       // fallback below
     }
 
     // Fallback: direct insert with author_id
-    final inserted = await _sb
-        .from('messages')
-        .insert({
-          'chat_id': chatId,
-          'author_id': uid,
-          'content': text,
-          'body': text,
-          'msg_type': hasFiles ? 'file' : 'text',
-          'reply_to_id': replyToId,
-          'attachments': <dynamic>[],
-          'reactions': <String, int>{},
-        })
-        .select('id')
-        .single();
+    late final dynamic inserted;
+    try {
+      inserted = await _sb
+          .from('messages')
+          .insert({
+            'chat_id': chatId,
+            'author_id': uid,
+            'content': text,
+            'body': text,
+            'msg_type': hasFiles ? 'file' : 'text',
+            'reply_to_id': replyToId,
+            'attachments': <dynamic>[],
+            'reactions': <String, int>{},
+          })
+          .select('id')
+          .single();
+    } catch (_) {
+      if (optimisticId != null) {
+        _markOptimisticFailed(chatId: chatId, clientId: optimisticId);
+      }
+      rethrow;
+    }
 
     final mid = Map<String, dynamic>.from(inserted as Map)['id'].toString();
     if (kDebugMode) {

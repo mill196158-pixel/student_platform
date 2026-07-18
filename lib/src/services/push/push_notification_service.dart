@@ -329,20 +329,35 @@ class PushNotificationService {
   Future<void> _registerCurrentToken() async {
     if (!_firebaseReady || !_sessionActive) return;
 
-    if (Platform.isIOS) {
-      final apns = await FirebaseMessaging.instance.getAPNSToken();
-      if (apns == null) {
-        // APNs may arrive slightly later; onTokenRefresh / retry covers it.
-        await Future<void>.delayed(const Duration(seconds: 2));
-      }
-    }
+    for (var attempt = 1; attempt <= 5; attempt++) {
+      if (!_sessionActive) return;
+      try {
+        if (Platform.isIOS) {
+          final apns = await FirebaseMessaging.instance.getAPNSToken();
+          if (apns == null || apns.isEmpty) {
+            if (kDebugMode) {
+              debugPrint('[Push] APNs token is not ready, retry $attempt/5');
+            }
+            await Future<void>.delayed(Duration(seconds: attempt));
+            continue;
+          }
+        }
 
-    try {
-      final token = await FirebaseMessaging.instance.getToken();
-      if (token == null || token.isEmpty) return;
-      await _upsertToken(token);
-    } catch (e) {
-      if (kDebugMode) debugPrint('[Push] getToken failed: $e');
+        final token = await FirebaseMessaging.instance.getToken();
+        if (token == null || token.isEmpty) {
+          if (kDebugMode) {
+            debugPrint('[Push] FCM token is empty, retry $attempt/5');
+          }
+          await Future<void>.delayed(Duration(seconds: attempt));
+          continue;
+        }
+        await _upsertToken(token);
+        return;
+      } catch (e) {
+        if (kDebugMode)
+          debugPrint('[Push] getToken failed attempt $attempt: $e');
+        await Future<void>.delayed(Duration(seconds: attempt));
+      }
     }
   }
 

@@ -109,6 +109,9 @@ class _BodyState extends State<_Body> {
 
   @override
   Widget build(BuildContext context) {
+    final headerHeight =
+        (MediaQuery.paddingOf(context).top + 86.0).clamp(128.0, 150.0);
+
     return BlocBuilder<LearningCubit, LearningState>(
       builder: (context, state) {
         return Scaffold(
@@ -116,7 +119,7 @@ class _BodyState extends State<_Body> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               SizedBox(
-                height: 128,
+                height: headerHeight,
                 child: _LandingHeader(
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -505,6 +508,7 @@ class _LandingHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final compact = MediaQuery.sizeOf(context).height < 760;
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -548,14 +552,14 @@ class _LandingHeader extends StatelessWidget {
           bottom: false,
           child: SizedBox.expand(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+              padding: EdgeInsets.fromLTRB(16, compact ? 4 : 8, 16, 6),
               child: Align(
-                alignment: const Alignment(-1, 0.26),
+                alignment: Alignment(-1, compact ? 0.08 : 0.18),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(12),
+                      padding: EdgeInsets.all(compact ? 10 : 12),
                       decoration: BoxDecoration(
                         color: theme.colorScheme.primary.withOpacity(0.10),
                         shape: BoxShape.circle,
@@ -575,7 +579,7 @@ class _LandingHeader extends StatelessWidget {
                       child: Icon(
                         Icons.groups_rounded,
                         color: theme.colorScheme.primary,
-                        size: 28,
+                        size: compact ? 26 : 28,
                       ),
                     ),
                     const SizedBox(width: 14),
@@ -588,6 +592,7 @@ class _LandingHeader extends StatelessWidget {
                           Text(
                             'Команды',
                             style: theme.textTheme.headlineSmall?.copyWith(
+                              fontSize: compact ? 30 : null,
                               fontWeight: FontWeight.w800,
                               color: Colors.black,
                               height: 1.05,
@@ -600,14 +605,17 @@ class _LandingHeader extends StatelessWidget {
                               ],
                             ),
                           ),
-                          const SizedBox(height: 6),
+                          SizedBox(height: compact ? 2 : 4),
                           Text(
                             'Чат и задания',
-                            maxLines: 2,
+                            maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodyMedium?.copyWith(
+                            style: (compact
+                                    ? theme.textTheme.bodySmall
+                                    : theme.textTheme.bodyMedium)
+                                ?.copyWith(
                               color: Colors.black.withOpacity(0.64),
-                              height: 1.25,
+                              height: 1.12,
                             ),
                           ),
                         ],

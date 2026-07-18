@@ -14,6 +14,9 @@ class DmComposerBar extends StatelessWidget {
 
   final Message? replyTo;
   final VoidCallback onCloseReply;
+  final int forwardCount;
+  final String? forwardPreview;
+  final VoidCallback? onCancelForward;
 
   final bool someoneTyping;
   final List<String> typingNames;
@@ -41,6 +44,9 @@ class DmComposerBar extends StatelessWidget {
     required this.focusNode,
     required this.replyTo,
     required this.onCloseReply,
+    this.forwardCount = 0,
+    this.forwardPreview,
+    this.onCancelForward,
     required this.someoneTyping,
     required this.typingNames,
     required this.attachedFiles,
@@ -91,6 +97,9 @@ class DmComposerBar extends StatelessWidget {
           focusNode: focusNode,
           pickedImagePath: null,
           attachedFiles: attachedFiles,
+          forwardCount: forwardCount,
+          forwardPreview: forwardPreview,
+          onCancelForward: onCancelForward,
           onAddFile: onAddFile,
           onRemoveFile: onRemoveFile,
           onRetryFile: onRetryFile,

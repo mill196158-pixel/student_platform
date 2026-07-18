@@ -13,7 +13,10 @@ class DmChatService implements IChatService {
   final String peerId;
   String? _chatId;
 
-  DmChatService({required this.peerId});
+  DmChatService({required this.peerId, String? initialChatId})
+      : _chatId = (initialChatId == null || initialChatId.trim().isEmpty)
+            ? null
+            : initialChatId.trim();
 
   @override
   ChatMode get mode => ChatMode.dm;
@@ -58,6 +61,14 @@ class DmChatService implements IChatService {
         ..clear()
         ..addAll(cached);
       yield cached;
+    }
+
+    final fresh = await DmApi.refreshStream(chatId: cid);
+    if (fresh.isNotEmpty || cached.isEmpty) {
+      _cache
+        ..clear()
+        ..addAll(fresh);
+      yield fresh;
     }
 
     await for (final list in DmApi.watchMessages(chatId: cid)) {

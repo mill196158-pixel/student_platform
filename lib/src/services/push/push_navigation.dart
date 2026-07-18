@@ -74,12 +74,35 @@ class PushNavigation {
     await handle(context, pending, fromColdStart: true);
   }
 
+  static Future<String?> _resolveDmPeerId(String chatId) async {
+    final me = Supabase.instance.client.auth.currentUser?.id;
+    if (me == null || me.isEmpty || chatId.isEmpty) return null;
+    try {
+      final rows = await Supabase.instance.client
+          .from('chat_members')
+          .select('user_id')
+          .eq('chat_id', chatId);
+      for (final row in rows as List) {
+        final id = (row['user_id'] ?? '').toString();
+        if (id.isNotEmpty && id != me) return id;
+      }
+    } catch (_) {}
+    return null;
+  }
+
   static Future<void> _openDm(BuildContext context, PushPayload payload) async {
-    final peerId = payload.peerId;
+    var peerId = payload.peerId;
+    final chatId = payload.chatId;
+    if ((peerId == null || peerId.isEmpty) &&
+        chatId != null &&
+        chatId.isNotEmpty) {
+      peerId = await _resolveDmPeerId(chatId);
+    }
     if (peerId == null || peerId.isEmpty) {
       MainTabScope.switchToTab(context, MainTab.home);
       return;
     }
+    final resolvedPeerId = peerId;
 
     String peerName = 'Личный чат';
     String? avatar;
@@ -87,7 +110,7 @@ class PushNavigation {
       final row = await Supabase.instance.client
           .from('users')
           .select('name, surname, avatar_url')
-          .eq('id', peerId)
+          .eq('id', resolvedPeerId)
           .maybeSingle();
       if (row != null) {
         final name = (row['name'] ?? '').toString().trim();
@@ -104,9 +127,10 @@ class PushNavigation {
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => DirectChatScreen(
-          peerId: peerId,
+          peerId: resolvedPeerId,
           peerName: peerName,
           peerAvatarUrl: avatar,
+          initialChatId: chatId,
         ),
       ),
     );

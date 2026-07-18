@@ -1,18 +1,44 @@
 // lib/src/ui/learning/tabs/chat/actions/chat_actions.dart
+import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui';
 
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter/services.dart' as services;
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:super_clipboard/super_clipboard.dart';
 
 import '../../../models/message.dart';
 import '../../../models/assignment.dart';
 import '../../../models/chat_file.dart';
 import '../../../state/team_cubit.dart';
+import '../../../utils/chat_copied_file_cache.dart';
+import '../../../widgets/file_card.dart';
 import '../message_builder.dart';
+
+enum _ChatActionsResultKind {
+  reply,
+  copy,
+  edit,
+  pin,
+  forward,
+  delete,
+  select,
+  react,
+}
+
+class _ChatActionsResult {
+  const _ChatActionsResult(this.kind, {this.emoji});
+
+  final _ChatActionsResultKind kind;
+  final String? emoji;
+}
 
 class ChatActions {
   // компактный набор реакций
@@ -36,6 +62,177 @@ class ChatActions {
     if (m.attachments != null && m.attachments!.isNotEmpty) return false;
     if (m.text.trim().isEmpty) return false;
     return DateTime.now().difference(m.at) <= const Duration(hours: 12);
+  }
+
+  static void _completeAction(
+    BuildContext ctx,
+    _ChatActionsResult result,
+  ) {
+    if (Navigator.of(ctx).canPop()) {
+      Navigator.of(ctx).pop(result);
+    }
+  }
+
+  static String _copyTextForMessage(Message message) {
+    final text = message.text.trim();
+    if (text.isEmpty) return '';
+
+    final markerIndex = text.indexOf('__FG__:');
+    if (markerIndex < 0) return text;
+
+    final visiblePrefix = text.substring(0, markerIndex).trim();
+    final raw = text.substring(markerIndex + '__FG__:'.length).trim();
+    final parts = <String>[
+      if (visiblePrefix.isNotEmpty) visiblePrefix,
+    ];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) {
+        final caption = (decoded['caption'] ?? '').toString().trim();
+        if (caption.isNotEmpty) parts.add(caption);
+        final items = decoded['items'];
+        if (items is List) {
+          for (final item in items) {
+            if (item is! Map) continue;
+            final itemText =
+                (item['x'] ?? item['text'] ?? '').toString().trim();
+            if (itemText.isNotEmpty) parts.add(itemText);
+          }
+        }
+      }
+    } catch (_) {}
+    return parts.join('\n').trim();
+  }
+
+  static bool _hasCopyableContent(Message message) {
+    if ((message.attachments ?? const <ChatFile>[]).isNotEmpty) return true;
+    return _copyTextForMessage(message).isNotEmpty;
+  }
+
+  static Future<void> copyMessageToClipboard(Message message) {
+    return _copyMessageToClipboard(message);
+  }
+
+  static Future<void> _copyMessageToClipboard(Message message) async {
+    final files = message.attachments ?? const <ChatFile>[];
+    if (files.isNotEmpty) {
+      await _copyFileToClipboard(files.first);
+      return;
+    }
+
+    final text = _copyTextForMessage(message);
+    if (text.isNotEmpty) {
+      await services.Clipboard.setData(services.ClipboardData(text: text));
+    }
+  }
+
+  static Future<void> _copyFileToClipboard(ChatFile chatFile) async {
+    final clipboard = SystemClipboard.instance;
+    if (clipboard == null) {
+      throw UnsupportedError('Буфер обмена недоступен на этой платформе');
+    }
+
+    final file = await _downloadRemoteFileToCache(
+      url: chatFile.fileUrl,
+      fileName: chatFile.fileName,
+    );
+    final bytes = await file.readAsBytes();
+    final cleanName = FileUiUtils.cleanFileName(chatFile.fileName);
+    final mimeType = chatFile.fileType.isNotEmpty
+        ? chatFile.fileType
+        : _guessMimeForClipboard(cleanName);
+    final format = _clipboardFormatForFile(cleanName, mimeType);
+    final item = DataWriterItem(suggestedName: cleanName);
+    item.add(format(Uint8List.fromList(bytes)));
+    await clipboard.write([item]);
+    ChatCopiedFileCache.remember(
+      path: file.path,
+      name: cleanName,
+      mimeType: mimeType,
+      isImage: mimeType.startsWith('image/'),
+      fileId: chatFile.id.isEmpty ? null : chatFile.id,
+    );
+  }
+
+  static Future<File> _downloadRemoteFileToCache({
+    required String url,
+    required String fileName,
+  }) async {
+    final cleanName = FileUiUtils.cleanFileName(fileName);
+    final digest = crypto.sha1.convert(utf8.encode(url)).toString();
+    final dir = await getApplicationCacheDirectory();
+    final filesDir =
+        Directory('${dir.path}${Platform.pathSeparator}chat_files');
+    if (!await filesDir.exists()) {
+      await filesDir.create(recursive: true);
+    }
+
+    final path =
+        '${filesDir.path}${Platform.pathSeparator}${digest}_$cleanName';
+    final cached = File(path);
+    if (await cached.exists() && await cached.length() > 0) return cached;
+
+    final resp = await http.get(Uri.parse(url));
+    if (resp.statusCode != 200) {
+      throw Exception('HTTP ${resp.statusCode}');
+    }
+    await cached.writeAsBytes(resp.bodyBytes, flush: true);
+    return cached;
+  }
+
+  static String _guessMimeForClipboard(String fileName) {
+    final name = fileName.toLowerCase();
+    if (name.endsWith('.png')) return 'image/png';
+    if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
+    if (name.endsWith('.gif')) return 'image/gif';
+    if (name.endsWith('.webp')) return 'image/webp';
+    if (name.endsWith('.pdf')) return 'application/pdf';
+    if (name.endsWith('.doc')) return 'application/msword';
+    if (name.endsWith('.docx')) {
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    }
+    if (name.endsWith('.xls')) return 'application/vnd.ms-excel';
+    if (name.endsWith('.xlsx')) {
+      return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    }
+    if (name.endsWith('.ppt')) return 'application/vnd.ms-powerpoint';
+    if (name.endsWith('.pptx')) {
+      return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    }
+    if (name.endsWith('.csv')) return 'text/csv';
+    if (name.endsWith('.txt')) return 'text/plain';
+    if (name.endsWith('.zip')) return 'application/zip';
+    return 'application/octet-stream';
+  }
+
+  static FileFormat _clipboardFormatForFile(String fileName, String mimeType) {
+    final name = fileName.toLowerCase();
+    final mime = mimeType.toLowerCase();
+    bool ext(String value) => name.endsWith('.$value');
+
+    if (mime.contains('png') || ext('png')) return Formats.png;
+    if (mime.contains('jpeg') ||
+        mime.contains('jpg') ||
+        ext('jpg') ||
+        ext('jpeg')) {
+      return Formats.jpeg;
+    }
+    if (mime.contains('gif') || ext('gif')) return Formats.gif;
+    if (mime.contains('webp') || ext('webp')) return Formats.webp;
+    if (mime.contains('bmp') || ext('bmp')) return Formats.bmp;
+    if (mime.contains('svg') || ext('svg')) return Formats.svg;
+    if (mime.contains('pdf') || ext('pdf')) return Formats.pdf;
+    if (mime.contains('msword') || ext('doc')) return Formats.doc;
+    if (mime.contains('wordprocessingml') || ext('docx')) return Formats.docx;
+    if (mime.contains('spreadsheetml') || ext('xlsx')) return Formats.xlsx;
+    if (mime.contains('vnd.ms-excel') || ext('xls')) return Formats.xls;
+    if (mime.contains('presentationml') || ext('pptx')) return Formats.pptx;
+    if (mime.contains('vnd.ms-powerpoint') || ext('ppt')) return Formats.ppt;
+    if (mime.contains('csv') || ext('csv')) return Formats.csv;
+    if (mime.startsWith('text/') || ext('txt')) return Formats.plainTextFile;
+    if (mime.contains('zip') || ext('zip')) return Formats.zip;
+    return SimpleFileFormat(
+        mimeTypes: [mime.isEmpty ? 'application/octet-stream' : mime]);
   }
 
   // посчитать “естественную” ширину панели по самому длинному тексту
@@ -78,9 +275,9 @@ class ChatActions {
     required void Function(String emoji) onReact,
     required void Function() onSelect,
   }) async {
-    await showGeneralDialog(
+    final result = await showGeneralDialog<_ChatActionsResult>(
       context: context,
-      barrierDismissible: true,
+      barrierDismissible: false,
       barrierLabel: 'message_actions',
       barrierColor: Colors.black.withValues(alpha: 0.35),
       pageBuilder: (ctx, anim1, anim2) {
@@ -98,13 +295,13 @@ class ChatActions {
 
         final hasDelete = _canDelete(message);
         final hasEdit = _canEdit(message) && onEditIfAllowed != null;
-        final hasText = message.text.trim().isNotEmpty;
+        final hasCopyable = _hasCopyableContent(message);
         final isPinned = message.isPinned;
 
         // список ярлыков, чтобы посчитать ширину
         final labels = <String>[
           'Ответить',
-          if (hasText) 'Скопировать',
+          if (hasCopyable) 'Скопировать',
           if (hasEdit) 'Изменить',
           isPinned ? 'Открепить' : 'Закрепить',
           'Переслать',
@@ -121,72 +318,145 @@ class ChatActions {
           value: context.read<TeamCubit>(),
           child: FadeTransition(
             opacity: CurvedAnimation(parent: anim1, curve: Curves.easeOutCubic),
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => Navigator.pop(ctx),
-              child: SafeArea(
-                child: Scaffold(
-                  backgroundColor: Colors.transparent,
-                  body: Stack(
-                    children: [
-                      // liquid glass
-                      Positioned.fill(
+            child: SafeArea(
+              child: Scaffold(
+                backgroundColor: Colors.transparent,
+                body: Stack(
+                  children: [
+                    // liquid glass + закрытие только по фону
+                    Positioned.fill(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => Navigator.pop(ctx),
                         child: BackdropFilter(
                           filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
                           child: Container(
-                              color: Colors.black.withValues(alpha: 0.35)),
+                            color: Colors.black.withValues(alpha: 0.35),
+                          ),
                         ),
                       ),
+                    ),
 
-                      if (noRect)
-                        _buildCenteredOverlay(
-                          ctx: ctx,
-                          screenW: w,
-                          screenH: h,
-                          safeTop: safeTop,
-                          safeBottom: safeBottom,
-                          fallbackPosition: fallbackPosition,
-                          reactionH: reactionH,
-                          gapBetween: gapBetween,
-                          actionsFullH: actionsFullH,
-                          labels: labels,
-                          message: message,
-                          replyPreview: replyPreview,
-                          hasText: hasText,
-                          onReply: onReply,
-                          onForward: onForward,
-                          onReact: onReact,
-                          onTogglePin: onTogglePin,
-                          onDeleteIfAllowed: onDeleteIfAllowed,
-                          onEditIfAllowed: hasEdit ? onEditIfAllowed : null,
-                          onSelect: onSelect,
-                        )
-                      else
-                        _buildAnchoredOverlay(
-                          ctx: ctx,
-                          screenW: w,
-                          screenH: h,
-                          safeTop: safeTop,
-                          safeBottom: safeBottom,
-                          bubble: targetRect,
-                          reactionH: reactionH,
-                          gapBubble: gapBubble,
-                          gapBetween: gapBetween,
-                          actionsFullH: actionsFullH,
-                          labels: labels,
-                          message: message,
-                          replyPreview: replyPreview,
-                          hasText: hasText,
-                          onReply: onReply,
-                          onForward: onForward,
-                          onReact: onReact,
-                          onTogglePin: onTogglePin,
-                          onDeleteIfAllowed: onDeleteIfAllowed,
-                          onEditIfAllowed: hasEdit ? onEditIfAllowed : null,
-                          onSelect: onSelect,
+                    if (noRect)
+                      _buildCenteredOverlay(
+                        ctx: ctx,
+                        screenW: w,
+                        screenH: h,
+                        safeTop: safeTop,
+                        safeBottom: safeBottom,
+                        fallbackPosition: fallbackPosition,
+                        reactionH: reactionH,
+                        gapBetween: gapBetween,
+                        actionsFullH: actionsFullH,
+                        labels: labels,
+                        message: message,
+                        replyPreview: replyPreview,
+                        hasCopyable: hasCopyable,
+                        onReply: () => _completeAction(
+                          ctx,
+                          const _ChatActionsResult(
+                            _ChatActionsResultKind.reply,
+                          ),
                         ),
-                    ],
-                  ),
+                        onForward: () => _completeAction(
+                          ctx,
+                          const _ChatActionsResult(
+                            _ChatActionsResultKind.forward,
+                          ),
+                        ),
+                        onReact: (emoji) => _completeAction(
+                          ctx,
+                          _ChatActionsResult(
+                            _ChatActionsResultKind.react,
+                            emoji: emoji,
+                          ),
+                        ),
+                        onTogglePin: () async => _completeAction(
+                          ctx,
+                          const _ChatActionsResult(_ChatActionsResultKind.pin),
+                        ),
+                        onDeleteIfAllowed: () async => _completeAction(
+                          ctx,
+                          const _ChatActionsResult(
+                            _ChatActionsResultKind.delete,
+                          ),
+                        ),
+                        onEditIfAllowed: hasEdit
+                            ? () async => _completeAction(
+                                  ctx,
+                                  const _ChatActionsResult(
+                                    _ChatActionsResultKind.edit,
+                                  ),
+                                )
+                            : null,
+                        onSelect: () => _completeAction(
+                          ctx,
+                          const _ChatActionsResult(
+                            _ChatActionsResultKind.select,
+                          ),
+                        ),
+                      )
+                    else
+                      _buildAnchoredOverlay(
+                        ctx: ctx,
+                        screenW: w,
+                        screenH: h,
+                        safeTop: safeTop,
+                        safeBottom: safeBottom,
+                        bubble: targetRect,
+                        reactionH: reactionH,
+                        gapBubble: gapBubble,
+                        gapBetween: gapBetween,
+                        actionsFullH: actionsFullH,
+                        labels: labels,
+                        message: message,
+                        replyPreview: replyPreview,
+                        hasCopyable: hasCopyable,
+                        onReply: () => _completeAction(
+                          ctx,
+                          const _ChatActionsResult(
+                            _ChatActionsResultKind.reply,
+                          ),
+                        ),
+                        onForward: () => _completeAction(
+                          ctx,
+                          const _ChatActionsResult(
+                            _ChatActionsResultKind.forward,
+                          ),
+                        ),
+                        onReact: (emoji) => _completeAction(
+                          ctx,
+                          _ChatActionsResult(
+                            _ChatActionsResultKind.react,
+                            emoji: emoji,
+                          ),
+                        ),
+                        onTogglePin: () async => _completeAction(
+                          ctx,
+                          const _ChatActionsResult(_ChatActionsResultKind.pin),
+                        ),
+                        onDeleteIfAllowed: () async => _completeAction(
+                          ctx,
+                          const _ChatActionsResult(
+                            _ChatActionsResultKind.delete,
+                          ),
+                        ),
+                        onEditIfAllowed: hasEdit
+                            ? () async => _completeAction(
+                                  ctx,
+                                  const _ChatActionsResult(
+                                    _ChatActionsResultKind.edit,
+                                  ),
+                                )
+                            : null,
+                        onSelect: () => _completeAction(
+                          ctx,
+                          const _ChatActionsResult(
+                            _ChatActionsResultKind.select,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ),
@@ -194,6 +464,39 @@ class ChatActions {
         );
       },
     );
+
+    if (result == null) return;
+    try {
+      switch (result.kind) {
+        case _ChatActionsResultKind.reply:
+          onReply();
+          break;
+        case _ChatActionsResultKind.copy:
+          await _copyMessageToClipboard(message);
+          break;
+        case _ChatActionsResultKind.edit:
+          await onEditIfAllowed?.call();
+          break;
+        case _ChatActionsResultKind.pin:
+          await onTogglePin();
+          break;
+        case _ChatActionsResultKind.forward:
+          onForward();
+          break;
+        case _ChatActionsResultKind.delete:
+          await onDeleteIfAllowed();
+          break;
+        case _ChatActionsResultKind.select:
+          onSelect();
+          break;
+        case _ChatActionsResultKind.react:
+          final emoji = result.emoji;
+          if (emoji != null && emoji.isNotEmpty) onReact(emoji);
+          break;
+      }
+    } catch (e, st) {
+      debugPrint('[ChatActions] action failed: $e\n$st');
+    }
   }
 
   // ---------- Вспомогательные билдеры overlay ----------
@@ -211,7 +514,7 @@ class ChatActions {
     required List<String> labels,
     required Message message,
     required String? replyPreview,
-    required bool hasText,
+    required bool hasCopyable,
     required VoidCallback onReply,
     required VoidCallback onForward,
     required void Function(String) onReact,
@@ -248,48 +551,19 @@ class ChatActions {
       showClone: false,
       message: message,
       replyPreview: replyPreview,
-      onReact: (e) {
-        Navigator.pop(ctx);
-        onReact(e);
-      },
-      onReply: () {
-        Navigator.pop(ctx);
-        onReply();
-      },
-      onForward: () {
-        Navigator.pop(ctx);
-        onForward();
-      },
-      onCopy: hasText
-          ? () async {
-              Navigator.pop(ctx);
-              final t = message.text;
-              if (t.isNotEmpty) {
-                await services.Clipboard.setData(
-                    services.ClipboardData(text: t));
-              }
-            }
+      onReact: onReact,
+      onReply: onReply,
+      onForward: onForward,
+      onCopy: hasCopyable
+          ? () async => _completeAction(
+                ctx,
+                const _ChatActionsResult(_ChatActionsResultKind.copy),
+              )
           : null,
-      onEdit: onEditIfAllowed == null
-          ? null
-          : () async {
-              Navigator.pop(ctx);
-              await onEditIfAllowed();
-            },
-      onPin: () async {
-        Navigator.pop(ctx);
-        await onTogglePin();
-      },
-      onDelete: _canDelete(message)
-          ? () async {
-              Navigator.pop(ctx);
-              await onDeleteIfAllowed();
-            }
-          : null,
-      onSelect: () {
-        Navigator.pop(ctx);
-        onSelect();
-      },
+      onEdit: onEditIfAllowed == null ? null : onEditIfAllowed,
+      onPin: onTogglePin,
+      onDelete: _canDelete(message) ? onDeleteIfAllowed : null,
+      onSelect: onSelect,
     );
   }
 
@@ -307,7 +581,7 @@ class ChatActions {
     required List<String> labels,
     required Message message,
     required String? replyPreview,
-    required bool hasText,
+    required bool hasCopyable,
     required VoidCallback onReply,
     required VoidCallback onForward,
     required void Function(String) onReact,
@@ -382,48 +656,19 @@ class ChatActions {
       actionsRect: actionsRect,
       message: message,
       replyPreview: replyPreview,
-      onReact: (e) {
-        Navigator.pop(ctx);
-        onReact(e);
-      },
-      onReply: () {
-        Navigator.pop(ctx);
-        onReply();
-      },
-      onForward: () {
-        Navigator.pop(ctx);
-        onForward();
-      },
-      onCopy: hasText
-          ? () async {
-              Navigator.pop(ctx);
-              final t = message.text;
-              if (t.isNotEmpty) {
-                await services.Clipboard.setData(
-                    services.ClipboardData(text: t));
-              }
-            }
+      onReact: onReact,
+      onReply: onReply,
+      onForward: onForward,
+      onCopy: hasCopyable
+          ? () async => _completeAction(
+                ctx,
+                const _ChatActionsResult(_ChatActionsResultKind.copy),
+              )
           : null,
-      onEdit: onEditIfAllowed == null
-          ? null
-          : () async {
-              Navigator.pop(ctx);
-              await onEditIfAllowed();
-            },
-      onPin: () async {
-        Navigator.pop(ctx);
-        await onTogglePin();
-      },
-      onDelete: _canDelete(message)
-          ? () async {
-              Navigator.pop(ctx);
-              await onDeleteIfAllowed();
-            }
-          : null,
-      onSelect: () {
-        Navigator.pop(ctx);
-        onSelect();
-      },
+      onEdit: onEditIfAllowed == null ? null : onEditIfAllowed,
+      onPin: onTogglePin,
+      onDelete: _canDelete(message) ? onDeleteIfAllowed : null,
+      onSelect: onSelect,
     );
   }
 
@@ -663,6 +908,7 @@ class _ContextActionsMenuState extends State<_ContextActionsMenu> {
   late List<GlobalKey> _itemKeys;
   int? _selectedIndex;
   bool _pointerActive = false;
+  bool _activated = false;
 
   @override
   void initState() {
@@ -691,9 +937,12 @@ class _ContextActionsMenuState extends State<_ContextActionsMenu> {
     _selectIndex(_hitTest(globalPosition), haptic: haptic);
   }
 
-  void _activateSelected() {
-    final index = _selectedIndex;
+  void _activateSelected([int? explicitIndex]) {
+    if (_activated) return;
+    final index = explicitIndex ?? _selectedIndex;
     if (index == null || index < 0 || index >= widget.actions.length) return;
+    _activated = true;
+    setState(() {});
     widget.actions[index].onTap();
   }
 
@@ -747,72 +996,76 @@ class _ContextActionsMenuState extends State<_ContextActionsMenu> {
       width: widget.width,
       child: ConstrainedBox(
         constraints: BoxConstraints(maxHeight: widget.maxHeight),
-        child: Listener(
-          behavior: HitTestBehavior.opaque,
-          onPointerDown: (event) {
-            _pointerActive = true;
-            _selectAtPosition(event.position, haptic: false);
-          },
-          onPointerMove: (event) {
-            if (!_pointerActive) return;
-            _selectAtPosition(event.position);
-          },
-          onPointerUp: (event) {
-            if (!_pointerActive) return;
-            _selectAtPosition(event.position, haptic: false);
-            _pointerActive = false;
-            _activateSelected();
-          },
-          onPointerCancel: (_) {
-            _pointerActive = false;
-          },
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: background,
-              borderRadius: BorderRadius.circular(14),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.18),
-                  blurRadius: 18,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: SingleChildScrollView(
-                physics: const BouncingScrollPhysics(),
-                child: SizedBox(
-                  height: contentHeight,
-                  child: Stack(
-                    children: [
-                      if (selectedIndex != null)
-                        AnimatedPositioned(
-                          duration: const Duration(milliseconds: 130),
-                          curve: Curves.easeOutCubic,
-                          left: 5,
-                          right: 5,
-                          top: selectedIndex * _contextMenuItemHeight + 4,
-                          height: _contextMenuItemHeight - 8,
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              color: highlightColor,
-                              borderRadius: BorderRadius.circular(10),
+        child: IgnorePointer(
+          ignoring: _activated,
+          child: Listener(
+            behavior: HitTestBehavior.opaque,
+            onPointerDown: (event) {
+              _pointerActive = true;
+              _selectAtPosition(event.position, haptic: false);
+            },
+            onPointerMove: (event) {
+              if (!_pointerActive) return;
+              _selectAtPosition(event.position);
+            },
+            onPointerUp: (event) {
+              if (!_pointerActive) return;
+              final index = _hitTest(event.position);
+              _selectIndex(index, haptic: false);
+              _pointerActive = false;
+              _activateSelected(index);
+            },
+            onPointerCancel: (_) {
+              _pointerActive = false;
+            },
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: background,
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.18),
+                    blurRadius: 18,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: SingleChildScrollView(
+                  physics: const BouncingScrollPhysics(),
+                  child: SizedBox(
+                    height: contentHeight,
+                    child: Stack(
+                      children: [
+                        if (selectedIndex != null)
+                          AnimatedPositioned(
+                            duration: const Duration(milliseconds: 130),
+                            curve: Curves.easeOutCubic,
+                            left: 5,
+                            right: 5,
+                            top: selectedIndex * _contextMenuItemHeight + 4,
+                            height: _contextMenuItemHeight - 8,
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: highlightColor,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
                             ),
                           ),
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            for (var i = 0; i < widget.actions.length; i++)
+                              _ContextMenuItemTile(
+                                key: _itemKeys[i],
+                                action: widget.actions[i],
+                                selected: selectedIndex == i,
+                              ),
+                          ],
                         ),
-                      Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          for (var i = 0; i < widget.actions.length; i++)
-                            _ContextMenuItemTile(
-                              key: _itemKeys[i],
-                              action: widget.actions[i],
-                              selected: selectedIndex == i,
-                            ),
-                        ],
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),

@@ -78,6 +78,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   late final ChatSearchController _search;
   late final PinController _pinsCtl;
   late final ChatAttachmentsController _att;
+  late final Stream<List<Message>> _messagesStream;
 
   final FileService _fileService = FileService();
   final GlobalCache _globalCache = GlobalCache();
@@ -93,6 +94,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   bool _loadingOlderMessages = false;
   bool _hasMoreOlderMessages = true;
   Message? _replyTo;
+  Message? _editingMessage;
 
   final Set<String> _typingUsers = {};
   Timer? _myTypingOff;
@@ -151,6 +153,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   @override
   void initState() {
     super.initState();
+    _messagesStream = widget.service.watchMessages();
     _chatScroll = ChatScrollController(_scroll, _messageKeys);
     _search = ChatSearchController();
     _pinsCtl = PinController();
@@ -257,9 +260,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     if (_dmTextHookAttached) {
       _ctrl.removeListener(_onTextChangedDm);
     }
-    try {
-      _keyboardChannel.invokeMethod('dispose');
-    } catch (_) {}
+    unawaited(_keyboardChannel.invokeMethod('dispose').catchError((_) {}));
     _keyboardChannel.setMethodCallHandler(null);
     _scroll.dispose();
     _ctrl.dispose();
@@ -426,6 +427,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
   // ===== DM Draft helpers =====
   void _onTextChangedDm() {
+    if (_editingMessage != null) return;
     if (_isDm) _saveDraftDmDebounced();
   }
 
@@ -453,6 +455,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   }
 
   void _forceSaveDraftDm() {
+    if (_editingMessage != null) return;
     _draftSaveTimerDm?.cancel();
     // ignore: discarded_futures
     _saveDraftDm();
@@ -707,18 +710,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   Future<void> _sendForwardHere(ForwardPayload payload, List<String> _) async {
     final replyId = _replyTo?.id;
 
-    // ждём аплоада всех pending (кроме '__FG__')
-    final files = _att.pending.where((x) => x.path != '__FG__').toList();
-    List<String> fileIds = [];
-    if (files.isNotEmpty) {
-      final paths = files.map((f) => f.path).toList();
-      fileIds = await _waitUploads(paths, tries: 60);
-    }
-
     await widget.service.sendText(
       payload.encodeForText(),
       replyToId: replyId,
-      fileIds: fileIds.isEmpty ? null : fileIds,
     );
 
     _att.clear();
@@ -777,13 +771,14 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     final target = await pickForwardTarget(context);
     if (target == null) return;
 
-    if (target.chatId == fromChatId) {
+    final targetChatId = await _resolveForwardTargetChatId(target);
+    if (targetChatId == fromChatId) {
       // Всегда staged-чип, не вставляем сырой FG-текст
       await _stageForwardPayload(
-          payload, uniqueFileUrls, uniqueFileIds, fromChatId);
+          payload, uniqueFileUrls, uniqueFileIds, targetChatId);
     } else {
       await ForwardOutbox.putForChat(
-        chatId: target.chatId,
+        chatId: targetChatId,
         text: payload.encodeForText(),
         fileUrls: uniqueFileUrls,
         fileIds: uniqueFileIds,
@@ -808,6 +803,56 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         p.endsWith('.png') ||
         p.endsWith('.gif') ||
         p.endsWith('.webp');
+  }
+
+  String? _forwardComposerPreview() {
+    final payload = _stagedForward;
+    if (payload == null || payload.items.isEmpty) return null;
+    final first = payload.items.first;
+    final author =
+        first.authorName.trim().isEmpty ? 'Сообщение' : first.authorName.trim();
+    final text = first.text.trim();
+    if (text.isNotEmpty) {
+      final normalized = text.replaceAll(RegExp(r'\s+'), ' ');
+      return '$author: $normalized';
+    }
+    if (first.files.isNotEmpty) {
+      final fileName = first.files.first.name.trim();
+      return '$author: ${fileName.isEmpty ? 'вложение' : fileName}';
+    }
+    return author;
+  }
+
+  Future<String> _resolveForwardTargetChatId(ForwardTarget target) async {
+    final id = target.chatId.trim();
+    if (id.startsWith('dm_') && id.length > 3) {
+      return DmApi.getOrCreateChatId(peerId: id.substring(3));
+    }
+    if (id.startsWith('team_') && id.length > 5) {
+      final row = await Supabase.instance.client
+          .from('chats')
+          .select('id')
+          .eq('team_id', id.substring(5))
+          .eq('type', 'team_main')
+          .limit(1)
+          .maybeSingle();
+      return (row?['id'] ?? '').toString();
+    }
+    return id;
+  }
+
+  Future<void> _sendForwardPayloadToTarget(
+    ForwardTarget target,
+    ForwardPayload payload,
+  ) async {
+    final chatId = await _resolveForwardTargetChatId(target);
+    if (chatId.isEmpty) {
+      throw StateError('Не удалось определить чат для пересылки');
+    }
+    await DmApi.sendText(
+      chatId: chatId,
+      text: payload.encodeForText(),
+    );
   }
 
   // ---------- Scroll / Read ----------
@@ -888,6 +933,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   }
 
   Future<void> _markReadSafely(String lastId) async {
+    if (lastId.isEmpty || lastId.startsWith('local_')) return;
     try {
       await widget.service.markRead(lastId);
       _lastMarkedReadId = lastId;
@@ -909,18 +955,91 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   bool _canEdit(Message m) =>
       canEditOwnTextMessage(m, widget.service.currentUserId);
 
-  Future<void> _editMessage(Message m) async {
-    await showEditMessageDialog(
-      context,
-      initialText: m.text,
-      onSave: (text) async {
-        await widget.service.editOwnMessage(m.id, text);
-      },
+  void _editMessage(Message m) {
+    _beginInlineEdit(m);
+  }
+
+  void _beginInlineEdit(Message m) {
+    _draftSaveTimerDm?.cancel();
+    setState(() {
+      _editingMessage = m;
+      _replyTo = null;
+      _forwardPackageAttached = false;
+      _stagedForward = null;
+      _forwardSelectedIds.clear();
+      _stagedForwardFileIds.clear();
+      _att.pending.removeWhere((file) => file.path == '__FG__');
+      _ctrl.text = m.text;
+      _ctrl.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: _ctrl.text.length,
+      );
+    });
+    _composerFocus.requestFocus();
+    services.SystemChannels.textInput.invokeMethod('TextInput.show');
+  }
+
+  Future<void> _cancelInlineEdit({bool restoreDraft = true}) async {
+    if (_editingMessage == null) return;
+    _draftSaveTimerDm?.cancel();
+    setState(() {
+      _editingMessage = null;
+      _ctrl.clear();
+    });
+    if (restoreDraft && _isDm) {
+      _restoreDraftDm();
+    }
+  }
+
+  Future<bool> _submitInlineEdit() async {
+    final editing = _editingMessage;
+    if (editing == null) return false;
+    final nextText = _ctrl.text.trim();
+    if (nextText.isEmpty) {
+      _showSnack('Текст не может быть пустым');
+      return true;
+    }
+    if (nextText.length > kChatMessageMaxLength) {
+      _showSnack('Слишком длинный текст');
+      return true;
+    }
+    if (nextText == editing.text.trim()) {
+      await _cancelInlineEdit();
+      return true;
+    }
+
+    _isSending = true;
+    if (mounted) setState(() {});
+    try {
+      await widget.service.editOwnMessage(editing.id, nextText);
+      if (!mounted) return true;
+      setState(() {
+        _editingMessage = null;
+        _ctrl.clear();
+      });
+      if (_isDm) await _clearDraftDm();
+    } catch (e) {
+      _showSnack(friendlyEditMessageError(e));
+    } finally {
+      _isSending = false;
+      if (mounted) setState(() {});
+    }
+    return true;
+  }
+
+  void _showSnack(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(text)),
     );
   }
 
   // ---------- Отправка ----------
   Future<void> _send(String text) async {
+    if (_editingMessage != null) {
+      await _submitInlineEdit();
+      return;
+    }
     if (_isUploadingAttachments || _hasFailedAttachments || _isSending) return;
     if (!_canComposeDm) return;
 
@@ -1166,8 +1285,19 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     final target = await pickForwardTarget(context);
     if (target == null) return;
 
+    final targetChatId = await _resolveForwardTargetChatId(target);
+    if (targetChatId == fromChatId) {
+      await _stageForwardPayload(
+        payload,
+        uniqueFileUrls,
+        uniqueFileIds,
+        targetChatId,
+      );
+      return;
+    }
+
     await ForwardOutbox.putForChat(
-      chatId: target.chatId,
+      chatId: targetChatId,
       text: payload.encodeForText(),
       fileUrls: uniqueFileUrls,
       fileIds: uniqueFileIds,
@@ -1288,10 +1418,15 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         ],
       ),
       body: StreamBuilder<List<Message>>(
-        stream: widget.service.watchMessages(),
-        initialData: widget.service.currentMessages,
+        stream: _messagesStream,
+        initialData: widget.service.currentMessages.isEmpty
+            ? null
+            : widget.service.currentMessages,
         builder: (ctx, snap) {
           final list = snap.data ?? const <Message>[];
+          final initialLoading = !snap.hasData &&
+              snap.connectionState != ConnectionState.done &&
+              list.isEmpty;
 
           if (_search.isActive) {
             _search.recompute(list, _isMatch);
@@ -1411,6 +1546,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                           },
                           // В ЛС аватары не показываем принципиально
                           forceHideAvatars: widget.hideAvatars || isDm,
+                          initialLoading: initialLoading,
                         ),
                       ),
                       if (_loadingOlderMessages)
@@ -1481,13 +1617,19 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                 ),
               ),
 
-              // Тонкая полоска статуса: идёт загрузка файлов или выполняется отправка
+              // Тонкая полоска статуса нужна только для реальной загрузки файлов.
               AnimatedSwitcher(
                 duration: const Duration(milliseconds: 150),
-                child: (_isUploadingAttachments || _isSending)
+                child: _isUploadingAttachments
                     ? const LinearProgressIndicator(minHeight: 2)
                     : const SizedBox.shrink(),
               ),
+
+              if (!_selecting && _editingMessage != null)
+                _InlineEditBar(
+                  message: _editingMessage!,
+                  onCancel: _cancelInlineEdit,
+                ),
 
               if (!_selecting)
                 // ⚠️ ЛС и группы используют разные композеры
@@ -1503,6 +1645,21 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                             focusNode: _composerFocus,
                             replyTo: _replyTo,
                             onCloseReply: () => setState(() => _replyTo = null),
+                            forwardCount: _forwardPackageAttached
+                                ? (_stagedForward?.items.length ??
+                                    _forwardSelectedIds.length)
+                                : 0,
+                            forwardPreview: _forwardComposerPreview(),
+                            onCancelForward: () {
+                              setState(() {
+                                _forwardPackageAttached = false;
+                                _stagedForward = null;
+                                _forwardSelectedIds.clear();
+                                _stagedForwardFileIds.clear();
+                                _att.pending
+                                    .removeWhere((x) => x.path == '__FG__');
+                              });
+                            },
                             // DM: typing UI is intentionally hidden until the feature is ready.
                             someoneTyping: false,
                             typingNames: const [],
@@ -1615,6 +1772,21 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                             focusNode: _composerFocus,
                             replyTo: _replyTo,
                             onCloseReply: () => setState(() => _replyTo = null),
+                            forwardCount: _forwardPackageAttached
+                                ? (_stagedForward?.items.length ??
+                                    _forwardSelectedIds.length)
+                                : 0,
+                            forwardPreview: _forwardComposerPreview(),
+                            onCancelForward: () {
+                              setState(() {
+                                _forwardPackageAttached = false;
+                                _stagedForward = null;
+                                _forwardSelectedIds.clear();
+                                _stagedForwardFileIds.clear();
+                                _att.pending
+                                    .removeWhere((x) => x.path == '__FG__');
+                              });
+                            },
                             someoneTyping: _someoneTyping,
                             typingNames: _visibleTypingUsers,
                             attachedFiles: _att.pending
@@ -1777,7 +1949,11 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         },
         onTogglePin: () async => widget.service.pinMessage(m.id, !m.isPinned),
         onDeleteIfAllowed: () async => widget.service.deleteMessage(m.id),
-        onEditIfAllowed: _canEdit(m) ? () => _editMessage(m) : null,
+        onEditIfAllowed: _canEdit(m)
+            ? () async {
+                _editMessage(m);
+              }
+            : null,
         onReact: (emoji) => widget.service.toggleReaction(m.id, emoji),
         onSelect: () {
           _selectedIds.add(m.id);
@@ -1795,14 +1971,11 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         setState(() => _replyTo = m);
         break;
       case 'Скопировать':
-        final text = m.text.trim();
-        if (text.isNotEmpty) {
-          await services.Clipboard.setData(services.ClipboardData(text: text));
-        }
+        await ca.ChatActions.copyMessageToClipboard(m);
         break;
       case 'Изменить':
         if (_canEdit(m)) {
-          await _editMessage(m);
+          _editMessage(m);
         }
         break;
       case 'Закрепить':
@@ -1854,6 +2027,72 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       if (all) return true;
     }
     return false;
+  }
+}
+
+class _InlineEditBar extends StatelessWidget {
+  const _InlineEditBar({
+    required this.message,
+    required this.onCancel,
+  });
+
+  final Message message;
+  final Future<void> Function() onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final preview = message.text.trim();
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primary.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: theme.colorScheme.primary.withValues(alpha: 0.24),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.edit_outlined,
+            size: 18,
+            color: theme.colorScheme.primary,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Редактирование',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: theme.colorScheme.primary,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                if (preview.isNotEmpty)
+                  Text(
+                    preview,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: Colors.black.withValues(alpha: 0.62),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: 'Отменить редактирование',
+            icon: const Icon(Icons.close_rounded),
+            onPressed: () => onCancel(),
+          ),
+        ],
+      ),
+    );
   }
 }
 

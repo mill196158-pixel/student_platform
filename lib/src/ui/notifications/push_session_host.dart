@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:student_platform/src/services/push/push_navigation.dart';
 import 'package:student_platform/src/services/push/push_notification_service.dart';
+import 'package:student_platform/src/ui/chats/data/chat_preload_service.dart';
 
 /// Starts push after auth and flushes pending deep links once the shell is ready.
 class PushSessionHost extends StatefulWidget {
@@ -15,12 +16,20 @@ class PushSessionHost extends StatefulWidget {
 }
 
 class _PushSessionHostState extends State<PushSessionHost> {
+  final _resumePreloadObserver = const _AppResumePreloadObserver();
   bool _started = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(_resumePreloadObserver);
     WidgetsBinding.instance.addPostFrameCallback((_) => _start());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(_resumePreloadObserver);
+    super.dispose();
   }
 
   Future<void> _start() async {
@@ -29,10 +38,25 @@ class _PushSessionHostState extends State<PushSessionHost> {
     _started = true;
 
     await PushNotificationService.instance.onAuthenticated(context);
+    ChatPreloadService.scheduleWarmUpFromServer();
     if (!mounted) return;
     await PushNavigation.flushPending(context);
   }
 
   @override
   Widget build(BuildContext context) => widget.child;
+}
+
+class _AppResumePreloadObserver with WidgetsBindingObserver {
+  const _AppResumePreloadObserver();
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed &&
+        Supabase.instance.client.auth.currentUser != null) {
+      ChatPreloadService.scheduleWarmUpFromServer(
+        delay: const Duration(milliseconds: 1200),
+      );
+    }
+  }
 }

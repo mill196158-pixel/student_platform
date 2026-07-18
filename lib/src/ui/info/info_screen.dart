@@ -91,7 +91,9 @@ class _InfoScreenState extends State<InfoScreen> {
   void _refreshSilently() {
     _loadFreshAndCache().then((fresh) {
       if (!mounted) return;
-      setState(() => _future = Future<_UsefulPlanState>.value(fresh));
+      setState(() {
+        _future = Future<_UsefulPlanState>.value(fresh);
+      });
     });
   }
 
@@ -239,6 +241,9 @@ class _InfoScreenState extends State<InfoScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final headerHeight =
+        (MediaQuery.paddingOf(context).top + 86.0).clamp(128.0, 150.0);
+
     return Scaffold(
       backgroundColor: const Color(0xFFF7F7FB),
       body: FutureBuilder<_UsefulPlanState>(
@@ -250,7 +255,7 @@ class _InfoScreenState extends State<InfoScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               SizedBox(
-                height: 128,
+                height: headerHeight,
                 child: _UsefulHeader(
                   selectedSection: _section,
                   onSectionTap: () => _showSectionSheet(context),
@@ -812,6 +817,7 @@ class _UsefulHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final compact = MediaQuery.sizeOf(context).height < 760;
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -855,14 +861,14 @@ class _UsefulHeader extends StatelessWidget {
           bottom: false,
           child: SizedBox.expand(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+              padding: EdgeInsets.fromLTRB(16, compact ? 4 : 8, 16, 6),
               child: Align(
-                alignment: const Alignment(-1, 0.26),
+                alignment: Alignment(-1, compact ? 0.08 : 0.18),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(12),
+                      padding: EdgeInsets.all(compact ? 10 : 12),
                       decoration: BoxDecoration(
                         color:
                             theme.colorScheme.primary.withValues(alpha: 0.10),
@@ -883,7 +889,7 @@ class _UsefulHeader extends StatelessWidget {
                       child: Icon(
                         Icons.lightbulb_outline_rounded,
                         color: theme.colorScheme.primary,
-                        size: 28,
+                        size: compact ? 26 : 28,
                       ),
                     ),
                     const SizedBox(width: 14),
@@ -895,6 +901,7 @@ class _UsefulHeader extends StatelessWidget {
                           Text(
                             'Информация',
                             style: theme.textTheme.headlineSmall?.copyWith(
+                              fontSize: compact ? 30 : null,
                               fontWeight: FontWeight.w800,
                               color: Colors.black,
                               height: 1.05,
@@ -907,14 +914,17 @@ class _UsefulHeader extends StatelessWidget {
                               ],
                             ),
                           ),
-                          const SizedBox(height: 6),
+                          SizedBox(height: compact ? 2 : 4),
                           Text(
                             _sectionSubtitle(selectedSection),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodyMedium?.copyWith(
+                            style: (compact
+                                    ? theme.textTheme.bodySmall
+                                    : theme.textTheme.bodyMedium)
+                                ?.copyWith(
                               color: Colors.black.withValues(alpha: 0.64),
-                              height: 1.25,
+                              height: 1.12,
                             ),
                           ),
                         ],

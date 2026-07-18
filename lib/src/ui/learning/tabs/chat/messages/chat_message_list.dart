@@ -1192,8 +1192,8 @@ class _PackageActionsMenuState extends State<_PackageActionsMenu> {
     _selectIndex(_hitTest(globalPosition), haptic: haptic);
   }
 
-  void _activateSelected() {
-    final index = _selectedIndex;
+  void _activateSelected([int? explicitIndex]) {
+    final index = explicitIndex ?? _selectedIndex;
     if (index == null || index < 0 || index >= widget.menuItems.length) return;
     widget.onTap(widget.menuItems[index]);
   }
@@ -1271,9 +1271,10 @@ class _PackageActionsMenuState extends State<_PackageActionsMenu> {
         },
         onPointerUp: (event) {
           if (!_menuPointerActive) return;
-          _selectAtMenuPosition(event.position, haptic: false);
+          final index = _hitTest(event.position);
+          _selectIndex(index, haptic: false);
           _menuPointerActive = false;
-          _activateSelected();
+          _activateSelected(index);
         },
         onPointerCancel: (_) {
           _menuPointerActive = false;

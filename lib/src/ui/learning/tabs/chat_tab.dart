@@ -1768,6 +1768,7 @@ class _ChatTabState extends State<ChatTab> {
                       ? (_stagedForward?.items.length ??
                           _forwardSelectedIds.length)
                       : 0,
+                  forwardPreview: _forwardComposerPreview(),
                   onCancelForward: _forwardPackageAttached
                       ? () {
                           setState(() {
@@ -2136,6 +2137,24 @@ class _ChatTabState extends State<ChatTab> {
         p.endsWith('.png') ||
         p.endsWith('.gif') ||
         p.endsWith('.webp');
+  }
+
+  String? _forwardComposerPreview() {
+    final payload = _stagedForward;
+    if (payload == null || payload.items.isEmpty) return null;
+    final first = payload.items.first;
+    final author =
+        first.authorName.trim().isEmpty ? 'Сообщение' : first.authorName.trim();
+    final text = first.text.trim();
+    if (text.isNotEmpty) {
+      final normalized = text.replaceAll(RegExp(r'\s+'), ' ');
+      return '$author: $normalized';
+    }
+    if (first.files.isNotEmpty) {
+      final fileName = first.files.first.name.trim();
+      return '$author: ${fileName.isEmpty ? 'вложение' : fileName}';
+    }
+    return author;
   }
 
   Future<void> _startForwardSelection(List<Message> selected) async {

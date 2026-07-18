@@ -12,6 +12,7 @@ class ChatComposerBar extends StatelessWidget {
   final Message? replyTo;
   final VoidCallback onCloseReply;
   final int forwardCount;
+  final String? forwardPreview;
   final VoidCallback? onCancelForward;
 
   final bool someoneTyping;
@@ -49,6 +50,7 @@ class ChatComposerBar extends StatelessWidget {
     required this.replyTo,
     required this.onCloseReply,
     this.forwardCount = 0,
+    this.forwardPreview,
     this.onCancelForward,
     required this.someoneTyping,
     required this.typingNames,
@@ -130,6 +132,7 @@ class ChatComposerBar extends StatelessWidget {
           pickedImagePath: null,
           attachedFiles: attachedFiles,
           forwardCount: forwardCount,
+          forwardPreview: forwardPreview,
           onCancelForward: onCancelForward,
           onAddFile: onAddFile,
           onRemoveFile: onRemoveFile,

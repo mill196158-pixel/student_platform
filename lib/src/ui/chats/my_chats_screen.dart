@@ -17,6 +17,7 @@ import 'package:student_platform/src/ui/chats/core/i_chat_service.dart'
 import 'package:student_platform/src/ui/chats/forward/forward_picker.dart'
     show ForwardTarget;
 import 'package:student_platform/src/ui/chats/data/chat_archive_api.dart';
+import 'package:student_platform/src/ui/chats/data/chat_preload_service.dart';
 import 'package:student_platform/src/ui/chats/data/dm_api.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/widgets.dart'; // ChatMessageList
 import 'package:student_platform/src/ui/learning/models/message.dart'; // модель сообщения
@@ -186,6 +187,9 @@ class _MyChatsScreenState extends State<MyChatsScreen>
         _loading = false;
       });
       _saveCache(_all);
+      unawaited(ChatPreloadService.warmUpChatIds(
+        _all.map((chat) => chat.chatId),
+      ));
 
       _subscribeChatsRealtime();
     } catch (_) {
@@ -481,6 +485,9 @@ class _MyChatsScreenState extends State<MyChatsScreen>
           _applyFilter();
         });
         await _saveCache(_all);
+        unawaited(ChatPreloadService.warmUpChatIds(
+          _all.map((chat) => chat.chatId),
+        ));
       } while (_summariesQueued && mounted);
     } catch (e) {
       safeDebugLog(
@@ -826,6 +833,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
                                                   peerId: c.peerId!,
                                                   peerName: c.title,
                                                   peerAvatarUrl: c.avatarUrl,
+                                                  initialChatId: realId,
                                                 ),
                                               ),
                                             ));
@@ -878,6 +886,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
                                         peerId: c.peerId!,
                                         peerName: c.title,
                                         peerAvatarUrl: c.avatarUrl,
+                                        initialChatId: c.chatId,
                                       ),
                                     ),
                                   ),
@@ -1913,8 +1922,8 @@ class _PeekContextMenuState extends State<_PeekContextMenu> {
     _selectIndex(_hitTest(globalPosition), haptic: haptic);
   }
 
-  void _activateSelected() {
-    final index = _selectedIndex;
+  void _activateSelected([int? explicitIndex]) {
+    final index = explicitIndex ?? _selectedIndex;
     final actions = _actions;
     if (index == null || index < 0 || index >= actions.length) return;
     actions[index].onTap();
@@ -1980,9 +1989,10 @@ class _PeekContextMenuState extends State<_PeekContextMenu> {
         },
         onPointerUp: (event) {
           if (!_pointerActive) return;
-          _selectAtPosition(event.position, haptic: false);
+          final index = _hitTest(event.position);
+          _selectIndex(index, haptic: false);
           _pointerActive = false;
-          _activateSelected();
+          _activateSelected(index);
         },
         onPointerCancel: (_) {
           _pointerActive = false;

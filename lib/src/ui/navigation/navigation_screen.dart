@@ -73,7 +73,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
           items: const [
             ModernBottomNavItem(icon: Icons.home_rounded, label: 'Главная'),
             ModernBottomNavItem(
-                icon: Icons.info_outline_rounded, label: 'Информация'),
+                icon: Icons.info_outline_rounded, label: 'Инфо'),
             ModernBottomNavItem(
                 icon: Icons.menu_book_rounded, label: 'Обучение'),
             ModernBottomNavItem(

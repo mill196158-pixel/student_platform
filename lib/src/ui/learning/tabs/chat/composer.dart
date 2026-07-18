@@ -53,6 +53,7 @@ class Composer extends StatefulWidget {
   final FocusNode? focusNode;
   final List<AttachedFile> attachedFiles;
   final int forwardCount;
+  final String? forwardPreview;
   final VoidCallback? onCancelForward;
   final Function(AttachedFile) onRemoveFile;
   final Function(AttachedFile) onAddFile;
@@ -75,6 +76,7 @@ class Composer extends StatefulWidget {
     this.leftButton,
     this.focusNode,
     this.forwardCount = 0,
+    this.forwardPreview,
     this.onCancelForward,
     this.onAttachFile,
     this.onPasteFile,
@@ -116,6 +118,7 @@ class _ComposerState extends State<Composer> {
             if (widget.forwardCount > 0)
               _ForwardComposerPreview(
                 count: widget.forwardCount,
+                preview: widget.forwardPreview,
                 onCancel: widget.onCancelForward,
               ),
             if (visibleAttachedFiles.isNotEmpty)
@@ -477,10 +480,12 @@ class _AttachedImagePreview extends StatelessWidget {
 
 class _ForwardComposerPreview extends StatelessWidget {
   final int count;
+  final String? preview;
   final VoidCallback? onCancel;
 
   const _ForwardComposerPreview({
     required this.count,
+    this.preview,
     this.onCancel,
   });
 
@@ -488,6 +493,7 @@ class _ForwardComposerPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final label = count == 1 ? '1 сообщение' : '$count сообщений';
+    final cleanPreview = (preview ?? '').trim();
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -518,7 +524,7 @@ class _ForwardComposerPreview extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  label,
+                  cleanPreview.isEmpty ? label : '$label · $cleanPreview',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodyMedium?.copyWith(

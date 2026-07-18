@@ -58,7 +58,7 @@ class _BodyState extends State<_Body> with SingleTickerProviderStateMixin {
   late final TabController _tabController;
   bool _selecting = false;
 
-  static const double _kHeaderHeight = 128.0;
+  static const double _kHeaderContentHeight = 106.0;
   static const double _kTabsTopGap = 0.0; // максимально прижать к шапке
 
   @override
@@ -103,7 +103,8 @@ class _BodyState extends State<_Body> with SingleTickerProviderStateMixin {
               alignment: Alignment.topCenter,
               child: showHeader
                   ? SizedBox(
-                      height: _kHeaderHeight,
+                      height: MediaQuery.of(context).padding.top +
+                          _kHeaderContentHeight,
                       child: _TeamHeader(
                         team: team,
                         leading:
@@ -339,16 +340,18 @@ class _TeamHeader extends StatelessWidget {
                             ],
                           ),
                         ),
-                        const SizedBox(height: 6),
-                        Text(
-                          team.teacher,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: Colors.black.withOpacity(0.64),
-                            height: 1.25,
+                        if (team.teacher.trim().isNotEmpty) ...[
+                          const SizedBox(height: 3),
+                          Text(
+                            team.teacher,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: Colors.black.withOpacity(0.64),
+                              height: 1.12,
+                            ),
                           ),
-                        ),
+                        ],
                       ],
                     ),
                   ),

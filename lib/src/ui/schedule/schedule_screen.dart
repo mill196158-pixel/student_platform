@@ -325,7 +325,6 @@ class ScheduleAssignment {
   }
 }
 
-const double _kHeaderExpandedHeight = 128.0; // как в «Командах»
 const double _kHeaderSpacing = 12.0;
 
 class ScheduleScreen extends StatefulWidget {
@@ -629,6 +628,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     final subtitle = '${_monthName(_selectedDay.month)} ${_selectedDay.year}';
 
     void handleSwipe(int dir) => _weekMode ? _shiftWeek(dir) : _shiftDay(dir);
+    final headerHeight =
+        (MediaQuery.paddingOf(context).top + 86.0).clamp(128.0, 150.0);
 
     return Scaffold(
       body: GestureDetector(
@@ -655,7 +656,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           children: [
             // ===== фиксированная шапка (как в «Командах») =====
             SizedBox(
-              height: _kHeaderExpandedHeight,
+              height: headerHeight,
               child: _ScheduleHeader(
                 title: 'Расписание',
                 subtitle: subtitle,
@@ -1467,6 +1468,7 @@ class _ScheduleHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final compact = MediaQuery.sizeOf(context).height < 760;
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -1503,9 +1505,9 @@ class _ScheduleHeader extends StatelessWidget {
         SafeArea(
           bottom: false,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+            padding: EdgeInsets.fromLTRB(16, compact ? 4 : 8, 16, 6),
             child: Align(
-              alignment: const Alignment(-1, 0.25),
+              alignment: Alignment(-1, compact ? 0.08 : 0.18),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
@@ -1517,7 +1519,7 @@ class _ScheduleHeader extends StatelessWidget {
                     onEnsureMonthLoaded:
                         onEnsureMonthLoaded ?? (DateTime _) async {},
                   ),
-                  const SizedBox(width: 14),
+                  SizedBox(width: compact ? 12 : 14),
                   Expanded(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -1529,6 +1531,7 @@ class _ScheduleHeader extends StatelessWidget {
                               .textTheme
                               .headlineSmall
                               ?.copyWith(
+                            fontSize: compact ? 30 : null,
                             fontWeight: FontWeight.w800,
                             color: Colors.black,
                             height: 1.05,
@@ -1540,14 +1543,18 @@ class _ScheduleHeader extends StatelessWidget {
                             ],
                           ),
                         ),
-                        const SizedBox(height: 6),
+                        SizedBox(height: compact ? 2 : 4),
                         Text(
                           subtitle,
-                          style:
-                              Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                    color: Colors.black.withValues(alpha: 0.64),
-                                    height: 1.25,
-                                  ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: (compact
+                                  ? Theme.of(context).textTheme.bodySmall
+                                  : Theme.of(context).textTheme.bodyMedium)
+                              ?.copyWith(
+                            color: Colors.black.withValues(alpha: 0.64),
+                            height: 1.12,
+                          ),
                         ),
                       ],
                     ),

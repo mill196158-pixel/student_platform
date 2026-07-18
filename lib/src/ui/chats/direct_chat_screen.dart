@@ -12,15 +12,17 @@ class DirectChatScreen extends StatelessWidget {
     required this.peerId,
     required this.peerName,
     this.peerAvatarUrl,
+    this.initialChatId,
   });
 
   final String peerId;
   final String peerName;
   final String? peerAvatarUrl;
+  final String? initialChatId;
 
   @override
   Widget build(BuildContext context) {
-    final service = DmChatService(peerId: peerId);
+    final service = DmChatService(peerId: peerId, initialChatId: initialChatId);
 
     return UnifiedChatScreen(
       service: service,
