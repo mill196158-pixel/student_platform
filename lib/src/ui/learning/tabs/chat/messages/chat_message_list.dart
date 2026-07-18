@@ -857,106 +857,100 @@ class _ChatMessageInteractionWrapper extends StatelessWidget {
             .toDouble();
         final availableH = (bottomLimit - dialogTop).clamp(120.0, totalH);
 
-        return Material(
-          color: Colors.transparent,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => Navigator.of(dialogContext).pop(),
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
-                    child: const SizedBox.expand(),
-                  ),
-                ),
-                Positioned(
-                  top: dialogTop,
-                  left: contentLeft,
-                  width: contentW,
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxWidth: contentW,
-                      maxHeight: availableH.toDouble(),
-                    ),
-                    child: SingleChildScrollView(
-                      physics: const ClampingScrollPhysics(),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: align,
-                        children: [
-                          if (menuAbove) ...[
-                            _PackageActionsMenu(
-                              menuItems: menuItems,
-                              width: menuW,
-                              isDark: Theme.of(dialogContext).brightness ==
-                                  Brightness.dark,
-                              dragPosition: dragPosition,
-                              dragRelease: dragRelease,
-                              onTap: (item) {
-                                Navigator.of(dialogContext).pop();
-                                onMenuAction?.call(item.label);
-                              },
-                            ),
-                            const SizedBox(height: gap),
-                          ],
-                          _PackageReactionPicker(
-                            reactions: const [
-                              '👍',
-                              '❤️',
-                              '😂',
-                              '😮',
-                              '😢',
-                              '😡'
-                            ],
-                            onSelected: (emoji) {
-                              Navigator.of(dialogContext).pop();
-                              onReactionSelected(emoji);
-                            },
-                          ),
-                          const SizedBox(height: gap),
-                          ConstrainedBox(
-                            constraints: BoxConstraints(
-                              maxWidth: contentW,
-                              maxHeight: _isForwardGroupPreview
-                                  ? maxPreviewH.toDouble().clamp(220.0, 340.0)
-                                  : maxPreviewH.toDouble(),
-                            ),
-                            child: _isForwardGroupPreview
-                                ? _PackageMessagePreview(
-                                    message: message,
-                                    liftBrightness: isMine,
-                                    child: previewChild,
-                                  )
-                                : IgnorePointer(
-                                    child: _PackageMessagePreview(
-                                      message: message,
-                                      liftBrightness: isMine,
-                                      child: previewChild,
-                                    ),
-                                  ),
-                          ),
-                          if (!menuAbove) ...[
-                            const SizedBox(height: gap),
-                            _PackageActionsMenu(
-                              menuItems: menuItems,
-                              width: menuW,
-                              isDark: Theme.of(dialogContext).brightness ==
-                                  Brightness.dark,
-                              dragPosition: dragPosition,
-                              dragRelease: dragRelease,
-                              onTap: (item) {
-                                Navigator.of(dialogContext).pop();
-                                onMenuAction?.call(item.label);
-                              },
-                            ),
-                          ],
-                        ],
+        var actionCommitted = false;
+
+        void dismissDialogOnly() {
+          if (!dialogContext.mounted) return;
+          Navigator.of(dialogContext).pop();
+        }
+
+        void commitMenuAction(String label) {
+          if (actionCommitted) return;
+          actionCommitted = true;
+          dismissDialogOnly();
+          onMenuAction?.call(label);
+        }
+
+        void commitReaction(String emoji) {
+          if (actionCommitted) return;
+          actionCommitted = true;
+          dismissDialogOnly();
+          onReactionSelected(emoji);
+        }
+
+        return _PackageActionsDialogShell(
+          onBackdropTap: () {
+            if (actionCommitted) return;
+            dismissDialogOnly();
+          },
+          child: Positioned(
+            top: dialogTop,
+            left: contentLeft,
+            width: contentW,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: contentW,
+                maxHeight: availableH.toDouble(),
+              ),
+              child: SingleChildScrollView(
+                physics: const ClampingScrollPhysics(),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: align,
+                  children: [
+                    if (menuAbove) ...[
+                      _PackageActionsMenu(
+                        menuItems: menuItems,
+                        width: menuW,
+                        isDark: Theme.of(dialogContext).brightness ==
+                            Brightness.dark,
+                        dragPosition: dragPosition,
+                        dragRelease: dragRelease,
+                        onTap: (item) => commitMenuAction(item.label),
                       ),
+                      const SizedBox(height: gap),
+                    ],
+                    _PackageReactionPicker(
+                      reactions: const ['👍', '❤️', '😂', '😮', '😢', '😡'],
+                      onSelected: commitReaction,
                     ),
-                  ),
+                    const SizedBox(height: gap),
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: contentW,
+                        maxHeight: _isForwardGroupPreview
+                            ? maxPreviewH.toDouble().clamp(220.0, 340.0)
+                            : maxPreviewH.toDouble(),
+                      ),
+                      child: _isForwardGroupPreview
+                          ? _PackageMessagePreview(
+                              message: message,
+                              liftBrightness: isMine,
+                              child: previewChild,
+                            )
+                          : IgnorePointer(
+                              child: _PackageMessagePreview(
+                                message: message,
+                                liftBrightness: isMine,
+                                child: previewChild,
+                              ),
+                            ),
+                    ),
+                    if (!menuAbove) ...[
+                      const SizedBox(height: gap),
+                      _PackageActionsMenu(
+                        menuItems: menuItems,
+                        width: menuW,
+                        isDark: Theme.of(dialogContext).brightness ==
+                            Brightness.dark,
+                        dragPosition: dragPosition,
+                        dragRelease: dragRelease,
+                        onTap: (item) => commitMenuAction(item.label),
+                      ),
+                    ],
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         );
@@ -1110,6 +1104,72 @@ class _SelectionIndicator extends StatelessWidget {
 
 const double _packageMenuItemHeight = 42.0;
 
+/// Backdrop + content layers for the message actions dialog.
+///
+/// The dismiss [GestureDetector] stays on the backdrop only so menu
+/// [Listener] taps do not also trigger [Navigator.pop].
+class _PackageActionsDialogShell extends StatelessWidget {
+  final VoidCallback onBackdropTap;
+  final Widget child;
+
+  const _PackageActionsDialogShell({
+    required this.onBackdropTap,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onBackdropTap,
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
+                child: const SizedBox.expand(),
+              ),
+            ),
+          ),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+@visibleForTesting
+Widget debugPackageActionsDialogShell({
+  required VoidCallback onBackdropTap,
+  required Widget child,
+}) {
+  return _PackageActionsDialogShell(
+    onBackdropTap: onBackdropTap,
+    child: child,
+  );
+}
+
+@visibleForTesting
+Widget debugPackageActionsMenu({
+  required List<fcr.MenuItem> menuItems,
+  required ValueListenable<Offset?> dragPosition,
+  required ValueListenable<int> dragRelease,
+  required void Function(fcr.MenuItem item) onTap,
+  double width = 220,
+  bool isDark = false,
+}) {
+  return _PackageActionsMenu(
+    menuItems: menuItems,
+    width: width,
+    isDark: isDark,
+    dragPosition: dragPosition,
+    dragRelease: dragRelease,
+    onTap: onTap,
+  );
+}
+
 class _PackageActionsMenu extends StatefulWidget {
   final List<fcr.MenuItem> menuItems;
   final double width;
@@ -1137,6 +1197,7 @@ class _PackageActionsMenuState extends State<_PackageActionsMenu> {
   int? _selectedIndex;
   int _handledReleaseTick = 0;
   bool _menuPointerActive = false;
+  bool _actionCommitted = false;
 
   @override
   void initState() {
@@ -1193,20 +1254,27 @@ class _PackageActionsMenuState extends State<_PackageActionsMenu> {
   }
 
   void _activateSelected([int? explicitIndex]) {
-    final index = explicitIndex ?? _selectedIndex;
-    if (index == null || index < 0 || index >= widget.menuItems.length) return;
+    _commitAction(explicitIndex ?? _selectedIndex);
+  }
+
+  void _commitAction(int? index) {
+    if (_actionCommitted) return;
+    if (index == null || index < 0 || index >= widget.menuItems.length) {
+      return;
+    }
+    _actionCommitted = true;
     widget.onTap(widget.menuItems[index]);
   }
 
   void _handleDragRelease() {
     if (!mounted || widget.dragRelease.value == _handledReleaseTick) return;
     _handledReleaseTick = widget.dragRelease.value;
+    if (_actionCommitted) return;
 
     final position = widget.dragPosition.value;
     final index =
         _selectedIndex ?? (position == null ? null : _hitTest(position));
-    if (index == null) return;
-    widget.onTap(widget.menuItems[index]);
+    _commitAction(index);
   }
 
   int? _hitTest(Offset globalPosition) {
