@@ -750,6 +750,16 @@
 - Full analyze: `flutter analyze` was run; it exits with existing project diagnostics outside this change, including missing `subject_quick_note_screen.dart` and undefined `getTemporaryDirectory`/`File` in `lib/src/ui/schedule/diary_entry_details_screen.dart`.
 - Git add/commit run: no.
 
+## Fix project-wide checks (diary / widget_test / edge typing / cleanup skipped)
+
+- Date: 2026-07-18
+- Trigger: close remaining technical blockers after cleanup worker ship.
+- `diary_entry_details_screen.dart`: import models/repo from `subject_diary` library (real `SubjectQuickNoteScreen` lives in `subject_diary/screens/quick_note_screen.dart`); added `dart:io` + `path_provider` for download path.
+- `test/widget_test.dart`: replaced stale `MyApp` counter test with deterministic `AppTheme.light()` MaterialApp smoke (no network).
+- `generate-upload-url`: UserClient typing only; behavior unchanged; `deno check` passes.
+- `cleanup-chat-files`: `skipped` only for 404 / already-cleared / already-done; `archive_missing` / `invalid_file_key` / retention issues → retry or failed without metadata wipe; redeployed.
+- Verification: analyze errors=0; flutter test passed; all three Edge Functions `deno check` passed.
+
 ## Chat map - Yandex cleanup worker + final technical audit
 
 - Date: 2026-07-18

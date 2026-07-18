@@ -636,6 +636,7 @@ Technical backlog for the chat/social map is closed on `refactor/chat-tab`:
 - queue claim/finalize RPCs are `SECURITY DEFINER`, `service_role` only;
 - Cron job `cleanup-chat-files` (`*/15 * * * *`) enabled once; queue was empty at enable time;
 - smoke: empty queue → `ok: true`, `claimed: 0` (no artificial Yandex objects);
+- follow-up fix: diary compile errors, widget smoke test, `generate-upload-url` typing, stricter cleanup `skipped` semantics;
 - remaining work is physical device checks and user-scenario QA only.
 
 ## Direct Chat And Friend Profile Back/Spacing Polish

@@ -1,4 +1,7 @@
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+
+// Untyped user-scoped client: table shapes are not in generated Database types.
+type UserClient = SupabaseClient<any, "public", any>;
 
 type UploadRequest = {
   chatId?: unknown;
@@ -92,7 +95,7 @@ Deno.serve(async (req) => {
   }
 });
 
-function createUserScopedSupabaseClient(authHeader: string) {
+function createUserScopedSupabaseClient(authHeader: string): UserClient {
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const supabaseKey = Deno.env.get("SUPABASE_ANON_KEY") ?? getDefaultPublishableKey();
 
@@ -104,7 +107,7 @@ function createUserScopedSupabaseClient(authHeader: string) {
     global: {
       headers: { Authorization: authHeader },
     },
-  });
+  }) as UserClient;
 }
 
 function getDefaultPublishableKey(): string | undefined {
@@ -154,7 +157,7 @@ function parseUploadRequest(body: UploadRequest) {
 }
 
 async function userCanAccessChat(
-  supabase: ReturnType<typeof createClient>,
+  supabase: UserClient,
   userId: string,
   chatId: string,
 ): Promise<boolean> {
@@ -183,7 +186,9 @@ async function userCanAccessChat(
     throw chatError;
   }
 
-  const teamId = typeof chat?.team_id === "string" ? chat.team_id : "";
+  const teamId = typeof (chat as { team_id?: unknown } | null)?.team_id === "string"
+    ? (chat as { team_id: string }).team_id
+    : "";
   if (!teamId) {
     return false;
   }

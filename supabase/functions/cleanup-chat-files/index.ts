@@ -130,7 +130,8 @@ async function processQueueRow(input: {
 
   if (!target.eligible) {
     const reason = target.skip_reason ?? "not_eligible";
-    // Temporary conditions: retry later. Terminal skips: close row without storage delete.
+
+    // Temporary: keep data, retry later. Do not clear metadata.
     if (reason === "not_expired" || reason === "retention_not_ended") {
       await supabase.rpc("complete_chat_file_cleanup", {
         p_queue_id: row.id,
@@ -143,15 +144,30 @@ async function processQueueRow(input: {
       return "retry";
     }
 
+    // Safe no-op only: metadata already cleared / queue already done.
+    if (reason === "file_already_cleared" || reason === "already_done") {
+      await supabase.rpc("complete_chat_file_cleanup", {
+        p_queue_id: row.id,
+        p_outcome: "skipped",
+        p_error_code: reason,
+        p_error_message: reason,
+        p_http_status: null,
+        p_retry_seconds: null,
+      });
+      return "skipped";
+    }
+
+    // archive_missing, invalid_file_key, missing_file_key, etc. → manual review.
+    // Must NOT clear chat_files metadata.
     await supabase.rpc("complete_chat_file_cleanup", {
       p_queue_id: row.id,
-      p_outcome: "skipped",
+      p_outcome: "failed",
       p_error_code: reason,
       p_error_message: reason,
       p_http_status: null,
       p_retry_seconds: null,
     });
-    return "skipped";
+    return "failed";
   }
 
   const fileKey = (target.file_key ?? "").trim();
@@ -182,16 +198,18 @@ async function processQueueRow(input: {
     return outcome;
   }
 
-  // 404 = already gone → success
+  // 404 = object already absent → skipped (safe to clear local metadata).
+  // 2xx = deleted now → done.
+  const outcome = deleteResult.status === 404 ? "skipped" : "done";
   await supabase.rpc("complete_chat_file_cleanup", {
     p_queue_id: row.id,
-    p_outcome: "done",
-    p_error_code: null,
-    p_error_message: null,
+    p_outcome: outcome,
+    p_error_code: outcome === "skipped" ? "object_already_absent" : null,
+    p_error_message: outcome === "skipped" ? "object_already_absent" : null,
     p_http_status: deleteResult.status,
     p_retry_seconds: null,
   });
-  return "done";
+  return outcome;
 }
 
 function assertTrustedCaller(req: Request): void {
