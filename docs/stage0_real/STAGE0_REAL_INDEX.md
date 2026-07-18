@@ -628,6 +628,16 @@ Verification:
 - `flutter analyze --no-pub lib/src/ui/chats/direct_chat_info_screen.dart` passed;
 - full `flutter analyze` was run and still reports pre-existing project diagnostics outside this change, including `lib/src/ui/schedule/diary_entry_details_screen.dart`.
 
+## Chat map technical closure (Yandex cleanup worker)
+
+Technical backlog for the chat/social map is closed on `refactor/chat-tab`:
+
+- Stage 10b worker: Edge Function `cleanup-chat-files` + migration `20260718115327_chat_file_cleanup_worker`;
+- queue claim/finalize RPCs are `SECURITY DEFINER`, `service_role` only;
+- Cron job `cleanup-chat-files` (`*/15 * * * *`) enabled once; queue was empty at enable time;
+- smoke: empty queue → `ok: true`, `claimed: 0` (no artificial Yandex objects);
+- remaining work is physical device checks and user-scenario QA only.
+
 ## Direct Chat And Friend Profile Back/Spacing Polish
 
 Direct chat info and friend profile screens now share the same top-left back button placement:

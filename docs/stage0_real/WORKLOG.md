@@ -750,6 +750,20 @@
 - Full analyze: `flutter analyze` was run; it exits with existing project diagnostics outside this change, including missing `subject_quick_note_screen.dart` and undefined `getTemporaryDirectory`/`File` in `lib/src/ui/schedule/diary_entry_details_screen.dart`.
 - Git add/commit run: no.
 
+## Chat map - Yandex cleanup worker + final technical audit
+
+- Date: 2026-07-18
+- Trigger: close last technical tail of the chat/social map (Yandex cleanup worker + one-pass audit).
+- Queue gate: `chat_file_cleanup_queue` total `0` → apply/deploy/cron allowed; no physical Yandex deletes.
+- Added migration `supabase/migrations/20260718115327_chat_file_cleanup_worker.sql`: lease/claim/retry RPCs, `chat_file_cleanup_errors`, finalize + message purge, Cron schedule.
+- Added Edge Function `supabase/functions/cleanup-chat-files` (Yandex DELETE via existing `YANDEX_*` secrets; 404 = success; keys only from DB).
+- Secrets (names only): Edge `CLEANUP_DISPATCH_SECRET`; Vault `chat_file_cleanup_secret`. Values not logged.
+- Deployed function; Cron `cleanup-chat-files` active exactly once (`*/15 * * * *`).
+- Smoke: empty queue HTTP 200, `claimed=0`.
+- Audit: Stage 1–11 helper grants closed for anon; friendship/blocks/archive/push outbox protected; no `Timer.periodic` on social chat screens; `deno check` OK for cleanup + push; `generate-upload-url` has pre-existing TS client typing errors; `dart format --set-exit-if-changed` reports many pre-existing style diffs (not applied); `flutter analyze` = 3 pre-existing compile errors in diary details + style infos; `flutter test` fails on stale `MyApp` widget_test.
+- Status: technical map closed; remaining = device/user-scenario checks.
+- Git: commit/push of cleanup worker as requested in the same session.
+
 ## Direct chat info and friend profile - back button and spacing polish
 
 - Date: 2026-07-15
