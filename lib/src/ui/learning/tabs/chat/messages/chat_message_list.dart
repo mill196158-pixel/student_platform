@@ -59,6 +59,8 @@ class ChatMessageList extends StatelessWidget {
   final VoidCallback? onAttachFile;
   final VoidCallback? onCreateAssignment;
   final bool initialLoading;
+  final bool loadError;
+  final VoidCallback? onRetryLoad;
 
   /// Authors blocked by the current user (group/team only). One set for the screen.
   final Set<String>? blockedUserIds;
@@ -100,6 +102,8 @@ class ChatMessageList extends StatelessWidget {
     this.onAttachFile,
     this.onCreateAssignment,
     this.initialLoading = false,
+    this.loadError = false,
+    this.onRetryLoad,
     this.blockedUserIds,
     this.revealedBlockedMessageIds,
     this.onRevealBlockedMessage,
@@ -112,6 +116,10 @@ class ChatMessageList extends StatelessWidget {
 
     if (list.isEmpty && initialLoading) {
       return const _InitialChatLoadingState();
+    }
+
+    if (list.isEmpty && loadError) {
+      return _ChatLoadErrorState(onRetry: onRetryLoad);
     }
 
     if (list.isEmpty) {
@@ -1632,6 +1640,55 @@ class _StaticAssignmentMenuPreview extends StatelessWidget {
                 ],
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ChatLoadErrorState extends StatelessWidget {
+  const _ChatLoadErrorState({this.onRetry});
+
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.wifi_off_rounded,
+              size: 48,
+              color: theme.colorScheme.onSurface.withValues(alpha: .45),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Не удалось загрузить сообщения',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Проверьте соединение и попробуйте снова.',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurface.withValues(alpha: .62),
+              ),
+              textAlign: TextAlign.center,
+            ),
+            if (onRetry != null) ...[
+              const SizedBox(height: 16),
+              FilledButton.tonal(
+                onPressed: onRetry,
+                child: const Text('Повторить'),
+              ),
+            ],
           ],
         ),
       ),

@@ -6,6 +6,9 @@ import 'package:student_platform/src/config/auth_email_adapter.dart';
 import 'package:student_platform/src/core/session.dart';
 import 'package:student_platform/src/services/push/push_notification_service.dart';
 import 'package:student_platform/src/ui/authentication/screens/change_password_screen.dart';
+import 'package:student_platform/src/ui/chats/core/chat_message_cache_store.dart';
+import 'package:student_platform/src/ui/chats/data/dm_api.dart';
+import 'package:student_platform/src/ui/learning/state/team_cubit.dart';
 
 class AuthService {
   static final _sb = Supabase.instance.client;
@@ -47,6 +50,9 @@ class AuthService {
 
   static Future<void> signOut(BuildContext context) async {
     await PushNotificationService.instance.onLogout();
+    await DmApi.clearSessionState();
+    await TeamCubit.clearSessionCaches();
+    await ChatMessageCacheStore.clearOnLogout();
     await _sb.auth.signOut();
     AppSession.clear();
     if (context.mounted) context.go('/login');

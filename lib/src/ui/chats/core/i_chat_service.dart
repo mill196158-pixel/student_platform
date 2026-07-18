@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/learning/models/local_attach.dart';
 import 'package:student_platform/src/ui/learning/models/chat_file.dart';
+import 'package:student_platform/src/ui/chats/core/chat_messages_load_state.dart';
 
 enum ChatMode { team, dm }
 
@@ -21,6 +22,15 @@ abstract class IChatService {
 
   /// Стрим актуального списка сообщений (по убыванию времени как в вашем ChatMessageList)
   Stream<List<Message>> watchMessages();
+
+  /// Snapshot-first load state (empty list can still be [ChatMessagesLoadPhase.ready]).
+  Stream<ChatMessagesViewState> watchMessagesState();
+
+  /// Latest view state without waiting for the next stream event.
+  ChatMessagesViewState get messagesViewState;
+
+  /// Retry after [ChatMessagesLoadPhase.error] when no snapshot exists.
+  Future<void> retryLoadMessages();
 
   /// Снимок текущего списка (удобно для быстрых операций)
   List<Message> get currentMessages;

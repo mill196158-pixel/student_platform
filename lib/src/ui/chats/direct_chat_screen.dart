@@ -6,7 +6,7 @@ import 'package:student_platform/src/ui/learning/state/team_cubit.dart';
 import 'package:student_platform/src/ui/chats/core/dm_chat_service.dart';
 import 'direct_chat_info_screen.dart';
 
-class DirectChatScreen extends StatelessWidget {
+class DirectChatScreen extends StatefulWidget {
   const DirectChatScreen({
     super.key,
     required this.peerId,
@@ -21,24 +21,44 @@ class DirectChatScreen extends StatelessWidget {
   final String? initialChatId;
 
   @override
-  Widget build(BuildContext context) {
-    final service = DmChatService(peerId: peerId, initialChatId: initialChatId);
+  State<DirectChatScreen> createState() => _DirectChatScreenState();
+}
 
+class _DirectChatScreenState extends State<DirectChatScreen> {
+  late final DmChatService _service;
+
+  @override
+  void initState() {
+    super.initState();
+    _service = DmChatService(
+      peerId: widget.peerId,
+      initialChatId: widget.initialChatId,
+    );
+  }
+
+  @override
+  void dispose() {
+    _service.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return UnifiedChatScreen(
-      service: service,
-      title: peerName.isEmpty ? 'Личный чат' : peerName,
+      service: _service,
+      title: widget.peerName.isEmpty ? 'Личный чат' : widget.peerName,
       hideAvatars: true,
-      peerAvatarUrl: peerAvatarUrl,
+      peerAvatarUrl: widget.peerAvatarUrl,
       onOpenPeer: () {
         Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => BlocProvider.value(
               value: context.read<TeamCubit>(),
               child: DirectChatInfoScreen(
-                service: service,
-                peerId: peerId,
-                peerName: peerName,
-                peerAvatarUrl: peerAvatarUrl,
+                service: _service,
+                peerId: widget.peerId,
+                peerName: widget.peerName,
+                peerAvatarUrl: widget.peerAvatarUrl,
               ),
             ),
           ),

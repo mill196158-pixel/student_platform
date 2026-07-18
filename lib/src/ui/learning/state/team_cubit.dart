@@ -13,6 +13,7 @@ import 'package:student_platform/src/ui/learning/models/assignment.dart';
 import 'package:student_platform/src/ui/learning/models/file_item.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/learning/models/team.dart';
+import 'package:student_platform/src/ui/chats/core/chat_message_cache_store.dart';
 import 'package:student_platform/src/ui/chats/core/chat_message_memory_cache.dart';
 import 'package:student_platform/src/utils/safe_debug_log.dart';
 
@@ -22,6 +23,12 @@ class TeamState {
   final List<FileItem> files;
   final List<Assignment> assignments;
   final bool loading;
+  final bool chatHasSnapshot;
+  final bool chatRefreshing;
+  final bool chatError;
+  final bool filesLoading;
+  final bool assignmentsLoading;
+  final bool roleLoading;
   final int votes;
   final bool isStarosta;
   final Set<String> doneAssignmentIds;
@@ -38,12 +45,21 @@ class TeamState {
 
   bool get hasPending => pending != null;
 
+  /// Backward-compatible: true only while chat has no snapshot yet.
+  bool get chatInitialLoading => !chatHasSnapshot && chatRefreshing;
+
   const TeamState({
     required this.team,
     this.chat = const [],
     this.files = const [],
     this.assignments = const [],
     this.loading = false,
+    this.chatHasSnapshot = false,
+    this.chatRefreshing = false,
+    this.chatError = false,
+    this.filesLoading = false,
+    this.assignmentsLoading = false,
+    this.roleLoading = false,
     this.votes = 0,
     this.isStarosta = false,
     this.doneAssignmentIds = const {},
@@ -55,6 +71,12 @@ class TeamState {
     List<FileItem>? files,
     List<Assignment>? assignments,
     bool? loading,
+    bool? chatHasSnapshot,
+    bool? chatRefreshing,
+    bool? chatError,
+    bool? filesLoading,
+    bool? assignmentsLoading,
+    bool? roleLoading,
     int? votes,
     bool? isStarosta,
     Set<String>? doneAssignmentIds,
@@ -65,6 +87,12 @@ class TeamState {
         files: files ?? this.files,
         assignments: assignments ?? this.assignments,
         loading: loading ?? this.loading,
+        chatHasSnapshot: chatHasSnapshot ?? this.chatHasSnapshot,
+        chatRefreshing: chatRefreshing ?? this.chatRefreshing,
+        chatError: chatError ?? this.chatError,
+        filesLoading: filesLoading ?? this.filesLoading,
+        assignmentsLoading: assignmentsLoading ?? this.assignmentsLoading,
+        roleLoading: roleLoading ?? this.roleLoading,
         votes: votes ?? this.votes,
         isStarosta: isStarosta ?? this.isStarosta,
         doneAssignmentIds: doneAssignmentIds ?? this.doneAssignmentIds,
@@ -82,6 +110,7 @@ class TeamCubit extends Cubit<TeamState> {
           team: team,
           chat: List<Message>.unmodifiable(
               _messagesByTeamId[team.id] ?? const <Message>[]),
+          chatHasSnapshot: _messagesByTeamId.containsKey(team.id),
           assignments: List<Assignment>.unmodifiable(
               _assignmentsByTeamId[team.id] ?? const <Assignment>[]),
           doneAssignmentIds: (_assignmentsByTeamId[team.id] ?? const [])
@@ -103,19 +132,6 @@ class TeamCubit extends Cubit<TeamState> {
 
   // ----------- INIT -----------
   Future<void> init() async {
-    if (state.chat.isEmpty) {
-      final persistedByTeam = await _loadPersistedTeamChatSnapshot();
-      if (persistedByTeam.isNotEmpty) {
-        _rememberTeamChat(persistedByTeam);
-        emit(state.copyWith(
-          loading: false,
-          chat: persistedByTeam,
-        ));
-        unawaited(_hydrateChatAuthorIdentities());
-      } else {
-        emit(state.copyWith(loading: true));
-      }
-    }
     if (state.assignments.isEmpty) {
       final persistedAssignments = await _loadPersistedAssignmentsSnapshot();
       if (persistedAssignments.isNotEmpty) {
@@ -129,57 +145,152 @@ class TeamCubit extends Cubit<TeamState> {
         ));
       }
     }
+
     final chatId = await _resolveMainChatId();
-    if (chatId != null && ChatMessageMemoryCache.has(chatId)) {
-      final cached = ChatMessageMemoryCache.snapshot(chatId);
-      _rememberTeamChat(cached);
-      emit(state.copyWith(
-        loading: false,
-        chat: cached,
-      ));
-      unawaited(_hydrateChatAuthorIdentities());
-    } else if (chatId != null) {
-      final persisted = await _loadPersistedChatSnapshot(chatId);
-      if (persisted.isNotEmpty) {
-        final cached = ChatMessageMemoryCache.replace(chatId, persisted);
-        _rememberTeamChat(cached);
-        emit(state.copyWith(
-          loading: false,
-          chat: cached,
-        ));
-        unawaited(_hydrateChatAuthorIdentities());
-      }
-    }
+    await _hydrateChatSnapshot(chatId);
 
-    final chat = await repo.loadChat(state.team.id);
-    final files = await repo.loadFiles(state.team.id);
-    final ass = await repo.loadAssignments(state.team.id);
-    final star = await _fetchIsStarosta(state.team.id);
-    final mergedChat = chatId == null
-        ? _dedupeAndSort(chat)
-        : ChatMessageMemoryCache.merge(chatId, chat);
-    if (chatId != null) {
-      unawaited(_persistChatSnapshot(chatId, mergedChat));
-    }
-    _rememberTeamChat(mergedChat);
-    _rememberAssignments(ass);
-    unawaited(_persistAssignmentsSnapshot(ass));
-
-    emit(state.copyWith(
-      loading: false,
-      chat: mergedChat,
-      files: files,
-      assignments: ass,
-      doneAssignmentIds:
-          ass.where((a) => a.completedByMe).map((a) => a.id).toSet(),
-      isStarosta: star,
-    ));
-    unawaited(_hydrateChatAuthorIdentities());
-
-    await _hydrateAssignmentIdsInChat();
+    // Chat sync must not wait for files/assignments/role.
+    unawaited(_loadChatInBackground(chatId));
+    unawaited(_loadFilesInBackground());
+    unawaited(_loadAssignmentsInBackground());
+    unawaited(_loadRoleInBackground());
 
     _subscribeToChat();
     _subscribeToAssignments();
+  }
+
+  Future<void> _hydrateChatSnapshot(String? chatId) async {
+    if (chatId != null) {
+      final storeSnap = await ChatMessageCacheStore.read(chatId);
+      if (storeSnap.found) {
+        _rememberTeamChat(storeSnap.messages, allowEmpty: true);
+        emit(state.copyWith(
+          loading: false,
+          chat: storeSnap.messages,
+          chatHasSnapshot: true,
+          chatRefreshing: true,
+          chatError: false,
+        ));
+        return;
+      }
+    }
+
+    final persistedByTeam = await _loadPersistedTeamChatSnapshot();
+    // Legacy team prefs may be a bare list without found flag; non-empty only.
+    if (persistedByTeam.isNotEmpty) {
+      if (chatId != null) {
+        await ChatMessageCacheStore.replace(
+          chatId: chatId,
+          messages: persistedByTeam,
+          markSynced: false,
+        );
+      }
+      _rememberTeamChat(persistedByTeam, allowEmpty: true);
+      emit(state.copyWith(
+        loading: false,
+        chat: persistedByTeam,
+        chatHasSnapshot: true,
+        chatRefreshing: true,
+        chatError: false,
+      ));
+      return;
+    }
+
+    emit(state.copyWith(
+      loading: true,
+      chatHasSnapshot: false,
+      chatRefreshing: true,
+      chatError: false,
+    ));
+  }
+
+  Future<void> _loadChatInBackground(String? chatId) async {
+    try {
+      final chat = await repo.loadChat(state.team.id);
+      if (isClosed) return;
+      final reconciled = chatId == null
+          ? _dedupeAndSort(chat)
+          : ChatMessageCacheStore.reconcileLatestPage(
+              existing: state.chat,
+              serverPage: chat,
+              pageLimit: 200,
+            );
+      if (chatId != null) {
+        await ChatMessageCacheStore.applyLatestServerPage(
+          chatId: chatId,
+          serverPage: chat,
+          pageLimit: 200,
+        );
+        unawaited(_persistChatSnapshot(chatId, reconciled));
+      }
+      _rememberTeamChat(reconciled, allowEmpty: true);
+      emit(state.copyWith(
+        loading: false,
+        chat: reconciled,
+        chatHasSnapshot: true,
+        chatRefreshing: false,
+        chatError: false,
+      ));
+      unawaited(_hydrateAssignmentIdsInChat());
+    } catch (e) {
+      safeDebugLog('[TeamCubit] loadChat failed: ${e.runtimeType}');
+      if (isClosed) return;
+      emit(state.copyWith(
+        loading: false,
+        chatRefreshing: false,
+        chatError: !state.chatHasSnapshot,
+      ));
+    }
+  }
+
+  Future<void> _loadFilesInBackground() async {
+    emit(state.copyWith(filesLoading: true));
+    try {
+      final files = await repo.loadFiles(state.team.id);
+      if (isClosed) return;
+      emit(state.copyWith(files: files, filesLoading: false));
+    } catch (_) {
+      if (!isClosed) emit(state.copyWith(filesLoading: false));
+    }
+  }
+
+  Future<void> _loadAssignmentsInBackground() async {
+    emit(state.copyWith(assignmentsLoading: true));
+    try {
+      final ass = await repo.loadAssignments(state.team.id);
+      if (isClosed) return;
+      _rememberAssignments(ass);
+      unawaited(_persistAssignmentsSnapshot(ass));
+      emit(state.copyWith(
+        assignments: ass,
+        doneAssignmentIds:
+            ass.where((a) => a.completedByMe).map((a) => a.id).toSet(),
+        assignmentsLoading: false,
+      ));
+    } catch (_) {
+      if (!isClosed) emit(state.copyWith(assignmentsLoading: false));
+    }
+  }
+
+  Future<void> _loadRoleInBackground() async {
+    emit(state.copyWith(roleLoading: true));
+    try {
+      final star = await _fetchIsStarosta(state.team.id);
+      if (isClosed) return;
+      emit(state.copyWith(isStarosta: star, roleLoading: false));
+    } catch (_) {
+      if (!isClosed) emit(state.copyWith(roleLoading: false));
+    }
+  }
+
+  Future<void> retryLoadChat() async {
+    final chatId = await _resolveMainChatId();
+    emit(state.copyWith(
+      chatRefreshing: true,
+      chatError: false,
+      loading: !state.chatHasSnapshot,
+    ));
+    await _loadChatInBackground(chatId);
   }
 
   void _rememberAssignments(Iterable<Assignment> assignments) {
@@ -189,88 +300,20 @@ class TeamCubit extends Cubit<TeamState> {
     _assignmentsByTeamId[state.team.id] = List<Assignment>.unmodifiable(stable);
   }
 
-  void _rememberTeamChat(Iterable<Message> messages) {
+  void _rememberTeamChat(
+    Iterable<Message> messages, {
+    bool allowEmpty = false,
+  }) {
     final stable = _dedupeAndSort(messages).where((m) => !m.isLocal).toList();
-    if (stable.isEmpty) return;
+    if (stable.isEmpty && !allowEmpty) return;
     final tail =
         stable.length > 120 ? stable.sublist(stable.length - 120) : stable;
     _messagesByTeamId[state.team.id] = List<Message>.unmodifiable(tail);
   }
 
-  Future<void> _hydrateChatAuthorIdentities() async {
-    final chat = state.chat;
-    if (chat.isEmpty) return;
-
-    final authorIds = chat
-        .where((message) {
-          if (message.authorId.isEmpty || message.isSystem) return false;
-          final name = message.authorName.trim();
-          final avatar = message.authorAvatarUrl?.trim() ?? '';
-          return name.isEmpty || name == 'Студент' || avatar.isEmpty;
-        })
-        .map((message) => message.authorId)
-        .toSet()
-        .toList();
-    if (authorIds.isEmpty) return;
-
-    try {
-      // Прямое чтение public.users по чужим id заблокировано RLS (виден только
-      // собственный ряд), поэтому профили берём через SECURITY DEFINER RPC
-      // get_user_profile, который обходит RLS.
-      final client = Supabase.instance.client;
-      final byId = <String, Map<String, dynamic>>{};
-      for (final authorId in authorIds) {
-        try {
-          final res =
-              await client.rpc('get_user_profile', params: {'p_id': authorId});
-          Map<String, dynamic>? map;
-          if (res is List && res.isNotEmpty) {
-            map = Map<String, dynamic>.from(res.first as Map);
-          } else if (res is Map) {
-            map = Map<String, dynamic>.from(res);
-          }
-          if (map != null) byId[authorId] = map;
-        } catch (_) {}
-      }
-      if (byId.isEmpty || isClosed) return;
-
-      var changed = false;
-      final updated = state.chat.map((message) {
-        final user = byId[message.authorId];
-        if (user == null) return message;
-
-        final name = [
-          (user['name'] ?? '').toString(),
-          (user['surname'] ?? '').toString(),
-        ].where((part) => part.trim().isNotEmpty).join(' ').trim();
-        final login = (user['login'] ?? '').toString().trim();
-        final avatar = (user['avatar_url'] ?? '').toString().trim();
-
-        final currentName = message.authorName.trim();
-        final nextName =
-            name.isNotEmpty ? name : (login.isNotEmpty ? login : currentName);
-        final nextAvatar = avatar.isNotEmpty ? avatar : message.authorAvatarUrl;
-        final nextLogin = login.isNotEmpty ? login : message.authorLogin;
-
-        if (nextName == message.authorName &&
-            nextAvatar == message.authorAvatarUrl &&
-            nextLogin == message.authorLogin) {
-          return message;
-        }
-
-        changed = true;
-        return message.copyWith(
-          authorLogin: nextLogin,
-          authorName: nextName,
-          authorAvatarUrl: nextAvatar,
-        );
-      }).toList();
-
-      if (!changed || isClosed) return;
-      emit(state.copyWith(chat: _mergeCachedChat(updated)));
-    } catch (e) {
-      safeDebugLog('[TeamCubit] hydrate authors failed: ${e.runtimeType}');
-    }
+  static Future<void> clearSessionCaches() async {
+    _messagesByTeamId.clear();
+    _assignmentsByTeamId.clear();
   }
 
   Future<String?> _resolveMainChatId() async {
@@ -298,16 +341,18 @@ class TeamCubit extends Cubit<TeamState> {
     final chatId = _mainChatId;
     if (chatId == null || chatId.isEmpty) {
       final sorted = _dedupeAndSort(messages);
-      _rememberTeamChat(sorted);
+      _rememberTeamChat(sorted, allowEmpty: true);
       return sorted;
     }
     final merged = ChatMessageMemoryCache.merge(chatId, messages);
-    _rememberTeamChat(merged);
-    unawaited(_persistChatSnapshot(chatId, merged));
+    _rememberTeamChat(merged, allowEmpty: true);
+    unawaited(ChatMessageCacheStore.merge(
+      chatId: chatId,
+      messages: merged,
+    ));
     return merged;
   }
 
-  String _chatSnapshotKey(String chatId) => 'chat_snapshot_v1_$chatId';
   String get _teamChatSnapshotKey => 'team_chat_snapshot_v1_${state.team.id}';
   String get _assignmentsSnapshotKey =>
       'team_assignment_snapshot_v1_${state.team.id}';
@@ -346,23 +391,6 @@ class TeamCubit extends Cubit<TeamState> {
     }
   }
 
-  Future<List<Message>> _loadPersistedChatSnapshot(String chatId) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_chatSnapshotKey(chatId));
-      if (raw == null || raw.isEmpty) return const [];
-      final decoded = jsonDecode(raw);
-      if (decoded is! List) return const [];
-      return decoded
-          .whereType<Map>()
-          .map((item) => Message.fromJson(Map<String, dynamic>.from(item)))
-          .where((message) => message.id.isNotEmpty)
-          .toList();
-    } catch (_) {
-      return const [];
-    }
-  }
-
   Future<void> _persistChatSnapshot(
     String chatId,
     Iterable<Message> messages,
@@ -372,13 +400,15 @@ class TeamCubit extends Cubit<TeamState> {
           .where((message) => !message.isLocal && message.id.isNotEmpty)
           .toList()
         ..sort((a, b) => a.at.compareTo(b.at));
+      await ChatMessageCacheStore.replace(
+        chatId: chatId,
+        messages: stable,
+        markSynced: true,
+      );
+      // Keep legacy team-scoped key briefly for older app builds reading it.
       final tail =
           stable.length > 120 ? stable.sublist(stable.length - 120) : stable;
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
-        _chatSnapshotKey(chatId),
-        jsonEncode(tail.map((message) => message.toJson()).toList()),
-      );
       await prefs.setString(
         _teamChatSnapshotKey,
         jsonEncode(tail.map((message) => message.toJson()).toList()),
@@ -667,8 +697,28 @@ class TeamCubit extends Cubit<TeamState> {
     }
     // Перечитываем чат, чтобы зафиксировать удаление сервером (устойчиво к рейсам/RT)
     try {
+      final chatId = await _resolveMainChatId();
       final fresh = await repo.loadChat(state.team.id);
-      if (fresh.isNotEmpty) emit(state.copyWith(chat: _mergeCachedChat(fresh)));
+      final reconciled = chatId == null
+          ? _dedupeAndSort(fresh)
+          : ChatMessageCacheStore.reconcileLatestPage(
+              existing: state.chat,
+              serverPage: fresh,
+              pageLimit: 200,
+            );
+      if (chatId != null) {
+        await ChatMessageCacheStore.applyLatestServerPage(
+          chatId: chatId,
+          serverPage: fresh,
+          pageLimit: 200,
+        );
+      }
+      _rememberTeamChat(reconciled, allowEmpty: true);
+      emit(state.copyWith(
+        chat: reconciled,
+        chatHasSnapshot: true,
+        chatError: false,
+      ));
     } catch (_) {}
   }
 
@@ -1066,18 +1116,38 @@ class TeamCubit extends Cubit<TeamState> {
 
   Future<void> _reloadChatFromServer({String? preferMessageId}) async {
     try {
+      final chatId = await _resolveMainChatId();
       final fresh = await repo.loadChat(state.team.id);
-      var merged = _mergeCachedChat(fresh);
+      var reconciled = chatId == null
+          ? _dedupeAndSort(fresh)
+          : ChatMessageCacheStore.reconcileLatestPage(
+              existing: state.chat,
+              serverPage: fresh,
+              pageLimit: 200,
+            );
+      if (chatId != null) {
+        await ChatMessageCacheStore.applyLatestServerPage(
+          chatId: chatId,
+          serverPage: fresh,
+          pageLimit: 200,
+        );
+      }
       if (preferMessageId != null &&
           preferMessageId.isNotEmpty &&
-          !merged.any((message) => message.id == preferMessageId)) {
+          !reconciled.any((message) => message.id == preferMessageId)) {
         final message =
             await repo.loadMessageById(state.team.id, preferMessageId);
         if (message != null) {
-          merged = _mergeCachedChat([...merged, message]);
+          reconciled = _mergeCachedChat([...reconciled, message]);
         }
       }
-      emit(state.copyWith(chat: merged));
+      _rememberTeamChat(reconciled, allowEmpty: true);
+      emit(state.copyWith(
+        chat: reconciled,
+        chatHasSnapshot: true,
+        chatRefreshing: false,
+        chatError: false,
+      ));
       await _hydrateAssignmentIdsInChat();
     } catch (e) {
       safeDebugLog('[TeamCubit] chat reload failed: ${e.runtimeType}');

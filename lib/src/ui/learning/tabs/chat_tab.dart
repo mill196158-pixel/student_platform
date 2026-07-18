@@ -1596,7 +1596,12 @@ class _ChatTabState extends State<ChatTab> {
                           entrySeenAt: _entrySeenAt,
                           showEntryNewBadge: _showEntryNewBadge,
                           hoveredMessageId: _actionsHoverId,
-                          initialLoading: state.loading && state.chat.isEmpty,
+                          initialLoading: state.chatInitialLoading,
+                          loadError: state.chatError && !state.chatHasSnapshot,
+                          onRetryLoad: () {
+                            unawaited(
+                                context.read<TeamCubit>().retryLoadChat());
+                          },
                           blockedUserIds: _blockedUserIds,
                           revealedBlockedMessageIds: _revealedBlockedMessageIds,
                           onRevealBlockedMessage: (id) {

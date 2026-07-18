@@ -9,6 +9,7 @@ import 'package:student_platform/src/ui/learning/models/local_attach.dart';
 import 'package:student_platform/src/ui/learning/models/chat_file.dart';
 import 'package:student_platform/src/ui/learning/state/team_cubit.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/data/chat_repository.dart';
+import 'chat_messages_load_state.dart';
 import 'i_chat_service.dart';
 
 class TeamChatService implements IChatService {
@@ -49,6 +50,33 @@ class TeamChatService implements IChatService {
   @override
   Stream<List<Message>> watchMessages() =>
       context.read<TeamCubit>().stream.map((s) => s.chat);
+
+  @override
+  Stream<ChatMessagesViewState> watchMessagesState() =>
+      context.read<TeamCubit>().stream.map(_viewStateFromTeam);
+
+  @override
+  ChatMessagesViewState get messagesViewState =>
+      _viewStateFromTeam(context.read<TeamCubit>().state);
+
+  ChatMessagesViewState _viewStateFromTeam(TeamState s) {
+    final phase = !s.chatHasSnapshot
+        ? ChatMessagesLoadPhase.noSnapshot
+        : (s.chatError
+            ? ChatMessagesLoadPhase.error
+            : (s.chatRefreshing
+                ? ChatMessagesLoadPhase.refreshing
+                : ChatMessagesLoadPhase.ready));
+    return ChatMessagesViewState(
+      phase: phase,
+      messages: s.chat,
+      hasSnapshot: s.chatHasSnapshot,
+      error: s.chatError ? 'chat_load_failed' : null,
+    );
+  }
+
+  @override
+  Future<void> retryLoadMessages() => context.read<TeamCubit>().retryLoadChat();
 
   @override
   List<Message> get currentMessages => context.read<TeamCubit>().state.chat;

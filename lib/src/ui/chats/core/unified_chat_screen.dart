@@ -41,6 +41,7 @@ import '../data/blocks_api.dart';
 
 import 'i_chat_service.dart';
 import 'dm_chat_service.dart';
+import 'chat_messages_load_state.dart';
 
 // ⤵️ DM-композер (новый файл ниже)
 import 'dm_composer_bar.dart';
@@ -78,7 +79,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   late final ChatSearchController _search;
   late final PinController _pinsCtl;
   late final ChatAttachmentsController _att;
-  late final Stream<List<Message>> _messagesStream;
+  late final Stream<ChatMessagesViewState> _messagesStream;
 
   final FileService _fileService = FileService();
   final GlobalCache _globalCache = GlobalCache();
@@ -153,7 +154,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   @override
   void initState() {
     super.initState();
-    _messagesStream = widget.service.watchMessages();
+    _messagesStream = widget.service.watchMessagesState();
     _chatScroll = ChatScrollController(_scroll, _messageKeys);
     _search = ChatSearchController();
     _pinsCtl = PinController();
@@ -1417,16 +1418,17 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
           ),
         ],
       ),
-      body: StreamBuilder<List<Message>>(
+      body: StreamBuilder<ChatMessagesViewState>(
         stream: _messagesStream,
-        initialData: widget.service.currentMessages.isEmpty
-            ? null
-            : widget.service.currentMessages,
+        initialData: widget.service.messagesViewState.hasSnapshot ||
+                widget.service.messagesViewState.messages.isNotEmpty
+            ? widget.service.messagesViewState
+            : null,
         builder: (ctx, snap) {
-          final list = snap.data ?? const <Message>[];
-          final initialLoading = !snap.hasData &&
-              snap.connectionState != ConnectionState.done &&
-              list.isEmpty;
+          final view = snap.data ?? widget.service.messagesViewState;
+          final list = view.messages;
+          final initialLoading = view.isInitialLoading;
+          final loadError = view.showError;
 
           if (_search.isActive) {
             _search.recompute(list, _isMatch);
@@ -1547,6 +1549,10 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                           // В ЛС аватары не показываем принципиально
                           forceHideAvatars: widget.hideAvatars || isDm,
                           initialLoading: initialLoading,
+                          loadError: loadError,
+                          onRetryLoad: () {
+                            unawaited(widget.service.retryLoadMessages());
+                          },
                         ),
                       ),
                       if (_loadingOlderMessages)

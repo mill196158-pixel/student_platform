@@ -6,18 +6,141 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/learning/models/chat_file.dart';
 import 'package:student_platform/src/ui/learning/models/local_attach.dart';
+import 'package:student_platform/src/ui/chats/core/chat_message_cache_store.dart';
+import 'package:student_platform/src/ui/chats/core/chat_message_memory_cache.dart';
+import 'package:student_platform/src/ui/chats/core/chat_messages_load_state.dart';
 import 'package:student_platform/src/utils/safe_debug_log.dart';
-import '../core/chat_message_memory_cache.dart';
 import 'blocks_api.dart';
+import 'chat_sync_realtime_gate.dart';
+
+class ChatSyncResult {
+  const ChatSyncResult._({
+    required this.ok,
+    this.messages = const <Message>[],
+    this.hasMoreBefore = false,
+    this.error,
+  });
+
+  final bool ok;
+  final List<Message> messages;
+  final bool hasMoreBefore;
+  final Object? error;
+
+  factory ChatSyncResult.success(
+    List<Message> messages, {
+    bool hasMoreBefore = false,
+  }) =>
+      ChatSyncResult._(
+        ok: true,
+        messages: messages,
+        hasMoreBefore: hasMoreBefore,
+      );
+
+  factory ChatSyncResult.failure(Object error) =>
+      ChatSyncResult._(ok: false, error: error);
+}
 
 class DmApi {
   static final SupabaseClient _sb = Supabase.instance.client;
   static final Map<String, List<Message>> _streamMessages = {};
   static final Map<String, StreamController<List<Message>>> _streamControllers =
       {};
+  static final Map<String, StreamController<ChatMessagesViewState>>
+      _viewControllers = {};
+  static final Map<String, ChatMessagesViewState> _viewStates = {};
+  static final Map<String, Future<ChatSyncResult>> _syncInFlight = {};
+  static final Map<String, RealtimeChannel> _channels = {};
+  static final Map<String, ChatSyncRealtimeGate> _syncGates = {};
 
   /// Per-chat clear boundary for the current user (one settings fetch).
   static final Map<String, DateTime?> _clearedAtByChat = {};
+
+  /// Test counters: number of initial/page message fetches per chat.
+  static final Map<String, int> debugLoadMessagesCounts = {};
+
+  /// Test hook: replace page fetch inside [syncLatest] (delayed pages, etc.).
+  static Future<({List<Message> messages, bool hasMore})> Function({
+    required String chatId,
+    required int limit,
+    DateTime? clearedAt,
+  })? debugSyncPageLoader;
+
+  /// Test hook: replace targeted single-message load used by Realtime flush.
+  static Future<Message?> Function({
+    required String chatId,
+    required String messageId,
+  })? debugLoadMessageById;
+
+  static void debugResetLoadCounts() => debugLoadMessagesCounts.clear();
+
+  static int debugLoadCount(String chatId) =>
+      debugLoadMessagesCounts[chatId] ?? 0;
+
+  static ChatSyncRealtimeGate _gateFor(String chatId) {
+    return _syncGates.putIfAbsent(
+      chatId,
+      () => ChatSyncRealtimeGate(
+        applyUpsert: (messageId) => _applyRealtimeUpsert(chatId, messageId),
+        applyDelete: (messageId) => _applyRealtimeDelete(chatId, messageId),
+      ),
+    );
+  }
+
+  /// Test helper: enqueue/apply an upsert through the same gate as Realtime.
+  static Future<void> debugHandleRealtimeUpsert({
+    required String chatId,
+    required String messageId,
+  }) =>
+      _gateFor(chatId).handleUpsert(messageId);
+
+  /// Test helper: enqueue/apply a delete through the same gate as Realtime.
+  static Future<void> debugHandleRealtimeDelete({
+    required String chatId,
+    required String messageId,
+  }) =>
+      _gateFor(chatId).handleDelete(messageId);
+
+  static ChatSyncRealtimeGate? debugGateFor(String chatId) =>
+      _syncGates[chatId];
+
+  static Future<void> _applyRealtimeUpsert(
+    String chatId,
+    String messageId,
+  ) async {
+    final clearedAt = await loadClearedAt(chatId);
+    final message = debugLoadMessageById != null
+        ? await debugLoadMessageById!(chatId: chatId, messageId: messageId)
+        : await loadMessageById(chatId: chatId, messageId: messageId);
+    if (message == null) return;
+    if (clearedAt != null && !message.at.isAfter(clearedAt)) return;
+    final snap = await ChatMessageCacheStore.reconcileUpsert(chatId, message);
+    await ChatMessageCacheStore.pruneAtOrBefore(chatId, clearedAt);
+    _emitView(
+      chatId,
+      ChatMessagesViewState(
+        phase: ChatMessagesLoadPhase.ready,
+        messages: ChatMessageCacheStore.messagesSync(chatId),
+        hasSnapshot: true,
+        hasMoreBefore: snap.hasMoreBefore,
+      ),
+    );
+  }
+
+  static Future<void> _applyRealtimeDelete(
+    String chatId,
+    String messageId,
+  ) async {
+    final snap = await ChatMessageCacheStore.remove(chatId, messageId);
+    _emitView(
+      chatId,
+      ChatMessagesViewState(
+        phase: ChatMessagesLoadPhase.ready,
+        messages: snap.found ? snap.messages : const <Message>[],
+        hasSnapshot: snap.found || ChatMessageCacheStore.hasSnapshot(chatId),
+        hasMoreBefore: snap.hasMoreBefore,
+      ),
+    );
+  }
 
   // 1) Создать/вернуть chat_id ЛС
   static Future<String> getOrCreateChatId({required String peerId}) async {
@@ -57,62 +180,164 @@ class DmApi {
     _clearedAtByChat.remove(chatId);
   }
 
-  // 2) Загрузить сообщения (и подтянуть вложения)
+  /// Test hook: seed clearedAt cache so sync can run without Supabase.
+  static void debugPrimeClearedAt(String chatId, DateTime? value) {
+    _clearedAtByChat[chatId] = value;
+  }
+
+  static ChatMessagesViewState viewStateFor(String chatId) {
+    return _viewStates[chatId] ??
+        ChatMessagesViewState(
+          phase: ChatMessageCacheStore.hasSnapshot(chatId)
+              ? ChatMessagesLoadPhase.ready
+              : ChatMessagesLoadPhase.noSnapshot,
+          messages: ChatMessageCacheStore.messagesSync(chatId),
+          hasSnapshot: ChatMessageCacheStore.hasSnapshot(chatId),
+          hasMoreBefore: ChatMessageCacheStore.peek(chatId).hasMoreBefore,
+        );
+  }
+
+  static void _emitView(String chatId, ChatMessagesViewState state) {
+    _viewStates[chatId] = state;
+    final list = List<Message>.unmodifiable(state.messages);
+    final current = _streamMessages.putIfAbsent(chatId, () => <Message>[]);
+    current
+      ..clear()
+      ..addAll(list);
+    final listCtrl = _streamControllers[chatId];
+    if (listCtrl != null && !listCtrl.isClosed) {
+      listCtrl.add(list);
+    }
+    final viewCtrl = _viewControllers[chatId];
+    if (viewCtrl != null && !viewCtrl.isClosed) {
+      viewCtrl.add(state);
+    }
+  }
+
+  // 2) Загрузить сообщения (bulk RPC; no per-message profile N+1)
   static Future<List<Message>> loadMessages({
     required String chatId,
     int limit = 50,
     DateTime? since,
     DateTime? clearedAt,
   }) async {
+    final page = await loadMessagesPage(
+      chatId: chatId,
+      limit: limit,
+      clearedAt: clearedAt,
+    );
+    return page.messages;
+  }
+
+  static Future<({List<Message> messages, bool hasMore})> loadMessagesPage({
+    required String chatId,
+    int limit = 50,
+    DateTime? beforeAt,
+    String? beforeId,
+    DateTime? clearedAt,
+  }) async {
+    debugLoadMessagesCounts[chatId] =
+        (debugLoadMessagesCounts[chatId] ?? 0) + 1;
+
     final clearFloor = clearedAt ?? await loadClearedAt(chatId);
-    ChatMessageMemoryCache.pruneAtOrBefore(chatId, clearFloor);
+    await ChatMessageCacheStore.pruneAtOrBefore(chatId, clearFloor);
 
-    var query = _sb.from('messages').select('*').eq('chat_id', chatId);
+    try {
+      final rows = await _sb.rpc('get_chat_messages_page', params: {
+        'p_chat_id': chatId,
+        'p_limit': limit.clamp(1, 100),
+        if (beforeAt != null) 'p_before_at': beforeAt.toUtc().toIso8601String(),
+        if (beforeId != null && beforeId.isNotEmpty) 'p_before_id': beforeId,
+      });
 
-    final sinceAt = since ?? DateTime.fromMillisecondsSinceEpoch(0);
-    // cleared_at: only messages with created_at > cleared_at.
-    if (clearFloor != null && !sinceAt.isAfter(clearFloor)) {
-      query = query.gt('created_at', clearFloor.toUtc().toIso8601String());
-    } else {
-      query = query.gte('created_at', sinceAt.toUtc().toIso8601String());
-    }
-
-    // Последние N сообщений (DESC), затем ASC для UI.
-    final rows = await query.order('created_at', ascending: false).limit(limit);
-
-    if (kDebugMode) {
-      final boundary = clearFloor?.toUtc().toIso8601String() ?? '<none>';
-      debugPrint(
-        '[DM] loadMessages chat=${maskDebugId(chatId)} rows=${(rows as List).length} '
-        'since=${sinceAt.toUtc().toIso8601String()} clearedAt=$boundary',
+      final list = <Message>[];
+      var hasMore = false;
+      for (final row in (rows as List? ?? const [])) {
+        final data = Map<String, dynamic>.from(row as Map);
+        hasMore = data['has_more'] == true || hasMore;
+        final message = _messageFromRow(data, chatId: chatId);
+        if (clearFloor != null && !message.at.isAfter(clearFloor)) continue;
+        list.add(message);
+      }
+      list.sort((a, b) {
+        final byTime = a.at.compareTo(b.at);
+        return byTime != 0 ? byTime : a.id.compareTo(b.id);
+      });
+      if (kDebugMode) {
+        debugPrint(
+          '[DM] loadMessagesPage rpc chat=${maskDebugId(chatId)} '
+          'rows=${list.length} hasMore=$hasMore',
+        );
+      }
+      return (messages: list, hasMore: hasMore);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint(
+          '[DM] get_chat_messages_page fallback chat=${maskDebugId(chatId)}: $e',
+        );
+      }
+      return _loadMessagesLegacyPage(
+        chatId: chatId,
+        limit: limit,
+        beforeAt: beforeAt,
+        beforeId: beforeId,
+        clearedAt: clearFloor,
       );
     }
+  }
+
+  /// Legacy table select used only when RPC is unavailable. Authors are left
+  /// as provided by the row (no per-message get_user_profile loop).
+  static Future<({List<Message> messages, bool hasMore})>
+      _loadMessagesLegacyPage({
+    required String chatId,
+    int limit = 50,
+    DateTime? beforeAt,
+    String? beforeId,
+    DateTime? clearedAt,
+  }) async {
+    var query = _sb.from('messages').select('*').eq('chat_id', chatId);
+
+    if (clearedAt != null) {
+      query = query.gt('created_at', clearedAt.toUtc().toIso8601String());
+    }
+    if (beforeAt != null) {
+      query = query.lte('created_at', beforeAt.toUtc().toIso8601String());
+    }
+
+    final rows =
+        await query.order('created_at', ascending: false).limit(limit + 1);
 
     final msgs = <Message>[];
-    for (final row in (rows as List).reversed) {
+    for (final row in (rows as List)) {
       final data = Map<String, dynamic>.from(row as Map);
-      await _hydrateAuthor(data);
+      final id = (data['id'] ?? '').toString();
+      if (beforeId != null && id == beforeId) continue;
       final message = _messageFromRow(data, chatId: chatId);
-      if (clearFloor != null && !message.at.isAfter(clearFloor)) continue;
+      if (clearedAt != null && !message.at.isAfter(clearedAt)) continue;
       msgs.add(message);
     }
 
-    final ids = msgs.map((m) => m.id).toList();
+    final hasMore = msgs.length > limit;
+    final page = msgs.take(limit).toList().reversed.toList();
+
+    final ids = page.map((m) => m.id).toList();
     if (ids.isNotEmpty) {
       final byMsg = await _loadFilesByMessage(ids);
-      for (var i = 0; i < msgs.length; i++) {
-        final m = msgs[i];
-        msgs[i] = m.copyWith(attachments: byMsg[m.id] ?? const []);
+      for (var i = 0; i < page.length; i++) {
+        final m = page[i];
+        page[i] = m.copyWith(attachments: byMsg[m.id] ?? const []);
       }
     }
 
-    return msgs;
+    return (messages: page, hasMore: hasMore);
   }
 
   static Message _messageFromRow(Map<String, dynamic> m,
       {required String chatId}) {
     final authorName = (m['author_name'] ?? '').toString().trim();
     final authorLogin = (m['author_login'] ?? '').toString().trim();
+    final attachments = _parseAttachments(m['attachments']);
     return Message(
       id: (m['id'] ?? '').toString(),
       chatId: (m['chat_id'] ?? chatId).toString(),
@@ -131,11 +356,29 @@ class DmApi {
       replyToId: (m['reply_to_id']?.toString().isNotEmpty ?? false)
           ? m['reply_to_id'].toString()
           : null,
-      attachments: const [],
+      attachments: attachments,
       reactions: (m['reactions'] is Map)
           ? Map<String, int>.from(m['reactions'])
           : null,
+      userReactions: m['user_reactions'] is List
+          ? (m['user_reactions'] as List)
+              .map((e) => e.toString())
+              .where((s) => s.isNotEmpty)
+              .toList()
+          : null,
+      isPinned: m['is_pinned'] == true,
     );
+  }
+
+  static List<ChatFile>? _parseAttachments(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is List) {
+      return raw
+          .whereType<Map>()
+          .map((item) => ChatFile.fromJson(Map<String, dynamic>.from(item)))
+          .toList();
+    }
+    return null;
   }
 
   static Future<Map<String, List<ChatFile>>> _loadFilesByMessage(
@@ -154,13 +397,15 @@ class DmApi {
     return byMsg;
   }
 
+  /// Targeted single-message hydrate for Realtime / edit paths (one RPC ok).
   static Future<void> _hydrateAuthor(Map<String, dynamic> data) async {
     final authorId = (data['author_id'] ?? '').toString();
     if (authorId.isEmpty) return;
+    if ((data['author_name'] ?? '').toString().trim().isNotEmpty &&
+        (data['author_avatar_url'] ?? '').toString().trim().isNotEmpty) {
+      return;
+    }
 
-    // Прямое чтение public.users работает только для собственного ряда
-    // (RLS). Для чужих авторов имя приходит пустым и в UI подставляется
-    // «Студент», поэтому дочитываем профиль через SECURITY DEFINER RPC.
     try {
       final user = await _sb
           .from('users')
@@ -205,6 +450,7 @@ class DmApi {
     required String messageId,
   }) async {
     try {
+      // Prefer bulk RPC page filtered by fetching single row via table + one hydrate.
       final row = await _sb
           .from('messages')
           .select('*')
@@ -235,55 +481,50 @@ class DmApi {
   }) async {
     try {
       final clearedAt = await loadClearedAt(chatId);
-      var query = _sb
-          .from('messages')
-          .select('*')
-          .eq('chat_id', chatId)
-          .lte('created_at', before.at.toUtc().toIso8601String());
-      if (clearedAt != null) {
-        query = query.gt('created_at', clearedAt.toUtc().toIso8601String());
-      }
-      final rows =
-          await query.order('created_at', ascending: false).limit(limit + 1);
+      final page = await loadMessagesPage(
+        chatId: chatId,
+        limit: limit,
+        beforeAt: before.at,
+        beforeId: before.id,
+        clearedAt: clearedAt,
+      );
 
-      final older = <Message>[];
-      for (final row in rows as List) {
-        final data = Map<String, dynamic>.from(row as Map);
-        final id = (data['id'] ?? '').toString();
-        if (id.isEmpty || id == before.id) continue;
+      final older = page.messages.where((m) => m.id != before.id).toList()
+        ..sort((a, b) => a.at.compareTo(b.at));
 
-        await _hydrateAuthor(data);
-        final message = _messageFromRow(data, chatId: chatId);
-        if (clearedAt != null && !message.at.isAfter(clearedAt)) continue;
-        final files = await _loadFilesByMessage([id]);
-        older.add(message.copyWith(
-          attachments: files[id] ?? const [],
-        ));
-      }
-
-      older.sort((a, b) => a.at.compareTo(b.at));
-      final page = older.take(limit).toList();
-      ChatMessageMemoryCache.merge(chatId, page);
-      ChatMessageMemoryCache.pruneAtOrBefore(chatId, clearedAt);
+      await ChatMessageCacheStore.merge(
+        chatId: chatId,
+        messages: older,
+        clearedAt: clearedAt,
+        hasMoreBefore: page.hasMore,
+      );
+      await ChatMessageCacheStore.pruneAtOrBefore(chatId, clearedAt);
 
       final current = _streamMessages[chatId];
       final ctrl = _streamControllers[chatId];
       if (current != null && ctrl != null) {
         final existingIds = current.map((m) => m.id).toSet();
-        final unique = page.where((m) => existingIds.add(m.id)).toList();
+        final unique = older.where((m) => existingIds.add(m.id)).toList();
         if (unique.isNotEmpty) {
           current.insertAll(0, unique);
-          ChatMessageMemoryCache.merge(chatId, current);
-          final visible =
-              ChatMessageMemoryCache.pruneAtOrBefore(chatId, clearedAt);
+          final visible = ChatMessageCacheStore.messagesSync(chatId);
           current
             ..clear()
             ..addAll(visible);
-          if (!ctrl.isClosed) ctrl.add(List<Message>.unmodifiable(current));
+          _emitView(
+            chatId,
+            viewStateFor(chatId).copyWith(
+              phase: ChatMessagesLoadPhase.ready,
+              messages: visible,
+              hasSnapshot: true,
+              hasMoreBefore: page.hasMore,
+              clearError: true,
+            ),
+          );
         }
         return unique;
       }
-      return page;
+      return older;
     } catch (e) {
       if (kDebugMode) {
         debugPrint('[DM] loadOlderMessages failed: $e');
@@ -301,18 +542,16 @@ class DmApi {
     final message = await loadMessageById(chatId: chatId, messageId: messageId);
     if (message == null) return;
 
-    final merged = ChatMessageMemoryCache.reconcileUpsert(chatId, message);
-    final current = _streamMessages[chatId];
-    if (current != null) {
-      current
-        ..clear()
-        ..addAll(merged);
-    }
-
-    final ctrl = _streamControllers[chatId];
-    if (ctrl != null && !ctrl.isClosed) {
-      ctrl.add(List<Message>.unmodifiable(merged));
-    }
+    final snap = await ChatMessageCacheStore.reconcileUpsert(chatId, message);
+    _emitView(
+      chatId,
+      ChatMessagesViewState(
+        phase: ChatMessagesLoadPhase.ready,
+        messages: snap.messages,
+        hasSnapshot: true,
+        hasMoreBefore: snap.hasMoreBefore,
+      ),
+    );
   }
 
   static String _publishOptimisticMessage({
@@ -335,15 +574,17 @@ class DmApi {
       clientId: clientId,
       deliveryStatus: MessageDeliveryStatus.sending,
     );
-    final merged = ChatMessageMemoryCache.upsert(chatId, local);
-    final current = _streamMessages.putIfAbsent(chatId, () => <Message>[]);
-    current
-      ..clear()
-      ..addAll(merged);
-    final ctrl = _streamControllers[chatId];
-    if (ctrl != null && !ctrl.isClosed) {
-      ctrl.add(List<Message>.unmodifiable(merged));
-    }
+    ChatMessageMemoryCache.upsert(chatId, local);
+    final merged = ChatMessageCacheStore.messagesSync(chatId);
+    _emitView(
+      chatId,
+      ChatMessagesViewState(
+        phase: ChatMessagesLoadPhase.ready,
+        messages: merged,
+        hasSnapshot: true,
+        hasMoreBefore: ChatMessageCacheStore.peek(chatId).hasMoreBefore,
+      ),
+    );
     return clientId;
   }
 
@@ -351,7 +592,7 @@ class DmApi {
     required String chatId,
     required String clientId,
   }) {
-    final current = ChatMessageMemoryCache.snapshot(chatId);
+    final current = ChatMessageCacheStore.messagesSync(chatId);
     if (current.isEmpty) return;
     final next = current.map((message) {
       if (message.clientId == clientId || message.id == clientId) {
@@ -359,53 +600,151 @@ class DmApi {
       }
       return message;
     }).toList();
-    final merged = ChatMessageMemoryCache.replace(chatId, next);
-    final streamCurrent = _streamMessages.putIfAbsent(chatId, () => <Message>[]);
-    streamCurrent
-      ..clear()
-      ..addAll(merged);
-    final ctrl = _streamControllers[chatId];
-    if (ctrl != null && !ctrl.isClosed) {
-      ctrl.add(List<Message>.unmodifiable(merged));
-    }
+    ChatMessageMemoryCache.replace(chatId, next);
+    final merged = ChatMessageCacheStore.messagesSync(chatId);
+    _emitView(
+      chatId,
+      ChatMessagesViewState(
+        phase: ChatMessagesLoadPhase.ready,
+        messages: merged,
+        hasSnapshot: true,
+        hasMoreBefore: ChatMessageCacheStore.peek(chatId).hasMoreBefore,
+      ),
+    );
   }
 
+  /// Single-flight latest sync. On error does NOT write [] over existing cache.
+  static Future<ChatSyncResult> syncLatest({
+    required String chatId,
+    int limit = 50,
+    bool invalidateClearBoundary = true,
+  }) {
+    if (chatId.isEmpty) {
+      return Future.value(ChatSyncResult.success(const <Message>[]));
+    }
+    final existing = _syncInFlight[chatId];
+    if (existing != null) return existing;
+
+    final future = _syncLatestImpl(
+      chatId: chatId,
+      limit: limit,
+      invalidateClearBoundary: invalidateClearBoundary,
+    );
+    _syncInFlight[chatId] = future;
+    future.whenComplete(() {
+      if (identical(_syncInFlight[chatId], future)) {
+        _syncInFlight.remove(chatId);
+      }
+    });
+    return future;
+  }
+
+  static Future<ChatSyncResult> _syncLatestImpl({
+    required String chatId,
+    required int limit,
+    required bool invalidateClearBoundary,
+  }) async {
+    final gate = _gateFor(chatId);
+    return gate.runExclusiveSync(() async {
+      try {
+        if (invalidateClearBoundary) invalidateClearedAt(chatId);
+        final clearedAt = await loadClearedAt(chatId);
+        final page = debugSyncPageLoader != null
+            ? await debugSyncPageLoader!(
+                chatId: chatId,
+                limit: limit,
+                clearedAt: clearedAt,
+              )
+            : await loadMessagesPage(
+                chatId: chatId,
+                limit: limit,
+                clearedAt: clearedAt,
+              );
+        // DELETE tombstones win over a page fetched before the delete.
+        final tombs = gate.pendingDeleteTombstones;
+        final serverPage = tombs.isEmpty
+            ? page.messages
+            : page.messages
+                .where((m) => !tombs.contains(m.id))
+                .toList(growable: false);
+        final snap = await ChatMessageCacheStore.applyLatestServerPage(
+          chatId: chatId,
+          serverPage: serverPage,
+          pageLimit: limit,
+          clearedAt: clearedAt,
+          hasMoreBefore: page.hasMore,
+        );
+        _emitView(
+          chatId,
+          ChatMessagesViewState(
+            phase: ChatMessagesLoadPhase.ready,
+            messages: snap.messages,
+            hasSnapshot: true,
+            hasMoreBefore: snap.hasMoreBefore,
+          ),
+        );
+        return ChatSyncResult.success(
+          snap.messages,
+          hasMoreBefore: snap.hasMoreBefore,
+        );
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('[DM] syncLatest failed chat=${maskDebugId(chatId)}: $e');
+        }
+        final cached = ChatMessageCacheStore.peek(chatId);
+        _emitView(
+          chatId,
+          ChatMessagesViewState(
+            phase: ChatMessagesLoadPhase.error,
+            messages: cached.found ? cached.messages : const <Message>[],
+            hasSnapshot: cached.found,
+            hasMoreBefore: cached.hasMoreBefore,
+            error: e,
+          ),
+        );
+        return ChatSyncResult.failure(e);
+      }
+      // Buffered Realtime ops flush in runExclusiveSync finally — even on error.
+    });
+  }
+
+  /// Backward-compatible refresh. Never pretends a network error is an empty chat.
   static Future<List<Message>> refreshStream({required String chatId}) async {
     if (chatId.isEmpty) return const <Message>[];
-    try {
-      invalidateClearedAt(chatId);
-      final clearedAt = await loadClearedAt(chatId);
-      final list = await loadMessages(chatId: chatId, clearedAt: clearedAt);
-      ChatMessageMemoryCache.merge(chatId, list);
-      final visible = ChatMessageMemoryCache.pruneAtOrBefore(chatId, clearedAt);
+    final result = await syncLatest(chatId: chatId);
+    if (!result.ok) {
+      return ChatMessageCacheStore.messagesSync(chatId);
+    }
+    return List<Message>.unmodifiable(result.messages);
+  }
 
-      final current = _streamMessages.putIfAbsent(chatId, () => <Message>[]);
-      current
-        ..clear()
-        ..addAll(visible);
-
-      final ctrl = _streamControllers[chatId];
-      if (ctrl != null && !ctrl.isClosed) {
-        ctrl.add(List<Message>.unmodifiable(current));
+  static Future<void> _ensureSynced(String chatId) async {
+    final current = _viewStates[chatId];
+    if (current == null ||
+        current.phase == ChatMessagesLoadPhase.noSnapshot ||
+        current.phase == ChatMessagesLoadPhase.ready ||
+        current.phase == ChatMessagesLoadPhase.error) {
+      if (current != null && current.hasSnapshot) {
+        _emitView(
+          chatId,
+          current.copyWith(phase: ChatMessagesLoadPhase.refreshing),
+        );
       }
-      return List<Message>.unmodifiable(current);
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('[DM] refreshStream failed chat=${maskDebugId(chatId)}: $e');
-      }
-      return const <Message>[];
+      await syncLatest(chatId: chatId);
     }
   }
 
-  // 3) Realtime подписка по chat_id
-  static Stream<List<Message>> watchMessages({required String chatId}) {
-    if (_streamControllers.containsKey(chatId)) {
-      final ctrl = _streamControllers[chatId]!;
-      final current = _streamMessages[chatId] ?? const <Message>[];
-      unawaited(refreshStream(chatId: chatId));
-      return Stream<List<Message>>.multi((controller) {
-        if (current.isNotEmpty) {
-          controller.add(List<Message>.unmodifiable(current));
+  /// Rich state stream: snapshot-first, one sync, realtime patches.
+  static Stream<ChatMessagesViewState> watchMessagesState({
+    required String chatId,
+  }) {
+    if (_viewControllers.containsKey(chatId)) {
+      final ctrl = _viewControllers[chatId]!;
+      unawaited(_ensureSynced(chatId));
+      return Stream<ChatMessagesViewState>.multi((controller) {
+        final current = _viewStates[chatId];
+        if (current != null) {
+          controller.add(current);
         }
         final sub = ctrl.stream.listen(
           controller.add,
@@ -416,81 +755,79 @@ class DmApi {
       });
     }
 
-    final ctrl = StreamController<List<Message>>.broadcast();
-    final current = _streamMessages.putIfAbsent(chatId, () => <Message>[]);
-    _streamControllers[chatId] = ctrl;
+    final viewCtrl = StreamController<ChatMessagesViewState>.broadcast();
+    final listCtrl = StreamController<List<Message>>.broadcast();
+    _viewControllers[chatId] = viewCtrl;
+    _streamControllers[chatId] = listCtrl;
+    _streamMessages.putIfAbsent(chatId, () => <Message>[]);
+
+    unawaited(_bootstrapWatch(chatId));
+
+    return viewCtrl.stream;
+  }
+
+  static Future<void> _bootstrapWatch(String chatId) async {
+    // 1) Snapshot first (empty found snapshot is valid).
+    final snap = await ChatMessageCacheStore.read(chatId);
+    if (snap.found) {
+      _emitView(
+        chatId,
+        ChatMessagesViewState(
+          phase: ChatMessagesLoadPhase.refreshing,
+          messages: snap.messages,
+          hasSnapshot: true,
+          hasMoreBefore: snap.hasMoreBefore,
+        ),
+      );
+    } else {
+      _emitView(
+        chatId,
+        const ChatMessagesViewState(
+          phase: ChatMessagesLoadPhase.noSnapshot,
+          messages: <Message>[],
+          hasSnapshot: false,
+        ),
+      );
+    }
+
+    // 2) One realtime subscription.
+    _ensureRealtime(chatId);
+
+    // 3) Exactly one background sync (deduped).
+    await syncLatest(chatId: chatId);
+  }
+
+  static void _ensureRealtime(String chatId) {
+    if (_channels.containsKey(chatId)) return;
 
     String idFromPayload(PostgresChangePayload payload, {bool old = false}) {
       final record = old ? payload.oldRecord : payload.newRecord;
       return (record['id'] ?? '').toString();
     }
 
-    Future<void> emitInitial() async {
-      try {
-        invalidateClearedAt(chatId);
-        final clearedAt = await loadClearedAt(chatId);
-        final prunedCache =
-            ChatMessageMemoryCache.pruneAtOrBefore(chatId, clearedAt);
-        if (prunedCache.isNotEmpty) {
-          current
-            ..clear()
-            ..addAll(prunedCache);
-          if (!ctrl.isClosed) ctrl.add(List<Message>.unmodifiable(current));
-        }
-
-        final list = await loadMessages(chatId: chatId, clearedAt: clearedAt);
-        ChatMessageMemoryCache.merge(chatId, list);
-        final visible =
-            ChatMessageMemoryCache.pruneAtOrBefore(chatId, clearedAt);
-        current
-          ..clear()
-          ..addAll(visible);
-        if (!ctrl.isClosed) ctrl.add(List<Message>.unmodifiable(current));
-      } catch (_) {}
-    }
-
     Future<void> insertOne(PostgresChangePayload payload) async {
       final id = idFromPayload(payload);
-      if (id.isEmpty || current.any((m) => m.id == id)) return;
-      final clearedAt = await loadClearedAt(chatId);
-      final message = await loadMessageById(chatId: chatId, messageId: id);
-      if (message == null) return;
-      if (clearedAt != null && !message.at.isAfter(clearedAt)) return;
-      ChatMessageMemoryCache.reconcileUpsert(chatId, message);
-      final visible = ChatMessageMemoryCache.pruneAtOrBefore(chatId, clearedAt);
-      current
-        ..clear()
-        ..addAll(visible);
-      if (!ctrl.isClosed) ctrl.add(List<Message>.unmodifiable(current));
+      if (id.isEmpty) return;
+      // Dedupe only when applying immediately; during sync/flush always buffer.
+      final gate = _gateFor(chatId);
+      if (!gate.isBusy) {
+        final current = _streamMessages[chatId] ?? const <Message>[];
+        if (current.any((m) => m.id == id)) return;
+      }
+      await gate.handleUpsert(id);
     }
 
     Future<void> updateOne(PostgresChangePayload payload) async {
       final id = idFromPayload(payload);
       if (id.isEmpty) return;
-      final idx = current.indexWhere((m) => m.id == id);
-      if (idx == -1) return;
-      final message = await loadMessageById(chatId: chatId, messageId: id);
-      if (message == null) return;
-      current[idx] = message;
-      final merged = ChatMessageMemoryCache.merge(chatId, current);
-      current
-        ..clear()
-        ..addAll(merged);
-      if (!ctrl.isClosed) ctrl.add(List<Message>.unmodifiable(current));
+      await _gateFor(chatId).handleUpsert(id);
     }
 
-    void deleteOne(PostgresChangePayload payload) {
+    Future<void> deleteOne(PostgresChangePayload payload) async {
       final id = idFromPayload(payload, old: true);
       if (id.isEmpty) return;
-      final before = current.length;
-      current.removeWhere((m) => m.id == id);
-      ChatMessageMemoryCache.remove(chatId, id);
-      if (before != current.length && !ctrl.isClosed) {
-        ctrl.add(List<Message>.unmodifiable(current));
-      }
+      await _gateFor(chatId).handleDelete(id);
     }
-
-    emitInitial();
 
     final ch = _sb.channel('dm:messages:$chatId')
       ..onPostgresChanges(
@@ -524,18 +861,54 @@ class DmApi {
           column: 'chat_id',
           value: chatId,
         ),
-        callback: deleteOne,
+        callback: (payload) => deleteOne(payload),
       )
       ..subscribe();
 
-    ctrl.onCancel = () async {
+    _channels[chatId] = ch;
+
+    final listCtrl = _streamControllers[chatId];
+    listCtrl?.onCancel = () async {
+      // Keep channel alive while view controller has listeners; tear down on logout.
+    };
+  }
+
+  // 3) Realtime подписка по chat_id (list stream)
+  static Stream<List<Message>> watchMessages({required String chatId}) {
+    return watchMessagesState(chatId: chatId).map((s) => s.messages);
+  }
+
+  /// Stop realtime, clear in-memory streams/maps, clear clearedAt cache.
+  static Future<void> clearSessionState() async {
+    for (final ch in _channels.values) {
       try {
         await ch.unsubscribe();
       } catch (_) {}
-      _streamControllers.remove(chatId);
-    };
+    }
+    _channels.clear();
 
-    return ctrl.stream;
+    for (final ctrl in _streamControllers.values) {
+      try {
+        await ctrl.close();
+      } catch (_) {}
+    }
+    _streamControllers.clear();
+
+    for (final ctrl in _viewControllers.values) {
+      try {
+        await ctrl.close();
+      } catch (_) {}
+    }
+    _viewControllers.clear();
+
+    _streamMessages.clear();
+    _viewStates.clear();
+    _syncInFlight.clear();
+    _syncGates.clear();
+    _clearedAtByChat.clear();
+    debugLoadMessagesCounts.clear();
+    debugSyncPageLoader = null;
+    debugLoadMessageById = null;
   }
 
   // 4) Отправка текста + привязка файлов
@@ -559,7 +932,6 @@ class DmApi {
             replyToId: replyToId,
           );
 
-    // Try RPC first (if present on server)
     try {
       final res = await _sb.rpc('send_message_in_chat_with_files', params: {
         'p_chat_id': chatId,
@@ -594,7 +966,6 @@ class DmApi {
       // fallback below
     }
 
-    // Fallback: direct insert with author_id
     late final dynamic inserted;
     try {
       inserted = await _sb
@@ -709,7 +1080,6 @@ class DmApi {
   }
 
   /// Edit own plain-text message via SECURITY DEFINER RPC.
-  /// Returns the updated message and publishes it into the local stream.
   static Future<Message> editOwnMessage({
     required String messageId,
     required String text,
@@ -739,26 +1109,23 @@ class DmApi {
     );
 
     if (chatId.isNotEmpty) {
-      final merged = ChatMessageMemoryCache.reconcileUpsert(chatId, message);
-      final current = _streamMessages[chatId];
-      if (current != null) {
-        current
-          ..clear()
-          ..addAll(merged);
-      }
-      final ctrl = _streamControllers[chatId];
-      if (ctrl != null && !ctrl.isClosed) {
-        ctrl.add(List<Message>.unmodifiable(merged));
-      }
+      final snap = await ChatMessageCacheStore.reconcileUpsert(chatId, message);
+      _emitView(
+        chatId,
+        ChatMessagesViewState(
+          phase: ChatMessagesLoadPhase.ready,
+          messages: snap.messages,
+          hasSnapshot: true,
+          hasMoreBefore: snap.hasMoreBefore,
+        ),
+      );
     }
 
     return message;
   }
 
-  // 9) Upload: у нас уже есть FileService через ChatAttachmentsController
+  // 9) Upload
   static Future<String> upload(LocalAttach local, String chatId) async {
-    // В текущей архитектуре загрузка делается через ChatAttachmentsController
-    // Этот метод не используется напрямую из UI и может быть не нужен.
     throw UnimplementedError('Use ChatAttachmentsController.upload instead');
   }
 

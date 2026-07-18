@@ -341,38 +341,96 @@ class SupabaseLearningRepository implements LearningRepository {
   }
 
   Future<List<ChatFile>> _loadChatFilesForMessage(String messageId) async {
+    final byMsg = await _loadChatFilesByMessageIds([messageId]);
+    return byMsg[messageId] ?? const <ChatFile>[];
+  }
+
+  /// One round-trip for many message ids (legacy team load paths).
+  Future<Map<String, List<ChatFile>>> _loadChatFilesByMessageIds(
+    List<String> messageIds,
+  ) async {
+    final ids = messageIds.where((id) => id.isNotEmpty).toSet().toList();
+    if (ids.isEmpty) return const <String, List<ChatFile>>{};
+
     final rows =
-        await _sb.from('chat_files').select('*').eq('message_id', messageId);
-    return (rows as List)
-        .map((e) => ChatFile.fromJson(Map<String, dynamic>.from(e as Map)))
-        .toList();
+        await _sb.from('chat_files').select('*').inFilter('message_id', ids);
+    final byMsg = <String, List<ChatFile>>{};
+    for (final r in (rows as List)) {
+      final m = Map<String, dynamic>.from(r as Map);
+      final mid = (m['message_id'] ?? '').toString();
+      if (mid.isEmpty) continue;
+      byMsg.putIfAbsent(mid, () => <ChatFile>[]).add(ChatFile.fromJson(m));
+    }
+    return byMsg;
+  }
+
+  bool _rowHasAttachments(Map<String, dynamic> data) {
+    final raw = data['attachments'];
+    return raw is List && raw.isNotEmpty;
   }
 
   @override
   Future<List<Message>> loadChat(String teamId) async {
-    try {
-      final me = _sb.auth.currentUser;
+    final me = _sb.auth.currentUser;
+    final chatId = await _getTeamMainChatId(teamId);
 
-      // Основной путь: SECURITY DEFINER RPC, который джойнит имя/логин/аватар
-      // автора на сервере в обход RLS. Прямое чтение public.users клиентом
-      // запрещено политиками (виден только собственный ряд id = auth.uid()),
-      // из-за чего у чужих сообщений имя не подтягивалось и падало в «Студент».
+    // Preferred: paginated bulk RPC (authors + attachments + reactions).
+    if (chatId != null && chatId.isNotEmpty) {
+      try {
+        final rpcRows = await _sb.rpc('get_chat_messages_page', params: {
+          'p_chat_id': chatId,
+          'p_limit': 100,
+        });
+        final list = <Message>[];
+        for (final row in rpcRows as List? ?? const []) {
+          final data = Map<String, dynamic>.from(row as Map);
+          final id = (data['id'] ?? '').toString();
+          if (id.isEmpty) continue;
+          list.add(_mapMessageRow(
+            data,
+            chatId: (data['chat_id'] ?? chatId).toString(),
+            currentUserId: me?.id ?? '',
+          ));
+        }
+        list.sort((a, b) => a.at.compareTo(b.at));
+        await _saveChatLocal(teamId, list);
+        return list;
+      } catch (e) {
+        debugPrint(
+            '[loadChat] get_chat_messages_page failed, trying team rpc: $e');
+      }
+    }
+
+    try {
+      // Legacy SECURITY DEFINER RPC by team_id.
       final rpcRows = await _sb.rpc('get_chat_messages_for_team', params: {
         'p_team_id': teamId,
         'p_limit': 200,
       });
 
-      final list = <Message>[];
+      final pending = <Map<String, dynamic>>[];
+      final needsFiles = <String>[];
       for (final row in rpcRows as List) {
         final data = Map<String, dynamic>.from(row as Map);
         final id = (data['id'] ?? '').toString();
         if (id.isEmpty) continue;
-
-        final attachments = await _loadChatFilesForMessage(id);
-        if (attachments.isNotEmpty) {
-          data['attachments'] = attachments.map((e) => e.toJson()).toList();
+        pending.add(data);
+        if (!_rowHasAttachments(data)) {
+          needsFiles.add(id);
         }
+      }
 
+      // One batch SELECT — request count does not grow with message count.
+      final filesByMsg = await _loadChatFilesByMessageIds(needsFiles);
+
+      final list = <Message>[];
+      for (final data in pending) {
+        final id = (data['id'] ?? '').toString();
+        final files = filesByMsg[id];
+        if (files != null && files.isNotEmpty) {
+          data['attachments'] = files.map((e) => e.toJson()).toList();
+        }
+        // Authors come from RPC join; no per-message get_user_profile.
         list.add(_mapMessageRow(
           data,
           chatId: (data['chat_id'] ?? '').toString(),
@@ -394,8 +452,8 @@ class SupabaseLearningRepository implements LearningRepository {
   }
 
   /// Fallback-путь загрузки чата напрямую из таблиц (используется, если RPC
-  /// `get_chat_messages_for_team` недоступен). Имена чужих авторов здесь могут
-  /// не резолвиться из-за RLS на public.users — тогда сработает заглушка.
+  /// `get_chat_messages_for_team` недоступен). Без N+1: один SELECT messages,
+  /// один batch chat_files. Профили — только поля ряда / «Студент».
   Future<List<Message>> _loadChatViaTables(String teamId) async {
     try {
       final me = _sb.auth.currentUser;
@@ -416,19 +474,26 @@ class SupabaseLearningRepository implements LearningRepository {
           .order('created_at', ascending: false)
           .limit(50);
 
-      final list = <Message>[];
+      final pending = <Map<String, dynamic>>[];
+      final messageIds = <String>[];
       for (final row in rows as List) {
         final data = Map<String, dynamic>.from(row as Map);
         final id = (data['id'] ?? '').toString();
         if (id.isEmpty) continue;
+        pending.add(data);
+        messageIds.add(id);
+      }
 
-        final attachments = await _loadChatFilesForMessage(id);
-        if (attachments.isNotEmpty) {
-          data['attachments'] = attachments.map((e) => e.toJson()).toList();
+      final filesByMsg = await _loadChatFilesByMessageIds(messageIds);
+
+      final list = <Message>[];
+      for (final data in pending) {
+        final id = (data['id'] ?? '').toString();
+        final files = filesByMsg[id];
+        if (files != null && files.isNotEmpty) {
+          data['attachments'] = files.map((e) => e.toJson()).toList();
         }
-
-        await _applyAuthorIdentity(data, (data['author_id'] ?? '').toString());
-
+        // No await get_user_profile / users select in the message loop.
         list.add(_mapMessageRow(
           data,
           chatId: chatId,

@@ -4,14 +4,20 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/learning/models/local_attach.dart';
 import 'package:student_platform/src/ui/learning/models/chat_file.dart';
+import 'package:student_platform/src/ui/chats/core/chat_message_cache_store.dart';
+import 'package:student_platform/src/ui/chats/core/chat_messages_load_state.dart';
 import '../data/dm_api.dart';
 import '../data/blocks_api.dart';
-import 'chat_message_memory_cache.dart';
 import 'i_chat_service.dart';
 
 class DmChatService implements IChatService {
   final String peerId;
   String? _chatId;
+  StreamSubscription<ChatMessagesViewState>? _sub;
+  final _viewController = StreamController<ChatMessagesViewState>.broadcast();
+  ChatMessagesViewState _viewState = ChatMessagesViewState.initial;
+  bool _disposed = false;
+  bool _watchStarted = false;
 
   DmChatService({required this.peerId, String? initialChatId})
       : _chatId = (initialChatId == null || initialChatId.trim().isEmpty)
@@ -25,7 +31,7 @@ class DmChatService implements IChatService {
   bool get supportsAssignments => false;
 
   @override
-  bool get supportsNotes => false; // по ТЗ “заметки” не нужны в ЛС
+  bool get supportsNotes => false;
 
   @override
   String get currentUserId =>
@@ -35,54 +41,109 @@ class DmChatService implements IChatService {
   String? get chatId => _chatId;
 
   @override
+  ChatMessagesViewState get messagesViewState => _viewState;
+
+  @override
   Future<String> ensureChatId() async {
     if (_chatId != null && _chatId!.isNotEmpty) return _chatId!;
     _chatId = await DmApi.getOrCreateChatId(peerId: peerId);
     return _chatId!;
   }
 
-  @override
-  Stream<List<Message>> watchMessages() async* {
-    String cid;
-    try {
-      cid = await ensureChatId();
-    } catch (e) {
-      // Blocked pair with no existing DM: keep screen readable, empty history.
-      if (BlocksApi.isDmBlockedError(e)) {
-        yield const <Message>[];
-        return;
-      }
-      rethrow;
-    }
-    final clearedAt = await DmApi.loadClearedAt(cid);
-    final cached = ChatMessageMemoryCache.pruneAtOrBefore(cid, clearedAt);
-    if (cached.isNotEmpty) {
-      _cache
-        ..clear()
-        ..addAll(cached);
-      yield cached;
-    }
-
-    final fresh = await DmApi.refreshStream(chatId: cid);
-    if (fresh.isNotEmpty || cached.isEmpty) {
-      _cache
-        ..clear()
-        ..addAll(fresh);
-      yield fresh;
-    }
-
-    await for (final list in DmApi.watchMessages(chatId: cid)) {
-      _cache
-        ..clear()
-        ..addAll(list);
-      yield list;
+  void _setView(ChatMessagesViewState next) {
+    _viewState = next;
+    if (!_viewController.isClosed) {
+      _viewController.add(next);
     }
   }
 
   @override
-  List<Message> get currentMessages =>
-      _chatId == null ? _cache : ChatMessageMemoryCache.snapshot(_chatId!);
-  final List<Message> _cache = <Message>[]; // можно наполнять из watchMessages
+  Stream<ChatMessagesViewState> watchMessagesState() {
+    if (!_watchStarted) {
+      _watchStarted = true;
+      unawaited(_startWatch());
+    }
+    return Stream<ChatMessagesViewState>.multi((controller) {
+      controller.add(_viewState);
+      final sub = _viewController.stream.listen(
+        controller.add,
+        onError: controller.addError,
+        onDone: controller.close,
+      );
+      controller.onCancel = sub.cancel;
+    });
+  }
+
+  Future<void> _startWatch() async {
+    String cid;
+    try {
+      cid = await ensureChatId();
+    } catch (e) {
+      if (BlocksApi.isDmBlockedError(e)) {
+        _setView(const ChatMessagesViewState(
+          phase: ChatMessagesLoadPhase.ready,
+          messages: <Message>[],
+          hasSnapshot: true,
+        ));
+        return;
+      }
+      _setView(ChatMessagesViewState(
+        phase: ChatMessagesLoadPhase.error,
+        messages: const <Message>[],
+        hasSnapshot: false,
+        error: e,
+      ));
+      return;
+    }
+    if (_disposed) return;
+
+    final clearedAt = await DmApi.loadClearedAt(cid);
+    await ChatMessageCacheStore.pruneAtOrBefore(cid, clearedAt);
+
+    // Seed from persistent/memory before attaching to DmApi owner stream.
+    final snap = await ChatMessageCacheStore.read(cid);
+    if (_disposed) return;
+    if (snap.found) {
+      _setView(ChatMessagesViewState(
+        phase: ChatMessagesLoadPhase.refreshing,
+        messages: snap.messages,
+        hasSnapshot: true,
+        hasMoreBefore: snap.hasMoreBefore,
+      ));
+    } else {
+      _setView(const ChatMessagesViewState(
+        phase: ChatMessagesLoadPhase.noSnapshot,
+        messages: <Message>[],
+        hasSnapshot: false,
+      ));
+    }
+
+    await _sub?.cancel();
+    _sub = DmApi.watchMessagesState(chatId: cid).listen(
+      (state) {
+        if (_disposed) return;
+        _setView(state);
+      },
+      onError: (Object e) {
+        if (_disposed) return;
+        final cached = ChatMessageCacheStore.peek(cid);
+        _setView(ChatMessagesViewState(
+          phase: ChatMessagesLoadPhase.error,
+          messages: cached.found ? cached.messages : _viewState.messages,
+          hasSnapshot: cached.found || _viewState.hasSnapshot,
+          hasMoreBefore: cached.hasMoreBefore,
+          error: e,
+        ));
+      },
+    );
+  }
+
+  @override
+  Stream<List<Message>> watchMessages() =>
+      watchMessagesState().map((s) => s.messages);
+
+  @override
+  List<Message> get currentMessages => _viewState.messages;
 
   @override
   Future<List<Message>> loadOlderMessages(
@@ -107,7 +168,6 @@ class DmChatService implements IChatService {
         'last_read_at': m['last_read_at'],
       };
     } catch (_) {
-      // Фоллбэк на старую функцию + last_read_at из chat_reads
       final r1 =
           await sb.rpc('get_unread_in_chat', params: {'p_chat_id': chatId});
       int unread = 0;
@@ -178,4 +238,28 @@ class DmChatService implements IChatService {
 
   @override
   Future<ChatFile?> getFile(String fileId) => DmApi.getFile(fileId);
+
+  @override
+  Future<void> retryLoadMessages() async {
+    final cid = _chatId;
+    if (cid == null || cid.isEmpty) {
+      _watchStarted = false;
+      await _startWatch();
+      return;
+    }
+    _setView(_viewState.copyWith(
+      phase: _viewState.hasSnapshot
+          ? ChatMessagesLoadPhase.refreshing
+          : ChatMessagesLoadPhase.noSnapshot,
+      clearError: true,
+    ));
+    await DmApi.syncLatest(chatId: cid);
+  }
+
+  Future<void> dispose() async {
+    _disposed = true;
+    await _sub?.cancel();
+    _sub = null;
+    await _viewController.close();
+  }
 }

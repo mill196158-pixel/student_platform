@@ -17,8 +17,8 @@ import 'package:student_platform/src/ui/chats/core/i_chat_service.dart'
 import 'package:student_platform/src/ui/chats/forward/forward_picker.dart'
     show ForwardTarget;
 import 'package:student_platform/src/ui/chats/data/chat_archive_api.dart';
-import 'package:student_platform/src/ui/chats/data/chat_preload_service.dart';
 import 'package:student_platform/src/ui/chats/data/dm_api.dart';
+import 'package:student_platform/src/ui/chats/core/chat_message_cache_store.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/widgets.dart'; // ChatMessageList
 import 'package:student_platform/src/ui/learning/models/message.dart'; // модель сообщения
 import 'package:student_platform/src/ui/learning/state/team_cubit.dart';
@@ -187,9 +187,6 @@ class _MyChatsScreenState extends State<MyChatsScreen>
         _loading = false;
       });
       _saveCache(_all);
-      unawaited(ChatPreloadService.warmUpChatIds(
-        _all.map((chat) => chat.chatId),
-      ));
 
       _subscribeChatsRealtime();
     } catch (_) {
@@ -485,9 +482,6 @@ class _MyChatsScreenState extends State<MyChatsScreen>
           _applyFilter();
         });
         await _saveCache(_all);
-        unawaited(ChatPreloadService.warmUpChatIds(
-          _all.map((chat) => chat.chatId),
-        ));
       } while (_summariesQueued && mounted);
     } catch (e) {
       safeDebugLog(
@@ -2141,81 +2135,39 @@ class _ChatPeekSheetState extends State<_ChatPeekSheet> {
   DateTime? _entrySeenAt;
   bool _showEntryNewBadge = false;
 
-  String? get _effectiveChatId {
+  Future<String?> _resolveChatId() async {
     final id = widget.chatId;
     if (id != null && id.isNotEmpty) return id;
-    if (widget.team.id.isNotEmpty) return 'team_${widget.team.id}';
+    try {
+      final res = await Supabase.instance.client
+          .from('chats')
+          .select('id')
+          .eq('team_id', widget.team.id)
+          .eq('type', 'team_main')
+          .limit(1)
+          .maybeSingle();
+      if (res != null && res is Map) {
+        final chatId = (res['id'] ?? '').toString();
+        if (chatId.isNotEmpty) return chatId;
+      }
+    } catch (_) {}
     return null;
   }
 
-  String? get _cacheKey {
-    final id = _effectiveChatId;
-    if (id == null || id.isEmpty) return null;
-    return 'chat_peek_messages_cache_v2_$id';
-  }
-
-  Future<void> _hydrateFromCache() async {
-    final key = _cacheKey;
-    if (key == null) return;
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(key);
-      if (raw == null || raw.trim().isEmpty) return;
-      final decoded = jsonDecode(raw);
-      if (decoded is! List) return;
-      final messages = decoded
-          .whereType<Map>()
-          .map((row) => _messageFromCache(Map<String, dynamic>.from(row)))
-          .toList()
-        ..sort((a, b) => a.at.compareTo(b.at));
-      if (messages.isEmpty || !mounted) return;
-      setState(() {
-        _messages = messages.length > 30
-            ? messages.sublist(messages.length - 30)
-            : messages;
-        _loading = false;
-      });
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        Future.delayed(const Duration(milliseconds: 1), _jumpToBottom);
-      });
-    } catch (_) {}
-  }
-
-  Future<void> _savePeekCache(List<Message> messages) async {
-    final key = _cacheKey;
-    if (key == null) return;
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final last = messages.length > 30
+  Future<void> _hydrateFromSharedCache(String? chatId) async {
+    if (chatId == null || chatId.isEmpty) return;
+    final snap = await ChatMessageCacheStore.read(chatId);
+    if (!snap.found || !mounted) return;
+    final messages = snap.messages;
+    setState(() {
+      _messages = messages.length > 30
           ? messages.sublist(messages.length - 30)
           : messages;
-      await prefs.setString(
-        key,
-        jsonEncode(last.map(_messageToCache).toList()),
-      );
-    } catch (_) {}
-  }
-
-  Map<String, dynamic> _messageToCache(Message message) => {
-        'id': message.id,
-        'chatId': message.chatId,
-        'authorId': message.authorId,
-        'authorLogin': message.authorLogin,
-        'authorName': message.authorName,
-        'text': message.text,
-        'at': message.at.toIso8601String(),
-      };
-
-  Message _messageFromCache(Map<String, dynamic> row) {
-    return Message(
-      id: (row['id'] ?? '').toString(),
-      chatId: (row['chatId'] ?? '').toString(),
-      authorId: (row['authorId'] ?? '').toString(),
-      authorLogin: (row['authorLogin'] ?? '').toString(),
-      authorName: (row['authorName'] ?? '').toString(),
-      text: (row['text'] ?? '').toString(),
-      at: DateTime.tryParse((row['at'] ?? '').toString()) ?? DateTime.now(),
-    );
+      _loading = false;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future.delayed(const Duration(milliseconds: 1), _jumpToBottom);
+    });
   }
 
   void _jumpToBottom() {
@@ -2235,121 +2187,37 @@ class _ChatPeekSheetState extends State<_ChatPeekSheet> {
   @override
   void initState() {
     super.initState();
-    _hydrateFromCache();
     _load();
   }
 
   Future<void> _load() async {
     try {
+      final chatId = await _resolveChatId();
+      await _hydrateFromSharedCache(chatId);
+
       List<Message> msgs;
-
-      if (widget.isDm && (widget.chatId?.isNotEmpty ?? false)) {
-        // ===== DM: грузим сообщения напрямую по chat_id =====
-        final sb = Supabase.instance.client;
-
-        String rowPreview(Map m) {
-          final body = (m['body'] ?? '').toString().trim();
-          if (body.isNotEmpty) return body;
-          final content = m['content'];
-          if (content is String && content.isNotEmpty) {
-            try {
-              final decoded = jsonDecode(content);
-              if (decoded is Map && decoded['text'] != null) {
-                final t = decoded['text'].toString().trim();
-                if (t.isNotEmpty) return t;
-              }
-            } catch (_) {
-              return content.trim();
-            }
-          } else if (content is Map) {
-            final t = (content['text'] ?? '').toString().trim();
-            if (t.isNotEmpty) return t;
-          }
-          final msgType = (m['msg_type'] ?? '').toString();
-          if (msgType == 'file' || msgType == 'image') return '📎 Вложение';
-          return 'Сообщение';
-        }
-
-        Future<String> authorName(String authorId) async {
-          try {
-            final u = await sb
-                .from('users')
-                .select('name,surname,login')
-                .eq('id', authorId)
-                .maybeSingle();
-            if (u != null && u is Map) {
-              final name = (u['name'] ?? '').toString();
-              final sur = (u['surname'] ?? '').toString();
-              final full =
-                  [name, sur].where((s) => s.isNotEmpty).join(' ').trim();
-              if (full.isNotEmpty) return full;
-              final login = (u['login'] ?? '').toString();
-              if (login.isNotEmpty) return login;
-            }
-          } catch (_) {}
-          return 'Пользователь';
-        }
-
-        final rows = await sb
-            .from('messages')
-            .select(
-                'id, chat_id, author_id, created_at, body, content, msg_type')
-            .eq('chat_id', widget.chatId!)
-            .order('created_at', ascending: true)
-            .limit(60);
-
-        msgs = [];
-        for (final r in (rows as List)) {
-          final m = r as Map<String, dynamic>;
-          final id = (m['id'] ?? '').toString();
-          final chatId = (m['chat_id'] ?? '').toString();
-          final aid = (m['author_id'] ?? '').toString();
-          final at = DateTime.tryParse((m['created_at'] ?? '').toString()) ??
-              DateTime.now();
-          final text = rowPreview(m);
-          final aname = await authorName(aid);
-
-          msgs.add(Message(
-            id: id,
-            chatId: chatId,
-            authorId: aid,
-            authorLogin: '',
-            authorName: aname,
-            text: text,
-            at: at,
-          ));
-        }
+      if (widget.isDm && (chatId?.isNotEmpty ?? false)) {
+        final result = await DmApi.syncLatest(chatId: chatId!, limit: 30);
+        msgs = result.ok
+            ? result.messages
+            : ChatMessageCacheStore.messagesSync(chatId);
       } else {
-        // ===== Группа: как было через репозиторий =====
         msgs = await _repo.loadChat(widget.team.id);
         msgs.sort((a, b) => a.at.compareTo(b.at));
+        if (chatId != null && chatId.isNotEmpty) {
+          await ChatMessageCacheStore.applyLatestServerPage(
+            chatId: chatId,
+            serverPage: msgs,
+            pageLimit: 30,
+          );
+        }
       }
 
-      // последние 30
       msgs.sort((a, b) => a.at.compareTo(b.at));
       final last = msgs.length > 30 ? msgs.sublist(msgs.length - 30) : msgs;
-      await _savePeekCache(last);
 
-      // --- граница «Новые сообщения» ---
       DateTime? boundary;
       bool showBadge = false;
-
-      String? chatId = widget.chatId;
-      if (chatId == null || chatId.isEmpty) {
-        // для групп получаем chatId по team_id
-        try {
-          final res = await Supabase.instance.client
-              .from('chats')
-              .select('id')
-              .eq('team_id', widget.team.id)
-              .eq('type', 'team_main')
-              .limit(1)
-              .maybeSingle();
-          if (res != null && res is Map) {
-            chatId = (res['id'] ?? '').toString();
-          }
-        } catch (_) {}
-      }
 
       if (chatId != null && chatId.isNotEmpty) {
         try {
