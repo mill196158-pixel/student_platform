@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.student_platform"
+    namespace = "com.mill453020.studentplatform"
     compileSdk = flutter.compileSdkVersion
 
     // Фикс версии NDK под требования плагинов
@@ -23,8 +23,7 @@ android {
     }
 
     defaultConfig {
-        // Укажи свой уникальный applicationId, если нужно
-        applicationId = "com.example.student_platform"
+        applicationId = "com.mill453020.studentplatform"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

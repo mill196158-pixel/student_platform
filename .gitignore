@@ -24,6 +24,13 @@ migrate_working_dir/
 private/
 **/firebase-service-account*.json
 **/serviceAccount*.json
+**/FIREBASE_SERVICE_ACCOUNT*.json
+*firebase*adminsdk*.json
+*.p8
+AuthKey_*.p8
+*PUSH_DISPATCH_SECRET*
+**/push_dispatch_secret*
+supabase/.temp/
 
 # Local code dumps (may contain outdated secrets)
 **/all_dart_code.txt

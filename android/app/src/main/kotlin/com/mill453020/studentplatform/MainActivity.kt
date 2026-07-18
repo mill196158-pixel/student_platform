@@ -1,4 +1,4 @@
-package com.example.student_platform
+package com.mill453020.studentplatform
 
 import android.content.Context
 import android.content.Intent

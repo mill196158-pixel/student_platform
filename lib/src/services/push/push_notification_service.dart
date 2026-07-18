@@ -11,6 +11,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'package:student_platform/firebase_options.dart';
 import 'package:student_platform/src/services/push/active_chat_tracker.dart';
 import 'package:student_platform/src/services/push/push_background_handler.dart';
 import 'package:student_platform/src/services/push/push_navigation.dart';
@@ -54,7 +55,9 @@ class PushNotificationService {
 
     try {
       if (Firebase.apps.isEmpty) {
-        await Firebase.initializeApp();
+        await Firebase.initializeApp(
+          options: DefaultFirebaseOptions.currentPlatform,
+        );
       }
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
       await _initLocalNotifications();

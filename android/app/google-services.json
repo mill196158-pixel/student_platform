@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "839455280008",
+    "project_id": "student-platform-mill",
+    "storage_bucket": "student-platform-mill.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:839455280008:android:e654ab3a55d408adbf483d",
+        "android_client_info": {
+          "package_name": "com.mill453020.studentplatform"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA1WFdR-rvBIRZuM-xzICDx6ZOlKS5Uxh0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
