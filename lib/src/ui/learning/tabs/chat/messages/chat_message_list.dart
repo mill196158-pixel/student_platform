@@ -58,6 +58,8 @@ class ChatMessageList extends StatelessWidget {
   final VoidCallback? onFocusComposer;
   final VoidCallback? onAttachFile;
   final VoidCallback? onCreateAssignment;
+  /// When true, empty-state copy is DM-oriented (no team assignment CTAs).
+  final bool isDirectChat;
   final bool initialLoading;
   final bool loadError;
   final VoidCallback? onRetryLoad;
@@ -101,6 +103,7 @@ class ChatMessageList extends StatelessWidget {
     this.onFocusComposer,
     this.onAttachFile,
     this.onCreateAssignment,
+    this.isDirectChat = false,
     this.initialLoading = false,
     this.loadError = false,
     this.onRetryLoad,
@@ -135,9 +138,10 @@ class ChatMessageList extends StatelessWidget {
               SizedBox(
                 height: height > 140 ? height - 108 : 180,
                 child: _EmptyChatState(
+                  isDirectChat: isDirectChat,
                   onFocusComposer: onFocusComposer,
                   onAttachFile: onAttachFile,
-                  onCreateAssignment: onCreateAssignment,
+                  onCreateAssignment: isDirectChat ? null : onCreateAssignment,
                 ),
               ),
             ],
@@ -1697,11 +1701,13 @@ class _ChatLoadErrorState extends StatelessWidget {
 }
 
 class _EmptyChatState extends StatelessWidget {
+  final bool isDirectChat;
   final VoidCallback? onFocusComposer;
   final VoidCallback? onAttachFile;
   final VoidCallback? onCreateAssignment;
 
   const _EmptyChatState({
+    this.isDirectChat = false,
     this.onFocusComposer,
     this.onAttachFile,
     this.onCreateAssignment,
@@ -1730,7 +1736,9 @@ class _EmptyChatState extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'Обсуждайте предмет, прикрепляйте файлы и создавайте задания для группы.',
+            isDirectChat
+                ? 'Напишите первое сообщение.'
+                : 'Обсуждайте предмет, прикрепляйте файлы и создавайте задания для группы.',
             style: theme.textTheme.bodyMedium?.copyWith(
               color: theme.colorScheme.onSurface.withValues(alpha: .62),
               height: 1.25,
@@ -1763,15 +1771,17 @@ class _EmptyChatState extends StatelessWidget {
                 ),
             ],
           ),
-          const SizedBox(height: 10),
-          Text(
-            'Файлы появятся во вкладке «Файлы», а задания — во вкладке «Задания».',
-            style: theme.textTheme.labelMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-              height: 1.2,
+          if (!isDirectChat) ...[
+            const SizedBox(height: 10),
+            Text(
+              'Файлы появятся во вкладке «Файлы», а задания — во вкладке «Задания».',
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                height: 1.2,
+              ),
+              textAlign: TextAlign.center,
             ),
-            textAlign: TextAlign.center,
-          ),
+          ],
         ],
       ),
     );

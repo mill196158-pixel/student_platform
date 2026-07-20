@@ -66,6 +66,7 @@ class ForwardGroupBubble extends StatelessWidget {
   final void Function(String srcMessageId)? onOpenOriginal;
   final VoidCallback? onLongPress;
   final VoidCallback? onReact;
+  final VoidCallback? onRetryFailed;
   final Map<String, int>? reactions;
 
   const ForwardGroupBubble({
@@ -78,6 +79,7 @@ class ForwardGroupBubble extends StatelessWidget {
     this.onOpenOriginal,
     this.onLongPress,
     this.onReact,
+    this.onRetryFailed,
     this.reactions,
   });
 
@@ -152,9 +154,33 @@ class ForwardGroupBubble extends StatelessWidget {
                 alignment: Alignment.bottomRight,
                 child: Text(
                   time,
-                  style: const TextStyle(color: textColor, fontSize: 11),
+                  style: TextStyle(
+                    color: textColor.withValues(alpha: .6),
+                    fontSize: 11,
+                  ),
                 ),
               ),
+
+              if (message.isFailed) ...[
+                const SizedBox(height: 6),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: onRetryFailed,
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      foregroundColor: Theme.of(context).colorScheme.error,
+                    ),
+                    child: const Text(
+                      'Не отправлено · Повторить',
+                      style:
+                          TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+              ],
 
               if (reactions != null && reactions!.isNotEmpty) ...[
                 const SizedBox(height: 6),

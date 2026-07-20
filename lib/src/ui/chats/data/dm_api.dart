@@ -536,13 +536,18 @@ class DmApi {
   static Future<void> _publishMessageById({
     required String chatId,
     required String messageId,
+    String? clientId,
   }) async {
     if (messageId.isEmpty) return;
 
     final message = await loadMessageById(chatId: chatId, messageId: messageId);
     if (message == null) return;
 
-    final snap = await ChatMessageCacheStore.reconcileUpsert(chatId, message);
+    final snap = await ChatMessageCacheStore.reconcileUpsert(
+      chatId,
+      message,
+      clientId: clientId,
+    );
     _emitView(
       chatId,
       ChatMessagesViewState(
@@ -923,14 +928,13 @@ class DmApi {
       throw Exception('Not authenticated');
     }
     final hasFiles = (fileIds != null && fileIds.isNotEmpty);
-    final optimisticId = hasFiles
-        ? null
-        : _publishOptimisticMessage(
-            chatId: chatId,
-            userId: uid,
-            text: text,
-            replyToId: replyToId,
-          );
+    // Always show the outgoing bubble immediately (Telegram-style).
+    final optimisticId = _publishOptimisticMessage(
+      chatId: chatId,
+      userId: uid,
+      text: text,
+      replyToId: replyToId,
+    );
 
     try {
       final res = await _sb.rpc('send_message_in_chat_with_files', params: {
@@ -941,26 +945,36 @@ class DmApi {
       });
       if (res is Map && res['id'] != null) {
         final id = res['id'].toString();
-        await _publishMessageById(chatId: chatId, messageId: id);
+        await _publishMessageById(
+          chatId: chatId,
+          messageId: id,
+          clientId: optimisticId,
+        );
         return id;
       }
       if (res is String && res.isNotEmpty) {
-        await _publishMessageById(chatId: chatId, messageId: res);
+        await _publishMessageById(
+          chatId: chatId,
+          messageId: res,
+          clientId: optimisticId,
+        );
         return res;
       }
       if (res is List && res.isNotEmpty) {
         final m = Map<String, dynamic>.from(res.first as Map);
         if (m['id'] != null) {
           final id = m['id'].toString();
-          await _publishMessageById(chatId: chatId, messageId: id);
+          await _publishMessageById(
+            chatId: chatId,
+            messageId: id,
+            clientId: optimisticId,
+          );
           return id;
         }
       }
     } catch (e) {
       if (BlocksApi.isDmBlockedError(e)) {
-        if (optimisticId != null) {
-          _markOptimisticFailed(chatId: chatId, clientId: optimisticId);
-        }
+        _markOptimisticFailed(chatId: chatId, clientId: optimisticId);
         rethrow;
       }
       // fallback below
@@ -983,9 +997,7 @@ class DmApi {
           .select('id')
           .single();
     } catch (_) {
-      if (optimisticId != null) {
-        _markOptimisticFailed(chatId: chatId, clientId: optimisticId);
-      }
+      _markOptimisticFailed(chatId: chatId, clientId: optimisticId);
       rethrow;
     }
 
@@ -1003,8 +1015,40 @@ class DmApi {
           .eq('chat_id', chatId);
     }
 
-    await _publishMessageById(chatId: chatId, messageId: mid);
+    await _publishMessageById(
+      chatId: chatId,
+      messageId: mid,
+      clientId: optimisticId,
+    );
     return mid;
+  }
+
+  /// Drop a failed local bubble and resend (optimistic again).
+  static Future<String> retryFailedText({
+    required String chatId,
+    required Message message,
+  }) async {
+    if (!message.isFailed) return '';
+    final text = message.text.trim();
+    // Allow retry for empty caption when it was a file-only optimistic row.
+    final replyToId = message.replyToId;
+    final clientKey = message.clientId ?? message.id;
+    await ChatMessageCacheStore.remove(chatId, message.id);
+    // Also drop by clientId if the bubble used a different primary id.
+    if (clientKey.isNotEmpty && clientKey != message.id) {
+      await ChatMessageCacheStore.remove(chatId, clientKey);
+    }
+    final merged = ChatMessageCacheStore.messagesSync(chatId);
+    _emitView(
+      chatId,
+      ChatMessagesViewState(
+        phase: ChatMessagesLoadPhase.ready,
+        messages: merged,
+        hasSnapshot: true,
+        hasMoreBefore: ChatMessageCacheStore.peek(chatId).hasMoreBefore,
+      ),
+    );
+    return sendText(chatId: chatId, text: text, replyToId: replyToId);
   }
 
   // 5) Прочитано до сообщения

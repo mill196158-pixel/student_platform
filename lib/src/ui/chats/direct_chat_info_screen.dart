@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:student_platform/src/ui/friends/friend_profile_screen.dart';
+import 'package:student_platform/src/ui/chats/dm_title.dart';
 
 import 'core/i_chat_service.dart';
 import 'media/chat_media_sheet.dart';
@@ -25,8 +26,7 @@ class DirectChatInfoScreen extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final media = MediaQuery.of(context);
-    final displayName =
-        peerName.trim().isEmpty ? 'Пользователь' : peerName.trim();
+    final displayName = normalizeDmTitle(peerName);
 
     return Scaffold(
       backgroundColor: scheme.surface,

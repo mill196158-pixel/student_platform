@@ -214,6 +214,11 @@ class DmChatService implements IChatService {
         chatId: cid, text: text, replyToId: replyToId, fileIds: fileIds);
   }
 
+  Future<String> retryFailedText(Message message) async {
+    final cid = await ensureChatId();
+    return DmApi.retryFailedText(chatId: cid, message: message);
+  }
+
   @override
   Future<void> toggleReaction(String messageId, String emoji) =>
       DmApi.toggleReaction(messageId, emoji);

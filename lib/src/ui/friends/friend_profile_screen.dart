@@ -588,7 +588,7 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
     final avatar = (g['avatar_url'] ?? '').toString();
     Widget screen = DirectChatScreen(
       peerId: widget.userId,
-      peerName: peerName.isEmpty ? 'Личный чат' : peerName,
+      peerName: peerName.isEmpty ? 'Пользователь' : peerName,
       peerAvatarUrl: avatar.isEmpty ? null : avatar,
     );
 

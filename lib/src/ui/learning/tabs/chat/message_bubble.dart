@@ -86,6 +86,7 @@ class MessageBubble extends StatelessWidget {
       isMe: isMe,
       receiptTicks: receiptTicks,
       isEdited: message.isEdited,
+      isSending: message.isSending,
     );
 
     final bool hasFgMarker = message.text.contains('__FG__:');
@@ -265,7 +266,7 @@ class MessageBubble extends StatelessWidget {
                         if (fg != null) ...[
                           ForwardGroupBubble(
                             message: message,
-                            time: time,
+                            time: displayTime,
                             isMe: isMe,
                             selected: selected,
                             idToFile: idToFile,
@@ -274,6 +275,7 @@ class MessageBubble extends StatelessWidget {
                             onLongPress: onLongPress,
                             onReact: onReact,
                             reactions: reactions,
+                            onRetryFailed: message.isFailed ? onRetryFailed : null,
                           ),
                         ],
 
@@ -343,11 +345,10 @@ class MessageBubble extends StatelessWidget {
                                 .toList(),
                           ),
                         ],
-                        if (message.isSending || message.isFailed) ...[
+                        if (message.isFailed) ...[
                           const SizedBox(height: 6),
                           _DeliveryStateRow(
-                            isFailed: message.isFailed,
-                            onRetry: message.isFailed ? onRetryFailed : null,
+                            onRetry: onRetryFailed,
                           ),
                         ],
                       ],
@@ -468,20 +469,16 @@ class _TextMessageContent extends StatelessWidget {
 }
 
 class _DeliveryStateRow extends StatelessWidget {
-  final bool isFailed;
   final VoidCallback? onRetry;
 
   const _DeliveryStateRow({
-    required this.isFailed,
     this.onRetry,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final color = isFailed
-        ? theme.colorScheme.error
-        : theme.colorScheme.onSurface.withValues(alpha: .55);
+    final color = theme.colorScheme.error;
 
     return Align(
       alignment: Alignment.centerRight,
@@ -489,26 +486,16 @@ class _DeliveryStateRow extends StatelessWidget {
         crossAxisAlignment: WrapCrossAlignment.center,
         spacing: 6,
         children: [
-          if (isFailed)
-            Icon(Icons.error_outline_rounded, size: 14, color: color)
-          else
-            SizedBox(
-              width: 12,
-              height: 12,
-              child: CircularProgressIndicator(
-                strokeWidth: 1.6,
-                color: color,
-              ),
-            ),
+          Icon(Icons.error_outline_rounded, size: 14, color: color),
           Text(
-            isFailed ? 'Не отправлено' : 'Отправляется...',
+            'Не отправлено',
             style: TextStyle(
               color: color,
               fontSize: 11,
               fontWeight: FontWeight.w600,
             ),
           ),
-          if (isFailed && onRetry != null)
+          if (onRetry != null)
             InkWell(
               borderRadius: BorderRadius.circular(10),
               onTap: onRetry,

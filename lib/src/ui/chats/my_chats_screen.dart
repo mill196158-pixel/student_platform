@@ -12,6 +12,7 @@ import 'package:student_platform/src/ui/learning/models/team.dart';
 import 'package:student_platform/src/ui/learning/team_details_screen.dart';
 import 'package:student_platform/src/ui/chats/archive_screen.dart';
 import 'package:student_platform/src/ui/chats/direct_chat_screen.dart';
+import 'package:student_platform/src/ui/chats/dm_title.dart';
 import 'package:student_platform/src/ui/chats/core/i_chat_service.dart'
     show ChatMode;
 import 'package:student_platform/src/ui/chats/forward/forward_picker.dart'
@@ -187,6 +188,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
         _loading = false;
       });
       _saveCache(_all);
+      unawaited(_hydrateUnresolvedDmTitles());
 
       _subscribeChatsRealtime();
     } catch (_) {
@@ -232,9 +234,11 @@ class _MyChatsScreenState extends State<MyChatsScreen>
           })
         : 'Сообщений пока нет';
 
-    final title = titleRaw.isNotEmpty
-        ? titleRaw
-        : (isDm ? 'Личный чат' : (teamName.isNotEmpty ? teamName : 'Чат'));
+    final title = isDm
+        ? normalizeDmTitle(titleRaw)
+        : (titleRaw.isNotEmpty
+            ? titleRaw
+            : (teamName.isNotEmpty ? teamName : 'Чат'));
 
     return _ChatSummary(
       team: Team(
@@ -262,6 +266,56 @@ class _MyChatsScreenState extends State<MyChatsScreen>
       peerId: peerId.isNotEmpty ? peerId : null,
       avatarUrl: avatarRaw.isNotEmpty ? avatarRaw : null,
     );
+  }
+
+  /// Resolve peer names for DMs still showing a neutral/legacy placeholder.
+  Future<void> _hydrateUnresolvedDmTitles() async {
+    final need = <_ChatSummary>[];
+    for (final c in _all) {
+      if (!c.isDm) continue;
+      final peerId = c.peerId;
+      if (peerId == null || peerId.isEmpty) continue;
+      if (isUnresolvedDmTitle(c.title) || (c.avatarUrl ?? '').isEmpty) {
+        need.add(c);
+      }
+    }
+    if (need.isEmpty) return;
+
+    try {
+      final ids = need.map((c) => c.peerId!).toSet().toList();
+      final rows = await Supabase.instance.client
+          .from('users')
+          .select('id, name, surname, avatar_url')
+          .inFilter('id', ids);
+      final byId = <String, Map<String, dynamic>>{
+        for (final row in (rows as List))
+          (row['id'] ?? '').toString(): Map<String, dynamic>.from(row as Map),
+      };
+      if (byId.isEmpty || !mounted) return;
+
+      var changed = false;
+      for (final c in need) {
+        final row = byId[c.peerId!];
+        if (row == null) continue;
+        final name = (row['name'] ?? '').toString().trim();
+        final surname = (row['surname'] ?? '').toString().trim();
+        final fullName = [name, surname].where((s) => s.isNotEmpty).join(' ');
+        final avatar = (row['avatar_url'] ?? '').toString().trim();
+        if (fullName.isNotEmpty && isUnresolvedDmTitle(c.title)) {
+          c.title = fullName;
+          changed = true;
+        }
+        if (avatar.isNotEmpty && (c.avatarUrl ?? '').isEmpty) {
+          c.avatarUrl = avatar;
+          changed = true;
+        }
+      }
+      if (!changed || !mounted) return;
+      _safeSetState(_applyFilter);
+      _saveCache(_all);
+    } catch (_) {
+      // Keep neutral fallback; header/open path also hydrates by peerId.
+    }
   }
 
   Future<void> _togglePinChat(_ChatSummary c) async {
@@ -1135,6 +1189,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
         _hydrated = true;
         _loading = false; // сразу показываем список, без скелетона
       });
+      unawaited(_hydrateUnresolvedDmTitles());
     } catch (_) {}
   }
 
@@ -1178,9 +1233,11 @@ class _MyChatsScreenState extends State<MyChatsScreen>
       teacher: (tm['teacher'] ?? '') as String,
       groupCode: (tm['groupCode'] ?? '') as String,
     );
+    final isDm = (m['isDm'] ?? false) as bool;
+    final titleRaw = (m['title'] ?? '') as String;
     return _ChatSummary(
       team: t,
-      title: (m['title'] ?? '') as String,
+      title: isDm ? normalizeDmTitle(titleRaw) : titleRaw,
       subtitle: m['subtitle'] as String?,
       lastAuthor: m['lastAuthor'] as String?,
       lastMsgPreview: m['lastMsgPreview'] as String?,
@@ -1192,7 +1249,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
       muted: (m['muted'] ?? false) as bool,
       chatId: m['chatId'] as String?,
       lastMessageId: m['lastMessageId'] as String?,
-      isDm: (m['isDm'] ?? false) as bool,
+      isDm: isDm,
       peerId: m['peerId'] as String?,
       avatarUrl: m['avatarUrl'] as String?,
     );
@@ -1229,7 +1286,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
 
 class _ChatSummary {
   final Team team;
-  final String title;
+  String title;
   final String? subtitle;
   String? lastAuthor; // ← отдельная строка «кто написал»
   String? lastMsgPreview; // ← отдельная строка «сообщение»
@@ -1243,7 +1300,7 @@ class _ChatSummary {
   // ➜ NEW: DM meta
   final bool isDm;
   final String? peerId;
-  final String? avatarUrl;
+  String? avatarUrl;
 
   _ChatSummary({
     required this.team,

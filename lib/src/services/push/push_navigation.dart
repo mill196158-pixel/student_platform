@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:student_platform/src/services/push/push_payload.dart';
 import 'package:student_platform/src/ui/chats/direct_chat_screen.dart';
+import 'package:student_platform/src/ui/chats/dm_title.dart';
 import 'package:student_platform/src/ui/friends/my_friends_screen.dart';
 import 'package:student_platform/src/ui/navigation/main_tab_scope.dart';
 
@@ -104,7 +105,7 @@ class PushNavigation {
     }
     final resolvedPeerId = peerId;
 
-    String peerName = 'Личный чат';
+    String peerName = kDmTitleFallback;
     String? avatar;
     try {
       final row = await Supabase.instance.client
@@ -115,8 +116,9 @@ class PushNavigation {
       if (row != null) {
         final name = (row['name'] ?? '').toString().trim();
         final surname = (row['surname'] ?? '').toString().trim();
-        peerName = [name, surname].where((s) => s.isNotEmpty).join(' ').trim();
-        if (peerName.isEmpty) peerName = 'Личный чат';
+        peerName = normalizeDmTitle(
+          [name, surname].where((s) => s.isNotEmpty).join(' ').trim(),
+        );
         avatar = (row['avatar_url'] as String?)?.trim();
       }
     } catch (_) {

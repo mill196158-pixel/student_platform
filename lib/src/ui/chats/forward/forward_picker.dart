@@ -58,7 +58,7 @@ class _ForwardPickerSheetState extends State<ForwardPickerSheet> {
             final avatar = r['avatar_url'] as String?;
             return ForwardTarget(
               chatId: 'dm_$peerId', // will be resolved to real chat id on confirm
-              title: title.isEmpty ? 'Профиль' : title,
+              title: title.isEmpty ? 'Пользователь' : title,
               avatarUrl: avatar,
               mode: ChatMode.dm,
               open: (ctx) async {
@@ -67,7 +67,7 @@ class _ForwardPickerSheetState extends State<ForwardPickerSheet> {
                     value: ctx.read<TeamCubit>(),
                     child: DirectChatScreen(
                       peerId: peerId,
-                      peerName: title.isEmpty ? 'Профиль' : title,
+                      peerName: title.isEmpty ? 'Пользователь' : title,
                       peerAvatarUrl: avatar,
                     ),
                   ),

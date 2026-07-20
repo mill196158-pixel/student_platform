@@ -38,6 +38,7 @@ import 'forward_payload.dart';
 import '../forward/forward_outbox.dart';
 import '../data/dm_api.dart';
 import '../data/blocks_api.dart';
+import '../dm_title.dart';
 
 import 'i_chat_service.dart';
 import 'dm_chat_service.dart';
@@ -1180,6 +1181,14 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       final replyId = _replyTo?.id;
       final files = _att.getPendingFiles();
 
+      // Clear composer immediately so the bubble can appear without waiting
+      // on the network round-trip (optimistic UI lives in DmApi.sendText).
+      _ctrl.clear();
+      final replyToClear = _replyTo;
+      setState(() => _replyTo = null);
+      FocusScope.of(context).unfocus();
+      unawaited(_clearDraftDm());
+
       if (files.isNotEmpty) {
         final paths = files.map((f) => f.path).toList();
         const maxTries = 40;
@@ -1206,9 +1215,11 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         }
         if (fileIds.isEmpty) {
           if (mounted) {
+            _ctrl.text = trimmed;
+            setState(() => _replyTo = replyToClear);
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                  content: Text('⏳ Файлы загружаются, подождите...')),
+                  content: Text('Файлы загружаются, подождите...')),
             );
           }
           return;
@@ -1219,11 +1230,6 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       } else {
         await widget.service.sendText(trimmed, replyToId: replyId);
       }
-
-      _ctrl.clear();
-      setState(() => _replyTo = null);
-      FocusScope.of(context).unfocus();
-      await _clearDraftDm();
     } catch (e) {
       if (_isDm && BlocksApi.isDmBlockedError(e)) {
         await _applyDmBlockedFromServer();
@@ -1233,6 +1239,24 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     } finally {
       _isSending = false;
       if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _retryFailedDm(Message message) async {
+    final svc = widget.service;
+    if (svc is! DmChatService) return;
+    try {
+      await svc.retryFailedText(message);
+    } catch (e) {
+      if (_isDm && BlocksApi.isDmBlockedError(e)) {
+        await _applyDmBlockedFromServer();
+        return;
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Не удалось отправить')),
+        );
+      }
     }
   }
 
@@ -1368,8 +1392,11 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   // ---------- UI ----------
   @override
   Widget build(BuildContext context) {
-    final titleText = widget.title ??
-        (widget.service.mode == ChatMode.dm ? 'Личный чат' : 'Чат');
+    final titleText = widget.title == null || widget.title!.trim().isEmpty
+        ? (widget.service.mode == ChatMode.dm ? kDmTitleFallback : 'Чат')
+        : (widget.service.mode == ChatMode.dm
+            ? normalizeDmTitle(widget.title)
+            : widget.title!.trim());
     final safeBottom = MediaQuery.of(context).padding.bottom;
     final theme = Theme.of(context);
 
@@ -1548,6 +1575,30 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                           },
                           // В ЛС аватары не показываем принципиально
                           forceHideAvatars: widget.hideAvatars || isDm,
+                          isDirectChat: isDm,
+                          onRetryFailedText:
+                              isDm ? (m) => unawaited(_retryFailedDm(m)) : null,
+                          onFocusComposer: () {
+                            _composerFocus.requestFocus();
+                            services.SystemChannels.textInput
+                                .invokeMethod('TextInput.show');
+                          },
+                          onAttachFile: () async {
+                            if (!_canComposeDm) return;
+                            final file = await _fileService.pickFile();
+                            if (file == null || !mounted) return;
+                            final attached = LocalAttach(
+                              path: file.path,
+                              name: file.path.split('/').last,
+                              mimeType: 'application/octet-stream',
+                              size: await file.length(),
+                              isImage: false,
+                            );
+                            _att.add(attached);
+                            final cid = await widget.service.ensureChatId();
+                            _att.upload(attached, teamId: null, chatId: cid);
+                            _saveDraftDmDebounced();
+                          },
                           initialLoading: initialLoading,
                           loadError: loadError,
                           onRetryLoad: () {

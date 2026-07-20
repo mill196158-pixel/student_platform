@@ -26,9 +26,13 @@ String formatMessageTimeLabel({
   required bool isMe,
   int? receiptTicks,
   bool isEdited = false,
+  bool isSending = false,
 }) {
   final labeled = isEdited ? 'изм. $time' : time;
   if (!isMe) return labeled;
+  // Compact Telegram-style: clock while sending, one/two ticks otherwise.
+  // No separate status row — keeps bubble height stable.
+  if (isSending) return '$labeled ◌';
   final ticks = receiptTicks ?? 1;
   if (ticks <= 0) return labeled;
   if (ticks >= 2) return '$labeled ✓✓';
