@@ -897,12 +897,12 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     if (mounted) setState(() {});
 
     try {
-      final loaded =
-          await widget.service.loadOlderMessages(before: oldest, limit: 50);
-      if (loaded.length < 50) {
-        _hasMoreOlderMessages = false;
-      }
+      await widget.service.loadOlderMessages(before: oldest, limit: 50);
+      _hasMoreOlderMessages =
+          widget.service.messagesViewState.hasMoreBefore;
       await _chatScroll.restorePrependAnchor(anchor);
+    } catch (_) {
+      // Network/RPC failure: keep hasMore so scroll can retry.
     } finally {
       _loadingOlderMessages = false;
       if (mounted) setState(() {});
@@ -1510,8 +1510,13 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                     if (p.refId != null) _chatScroll.scrollToMessage(p.refId!);
                   },
                   onUnpin: (p) async {
-                    if (p.type == PinType.message && p.refId != null)
-                      await widget.service.pinMessage(p.refId!, false);
+                    if (p.type == PinType.message && p.refId != null) {
+                      try {
+                        await widget.service.pinMessage(p.refId!, false);
+                      } catch (_) {
+                        _showSnack('Не удалось открепить');
+                      }
+                    }
                   },
                 ),
 
@@ -1587,12 +1592,14 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                             if (!_canComposeDm) return;
                             final file = await _fileService.pickFile();
                             if (file == null || !mounted) return;
+                            final path = file.path;
+                            final isImage = _isImagePath(path);
                             final attached = LocalAttach(
-                              path: file.path,
-                              name: file.path.split('/').last,
-                              mimeType: 'application/octet-stream',
+                              path: path,
+                              name: path.split('/').last,
+                              mimeType: _guessMime(path),
                               size: await file.length(),
-                              isImage: false,
+                              isImage: isImage,
                             );
                             _att.add(attached);
                             final cid = await widget.service.ensureChatId();
@@ -1808,12 +1815,13 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                               if (!_canComposeDm) return;
                               final file = await _fileService.pickFile();
                               if (file != null) {
+                                final path = file.path;
                                 final attached = LocalAttach(
-                                  path: file.path,
-                                  name: file.path.split('/').last,
-                                  mimeType: 'application/octet-stream',
+                                  path: path,
+                                  name: path.split('/').last,
+                                  mimeType: _guessMime(path),
                                   size: await file.length(),
-                                  isImage: false,
+                                  isImage: _isImagePath(path),
                                 );
                                 _att.add(attached);
                                 final cid = await widget.service.ensureChatId();
@@ -1921,12 +1929,13 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                             onAttachFile: () async {
                               final file = await _fileService.pickFile();
                               if (file != null) {
+                                final path = file.path;
                                 final attached = LocalAttach(
-                                  path: file.path,
-                                  name: file.path.split('/').last,
-                                  mimeType: 'application/octet-stream',
+                                  path: path,
+                                  name: path.split('/').last,
+                                  mimeType: _guessMime(path),
                                   size: await file.length(),
-                                  isImage: false,
+                                  isImage: _isImagePath(path),
                                 );
                                 _att.add(attached);
                                 final cid = await widget.service.ensureChatId();
@@ -2004,7 +2013,15 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         onForward: () async {
           await _startForwardSelection([m]);
         },
-        onTogglePin: () async => widget.service.pinMessage(m.id, !m.isPinned),
+        onTogglePin: () async {
+          try {
+            await widget.service.pinMessage(m.id, !m.isPinned);
+          } catch (_) {
+            _showSnack(m.isPinned
+                ? 'Не удалось открепить'
+                : 'Не удалось закрепить');
+          }
+        },
         onDeleteIfAllowed: () async => widget.service.deleteMessage(m.id),
         onEditIfAllowed: _canEdit(m)
             ? () async {
@@ -2037,7 +2054,13 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         break;
       case 'Закрепить':
       case 'Открепить':
-        await widget.service.pinMessage(m.id, !m.isPinned);
+        try {
+          await widget.service.pinMessage(m.id, !m.isPinned);
+        } catch (_) {
+          _showSnack(m.isPinned
+              ? 'Не удалось открепить'
+              : 'Не удалось закрепить');
+        }
         break;
       case 'Переслать':
         await _startForwardSelection([m]);

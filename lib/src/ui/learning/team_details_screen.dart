@@ -5,8 +5,6 @@
 import 'dart:ui' as ui; // для мягких свечений
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:cached_network_image/cached_network_image.dart';
-import 'package:characters/characters.dart';
 
 import 'models/team.dart';
 import 'state/team_cubit.dart';
@@ -14,6 +12,7 @@ import 'tabs/assignments_tab.dart';
 import 'tabs/chat_tab.dart';
 import 'tabs/files_tab.dart';
 import 'tabs/assignments/view_mode.dart';
+import 'widgets/team_avatar.dart';
 
 class TeamDetailsScreen extends StatelessWidget {
   final Team team;
@@ -58,8 +57,9 @@ class _BodyState extends State<_Body> with SingleTickerProviderStateMixin {
   late final TabController _tabController;
   bool _selecting = false;
 
-  static const double _kHeaderContentHeight = 106.0;
-  static const double _kTabsTopGap = 0.0; // максимально прижать к шапке
+  // Compact header: more room for chat / assignments below.
+  static const double _kHeaderContentHeight = 64.0;
+  static const double _kTabsTopGap = 6.0;
 
   @override
   void initState() {
@@ -119,7 +119,7 @@ class _BodyState extends State<_Body> with SingleTickerProviderStateMixin {
             const SizedBox(height: _kTabsTopGap),
             // Сильно сжатый сегмент-контрол для вкладок (уменьшен на ~60%)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
               child: Container(
                 decoration: BoxDecoration(
                   color: theme.colorScheme.surface,
@@ -224,22 +224,24 @@ class _RoundBackButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      width: 40,
-      height: 40,
+      width: 36,
+      height: 36,
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         shape: BoxShape.circle,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.06),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
       child: IconButton(
         tooltip: 'Назад',
-        icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+        icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 16),
         onPressed: () => Navigator.of(context).maybePop(),
       ),
     );
@@ -256,8 +258,7 @@ class _TeamHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final base = theme.textTheme.headlineSmall?.fontSize ?? 24.0;
-    final titleSize = base / 2; // уменьшили в 2 раза
+    const titleSize = 15.0;
 
     return Stack(
       fit: StackFit.expand,
@@ -300,22 +301,22 @@ class _TeamHeader extends StatelessWidget {
             ],
           ),
         ),
-        // Контент
+        // Контент — плотно под статус-баром / Dynamic Island.
         SafeArea(
           bottom: false,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+            padding: const EdgeInsets.fromLTRB(12, 2, 8, 4),
             child: Align(
-              alignment: const Alignment(-1, 0.26),
+              alignment: Alignment.centerLeft,
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   if (leading != null) ...[
                     leading!,
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 8),
                   ],
-                  _TeamAvatarSmall(icon: team.icon, name: team.name),
-                  const SizedBox(width: 12),
+                  TeamAvatar(icon: team.icon, name: team.name, size: 36),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -324,31 +325,25 @@ class _TeamHeader extends StatelessWidget {
                       children: [
                         Text(
                           team.name,
-                          maxLines: 2,
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.headlineSmall?.copyWith(
                             fontSize: titleSize,
                             fontWeight: FontWeight.w800,
                             color: Colors.black,
                             height: 1.05,
-                            shadows: [
-                              Shadow(
-                                color: Colors.black.withOpacity(0.05),
-                                offset: const Offset(0, 2),
-                                blurRadius: 3,
-                              ),
-                            ],
                           ),
                         ),
                         if (team.teacher.trim().isNotEmpty) ...[
-                          const SizedBox(height: 3),
+                          const SizedBox(height: 1),
                           Text(
                             team.teacher,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: Colors.black.withOpacity(0.64),
-                              height: 1.12,
+                              height: 1.1,
+                              fontSize: 11,
                             ),
                           ),
                         ],
@@ -356,8 +351,11 @@ class _TeamHeader extends StatelessWidget {
                     ),
                   ),
                   if (trailing != null) ...[
-                    const SizedBox(width: 8),
-                    trailing!,
+                    const SizedBox(width: 4),
+                    IconTheme(
+                      data: const IconThemeData(size: 22),
+                      child: trailing!,
+                    ),
                   ],
                 ],
               ),
@@ -388,61 +386,6 @@ class _GlowCircle extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _TeamAvatarSmall extends StatelessWidget {
-  final String icon;
-  final String name;
-  const _TeamAvatarSmall({required this.icon, required this.name});
-
-  bool get _isUrl => icon.startsWith('http://') || icon.startsWith('https://');
-
-  @override
-  Widget build(BuildContext context) {
-    final initials =
-        (name.isNotEmpty ? name.trim().characters.first.toUpperCase() : 'T');
-    final colorSeed = initials.codeUnitAt(0);
-    final hue = (colorSeed % 360).toDouble();
-    final bgColor = HSLColor.fromAHSL(1, hue, 0.55, 0.48).toColor();
-
-    return Container(
-      height: 44,
-      width: 44,
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(11),
-        border: Border.all(color: Colors.white, width: 2),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.06),
-              blurRadius: 10,
-              offset: const Offset(0, 3)),
-        ],
-        image: _isUrl
-            ? DecorationImage(
-                image: CachedNetworkImageProvider(icon), fit: BoxFit.cover)
-            : null,
-        gradient: _isUrl
-            ? null
-            : LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [bgColor.withOpacity(0.95), bgColor],
-              ),
-      ),
-      alignment: Alignment.center,
-      child: !_isUrl
-          ? Text(
-              initials,
-              style: const TextStyle(
-                fontWeight: FontWeight.w800,
-                color: Colors.white,
-                fontSize: 19,
-              ),
-            )
-          : null,
     );
   }
 }

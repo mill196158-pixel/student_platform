@@ -9,6 +9,7 @@ import 'package:student_platform/src/ui/friends/friend_profile_screen.dart';
 import 'package:student_platform/src/ui/chats/direct_chat_screen.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:student_platform/src/ui/learning/state/team_cubit.dart';
+import 'package:student_platform/src/services/presence/user_presence.dart';
 
 class MyFriendsScreen extends StatefulWidget {
   const MyFriendsScreen({super.key});
@@ -130,7 +131,12 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
       });
     } catch (e) {
       debugPrint('[Friends] get_my_friends_bulk error: $e');
-      setState(() => _friends = []);
+      // Keep previous list on failure so a blip does not look like "no friends".
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Не удалось обновить список друзей')),
+        );
+      }
     }
   }
 
@@ -388,15 +394,21 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
   }
 
   _Friend _friendFromMap(Map<String, dynamic> u) {
+    final rawStatus = (u['status'] ?? '').toString();
+    final lastSeen = UserStatusDisplay.parseLastSeen(u['last_seen_at']);
     return _Friend(
       id: (u['id'] ?? '').toString(),
       name: (u['name'] ?? '').toString(),
       surname: (u['surname'] ?? '').toString(),
       avatarUrl: (u['avatar_url'] ?? '').toString(),
-      status: (u['status'] ?? '').toString(),
+      status: UserStatusDisplay.resolve(
+        status: rawStatus,
+        lastSeenAt: lastSeen,
+      ),
       university: (u['university'] ?? '').toString(),
       city: (u['city'] ?? '').toString(),
       groupName: (u['group_name'] ?? '').toString(),
+      isOnline: UserStatusDisplay.isOnline(lastSeen),
     );
   }
 
@@ -542,12 +554,12 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
             .replaceAll('*', '')
             .replaceAll(',', ' ')
             .trim();
-        final pattern = '*${Uri.encodeComponent(safe)}*';
+        final pattern = '*$safe*';
         try {
           rows = await _sb
               .from('users')
               .select(
-                  'id, name, surname, avatar_url, status, university, group_name')
+                  'id, name, surname, avatar_url, status, university, group_name, last_seen_at')
               .or('name.ilike.$pattern,surname.ilike.$pattern')
               .limit(50);
         } catch (_) {
@@ -559,7 +571,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
             rows = await _sb
                 .from('users')
                 .select(
-                    'id, name, surname, avatar_url, status, university, group_name')
+                    'id, name, surname, avatar_url, status, university, group_name, last_seen_at')
                 .eq('group_name', myGroup)
                 .or('name.ilike.$pattern,surname.ilike.$pattern')
                 .limit(50);
@@ -571,16 +583,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
       for (final r in rows) {
         final id = (r['id'] ?? '').toString();
         if (id.isEmpty || id == me) continue;
-        found.add(_Friend(
-          id: id,
-          name: (r['name'] ?? '').toString(),
-          surname: (r['surname'] ?? '').toString(),
-          avatarUrl: (r['avatar_url'] ?? '').toString(),
-          status: (r['status'] ?? '').toString(),
-          university: (r['university'] ?? '').toString(),
-          city: (r['city'] ?? '').toString(),
-          groupName: (r['group_name'] ?? '').toString(),
-        ));
+        found.add(_friendFromMap(Map<String, dynamic>.from(r as Map)));
       }
 
       found.sort((a, b) {
@@ -593,7 +596,8 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
 
       setState(() {
         _remote = found;
-        _visible = found.isNotEmpty ? List.of(found) : List.of(_friends);
+        // Empty search must stay empty — never fall back to the friends list.
+        _visible = List.of(found);
         _searching = false;
       });
     } catch (e) {
@@ -601,7 +605,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
       setState(() {
         _searching = false;
         _remote = [];
-        _applyFilter();
+        _visible = [];
       });
     }
   }
@@ -885,6 +889,7 @@ class _Friend {
   final String university;
   final String city;
   final String groupName;
+  final bool isOnline;
 
   const _Friend({
     required this.id,
@@ -895,12 +900,14 @@ class _Friend {
     required this.university,
     required this.city,
     required this.groupName,
+    this.isOnline = false,
   });
 
   String get fullName =>
       [name, surname].where((e) => e.trim().isNotEmpty).join(' ').trim();
 
-  _Friend copyWith({String? avatarUrl, String? status}) => _Friend(
+  _Friend copyWith({String? avatarUrl, String? status, bool? isOnline}) =>
+      _Friend(
         id: id,
         name: name,
         surname: surname,
@@ -909,6 +916,7 @@ class _Friend {
         university: university,
         city: city,
         groupName: groupName,
+        isOnline: isOnline ?? this.isOnline,
       );
 }
 
@@ -955,23 +963,59 @@ class _FriendRow extends StatelessWidget {
                   if (data.status.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
-                      child: Text(data.status,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: t.bodySmall?.copyWith(color: Colors.black45)),
+                      child: Text(
+                        data.status,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: t.bodySmall?.copyWith(
+                          color: data.isOnline
+                              ? (data.status == 'Онлайн'
+                                  ? const Color(0xFF34C759)
+                                  : const Color(0xFF5B5168))
+                              : Colors.black45,
+                          fontWeight:
+                              data.isOnline ? FontWeight.w600 : FontWeight.w400,
+                        ),
+                      ),
                     ),
                 ],
               ),
             ),
-            Row(
-              children: [
-                IconButton(
-                    icon: const Icon(Icons.chat_bubble_outline),
-                    tooltip: 'Написать',
-                    onPressed: onChat),
-              ],
-            ),
+            _MessageActionButton(onPressed: onChat),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MessageActionButton extends StatelessWidget {
+  const _MessageActionButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  static const _lavender = Color(0xFF7C63D8);
+  static const _lavenderSoft = Color(0xFFDCD0FA);
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Написать',
+      child: Material(
+        color: _lavenderSoft.withValues(alpha: 0.72),
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(14),
+          child: const SizedBox(
+            width: 42,
+            height: 42,
+            child: Icon(
+              Icons.maps_ugc_rounded,
+              color: _lavender,
+              size: 22,
+            ),
+          ),
         ),
       ),
     );

@@ -58,6 +58,45 @@ class PushPayload {
     return 't:$type|c:${chatId ?? ''}|a:${assignmentId ?? ''}|l:${lessonId ?? ''}|f:${friendUserId ?? ''}';
   }
 
+  /// Query-string payload for local notification taps (kept small for OS limits).
+  String toLocalPayload() {
+    final map = <String, String>{
+      'version': '$version',
+      'type': type,
+      if (notificationId != null) 'notification_id': notificationId!,
+      if (chatId != null) 'chat_id': chatId!,
+      if (peerId != null) 'peer_id': peerId!,
+      if (teamId != null) 'team_id': teamId!,
+      if (assignmentId != null) 'assignment_id': assignmentId!,
+      if (lessonId != null) 'lesson_id': lessonId!,
+      if (friendUserId != null) 'friend_user_id': friendUserId!,
+      if (raw['title'] != null) 'title': raw['title']!,
+      if (raw['body'] != null) 'body': raw['body']!,
+    };
+    final encoded = map.entries
+        .map((e) =>
+            '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}')
+        .join('&');
+    return encoded.length > 3500
+        ? 'type=${Uri.encodeComponent(type)}&chat_id=${Uri.encodeComponent(chatId ?? '')}'
+        : encoded;
+  }
+
+  static PushPayload? tryParseLocalPayload(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return null;
+    final trimmed = raw.trim();
+    if (!trimmed.contains('=')) return null;
+    final map = <String, dynamic>{};
+    for (final part in trimmed.split('&')) {
+      final idx = part.indexOf('=');
+      if (idx <= 0) continue;
+      final k = Uri.decodeComponent(part.substring(0, idx));
+      final v = Uri.decodeComponent(part.substring(idx + 1));
+      if (k.isNotEmpty) map[k] = v;
+    }
+    return tryParse(map);
+  }
+
   static String? _nonEmpty(String? value) {
     final v = value?.trim();
     if (v == null || v.isEmpty) return null;

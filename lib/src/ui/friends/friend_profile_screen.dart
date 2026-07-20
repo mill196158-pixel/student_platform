@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:student_platform/src/ui/chats/data/blocks_api.dart';
 import 'package:student_platform/src/ui/chats/direct_chat_screen.dart';
 import 'package:student_platform/src/ui/learning/state/team_cubit.dart';
+import 'package:student_platform/src/services/presence/user_presence.dart';
 
 /// Гостевой профиль пользователя.
 /// Показывает: аватар, ФИО, вуз, группу, статус.
@@ -46,6 +47,7 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
 
   // блокировка (отдельно от дружбы)
   bool _iBlocked = false;
+  bool _dmAvailable = true;
   bool _blockActionBusy = false;
 
   // прокрутка и якорь «Друзья»
@@ -122,56 +124,106 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
   void _subscribeFriendsRealtime() {
     _friendsChannel?.unsubscribe();
     final other = widget.userId;
+    final me = _myId;
 
-    _friendsChannel = _sb
-        .channel('public:friends:for:$other')
-        // INSERT: когда у гостя появляется новый друг
-        .onPostgresChanges(
-          event: PostgresChangeEvent.insert,
-          schema: 'public',
-          table: 'friends',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'user_id',
-            value: other,
-          ),
-          callback: (_) async => _onFriendsChangedRealtime(),
-        )
-        .onPostgresChanges(
-          event: PostgresChangeEvent.insert,
-          schema: 'public',
-          table: 'friends',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'friend_id',
-            value: other,
-          ),
-          callback: (_) async => _onFriendsChangedRealtime(),
-        )
-        // DELETE: когда у гостя удаляют друга
-        .onPostgresChanges(
-          event: PostgresChangeEvent.delete,
-          schema: 'public',
-          table: 'friends',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'user_id',
-            value: other,
-          ),
-          callback: (_) async => _onFriendsChangedRealtime(),
-        )
-        .onPostgresChanges(
-          event: PostgresChangeEvent.delete,
-          schema: 'public',
-          table: 'friends',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'friend_id',
-            value: other,
-          ),
-          callback: (_) async => _onFriendsChangedRealtime(),
-        )
-        .subscribe();
+    var channel = _sb.channel('public:friends:for:$other')
+      // INSERT: когда у гостя появляется новый друг
+      .onPostgresChanges(
+        event: PostgresChangeEvent.insert,
+        schema: 'public',
+        table: 'friends',
+        filter: PostgresChangeFilter(
+          type: PostgresChangeFilterType.eq,
+          column: 'user_id',
+          value: other,
+        ),
+        callback: (_) async => _onFriendsChangedRealtime(),
+      )
+      .onPostgresChanges(
+        event: PostgresChangeEvent.insert,
+        schema: 'public',
+        table: 'friends',
+        filter: PostgresChangeFilter(
+          type: PostgresChangeFilterType.eq,
+          column: 'friend_id',
+          value: other,
+        ),
+        callback: (_) async => _onFriendsChangedRealtime(),
+      )
+      // DELETE: когда у гостя удаляют друга
+      .onPostgresChanges(
+        event: PostgresChangeEvent.delete,
+        schema: 'public',
+        table: 'friends',
+        filter: PostgresChangeFilter(
+          type: PostgresChangeFilterType.eq,
+          column: 'user_id',
+          value: other,
+        ),
+        callback: (_) async => _onFriendsChangedRealtime(),
+      )
+      .onPostgresChanges(
+        event: PostgresChangeEvent.delete,
+        schema: 'public',
+        table: 'friends',
+        filter: PostgresChangeFilter(
+          type: PostgresChangeFilterType.eq,
+          column: 'friend_id',
+          value: other,
+        ),
+        callback: (_) async => _onFriendsChangedRealtime(),
+      );
+
+    // Outgoing/incoming request changes so "Заявка отправлена" updates live.
+    if (me != null && me.isNotEmpty) {
+      channel = channel
+          .onPostgresChanges(
+            event: PostgresChangeEvent.delete,
+            schema: 'public',
+            table: 'friend_requests',
+            filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: 'from_id',
+              value: me,
+            ),
+            callback: (_) async => _onFriendsChangedRealtime(),
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.insert,
+            schema: 'public',
+            table: 'friend_requests',
+            filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: 'from_id',
+              value: me,
+            ),
+            callback: (_) async => _onFriendsChangedRealtime(),
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.delete,
+            schema: 'public',
+            table: 'friend_requests',
+            filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: 'to_id',
+              value: me,
+            ),
+            callback: (_) async => _onFriendsChangedRealtime(),
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.insert,
+            schema: 'public',
+            table: 'friend_requests',
+            filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: 'to_id',
+              value: me,
+            ),
+            callback: (_) async => _onFriendsChangedRealtime(),
+          );
+    }
+
+    _friendsChannel = channel.subscribe();
   }
 
   Future<void> _onFriendsChangedRealtime() async {
@@ -418,14 +470,17 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
     final me = _myId;
     if (me == null || me.isEmpty || me == widget.userId) {
       _iBlocked = false;
+      _dmAvailable = true;
       return;
     }
     try {
       final rel = await BlocksApi.getBlockRelationship(widget.userId);
       _iBlocked = rel.iBlocked;
+      _dmAvailable = rel.dmAvailable;
     } catch (e) {
       debugPrint('[FriendProfile] get_block_relationship error: $e');
       _iBlocked = false;
+      _dmAvailable = true;
     }
   }
 
@@ -484,7 +539,10 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
     try {
       await BlocksApi.blockUser(widget.userId);
       if (!mounted) return;
-      setState(() => _iBlocked = true);
+      setState(() {
+        _iBlocked = true;
+        _dmAvailable = false;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Пользователь заблокирован')),
       );
@@ -555,7 +613,10 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
     try {
       await BlocksApi.unblockUser(widget.userId);
       if (!mounted) return;
-      setState(() => _iBlocked = false);
+      setState(() {
+        _iBlocked = false;
+        _dmAvailable = true;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Пользователь разблокирован')),
       );
@@ -580,6 +641,14 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
   Future<void> _openDirectChat() async {
     final me = _myId;
     if (me == null || me.isEmpty || me == widget.userId) return;
+
+    if (!_dmAvailable || _iBlocked) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Личные сообщения недоступны')),
+      );
+      return;
+    }
 
     final g = _guest;
     if (g == null) return;
@@ -633,34 +702,18 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
   }
 
   Future<void> _loadGuestFriends() async {
-    // ожидаем таблицу friends с полями (user_id, friend_id)
     final other = widget.userId;
+    // SECURITY DEFINER RPC — member-only RLS on friends would otherwise hide
+    // almost everyone else's friend list.
+    final res = await _sb.rpc(
+      'get_user_friends_preview',
+      params: {'p_user_id': other, 'p_limit': 50},
+    );
+    final rows = res is List
+        ? res.map((e) => Map<String, dynamic>.from(e as Map)).toList()
+        : const <Map<String, dynamic>>[];
 
-    final pairs = await _sb
-        .from('friends')
-        .select('user_id, friend_id')
-        .or('user_id.eq.$other,friend_id.eq.$other')
-        .limit(200);
-
-    final ids = <String>{};
-    for (final r in pairs) {
-      final a = (r['user_id'] ?? '').toString();
-      final b = (r['friend_id'] ?? '').toString();
-      if (a == other && b.isNotEmpty) ids.add(b);
-      if (b == other && a.isNotEmpty) ids.add(a);
-    }
-    if (ids.isEmpty) {
-      _friends = [];
-      return;
-    }
-
-    final users = await _sb
-        .from('users')
-        .select('id, name, surname, avatar_url, university, group_name')
-        .inFilter('id', ids.toList())
-        .order('surname', ascending: true);
-
-    _friends = users.map<_MiniUser>((r) {
+    _friends = rows.map<_MiniUser>((r) {
       return _MiniUser(
         id: (r['id'] ?? '').toString(),
         name: (r['name'] ?? '').toString(),
@@ -720,7 +773,10 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
     final avatar = (g['avatar_url'] ?? '').toString();
     final university = (g['university'] ?? '').toString();
     final group = (g['group_name'] ?? '').toString();
-    final status = (g['status'] ?? '').toString();
+    final status = UserStatusDisplay.resolve(
+      status: (g['status'] ?? '').toString(),
+      lastSeenAt: UserStatusDisplay.parseLastSeen(g['last_seen_at']),
+    );
 
     return Scaffold(
       backgroundColor: colorScheme.surface,
@@ -756,13 +812,30 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
                     onCancelRequest: _cancelFriendRequest,
                     onDecline: _declineIncomingRequest,
                   ),
-                if (_myId != null && _myId != widget.userId) ...[
+                if (_myId != null &&
+                    _myId != widget.userId &&
+                    _dmAvailable &&
+                    !_iBlocked) ...[
                   const SizedBox(height: 10),
                   _GActionLarge(
                     onTap: _openDirectChat,
                     gradient: _gradBlue,
-                    icon: Icons.chat_bubble_outline,
+                    icon: Icons.maps_ugc_rounded,
                     text: 'Сообщение',
+                  ),
+                ],
+                if (_myId != null &&
+                    _myId != widget.userId &&
+                    (!_dmAvailable || _iBlocked)) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    _iBlocked
+                        ? 'Вы заблокировали этого пользователя'
+                        : 'Личные сообщения недоступны',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
                   ),
                 ],
 

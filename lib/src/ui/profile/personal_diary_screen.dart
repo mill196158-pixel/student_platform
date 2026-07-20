@@ -2061,189 +2061,93 @@ class _DiaryHeader extends StatelessWidget {
 
   const _DiaryHeader({required this.onAdd});
 
-  @override
-  Widget build(BuildContext context) {
-    final compact = MediaQuery.sizeOf(context).width < 390;
-    return SizedBox(
-      height: compact ? 88 : 96,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Color(0xFFFFFBFF), Color(0xFFF7FBFA)],
-              ),
-            ),
-          ),
-          Positioned(
-            left: -34,
-            top: -42,
-            child: _SoftCircle(
-              size: 128,
-              color: const Color(0xFFEDE7F6).withValues(alpha: .72),
-            ),
-          ),
-          Positioned(
-            right: -48,
-            bottom: -56,
-            child: _SoftCircle(
-              size: 160,
-              color: Colors.white.withValues(alpha: .70),
-            ),
-          ),
-          SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(
-                compact ? 12 : 16,
-                8,
-                compact ? 12 : 16,
-                8,
-              ),
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: _HeaderRoundButton(
-                      icon: Icons.arrow_back_ios_new_rounded,
-                      onTap: () => Navigator.of(context).maybePop(),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 58),
-                    child: Text(
-                      'Мой дневник',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        color: Colors.black,
-                        height: 1.0,
-                        shadows: [
-                          Shadow(
-                            color: Colors.black.withValues(alpha: .05),
-                            offset: const Offset(0, 2),
-                            blurRadius: 3,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: _HeaderAddButton(
-                      enabled: true,
-                      onTap: onAdd,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SoftCircle extends StatelessWidget {
-  final double size;
-  final Color color;
-
-  const _SoftCircle({
-    required this.size,
-    required this.color,
-  });
+  static const _lavender = Color(0xFF7C63D8);
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: color,
-        shape: BoxShape.circle,
-      ),
-    );
-  }
-}
-
-class _HeaderRoundButton extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-
-  const _HeaderRoundButton({
-    required this.icon,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white.withValues(alpha: .86),
-      shape: const CircleBorder(),
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: onTap,
-        child: SizedBox(
-          width: 42,
-          height: 42,
-          child: Icon(icon, size: 18, color: Colors.black87),
+    return ColoredBox(
+      color: const Color(0xFFFBFAFF),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+          child: SizedBox(
+            height: 44,
+            child: Row(
+              children: [
+                _HeaderNavButton(
+                  onTap: () => Navigator.of(context).maybePop(),
+                  child: const Icon(
+                    Icons.chevron_left_rounded,
+                    size: 28,
+                    color: Color(0xFF1C1B1F),
+                  ),
+                ),
+                const Expanded(
+                  child: Text(
+                    'Мой дневник',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF1C1B1F),
+                      height: 1.1,
+                    ),
+                  ),
+                ),
+                _HeaderNavButton(
+                  onTap: onAdd,
+                  child: const Icon(
+                    Icons.add_rounded,
+                    size: 24,
+                    color: _lavender,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
 }
 
-class _HeaderAddButton extends StatelessWidget {
-  final bool enabled;
-  final VoidCallback? onTap;
-
-  const _HeaderAddButton({
-    required this.enabled,
+/// Minimal iOS/Figma-style nav chip: soft fill, thin border, no heavy gradient.
+class _HeaderNavButton extends StatelessWidget {
+  const _HeaderNavButton({
     required this.onTap,
+    required this.child,
   });
+
+  final VoidCallback onTap;
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.transparent,
+      color: Colors.white,
       shape: const CircleBorder(),
       child: InkWell(
         customBorder: const CircleBorder(),
-        onTap: enabled ? onTap : null,
-        child: Container(
-          width: 44,
-          height: 44,
-          alignment: Alignment.center,
+        onTap: onTap,
+        child: Ink(
+          width: 40,
+          height: 40,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: enabled
-                  ? const [Color(0xFF7C63D8), Color(0xFF8A72D8)]
-                  : const [Color(0xFFE2E5F0), Color(0xFFC8CEDD)],
-            ),
-            boxShadow: enabled
-                ? [
-                    BoxShadow(
-                      color: const Color(0xFF7C63D8).withValues(alpha: .22),
-                      blurRadius: 18,
-                      offset: const Offset(0, 8),
-                    ),
-                  ]
-                : null,
+            color: Colors.white,
+            border: Border.all(color: const Color(0xFFE8E4F0)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
+              ),
+            ],
           ),
-          child: Transform.translate(
-            offset: const Offset(0, -1.5),
-            child: const Icon(Icons.add, color: Colors.white, size: 24),
-          ),
+          child: Center(child: child),
         ),
       ),
     );

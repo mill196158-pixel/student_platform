@@ -38,6 +38,7 @@ import '../../chats/data/blocks_api.dart';
 import '../../chats/forward/forward_outbox.dart';
 import '../../chats/forward/forward_picker.dart';
 import '../../chats/forward/forward_pick_nav.dart';
+import '../../../services/push/active_chat_tracker.dart';
 import '../../../utils/safe_debug_log.dart';
 import '../utils/chat_copied_file_cache.dart';
 
@@ -164,6 +165,7 @@ class _ChatTabState extends State<ChatTab> {
   final Set<String> _revealedBlockedMessageIds = <String>{};
   bool _loadingOlderMessages = false;
   bool _hasMoreOlderMessages = true;
+  String? _trackedChatId;
   // флаг и чип превью «пакет сообщений» в композере
   bool _forwardPackageAttached = false;
   final List<String> _forwardSelectedIds = [];
@@ -464,6 +466,11 @@ class _ChatTabState extends State<ChatTab> {
       _restoreDraft();
       () async {
         final chatId = await _getChatIdForTeam(teamId);
+        if (!mounted) return;
+        if (chatId.isNotEmpty) {
+          _trackedChatId = chatId;
+          ActiveChatTracker.instance.enter(chatId);
+        }
         await _consumeForwardOutboxIfAny(chatId);
       }();
 
@@ -492,6 +499,7 @@ class _ChatTabState extends State<ChatTab> {
 
   @override
   void dispose() {
+    ActiveChatTracker.instance.leave(_trackedChatId);
     // ➜ NEW: финальная подстраховка
     try {
       final list = context.read<TeamCubit>().state.chat;
@@ -596,6 +604,8 @@ class _ChatTabState extends State<ChatTab> {
         _hasMoreOlderMessages = false;
       }
       await _chatScroll.restorePrependAnchor(anchor);
+    } catch (_) {
+      // Keep hasMore so a failed page load can be retried.
     } finally {
       _loadingOlderMessages = false;
       if (mounted) setState(() {});
@@ -619,12 +629,27 @@ class _ChatTabState extends State<ChatTab> {
     final file = await _fileService.pickFile();
     if (file == null || !mounted) return;
 
+    final path = file.path;
+    final lower = path.toLowerCase();
+    final isImage = lower.endsWith('.jpg') ||
+        lower.endsWith('.jpeg') ||
+        lower.endsWith('.png') ||
+        lower.endsWith('.gif') ||
+        lower.endsWith('.webp');
     final attached = LocalAttach(
-      path: file.path,
-      name: file.path.split('/').last,
-      mimeType: 'application/octet-stream',
+      path: path,
+      name: path.split('/').last,
+      mimeType: isImage
+          ? (lower.endsWith('.png')
+              ? 'image/png'
+              : lower.endsWith('.gif')
+                  ? 'image/gif'
+                  : lower.endsWith('.webp')
+                      ? 'image/webp'
+                      : 'image/jpeg')
+          : 'application/octet-stream',
       size: await file.length(),
-      isImage: false,
+      isImage: isImage,
     );
     _att.add(attached);
     final teamId = context.read<TeamCubit>().state.team.id;

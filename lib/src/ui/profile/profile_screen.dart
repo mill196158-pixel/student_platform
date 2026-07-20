@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:student_platform/router_observer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -518,6 +519,11 @@ class _ProfileScreenState extends State<ProfileScreen>
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
+        systemOverlayStyle: const SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarBrightness: Brightness.light,
+          statusBarIconBrightness: Brightness.dark,
+        ),
         leading: IconButton(
           tooltip: 'Редактировать',
           icon: const Icon(Icons.tune),
@@ -599,10 +605,6 @@ class _ProfileScreenState extends State<ProfileScreen>
               _ExamsBanner(onTap: () => context.push('/exams')),
               const SizedBox(height: 12),
               _PersonalDiaryBanner(onTap: () => context.push('/my-diary')),
-              const SizedBox(height: 12),
-              _NotificationsBanner(
-                onTap: () => context.push('/notification-settings'),
-              ),
               const SizedBox(height: 12),
               _MapBanner(
                 onTap: () => Navigator.push(
@@ -1208,70 +1210,6 @@ class _MapBanner extends StatelessWidget {
                     .textTheme
                     .titleMedium
                     ?.copyWith(fontWeight: FontWeight.w700),
-              ),
-            ),
-            const Icon(Icons.chevron_right),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _NotificationsBanner extends StatelessWidget {
-  final VoidCallback onTap;
-  const _NotificationsBanner({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = const [
-      Color(0xFFDCD0FA),
-      Color(0xFFC9B8F3),
-    ];
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 72),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          gradient: LinearGradient(
-              colors: colors,
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight),
-          boxShadow: [
-            BoxShadow(
-                color: colors.last.withValues(alpha: .25),
-                blurRadius: 16,
-                offset: const Offset(0, 10))
-          ],
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
-          children: [
-            const Icon(Icons.notifications_none_rounded,
-                size: 24, color: Color(0xFF7C63D8)),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Уведомления',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w800),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Сообщения, друзья, задания и расписание',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(color: Colors.black54),
-                  ),
-                ],
               ),
             ),
             const Icon(Icons.chevron_right),

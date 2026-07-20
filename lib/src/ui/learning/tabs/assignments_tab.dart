@@ -259,22 +259,28 @@ class _AssignmentRowTile extends StatelessWidget {
                         ),
                       ),
                     ],
-                    const SizedBox(height: 12),
-                    Row(
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 7,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         _StatusPill(
                           text: _statusText(isDraft: isDraft, isDone: isDone),
                           color: accent,
+                          compact: true,
                         ),
-                        if ((a.due ?? '').isNotEmpty) ...[
-                          const SizedBox(width: 7),
-                          _DuePill(due: a.due!, color: cs.tertiary),
-                        ],
-                        const Spacer(),
+                        if ((a.due ?? '').isNotEmpty)
+                          _DuePill(
+                            due: a.due!,
+                            color: cs.tertiary,
+                            compact: true,
+                          ),
                         if (!isDraft)
                           _CompleteActionButton(
                             isDone: isDone,
                             onPressed: onToggle,
+                            compact: true,
                           ),
                       ],
                     ),
@@ -509,10 +515,12 @@ class _DuePill extends StatelessWidget {
 class _CompleteActionButton extends StatelessWidget {
   final bool isDone;
   final VoidCallback onPressed;
+  final bool compact;
 
   const _CompleteActionButton({
     required this.isDone,
     required this.onPressed,
+    this.compact = false,
   });
 
   @override
@@ -526,7 +534,10 @@ class _CompleteActionButton extends StatelessWidget {
         onTap: onPressed,
         borderRadius: BorderRadius.circular(999),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+          padding: EdgeInsets.symmetric(
+            horizontal: compact ? 9 : 11,
+            vertical: compact ? 6 : 8,
+          ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -534,15 +545,17 @@ class _CompleteActionButton extends StatelessWidget {
                 isDone
                     ? Icons.check_circle_rounded
                     : Icons.radio_button_unchecked_rounded,
-                size: 18,
+                size: compact ? 16 : 18,
                 color: color,
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: 5),
               Text(
-                isDone ? 'Готово' : 'Выполнить',
+                isDone ? 'Готово' : 'Сделать',
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
                       color: color,
                       fontWeight: FontWeight.w800,
+                      fontSize: compact ? 12 : null,
+                      height: 1,
                     ),
               ),
             ],

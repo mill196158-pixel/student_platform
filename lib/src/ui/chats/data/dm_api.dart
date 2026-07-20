@@ -474,63 +474,63 @@ class DmApi {
     }
   }
 
-  static Future<List<Message>> loadOlderMessages({
+  /// Older page load. Throws on network/RPC failure so UI does not treat
+  /// errors as "end of history".
+  static Future<({List<Message> messages, bool hasMore})> loadOlderMessages({
     required String chatId,
     required Message before,
     int limit = 50,
   }) async {
-    try {
-      final clearedAt = await loadClearedAt(chatId);
-      final page = await loadMessagesPage(
-        chatId: chatId,
-        limit: limit,
-        beforeAt: before.at,
-        beforeId: before.id,
-        clearedAt: clearedAt,
-      );
+    final clearedAt = await loadClearedAt(chatId);
+    final page = await loadMessagesPage(
+      chatId: chatId,
+      limit: limit,
+      beforeAt: before.at,
+      beforeId: before.id,
+      clearedAt: clearedAt,
+    );
 
-      final older = page.messages.where((m) => m.id != before.id).toList()
-        ..sort((a, b) => a.at.compareTo(b.at));
+    final older = page.messages.where((m) => m.id != before.id).toList()
+      ..sort((a, b) => a.at.compareTo(b.at));
 
-      await ChatMessageCacheStore.merge(
-        chatId: chatId,
-        messages: older,
-        clearedAt: clearedAt,
-        hasMoreBefore: page.hasMore,
-      );
-      await ChatMessageCacheStore.pruneAtOrBefore(chatId, clearedAt);
+    await ChatMessageCacheStore.merge(
+      chatId: chatId,
+      messages: older,
+      clearedAt: clearedAt,
+      hasMoreBefore: page.hasMore,
+    );
+    await ChatMessageCacheStore.pruneAtOrBefore(chatId, clearedAt);
 
-      final current = _streamMessages[chatId];
-      final ctrl = _streamControllers[chatId];
-      if (current != null && ctrl != null) {
-        final existingIds = current.map((m) => m.id).toSet();
-        final unique = older.where((m) => existingIds.add(m.id)).toList();
-        if (unique.isNotEmpty) {
-          current.insertAll(0, unique);
-          final visible = ChatMessageCacheStore.messagesSync(chatId);
-          current
-            ..clear()
-            ..addAll(visible);
-          _emitView(
-            chatId,
-            viewStateFor(chatId).copyWith(
-              phase: ChatMessagesLoadPhase.ready,
-              messages: visible,
-              hasSnapshot: true,
-              hasMoreBefore: page.hasMore,
-              clearError: true,
-            ),
-          );
-        }
-        return unique;
+    final current = _streamMessages[chatId];
+    final ctrl = _streamControllers[chatId];
+    if (current != null && ctrl != null) {
+      final existingIds = current.map((m) => m.id).toSet();
+      final unique = older.where((m) => existingIds.add(m.id)).toList();
+      if (unique.isNotEmpty) {
+        current.insertAll(0, unique);
+        final visible = ChatMessageCacheStore.messagesSync(chatId);
+        current
+          ..clear()
+          ..addAll(visible);
+        _emitView(
+          chatId,
+          viewStateFor(chatId).copyWith(
+            phase: ChatMessagesLoadPhase.ready,
+            messages: visible,
+            hasSnapshot: true,
+            hasMoreBefore: page.hasMore,
+            clearError: true,
+          ),
+        );
+        return (messages: unique, hasMore: page.hasMore);
       }
-      return older;
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('[DM] loadOlderMessages failed: $e');
-      }
-      return [];
+      _emitView(
+        chatId,
+        viewStateFor(chatId).copyWith(hasMoreBefore: page.hasMore),
+      );
+      return (messages: unique, hasMore: page.hasMore);
     }
+    return (messages: older, hasMore: page.hasMore);
   }
 
   static Future<void> _publishMessageById({
@@ -1030,11 +1030,15 @@ class DmApi {
   }) async {
     if (!message.isFailed) return '';
     final text = message.text.trim();
-    // Allow retry for empty caption when it was a file-only optimistic row.
     final replyToId = message.replyToId;
+    final fileIds = (message.attachments ?? const <ChatFile>[])
+        .map((f) => f.id)
+        .where((id) => id.isNotEmpty)
+        .toList();
+    if (text.isEmpty && fileIds.isEmpty) return '';
+
     final clientKey = message.clientId ?? message.id;
     await ChatMessageCacheStore.remove(chatId, message.id);
-    // Also drop by clientId if the bubble used a different primary id.
     if (clientKey.isNotEmpty && clientKey != message.id) {
       await ChatMessageCacheStore.remove(chatId, clientKey);
     }
@@ -1048,7 +1052,12 @@ class DmApi {
         hasMoreBefore: ChatMessageCacheStore.peek(chatId).hasMoreBefore,
       ),
     );
-    return sendText(chatId: chatId, text: text, replyToId: replyToId);
+    return sendText(
+      chatId: chatId,
+      text: text,
+      replyToId: replyToId,
+      fileIds: fileIds.isEmpty ? null : fileIds,
+    );
   }
 
   // 5) Прочитано до сообщения
@@ -1114,9 +1123,51 @@ class DmApi {
     });
   }
 
-  // 8) Пин/удаление
-  static Future<void> pinMessage(String messageId, bool pin) async {
-    await _sb.from('messages').update({'is_pinned': pin}).eq('id', messageId);
+  // 8) Пин/удаление (SECURITY DEFINER RPC — оба участника ЛС могут откреплять)
+  static Future<void> pinMessage(
+    String messageId,
+    bool pin, {
+    String? chatId,
+  }) async {
+    final cid = (chatId ?? '').trim();
+    List<Message>? previous;
+    if (cid.isNotEmpty) {
+      previous = ChatMessageCacheStore.messagesSync(cid);
+      final next = previous
+          .map((m) => m.id == messageId ? m.copyWith(isPinned: pin) : m)
+          .toList();
+      ChatMessageMemoryCache.replace(cid, next);
+      _emitView(
+        cid,
+        ChatMessagesViewState(
+          phase: ChatMessagesLoadPhase.ready,
+          messages: ChatMessageCacheStore.messagesSync(cid),
+          hasSnapshot: true,
+          hasMoreBefore: ChatMessageCacheStore.peek(cid).hasMoreBefore,
+        ),
+      );
+    }
+
+    try {
+      await _sb.rpc('pin_message', params: {
+        'p_message_id': messageId,
+        'p_pinned': pin,
+      });
+    } catch (_) {
+      if (cid.isNotEmpty && previous != null) {
+        ChatMessageMemoryCache.replace(cid, previous);
+        _emitView(
+          cid,
+          ChatMessagesViewState(
+            phase: ChatMessagesLoadPhase.ready,
+            messages: ChatMessageCacheStore.messagesSync(cid),
+            hasSnapshot: true,
+            hasMoreBefore: ChatMessageCacheStore.peek(cid).hasMoreBefore,
+          ),
+        );
+      }
+      rethrow;
+    }
   }
 
   static Future<void> deleteMessage(String messageId) async {

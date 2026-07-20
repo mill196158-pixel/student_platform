@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:student_platform/src/services/push/app_notifications_api.dart';
+import 'package:student_platform/src/services/push/in_app_notification_bus.dart';
 import 'package:student_platform/src/ui/home/home_dashboard_service.dart';
 import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
 import 'package:student_platform/src/ui/home/widgets/help_card.dart';
@@ -12,6 +16,7 @@ import 'package:student_platform/src/ui/home/widgets/news_story_sheet.dart';
 import 'package:student_platform/src/ui/home/widgets/task_preview_card.dart';
 import 'package:student_platform/src/ui/navigation/main_tab_scope.dart';
 import 'package:student_platform/src/ui/home/widgets/today_summary_card.dart';
+import 'package:student_platform/src/ui/notifications/in_app_toast_host.dart';
 import 'package:student_platform/src/ui/notifications/notification_center_sheet.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -31,11 +36,73 @@ class _HomeScreenState extends State<HomeScreen> {
   int _unreadNotificationCount = 0;
   final Set<String> _hiddenDoneAssignmentIds = {};
   final Set<String> _markingDoneAssignmentIds = {};
+  StreamSubscription<InAppNotificationEvent>? _inAppSub;
+  RealtimeChannel? _notifChannel;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _inAppSub = InAppNotificationBus.instance.stream.listen(_onInAppEvent);
+    _subscribeNotificationRealtime();
+  }
+
+  @override
+  void dispose() {
+    _inAppSub?.cancel();
+    final ch = _notifChannel;
+    _notifChannel = null;
+    if (ch != null) {
+      unawaited(Supabase.instance.client.removeChannel(ch));
+    }
+    super.dispose();
+  }
+
+  void _subscribeNotificationRealtime() {
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    if (uid == null || uid.isEmpty) return;
+
+    _notifChannel = Supabase.instance.client
+        .channel('home-app-notifications-$uid')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'app_notifications',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'recipient_id',
+            value: uid,
+          ),
+          callback: (payload) {
+            final row = payload.newRecord;
+            final type = (row['event_type'] ?? '').toString();
+            final title = (row['title'] ?? 'Уведомление').toString();
+            final body = (row['body'] ?? '').toString();
+            final pushPayload = pushPayloadFromNotificationData(row['data']);
+            InAppNotificationBus.instance.emit(
+              InAppNotificationEvent(
+                type: type,
+                title: title,
+                body: body,
+                payload: pushPayload,
+              ),
+            );
+          },
+        )
+        .subscribe();
+  }
+
+  Future<void> _onInAppEvent(InAppNotificationEvent event) async {
+    // Visual toast is handled globally by [InAppToastHost].
+    await _refreshUnreadBadge();
+  }
+
+  Future<void> _refreshUnreadBadge() async {
+    try {
+      final count = await _notificationsApi.unreadCount();
+      if (!mounted) return;
+      setState(() => _unreadNotificationCount = count);
+    } catch (_) {}
   }
 
   Future<void> _load() async {

@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 // import 'package:get_storage/get_storage.dart'; // Временно отключено
@@ -16,16 +15,25 @@ class ThemeService extends ChangeNotifier {
   // final _getStorage = GetStorage(); // Временно отключено
   final storageKey = 'isDarkMode';
 
-  switchStatusColor() {
-    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
+  /// Light app chrome → dark status icons; dark chrome → light icons.
+  /// (Previously iOS light mode set [statusBarIconBrightness.light] = white icons.)
+  static SystemUiOverlayStyle overlayFor({required bool darkMode}) {
+    final darkIcons = !darkMode;
+    return SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
-      statusBarBrightness: Platform.isIOS
-          ? (isSavedDarkMode() ? Brightness.dark : Brightness.light)
-          : (isSavedDarkMode() ? Brightness.light : Brightness.dark),
-      statusBarIconBrightness: Platform.isIOS
-          ? (isSavedDarkMode() ? Brightness.dark : Brightness.light)
-          : (isSavedDarkMode() ? Brightness.light : Brightness.dark),
-    ));
+      // iOS: brightness of the *background* behind status icons.
+      statusBarBrightness: darkIcons ? Brightness.light : Brightness.dark,
+      statusBarIconBrightness: darkIcons ? Brightness.dark : Brightness.light,
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarIconBrightness:
+          darkIcons ? Brightness.dark : Brightness.light,
+    );
+  }
+
+  switchStatusColor() {
+    SystemChrome.setSystemUIOverlayStyle(
+      overlayFor(darkMode: isSavedDarkMode()),
+    );
   }
 
   ThemeMode getThemeMode() {

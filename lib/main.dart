@@ -27,11 +27,10 @@ import 'src/ui/notifications/push_session_host.dart';
 import 'src/config/supabase_config.dart';
 import 'src/core/session_keeper.dart';
 import 'src/services/push/push_notification_service.dart';
+import 'src/navigation/root_nav.dart';
 import 'router_observer.dart';
 import 'src/ui/learning/state/team_cubit.dart';
 import 'src/ui/learning/models/team.dart';
-
-final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
 /// ===== GoRouter =====
 final GoRouter appRouter = GoRouter(

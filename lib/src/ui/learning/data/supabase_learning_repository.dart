@@ -634,7 +634,7 @@ class SupabaseLearningRepository implements LearningRepository {
       return older.take(limit).toList();
     } catch (e, st) {
       debugPrint('[loadOlderMessages] error: $e\n$st');
-      return [];
+      rethrow;
     }
   }
 

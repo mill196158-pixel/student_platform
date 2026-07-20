@@ -270,10 +270,33 @@ void main() {
     expect(view.isInitialLoading, isFalse);
   });
 
-  test('12. ChatPreloadService warmUpChatIds is a no-op', () async {
-    await ChatPreloadService.warmUpChatIds(['a', 'b', 'c']);
-    expect(DmApi.debugLoadCount('a'), 0);
-    expect(DmApi.debugLoadCount('b'), 0);
+  test('12. ChatPreloadService warmUpChatIds syncs cold chats', () async {
+    DmApi.debugPrimeClearedAt('a', null);
+    DmApi.debugPrimeClearedAt('b', null);
+    final synced = <String>{};
+    DmApi.debugSyncPageLoader = ({
+      required String chatId,
+      required int limit,
+      DateTime? clearedAt,
+    }) async {
+      synced.add(chatId);
+      return (
+        messages: [_msg('m1-$chatId', chatId: chatId)],
+        hasMore: false,
+      );
+    };
+
+    await ChatPreloadService.warmUpChatIds(['a', 'b'], parallel: 2);
+    expect(synced, containsAll(['a', 'b']));
+
+    final snapA = await ChatMessageCacheStore.read('a', userId: 'user-a');
+    expect(snapA.found, isTrue);
+    expect(snapA.messages, isNotEmpty);
+
+    // Fresh cache should skip a second warm.
+    synced.clear();
+    await ChatPreloadService.warmUpChatIds(['a'], parallel: 1);
+    expect(synced, isEmpty);
   });
 
   testWidgets('error UI shows retry, not empty state', (tester) async {

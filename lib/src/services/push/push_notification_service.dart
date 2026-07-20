@@ -12,10 +12,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:student_platform/firebase_options.dart';
+import 'package:student_platform/src/navigation/root_nav.dart';
 import 'package:student_platform/src/services/push/active_chat_tracker.dart';
+import 'package:student_platform/src/services/push/in_app_notification_bus.dart';
 import 'package:student_platform/src/services/push/push_background_handler.dart';
 import 'package:student_platform/src/services/push/push_navigation.dart';
 import 'package:student_platform/src/services/push/push_payload.dart';
+import 'package:student_platform/src/ui/chats/data/chat_warm_coordinator.dart';
 import 'package:student_platform/src/ui/notifications/push_permission_prompt.dart';
 
 const _kInstallationIdKey = 'push_installation_id';
@@ -38,15 +41,13 @@ class PushNotificationService {
   bool _sessionActive = false;
   bool _promptInFlight = false;
   String? _installationId;
-  GlobalKey<NavigatorState>? _navigatorKey;
-
   bool get isSupportedPlatform =>
       !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
   bool get isFirebaseReady => _firebaseReady;
 
   void bindNavigatorKey(GlobalKey<NavigatorState> key) {
-    _navigatorKey = key;
+    // Kept for call-site compatibility; navigation uses [rootNavigatorKey].
   }
 
   Future<void> bootstrapFirebase() async {
@@ -214,7 +215,7 @@ class PushNotificationService {
 
   Future<void> _onForegroundMessage(RemoteMessage message) async {
     final payload = PushPayload.tryParse(message.data);
-    final chatId = payload?.chatId ?? message.data['chat_id'];
+    final chatId = payload?.chatId ?? message.data['chat_id']?.toString();
     if (ActiveChatTracker.instance.isActive(chatId)) {
       return;
     }
@@ -222,19 +223,43 @@ class PushNotificationService {
     final title =
         message.notification?.title ?? payload?.raw['title'] ?? 'Уведомление';
     final body = message.notification?.body ?? payload?.raw['body'] ?? '';
+    final eventType = payload?.type ?? message.data['type']?.toString() ?? '';
+
+    InAppNotificationBus.instance.emit(
+      InAppNotificationEvent(
+        type: eventType,
+        title: title.toString(),
+        body: body.toString(),
+        payload: payload,
+      ),
+    );
+
+    // Quietly warm that thread so opening the chat is instant.
+    if (chatId != null && chatId.isNotEmpty) {
+      ChatWarmCoordinator.instance.prioritizeChat(chatId);
+    }
+
+    // Foreground chat/friend events use the floating in-app toast.
+    // Skip a second OS banner so the tab bar isn't covered by a SnackBar-like strip.
+    final useInAppToast = eventType == 'dm_message' ||
+        eventType == 'team_message' ||
+        eventType == 'team_reply' ||
+        eventType == 'friend_request' ||
+        eventType == 'friend_accept';
+    if (useInAppToast) return;
 
     await _showLocalNotification(
-      title: title,
-      body: body,
+      title: title.toString(),
+      body: body.toString(),
       payload: payload,
-      eventType: payload?.type ?? message.data['type'],
+      eventType: eventType,
     );
   }
 
   Future<void> _onMessageOpened(RemoteMessage message) async {
     final payload = PushPayload.tryParse(message.data);
     if (payload == null) return;
-    final context = _navigatorKey?.currentContext;
+    final context = rootNavigatorContext;
     if (context == null) {
       PushNavigation.stash(payload);
       return;
@@ -273,7 +298,7 @@ class PushNotificationService {
         android: androidDetails,
         iOS: iosDetails,
       ),
-      payload: payload?.dedupeKey,
+      payload: payload?.toLocalPayload(),
     );
   }
 
@@ -292,7 +317,14 @@ class PushNotificationService {
       settings:
           const InitializationSettings(android: androidInit, iOS: iosInit),
       onDidReceiveNotificationResponse: (response) {
-        // Local taps in foreground; deep data already handled via FCM opened.
+        final parsed = PushPayload.tryParseLocalPayload(response.payload);
+        if (parsed == null) return;
+        final context = rootNavigatorContext;
+        if (context == null) {
+          PushNavigation.stash(parsed);
+          return;
+        }
+        unawaited(PushNavigation.handle(context, parsed, force: true));
       },
     );
 

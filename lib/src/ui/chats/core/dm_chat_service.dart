@@ -149,7 +149,10 @@ class DmChatService implements IChatService {
   Future<List<Message>> loadOlderMessages(
       {required Message before, int limit = 50}) async {
     final cid = await ensureChatId();
-    return DmApi.loadOlderMessages(chatId: cid, before: before, limit: limit);
+    final page =
+        await DmApi.loadOlderMessages(chatId: cid, before: before, limit: limit);
+    _setView(_viewState.copyWith(hasMoreBefore: page.hasMore));
+    return page.messages;
   }
 
   @override
@@ -224,8 +227,10 @@ class DmChatService implements IChatService {
       DmApi.toggleReaction(messageId, emoji);
 
   @override
-  Future<void> pinMessage(String messageId, bool pin) =>
-      DmApi.pinMessage(messageId, pin);
+  Future<void> pinMessage(String messageId, bool pin) async {
+    final cid = await ensureChatId();
+    await DmApi.pinMessage(messageId, pin, chatId: cid);
+  }
 
   @override
   Future<void> deleteMessage(String messageId) =>

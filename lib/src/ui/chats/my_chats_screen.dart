@@ -686,6 +686,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
               peerId: c.peerId!,
               peerName: c.title,
               peerAvatarUrl: c.avatarUrl,
+              initialChatId: c.chatId,
             ),
           ),
         ),

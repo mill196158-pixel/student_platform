@@ -489,46 +489,52 @@ class _InfoScreenState extends State<InfoScreen> {
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
       constraints: _fullWidthSheetConstraints(context),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (sheetContext) {
-        return SizedBox(
-          width: double.infinity,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 4, 18, 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: const [
-                _InfoSheetHeader(),
-                SizedBox(height: 14),
-                _InfoSheetPoint(
-                  icon: Icons.school_outlined,
-                  title: 'Предметы',
-                  text:
-                      'Здесь собраны дисциплины по семестрам. Внутри предмета будут файлы, материалы и учебная информация.',
-                ),
-                _InfoSheetPoint(
-                  icon: Icons.help_outline_rounded,
-                  title: 'Справочный раздел',
-                  text:
-                      'Короткие инструкции по документам, доступам, аудиториям и частым учебным вопросам.',
-                ),
-                _InfoSheetPoint(
-                  icon: Icons.work_outline_rounded,
-                  title: 'Вакансии',
-                  text:
-                      'Место для стажировок, подработок и проектных задач, которые могут быть полезны студентам.',
-                ),
-                _InfoSheetPoint(
-                  icon: Icons.swap_horiz_rounded,
-                  title: 'Как переключаться',
-                  text:
-                      'Нажми круглую кнопку с иконкой раздела вверху экрана и выбери нужный блок.',
-                ),
-              ],
+        final maxHeight = MediaQuery.sizeOf(sheetContext).height * 0.78;
+        final bottom = MediaQuery.paddingOf(sheetContext).bottom;
+        return SafeArea(
+          top: false,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxHeight),
+            child: SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(18, 4, 18, 20 + bottom),
+              child: const Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _InfoSheetHeader(),
+                  SizedBox(height: 14),
+                  _InfoSheetPoint(
+                    icon: Icons.school_outlined,
+                    title: 'Предметы',
+                    text:
+                        'Здесь собраны дисциплины по семестрам. Внутри предмета будут файлы, материалы и учебная информация.',
+                  ),
+                  _InfoSheetPoint(
+                    icon: Icons.help_outline_rounded,
+                    title: 'Справочный раздел',
+                    text:
+                        'Короткие инструкции по документам, доступам, аудиториям и частым учебным вопросам.',
+                  ),
+                  _InfoSheetPoint(
+                    icon: Icons.work_outline_rounded,
+                    title: 'Вакансии',
+                    text:
+                        'Место для стажировок, подработок и проектных задач, которые могут быть полезны студентам.',
+                  ),
+                  _InfoSheetPoint(
+                    icon: Icons.swap_horiz_rounded,
+                    title: 'Как переключаться',
+                    text:
+                        'Нажми круглую кнопку с иконкой раздела вверху экрана и выбери нужный блок.',
+                  ),
+                ],
+              ),
             ),
           ),
         );

@@ -6,7 +6,6 @@ import 'dart:ui' as ui; // для мягких свечений
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 
 import 'package:student_platform/src/data/academic_context_service.dart';
 import 'state/learning_cubit.dart';
@@ -14,6 +13,7 @@ import 'state/learning_state.dart';
 import 'team_details_screen.dart';
 import 'models/team.dart';
 import 'manage/manage_teams_screen.dart';
+import 'widgets/team_avatar.dart';
 
 // ЕДИНЫЙ padding для контента (список и сетка одинаково!)
 // Верхний отступ делаем отдельным слотом в Sliver, чтобы при сворачивании не было "прыжка" содержимого
@@ -234,7 +234,7 @@ class _TeamTile extends StatelessWidget {
         ),
         child: Row(
           children: [
-            _TeamAvatar(icon: team.icon, name: team.name),
+            TeamAvatar(icon: team.icon, name: team.name),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -333,7 +333,7 @@ class _TeamGridCard extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        _TeamAvatar(
+                        TeamAvatar(
                           icon: team.icon,
                           name: team.name,
                           size: avatarSize,
@@ -418,86 +418,6 @@ class _UnreadBadge extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-class _TeamAvatar extends StatelessWidget {
-  final String icon;
-  final String name;
-  final double size;
-  const _TeamAvatar({required this.icon, required this.name, this.size = 44});
-
-  bool get _isUrl => icon.startsWith('http://') || icon.startsWith('https://');
-
-  @override
-  Widget build(BuildContext context) {
-    final initials = _teamInitials(name);
-    final colorSeed = initials.codeUnitAt(0);
-    final hue = (colorSeed % 360).toDouble();
-    final bgColor = HSLColor.fromAHSL(1, hue, 0.55, 0.48).toColor();
-
-    return Container(
-      height: size,
-      width: size,
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(size / 4),
-        border: Border.all(color: Colors.white, width: 2),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.06),
-              blurRadius: 10,
-              offset: const Offset(0, 3)),
-        ],
-        image: _isUrl
-            ? DecorationImage(
-                image: CachedNetworkImageProvider(icon), fit: BoxFit.cover)
-            : null,
-        gradient: _isUrl
-            ? null
-            : LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [bgColor.withOpacity(0.95), bgColor],
-              ),
-      ),
-      alignment: Alignment.center,
-      child: !_isUrl
-          ? Padding(
-              padding: EdgeInsets.all(size * 0.16),
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  initials,
-                  maxLines: 1,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w800,
-                    color: Colors.white,
-                    fontSize: size * 0.46,
-                    height: 1,
-                  ),
-                ),
-              ),
-            )
-          : null,
-    );
-  }
-
-  String _teamInitials(String value) {
-    final words = value
-        .trim()
-        .split(RegExp(r'[\s\-.]+'))
-        .where((word) => word.trim().isNotEmpty)
-        .toList();
-
-    if (words.isEmpty) return 'T';
-
-    final buffer = StringBuffer();
-    for (final word in words.take(2)) {
-      buffer.write(word.characters.first.toUpperCase());
-    }
-
-    return buffer.toString();
   }
 }
 

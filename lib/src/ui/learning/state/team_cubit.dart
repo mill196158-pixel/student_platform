@@ -662,9 +662,10 @@ class TeamCubit extends Cubit<TeamState> {
   }
 
   Future<void> retryFailedTextMessage(Message message) async {
-    if (!message.isFailed || message.type != MessageType.text) return;
+    if (!message.isFailed) return;
     final text = message.text.trim();
-    if (text.isEmpty) return;
+    final fileId = message.fileId;
+    if (text.isEmpty && (fileId == null || fileId.isEmpty)) return;
 
     // Drop the stale local bubble before retrying so a successful retry cannot
     // leave both the failed local row and the server row in the list.
@@ -673,7 +674,8 @@ class TeamCubit extends Cubit<TeamState> {
       'me',
       text,
       replyToId: message.replyToId,
-      type: MessageType.text,
+      type: message.type,
+      fileId: fileId,
     );
   }
 
