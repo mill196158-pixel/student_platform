@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import 'admin_auth_config.dart';
+import 'admin_backend_config.dart';
 import 'admin_session_controller.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -43,7 +43,11 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final session = widget.session;
-    final local = !AdminAuthConfig.isConfigured;
+    final demo = AdminBackendConfig.isDemoMode;
+    final hasError =
+        session.phase == AdminSessionPhase.error ||
+        (session.errorMessage != null &&
+            session.phase != AdminSessionPhase.loadingCapabilities);
 
     return Scaffold(
       body: Center(
@@ -51,7 +55,7 @@ class _LoginScreenState extends State<LoginScreen> {
           constraints: const BoxConstraints(maxWidth: 440),
           child: Card(
             margin: const EdgeInsets.all(24),
-            child: Padding(
+            child: SingleChildScrollView(
               padding: const EdgeInsets.all(32),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -72,18 +76,44 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    local
-                        ? 'Backend не настроен. Доступен локальный прототип без публикации.'
-                        : 'Войдите через безопасный Supabase Auth. Права проверяются на сервере.',
+                    demo
+                        ? 'Включён локальный прототип (ADMIN_DEMO_MODE). Публикация и серверные права недоступны.'
+                        : 'Войдите через Supabase Auth в браузере. Права проверяются на сервере.',
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: Color(0xFF6E7180)),
                   ),
+                  if (!demo) ...[
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.center,
+                      child: Chip(
+                        avatar: const Icon(Icons.cloud_done_outlined, size: 18),
+                        label: const Text('Подключено'),
+                        backgroundColor: const Color(0xFFE8F5E9),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 24),
-                  if (local) ...[
+                  if (demo) ...[
                     FilledButton.icon(
                       onPressed: () => context.go('/dashboard'),
                       icon: const Icon(Icons.science_outlined),
                       label: const Text('Открыть локальный прототип'),
+                    ),
+                  ] else if (AdminBackendConfig.configurationError != null) ...[
+                    Text(
+                      AdminBackendConfig.configurationError!,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    OutlinedButton.icon(
+                      onPressed: () => session.bootstrap(),
+                      icon: const Icon(Icons.refresh_rounded),
+                      label: const Text('Повторить подключение'),
                     ),
                   ] else ...[
                     TextField(
@@ -102,8 +132,27 @@ class _LoginScreenState extends State<LoginScreen> {
                       },
                       decoration: const InputDecoration(labelText: 'Пароль'),
                     ),
-                    if (session.errorMessage != null) ...[
-                      const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: _submitting
+                            ? null
+                            : () => context.go('/auth/forgot-password'),
+                        child: const Text('Забыли пароль?'),
+                      ),
+                    ),
+                    if (session.infoMessage != null) ...[
+                      Text(
+                        session.infoMessage!,
+                        style: const TextStyle(
+                          color: Color(0xFF2E7D32),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    if (hasError && session.errorMessage != null) ...[
+                      const SizedBox(height: 4),
                       Text(
                         session.errorMessage!,
                         style: TextStyle(
@@ -112,7 +161,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                     ],
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 10),
                     FilledButton.icon(
                       onPressed: _submitting ? null : _submit,
                       icon: _submitting
@@ -124,6 +173,14 @@ class _LoginScreenState extends State<LoginScreen> {
                           : const Icon(Icons.login_rounded),
                       label: Text(_submitting ? 'Вход…' : 'Войти'),
                     ),
+                    if (session.phase == AdminSessionPhase.error) ...[
+                      const SizedBox(height: 12),
+                      OutlinedButton.icon(
+                        onPressed: () => session.bootstrap(),
+                        icon: const Icon(Icons.refresh_rounded),
+                        label: const Text('Повторить подключение'),
+                      ),
+                    ],
                   ],
                 ],
               ),

@@ -115,13 +115,13 @@ class AdminShell extends StatelessWidget {
                       avatar: Icon(
                         session.isLocalPrototype
                             ? Icons.science_outlined
-                            : Icons.verified_user_outlined,
+                            : Icons.cloud_done_outlined,
                         size: 18,
                       ),
                       label: Text(
                         session.isLocalPrototype
                             ? 'Локальный прототип'
-                            : 'Безопасный вход',
+                            : 'Подключено',
                       ),
                     ),
                   ),

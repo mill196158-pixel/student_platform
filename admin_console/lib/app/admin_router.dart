@@ -2,13 +2,21 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/auth/admin_session_controller.dart';
+import '../core/auth/forgot_password_screen.dart';
 import '../core/auth/login_screen.dart';
 import '../core/auth/no_access_screen.dart';
+import '../core/auth/reset_password_screen.dart';
 import '../core/navigation/admin_shell.dart';
 import '../features/academic/subjects/subjects_screen.dart';
 import '../features/academic/teachers/teachers_screen.dart';
 import '../features/content/news/news_editor_screen.dart';
 import '../features/dashboard/dashboard_screen.dart';
+
+bool _isAuthPublicPath(String loc) {
+  return loc == '/login' ||
+      loc == '/auth/forgot-password' ||
+      loc == '/auth/reset-password';
+}
 
 GoRouter createAdminRouter(AdminSessionController session) {
   return GoRouter(
@@ -23,8 +31,15 @@ GoRouter createAdminRouter(AdminSessionController session) {
         return loc == '/loading' ? null : '/loading';
       }
 
+      if (phase == AdminSessionPhase.passwordRecovery) {
+        return loc == '/auth/reset-password' ? null : '/auth/reset-password';
+      }
+
       if (phase == AdminSessionPhase.localPrototype) {
-        if (loc == '/login' || loc == '/loading' || loc == '/no-access') {
+        if (loc == '/login' ||
+            loc == '/loading' ||
+            loc == '/no-access' ||
+            loc.startsWith('/auth/')) {
           return '/dashboard';
         }
         return null;
@@ -32,7 +47,8 @@ GoRouter createAdminRouter(AdminSessionController session) {
 
       if (phase == AdminSessionPhase.signedOut ||
           phase == AdminSessionPhase.error) {
-        return loc == '/login' ? null : '/login';
+        if (_isAuthPublicPath(loc)) return null;
+        return '/login';
       }
 
       if (phase == AdminSessionPhase.noAccess) {
@@ -40,7 +56,10 @@ GoRouter createAdminRouter(AdminSessionController session) {
       }
 
       // ready
-      if (loc == '/login' || loc == '/loading' || loc == '/no-access') {
+      if (loc == '/login' ||
+          loc == '/loading' ||
+          loc == '/no-access' ||
+          loc.startsWith('/auth/')) {
         return '/dashboard';
       }
 
@@ -63,6 +82,14 @@ GoRouter createAdminRouter(AdminSessionController session) {
       GoRoute(
         path: '/login',
         builder: (context, state) => LoginScreen(session: session),
+      ),
+      GoRoute(
+        path: '/auth/forgot-password',
+        builder: (context, state) => ForgotPasswordScreen(session: session),
+      ),
+      GoRoute(
+        path: '/auth/reset-password',
+        builder: (context, state) => ResetPasswordScreen(session: session),
       ),
       GoRoute(
         path: '/no-access',

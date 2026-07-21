@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:student_platform_admin/app/admin_app.dart';
-import 'package:student_platform_admin/core/auth/admin_auth_config.dart';
+import 'package:student_platform_admin/core/auth/admin_backend_config.dart';
 import 'package:student_platform_admin/core/auth/admin_capabilities.dart';
 import 'package:student_platform_admin/core/auth/admin_session_controller.dart';
 import 'package:student_platform_admin/core/auth/login_screen.dart';
@@ -28,11 +28,11 @@ class _TestSession extends AdminSessionController {
 
 void main() {
   tearDown(() {
-    AdminAuthConfig.debugIsConfiguredOverride = null;
+    AdminBackendConfig.debugDemoModeOverride = null;
   });
 
-  testWidgets('without backend config opens local prototype', (tester) async {
-    AdminAuthConfig.debugIsConfiguredOverride = false;
+  testWidgets('demo mode opens local prototype', (tester) async {
+    AdminBackendConfig.debugDemoModeOverride = true;
     await tester.pumpWidget(const AdminApp());
     await tester.pumpAndSettle();
 
@@ -40,10 +40,8 @@ void main() {
     expect(find.text('Рабочее пространство'), findsOneWidget);
   });
 
-  testWidgets('configured mode shows login fields when signed out', (
-    tester,
-  ) async {
-    AdminAuthConfig.debugIsConfiguredOverride = true;
+  testWidgets('real mode shows login fields when signed out', (tester) async {
+    AdminBackendConfig.debugDemoModeOverride = false;
     final session = _TestSession(initialPhase: AdminSessionPhase.signedOut);
     await tester.pumpWidget(MaterialApp(home: LoginScreen(session: session)));
     await tester.pumpAndSettle();
@@ -51,6 +49,56 @@ void main() {
     expect(find.text('Войти'), findsOneWidget);
     expect(find.text('Email'), findsOneWidget);
     expect(find.text('Пароль'), findsOneWidget);
+    expect(find.text('Подключено'), findsOneWidget);
+    expect(find.text('Забыли пароль?'), findsOneWidget);
+  });
+
+  test('password reset redirect target is localhost:3000 hash route', () {
+    expect(
+      AdminBackendConfig.passwordResetRedirectTo,
+      'http://localhost:3000/#/auth/reset-password',
+    );
+  });
+
+  testWidgets('requestPasswordReset shows info without tokens', (tester) async {
+    AdminBackendConfig.debugDemoModeOverride = false;
+    var capturedEmail = '';
+    final session = AdminSessionController(
+      initializeSupabase: () async {},
+      loadCapabilities: () async => AdminCapabilities.empty,
+      signOut: () async {},
+      resetPasswordForEmail: (email) async {
+        capturedEmail = email;
+      },
+    );
+    session.phase = AdminSessionPhase.signedOut;
+
+    await session.requestPasswordReset(email: 'admin@example.com');
+    expect(capturedEmail, 'admin@example.com');
+    expect(session.infoMessage, isNotNull);
+    expect(session.infoMessage!.toLowerCase(), isNot(contains('access_token')));
+    expect(session.infoMessage!.toLowerCase(), isNot(contains('refresh_token')));
+  });
+
+  testWidgets('updatePassword signs out and returns to login phase', (
+    tester,
+  ) async {
+    AdminBackendConfig.debugDemoModeOverride = false;
+    var updated = false;
+    final session = AdminSessionController(
+      initializeSupabase: () async {},
+      loadCapabilities: () async => AdminCapabilities.empty,
+      signOut: () async {},
+      updatePassword: (password) async {
+        updated = password == 'new-pass-123';
+      },
+    );
+    session.phase = AdminSessionPhase.passwordRecovery;
+
+    await session.updatePassword(password: 'new-pass-123');
+    expect(updated, isTrue);
+    expect(session.phase, AdminSessionPhase.signedOut);
+    expect(session.infoMessage, isNotNull);
   });
 
   testWidgets('no capabilities shows no access', (tester) async {
@@ -82,8 +130,8 @@ void main() {
     expect(academicOnly.canReadContent, isFalse);
   });
 
-  testWidgets('logout clears admin session', (tester) async {
-    AdminAuthConfig.debugIsConfiguredOverride = true;
+  testWidgets('logout clears admin session in real mode', (tester) async {
+    AdminBackendConfig.debugDemoModeOverride = false;
     final session = _TestSession(
       initialPhase: AdminSessionPhase.ready,
       capabilities: const AdminCapabilities(
@@ -96,6 +144,19 @@ void main() {
     await session.signOut();
     expect(session.capabilities.permissions, isEmpty);
     expect(session.phase, AdminSessionPhase.signedOut);
+  });
+
+  testWidgets('config error does not fall back to demo', (tester) async {
+    AdminBackendConfig.debugDemoModeOverride = false;
+    final session = AdminSessionController(
+      initializeSupabase: () async {
+        throw StateError('backend unavailable');
+      },
+    );
+    await session.bootstrap();
+    expect(session.phase, AdminSessionPhase.error);
+    expect(session.isLocalPrototype, isFalse);
+    expect(session.errorMessage, isNotNull);
   });
 
   testWidgets('news editor still works locally', (tester) async {

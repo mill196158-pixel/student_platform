@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:student_platform_admin/app/admin_app.dart';
+import 'package:student_platform_admin/core/auth/admin_backend_config.dart';
 import 'package:student_platform_admin/features/content/news/news_editor_screen.dart';
 import 'package:student_ui/student_ui.dart';
 
 void main() {
-  testWidgets('admin dashboard opens in local prototype', (tester) async {
+  tearDown(() {
+    AdminBackendConfig.debugDemoModeOverride = null;
+  });
+
+  testWidgets('admin dashboard opens in demo mode', (tester) async {
+    AdminBackendConfig.debugDemoModeOverride = true;
     await tester.pumpWidget(const AdminApp());
     await tester.pumpAndSettle();
 
