@@ -10,6 +10,8 @@ class TeacherProfileScreen extends StatefulWidget {
   final String? department;
   final int? semesterNumber;
   final double? difficultyScore;
+  final String? subjectOfferingId;
+  final double? subjectDifficultyAvg;
 
   const TeacherProfileScreen({
     super.key,
@@ -18,6 +20,8 @@ class TeacherProfileScreen extends StatefulWidget {
     this.department,
     this.semesterNumber,
     this.difficultyScore,
+    this.subjectOfferingId,
+    this.subjectDifficultyAvg,
   });
 
   @override
@@ -29,11 +33,14 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
   _TeacherDifficultySnapshot? _rating;
   bool _ratingLoading = true;
   bool _ratingSubmitting = false;
+  double? _subjectDifficultyAvg;
 
   @override
   void initState() {
     super.initState();
+    _subjectDifficultyAvg = widget.subjectDifficultyAvg;
     _loadRating();
+    _loadSubjectDifficulty();
   }
 
   Future<void> _loadRating() async {
@@ -56,6 +63,17 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
       if (!mounted) return;
       setState(() => _ratingLoading = false);
     }
+  }
+
+  Future<void> _loadSubjectDifficulty() async {
+    if (_subjectDifficultyAvg != null && _subjectDifficultyAvg! > 0) return;
+    final offeringId = (widget.subjectOfferingId ?? '').trim();
+    if (offeringId.isEmpty) return;
+    try {
+      final avg = await _repository.loadSubjectDifficultyAvg(offeringId);
+      if (!mounted || avg == null) return;
+      setState(() => _subjectDifficultyAvg = avg);
+    } catch (_) {}
   }
 
   Future<void> _vote(int score) async {
@@ -135,19 +153,33 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
                 ),
                 child: Column(
                   children: [
+                    if (_rating?.aboutOrNull != null) ...[
+                      _ProfileCard(
+                        icon: Icons.info_outline_rounded,
+                        title: 'О преподавателе',
+                        compact: true,
+                        child: _AboutTeacherBlock(
+                          text: _rating!.aboutOrNull!,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
                     if (subject != null)
                       _ProfileCard(
                         icon: Icons.auto_stories_outlined,
                         title: 'Предмет',
+                        compact: true,
                         child: _SubjectRow(
                           title: subject,
                           semesterNumber: widget.semesterNumber,
+                          subjectDifficultyAvg: _subjectDifficultyAvg,
                         ),
                       ),
-                    if (subject != null) const SizedBox(height: 14),
+                    if (subject != null) const SizedBox(height: 10),
                     const _ProfileCard(
                       icon: Icons.forum_outlined,
                       title: 'Отзывы студентов',
+                      compact: true,
                       child: _ReviewsPausedState(),
                     ),
                   ],
@@ -176,13 +208,20 @@ class _TeacherDifficultySnapshot {
   final double? averageScore;
   final int voteCount;
   final int? myScore;
+  final String? aboutText;
 
   const _TeacherDifficultySnapshot({
     required this.teacherId,
     required this.averageScore,
     required this.voteCount,
     required this.myScore,
+    this.aboutText,
   });
+
+  String? get aboutOrNull {
+    final text = (aboutText ?? '').trim();
+    return text.isEmpty ? null : text;
+  }
 }
 
 class _TeacherDifficultyRepository {
@@ -202,7 +241,7 @@ class _TeacherDifficultyRepository {
 
   String _cacheKey(String teacherName) {
     final user = _client.auth.currentUser?.id ?? 'anonymous';
-    return 'teacher_difficulty_v2:$user:${_normalizedName(teacherName)}';
+    return 'teacher_difficulty_v3:$user:${_normalizedName(teacherName)}';
   }
 
   Future<_TeacherDifficultySnapshot?> loadCached(String teacherName) async {
@@ -219,6 +258,7 @@ class _TeacherDifficultyRepository {
         averageScore: (json['averageScore'] as num?)?.toDouble(),
         voteCount: _asInt(json['voteCount']),
         myScore: json['myScore'] == null ? null : _asInt(json['myScore']),
+        aboutText: (json['aboutText'] as String?)?.trim(),
       );
       _memoryCache[key] = snapshot;
       return snapshot;
@@ -238,6 +278,7 @@ class _TeacherDifficultyRepository {
       'averageScore': snapshot.averageScore,
       'voteCount': snapshot.voteCount,
       'myScore': snapshot.myScore,
+      'aboutText': snapshot.aboutText,
     });
     await (await SharedPreferences.getInstance()).setString(key, raw);
   }
@@ -250,6 +291,7 @@ class _TeacherDifficultyRepository {
         averageScore: null,
         voteCount: 0,
         myScore: null,
+        aboutText: null,
       );
       await _saveCached(teacherName, snapshot);
       return snapshot;
@@ -257,16 +299,18 @@ class _TeacherDifficultyRepository {
 
     final target = await _client
         .from('teacher_difficulty_targets')
-        .select('id')
+        .select('id, about_text')
         .eq('normalized_name', normalizedName)
         .maybeSingle();
     final teacherId = (target?['id'] ?? '').toString().trim();
+    final aboutText = (target?['about_text'] ?? '').toString().trim();
     if (teacherId.isEmpty) {
       const snapshot = _TeacherDifficultySnapshot(
         teacherId: null,
         averageScore: null,
         voteCount: 0,
         myScore: null,
+        aboutText: null,
       );
       await _saveCached(teacherName, snapshot);
       return snapshot;
@@ -298,6 +342,7 @@ class _TeacherDifficultyRepository {
       averageScore: voteCount == 0 ? null : scoreTotal / voteCount,
       voteCount: voteCount,
       myScore: myScore,
+      aboutText: aboutText.isEmpty ? null : aboutText,
     );
     await _saveCached(teacherName, snapshot);
     return snapshot;
@@ -321,9 +366,37 @@ class _TeacherDifficultyRepository {
     );
   }
 
+  Future<double?> loadSubjectDifficultyAvg(String subjectOfferingId) async {
+    final wanted = subjectOfferingId.trim().toLowerCase();
+    if (wanted.isEmpty) return null;
+    try {
+      final res = await _client.rpc('rpc_get_my_subjects_v2');
+      final rows = (res as List)
+          .map((row) => Map<String, dynamic>.from(row as Map))
+          .toList();
+      for (final row in rows) {
+        final id = (row['subject_offering_id'] ?? row['id'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+        if (id != wanted) continue;
+        final global = _asDouble(row['avg_difficulty_global']);
+        final local = _asDouble(row['avg_difficulty_local']);
+        final avg = global > 0 ? global : local;
+        return avg > 0 ? avg : null;
+      }
+    } catch (_) {}
+    return null;
+  }
+
   static int _asInt(dynamic value) {
     if (value is num) return value.toInt();
     return int.tryParse((value ?? '').toString()) ?? 0;
+  }
+
+  static double _asDouble(dynamic value) {
+    if (value is num) return value.toDouble();
+    return double.tryParse((value ?? '').toString().replaceAll(',', '.')) ?? 0;
   }
 }
 
@@ -676,27 +749,30 @@ class _ProfileCard extends StatelessWidget {
   final IconData icon;
   final String title;
   final Widget child;
+  final bool compact;
 
   const _ProfileCard({
     required this.icon,
     required this.title,
     required this.child,
+    this.compact = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final iconSize = compact ? 30.0 : 36.0;
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(compact ? 12 : 16),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(compact ? 20 : 24),
         border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 18,
-            offset: const Offset(0, 7),
+            blurRadius: compact ? 12 : 18,
+            offset: Offset(0, compact ? 5 : 7),
           ),
         ],
       ),
@@ -706,19 +782,26 @@ class _ProfileCard extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 36,
-                height: 36,
+                width: iconSize,
+                height: iconSize,
                 decoration: BoxDecoration(
                   color: const Color(0xFF6A4BBC).withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(compact ? 10 : 12),
                 ),
-                child: Icon(icon, color: const Color(0xFF6A4BBC), size: 19),
+                child: Icon(
+                  icon,
+                  color: const Color(0xFF6A4BBC),
+                  size: compact ? 17 : 19,
+                ),
               ),
-              const SizedBox(width: 10),
+              SizedBox(width: compact ? 8 : 10),
               Expanded(
                 child: Text(
                   title,
-                  style: theme.textTheme.titleMedium?.copyWith(
+                  style: (compact
+                          ? theme.textTheme.titleSmall
+                          : theme.textTheme.titleMedium)
+                      ?.copyWith(
                     color: Colors.black,
                     fontWeight: FontWeight.w900,
                   ),
@@ -726,9 +809,37 @@ class _ProfileCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 14),
+          SizedBox(height: compact ? 8 : 14),
           child,
         ],
+      ),
+    );
+  }
+}
+
+class _AboutTeacherBlock extends StatelessWidget {
+  final String text;
+
+  const _AboutTeacherBlock({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8F5FF),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Text(
+        text,
+        style: theme.textTheme.bodyMedium?.copyWith(
+          color: Colors.black.withValues(alpha: 0.78),
+          height: 1.28,
+          fontSize: 13.5,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }
@@ -737,64 +848,108 @@ class _ProfileCard extends StatelessWidget {
 class _SubjectRow extends StatelessWidget {
   final String title;
   final int? semesterNumber;
+  final double? subjectDifficultyAvg;
 
   const _SubjectRow({
     required this.title,
     required this.semesterNumber,
+    this.subjectDifficultyAvg,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final hasSubjectScore =
+        subjectDifficultyAvg != null && subjectDifficultyAvg! > 0;
+    final difficultyLabel = hasSubjectScore
+        ? '${subjectDifficultyAvg!.toStringAsFixed(1)} / 5'
+        : 'нет оценок';
+    final semesterLabel =
+        semesterNumber == null ? null : '$semesterNumber-й семестр';
+
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
       decoration: BoxDecoration(
         color: const Color(0xFFF8F5FF),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Row(
         children: [
           Container(
-            width: 44,
-            height: 44,
+            width: 34,
+            height: 34,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: const Color(0xFF6A4BBC),
-              borderRadius: BorderRadius.circular(15),
+              borderRadius: BorderRadius.circular(11),
             ),
             child: Text(
               title.substring(0, 1).toUpperCase(),
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.w900,
-                fontSize: 18,
+                fontSize: 15,
               ),
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   title,
-                  maxLines: 3,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleSmall?.copyWith(
+                  style: theme.textTheme.bodyMedium?.copyWith(
                     color: Colors.black,
-                    fontWeight: FontWeight.w900,
+                    fontWeight: FontWeight.w800,
+                    height: 1.2,
+                    fontSize: 13.5,
                   ),
                 ),
-                if (semesterNumber != null) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    '$semesterNumber-й семестр',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.black54,
-                      fontWeight: FontWeight.w700,
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Icon(
+                      Icons.local_fire_department_rounded,
+                      size: 14,
+                      color: hasSubjectScore
+                          ? const Color(0xFFE67E22)
+                          : Colors.black38,
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 3),
+                    Flexible(
+                      child: Text(
+                        'Сложность: $difficultyLabel',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: hasSubjectScore
+                              ? Colors.black87
+                              : Colors.black45,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    if (semesterLabel != null) ...[
+                      Text(
+                        ' · ',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: Colors.black38,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Text(
+                        semesterLabel,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: Colors.black45,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
               ],
             ),
           ),

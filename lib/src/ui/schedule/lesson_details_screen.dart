@@ -386,6 +386,7 @@ class _TeacherLinkCard extends StatelessWidget {
             teacherName: lesson.teacher!,
             subjectTitle: lesson.subject,
             semesterNumber: lesson.semesterNumber,
+            subjectOfferingId: lesson.subjectOfferingId,
           ),
         ),
       ),

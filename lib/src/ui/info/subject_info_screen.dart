@@ -30,17 +30,116 @@ class SubjectInfoScreen extends StatefulWidget {
 }
 
 class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
-  late final Future<_SubjectInfoData> _future = _load();
+  late Future<_SubjectInfoData> _future = _load();
   final _scrollController = ScrollController();
   final _filesKey = GlobalKey();
+  final _repository = _SubjectInfoRepository();
+  bool _voting = false;
 
   Future<_SubjectInfoData> _load() async {
-    return _SubjectInfoRepository().load(
+    return _repository.load(
       subjectOfferingId: widget.subjectOfferingId,
       fallbackTitle: widget.title,
       fallbackSubjectId: widget.subjectId,
       fallbackGroupId: widget.groupId,
       fallbackSemesterNumber: widget.semesterNumber,
+    );
+  }
+
+  Future<void> _reload() async {
+    final next = await _load();
+    if (!mounted) return;
+    setState(() => _future = Future<_SubjectInfoData>.value(next));
+  }
+
+  Future<void> _rateSubject(_SubjectInfoData data) async {
+    if (_voting) return;
+    var difficulty = data.mySubjectScore ?? 3;
+    var isSaving = false;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            Future<void> submit() async {
+              if (isSaving) return;
+              setSheetState(() => isSaving = true);
+              setState(() => _voting = true);
+              try {
+                await _repository.voteSubjectDifficulty(
+                  subjectOfferingId: data.subjectOfferingId,
+                  difficultyRating: difficulty,
+                );
+                if (sheetContext.mounted) Navigator.of(sheetContext).pop();
+                await _reload();
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Оценка сохранена')),
+                );
+              } catch (_) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Не удалось сохранить оценку')),
+                );
+              } finally {
+                if (mounted) setState(() => _voting = false);
+                if (context.mounted) setSheetState(() => isSaving = false);
+              }
+            }
+
+            return Padding(
+              padding: EdgeInsets.fromLTRB(
+                18,
+                16,
+                18,
+                MediaQuery.of(context).viewInsets.bottom + 16,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Оценить сложность предмета',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w900,
+                        ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    data.displayTitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Colors.black54,
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                  const SizedBox(height: 14),
+                  _CompactRatingCircles(
+                    value: difficulty,
+                    onChanged: (value) =>
+                        setSheetState(() => difficulty = value),
+                  ),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: isSaving ? null : submit,
+                      child: Text(isSaving ? 'Сохраняю...' : 'Сохранить'),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -71,10 +170,32 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
 
           return ListView(
             controller: _scrollController,
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
             children: [
               _HeroCard(data: data),
-              const SizedBox(height: 14),
+              const SizedBox(height: 10),
+              _TeacherDifficultyGlance(
+                data: data,
+                ratingBusy: _voting,
+                onOpenTeacher: data.hasTeacher
+                    ? () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => TeacherProfileScreen(
+                              teacherName: data.teacherName,
+                              subjectTitle: data.displayTitle,
+                              department: data.department,
+                              semesterNumber: data.semesterNumber,
+                              difficultyScore: data.teacherDifficultyAvg,
+                              subjectOfferingId: data.subjectOfferingId,
+                              subjectDifficultyAvg: data.subjectDifficultyAvg,
+                            ),
+                          ),
+                        )
+                    : null,
+                onRateSubject:
+                    data.canVoteSubject ? () => _rateSubject(data) : null,
+              ),
+              const SizedBox(height: 10),
               _QuickActions(
                 canOpenChat: data.canOpenChat,
                 onChatTap:
@@ -82,13 +203,11 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
                 onDiaryTap: () => _openDiary(context, data),
                 onFilesTap: _scrollToFiles,
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 10),
               _SummaryCard(data: data),
-              const SizedBox(height: 14),
-              _TeacherCard(data: data),
-              const SizedBox(height: 14),
+              const SizedBox(height: 10),
               _FilesCard(key: _filesKey),
-              const SizedBox(height: 14),
+              const SizedBox(height: 10),
               _LargeActionCard(
                 icon: Icons.chat_bubble_outline_rounded,
                 title: 'Чат предмета',
@@ -99,7 +218,7 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
                 enabled: data.canOpenChat,
                 onTap: data.canOpenChat ? () => _openChat(context, data) : null,
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 10),
               _LargeActionCard(
                 icon: Icons.menu_book_outlined,
                 title: 'Дневник предмета',
@@ -108,7 +227,7 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
                 enabled: true,
                 onTap: () => _openDiary(context, data),
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 10),
               const _HelpCard(),
             ],
           );
@@ -238,6 +357,10 @@ class _SubjectInfoRepository {
       fallbackTitle,
     ]);
 
+    final teacherName = _firstNonEmpty([team?['teacher']]);
+    final subjectRating = await _loadSubjectRating(subjectOfferingId);
+    final teacherRating = await _loadTeacherRating(teacherName);
+
     return _SubjectInfoData(
       title: title,
       subjectOfferingId: subjectOfferingId,
@@ -248,7 +371,7 @@ class _SubjectInfoRepository {
           _asInt(offeringMap?['semester_number']) ?? fallbackSemesterNumber,
       description: _firstNonEmpty([subject?['description']]),
       controlForm: _firstNonEmpty([curriculum?['control_form']]),
-      teacherName: _firstNonEmpty([team?['teacher']]),
+      teacherName: teacherName,
       department: _firstNonEmpty([curriculum?['department']]),
       credits: _firstNonEmpty([curriculum?['credits']]),
       hoursTotal: _firstNonEmpty([curriculum?['hours_total']]),
@@ -257,6 +380,82 @@ class _SubjectInfoRepository {
       teamIcon: _firstNonEmpty([team?['icon']]),
       teamGroupName: _firstNonEmpty([team?['group_name']]),
       chatId: _stringOrNull(chat?['id']),
+      subjectDifficultyAvg: subjectRating.$1,
+      mySubjectScore: subjectRating.$2,
+      canVoteSubject: subjectRating.$3,
+      teacherDifficultyAvg: teacherRating,
+    );
+  }
+
+  Future<(double?, int?, bool)> _loadSubjectRating(String offeringId) async {
+    try {
+      final res = await _sb.rpc('rpc_get_my_subjects_v2');
+      final rows = (res as List)
+          .map((row) => Map<String, dynamic>.from(row as Map))
+          .toList();
+      for (final row in rows) {
+        if ((row['subject_offering_id'] ?? '').toString() != offeringId) {
+          continue;
+        }
+        final global = _asDouble(row['avg_difficulty_global']);
+        final local = _asDouble(row['avg_difficulty_local']);
+        final avg = global > 0 ? global : local;
+        final vote = _asMap(row['user_vote']);
+        final myScore = vote == null ? null : _asInt(vote['difficulty_rating']);
+        final canVote = row['can_vote'] == true;
+        return (
+          avg > 0 ? avg : null,
+          (myScore != null && myScore >= 1 && myScore <= 5) ? myScore : null,
+          canVote,
+        );
+      }
+    } catch (_) {}
+    return (null, null, false);
+  }
+
+  Future<double?> _loadTeacherRating(String teacherName) async {
+    final normalized = teacherName
+        .trim()
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .toLowerCase();
+    if (normalized.isEmpty) return null;
+    try {
+      final target = await _sb
+          .from('teacher_difficulty_targets')
+          .select('id')
+          .eq('normalized_name', normalized)
+          .maybeSingle();
+      final teacherId = (target?['id'] ?? '').toString().trim();
+      if (teacherId.isEmpty) return null;
+      final summary = await _sb
+          .from('teacher_difficulty_summaries')
+          .select('vote_count,score_total')
+          .eq('teacher_id', teacherId)
+          .maybeSingle();
+      final voteCount = _asInt(summary?['vote_count']) ?? 0;
+      final scoreTotal = _asInt(summary?['score_total']) ?? 0;
+      if (voteCount <= 0) return null;
+      return scoreTotal / voteCount;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> voteSubjectDifficulty({
+    required String subjectOfferingId,
+    required int difficultyRating,
+  }) async {
+    await _sb.rpc(
+      'rpc_vote_subject_difficulty_v2',
+      params: {
+        'p_subject_offering_id': subjectOfferingId,
+        'p_difficulty_rating': difficultyRating,
+        'p_workload_rating': null,
+        'p_usefulness_rating': null,
+        'p_exam_stress_rating': null,
+        'p_comment': null,
+        'p_is_anonymous': true,
+      },
     );
   }
 
@@ -273,6 +472,11 @@ class _SubjectInfoRepository {
   int? _asInt(dynamic value) {
     if (value is int) return value;
     return int.tryParse((value ?? '').toString());
+  }
+
+  double _asDouble(dynamic value) {
+    if (value is num) return value.toDouble();
+    return double.tryParse((value ?? '').toString().replaceAll(',', '.')) ?? 0;
   }
 
   String _firstNonEmpty(List<dynamic> values) {
@@ -301,6 +505,10 @@ class _SubjectInfoData {
   final String teamIcon;
   final String teamGroupName;
   final String? chatId;
+  final double? subjectDifficultyAvg;
+  final int? mySubjectScore;
+  final bool canVoteSubject;
+  final double? teacherDifficultyAvg;
 
   const _SubjectInfoData({
     required this.title,
@@ -319,6 +527,10 @@ class _SubjectInfoData {
     required this.teamIcon,
     required this.teamGroupName,
     this.chatId,
+    this.subjectDifficultyAvg,
+    this.mySubjectScore,
+    this.canVoteSubject = false,
+    this.teacherDifficultyAvg,
   });
 
   bool get canOpenChat => teamId != null && chatId != null;
@@ -409,7 +621,23 @@ class _SubjectInfoData {
       teamName: '',
       teamIcon: '',
       teamGroupName: '',
+      subjectDifficultyAvg: null,
+      mySubjectScore: null,
+      canVoteSubject: false,
+      teacherDifficultyAvg: null,
     );
+  }
+
+  String get subjectDifficultyLabel {
+    final value = subjectDifficultyAvg;
+    if (value == null || value <= 0) return 'нет оценок';
+    return '${value.toStringAsFixed(1)} / 5';
+  }
+
+  String get teacherDifficultyLabel {
+    final value = teacherDifficultyAvg;
+    if (value == null || value <= 0) return 'нет оценок';
+    return '${value.toStringAsFixed(1)} / 5';
   }
 }
 
@@ -429,74 +657,58 @@ class _HeroCard extends StatelessWidget {
     ];
 
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [Color(0xFFF3ECFF), Color(0xFFFFFFFF)],
         ),
-        borderRadius: BorderRadius.circular(28),
+        borderRadius: BorderRadius.circular(22),
         border:
             Border.all(color: const Color(0xFF6A4BBC).withValues(alpha: 0.08)),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF6A4BBC).withValues(alpha: 0.10),
-            blurRadius: 28,
-            offset: const Offset(0, 12),
+            color: const Color(0xFF6A4BBC).withValues(alpha: 0.08),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
-      child: Column(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _SubjectIcon(title: title, size: 58),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      maxLines: 4,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        color: Colors.black,
-                        height: 1.05,
-                      ),
-                    ),
-                    if (details.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        details.join(' · '),
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: Colors.black.withValues(alpha: 0.62),
-                          fontWeight: FontWeight.w700,
-                          height: 1.25,
-                        ),
-                      ),
-                    ],
-                  ],
+          _SubjectIcon(title: title, size: 46),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: Colors.black,
+                    height: 1.12,
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              const _SoftChip(label: 'Материалы', icon: Icons.folder_outlined),
-              _SoftChip(
-                label: data.canOpenChat ? 'Чат' : 'Чат позже',
-                icon: Icons.chat_bubble_outline_rounded,
-              ),
-              const _SoftChip(label: 'Дневник', icon: Icons.menu_book_outlined),
-            ],
+                if (details.isNotEmpty) ...[
+                  const SizedBox(height: 5),
+                  Text(
+                    details.join(' · '),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: Colors.black.withValues(alpha: 0.58),
+                      fontWeight: FontWeight.w700,
+                      height: 1.2,
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
         ],
       ),
@@ -578,27 +790,27 @@ class _QuickActionCard extends StatelessWidget {
       onTap: enabled ? onTap : null,
       borderRadius: BorderRadius.circular(22),
       child: Container(
-        constraints: const BoxConstraints(minHeight: 92),
-        padding: const EdgeInsets.all(12),
+        constraints: const BoxConstraints(minHeight: 82),
+        padding: const EdgeInsets.fromLTRB(11, 10, 11, 10),
         decoration: BoxDecoration(
           color: enabled
               ? theme.colorScheme.surface
               : Colors.white.withValues(alpha: 0.72),
-          borderRadius: BorderRadius.circular(22),
+          borderRadius: BorderRadius.circular(18),
           border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: enabled ? 0.045 : 0.02),
-              blurRadius: 16,
-              offset: const Offset(0, 6),
+              color: Colors.black.withValues(alpha: enabled ? 0.035 : 0.02),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
             ),
           ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, color: color, size: 22),
-            const SizedBox(height: 14),
+            Icon(icon, color: color, size: 20),
+            const SizedBox(height: 8),
             Text(
               title,
               maxLines: 1,
@@ -608,7 +820,7 @@ class _QuickActionCard extends StatelessWidget {
                 fontWeight: FontWeight.w900,
               ),
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: 1),
             Text(
               subtitle,
               maxLines: 1,
@@ -664,10 +876,144 @@ class _SummaryCard extends StatelessWidget {
                 'Материалы, требования преподавателя и заметки появятся здесь позже.',
             icon: Icons.star_border_rounded,
           ),
-          const _InfoTile(
-            title: 'Сложность предмета',
-            value: 'Оценка сложности появится после накопления отзывов.',
-            icon: Icons.trending_up_rounded,
+        ],
+      ),
+    );
+  }
+}
+
+class _TeacherDifficultyGlance extends StatelessWidget {
+  final _SubjectInfoData data;
+  final bool ratingBusy;
+  final VoidCallback? onOpenTeacher;
+  final VoidCallback? onRateSubject;
+
+  const _TeacherDifficultyGlance({
+    required this.data,
+    required this.ratingBusy,
+    required this.onOpenTeacher,
+    required this.onRateSubject,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.035),
+            blurRadius: 14,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          InkWell(
+            onTap: onOpenTeacher,
+            borderRadius: BorderRadius.circular(14),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: const Color(0xFF6A4BBC).withValues(alpha: 0.10),
+                  ),
+                  child: const Icon(
+                    Icons.person_outline_rounded,
+                    color: Color(0xFF6A4BBC),
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        data.displayTeacherName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: Colors.black,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        data.hasTeacher
+                            ? 'Сдача: ${data.teacherDifficultyLabel}'
+                            : 'Преподаватель пока не указан',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: Colors.black54,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (onOpenTeacher != null)
+                  const Icon(Icons.chevron_right_rounded,
+                      color: Colors.black38, size: 22),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _GlanceStatChip(
+                  icon: Icons.local_fire_department_rounded,
+                  label: 'Предмет',
+                  value: data.subjectDifficultyLabel,
+                ),
+              ),
+              const SizedBox(width: 8),
+              if (onRateSubject != null)
+                Material(
+                  color: const Color(0xFF6A4BBC).withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(999),
+                  child: InkWell(
+                    onTap: ratingBusy ? null : onRateSubject,
+                    borderRadius: BorderRadius.circular(999),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            data.mySubjectScore == null
+                                ? Icons.star_border_rounded
+                                : Icons.star_rounded,
+                            size: 18,
+                            color: const Color(0xFF6A4BBC),
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            data.mySubjectScore == null
+                                ? 'Оценить'
+                                : 'Моя: ${data.mySubjectScore}',
+                            style: theme.textTheme.labelMedium?.copyWith(
+                              color: const Color(0xFF6A4BBC),
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ],
       ),
@@ -675,85 +1021,84 @@ class _SummaryCard extends StatelessWidget {
   }
 }
 
-class _TeacherCard extends StatelessWidget {
-  final _SubjectInfoData data;
+class _GlanceStatChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
 
-  const _TeacherCard({required this.data});
+  const _GlanceStatChip({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return InkWell(
-      onTap: data.hasTeacher
-          ? () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => TeacherProfileScreen(
-                    teacherName: data.teacherName,
-                    subjectTitle: data.displayTitle,
-                    department: data.department,
-                    semesterNumber: data.semesterNumber,
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8F5FF),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: const Color(0xFF6A4BBC)),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              '$label: $value',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: Colors.black87,
+                    fontWeight: FontWeight.w800,
                   ),
-                ),
-              )
-          : null,
-      borderRadius: BorderRadius.circular(24),
-      child: _ContentCard(
-        icon: Icons.person_outline_rounded,
-        title: 'Преподаватель',
-        child: Row(
-          children: [
-            Container(
-              width: 52,
-              height: 52,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CompactRatingCircles extends StatelessWidget {
+  final int value;
+  final ValueChanged<int> onChanged;
+
+  const _CompactRatingCircles({
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        for (var i = 1; i <= 5; i++)
+          InkWell(
+            onTap: () => onChanged(i),
+            borderRadius: BorderRadius.circular(999),
+            child: Container(
+              width: 42,
+              height: 42,
+              alignment: Alignment.center,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: const Color(0xFF6A4BBC).withValues(alpha: 0.10),
+                color: i <= value
+                    ? const Color(0xFF6A4BBC)
+                    : const Color(0xFFF0ECF8),
               ),
-              child: const Icon(
-                Icons.person_outline_rounded,
-                color: Color(0xFF6A4BBC),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    data.displayTeacherName,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: Colors.black,
-                      fontWeight: FontWeight.w900,
-                      height: 1.12,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    data.hasTeacher ? 'Открыть профиль' : 'Преподаватель',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.black54,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  const _MiniStatusPill(
-                    text: 'Сложность сдачи: пока нет данных',
-                  ),
-                ],
+              child: Text(
+                '$i',
+                style: TextStyle(
+                  color: i <= value ? Colors.white : Colors.black54,
+                  fontWeight: FontWeight.w900,
+                ),
               ),
             ),
-            if (data.hasTeacher) ...[
-              const SizedBox(width: 8),
-              const Icon(
-                Icons.chevron_right_rounded,
-                color: Colors.black38,
-              ),
-            ],
-          ],
-        ),
-      ),
+          ),
+      ],
     );
   }
 }
@@ -1150,67 +1495,6 @@ class _SubjectIcon extends StatelessWidget {
           fontWeight: FontWeight.w900,
           fontSize: size * 0.38,
         ),
-      ),
-    );
-  }
-}
-
-class _SoftChip extends StatelessWidget {
-  final String label;
-  final IconData icon;
-
-  const _SoftChip({
-    required this.label,
-    required this.icon,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.82),
-        borderRadius: BorderRadius.circular(999),
-        border:
-            Border.all(color: const Color(0xFF6A4BBC).withValues(alpha: 0.08)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 15, color: const Color(0xFF6A4BBC)),
-          const SizedBox(width: 5),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: Colors.black87,
-                  fontWeight: FontWeight.w900,
-                ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MiniStatusPill extends StatelessWidget {
-  final String text;
-
-  const _MiniStatusPill({required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF7F1FF),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        text,
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: const Color(0xFF6A4BBC),
-              fontWeight: FontWeight.w900,
-            ),
       ),
     );
   }
