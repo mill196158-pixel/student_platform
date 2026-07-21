@@ -12,6 +12,8 @@ dependencies:
     sdk: flutter
   flutter_localizations:
     sdk: flutter
+  student_ui:
+    path: packages/student_ui
 
   # Навигация / сеть / состояния
   go_router: ^14.2.0

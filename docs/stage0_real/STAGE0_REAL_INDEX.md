@@ -731,3 +731,22 @@ Teacher rating saves now also publish an in-process revision notification.
 Mounted `TeacherDifficultyAvatar` widgets listen for it and reload from the
 updated cache, so the lesson teacher card changes immediately before navigation
 returns to it.
+
+## Student Platform Admin — Stage 12.0
+
+The separate `feature/admin-console` worktree now contains the local Flutter Web
+Admin foundation under `admin_console/`. The master roadmap is
+`docs/admin_console/ADMIN_ROADMAP.md`; it is the only roadmap for this direction.
+Stage 12.0 is in REVIEW after successful format, analyze, test, and Web build.
+Supabase, migrations, Firebase, deploy, commit, and push were not used.
+
+The post-review correction extracted the loaded mobile home presentation and
+bottom navigation into `packages/student_ui`. Mobile `HomeScreen` still owns
+real loading/actions, while Admin supplies mock view models to the same
+`StudentHomeView`.
+
+A follow-up completed the stage 12.0 visual news editor: scaled phone preview,
+four news card variants with local image picking via `AdminImagePicker` /
+`AdminImageStore` / `NewsRepository` mocks, and live preview through the shared
+`StudentHomeView`. Stage 12.0 remains in REVIEW for visual sign-off. No
+Supabase, Firebase, migration, deploy, commit, or push operation was performed.

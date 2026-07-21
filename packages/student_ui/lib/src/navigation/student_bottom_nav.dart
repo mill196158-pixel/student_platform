@@ -1,56 +1,50 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-class ModernBottomNavItem {
+class StudentBottomNavItem {
+  const StudentBottomNavItem({required this.icon, required this.label});
+
   final IconData icon;
   final String label;
-
-  const ModernBottomNavItem({
-    required this.icon,
-    required this.label,
-  });
 }
 
-class ModernBottomNav extends StatefulWidget {
-  final int currentIndex;
-  final ValueChanged<int> onTap;
-  final List<ModernBottomNavItem> items;
-
-  const ModernBottomNav({
-    super.key,
+class StudentBottomNav extends StatefulWidget {
+  const StudentBottomNav({
     required this.currentIndex,
     required this.onTap,
     required this.items,
+    super.key,
   });
 
+  final int currentIndex;
+  final ValueChanged<int> onTap;
+  final List<StudentBottomNavItem> items;
+
   @override
-  State<ModernBottomNav> createState() => _ModernBottomNavState();
+  State<StudentBottomNav> createState() => _StudentBottomNavState();
 }
 
-class _ModernBottomNavState extends State<ModernBottomNav> {
+class _StudentBottomNavState extends State<StudentBottomNav> {
   int? _previewIndex;
   int? _lastFeedbackIndex;
 
   void _commitIndex(int index) {
     if (index < 0 || index >= widget.items.length) return;
-
     final alreadyFelt = _lastFeedbackIndex == index;
     _clearPreview();
-
     if (index == widget.currentIndex) return;
     if (!alreadyFelt) HapticFeedback.selectionClick();
     widget.onTap(index);
   }
 
-  void _previewPosition(Offset localPosition, double width,
-      {bool haptic = true}) {
+  void _previewPosition(
+    Offset localPosition,
+    double width, {
+    bool haptic = true,
+  }) {
     final index = _indexFromLocalPosition(localPosition, width);
     if (index == null) return;
-
-    if (_previewIndex != index) {
-      setState(() => _previewIndex = index);
-    }
-
+    if (_previewIndex != index) setState(() => _previewIndex = index);
     if (haptic && _lastFeedbackIndex != index && index != widget.currentIndex) {
       _lastFeedbackIndex = index;
       HapticFeedback.selectionClick();
@@ -59,7 +53,6 @@ class _ModernBottomNavState extends State<ModernBottomNav> {
 
   void _clearPreview() {
     if (_previewIndex == null && _lastFeedbackIndex == null) return;
-
     setState(() {
       _previewIndex = null;
       _lastFeedbackIndex = null;
@@ -74,9 +67,7 @@ class _ModernBottomNavState extends State<ModernBottomNav> {
 
   int? _indexFromLocalPosition(Offset localPosition, double width) {
     if (widget.items.isEmpty || width <= 0) return null;
-
-    final itemWidth = width / widget.items.length;
-    final index = (localPosition.dx / itemWidth).floor();
+    final index = (localPosition.dx / (width / widget.items.length)).floor();
     if (index < 0 || index >= widget.items.length) return null;
     return index;
   }
@@ -85,21 +76,19 @@ class _ModernBottomNavState extends State<ModernBottomNav> {
   Widget build(BuildContext context) {
     const active = Color(0xFF7C63D8);
     const inactive = Color(0xFF7A7F8C);
-    final cs = Theme.of(context).colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
     final selectedIndex = _previewIndex ?? widget.currentIndex;
-    final mq = MediaQuery.of(context);
-    final safeBottom = mq.padding.bottom;
-    // Same bottom level as chat Composer; keep home-indicator gesture clear.
-    final reducedBottom = safeBottom > 0
-        ? (safeBottom - 12).clamp(18.0, safeBottom)
-        : 0.0;
+    final mediaQuery = MediaQuery.of(context);
+    final safeBottom = mediaQuery.padding.bottom;
+    final reducedBottom =
+        safeBottom > 0 ? (safeBottom - 12).clamp(18.0, safeBottom) : 0.0;
 
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: cs.surface,
+        color: colorScheme.surface,
         border: Border(
           top: BorderSide(
-            color: cs.outlineVariant.withValues(alpha: .42),
+            color: colorScheme.outlineVariant.withValues(alpha: .42),
             width: .6,
           ),
         ),
@@ -112,9 +101,9 @@ class _ModernBottomNavState extends State<ModernBottomNav> {
         ],
       ),
       child: MediaQuery(
-        data: mq.copyWith(
-          padding: mq.padding.copyWith(bottom: reducedBottom),
-          viewPadding: mq.viewPadding.copyWith(bottom: reducedBottom),
+        data: mediaQuery.copyWith(
+          padding: mediaQuery.padding.copyWith(bottom: reducedBottom),
+          viewPadding: mediaQuery.viewPadding.copyWith(bottom: reducedBottom),
         ),
         child: LayoutBuilder(
           builder: (context, constraints) {
@@ -125,15 +114,17 @@ class _ModernBottomNavState extends State<ModernBottomNav> {
                 constraints.maxWidth,
                 haptic: false,
               ),
-              onPanUpdate: (details) =>
-                  _previewPosition(details.localPosition, constraints.maxWidth),
+              onPanUpdate: (details) => _previewPosition(
+                details.localPosition,
+                constraints.maxWidth,
+              ),
               onPanEnd: (_) => _finishDrag(),
               onPanCancel: _clearPreview,
               onTapCancel: _clearPreview,
               child: NavigationBarTheme(
                 data: NavigationBarThemeData(
                   height: 64,
-                  backgroundColor: cs.surface,
+                  backgroundColor: colorScheme.surface,
                   elevation: 0,
                   indicatorColor: active.withValues(alpha: .13),
                   labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
@@ -174,3 +165,14 @@ class _ModernBottomNavState extends State<ModernBottomNav> {
     );
   }
 }
+
+const studentBottomNavItems = [
+  StudentBottomNavItem(icon: Icons.home_rounded, label: 'Главная'),
+  StudentBottomNavItem(icon: Icons.info_outline_rounded, label: 'Инфо'),
+  StudentBottomNavItem(icon: Icons.menu_book_rounded, label: 'Обучение'),
+  StudentBottomNavItem(
+    icon: Icons.calendar_today_rounded,
+    label: 'Расписание',
+  ),
+  StudentBottomNavItem(icon: Icons.person_rounded, label: 'Профиль'),
+];

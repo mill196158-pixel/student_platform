@@ -904,3 +904,47 @@
 - Focused analyze passed with no issues; IDE lints report no errors.
 - Supabase schema/data/RLS changed: no.
 - Git add/commit run: no.
+
+## Student Platform Admin - Stage 12.0 Web foundation
+
+- Date: 2026-07-21
+- Worktree: `/Users/annasuvorova/student_platform_admin`
+- Branch: `feature/admin-console`
+- Base commit: `89f0890`
+- Master roadmap created: `docs/admin_console/ADMIN_ROADMAP.md`
+- Flutter Web project created: `admin_console/`
+- Implemented: routes, responsive desktop shell/Drawer, dashboard, local news editor, mock subjects table, mock teachers table.
+- Data source: local mock data only.
+- Supabase connection/schema/RLS/migrations changed: no.
+- Root mobile `lib/`, Firebase, and neighboring worktree changed: no.
+- Verification: `dart format lib test`, `flutter analyze`, `flutter test`, and `flutter build web` passed.
+- Stage status: REVIEW, pending user visual review.
+- Commit/push/deploy: not performed.
+
+## Student Platform Admin - Stage 12.0 exact preview correction
+
+- Date: 2026-07-21
+- Shared presentation package added: `packages/student_ui/`.
+- Shared components: loaded home composition, news cards/feed, bottom navigation, preview models, and preview light theme.
+- Mobile `HomeScreen` remains the owner of real services, notifications, assignment actions, refresh, and navigation callbacks.
+- `HomeDashboardService` changed: no.
+- Admin Preview now uses `StudentHomeView` with local name/group/date/lesson/assignment/news data.
+- Editable preview area: news only; system cards and bottom navigation are display-only.
+- PWA manifest and repository-relative macOS/Windows launch scripts added.
+- Verification: focused shared/mobile/admin analyze passed; shared/admin widget tests passed; Admin Web build passed.
+- Supabase/Firebase/migrations/deploy/commit/push: not performed.
+- Status: REVIEW, pending exact visual comparison.
+
+## Student Platform Admin - Stage 12.0 visual news editor
+
+- Date: 2026-07-21
+- Worktree: `/Users/annasuvorova/student_platform_admin`
+- Branch: `feature/admin-console`
+- News editor layout: left card list, center height-scaled phone preview, right properties; adaptive medium/narrow stacking.
+- Shared `StudentHomeNews` gained optional `imageBytes`, `imageFocus`, `overlayDarken`; card variants render `gradientText`, `imageOnly`, `imageOverlay`, `imageWithText`.
+- Admin local adapters: `AdminImagePicker`, `AdminImageStore`, `NewsRepository` with in-memory/mock implementations only.
+- Local image pick: JPG/PNG/WebP, max 5 MB, friendly validation errors; bytes kept in memory only (not Git/SharedPreferences/Base64 sources).
+- Editor actions: create, select, reorder, duplicate, hide, delete, draft save; publish remains disabled with explicit notice.
+- Verification: `dart format` on touched Dart files; `packages/student_ui` + `admin_console` focused analyze; shared/admin widget tests including four variants and image retention; `flutter build web`; `git diff --check`.
+- Supabase/Firebase/migrations/deploy/commit/push: not performed.
+- Status: REVIEW, awaiting visual sign-off before 12.1 Auth/RBAC/Storage.

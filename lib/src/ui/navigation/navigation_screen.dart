@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:student_ui/student_ui.dart';
 
 // Импорты по текущей структуре
 import '../home/home_screen.dart';
@@ -11,7 +12,6 @@ import '../chats/data/chat_warm_coordinator.dart';
 import '../../services/presence/user_presence.dart';
 import '../../themes/theme_service.dart';
 import 'main_tab_scope.dart';
-import 'modern_bottom_nav.dart';
 
 class NavigationScreen extends StatefulWidget {
   const NavigationScreen({super.key});
@@ -83,18 +83,9 @@ class _NavigationScreenState extends State<NavigationScreen> {
               ],
             ),
           ),
-          bottomNavigationBar: ModernBottomNav(
+          bottomNavigationBar: StudentBottomNav(
             currentIndex: _currentIndex,
-            items: const [
-              ModernBottomNavItem(icon: Icons.home_rounded, label: 'Главная'),
-              ModernBottomNavItem(
-                  icon: Icons.info_outline_rounded, label: 'Инфо'),
-              ModernBottomNavItem(
-                  icon: Icons.menu_book_rounded, label: 'Обучение'),
-              ModernBottomNavItem(
-                  icon: Icons.calendar_today_rounded, label: 'Расписание'),
-              ModernBottomNavItem(icon: Icons.person_rounded, label: 'Профиль'),
-            ],
+            items: studentBottomNavItems,
             onTap: (index) {
               _switchToTab(MainTab.values[index]);
             },
