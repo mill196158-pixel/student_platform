@@ -5,12 +5,12 @@ import 'package:student_platform_admin/features/content/news/news_editor_screen.
 import 'package:student_ui/student_ui.dart';
 
 void main() {
-  testWidgets('admin dashboard opens', (tester) async {
+  testWidgets('admin dashboard opens in local prototype', (tester) async {
     await tester.pumpWidget(const AdminApp());
     await tester.pumpAndSettle();
 
     expect(find.text('Рабочее пространство'), findsOneWidget);
-    expect(find.text('Локальный прототип'), findsOneWidget);
+    expect(find.text('Локальный прототип'), findsWidgets);
   });
 
   testWidgets('news editor embeds shared student home view', (tester) async {

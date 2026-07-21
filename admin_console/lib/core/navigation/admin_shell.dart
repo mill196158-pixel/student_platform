@@ -1,54 +1,73 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../auth/admin_capabilities.dart';
+import '../auth/admin_session_controller.dart';
+
 class AdminShell extends StatelessWidget {
-  const AdminShell({required this.currentPath, required this.child, super.key});
+  const AdminShell({
+    required this.currentPath,
+    required this.session,
+    required this.child,
+    super.key,
+  });
 
   final String currentPath;
+  final AdminSessionController session;
   final Widget child;
 
-  static const _destinations = <_AdminDestination>[
-    _AdminDestination(
-      label: 'Главная',
-      icon: Icons.dashboard_outlined,
-      path: '/dashboard',
-    ),
-    _AdminDestination(
-      label: 'Новости',
-      icon: Icons.newspaper_outlined,
-      path: '/content/news',
-      section: 'Контент',
-    ),
-    _AdminDestination(
-      label: 'Предметы',
-      icon: Icons.menu_book_outlined,
-      path: '/academic/subjects',
-      section: 'Учебная часть',
-    ),
-    _AdminDestination(
-      label: 'Преподаватели',
-      icon: Icons.school_outlined,
-      path: '/academic/teachers',
-    ),
-    _AdminDestination(
-      label: 'Студенты',
-      icon: Icons.groups_outlined,
-      isEnabled: false,
-    ),
-    _AdminDestination(
-      label: 'Модерация',
-      icon: Icons.shield_outlined,
-      isEnabled: false,
-    ),
-    _AdminDestination(
-      label: 'Система',
-      icon: Icons.settings_outlined,
-      isEnabled: false,
-    ),
-  ];
+  List<_AdminDestination> _visibleDestinations(AdminCapabilities caps) {
+    final local = session.isLocalPrototype;
+    return [
+      _AdminDestination(
+        label: 'Главная',
+        icon: Icons.dashboard_outlined,
+        path: '/dashboard',
+        isVisible: local || caps.canViewDashboard || caps.hasAnyAdminAccess,
+      ),
+      _AdminDestination(
+        label: 'Новости',
+        icon: Icons.newspaper_outlined,
+        path: '/content/news',
+        section: 'Контент',
+        isVisible: local || caps.canReadContent,
+      ),
+      _AdminDestination(
+        label: 'Предметы',
+        icon: Icons.menu_book_outlined,
+        path: '/academic/subjects',
+        section: 'Учебная часть',
+        isVisible: local || caps.canReadAcademic,
+      ),
+      _AdminDestination(
+        label: 'Преподаватели',
+        icon: Icons.school_outlined,
+        path: '/academic/teachers',
+        isVisible: local || caps.canReadAcademic,
+      ),
+      const _AdminDestination(
+        label: 'Студенты',
+        icon: Icons.groups_outlined,
+        isEnabled: false,
+        isVisible: false,
+      ),
+      const _AdminDestination(
+        label: 'Модерация',
+        icon: Icons.shield_outlined,
+        isEnabled: false,
+        isVisible: false,
+      ),
+      const _AdminDestination(
+        label: 'Система',
+        icon: Icons.settings_outlined,
+        isEnabled: false,
+        isVisible: false,
+      ),
+    ].where((item) => item.isVisible).toList(growable: false);
+  }
 
-  String get _title {
-    for (final destination in _destinations) {
+  String _title(List<_AdminDestination> destinations) {
+    for (final destination in destinations) {
       if (destination.path == currentPath) return destination.label;
     }
     return 'Student Platform Admin';
@@ -56,54 +75,82 @@ class AdminShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final isCompact = constraints.maxWidth < 900;
-        final navigation = _NavigationPanel(
-          currentPath: currentPath,
-          destinations: _destinations,
-          onSelected: (path) {
-            if (isCompact) Navigator.of(context).pop();
-            context.go(path);
-          },
-        );
+    return AnimatedBuilder(
+      animation: session,
+      builder: (context, _) {
+        final destinations = _visibleDestinations(session.capabilities);
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final isCompact = constraints.maxWidth < 900;
+            final navigation = _NavigationPanel(
+              currentPath: currentPath,
+              destinations: destinations,
+              onSelected: (path) {
+                if (isCompact) Navigator.of(context).pop();
+                context.go(path);
+              },
+            );
 
-        return Scaffold(
-          drawer: isCompact ? Drawer(child: navigation) : null,
-          appBar: AppBar(
-            backgroundColor: Colors.white,
-            leading: isCompact
-                ? Builder(
-                    builder: (context) => IconButton(
-                      tooltip: 'Открыть меню',
-                      onPressed: () => Scaffold.of(context).openDrawer(),
-                      icon: const Icon(Icons.menu_rounded),
-                    ),
-                  )
-                : null,
-            title: Text(
-              _title,
-              style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
-            actions: const [
-              Padding(
-                padding: EdgeInsets.symmetric(horizontal: 18),
-                child: Chip(
-                  avatar: Icon(Icons.science_outlined, size: 18),
-                  label: Text('Локальный прототип'),
+            return Scaffold(
+              drawer: isCompact ? Drawer(child: navigation) : null,
+              appBar: AppBar(
+                backgroundColor: Colors.white,
+                leading: isCompact
+                    ? Builder(
+                        builder: (context) => IconButton(
+                          tooltip: 'Открыть меню',
+                          onPressed: () => Scaffold.of(context).openDrawer(),
+                          icon: const Icon(Icons.menu_rounded),
+                        ),
+                      )
+                    : null,
+                title: Text(
+                  _title(destinations),
+                  style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
+                actions: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Chip(
+                      avatar: Icon(
+                        session.isLocalPrototype
+                            ? Icons.science_outlined
+                            : Icons.verified_user_outlined,
+                        size: 18,
+                      ),
+                      label: Text(
+                        session.isLocalPrototype
+                            ? 'Локальный прототип'
+                            : 'Безопасный вход',
+                      ),
+                    ),
+                  ),
+                  if (!session.isLocalPrototype)
+                    IconButton(
+                      tooltip: 'Выйти',
+                      onPressed: () async {
+                        await session.signOut();
+                        if (context.mounted) context.go('/login');
+                      },
+                      icon: const Icon(Icons.logout_rounded),
+                    ),
+                  const SizedBox(width: 8),
+                ],
               ),
-            ],
-          ),
-          body: Row(
-            children: [
-              if (!isCompact)
-                SizedBox(width: 260, child: Material(child: navigation)),
-              Expanded(
-                child: Padding(padding: const EdgeInsets.all(24), child: child),
+              body: Row(
+                children: [
+                  if (!isCompact)
+                    SizedBox(width: 260, child: Material(child: navigation)),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: child,
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
@@ -184,7 +231,7 @@ class _NavigationPanel extends StatelessWidget {
             const Padding(
               padding: EdgeInsets.all(18),
               child: Text(
-                'Данные не подключены',
+                'Права проверяются на сервере',
                 style: TextStyle(color: Colors.white54, fontSize: 12),
               ),
             ),
@@ -258,6 +305,7 @@ class _AdminDestination {
     this.path,
     this.section,
     this.isEnabled = true,
+    this.isVisible = true,
   });
 
   final String label;
@@ -265,4 +313,5 @@ class _AdminDestination {
   final String? path;
   final String? section;
   final bool isEnabled;
+  final bool isVisible;
 }

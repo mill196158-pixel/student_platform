@@ -8,10 +8,10 @@
 - Current branch: `feature/admin-console`
 - Current worktree: `/Users/annasuvorova/student_platform_admin`
 - Base commit: `89f0890`
-- Current stage: 12.0 — Web Admin foundation
+- Current stage: 12.1 — Security and RBAC
 - Current status: REVIEW
-- Next action: пользовательское визуальное ревью полноценного редактора новостей с масштабируемым phone preview и локальной загрузкой изображений.
-- Blockers: реальное подключение к Supabase заблокировано до этапа 12.1; завершение этапа 12.0 ожидает визуального ревью редактора.
+- Next action: review локальной миграции `20260721184328_admin_rbac_and_audit.sql` и auth-каркаса Admin; не применять к remote без разрешения.
+- Blockers: remote apply/deploy запрещены до отдельного разрешения; первый `super_admin` назначается только bootstrap-инструкцией после review.
 
 Допустимые статусы: TODO, IN PROGRESS, REVIEW, DONE, BLOCKED. Одновременно только один этап может иметь статус IN PROGRESS.
 
@@ -197,13 +197,13 @@ Student Platform Admin — отдельная визуальная веб-пан
 ### 12.1 — Security and RBAC
 
 - Goal: подготовить безопасный административный доступ до подключения реальных данных.
-- Deliverables: аудит обращений к базе; безопасные grants/RLS; admin roles; capabilities; audit log; безопасный вход.
-- Acceptance criteria: будут определены после аудита текущих запросов и live-схемы.
-- Status: TODO
-- Related files: будут определены
+- Deliverables: аудит `users` grants/RLS; локальная миграция admin RBAC/scopes/audit; RPC capabilities; hardening опасных колонок профиля; Admin Auth каркас; bootstrap-инструкция; focused tests.
+- Acceptance criteria: студенту недоступны admin RPC; права только через server assignments; Web Admin без service_role; локальный прототип работает без dart-define; миграция не применена к remote.
+- Status: REVIEW
+- Related files: `supabase/migrations/20260721184328_admin_rbac_and_audit.sql`, `supabase/checks/admin_rbac_security_review.sql`, `docs/admin_console/ADMIN_RBAC_BOOTSTRAP.md`, `admin_console/lib/core/auth/`
 - Commit SHA: отсутствует
 - Remote applied/deployed: нет
-- Notes: RLS нельзя включать механически; браузер не получает `service_role`.
+- Notes: live audit confirmed `authenticated`/`anon` could UPDATE `users.role` and other privileged columns; migration revokes those column privileges and adds RPC-only admin access. Do not apply until explicit approval.
 
 ### 12.2 — Shared content renderer
 
@@ -325,14 +325,14 @@ Student Platform Admin — отдельная визуальная веб-пан
 
 ## Session handoff
 
-- Last completed action: визуальный редактор новостей доведён до полноценного локального прототипа с четырьмя вариантами карточек, локальной загрузкой изображений и height-scaled phone preview на общем `StudentHomeView`.
-- Current task: пользовательское визуальное ревью редактора новостей и точного Admin Preview.
-- Files being changed: `packages/student_ui/` (модели новостей + рендер четырёх вариантов); `admin_console/lib/features/content/news/` (`news_editor_screen`, `news_item`, `admin_image_picker`, `admin_image_store`, `news_repository`, `widgets/news_image_field`); admin/shared tests; docs.
-- Checks already run: format изменённых Dart-файлов — passed; `packages/student_ui: flutter analyze lib test` — passed; `admin_console: flutter analyze lib test` — passed; shared UI tests (home + 4 variants + image retention) — passed; admin tests (dashboard, shared preview, image pick/retention) — passed; `flutter build web` — passed; `git diff --check` — pending in final report.
-- Known blockers: Supabase и реальная публикация запрещены до этапа 12.1; завершение этапа 12.0 ожидает визуального ревью.
-- Exact next task: открыть Admin в Chrome, проверить компоновку редактора на ноутбуке, смену вариантов карточек и локальную загрузку изображения в preview.
-- Uncommitted changes: общий UI-пакет, мобильный presentation adapter/navigation, Admin Preview/редактор/PWA/README, launch-скрипты и документация; commit отсутствует.
-- Last commit: `89f0890`
-- Push status: отсутствует.
-- Remote migration status: не применялись.
+- Last completed action: этап 12.1 — local runtime role-play **23/23 PASS** on local Supabase; migration `20260721184328` applied only locally.
+- Current task: review + decision о remote apply; затем bootstrap первого `super_admin` по `ADMIN_RBAC_BOOTSTRAP.md`.
+- Files being changed: `supabase/migrations/20260721184328_admin_rbac_and_audit.sql`, `supabase/checks/admin_rbac_*`, `admin_console/lib/core/auth/*`, router/shell, mobile `change_password_screen.dart`, docs.
+- Checks already run: local role-play B/C — 23/23 PASS; `git diff --check` — clean; remote not touched.
+- Known blockers: remote apply / Edge deploy / commit / push запрещены до явного разрешения.
+- Exact next task: после approval — remote apply migration, bootstrap super_admin, затем 12.2/12.3 content renderer.
+- Uncommitted changes: stage 12.1 files listed in git status; commit отсутствует.
+- Last commit: `4a17b82`
+- Push status: branch tracking exists from 12.0; 12.1 not pushed.
+- Remote migration status: `20260609093000_*` / `20260609133500_*` / `20260721184328_*` — не применены.
 - Deploy status: не выполнялся.

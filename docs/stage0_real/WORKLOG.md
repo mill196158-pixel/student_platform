@@ -948,3 +948,54 @@
 - Verification: `dart format` on touched Dart files; `packages/student_ui` + `admin_console` focused analyze; shared/admin widget tests including four variants and image retention; `flutter build web`; `git diff --check`.
 - Supabase/Firebase/migrations/deploy/commit/push: not performed.
 - Status: REVIEW, awaiting visual sign-off before 12.1 Auth/RBAC/Storage.
+
+## Student Platform Admin - Stage 12.1 RBAC and auth scaffold
+
+- Date: 2026-07-21
+- Branch: `feature/admin-console`
+- Live audit: `public.users` RLS allows self-update; `anon`/`authenticated` had UPDATE on privileged columns including `role`, `is_active`, `primary_group_id`, `must_change_password`.
+- Local migration created via Supabase CLI: `supabase/migrations/20260721184328_admin_rbac_and_audit.sql` (NOT applied to remote).
+- Adds admin roles/permissions/assignments/audit + RPC capabilities; hardens users column privileges.
+- Admin Web: dart-define config, session controller, login/no-access, capability menu filtering; local prototype preserved without backend config.
+- Docs: `docs/admin_console/ADMIN_RBAC_BOOTSTRAP.md`, security review SQL check.
+- Remote apply / Edge deploy / commit / push: not performed.
+
+## Student Platform Admin - Stage 12.1 security hardening follow-up
+
+- Date: 2026-07-21
+- Tightened `users` UPDATE whitelist to `name, surname, avatar_url, status, updated_at` (removed `group_name`, `university`, `last_seen_at`).
+- Replaced `clear_my_must_change_password` with `auth.users` AFTER UPDATE OF `encrypted_password` private trigger.
+- Replaced `users.role`-based admin checks in unapplied academic drafts with `private.can_manage_academic()`; `public.is_admin(uuid)` now RBAC-only for current `auth.uid()`.
+- Removed `audit.read` from `viewer`; hardened super_admin global/non-expiring + serialized last-super-admin revoke.
+- Local Supabase role-play blocked: Docker unavailable on this host.
+- Remote apply / commit / push: not performed.
+
+## Student Platform Admin - Stage 12.1 backward-compat + migration-history preflight
+
+- Date: 2026-07-21
+- Remote `schema_migrations` / `list_migrations` (project `gwdanmwluhrcfxbnplwd`):
+  - `20260609093000_*` NOT applied
+  - `20260609133500_*` NOT applied
+  - `20260721184328_admin_rbac_and_audit` NOT applied
+- Draft migration files restored exactly to HEAD (no residual working-tree edits).
+- Compatibility model in new migration only:
+  - column UPDATE grants for safe + legacy payload fields (`university`, `group_name`, `must_change_password`)
+  - `private.guard_users_self_update` BEFORE UPDATE blocks real privileged changes; allows unchanged legacy values
+  - Auth password trigger clears `must_change_password` via session GUC bypass
+  - presence remains RPC `touch_my_presence` (no `last_seen_at` column grant)
+  - signup remains `register_local_user` (security definer; anon EXECUTE preserved on remote today)
+- Security review SQL expanded with backward-compat scenarios.
+- Runtime role-play blocker: Docker / local Supabase unavailable.
+- Remote apply / commit / push / deploy: not performed.
+
+## Student Platform Admin - Stage 12.1 local runtime role-play
+
+- Date: 2026-07-21
+- Docker Desktop available; Supabase CLI 2.109.1 installed to `~/.local/share/supabase`.
+- Local stack started with `--exclude storage-api,imgproxy` (broken cached storage image tag).
+- Full repo migration chain cannot apply from empty DB (incomplete history + draft ordering); used ephemeral local bootstrap + `20260721184328_admin_rbac_and_audit.sql` only.
+- Applied locally: `local_roleplay_bootstrap`, `admin_rbac_and_audit`.
+- Role-play script: `supabase/checks/admin_rbac_roleplay_runtime.sql` — **23/23 PASS**.
+- No SQL fixes required in `20260721184328_admin_rbac_and_audit.sql`.
+- Migrations folder restored after run; bootstrap kept under `supabase/checks/admin_rbac_local_bootstrap.sql`.
+- Remote apply / linked writes / commit / push / deploy: not performed.

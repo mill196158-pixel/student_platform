@@ -748,5 +748,15 @@ real loading/actions, while Admin supplies mock view models to the same
 A follow-up completed the stage 12.0 visual news editor: scaled phone preview,
 four news card variants with local image picking via `AdminImagePicker` /
 `AdminImageStore` / `NewsRepository` mocks, and live preview through the shared
-`StudentHomeView`. Stage 12.0 remains in REVIEW for visual sign-off. No
-Supabase, Firebase, migration, deploy, commit, or push operation was performed.
+`StudentHomeView`.
+
+Stage 12.1 prepared a local-only admin RBAC/audit migration
+(`20260721184328_admin_rbac_and_audit.sql`), hardened dangerous `users` column
+privileges in that migration, and added the Admin Web Auth/capabilities scaffold.
+Backward-compat preflight confirmed remote drafts `20260609093000_*` and
+`20260609133500_*` are not applied; those files were restored to HEAD, and
+legacy payload protection lives only in the new migration
+(`private.guard_users_self_update` + compatibility column grants).
+The migration was not applied to remote Supabase. Commit/push/deploy were not
+performed in the 12.1 work session. Local runtime SQL role-play remains blocked
+(Docker/Supabase CLI unavailable).
