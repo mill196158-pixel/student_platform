@@ -1642,8 +1642,7 @@ class _PullSearchHostState extends State<_PullSearchHost>
       _pull = 0;
     });
     await _anim.forward();
-    if (!mounted) return;
-    _focus.requestFocus();
+    // Don't autofocus: keyboard only after an intentional tap on the field.
   }
 
   Future<void> _closeSearch() async {
