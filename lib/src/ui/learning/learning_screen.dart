@@ -12,7 +12,6 @@ import 'state/learning_cubit.dart';
 import 'state/learning_state.dart';
 import 'team_details_screen.dart';
 import 'models/team.dart';
-import 'manage/manage_teams_screen.dart';
 import 'widgets/team_avatar.dart';
 
 // ЕДИНЫЙ padding для контента (список и сетка одинаково!)
@@ -132,28 +131,14 @@ class _BodyState extends State<_Body> {
                         tooltip: state.viewMode == ViewMode.grid
                             ? 'Список'
                             : 'Плитка',
-                        icon: Icon(state.viewMode == ViewMode.grid
-                            ? Icons.view_list
-                            : Icons.grid_view_rounded),
+                        icon: Icon(
+                          state.viewMode == ViewMode.grid
+                              ? Icons.view_list
+                              : Icons.grid_view_rounded,
+                          color: Colors.black87,
+                        ),
                         onPressed: () =>
                             context.read<LearningCubit>().toggleViewMode(),
-                      ),
-                      IconButton(
-                        tooltip: 'Управление командами',
-                        icon: const Icon(Icons.settings_outlined),
-                        onPressed: () {
-                          final cubit = context.read<LearningCubit>();
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => BlocProvider.value(
-                                value: cubit,
-                                child: ManageTeamsScreen(
-                                  groupCode: _currentGroupCode,
-                                ),
-                              ),
-                            ),
-                          );
-                        },
                       ),
                     ],
                   ),
@@ -170,7 +155,7 @@ class _BodyState extends State<_Body> {
                     final items = context.read<LearningCubit>().visibleTeams;
 
                     if (items.isEmpty) {
-                      return _EmptyTeams(groupCode: _currentGroupCode);
+                      return const _EmptyTeams();
                     }
 
                     if (state.viewMode == ViewMode.grid) {
@@ -592,7 +577,7 @@ class _AcademicContextInfoButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return IconButton(
       tooltip: 'Учебный контекст',
-      icon: const Icon(Icons.info_outline_rounded),
+      icon: const Icon(Icons.info_outline_rounded, color: Colors.black87),
       onPressed: () => _showAcademicContextSheet(context),
     );
   }
@@ -606,11 +591,17 @@ class _AcademicContextInfoButton extends StatelessWidget {
     final semesterText = loading
         ? '...'
         : (contextData?.currentSemesterNumber?.toString() ?? 'не определён');
+    final recordBookText = loading
+        ? '...'
+        : (contextData?.recordBookNumber?.isNotEmpty == true
+            ? contextData!.recordBookNumber!
+            : 'не указан');
     final warning = contextData?.loadWarning;
 
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
+      backgroundColor: Colors.white,
       builder: (sheetContext) {
         final theme = Theme.of(sheetContext);
         return SafeArea(
@@ -639,20 +630,29 @@ class _AcademicContextInfoButton extends StatelessWidget {
                       child: Text(
                         'Моя учебная группа',
                         style: theme.textTheme.titleMedium?.copyWith(
+                          color: Colors.black,
                           fontWeight: FontWeight.w800,
                         ),
                       ),
                     ),
                   ],
                 ),
+                const SizedBox(height: 12),
+                Text(
+                  'Команды — чаты по предметам вашей учебной группы: обсуждения, файлы и задания в одном месте.',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: Colors.black.withOpacity(0.68),
+                    height: 1.35,
+                  ),
+                ),
                 const SizedBox(height: 16),
                 _AcademicContextLine(label: 'Группа', value: groupText),
                 const SizedBox(height: 8),
                 _AcademicContextLine(label: 'Семестр', value: semesterText),
                 const SizedBox(height: 8),
-                const _AcademicContextLine(
-                  label: 'Источник',
-                  value: 'student_enrollments / group_term_semesters',
+                _AcademicContextLine(
+                  label: '№ зачётки',
+                  value: recordBookText,
                 ),
                 if (warning != null && warning.isNotEmpty) ...[
                   const SizedBox(height: 12),
@@ -692,7 +692,7 @@ class _AcademicContextLine extends StatelessWidget {
           child: Text(
             '$label:',
             style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurface.withOpacity(0.62),
+              color: Colors.black.withOpacity(0.55),
             ),
           ),
         ),
@@ -700,6 +700,7 @@ class _AcademicContextLine extends StatelessWidget {
           child: Text(
             value,
             style: theme.textTheme.bodyMedium?.copyWith(
+              color: Colors.black,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -710,9 +711,7 @@ class _AcademicContextLine extends StatelessWidget {
 }
 
 class _EmptyTeams extends StatelessWidget {
-  final String groupCode;
-
-  const _EmptyTeams({required this.groupCode});
+  const _EmptyTeams();
 
   @override
   Widget build(BuildContext context) {
@@ -741,28 +740,10 @@ class _EmptyTeams extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Добавьте или присоединитесь к команде, чтобы начать работу',
+              'Команды появятся здесь, когда они будут доступны вашей группе',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurface.withOpacity(0.7)),
-            ),
-            const SizedBox(height: 16),
-            OutlinedButton.icon(
-              onPressed: () {
-                final cubit = context.read<LearningCubit>();
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => BlocProvider.value(
-                      value: cubit,
-                      child: ManageTeamsScreen(
-                        groupCode: groupCode,
-                      ),
-                    ),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.settings_outlined),
-              label: const Text('Управление командами'),
             ),
           ],
         ),

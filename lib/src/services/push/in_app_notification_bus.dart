@@ -18,9 +18,7 @@ class InAppNotificationEvent {
   final PushPayload? payload;
 
   bool get isChatMessage =>
-      type == 'dm_message' ||
-      type == 'team_message' ||
-      type == 'team_reply';
+      type == 'dm_message' || type == 'team_message' || type == 'team_reply';
 }
 
 /// App-wide bus so Home (and others) can bump the bell badge / show a snackbar
@@ -37,5 +35,16 @@ class InAppNotificationBus {
   void emit(InAppNotificationEvent event) {
     if (_controller.isClosed) return;
     _controller.add(event);
+  }
+
+  /// Tells badge listeners to reload without showing a visual notification.
+  void requestBadgeRefresh() {
+    emit(
+      const InAppNotificationEvent(
+        type: '_badge_refresh',
+        title: '',
+        body: '',
+      ),
+    );
   }
 }

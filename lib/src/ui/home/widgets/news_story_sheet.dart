@@ -82,7 +82,7 @@ class _NewsStorySheetState extends State<NewsStorySheet> {
                 width: double.infinity,
                 child: FilledButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Понятно'),
+                  child: const Text('Отлично'),
                 ),
               ),
             ],

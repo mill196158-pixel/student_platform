@@ -22,7 +22,19 @@ class DmChatService implements IChatService {
   DmChatService({required this.peerId, String? initialChatId})
       : _chatId = (initialChatId == null || initialChatId.trim().isEmpty)
             ? null
-            : initialChatId.trim();
+            : initialChatId.trim() {
+    final cid = _chatId;
+    if (cid == null) return;
+    final cached = ChatMessageCacheStore.peek(cid);
+    if (cached.found) {
+      _viewState = ChatMessagesViewState(
+        phase: ChatMessagesLoadPhase.refreshing,
+        messages: cached.messages,
+        hasSnapshot: true,
+        hasMoreBefore: cached.hasMoreBefore,
+      );
+    }
+  }
 
   @override
   ChatMode get mode => ChatMode.dm;
@@ -97,10 +109,8 @@ class DmChatService implements IChatService {
     }
     if (_disposed) return;
 
-    final clearedAt = await DmApi.loadClearedAt(cid);
-    await ChatMessageCacheStore.pruneAtOrBefore(cid, clearedAt);
-
-    // Seed from persistent/memory before attaching to DmApi owner stream.
+    // Paint persistent/memory data before any network-dependent clear-boundary
+    // lookup. The server refresh below remains authoritative.
     final snap = await ChatMessageCacheStore.read(cid);
     if (_disposed) return;
     if (snap.found) {
@@ -115,6 +125,20 @@ class DmChatService implements IChatService {
         phase: ChatMessagesLoadPhase.noSnapshot,
         messages: <Message>[],
         hasSnapshot: false,
+      ));
+    }
+
+    final clearedAt = await DmApi.loadClearedAt(cid);
+    final pruned = await ChatMessageCacheStore.pruneAtOrBefore(cid, clearedAt);
+    if (_disposed) return;
+    if (pruned.found &&
+        (pruned.messages.length != _viewState.messages.length ||
+            pruned.clearedAt != snap.clearedAt)) {
+      _setView(ChatMessagesViewState(
+        phase: ChatMessagesLoadPhase.refreshing,
+        messages: pruned.messages,
+        hasSnapshot: true,
+        hasMoreBefore: pruned.hasMoreBefore,
       ));
     }
 
@@ -149,8 +173,8 @@ class DmChatService implements IChatService {
   Future<List<Message>> loadOlderMessages(
       {required Message before, int limit = 50}) async {
     final cid = await ensureChatId();
-    final page =
-        await DmApi.loadOlderMessages(chatId: cid, before: before, limit: limit);
+    final page = await DmApi.loadOlderMessages(
+        chatId: cid, before: before, limit: limit);
     _setView(_viewState.copyWith(hasMoreBefore: page.hasMore));
     return page.messages;
   }

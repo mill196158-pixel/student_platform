@@ -216,21 +216,31 @@ class PushNotificationService {
   Future<void> _onForegroundMessage(RemoteMessage message) async {
     final payload = PushPayload.tryParse(message.data);
     final chatId = payload?.chatId ?? message.data['chat_id']?.toString();
-    if (ActiveChatTracker.instance.isActive(chatId)) {
+    final eventType = payload?.type ?? message.data['type']?.toString() ?? '';
+    final isChatEvent = eventType == 'dm_message' ||
+        eventType == 'team_message' ||
+        eventType == 'team_reply';
+    if (ActiveChatTracker.instance.isActive(chatId) ||
+        (isChatEvent && ActiveChatTracker.instance.isViewingMessages)) {
       return;
     }
 
     final title =
         message.notification?.title ?? payload?.raw['title'] ?? 'Уведомление';
     final body = message.notification?.body ?? payload?.raw['body'] ?? '';
-    final eventType = payload?.type ?? message.data['type']?.toString() ?? '';
 
+    final toastTitle = title.toString();
+    final toastBody = body.toString();
     InAppNotificationBus.instance.emit(
       InAppNotificationEvent(
         type: eventType,
-        title: title.toString(),
-        body: body.toString(),
-        payload: payload,
+        title: toastTitle,
+        body: toastBody,
+        payload: PushNavigation.withDisplayFields(
+          payload,
+          title: toastTitle,
+          body: toastBody,
+        ),
       ),
     );
 

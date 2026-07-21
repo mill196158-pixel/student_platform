@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:student_platform/src/services/image_cache_service.dart';
 import 'package:student_platform/src/ui/chats/data/blocks_api.dart';
 import 'package:student_platform/src/ui/chats/direct_chat_screen.dart';
 import 'package:student_platform/src/ui/learning/state/team_cubit.dart';
@@ -1051,25 +1053,24 @@ class _Header extends StatelessWidget {
     final colorScheme = theme.colorScheme;
     final text = theme.textTheme;
 
-    ImageProvider? avatarProvider;
-    if (avatarUrl != null && avatarUrl!.isNotEmpty) {
-      avatarProvider = NetworkImage(avatarUrl!);
-    }
-
     return Column(
       children: [
-        CircleAvatar(
-          radius: 44,
-          backgroundColor: colorScheme.secondaryContainer,
-          backgroundImage: avatarProvider,
-          child: avatarProvider == null
-              ? Icon(
-                  Icons.person,
-                  size: 44,
-                  color: colorScheme.onSecondaryContainer,
-                )
-              : null,
-        ),
+        if (avatarUrl != null && avatarUrl!.isNotEmpty)
+          ClipOval(
+            child: CachedNetworkImage(
+              imageUrl: avatarUrl!,
+              cacheManager: AppImageCache().manager,
+              width: 88,
+              height: 88,
+              fit: BoxFit.cover,
+              useOldImageOnUrlChange: true,
+              fadeInDuration: const Duration(milliseconds: 160),
+              placeholder: (_, __) => _profileAvatarFallback(colorScheme),
+              errorWidget: (_, __, ___) => _profileAvatarFallback(colorScheme),
+            ),
+          )
+        else
+          _profileAvatarFallback(colorScheme),
         const SizedBox(height: 10),
         Text(
           fullName,
@@ -1101,6 +1102,20 @@ class _Header extends StatelessWidget {
           textAlign: TextAlign.center,
         ),
       ],
+    );
+  }
+
+  Widget _profileAvatarFallback(ColorScheme colorScheme) {
+    return Container(
+      width: 88,
+      height: 88,
+      color: colorScheme.secondaryContainer,
+      alignment: Alignment.center,
+      child: Icon(
+        Icons.person,
+        size: 44,
+        color: colorScheme.onSecondaryContainer,
+      ),
     );
   }
 }
@@ -1413,12 +1428,27 @@ class _Avatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final initials = _initials(name);
+    final fallback = _fallback(initials);
     if (url.isNotEmpty) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(size / 2),
-        child: Image.network(url, width: size, height: size, fit: BoxFit.cover),
+        child: CachedNetworkImage(
+          imageUrl: url,
+          cacheManager: AppImageCache().manager,
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          useOldImageOnUrlChange: true,
+          fadeInDuration: const Duration(milliseconds: 160),
+          placeholder: (_, __) => fallback,
+          errorWidget: (_, __, ___) => fallback,
+        ),
       );
     }
+    return fallback;
+  }
+
+  Widget _fallback(String initials) {
     final color = _seedColor(name);
     return Container(
       width: size,

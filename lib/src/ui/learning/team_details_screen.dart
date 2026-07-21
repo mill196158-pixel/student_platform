@@ -95,7 +95,7 @@ class _BodyState extends State<_Body> with SingleTickerProviderStateMixin {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // В режиме выделения сообщений шапку полностью заменяет floating selection bar внутри чата.
+          // В режиме выделения шапку заменяет TopSelectionBar внутри ChatTab.
           if (!_selecting) ...[
             AnimatedSize(
               duration: const Duration(milliseconds: 180),
@@ -184,7 +184,6 @@ class _BodyState extends State<_Body> with SingleTickerProviderStateMixin {
                 controller: _tabController,
                 children: [
                   AssignmentsTab(team: team),
-                  // Чат сообщает о режиме выделения, шапка исчезает — логика сохранена
                   ChatTab(
                     onSelectingChanged: (v) => setState(() => _selecting = v),
                     readOnly: widget.readOnly,

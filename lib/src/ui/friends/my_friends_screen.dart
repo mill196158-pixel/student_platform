@@ -1,10 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:characters/characters.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:student_platform/src/services/image_cache_service.dart';
+import 'package:student_platform/src/ui/friends/data/friends_snapshot_cache.dart';
 import 'package:student_platform/src/ui/friends/friend_profile_screen.dart';
 import 'package:student_platform/src/ui/chats/direct_chat_screen.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -51,7 +54,20 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
   @override
   void initState() {
     super.initState();
-    _load();
+    final cached = FriendsSnapshotCache.readSync(_currentUserId);
+    if (cached != null) {
+      _applyCachedSnapshot(cached, notify: false);
+    }
+    unawaited(_initialize());
+  }
+
+  String get _currentUserId => _sb.auth.currentUser?.id ?? '';
+
+  Future<void> _initialize() async {
+    if (!_hydrated) {
+      await _hydrateFromCache();
+    }
+    await _load();
   }
 
   @override
@@ -81,13 +97,14 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
       }
 
       await Future.wait([
-        _loadFriends(),
-        _loadClassmates(),
-        _reloadRequestsOnly(),
+        _loadFriends(persistCache: false),
+        _loadClassmates(persistCache: false),
+        _reloadRequestsOnly(persistCache: false),
       ]);
 
       _subscribeRealtime(uid);
 
+      if (!mounted) return;
       setState(() {
         _applyFilter();
         if (_friends.isEmpty && _classmates.isNotEmpty) {
@@ -96,8 +113,10 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
         _loading = false;
         _hydrated = true;
       });
+      unawaited(_saveSnapshot());
     } catch (e) {
       debugPrint('[Friends] load error: $e');
+      if (!mounted) return;
       setState(() {
         _loading = false;
         _hydrated = true;
@@ -107,7 +126,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
 
   // ---------- ДРУЗЬЯ ----------
 
-  Future<void> _loadFriends() async {
+  Future<void> _loadFriends({bool persistCache = true}) async {
     final uid = _sb.auth.currentUser?.id;
     if (uid == null) {
       setState(() => _friends = []);
@@ -129,6 +148,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
           _applyFilter();
         }
       });
+      if (persistCache) unawaited(_saveSnapshot());
     } catch (e) {
       debugPrint('[Friends] get_my_friends_bulk error: $e');
       // Keep previous list on failure so a blip does not look like "no friends".
@@ -211,7 +231,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
         .subscribe();
   }
 
-  Future<void> _loadClassmates() async {
+  Future<void> _loadClassmates({bool persistCache = true}) async {
     final uid = _sb.auth.currentUser?.id;
     if (uid == null) {
       setState(() => _classmates = []);
@@ -225,6 +245,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
           _classmates = rpcRows.map(_friendFromMap).toList();
           _classmatesLoadFailed = false;
         });
+        if (persistCache) unawaited(_saveSnapshot());
         return;
       }
 
@@ -256,6 +277,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
           _classmates = [];
           _classmatesLoadFailed = false;
         });
+        if (persistCache) unawaited(_saveSnapshot());
         return;
       }
 
@@ -277,10 +299,11 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
         _classmates = list;
         _classmatesLoadFailed = false;
       });
+      if (persistCache) unawaited(_saveSnapshot());
     } catch (e) {
       debugPrint('[Friends] load classmates error: $e');
       setState(() {
-        _classmates = [];
+        if (!_hydrated) _classmates = [];
         _classmatesLoadFailed = true;
       });
     }
@@ -412,9 +435,104 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
     );
   }
 
+  Future<void> _hydrateFromCache() async {
+    try {
+      final raw = await FriendsSnapshotCache.read(_currentUserId);
+      if (raw == null || raw.isEmpty || !mounted) return;
+      _applyCachedSnapshot(raw, notify: true);
+    } catch (e) {
+      debugPrint('[Friends] cache read error: $e');
+    }
+  }
+
+  void _applyCachedSnapshot(String raw, {required bool notify}) {
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return;
+      final snapshot = Map<String, dynamic>.from(decoded);
+
+      List<_Friend> decodeList(String key) {
+        final value = snapshot[key];
+        if (value is! List) return const [];
+        return value
+            .whereType<Map>()
+            .map((item) => _friendFromCacheMap(
+                  Map<String, dynamic>.from(item),
+                ))
+            .where((friend) => friend.id.isNotEmpty)
+            .toList();
+      }
+
+      void apply() {
+        _friends = decodeList('friends');
+        _classmates = decodeList('classmates');
+        _requests = decodeList('requests');
+        _applyFilter();
+        if (_friends.isEmpty && _classmates.isNotEmpty) {
+          _activeTab = _FriendsTab.classmates;
+        }
+        _loading = false;
+        _hydrated = true;
+      }
+
+      if (notify) {
+        setState(apply);
+      } else {
+        apply();
+      }
+
+      unawaited(AppImageCache().prefetchUrls([
+        ..._friends.map((friend) => friend.avatarUrl),
+        ..._classmates.map((friend) => friend.avatarUrl),
+        ..._requests.map((friend) => friend.avatarUrl),
+      ]));
+    } catch (e) {
+      debugPrint('[Friends] cache decode error: $e');
+    }
+  }
+
+  Future<void> _saveSnapshot() async {
+    final userId = _currentUserId;
+    if (userId.isEmpty) return;
+    try {
+      final raw = jsonEncode({
+        'friends': _friends.map(_friendToCacheMap).toList(),
+        'classmates': _classmates.map(_friendToCacheMap).toList(),
+        'requests': _requests.map(_friendToCacheMap).toList(),
+      });
+      await FriendsSnapshotCache.write(userId, raw);
+    } catch (e) {
+      debugPrint('[Friends] cache write error: $e');
+    }
+  }
+
+  Map<String, dynamic> _friendToCacheMap(_Friend friend) => {
+        'id': friend.id,
+        'name': friend.name,
+        'surname': friend.surname,
+        'avatar_url': friend.avatarUrl,
+        'status': friend.status,
+        'university': friend.university,
+        'city': friend.city,
+        'group_name': friend.groupName,
+        'is_online': friend.isOnline,
+      };
+
+  _Friend _friendFromCacheMap(Map<String, dynamic> value) => _Friend(
+        id: (value['id'] ?? '').toString(),
+        name: (value['name'] ?? '').toString(),
+        surname: (value['surname'] ?? '').toString(),
+        avatarUrl: (value['avatar_url'] ?? '').toString(),
+        status: (value['status'] ?? '').toString(),
+        university: (value['university'] ?? '').toString(),
+        city: (value['city'] ?? '').toString(),
+        groupName: (value['group_name'] ?? '').toString(),
+        isOnline: value['is_online'] == true,
+      );
+
   // ---------- ЗАЯВКИ ----------
 
-  Future<void> _reloadRequestsOnly() async {
+  Future<void> _reloadRequestsOnly({bool persistCache = true}) async {
     try {
       final uid = _sb.auth.currentUser?.id;
       if (uid == null) {
@@ -428,9 +546,10 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
           : const <Map<String, dynamic>>[];
 
       setState(() => _requests = rows.map(_friendFromMap).toList());
+      if (persistCache) unawaited(_saveSnapshot());
     } catch (e) {
       debugPrint('[Friends] get_my_incoming_friend_requests error: $e');
-      setState(() => _requests = const []);
+      if (!_hydrated) setState(() => _requests = const []);
     }
   }
 
@@ -1208,8 +1327,33 @@ class _BubbleAvatar extends StatelessWidget {
         child: ClipRRect(
           borderRadius: BorderRadius.circular(22),
           child: imageUrl.isNotEmpty
-              ? Image.network(imageUrl,
-                  width: 44, height: 44, fit: BoxFit.cover)
+              ? CachedNetworkImage(
+                  imageUrl: imageUrl,
+                  cacheManager: AppImageCache().manager,
+                  width: 44,
+                  height: 44,
+                  fit: BoxFit.cover,
+                  useOldImageOnUrlChange: true,
+                  fadeInDuration: const Duration(milliseconds: 160),
+                  placeholder: (_, __) => Center(
+                    child: Text(
+                      ch,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 18,
+                      ),
+                    ),
+                  ),
+                  errorWidget: (_, __, ___) => Center(
+                    child: Text(
+                      ch,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 18,
+                      ),
+                    ),
+                  ),
+                )
               : Text(ch,
                   style: const TextStyle(
                       fontWeight: FontWeight.w800, fontSize: 18)),

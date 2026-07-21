@@ -163,8 +163,10 @@ class HomeDashboardService {
     try {
       final assignments = await _learningRepository.loadAssignments(team.id);
       return assignments
-          .where(
-              (assignment) => assignment.published && !assignment.completedByMe)
+          .where((assignment) =>
+              assignment.published &&
+              !assignment.completedByMe &&
+              assignment.subjectOfferingId?.trim().isNotEmpty == true)
           .map(
             (assignment) => HomeAssignmentPreview(
               assignment: assignment,

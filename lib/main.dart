@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 // import 'package:get_storage/get_storage.dart'; // Временно отключено
@@ -24,6 +25,7 @@ import 'src/ui/exams/exams_screen.dart';
 import 'src/ui/schedule/subject_diary/subject_diary.dart';
 import 'src/ui/notifications/notification_settings_screen.dart';
 import 'src/ui/notifications/push_session_host.dart';
+import 'src/ui/notifications/in_app_toast_host.dart';
 import 'src/config/supabase_config.dart';
 import 'src/core/session_keeper.dart';
 import 'src/services/push/push_notification_service.dart';
@@ -31,6 +33,9 @@ import 'src/navigation/root_nav.dart';
 import 'router_observer.dart';
 import 'src/ui/learning/state/team_cubit.dart';
 import 'src/ui/learning/models/team.dart';
+import 'src/ui/chats/core/chat_message_cache_store.dart';
+import 'src/ui/chats/data/chat_summaries_cache.dart';
+import 'src/ui/friends/data/friends_snapshot_cache.dart';
 
 /// ===== GoRouter =====
 final GoRouter appRouter = GoRouter(
@@ -80,6 +85,10 @@ final GoRouter appRouter = GoRouter(
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+  ]);
+
   // Временно отключаем GetStorage для избежания ошибок
   // await GetStorage.init('student_platform');
 
@@ -96,8 +105,14 @@ Future<void> main() async {
   PushNotificationService.instance.bindNavigatorKey(rootNavigatorKey);
   await PushNotificationService.instance.bootstrapFirebase();
 
-  // Инициализируем глобальный кэш
-  await GlobalCache().initialize();
+  // Поднимаем локальные данные до первого кадра: после холодного старта чаты
+  // и друзья сразу рисуются из дискового кэша, сеть обновляет их в фоне.
+  await Future.wait([
+    GlobalCache().initialize(),
+    ChatMessageCacheStore.initializeCurrentUser(),
+    ChatSummariesCache.initializeCurrentUser(),
+    FriendsSnapshotCache.initializeCurrentUser(),
+  ]);
 
   // Подключаем серверную реализацию дневника предмета
   SubjectDiaryRepository.instance = SubjectDiaryRepositorySupabase();
@@ -133,6 +148,9 @@ class StudentPlatformApp extends StatelessWidget {
           darkTheme: AppTheme.dark().data,
           themeMode: themeService.getThemeMode(),
           routerConfig: appRouter,
+          builder: (context, child) => InAppToastHost(
+            child: child ?? const SizedBox.shrink(),
+          ),
 
           // Локализация
           locale: const Locale('ru', 'RU'),

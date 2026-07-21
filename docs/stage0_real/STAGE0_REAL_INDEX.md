@@ -655,3 +655,79 @@ Verification:
 - `dart format lib/src/ui/chats/direct_chat_info_screen.dart lib/src/ui/friends/friend_profile_screen.dart` passed;
 - focused analyze for both changed screens was run and reported no new compile errors, with pre-existing `FriendProfileScreen` warnings/infos still present;
 - full `flutter analyze` was run and still reports pre-existing project diagnostics outside this change, including `lib/src/ui/schedule/diary_entry_details_screen.dart`.
+
+## Home And Personal Diary Assignment Consistency
+
+Live data for student `24002820` confirmed three published team assignments, but only two belong to current-semester `subject_offerings`. The extra `ТЕСТ` assignment is legacy data with null `subject_offering_id`, `subject_id`, `group_id`, and semester fields.
+
+`Мой дневник` correctly excludes unlinked assignments. The Home dashboard now applies the same minimum academic-link rule and shows only published, incomplete assignments with a non-empty `subject_offering_id`. No Supabase data or schema was changed.
+
+## Teacher Profile UI
+
+Schedule lesson details and subject information now open a dedicated read-only teacher profile:
+
+- screen: `lib/src/ui/info/teacher_profile_screen.dart`;
+- available data: teacher name from the lesson/team, current subject, semester, and department when present;
+- no teacher photo is used; the profile uses generated initials;
+- difficulty shows an explicit no-ratings state;
+- student comments remain disabled until moderation exists;
+- live `teachers` and `offering_teachers` tables were checked and currently contain no rows.
+
+No Supabase schema, RLS, teacher rows, ratings, or comments were created.
+
+## Teacher Difficulty Avatars And Ratings
+
+The teacher profile follow-up replaced generated initials with six original comic-style difficulty avatars:
+
+- unknown: `Гость из мультивселенной`;
+- levels 1-5: `Дружелюбный сосед`, `Защитник студентов`, `Маг дедлайнов`, `Железный экзаменатор`, and `Титан сессии`;
+- assets: `assets/images/teacher_difficulty/`;
+- the avatar is selected from the aggregate difficulty score; no votes still shows the unknown character.
+
+Live Supabase now has an RLS-protected rating model:
+
+- `teacher_difficulty_targets`;
+- `teacher_difficulty_votes`;
+- `teacher_difficulty_summaries`;
+- one mutable 1-5 vote per authenticated user and teacher;
+- only the user's own vote is readable; aggregate summaries expose no voter identities;
+- four real schedule/team teacher names were loaded; test teacher names were excluded.
+
+Comments remain disabled until moderation exists.
+
+## Teacher Rating Scale And Header UX
+
+The teacher profile rating now uses an unambiguous ease scale:
+
+- 1 star means very hard to pass;
+- 5 stars means easy to pass;
+- the compact rating action is in the teacher hero/header;
+- the separate large rating card was removed;
+- the hero was lifted and compacted;
+- difficulty images now use a common centered layout without per-character shifts;
+- the subject difficulty remains a separate placeholder and is not persisted yet.
+
+Migration `20260721105759_teacher_rating_five_means_easy.sql` converted the two
+existing votes with `score = 5` to `score = 1`, preserving their meaning from the
+former scale. Aggregate summaries were verified consistent after the migration.
+
+## Teacher Profile Edge-To-Edge Header
+
+The teacher profile now follows the direct-chat info header layout:
+
+- the gradient hero starts at the physical top edge of the screen;
+- the status-bar safe inset is handled inside the hero;
+- the avatar, name, rating, and rating action stay in one top header;
+- lower subject/review cards keep their normal horizontal margins;
+- the old elevated circular back button was replaced by the shared-style
+  transparent 48x48 back target with a 24px arrow.
+
+The avatar follow-up removed the white inner ring, applies a common 1.16 image
+scale for fuller circular crops, and moves the avatar start from
+`safeAreaTop + 50` to `safeAreaTop + 8`. This lifts the complete hero content
+while keeping the back button independently tappable.
+
+Teacher rating saves now also publish an in-process revision notification.
+Mounted `TeacherDifficultyAvatar` widgets listen for it and reload from the
+updated cache, so the lesson teacher card changes immediately before navigation
+returns to it.

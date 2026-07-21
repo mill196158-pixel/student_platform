@@ -8,7 +8,6 @@ import '../learning/learning_screen.dart';
 import '../schedule/schedule_screen.dart';
 import '../profile/profile_screen.dart';
 import '../chats/data/chat_warm_coordinator.dart';
-import '../notifications/in_app_toast_host.dart';
 import '../../services/presence/user_presence.dart';
 import '../../themes/theme_service.dart';
 import 'main_tab_scope.dart';
@@ -63,45 +62,42 @@ class _NavigationScreenState extends State<NavigationScreen> {
       value: overlay,
       child: MainTabScope(
         switchTo: _switchToTab,
-        child: InAppToastHost(
-          child: Scaffold(
-            extendBody: false,
-            body: PageStorage(
-              bucket: _bucket,
-              child: IndexedStack(
-                index: _currentIndex,
-                children: [
-                  _tab(active: _currentIndex == 0, child: _tabs[0]),
-                  _tab(active: _currentIndex == 1, child: _tabs[1]),
-                  _tab(active: _currentIndex == 2, child: _tabs[2]),
-                  _tab(active: _currentIndex == 3, child: _tabs[3]),
-                  _tab(
-                    active: _currentIndex == 4,
-                    child: _KeepAlive(
-                      storageKey: 'tab_profile',
-                      child: ProfileScreen(activeListenable: _profileActive),
-                    ),
+        child: Scaffold(
+          extendBody: false,
+          body: PageStorage(
+            bucket: _bucket,
+            child: IndexedStack(
+              index: _currentIndex,
+              children: [
+                _tab(active: _currentIndex == 0, child: _tabs[0]),
+                _tab(active: _currentIndex == 1, child: _tabs[1]),
+                _tab(active: _currentIndex == 2, child: _tabs[2]),
+                _tab(active: _currentIndex == 3, child: _tabs[3]),
+                _tab(
+                  active: _currentIndex == 4,
+                  child: _KeepAlive(
+                    storageKey: 'tab_profile',
+                    child: ProfileScreen(activeListenable: _profileActive),
                   ),
-                ],
-              ),
-            ),
-            bottomNavigationBar: ModernBottomNav(
-              currentIndex: _currentIndex,
-              items: const [
-                ModernBottomNavItem(icon: Icons.home_rounded, label: 'Главная'),
-                ModernBottomNavItem(
-                    icon: Icons.info_outline_rounded, label: 'Инфо'),
-                ModernBottomNavItem(
-                    icon: Icons.menu_book_rounded, label: 'Обучение'),
-                ModernBottomNavItem(
-                    icon: Icons.calendar_today_rounded, label: 'Расписание'),
-                ModernBottomNavItem(
-                    icon: Icons.person_rounded, label: 'Профиль'),
+                ),
               ],
-              onTap: (index) {
-                _switchToTab(MainTab.values[index]);
-              },
             ),
+          ),
+          bottomNavigationBar: ModernBottomNav(
+            currentIndex: _currentIndex,
+            items: const [
+              ModernBottomNavItem(icon: Icons.home_rounded, label: 'Главная'),
+              ModernBottomNavItem(
+                  icon: Icons.info_outline_rounded, label: 'Инфо'),
+              ModernBottomNavItem(
+                  icon: Icons.menu_book_rounded, label: 'Обучение'),
+              ModernBottomNavItem(
+                  icon: Icons.calendar_today_rounded, label: 'Расписание'),
+              ModernBottomNavItem(icon: Icons.person_rounded, label: 'Профиль'),
+            ],
+            onTap: (index) {
+              _switchToTab(MainTab.values[index]);
+            },
           ),
         ),
       ),

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../info/subject_info_screen.dart';
+import '../info/teacher_profile_screen.dart';
 import 'models/lesson.dart';
 import 'subject_diary/subject_diary.dart';
 import 'subject_diary_screen.dart';
@@ -54,6 +55,10 @@ class LessonDetailsScreen extends StatelessWidget {
                   value: dateWithWeekday,
                 ),
 
+                // Информация о предмете — 3-я позиция в списке
+                _SubjectLinkCard(lesson: lesson),
+                const SizedBox(height: 10),
+
                 // Время
                 _Info(
                   icon: Icons.schedule_outlined,
@@ -70,11 +75,7 @@ class LessonDetailsScreen extends StatelessWidget {
 
                 // Преподаватель
                 if ((lesson.teacher ?? '').isNotEmpty)
-                  _Info(
-                    icon: Icons.person_outline,
-                    title: 'Преподаватель',
-                    value: lesson.teacher!,
-                  ),
+                  _TeacherLinkCard(lesson: lesson),
 
                 // Аудитория + кнопка «На карте»
                 if (hasRoom)
@@ -90,10 +91,6 @@ class LessonDetailsScreen extends StatelessWidget {
                   ),
 
                 const SizedBox(height: 14),
-
-                _SubjectLinkCard(lesson: lesson),
-
-                const SizedBox(height: 10),
 
                 // Облачка действий
                 _ActionCloud(
@@ -141,7 +138,8 @@ class LessonDetailsScreen extends StatelessWidget {
                                 legacySubjectKey: lesson.subject.trim(),
                               ),
                             )
-                          : SubjectDiaryScreen(subjectKey: lesson.subject.trim()),
+                          : SubjectDiaryScreen(
+                              subjectKey: lesson.subject.trim()),
                     ),
                   ),
                 ),
@@ -373,6 +371,81 @@ class _Info extends StatelessWidget {
   }
 }
 
+class _TeacherLinkCard extends StatelessWidget {
+  final Lesson lesson;
+
+  const _TeacherLinkCard({required this.lesson});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => TeacherProfileScreen(
+            teacherName: lesson.teacher!,
+            subjectTitle: lesson.subject,
+            semesterNumber: lesson.semesterNumber,
+          ),
+        ),
+      ),
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.06),
+              blurRadius: 12,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            TeacherDifficultyAvatar(
+              teacherName: lesson.teacher!,
+              size: 38,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Преподаватель',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: Colors.black.withValues(alpha: 0.55),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    lesson.teacher!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: Colors.black,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: Colors.black38,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Строка "Аудитория": значение + «На карте» (если разрешено)
 class _RoomInfo extends StatelessWidget {
   final String value;
@@ -433,16 +506,19 @@ class _RoomInfo extends StatelessWidget {
                       const SizedBox(width: 10),
                       FilledButton.icon(
                         onPressed: onOpenMap,
-                        icon: const Icon(Icons.map_outlined, size: 18),
+                        icon: const Icon(Icons.map_outlined, size: 16),
                         label: const Text('На карте'),
                         style: FilledButton.styleFrom(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 10),
-                          minimumSize: const Size(0, 36),
+                            horizontal: 10,
+                            vertical: 7,
+                          ),
+                          minimumSize: const Size(0, 32),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          visualDensity: VisualDensity.compact,
                           shape: const StadiumBorder(),
-                          textStyle: theme.textTheme.labelMedium?.copyWith(
+                          textStyle: theme.textTheme.labelSmall?.copyWith(
                             fontWeight: FontWeight.w800,
-                            letterSpacing: .2,
                           ),
                           elevation: 1,
                         ),
@@ -693,7 +769,14 @@ class _MapSpbgasuInlineScreenState extends State<_MapSpbgasuInlineScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Карта СПБГАСУ')),
+      appBar: AppBar(
+        leadingWidth: 64,
+        leading: const Padding(
+          padding: EdgeInsets.only(left: 12),
+          child: _RoundBackButton(),
+        ),
+        title: const Text('Карта СПБГАСУ'),
+      ),
       body: Stack(
         children: [
           WebViewWidget(controller: _controller),

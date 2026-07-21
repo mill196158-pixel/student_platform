@@ -686,36 +686,53 @@ class _ChatMessageInteractionWrapper extends StatelessWidget {
           children: [
             if (applyHighlight)
               Positioned.fill(
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 140),
-                  margin: EdgeInsets.only(
-                    left: isMine ? 44 : 0,
-                    right: isMine ? 0 : 44,
-                  ),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primary.withValues(
-                      alpha: isSelected ? 0.075 : 0.045,
+                child: IgnorePointer(
+                  child: Padding(
+                    padding: selectingMessages
+                        ? const EdgeInsets.fromLTRB(6, 3, 8, 3)
+                        : EdgeInsets.only(
+                            left: isMine ? 44 : 0,
+                            right: isMine ? 0 : 44,
+                          ),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.primary.withValues(
+                          alpha: isSelected
+                              ? 0.16
+                              : (selectingMessages ? 0.04 : 0.045),
+                        ),
+                        borderRadius: BorderRadius.circular(
+                          selectingMessages ? 22 : 20,
+                        ),
+                      ),
                     ),
-                    borderRadius: BorderRadius.circular(20),
                   ),
                 ),
               ),
-            IgnorePointer(
-              ignoring: selectingMessages,
-              child: child,
+            Padding(
+              padding: EdgeInsets.only(left: selectingMessages ? 40 : 0),
+              child: IgnorePointer(
+                ignoring: selectingMessages,
+                child: child,
+              ),
             ),
             if (selectingMessages)
               Positioned(
-                top: 6,
-                left: isMine ? null : 8,
-                right: isMine ? 8 : null,
-                child: _SelectionIndicator(
-                  selected: isSelected,
+                left: 10,
+                top: 0,
+                bottom: hasReactions ? 10 : 0,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: _SelectionIndicator(
+                    selected: isSelected,
+                  ),
                 ),
               ),
             if (hasReactions)
               Positioned(
-                left: reactionLeft,
+                left: selectingMessages && reactionLeft != null
+                    ? reactionLeft! + 40
+                    : reactionLeft,
                 right: reactionRight,
                 bottom: -10,
                 child: fcr.StackedReactions(
@@ -1074,42 +1091,26 @@ class _SelectionIndicator extends StatelessWidget {
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 140),
-      width: 24,
-      height: 24,
+      width: 22,
+      height: 22,
       decoration: BoxDecoration(
-        color:
-            selected ? scheme.primary : scheme.surface.withValues(alpha: .96),
+        color: selected ? scheme.primary : Colors.transparent,
         shape: BoxShape.circle,
         border: Border.all(
           color: selected
               ? scheme.primary
-              : scheme.outlineVariant.withValues(alpha: .8),
-          width: 1.2,
+              : scheme.onSurface.withValues(alpha: 0.35),
+          width: 1.6,
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.12),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
       ),
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 120),
-        child: selected
-            ? const Icon(
-                Icons.check_rounded,
-                key: ValueKey('selected'),
-                color: Colors.white,
-                size: 17,
-              )
-            : Icon(
-                Icons.circle_outlined,
-                key: ValueKey('empty'),
-                color: scheme.onSurfaceVariant.withValues(alpha: .45),
-                size: 14,
-              ),
-      ),
+      alignment: Alignment.center,
+      child: selected
+          ? const Icon(
+              Icons.check_rounded,
+              color: Colors.white,
+              size: 15,
+            )
+          : const SizedBox.shrink(),
     );
   }
 }

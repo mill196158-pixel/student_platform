@@ -2497,7 +2497,7 @@ class _AssignmentDiaryCard extends StatelessWidget {
                           : Icons.check_circle_outline_rounded,
                       size: 18,
                     ),
-                    label: Text(done ? 'Снять' : 'Выполнить'),
+                    label: Text(done ? 'Не выполнено' : 'Выполнить'),
                   ),
                 ],
               ),

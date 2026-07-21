@@ -5,6 +5,7 @@ import '../learning/models/team.dart';
 import '../learning/team_details_screen.dart';
 import '../schedule/subject_diary/subject_diary.dart';
 import '../schedule/subject_diary_screen.dart';
+import 'teacher_profile_screen.dart';
 
 class SubjectInfoScreen extends StatefulWidget {
   final String title;
@@ -344,6 +345,8 @@ class _SubjectInfoData {
     return _cleanHumanText(teacherName) ?? 'Преподаватель будет указан позже.';
   }
 
+  bool get hasTeacher => _cleanHumanText(teacherName) != null;
+
   List<String> get heroDetails {
     return [
       if (semesterNumber != null) '$semesterNumber-й семестр',
@@ -680,50 +683,76 @@ class _TeacherCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return _ContentCard(
-      icon: Icons.person_outline_rounded,
-      title: 'Преподаватель',
-      child: Row(
-        children: [
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: const Color(0xFF6A4BBC).withValues(alpha: 0.10),
-            ),
-            child: const Icon(Icons.person_outline_rounded,
-                color: Color(0xFF6A4BBC)),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  data.displayTeacherName,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: Colors.black,
-                    fontWeight: FontWeight.w900,
-                    height: 1.12,
+    return InkWell(
+      onTap: data.hasTeacher
+          ? () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => TeacherProfileScreen(
+                    teacherName: data.teacherName,
+                    subjectTitle: data.displayTitle,
+                    department: data.department,
+                    semesterNumber: data.semesterNumber,
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  'Преподаватель',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: Colors.black54,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                const _MiniStatusPill(text: 'Сложность сдачи: пока нет данных'),
-              ],
+              )
+          : null,
+      borderRadius: BorderRadius.circular(24),
+      child: _ContentCard(
+        icon: Icons.person_outline_rounded,
+        title: 'Преподаватель',
+        child: Row(
+          children: [
+            Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: const Color(0xFF6A4BBC).withValues(alpha: 0.10),
+              ),
+              child: const Icon(
+                Icons.person_outline_rounded,
+                color: Color(0xFF6A4BBC),
+              ),
             ),
-          ),
-        ],
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    data.displayTeacherName,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: Colors.black,
+                      fontWeight: FontWeight.w900,
+                      height: 1.12,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    data.hasTeacher ? 'Открыть профиль' : 'Преподаватель',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: Colors.black54,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const _MiniStatusPill(
+                    text: 'Сложность сдачи: пока нет данных',
+                  ),
+                ],
+              ),
+            ),
+            if (data.hasTeacher) ...[
+              const SizedBox(width: 8),
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: Colors.black38,
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

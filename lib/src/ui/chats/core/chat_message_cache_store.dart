@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -20,6 +19,7 @@ class ChatMessageCacheStore {
 
   static final Map<String, ChatCacheSnapshot> _memory = {};
   static SharedPreferences? _prefsOverride;
+  static SharedPreferences? _prefs;
 
   /// Test hook: inject prefs (or clear with null).
   static void debugSetPrefs(SharedPreferences? prefs) {
@@ -45,6 +45,34 @@ class ChatMessageCacheStore {
     }
   }
 
+  /// Decode this user's persistent message envelopes before the first frame.
+  ///
+  /// This lets a service created with an initial chat id synchronously seed its
+  /// first view state instead of briefly rendering an empty/loading chat.
+  static Future<void> initializeCurrentUser() async {
+    try {
+      final prefs = _prefsOverride ?? await SharedPreferences.getInstance();
+      _prefs = prefs;
+      final uid = _resolveUserId(null);
+      if (uid == null) return;
+      final keyPrefix = '$_prefsPrefix${uid}_';
+      for (final prefsKey in prefs.getKeys()) {
+        if (!prefsKey.startsWith(keyPrefix)) continue;
+        final raw = prefs.getString(prefsKey);
+        if (raw == null || raw.isEmpty) continue;
+        final decoded = jsonDecode(raw);
+        if (decoded is! Map) continue;
+        final envelope = Map<String, dynamic>.from(decoded);
+        final chatId = (envelope['chatId'] ?? '').toString();
+        if (chatId.isEmpty) continue;
+        final snap = _fromEnvelope(envelope, uid);
+        if (snap.found) {
+          _memory[_memKey(uid, chatId)] = snap;
+        }
+      }
+    } catch (_) {}
+  }
+
   /// Sync memory lookup. Empty list with [ChatCacheSnapshot.found] is a hit.
   static bool hasSnapshot(String chatId, {String? userId}) {
     final uid = _resolveUserId(userId);
@@ -55,7 +83,24 @@ class ChatMessageCacheStore {
   static ChatCacheSnapshot peek(String chatId, {String? userId}) {
     final uid = _resolveUserId(userId);
     if (uid == null || chatId.isEmpty) return ChatCacheSnapshot.notFound;
-    return _memory[_memKey(uid, chatId)] ?? ChatCacheSnapshot.notFound;
+    final key = _memKey(uid, chatId);
+    final memory = _memory[key];
+    if (memory != null) return memory;
+
+    // SharedPreferences is fully memory-backed after initialization, so this
+    // remains synchronous even for a user who signed in after app startup.
+    final prefs = _prefsOverride ?? _prefs;
+    final raw = prefs?.getString(_prefsKey(uid, chatId));
+    if (raw == null || raw.isEmpty) return ChatCacheSnapshot.notFound;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return ChatCacheSnapshot.notFound;
+      final snap = _fromEnvelope(Map<String, dynamic>.from(decoded), uid);
+      if (snap.found) _memory[key] = snap;
+      return snap;
+    } catch (_) {
+      return ChatCacheSnapshot.notFound;
+    }
   }
 
   static List<Message> messagesSync(String chatId, {String? userId}) {
@@ -68,11 +113,13 @@ class ChatMessageCacheStore {
     if (uid == null || chatId.isEmpty) return ChatCacheSnapshot.notFound;
 
     final key = _memKey(uid, chatId);
-    final mem = _memory[key];
-    if (mem != null && mem.found) return mem;
+    final cached = peek(chatId, userId: uid);
+    if (cached.found) return cached;
 
     try {
-      final prefs = _prefsOverride ?? await SharedPreferences.getInstance();
+      final prefs =
+          _prefsOverride ?? _prefs ?? await SharedPreferences.getInstance();
+      _prefs ??= prefs;
       final raw = prefs.getString(_prefsKey(uid, chatId));
       if (raw == null || raw.isEmpty) return ChatCacheSnapshot.notFound;
 
@@ -114,7 +161,7 @@ class ChatMessageCacheStore {
       clearedAt: clearedAt,
     );
     _memory[_memKey(uid, chatId)] = snap;
-    unawaited(_persist(uid, chatId, snap));
+    await _persist(uid, chatId, snap);
     return snap;
   }
 
@@ -284,7 +331,9 @@ class ChatMessageCacheStore {
     if (uid == null || chatId.isEmpty) return;
     _memory.remove(_memKey(uid, chatId));
     try {
-      final prefs = _prefsOverride ?? await SharedPreferences.getInstance();
+      final prefs =
+          _prefsOverride ?? _prefs ?? await SharedPreferences.getInstance();
+      _prefs ??= prefs;
       await prefs.remove(_prefsKey(uid, chatId));
     } catch (_) {}
   }
@@ -308,7 +357,9 @@ class ChatMessageCacheStore {
   /// Remove all versioned prefs envelopes (all users on this device).
   static Future<void> clearAllPersistent() async {
     try {
-      final prefs = _prefsOverride ?? await SharedPreferences.getInstance();
+      final prefs =
+          _prefsOverride ?? _prefs ?? await SharedPreferences.getInstance();
+      _prefs ??= prefs;
       final keys =
           prefs.getKeys().where((k) => k.startsWith(_prefsPrefix)).toList();
       for (final key in keys) {
@@ -329,7 +380,9 @@ class ChatMessageCacheStore {
     ChatCacheSnapshot snap,
   ) async {
     try {
-      final prefs = _prefsOverride ?? await SharedPreferences.getInstance();
+      final prefs =
+          _prefsOverride ?? _prefs ?? await SharedPreferences.getInstance();
+      _prefs ??= prefs;
       await prefs.setString(
         _prefsKey(userId, chatId),
         jsonEncode(_toEnvelope(userId, chatId, snap)),

@@ -116,19 +116,32 @@ class PushNavigation {
     return null;
   }
 
+  /// Resolve peer display name/avatar.
+  ///
+  /// Direct `users` SELECT is blocked by RLS for other people — only self rows
+  /// are readable. Use SECURITY DEFINER `get_user_profile` instead.
   static Future<({String name, String? avatar})> resolvePeerProfile(
     String peerId,
   ) async {
+    if (peerId.trim().isEmpty) {
+      return (name: kDmTitleFallback, avatar: null);
+    }
     try {
-      final row = await Supabase.instance.client
-          .from('users')
-          .select('name, surname, avatar_url')
-          .eq('id', peerId)
-          .maybeSingle();
+      final res = await Supabase.instance.client.rpc(
+        'get_user_profile',
+        params: {'p_id': peerId},
+      );
+      Map<String, dynamic>? row;
+      if (res is List && res.isNotEmpty) {
+        row = Map<String, dynamic>.from(res.first as Map);
+      } else if (res is Map) {
+        row = Map<String, dynamic>.from(res);
+      }
       if (row != null) {
         final name = (row['name'] ?? '').toString().trim();
         final surname = (row['surname'] ?? '').toString().trim();
-        final full = [name, surname].where((s) => s.isNotEmpty).join(' ').trim();
+        final full =
+            [name, surname].where((s) => s.isNotEmpty).join(' ').trim();
         final avatar = (row['avatar_url'] as String?)?.trim();
         return (
           name: normalizeDmTitle(full),
@@ -137,6 +150,22 @@ class PushNavigation {
       }
     } catch (_) {}
     return (name: kDmTitleFallback, avatar: null);
+  }
+
+  /// Copy [title]/[body] into payload data so open-from-toast can use the
+  /// already-shown name without waiting on a second profile fetch.
+  static PushPayload? withDisplayFields(
+    PushPayload? payload, {
+    String? title,
+    String? body,
+  }) {
+    if (payload == null) return null;
+    final raw = Map<String, String>.from(payload.raw);
+    final t = title?.trim();
+    final b = body?.trim();
+    if (t != null && t.isNotEmpty) raw['title'] = t;
+    if (b != null && b.isNotEmpty) raw['body'] = b;
+    return PushPayload.tryParse(raw) ?? payload;
   }
 
   static Future<void> _openDm(BuildContext context, PushPayload payload) async {

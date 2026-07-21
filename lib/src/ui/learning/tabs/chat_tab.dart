@@ -39,6 +39,7 @@ import '../../chats/forward/forward_outbox.dart';
 import '../../chats/forward/forward_picker.dart';
 import '../../chats/forward/forward_pick_nav.dart';
 import '../../../services/push/active_chat_tracker.dart';
+import '../../../services/push/app_notifications_api.dart';
 import '../../../utils/safe_debug_log.dart';
 import '../utils/chat_copied_file_cache.dart';
 
@@ -174,6 +175,118 @@ class _ChatTabState extends State<ChatTab> {
     final uid = Supabase.instance.client.auth.currentUser?.id;
     if (uid == null || uid.isEmpty || m.authorId != uid) return false;
     return DateTime.now().difference(m.at) <= const Duration(hours: 12);
+  }
+
+  void _exitSelection() {
+    _selectedMessageIds.clear();
+    _setSelecting(false);
+  }
+
+  void _showSelectionSnack(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  List<Message> _selectedMessagesFrom(List<Message> list) {
+    return list.where((m) => _selectedMessageIds.contains(m.id)).toList()
+      ..sort((a, b) => a.at.compareTo(b.at));
+  }
+
+  bool _canCopySelected(List<Message> selected) {
+    if (selected.isEmpty) return false;
+    if (selected.any((m) => m.text.trim().isNotEmpty)) return true;
+    if (selected.length == 1 &&
+        (selected.first.attachments?.isNotEmpty ?? false)) {
+      return true;
+    }
+    return false;
+  }
+
+  Future<void> _copySelectedMessages(List<Message> selected) async {
+    if (selected.isEmpty) {
+      _showSelectionSnack('Нечего копировать');
+      return;
+    }
+    if (selected.length == 1) {
+      try {
+        await ca.ChatActions.copyMessageToClipboard(selected.first);
+        _showSelectionSnack('Скопировано');
+      } catch (_) {
+        _showSelectionSnack('Не удалось скопировать');
+      }
+      return;
+    }
+    final text = selected
+        .map((m) => m.text.trim())
+        .where((t) => t.isNotEmpty)
+        .join('\n\n');
+    if (text.isEmpty) {
+      _showSelectionSnack('Нечего копировать');
+      return;
+    }
+    await services.Clipboard.setData(services.ClipboardData(text: text));
+    _showSelectionSnack('Скопировано');
+  }
+
+  Future<void> _deleteSelectedMessages(List<Message> selected) async {
+    final deletable = selected.where(_canDeleteMessage).toList();
+    if (deletable.isEmpty) {
+      _showSelectionSnack(
+        'Удалить можно только свои сообщения не старше 12 часов',
+      );
+      return;
+    }
+
+    final count = deletable.length;
+    final skipped = selected.length - count;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final cs = Theme.of(ctx).colorScheme;
+        return AlertDialog(
+          title: Text(count == 1 ? 'Удалить сообщение?' : 'Удалить сообщения?'),
+          content: Text(
+            skipped > 0
+                ? 'Будет удалено $count из ${selected.length}. Остальные нельзя удалить.'
+                : (count == 1
+                    ? 'Сообщение будет удалено для всех.'
+                    : 'Будет удалено сообщений: $count.'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Отмена'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: TextButton.styleFrom(foregroundColor: cs.error),
+              child: const Text('Удалить'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true || !mounted) return;
+
+    for (final m in deletable) {
+      try {
+        await context.read<TeamCubit>().removeMessage(m.id);
+      } catch (_) {
+        if (!mounted) return;
+        _showSelectionSnack('Не удалось удалить сообщение');
+        return;
+      }
+    }
+    if (!mounted) return;
+    _exitSelection();
+  }
+
+  Future<void> _forwardSelectedMessages(List<Message> selected) async {
+    if (selected.isEmpty) return;
+    _exitSelection();
+    await _startForwardSelection(selected);
   }
 
   bool _canEditMessage(Message m) => canEditOwnTextMessage(
@@ -620,6 +733,13 @@ class _ChatTabState extends State<ChatTab> {
       if (chatId.isEmpty) return; // ← NEW safeguard
       await _repo.markRead(chatId: chatId, messageId: lastMsgId);
       _lastMarkedReadId = lastMsgId;
+      try {
+        await AppNotificationsApi().markReadForChat(chatId);
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('[ChatTab] notification read sync error: $e');
+        }
+      }
     } catch (e) {
       if (kDebugMode) debugPrint('[ChatTab] markRead error: $e');
     }
@@ -1529,6 +1649,11 @@ class _ChatTabState extends State<ChatTab> {
 
           return Column(
             children: [
+              if (_selectingMessages)
+                TopSelectionBar(
+                  count: _selectedMessageIds.length,
+                  onClose: _exitSelection,
+                ),
               if (readOnly)
                 Material(
                   color: Theme.of(context)
@@ -1602,8 +1727,7 @@ class _ChatTabState extends State<ChatTab> {
                       _search.setActive(false);
                     }
                     if (_selectingMessages) {
-                      _selectedMessageIds.clear();
-                      _setSelecting(false);
+                      _exitSelection();
                     }
                   },
                   child: Stack(
@@ -1708,69 +1832,10 @@ class _ChatTabState extends State<ChatTab> {
                             ),
                           ),
                         ),
-                      // внутренние действия бабла уже выключены в списке; отдельный overlay не нужен
-
-                      // Верхняя панель выбора (полноширинная)
-                      if (_selectingMessages)
-                        Positioned(
-                          top: 0,
-                          left: 0,
-                          right: 0,
-                          child: TopSelectionBar(
-                            count: _selectedMessageIds.length,
-                            onCancel: () {
-                              _selectedMessageIds.clear();
-                              _setSelecting(false);
-                            },
-                          ),
-                        ),
-
-                      // Нижняя панель действий (переслать / удалить) в самом низу
-                      if (_selectingMessages)
-                        Positioned(
-                          left: 0,
-                          right: 0,
-                          bottom: 0,
-                          child: Builder(builder: (ctx2) {
-                            final selected = state.chat
-                                .where(
-                                    (m) => _selectedMessageIds.contains(m.id))
-                                .toList();
-                            final canDeleteAll = selected.isNotEmpty &&
-                                selected.every(_canDeleteMessage);
-                            return BottomSelectionBar(
-                              onForward: _selectedMessageIds.isEmpty
-                                  ? null
-                                  : () async {
-                                      final sel = state.chat
-                                          .where((m) => _selectedMessageIds
-                                              .contains(m.id))
-                                          .toList()
-                                        ..sort((a, b) => a.at.compareTo(b.at));
-                                      _selectedMessageIds.clear();
-                                      _setSelecting(false);
-                                      await _startForwardSelection(sel);
-                                    },
-                              onDelete: (!canDeleteAll)
-                                  ? null
-                                  : () async {
-                                      for (final id
-                                          in _selectedMessageIds.toList()) {
-                                        await context
-                                            .read<TeamCubit>()
-                                            .removeMessage(id);
-                                      }
-                                      _selectedMessageIds.clear();
-                                      _setSelecting(false);
-                                    },
-                            );
-                          }),
-                        ),
-
                       if (_showJump)
                         Positioned(
                           right: 12,
-                          bottom: jumpBottom,
+                          bottom: _selectingMessages ? 20 : jumpBottom,
                           child: ScrollToBottomButton(onTap: _jumpToBottom),
                         ),
                     ],
@@ -1786,7 +1851,34 @@ class _ChatTabState extends State<ChatTab> {
                     : const SizedBox.shrink(),
               ),
 
-              if (!_selectingMessages && !readOnly)
+              if (_selectingMessages)
+                Builder(
+                  builder: (_) {
+                    final selected = _selectedMessagesFrom(state.chat);
+                    final canDeleteAny = selected.any(_canDeleteMessage);
+                    return BottomSelectionBar(
+                      onCopy: _canCopySelected(selected)
+                          ? () => unawaited(_copySelectedMessages(selected))
+                          : null,
+                      onForward: selected.isEmpty
+                          ? null
+                          : () => unawaited(
+                                _forwardSelectedMessages(selected),
+                              ),
+                      onDelete: selected.isEmpty
+                          ? null
+                          : (canDeleteAny
+                              ? () => unawaited(
+                                    _deleteSelectedMessages(selected),
+                                  )
+                              : null),
+                      deleteUnavailableHint:
+                          'Удалить можно только свои сообщения не старше 12 часов',
+                      onUnavailable: _showSelectionSnack,
+                    );
+                  },
+                )
+              else if (!readOnly)
                 ChatComposerBar(
                   controller: _ctrl,
                   focusNode: _composerFocus,

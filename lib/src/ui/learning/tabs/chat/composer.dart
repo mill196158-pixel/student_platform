@@ -98,8 +98,14 @@ class _ComposerState extends State<Composer> {
         .where((file) => file.path != '__FG__')
         .toList(growable: false);
 
-    return SafeArea(
-      top: false,
+    // Same bottom level as ModernBottomNav; keep home-indicator gesture clear.
+    final safeBottom = MediaQuery.paddingOf(context).bottom;
+    final bottomPad = safeBottom > 0
+        ? (safeBottom - 12).clamp(18.0, safeBottom)
+        : 6.0;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomPad),
       child: Container(
         decoration: BoxDecoration(
           color: theme.colorScheme.surface.withValues(alpha: .96),
@@ -111,7 +117,7 @@ class _ComposerState extends State<Composer> {
             ),
           ],
         ),
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

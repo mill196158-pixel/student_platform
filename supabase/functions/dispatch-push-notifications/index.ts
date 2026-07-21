@@ -278,11 +278,14 @@ async function processOutboxRow(args: {
   }
 
   const pushBody = resolvePushBody(decision);
+  const pushTitle = String(decision.title ?? "Уведомление");
   const dataPayload = toStringMap({
     version: "1",
     type: String(decision.event_type ?? row.event_type),
     notification_id: String(decision.notification_id ?? row.app_notification_id ?? ""),
     ...(decision.data ?? {}),
+    title: pushTitle,
+    body: pushBody,
   });
 
   const channelId = channelForEvent(String(decision.event_type ?? row.event_type));
@@ -296,7 +299,7 @@ async function processOutboxRow(args: {
         accessToken,
         projectId,
         token: device.token,
-        title: String(decision.title ?? "Уведомление"),
+        title: pushTitle,
         body: pushBody,
         data: dataPayload,
         channelId,

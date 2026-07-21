@@ -25,6 +25,7 @@ class _InAppToastHostState extends State<InAppToastHost>
   Timer? _hideTimer;
   String? _lastDedupe;
   DateTime? _lastAt;
+  final Map<String, DateTime> _seenNotificationIds = {};
 
   static const _lavender = Color(0xFF7C63D8);
 
@@ -52,14 +53,23 @@ class _InAppToastHostState extends State<InAppToastHost>
         event.type == 'friend_accept';
     if (!show) return;
 
-    final key = '${event.type}|${event.title}|${event.body}';
     final now = DateTime.now();
-    if (_lastDedupe == key &&
-        _lastAt != null &&
-        now.difference(_lastAt!) < const Duration(seconds: 2)) {
-      return;
+    final notificationId = event.payload?.notificationId;
+    if (notificationId != null && notificationId.isNotEmpty) {
+      _seenNotificationIds.removeWhere(
+        (_, seenAt) => now.difference(seenAt) > const Duration(minutes: 1),
+      );
+      if (_seenNotificationIds.containsKey(notificationId)) return;
+      _seenNotificationIds[notificationId] = now;
+    } else {
+      final key = '${event.type}|${event.title}|${event.body}';
+      if (_lastDedupe == key &&
+          _lastAt != null &&
+          now.difference(_lastAt!) < const Duration(seconds: 2)) {
+        return;
+      }
+      _lastDedupe = key;
     }
-    _lastDedupe = key;
     _lastAt = now;
 
     _hideTimer?.cancel();

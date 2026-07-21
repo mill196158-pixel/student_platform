@@ -55,31 +55,38 @@ class AssignmentDetailsScreen extends StatelessWidget {
               children: [
                 _ModernAssignmentHeaderCard(
                     assignment: a, isDraft: isDraft, isDone: isDone),
-                const SizedBox(height: 24),
+                if (isDraft) ...[
+                  const SizedBox(height: 14),
+                  _VoteHintBanner(votes: a.votesCount),
+                ],
+                const SizedBox(height: 20),
                 if (link != null) ...[
                   _ModernSectionCard(
-                    title: '🔗 Ссылка',
+                    title: 'Ссылка',
+                    icon: Icons.link_rounded,
                     gradient: const LinearGradient(
-                        colors: [Color(0xFFEDE7F6), Color(0xFFF7FBFA)]),
+                        colors: [Color(0xFFF6F3FA), Color(0xFFFAFAFC)]),
                     child: _ModernLinkTile(link: link),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 14),
                 ],
                 _ModernSectionCard(
-                  title: '📝 Описание',
+                  title: 'Описание',
+                  icon: Icons.notes_rounded,
                   gradient: const LinearGradient(
-                      colors: [Color(0xFFFFFBFF), Color(0xFFF3EEF9)]),
+                      colors: [Color(0xFFFBFBFD), Color(0xFFF5F2F9)]),
                   child: _ModernDescriptionTile(
                       description: a.description.trim().isEmpty
                           ? 'Описания нет.'
                           : a.description),
                 ),
                 if (files.isNotEmpty) ...[
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 14),
                   _ModernSectionCard(
-                    title: '📎 Вложения',
+                    title: 'Вложения',
+                    icon: Icons.attach_file_rounded,
                     gradient: const LinearGradient(
-                        colors: [Color(0xFFD6F5EE), Color(0xFFF7FBFA)]),
+                        colors: [Color(0xFFF3F8F6), Color(0xFFFAFAFC)]),
                     child: Column(
                         children: files
                             .map((f) => _ModernAttachmentTile(
@@ -121,7 +128,7 @@ class AssignmentDetailsScreen extends StatelessWidget {
                           icon: Icons.rocket_launch,
                           label: 'Опубликовать',
                           gradient: const LinearGradient(
-                              colors: [Color(0xFF2F9D84), Color(0xFF5DBEAD)]),
+                              colors: [Color(0xFF6FA894), Color(0xFF8BB8A8)]),
                           onPressed: () {
                             context.read<TeamCubit>().publishPendingManually();
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -137,7 +144,7 @@ class AssignmentDetailsScreen extends StatelessWidget {
                           icon: Icons.how_to_vote,
                           label: 'Голосовать «за»',
                           gradient: const LinearGradient(
-                              colors: [Color(0xFFB58B3B), Color(0xFFD6BD7A)]),
+                              colors: [Color(0xFFC4A36A), Color(0xFFD4BE90)]),
                           onPressed: () =>
                               context.read<TeamCubit>().voteFor(a.id),
                         ),
@@ -152,12 +159,18 @@ class AssignmentDetailsScreen extends StatelessWidget {
                               isDone ? 'Выполнено' : 'Отметить как выполнено',
                           gradient: isDone
                               ? const LinearGradient(colors: [
-                                  Color(0xFF2F9D84),
-                                  Color(0xFF5DBEAD)
+                                  Color(0xFF6FA894),
+                                  Color(0xFF8BB8A8)
                                 ])
-                              : const LinearGradient(colors: [
-                                  Color(0xFF7C63D8),
-                                  Color(0xFF8A72D8)
+                              : LinearGradient(colors: [
+                                  Theme.of(context)
+                                      .colorScheme
+                                      .primary
+                                      .withValues(alpha: 0.88),
+                                  Theme.of(context)
+                                      .colorScheme
+                                      .primary
+                                      .withValues(alpha: 0.72),
                                 ]),
                           onPressed: () {
                             context.read<TeamCubit>().toggleCompleted(a.id);
@@ -287,36 +300,38 @@ class _ModernAssignmentHeaderCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final statusGradient = isDraft
-        ? const LinearGradient(colors: [Color(0xFFFFF1D6), Color(0xFFEDE7F6)])
+        ? const LinearGradient(colors: [Color(0xFFFAF6EF), Color(0xFFF7F5FA)])
         : (isDone
             ? const LinearGradient(
-                colors: [Color(0xFFD6F5EE), Color(0xFFC2ECE4)])
+                colors: [Color(0xFFF3F8F6), Color(0xFFF7F8FA)])
             : const LinearGradient(
-                colors: [Color(0xFFEDE7F6), Color(0xFFD6F5EE)]));
+                colors: [Color(0xFFF7F5FA), Color(0xFFFAFAFC)]));
+
+    final chipBg = isDraft
+        ? const Color(0xFFF4EBD8)
+        : (isDone ? const Color(0xFFE4F0EB) : const Color(0xFFEDE8F6));
+    final chipFg = isDraft
+        ? const Color(0xFF9A7B45)
+        : (isDone ? const Color(0xFF4F8A74) : const Color(0xFF6E5BAE));
 
     return Container(
       decoration: BoxDecoration(
         gradient: statusGradient,
         borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withValues(alpha: 0.06),
-              blurRadius: 20,
-              offset: const Offset(0, 8)),
-          BoxShadow(
-              color: Colors.white.withValues(alpha: 0.8),
-              blurRadius: 1,
-              offset: const Offset(0, 1)),
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 16,
+              offset: const Offset(0, 6)),
         ],
       ),
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.9),
+          color: Colors.white.withValues(alpha: 0.82),
           borderRadius: BorderRadius.circular(24),
-          border:
-              Border.all(color: Colors.white.withValues(alpha: 0.3), width: 1),
         ),
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(22),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -329,41 +344,32 @@ class _ModernAssignmentHeaderCard extends StatelessWidget {
                   label: isDraft
                       ? 'Черновик'
                       : (isDone ? 'Выполнено' : 'Опубликовано'),
-                  background: isDraft
-                      ? const Color(0xFFFFF1D6)
-                      : (isDone
-                          ? const Color(0xFFD6F5EE)
-                          : const Color(0xFFEDE7F6)),
-                  foreground: isDraft
-                      ? const Color(0xFFB58B3B)
-                      : (isDone
-                          ? const Color(0xFF2F9D84)
-                          : const Color(0xFF7C63D8)),
+                  background: chipBg,
+                  foreground: chipFg,
                 ),
                 const Spacer(),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  width: 40,
+                  height: 40,
+                  alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.8),
-                    borderRadius: BorderRadius.circular(12),
-                    border:
-                        Border.all(color: Colors.white.withValues(alpha: 0.3)),
+                    borderRadius: BorderRadius.circular(13),
+                    color: chipFg.withValues(alpha: 0.12),
                   ),
-                  child: const Icon(Icons.assignment,
-                      color: Color(0xFF64748B), size: 20),
+                  child: Icon(Icons.assignment_rounded,
+                      color: chipFg, size: 20),
                 ),
               ],
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 18),
             Text(
               assignment.title,
               style: const TextStyle(
                   fontSize: 24,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.5,
-                  color: Color(0xFF1E293B),
-                  height: 1.2),
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.4,
+                  color: Colors.black,
+                  height: 1.15),
             ),
             if (assignment.due != null &&
                 '${assignment.due}'.trim().isNotEmpty) ...[
@@ -468,13 +474,87 @@ class _ModernStatusChip extends StatelessWidget {
   }
 }
 
+class _VoteHintBanner extends StatelessWidget {
+  final int votes;
+
+  const _VoteHintBanner({required this.votes});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFF5F2F9), Color(0xFFFAFAFC)],
+        ),
+        border: Border.all(color: const Color(0xFF6E5BAE).withValues(alpha: 0.12)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.9),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(Icons.how_to_vote_rounded,
+                color: Color(0xFF6E5BAE), size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Нужны 2 голоса одногруппников',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    color: Colors.black,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Сейчас $votes/2 — потом задание увидят все.',
+                  style: TextStyle(
+                    fontSize: 13,
+                    height: 1.25,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black.withValues(alpha: 0.55),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ModernSectionCard extends StatelessWidget {
   final String title;
   final Widget child;
   final Gradient gradient;
+  final IconData? icon;
 
-  const _ModernSectionCard(
-      {required this.title, required this.child, required this.gradient});
+  const _ModernSectionCard({
+    required this.title,
+    required this.child,
+    required this.gradient,
+    this.icon,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -502,21 +582,27 @@ class _ModernSectionCard extends StatelessWidget {
           children: [
             Row(
               children: [
+                if (icon != null) ...[
+                  Icon(icon, size: 18, color: const Color(0xFF6E5BAE)),
+                  const SizedBox(width: 8),
+                ],
                 Text(title,
                     style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                        color: Color(0xFF1E293B))),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.black)),
                 const Spacer(),
                 Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                        color: const Color(0xFF64748B),
-                        borderRadius: BorderRadius.circular(4))),
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF6E5BAE).withValues(alpha: 0.35),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
             child,
           ],
         ),

@@ -107,6 +107,42 @@ void main() {
     expect(find.byType(CircularProgressIndicator), findsNothing);
   });
 
+  testWidgets('2b. empty refreshing DM never flashes empty state',
+      (tester) async {
+    const view = ChatMessagesViewState(
+      phase: ChatMessagesLoadPhase.refreshing,
+      messages: [],
+      hasSnapshot: true,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ChatMessageList(
+            messages: view.messages,
+            controller: ScrollController(),
+            messageKeys: {},
+            search: ChatSearchController(),
+            currentUserId: 'me',
+            onReply: (_) {},
+            onLongPress: (_, __, ___, ____, _____, ______) {},
+            onReplyTap: (_) {},
+            onReact: (_, __) {},
+            selectingMessages: false,
+            selectedMessageIds: const {},
+            onToggleSelect: (_) {},
+            initialLoading: view.isInitialLoading ||
+                (view.isRefreshing && view.messages.isEmpty),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Сообщений пока нет'), findsNothing);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+  });
+
   test('3/4. syncLatest single-flight for one chatId', () async {
     final a = DmApi.syncLatest(chatId: 'chat-sf');
     final b = DmApi.syncLatest(chatId: 'chat-sf');

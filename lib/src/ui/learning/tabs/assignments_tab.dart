@@ -37,42 +37,53 @@ class AssignmentsTab extends StatelessWidget {
 
             if (items.isEmpty) {
               return _AssignmentsEmptyState(
-                onCreate: () {
-                  _createAssignment(context);
-                },
+                onCreate: () => _createAssignment(context),
               );
             }
 
-            if (asGrid) {
-              return GridView.builder(
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childAspectRatio: .92,
-                ),
-                itemCount: items.length,
-                itemBuilder: (context, i) => _AssignmentCardTile(
-                  a: items[i],
-                  onOpen: () => _openDetails(context, items[i].id),
-                  onToggle: () =>
-                      context.read<TeamCubit>().toggleCompleted(items[i].id),
-                ),
-              );
-            }
+            final list = asGrid
+                ? GridView.builder(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 88),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      mainAxisSpacing: 12,
+                      crossAxisSpacing: 12,
+                      childAspectRatio: .92,
+                    ),
+                    itemCount: items.length,
+                    itemBuilder: (context, i) => _AssignmentCardTile(
+                      a: items[i],
+                      onOpen: () => _openDetails(context, items[i].id),
+                      onToggle: () => context
+                          .read<TeamCubit>()
+                          .toggleCompleted(items[i].id),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 88),
+                    itemCount: items.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (context, i) => _AssignmentRowTile(
+                      a: items[i],
+                      onOpen: () => _openDetails(context, items[i].id),
+                      onToggle: () => context
+                          .read<TeamCubit>()
+                          .toggleCompleted(items[i].id),
+                    ),
+                  );
 
-            // список
-            return ListView.separated(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-              itemCount: items.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 10),
-              itemBuilder: (context, i) => _AssignmentRowTile(
-                a: items[i],
-                onOpen: () => _openDetails(context, items[i].id),
-                onToggle: () =>
-                    context.read<TeamCubit>().toggleCompleted(items[i].id),
-              ),
+            return Stack(
+              children: [
+                list,
+                Positioned(
+                  right: 16,
+                  bottom: 16,
+                  child: _CreateAssignmentFab(
+                    onPressed: () => _createAssignment(context),
+                  ),
+                ),
+              ],
             );
           },
         );
@@ -155,7 +166,7 @@ class _AssignmentsEmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              'Когда староста или студент добавит задание, оно появится здесь.',
+              'Чтобы задание появилось у всех, нужны 2 голоса одногруппников.',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: cs.onSurfaceVariant,
@@ -171,6 +182,62 @@ class _AssignmentsEmptyState extends StatelessWidget {
               ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CreateAssignmentFab extends StatelessWidget {
+  final VoidCallback onPressed;
+
+  const _CreateAssignmentFab({required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(22),
+        child: Ink(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: primary.withValues(alpha: 0.16)),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                primary.withValues(alpha: 0.10),
+                primary.withValues(alpha: 0.04),
+                Colors.white,
+              ],
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 12,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.assignment_add, color: primary, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                'Создать',
+                style: TextStyle(
+                  color: primary,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -203,16 +270,24 @@ class _AssignmentRowTile extends StatelessWidget {
         onTap: onOpen,
         child: Ink(
           decoration: BoxDecoration(
-            color: cs.surface,
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Colors.white,
+                accent.withValues(alpha: 0.035),
+                const Color(0xFFFBF9FE),
+              ],
+            ),
             borderRadius: BorderRadius.circular(22),
             border: Border.all(
-              color: accent.withValues(alpha: isDone || isDraft ? .26 : .12),
+              color: Colors.black.withValues(alpha: 0.06),
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: .055),
-                blurRadius: 18,
-                offset: const Offset(0, 8),
+                color: Colors.black.withValues(alpha: .04),
+                blurRadius: 14,
+                offset: const Offset(0, 6),
               ),
             ],
           ),
@@ -239,8 +314,8 @@ class _AssignmentRowTile extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.titleMedium?.copyWith(
                               fontSize: 16,
-                              fontWeight: FontWeight.w800,
-                              color: cs.onSurface,
+                              fontWeight: FontWeight.w900,
+                              color: Colors.black,
                               height: 1.12,
                             ),
                           ),
@@ -254,7 +329,7 @@ class _AssignmentRowTile extends StatelessWidget {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodyMedium?.copyWith(
-                          color: cs.onSurfaceVariant,
+                          color: Colors.black.withValues(alpha: 0.55),
                           height: 1.22,
                         ),
                       ),
@@ -321,16 +396,24 @@ class _AssignmentCardTile extends StatelessWidget {
         onTap: onOpen,
         child: Ink(
           decoration: BoxDecoration(
-            color: cs.surface,
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Colors.white,
+                accent.withValues(alpha: 0.035),
+                const Color(0xFFFBF9FE),
+              ],
+            ),
             borderRadius: BorderRadius.circular(22),
             border: Border.all(
-              color: accent.withValues(alpha: isDone || isDraft ? .26 : .12),
+              color: Colors.black.withValues(alpha: 0.06),
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: .055),
-                blurRadius: 18,
-                offset: const Offset(0, 8),
+                color: Colors.black.withValues(alpha: .04),
+                blurRadius: 14,
+                offset: const Offset(0, 6),
               ),
             ],
           ),
@@ -361,8 +444,8 @@ class _AssignmentCardTile extends StatelessWidget {
                   maxLines: 5,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: cs.onSurface,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.black,
                     height: 1.12,
                   ),
                 ),
@@ -394,7 +477,7 @@ Color _assignmentAccent(
   required bool isDraft,
   required bool isDone,
 }) {
-  if (isDone) return const Color(0xFF22A06B);
+  if (isDone) return const Color(0xFF5B9E86);
   if (isDraft) return cs.secondary;
   return cs.primary;
 }
@@ -428,10 +511,10 @@ class _AssignmentIconTile extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: color.withValues(alpha: .12),
+        color: color.withValues(alpha: .08),
         borderRadius: BorderRadius.circular(14),
       ),
-      child: Icon(icon, color: color, size: size * .55),
+      child: Icon(icon, color: color.withValues(alpha: 0.88), size: size * .55),
     );
   }
 }
@@ -455,13 +538,13 @@ class _StatusPill extends StatelessWidget {
         vertical: compact ? 4 : 5,
       ),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: .11),
+        color: color.withValues(alpha: .08),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
         text,
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: color,
+              color: color.withValues(alpha: 0.92),
               fontWeight: FontWeight.w800,
               height: 1,
             ),
@@ -526,7 +609,7 @@ class _CompleteActionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final color = isDone ? const Color(0xFF22A06B) : cs.primary;
+    final color = isDone ? const Color(0xFF5B9E86) : cs.primary;
     return Material(
       color: color.withValues(alpha: isDone ? .11 : .10),
       borderRadius: BorderRadius.circular(999),

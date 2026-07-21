@@ -82,7 +82,10 @@ class ChatPlusButton extends StatelessWidget {
                       padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
                       child: Text(
                         'Действия в чате',
-                        style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: colorScheme.onSurface,
+                        ),
                       ),
                     ),
                     for (final action in actions)
@@ -119,10 +122,16 @@ class _PlusActionTile extends StatelessWidget {
     final colorScheme = theme.colorScheme;
     final bg = action.emphasized
         ? colorScheme.primaryContainer.withValues(alpha: .75)
-        : colorScheme.surfaceContainerHighest.withValues(alpha: .5);
-    final fg = action.emphasized
+        : const Color(0xFFF4F2F8);
+    final titleColor = action.emphasized
         ? colorScheme.onPrimaryContainer
-        : colorScheme.onSurfaceVariant;
+        : Colors.black;
+    final subtitleColor = action.emphasized
+        ? colorScheme.onPrimaryContainer.withValues(alpha: .75)
+        : Colors.black.withValues(alpha: 0.55);
+    final iconColor = action.emphasized
+        ? colorScheme.onPrimaryContainer
+        : colorScheme.primary;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -142,10 +151,10 @@ class _PlusActionTile extends StatelessWidget {
                 width: 42,
                 height: 42,
                 decoration: BoxDecoration(
-                  color: colorScheme.surface.withValues(alpha: .8),
+                  color: Colors.white.withValues(alpha: .92),
                   borderRadius: BorderRadius.circular(14),
                 ),
-                child: Icon(action.icon, color: fg),
+                child: Icon(action.icon, color: iconColor),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -156,7 +165,7 @@ class _PlusActionTile extends StatelessWidget {
                       action.title,
                       style: theme.textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w800,
-                        color: action.emphasized ? colorScheme.onPrimaryContainer : null,
+                        color: titleColor,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -165,15 +174,13 @@ class _PlusActionTile extends StatelessWidget {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: action.emphasized
-                            ? colorScheme.onPrimaryContainer.withValues(alpha: .75)
-                            : colorScheme.onSurfaceVariant,
+                        color: subtitleColor,
                       ),
                     ),
                   ],
                 ),
               ),
-              Icon(Icons.chevron_right, color: fg.withValues(alpha: .7)),
+              Icon(Icons.chevron_right, color: titleColor.withValues(alpha: .55)),
             ],
           ),
         ),

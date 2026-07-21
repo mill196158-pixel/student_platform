@@ -790,3 +790,117 @@
 - Focused analyze: `flutter analyze --no-pub lib/src/ui/chats/direct_chat_info_screen.dart lib/src/ui/friends/friend_profile_screen.dart` ran; no new compile errors, existing `FriendProfileScreen` warnings/infos remain.
 - Full analyze: `flutter analyze` was run; it exits with existing project diagnostics outside this change, including missing `subject_quick_note_screen.dart` and undefined `getTemporaryDirectory`/`File` in `lib/src/ui/schedule/diary_entry_details_screen.dart`.
 - Git add/commit run: no.
+
+## Home assignments - align with personal diary linkage
+
+- Date: 2026-07-21
+- Trigger: student `24002820` saw 3 assignments on Home but only 2 in `Мой дневник`.
+- Live Supabase check: 3 published assignments are visible through the student's team memberships.
+- Root cause: assignment `ТЕСТ` has no `subject_offering_id`, subject, group, or semester academic linkage.
+- `Мой дневник` behavior: correctly includes only published assignments linked to selected-semester `subject_offerings`.
+- Flutter fix: Home now also excludes assignments without a non-empty `subject_offering_id`.
+- Supabase schema/data/RLS changed: no.
+- Focused analyze: `flutter analyze --no-pub lib/src/ui/home/home_dashboard_service.dart` passed with no issues.
+- IDE lints: no errors in the changed Flutter file.
+- Git add/commit run: no.
+
+## Teacher profile - read-only card and navigation
+
+- Date: 2026-07-21
+- Trigger: user requested a separate designed teacher card reachable from a schedule lesson.
+- Existing state: `SubjectInfoScreen` had only a static teacher block; no dedicated teacher screen existed.
+- Live DB check: `teachers=0`, `offering_teachers=0`; no rating or comment data source exists.
+- Flutter screen added: `lib/src/ui/info/teacher_profile_screen.dart`.
+- Navigation added from the teacher row in `LessonDetailsScreen`.
+- Navigation added from the teacher card in `SubjectInfoScreen`.
+- Displayed data: teacher name, current subject, semester, and department when available.
+- Photo behavior: no external photo is used; initials are generated from the teacher name.
+- Difficulty behavior: honest empty state only; no local or fake rating is stored.
+- Comments behavior: visible as a paused section until moderation is available; no comment input is exposed.
+- Supabase schema/data/RLS changed: no.
+- Focused analyze: no compile errors; existing `LessonDetailsScreen` deprecation infos and old unused-parameter warnings remain.
+- IDE lints: no errors in the three changed Flutter files.
+- Git add/commit run: no.
+
+## Teacher difficulty - comic avatars and protected voting
+
+- Date: 2026-07-21
+- Trigger: user requested recognizable comic-story avatars selected by teacher difficulty.
+- Generated design: six original superhero-archetype portraits without copied faces, costumes, logos, or names.
+- Asset directory: `assets/images/teacher_difficulty/`.
+- Asset registration: `pubspec.yaml` includes the new directory.
+- Unknown avatar: `Гость из мультивселенной`.
+- Difficulty avatars: `Дружелюбный сосед`, `Защитник студентов`, `Маг дедлайнов`, `Железный экзаменатор`, `Титан сессии`.
+- Flutter behavior: `TeacherProfileScreen` loads aggregate score and the current user's vote, accepts a 1-5 vote, and selects the avatar from the rounded aggregate.
+- No-vote behavior: the unknown avatar is shown; no fake score is generated.
+- SQL migration: `supabase/migrations/20260721095738_teacher_difficulty_ratings.sql`.
+- Remote migration applied: version `20260721095738`, name `teacher_difficulty_ratings`.
+- Tables: `teacher_difficulty_targets`, `teacher_difficulty_votes`, `teacher_difficulty_summaries`.
+- RLS: enabled on all three tables.
+- Vote privacy: authenticated users can read/change only their own vote; aggregate summary contains only count and total.
+- Seeded targets: four real teacher names found in schedule/team data; test-prefixed names were excluded.
+- Runtime DB smoke: authenticated-role vote insert updated the aggregate to `1 / 3`, then the temporary vote was deleted.
+- Cleanup verification: `votes=0`, non-zero summaries `=0`.
+- Supabase security advisors were run; no new finding referencing the teacher difficulty tables was returned.
+- Comments remain disabled until moderation exists.
+- Focused analyze: teacher profile and subject info passed with no issues.
+- `flutter test`: all tests passed.
+- Android build: not run to completion because this macOS environment has no Android SDK configured.
+- Git add/commit run: no.
+
+## Teacher rating - five stars means easy
+
+- Date: 2026-07-21
+- Trigger: user clarified that teacher rating must mean `1 = very hard` and `5 = easy`, and requested a tighter teacher header with the rating action inside it.
+- Persisted ratings confirmed: live migration `teacher_difficulty_ratings` exists; live tables contained 4 targets, 2 votes, 4 summaries, and 6 RLS policies.
+- Subject difficulty: remains a separate display placeholder and is not saved.
+- Teacher profile: removed the separate large difficulty card and moved a compact `Оценить` / `Моя оценка` button into the hero.
+- Rating sheet: explicitly explains `1 звезда — очень тяжело, 5 звёзд — легко`.
+- Avatar mapping: high scores now select easy/friendly characters; low scores select hard/examiner characters.
+- Avatar layout: removed per-level fractional translations and scale transforms; all images now use the same centered square layout.
+- Header layout: reduced top/body spacing, hero padding, avatar size, and internal gaps.
+- Cache: bumped from `teacher_difficulty_v1` to `teacher_difficulty_v2` so old semantic cache values are not reused.
+- Migration added/applied: `supabase/migrations/20260721105759_teacher_rating_five_means_easy.sql`.
+- Existing data conversion: the 2 votes stored as `5` under the former scale were converted to `1` to preserve their original meaning.
+- Verification: live score distribution is now `{1: 2}` and aggregate summaries match the vote rows.
+- Focused analyze: `flutter analyze --no-pub lib/src/ui/info/teacher_profile_screen.dart` passed with no issues.
+- IDE lints: no errors in the changed teacher profile.
+- `flutter test`: all 32 tests passed.
+- Git add/commit run: no.
+
+## Teacher profile - edge-to-edge header follow-up
+
+- Date: 2026-07-21
+- Trigger: visual feedback requested the same top treatment as direct-chat info and a less prominent back button.
+- Removed the standard `AppBar` and its empty top band.
+- Teacher hero now starts at the screen top and handles the status-bar inset internally.
+- Hero is full width with only bottom corner rounding; subject and review cards remain inset.
+- Back navigation now matches `DirectChatInfoScreen`: transparent 48x48 tap target, 24px `arrow_back_rounded`, positioned at `safeAreaTop + 4`.
+- Focused analyze: `flutter analyze --no-pub lib/src/ui/info/teacher_profile_screen.dart` passed with no issues.
+- IDE lints: no errors.
+- Supabase schema/data/RLS changed: no.
+- Git add/commit run: no.
+
+## Teacher difficulty avatar - immediate return refresh
+
+- Date: 2026-07-21
+- Trigger: after rating a teacher and navigating back, the compact lesson teacher avatar kept its old image.
+- Root cause: `TeacherDifficultyAvatar` loaded only during `initState`; the covered lesson route stayed mounted and did not recreate it.
+- Added a lightweight in-process rating revision notifier to `_TeacherDifficultyRepository`.
+- Successful teacher rating reloads publish a revision.
+- Mounted compact avatars subscribe during `initState`, reload on revision, and unsubscribe in `dispose`.
+- Focused analyze passed with no issues; IDE lints report no errors.
+- Supabase schema/data/RLS changed: no.
+- Git add/commit run: no.
+
+## Teacher profile - avatar crop and vertical lift
+
+- Date: 2026-07-21
+- Trigger: visual feedback requested fuller circular character images and a higher avatar position.
+- Removed the white padding/ring from the large teacher avatar.
+- Difficulty artwork now uses a shared `1.16` scale inside the circular clip for a fuller, more centered crop.
+- Compact teacher difficulty avatars use the same crop and no longer add white inner padding.
+- Hero top padding changed from `safeAreaTop + 50` to `safeAreaTop + 8`, placing the avatar near the back-button level and lifting the complete header.
+- Focused analyze passed with no issues; IDE lints report no errors.
+- Supabase schema/data/RLS changed: no.
+- Git add/commit run: no.

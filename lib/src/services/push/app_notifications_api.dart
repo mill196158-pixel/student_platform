@@ -1,5 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'package:student_platform/src/services/push/in_app_notification_bus.dart';
+
 class AppNotificationItem {
   const AppNotificationItem({
     required this.id,
@@ -84,15 +86,48 @@ class AppNotificationsApi {
     await _sb.rpc('mark_notification_read', params: {
       'p_notification_id': id,
     });
+    InAppNotificationBus.instance.requestBadgeRefresh();
   }
 
   Future<void> markAllRead() async {
     await _sb.rpc('mark_all_notifications_read');
+    InAppNotificationBus.instance.requestBadgeRefresh();
+  }
+
+  /// Keeps the notification-center badge in sync with the chat read cursor.
+  Future<void> markReadForChat(String chatId) async {
+    final normalized = chatId.trim();
+    if (normalized.isEmpty) return;
+
+    final rows = await _sb
+        .from('app_notifications')
+        .select('id')
+        .isFilter('read_at', null)
+        .isFilter('deleted_at', null)
+        .contains('data', <String, dynamic>{'chat_id': normalized});
+
+    final ids = rows
+        .whereType<Map>()
+        .map((row) => (row['id'] ?? '').toString())
+        .where((id) => id.isNotEmpty)
+        .toSet();
+    if (ids.isEmpty) return;
+
+    await Future.wait(
+      ids.map(
+        (id) => _sb.rpc(
+          'mark_notification_read',
+          params: {'p_notification_id': id},
+        ),
+      ),
+    );
+    InAppNotificationBus.instance.requestBadgeRefresh();
   }
 
   Future<void> hide(String id) async {
     await _sb.rpc('hide_notification_for_me', params: {
       'p_notification_id': id,
     });
+    InAppNotificationBus.instance.requestBadgeRefresh();
   }
 }

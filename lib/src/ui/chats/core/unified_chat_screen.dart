@@ -28,6 +28,7 @@ import 'package:student_platform/src/ui/learning/tabs/chat/composer.dart';
 
 import 'package:student_platform/src/services/file_service.dart';
 import 'package:student_platform/src/services/push/active_chat_tracker.dart';
+import 'package:student_platform/src/services/push/app_notifications_api.dart';
 import 'package:student_platform/src/ui/learning/global_cache.dart';
 import 'package:student_platform/src/services/image_cache_service.dart';
 
@@ -898,8 +899,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
     try {
       await widget.service.loadOlderMessages(before: oldest, limit: 50);
-      _hasMoreOlderMessages =
-          widget.service.messagesViewState.hasMoreBefore;
+      _hasMoreOlderMessages = widget.service.messagesViewState.hasMoreBefore;
       await _chatScroll.restorePrependAnchor(anchor);
     } catch (_) {
       // Network/RPC failure: keep hasMore so scroll can retry.
@@ -939,6 +939,16 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     try {
       await widget.service.markRead(lastId);
       _lastMarkedReadId = lastId;
+      final chatId = _currentChatIdDm;
+      if (chatId != null && chatId.isNotEmpty) {
+        try {
+          await AppNotificationsApi().markReadForChat(chatId);
+        } catch (e) {
+          if (kDebugMode) {
+            debugPrint('[UnifiedChat] notification read sync error: $e');
+          }
+        }
+      }
     } catch (e) {
       if (kDebugMode) debugPrint('[UnifiedChat] markRead error: $e');
     }
@@ -952,6 +962,113 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     final uid = widget.service.currentUserId;
     if (uid.isEmpty || m.authorId != uid) return false;
     return DateTime.now().difference(m.at) <= const Duration(hours: 12);
+  }
+
+  void _exitSelection() {
+    _selectedIds.clear();
+    if (!_selecting) return;
+    setState(() => _selecting = false);
+  }
+
+  List<Message> _selectedMessagesFrom(List<Message> list) {
+    final selected = list.where((m) => _selectedIds.contains(m.id)).toList()
+      ..sort((a, b) => a.at.compareTo(b.at));
+    return selected;
+  }
+
+  Future<void> _copySelectedMessages(List<Message> selected) async {
+    if (selected.isEmpty) {
+      _showSnack('Нечего копировать');
+      return;
+    }
+    if (selected.length == 1) {
+      try {
+        await ca.ChatActions.copyMessageToClipboard(selected.first);
+        _showSnack('Скопировано');
+      } catch (_) {
+        _showSnack('Не удалось скопировать');
+      }
+      return;
+    }
+    final text = selected
+        .map((m) => m.text.trim())
+        .where((t) => t.isNotEmpty)
+        .join('\n\n');
+    if (text.isEmpty) {
+      _showSnack('Нечего копировать');
+      return;
+    }
+    await services.Clipboard.setData(services.ClipboardData(text: text));
+    _showSnack('Скопировано');
+  }
+
+  Future<void> _deleteSelectedMessages(List<Message> selected) async {
+    final deletable = selected.where(_canDelete).toList();
+    if (deletable.isEmpty) {
+      _showSnack(
+        'Удалить можно только свои сообщения не старше 12 часов',
+      );
+      return;
+    }
+
+    final count = deletable.length;
+    final skipped = selected.length - count;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final cs = Theme.of(ctx).colorScheme;
+        return AlertDialog(
+          title: Text(count == 1 ? 'Удалить сообщение?' : 'Удалить сообщения?'),
+          content: Text(
+            skipped > 0
+                ? 'Будет удалено $count из ${selected.length}. Остальные нельзя удалить.'
+                : (count == 1
+                    ? 'Сообщение будет удалено для всех.'
+                    : 'Будет удалено сообщений: $count.'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Отмена'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: TextButton.styleFrom(foregroundColor: cs.error),
+              child: const Text('Удалить'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true || !mounted) return;
+
+    for (final m in deletable) {
+      try {
+        await widget.service.deleteMessage(m.id);
+      } catch (_) {
+        if (!mounted) return;
+        _showSnack('Не удалось удалить сообщение');
+        return;
+      }
+    }
+    if (!mounted) return;
+    _exitSelection();
+  }
+
+  Future<void> _forwardSelectedMessages(List<Message> selected) async {
+    if (selected.isEmpty) return;
+    _exitSelection();
+    await _startForwardSelection(selected);
+  }
+
+  bool _canCopySelected(List<Message> selected) {
+    if (selected.isEmpty) return false;
+    if (selected.any((m) => m.text.trim().isNotEmpty)) return true;
+    if (selected.length == 1 &&
+        (selected.first.attachments?.isNotEmpty ?? false)) {
+      return true;
+    }
+    return false;
   }
 
   bool _canEdit(Message m) =>
@@ -1218,8 +1335,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
             _ctrl.text = trimmed;
             setState(() => _replyTo = replyToClear);
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                  content: Text('Файлы загружаются, подождите...')),
+              const SnackBar(content: Text('Файлы загружаются, подождите...')),
             );
           }
           return;
@@ -1406,45 +1522,59 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         _canManageAssignments(context);
 
     return Scaffold(
-      appBar: AppBar(
-        title: (isDm)
-            ? _DmTitle(
-                title: titleText,
-                avatarUrl: widget.peerAvatarUrl,
-                onTap: widget.onOpenPeer ??
-                    () async {
-                      final messages = widget.service.watchMessages();
-                      await showModalBottomSheet(
-                        context: context,
-                        isScrollControlled: true,
-                        useSafeArea: true,
-                        backgroundColor: theme.colorScheme.surface,
-                        builder: (_) =>
-                            ChatMediaSheet(messagesStream: messages),
-                      );
-                    },
-              )
-            : Text(titleText, style: const TextStyle(color: Colors.black)),
-        centerTitle: false,
-        iconTheme: const IconThemeData(color: Colors.black),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 6),
-            child: Material(
-              type: MaterialType.transparency,
-              child: InkResponse(
-                key: _kebabKey,
-                radius: 22,
-                onTap: _openKebabMenu,
-                child: const Padding(
-                  padding: EdgeInsets.all(10),
-                  child: Icon(Icons.more_horiz, size: 24, color: Colors.black),
+      appBar: _selecting
+          ? PreferredSize(
+              preferredSize: const Size.fromHeight(56),
+              child: SafeArea(
+                bottom: false,
+                child: TopSelectionBar(
+                  count: _selectedIds.length,
+                  onClose: _exitSelection,
+                  includeTopInset: false,
                 ),
               ),
+            )
+          : AppBar(
+              title: (isDm)
+                  ? _DmTitle(
+                      title: titleText,
+                      avatarUrl: widget.peerAvatarUrl,
+                      onTap: widget.onOpenPeer ??
+                          () async {
+                            final messages = widget.service.watchMessages();
+                            await showModalBottomSheet(
+                              context: context,
+                              isScrollControlled: true,
+                              useSafeArea: true,
+                              backgroundColor: theme.colorScheme.surface,
+                              builder: (_) =>
+                                  ChatMediaSheet(messagesStream: messages),
+                            );
+                          },
+                    )
+                  : Text(titleText,
+                      style: const TextStyle(color: Colors.black)),
+              centerTitle: false,
+              iconTheme: const IconThemeData(color: Colors.black),
+              actions: [
+                Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: Material(
+                    type: MaterialType.transparency,
+                    child: InkResponse(
+                      key: _kebabKey,
+                      radius: 22,
+                      onTap: _openKebabMenu,
+                      child: const Padding(
+                        padding: EdgeInsets.all(10),
+                        child: Icon(Icons.more_horiz,
+                            size: 24, color: Colors.black),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ),
-        ],
-      ),
       body: StreamBuilder<ChatMessagesViewState>(
         stream: _messagesStream,
         initialData: widget.service.messagesViewState.hasSnapshot ||
@@ -1454,7 +1584,10 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         builder: (ctx, snap) {
           final view = snap.data ?? widget.service.messagesViewState;
           final list = view.messages;
-          final initialLoading = view.isInitialLoading;
+          // An empty refreshing snapshot is not yet proof that the chat is
+          // empty. Keep the loading placeholder until the server confirms it.
+          final initialLoading =
+              view.isInitialLoading || (view.isRefreshing && list.isEmpty);
           final loadError = view.showError;
 
           if (_search.isActive) {
@@ -1525,16 +1658,12 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                   behavior: HitTestBehavior.deferToChild,
                   onTap: () {
                     FocusScope.of(context).unfocus();
-                    if (_selecting) {
-                      _selectedIds.clear();
-                      setState(() => _selecting = false);
-                    }
+                    if (_selecting) _exitSelection();
                   },
                   child: Stack(
                     children: [
                       Padding(
-                        padding: EdgeInsets.only(
-                            bottom: _selecting ? (safeBottom + 64 + 12) : 8.0),
+                        padding: const EdgeInsets.only(bottom: 8.0),
                         child: ChatMessageList(
                           messages: list,
                           controller: _scroll,
@@ -1626,54 +1755,10 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                             ),
                           ),
                         ),
-                      if (_selecting)
-                        Positioned(
-                          top: 0,
-                          left: 0,
-                          right: 0,
-                          child: TopSelectionBar(
-                            count: _selectedIds.length,
-                            onCancel: () {
-                              _selectedIds.clear();
-                              setState(() => _selecting = false);
-                            },
-                          ),
-                        ),
-                      if (_selecting)
-                        Positioned(
-                          left: 0,
-                          right: 0,
-                          bottom: 0,
-                          child: BottomSelectionBar(
-                            onForward: _selectedIds.isEmpty
-                                ? null
-                                : () async {
-                                    final sel = list
-                                        .where(
-                                            (m) => _selectedIds.contains(m.id))
-                                        .toList();
-                                    _selectedIds.clear();
-                                    setState(() => _selecting = false);
-                                    await _startForwardSelection(sel);
-                                  },
-                            onDelete: (!_selectedIds.every((id) => _canDelete(
-                                    list.firstWhere((m) => m.id == id))))
-                                ? null
-                                : () async {
-                                    for (final id in _selectedIds.toList()) {
-                                      await widget.service.deleteMessage(id);
-                                    }
-                                    _selectedIds.clear();
-                                    setState(() => _selecting = false);
-                                  },
-                          ),
-                        ),
                       if (_showJump)
                         Positioned(
                           right: 12,
-                          bottom: _selecting
-                              ? (safeBottom + 64 + 20)
-                              : (safeBottom + 82.0),
+                          bottom: _selecting ? 20 : (safeBottom + 82.0),
                           child: ScrollToBottomButton(onTap: _jumpToBottom),
                         ),
                     ],
@@ -1695,7 +1780,34 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                   onCancel: _cancelInlineEdit,
                 ),
 
-              if (!_selecting)
+              if (_selecting)
+                Builder(
+                  builder: (_) {
+                    final selected = _selectedMessagesFrom(list);
+                    final canDeleteAny = selected.any(_canDelete);
+                    return BottomSelectionBar(
+                      onCopy: _canCopySelected(selected)
+                          ? () => unawaited(_copySelectedMessages(selected))
+                          : null,
+                      onForward: selected.isEmpty
+                          ? null
+                          : () => unawaited(
+                                _forwardSelectedMessages(selected),
+                              ),
+                      onDelete: selected.isEmpty
+                          ? null
+                          : (canDeleteAny
+                              ? () => unawaited(
+                                    _deleteSelectedMessages(selected),
+                                  )
+                              : null),
+                      deleteUnavailableHint:
+                          'Удалить можно только свои сообщения не старше 12 часов',
+                      onUnavailable: _showSnack,
+                    );
+                  },
+                )
+              else
                 // ⚠️ ЛС и группы используют разные композеры
                 (isDm && _dmBlockLoaded && !_dmAvailable)
                     ? _DmBlockedComposerBar(
@@ -2017,9 +2129,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
           try {
             await widget.service.pinMessage(m.id, !m.isPinned);
           } catch (_) {
-            _showSnack(m.isPinned
-                ? 'Не удалось открепить'
-                : 'Не удалось закрепить');
+            _showSnack(
+                m.isPinned ? 'Не удалось открепить' : 'Не удалось закрепить');
           }
         },
         onDeleteIfAllowed: () async => widget.service.deleteMessage(m.id),
@@ -2057,9 +2168,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         try {
           await widget.service.pinMessage(m.id, !m.isPinned);
         } catch (_) {
-          _showSnack(m.isPinned
-              ? 'Не удалось открепить'
-              : 'Не удалось закрепить');
+          _showSnack(
+              m.isPinned ? 'Не удалось открепить' : 'Не удалось закрепить');
         }
         break;
       case 'Переслать':
@@ -2195,11 +2305,16 @@ class _DmBlockedComposerBar extends StatelessWidget {
         ? 'Вы заблокировали пользователя'
         : 'Личные сообщения недоступны';
 
-    return SafeArea(
-      top: false,
+    final safeBottom = MediaQuery.paddingOf(context).bottom;
+    final bottomPad = safeBottom > 0
+        ? (safeBottom - 12).clamp(18.0, safeBottom)
+        : 6.0;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomPad),
       child: Container(
         width: double.infinity,
-        margin: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+        margin: const EdgeInsets.fromLTRB(12, 6, 12, 6),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
           color: scheme.surfaceContainerHighest.withValues(alpha: 0.7),

@@ -149,7 +149,7 @@ class ChatComposerBar extends StatelessWidget {
                 ChatPlusAction(
                   icon: Icons.assignment_add,
                   title: 'Новое задание',
-                  subtitle: 'Оформить задачу красиво и отправить в чат',
+                  subtitle: 'Чтобы появилось у всех — нужны 2 голоса',
                   emphasized: true,
                   onTap: () async {
                     final res = await showAssignmentFormDialog(context);

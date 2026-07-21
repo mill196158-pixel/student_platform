@@ -1,7 +1,7 @@
 name: student_platform
 description: MVP в стиле Cloudmate (Flutter)
 publish_to: "none"
-version: 1.0.0+5
+version: 1.0.0+6
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -71,6 +71,7 @@ flutter:
   assets:
     - assets/icons/
     - assets/images/
+    - assets/images/teacher_difficulty/
     - assets/lottie/
     - assets/fonts/
     - assets/lottie/cat_sleeping.json

@@ -2,11 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/widgets.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:student_platform/src/services/image_cache_service.dart';
 import 'package:student_platform/src/ui/chats/data/chat_preload_service.dart';
+import 'package:student_platform/src/ui/chats/data/chat_summaries_cache.dart';
 import 'package:student_platform/src/ui/chats/dm_title.dart';
 import 'package:student_platform/src/utils/safe_debug_log.dart';
 
@@ -19,7 +19,6 @@ class ChatWarmCoordinator with WidgetsBindingObserver {
   ChatWarmCoordinator._();
   static final ChatWarmCoordinator instance = ChatWarmCoordinator._();
 
-  static const String _cacheKeyPrefix = 'my_chats_cache_v2';
   static const int topChatsToWarm = 8;
   static const int messagePageLimit = 40;
   static const Duration _initialDelay = Duration(milliseconds: 900);
@@ -31,8 +30,6 @@ class ChatWarmCoordinator with WidgetsBindingObserver {
   Future<void>? _refreshInFlight;
   DateTime? _lastRefreshAt;
   Timer? _pendingTimer;
-
-  String _cacheKeyFor(String userId) => '${_cacheKeyPrefix}_$userId';
 
   /// Call once after the main shell is up (authenticated home/nav).
   void start() {
@@ -166,8 +163,7 @@ class ChatWarmCoordinator with WidgetsBindingObserver {
     List<Map<String, dynamic>> summaries,
   ) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_cacheKeyFor(userId), jsonEncode(summaries));
+      await ChatSummariesCache.write(userId, jsonEncode(summaries));
     } catch (_) {}
   }
 
@@ -208,9 +204,8 @@ class ChatWarmCoordinator with WidgetsBindingObserver {
     final muted = row['is_muted'] == true;
 
     final hasLastMessage = lastMessageId.isNotEmpty;
-    final preview = hasLastMessage
-        ? _buildPreviewFromRow(row)
-        : 'Сообщений пока нет';
+    final preview =
+        hasLastMessage ? _buildPreviewFromRow(row) : 'Сообщений пока нет';
 
     final title = isDm
         ? normalizeDmTitle(titleRaw)

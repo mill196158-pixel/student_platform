@@ -87,6 +87,12 @@ class _ModernBottomNavState extends State<ModernBottomNav> {
     const inactive = Color(0xFF7A7F8C);
     final cs = Theme.of(context).colorScheme;
     final selectedIndex = _previewIndex ?? widget.currentIndex;
+    final mq = MediaQuery.of(context);
+    final safeBottom = mq.padding.bottom;
+    // Same bottom level as chat Composer; keep home-indicator gesture clear.
+    final reducedBottom = safeBottom > 0
+        ? (safeBottom - 12).clamp(18.0, safeBottom)
+        : 0.0;
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -105,59 +111,65 @@ class _ModernBottomNavState extends State<ModernBottomNav> {
           ),
         ],
       ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          return GestureDetector(
-            behavior: HitTestBehavior.translucent,
-            onPanDown: (details) => _previewPosition(
-              details.localPosition,
-              constraints.maxWidth,
-              haptic: false,
-            ),
-            onPanUpdate: (details) =>
-                _previewPosition(details.localPosition, constraints.maxWidth),
-            onPanEnd: (_) => _finishDrag(),
-            onPanCancel: _clearPreview,
-            onTapCancel: _clearPreview,
-            child: NavigationBarTheme(
-              data: NavigationBarThemeData(
-                height: 64,
-                backgroundColor: cs.surface,
-                elevation: 0,
-                indicatorColor: active.withValues(alpha: .13),
-                labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-                iconTheme: WidgetStateProperty.resolveWith((states) {
-                  final selected = states.contains(WidgetState.selected);
-                  return IconThemeData(
-                    color: selected ? active : inactive,
-                    size: 23,
-                  );
-                }),
-                labelTextStyle: WidgetStateProperty.resolveWith((states) {
-                  final selected = states.contains(WidgetState.selected);
-                  return TextStyle(
-                    color: selected ? active : inactive,
-                    fontSize: 11.5,
-                    fontWeight: selected ? FontWeight.w800 : FontWeight.w700,
-                    height: 1,
-                  );
-                }),
+      child: MediaQuery(
+        data: mq.copyWith(
+          padding: mq.padding.copyWith(bottom: reducedBottom),
+          viewPadding: mq.viewPadding.copyWith(bottom: reducedBottom),
+        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onPanDown: (details) => _previewPosition(
+                details.localPosition,
+                constraints.maxWidth,
+                haptic: false,
               ),
-              child: NavigationBar(
-                selectedIndex: selectedIndex,
-                onDestinationSelected: _commitIndex,
-                destinations: [
-                  for (final item in widget.items)
-                    NavigationDestination(
-                      icon: Icon(item.icon),
-                      selectedIcon: Icon(item.icon),
-                      label: item.label,
-                    ),
-                ],
+              onPanUpdate: (details) =>
+                  _previewPosition(details.localPosition, constraints.maxWidth),
+              onPanEnd: (_) => _finishDrag(),
+              onPanCancel: _clearPreview,
+              onTapCancel: _clearPreview,
+              child: NavigationBarTheme(
+                data: NavigationBarThemeData(
+                  height: 64,
+                  backgroundColor: cs.surface,
+                  elevation: 0,
+                  indicatorColor: active.withValues(alpha: .13),
+                  labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+                  iconTheme: WidgetStateProperty.resolveWith((states) {
+                    final selected = states.contains(WidgetState.selected);
+                    return IconThemeData(
+                      color: selected ? active : inactive,
+                      size: 23,
+                    );
+                  }),
+                  labelTextStyle: WidgetStateProperty.resolveWith((states) {
+                    final selected = states.contains(WidgetState.selected);
+                    return TextStyle(
+                      color: selected ? active : inactive,
+                      fontSize: 11.5,
+                      fontWeight: selected ? FontWeight.w800 : FontWeight.w700,
+                      height: 1,
+                    );
+                  }),
+                ),
+                child: NavigationBar(
+                  selectedIndex: selectedIndex,
+                  onDestinationSelected: _commitIndex,
+                  destinations: [
+                    for (final item in widget.items)
+                      NavigationDestination(
+                        icon: Icon(item.icon),
+                        selectedIcon: Icon(item.icon),
+                        label: item.label,
+                      ),
+                  ],
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }

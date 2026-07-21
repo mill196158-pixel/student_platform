@@ -35,7 +35,6 @@ class _InfoScreenState extends State<InfoScreen> {
   int? _selectedSemester;
   _UsefulFilter _filter = _UsefulFilter.all;
   _UsefulSection _section = _UsefulSection.subjects;
-  bool _filtersExpanded = false;
   bool _controlGroupsTouched = false;
   final Set<String> _collapsedControlGroups = {};
 
@@ -281,16 +280,22 @@ class _InfoScreenState extends State<InfoScreen> {
     }
 
     if (_section == _UsefulSection.help) {
-      return ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-        children: const [_HelpSection()],
+      return _PullSearchHost(
+        key: const ValueKey('help-search'),
+        hintText: 'Найти в справочнике…',
+        builder: (context, query) => [
+          _HelpSection(query: query),
+        ],
       );
     }
 
     if (_section == _UsefulSection.jobs) {
-      return ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-        children: const [_JobsSection()],
+      return _PullSearchHost(
+        key: const ValueKey('jobs-search'),
+        hintText: 'Найти вакансию, компанию, тег…',
+        builder: (context, query) => [
+          _JobsSection(query: query),
+        ],
       );
     }
 
@@ -346,61 +351,39 @@ class _InfoScreenState extends State<InfoScreen> {
           else ...[
             _AcademicContextStrip(
               contextData: state.contextData,
-              selectedSemester: selectedSemester,
-              currentSemester: currentSemester,
-            ),
-            const SizedBox(height: 10),
-            _SubjectControlsCard(
-              semesters: semesters,
-              currentSemester: currentSemester,
-              selectedSemester: selectedSemester,
-              selectedFilter: _filter,
-              expanded: _filtersExpanded,
-              onToggleExpanded: () {
-                setState(() => _filtersExpanded = !_filtersExpanded);
-              },
-              onSemesterSelected: (value) {
-                setState(() {
-                  _selectedSemester = value;
-                  _filter = _UsefulFilter.all;
-                  _controlGroupsTouched = false;
-                  _collapsedControlGroups.clear();
-                });
-              },
-              onFilterSelected: (value) {
-                setState(() {
-                  _filter = value;
-                  _controlGroupsTouched = false;
-                  _collapsedControlGroups.clear();
-                });
-              },
             ),
             const SizedBox(height: 12),
-            if (visibleSubjects.isEmpty)
-              const _EmptyState(
-                text: 'В этом фильтре предметы не найдены',
-                compact: true,
-              )
-            else
-              _SemesterSubjectsSection(
-                semester: selectedSemester,
-                currentSemester: currentSemester,
-                subjects: visibleSubjects,
-                collapsedGroups: effectiveCollapsedControlGroups,
-                onGroupTap: (label) {
-                  setState(() {
-                    if (!_controlGroupsTouched) {
-                      _controlGroupsTouched = true;
-                      _collapsedControlGroups
-                        ..clear()
-                        ..addAll(effectiveCollapsedControlGroups);
-                    }
-                    if (!_collapsedControlGroups.add(label)) {
-                      _collapsedControlGroups.remove(label);
-                    }
-                  });
-                },
-              ),
+            _SemesterSubjectsSection(
+              semester: selectedSemester,
+              currentSemester: currentSemester,
+              semesters: semesters,
+              selectedFilter: _filter,
+              subjects: visibleSubjects,
+              collapsedGroups: effectiveCollapsedControlGroups,
+              onSortApplied: (semester, filter) {
+                setState(() {
+                  if (semester != null) {
+                    _selectedSemester = semester;
+                  }
+                  _filter = filter;
+                  _controlGroupsTouched = false;
+                  _collapsedControlGroups.clear();
+                });
+              },
+              onGroupTap: (label) {
+                setState(() {
+                  if (!_controlGroupsTouched) {
+                    _controlGroupsTouched = true;
+                    _collapsedControlGroups
+                      ..clear()
+                      ..addAll(effectiveCollapsedControlGroups);
+                  }
+                  if (!_collapsedControlGroups.add(label)) {
+                    _collapsedControlGroups.remove(label);
+                  }
+                });
+              },
+            ),
           ],
         ],
       ),
@@ -1143,13 +1126,9 @@ class _SectionChoiceTile extends StatelessWidget {
 
 class _AcademicContextStrip extends StatelessWidget {
   final AcademicContext contextData;
-  final int? selectedSemester;
-  final int? currentSemester;
 
   const _AcademicContextStrip({
     required this.contextData,
-    required this.selectedSemester,
-    required this.currentSemester,
   });
 
   @override
@@ -1157,9 +1136,6 @@ class _AcademicContextStrip extends StatelessWidget {
     final theme = Theme.of(context);
     final groupName = contextData.groupName ?? 'Группа не указана';
     final recordBookNumber = contextData.recordBookNumber;
-    final semester = selectedSemester ?? currentSemester;
-    final semesterText =
-        semester == null ? 'семестр уточняется' : '$semester семестр';
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -1212,25 +1188,24 @@ class _AcademicContextStrip extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
+          Row(
             children: [
-              _ContextPill(
-                icon: Icons.groups_2_outlined,
-                label: 'Группа',
-                text: groupName,
+              Expanded(
+                child: _ContextPill(
+                  icon: Icons.groups_2_outlined,
+                  label: 'Группа',
+                  text: groupName,
+                ),
               ),
-              _ContextPill(
-                icon: Icons.calendar_month_outlined,
-                label: 'Семестр',
-                text: semesterText,
-              ),
-              _ContextPill(
-                icon: Icons.confirmation_number_outlined,
-                label: '№ зачётки',
-                text:
-                    recordBookNumber == null ? 'не указана' : recordBookNumber,
+              const SizedBox(width: 8),
+              Expanded(
+                child: _ContextPill(
+                  icon: Icons.confirmation_number_outlined,
+                  label: '№ зачётки',
+                  text: recordBookNumber == null
+                      ? 'не указана'
+                      : recordBookNumber,
+                ),
               ),
             ],
           ),
@@ -1259,35 +1234,41 @@ class _ContextPill extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.86),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
+        border: Border.all(
+          color: Colors.black.withValues(alpha: 0.05),
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, color: theme.colorScheme.primary, size: 16),
           const SizedBox(width: 6),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                label,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: Colors.black45,
-                  fontWeight: FontWeight.w800,
-                  height: 1,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: Colors.black45,
+                    fontWeight: FontWeight.w800,
+                    height: 1,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                text,
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: Colors.black87,
-                  fontWeight: FontWeight.w900,
-                  height: 1,
+                const SizedBox(height: 2),
+                Text(
+                  text,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: Colors.black87,
+                    fontWeight: FontWeight.w900,
+                    height: 1,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
@@ -1298,15 +1279,21 @@ class _ContextPill extends StatelessWidget {
 class _SemesterSubjectsSection extends StatelessWidget {
   final int? semester;
   final int? currentSemester;
+  final List<int> semesters;
+  final _UsefulFilter selectedFilter;
   final List<_UsefulSubject> subjects;
   final Set<String> collapsedGroups;
+  final void Function(int? semester, _UsefulFilter filter) onSortApplied;
   final ValueChanged<String> onGroupTap;
 
   const _SemesterSubjectsSection({
     required this.semester,
     required this.currentSemester,
+    required this.semesters,
+    required this.selectedFilter,
     required this.subjects,
     required this.collapsedGroups,
+    required this.onSortApplied,
     required this.onGroupTap,
   });
 
@@ -1326,60 +1313,194 @@ class _SemesterSubjectsSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: Theme.of(context)
-                      .colorScheme
-                      .primary
-                      .withValues(alpha: 0.10),
-                  shape: BoxShape.circle,
+          InkWell(
+            onTap: semesters.isEmpty
+                ? null
+                : () => _showSubjectsSortSheet(context),
+            borderRadius: BorderRadius.circular(16),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .primary
+                        .withValues(alpha: 0.10),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.school_outlined,
+                    color: Theme.of(context).colorScheme.primary,
+                    size: 20,
+                  ),
                 ),
-                child: Icon(
-                  Icons.school_outlined,
-                  color: Theme.of(context).colorScheme.primary,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        color: Colors.black87,
-                        fontWeight: FontWeight.w900,
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          color: Colors.black87,
+                          fontWeight: FontWeight.w900,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${subjects.length} ${_pluralRu(subjects.length, 'дисциплина', 'дисциплины', 'дисциплин')}',
-                      style:
-                          const TextStyle(color: Colors.black54, fontSize: 12),
-                    ),
-                  ],
+                      const SizedBox(height: 2),
+                      Text(
+                        '${subjects.length} ${_pluralRu(subjects.length, 'дисциплина', 'дисциплины', 'дисциплин')}',
+                        style: const TextStyle(
+                            color: Colors.black54, fontSize: 12),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+                if (semesters.isNotEmpty)
+                  TextButton(
+                    onPressed: () => _showSubjectsSortSheet(context),
+                    child: const Text('Изменить'),
+                  ),
+              ],
+            ),
           ),
           const SizedBox(height: 12),
-          for (final entry in grouped.entries) ...[
-            _ControlGroupBlock(
-              label: entry.key,
-              subjects: entry.value,
-              collapsed: collapsedGroups.contains(entry.key),
-              onTap: () => onGroupTap(entry.key),
-            ),
-            const SizedBox(height: 6),
-          ],
+          if (subjects.isEmpty)
+            const Padding(
+              padding: EdgeInsets.fromLTRB(4, 8, 4, 16),
+              child: _EmptyState(
+                text: 'В этом фильтре предметы не найдены',
+                compact: true,
+              ),
+            )
+          else
+            for (final entry in grouped.entries) ...[
+              _ControlGroupBlock(
+                label: entry.key,
+                subjects: entry.value,
+                collapsed: collapsedGroups.contains(entry.key),
+                onTap: () => onGroupTap(entry.key),
+              ),
+              const SizedBox(height: 6),
+            ],
         ],
       ),
+    );
+  }
+
+  Future<void> _showSubjectsSortSheet(BuildContext context) async {
+    var draftSemester = semester;
+    var draftFilter = selectedFilter;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      constraints: _fullWidthSheetConstraints(context),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return SafeArea(
+              child: SizedBox(
+                width: double.infinity,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 22),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Предметы семестра',
+                          style:
+                              Theme.of(context).textTheme.titleLarge?.copyWith(
+                                    color: Colors.black,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Выберите семестр и тип контроля',
+                          style:
+                              Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    color: Colors.black54,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Семестр',
+                          style:
+                              Theme.of(context).textTheme.titleSmall?.copyWith(
+                                    color: Colors.black87,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                        ),
+                        const SizedBox(height: 8),
+                        ...semesters.map(
+                          (value) => _ChoiceSheetTile(
+                            title: 'Семестр $value',
+                            subtitle:
+                                value == currentSemester ? 'текущий' : null,
+                            selected: value == draftSemester,
+                            onTap: () {
+                              setSheetState(() => draftSemester = value);
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          'Тип',
+                          style:
+                              Theme.of(context).textTheme.titleSmall?.copyWith(
+                                    color: Colors.black87,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                        ),
+                        const SizedBox(height: 8),
+                        ..._UsefulFilter.values.map(
+                          (filter) => _ChoiceSheetTile(
+                            title: _filterLabel(filter),
+                            selected: filter == draftFilter,
+                            onTap: () {
+                              setSheetState(() => draftFilter = filter);
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton(
+                            onPressed: () {
+                              Navigator.of(sheetContext).pop();
+                              final semesterChanged = draftSemester != null &&
+                                  draftSemester != semester;
+                              final filterChanged =
+                                  draftFilter != selectedFilter;
+                              if (semesterChanged || filterChanged) {
+                                onSortApplied(
+                                  semesterChanged ? draftSemester : null,
+                                  draftFilter,
+                                );
+                              }
+                            },
+                            child: const Text('Готово'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }
@@ -1458,6 +1579,441 @@ class _ControlGroupBlock extends StatelessWidget {
   }
 }
 
+typedef _SearchChildrenBuilder = List<Widget> Function(
+  BuildContext context,
+  String query,
+);
+
+class _PullSearchHost extends StatefulWidget {
+  final String hintText;
+  final _SearchChildrenBuilder builder;
+
+  const _PullSearchHost({
+    super.key,
+    required this.hintText,
+    required this.builder,
+  });
+
+  @override
+  State<_PullSearchHost> createState() => _PullSearchHostState();
+}
+
+class _PullSearchHostState extends State<_PullSearchHost>
+    with SingleTickerProviderStateMixin {
+  static const _openThreshold = 44.0;
+  static const _closeScrollThreshold = 28.0;
+
+  final _field = TextEditingController();
+  final _focus = FocusNode();
+  final _scroll = ScrollController();
+
+  late final AnimationController _anim;
+  String _query = '';
+  bool _revealed = false;
+  double _pull = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _anim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 280),
+    );
+    _field.addListener(() {
+      final next = _field.text.trim();
+      if (next == _query) return;
+      setState(() => _query = next);
+    });
+  }
+
+  @override
+  void dispose() {
+    _field.dispose();
+    _focus.dispose();
+    _scroll.dispose();
+    _anim.dispose();
+    super.dispose();
+  }
+
+  Future<void> _openSearch() async {
+    if (_revealed) return;
+    setState(() {
+      _revealed = true;
+      _pull = 0;
+    });
+    await _anim.forward();
+    if (!mounted) return;
+    _focus.requestFocus();
+  }
+
+  Future<void> _closeSearch() async {
+    if (!_revealed) return;
+    FocusScope.of(context).unfocus();
+    _field.clear();
+    setState(() {
+      _query = '';
+      _pull = 0;
+    });
+    await _anim.reverse();
+    if (!mounted) return;
+    setState(() => _revealed = false);
+  }
+
+  bool _onScroll(ScrollNotification notification) {
+    if (notification.metrics.axis != Axis.vertical) return false;
+
+    // Open search only on a direct finger pull-down at the top.
+    // Ignore inertial bounce after scrolling up from below.
+    if (notification is OverscrollNotification) {
+      final dragging = notification.dragDetails != null;
+      if (!_revealed &&
+          dragging &&
+          notification.overscroll < 0 &&
+          notification.metrics.pixels <= 0) {
+        final next = (_pull + (-notification.overscroll) * 0.55)
+            .clamp(0.0, _openThreshold + 24);
+        if (next != _pull) setState(() => _pull = next);
+        if (next >= _openThreshold) {
+          _openSearch();
+        }
+      }
+      return false;
+    }
+
+    if (notification is ScrollUpdateNotification) {
+      final pixels = notification.metrics.pixels;
+      final delta = notification.scrollDelta ?? 0;
+      final dragging = notification.dragDetails != null;
+
+      if (!_revealed) {
+        if (dragging && pixels < 0) {
+          // Direct finger pull at the top only.
+          final next = (-pixels).clamp(0.0, _openThreshold + 24);
+          if (next != _pull) setState(() => _pull = next);
+          if (next >= _openThreshold) _openSearch();
+        } else if (_pull > 0 && pixels >= 0) {
+          // Settled back to content — clear leftover pull progress.
+          setState(() => _pull = 0);
+        }
+        // Inertial bounce (pixels < 0, not dragging): ignore completely.
+      } else if (_query.isEmpty && pixels > _closeScrollThreshold && delta > 0) {
+        _closeSearch();
+      }
+    }
+
+    if (notification is ScrollEndNotification && !_revealed && _pull > 0) {
+      // _pull is only accumulated while dragging, so a high value here
+      // means a deliberate pull-down, not an inertial top bounce.
+      if (_pull >= _openThreshold * 0.72) {
+        _openSearch();
+      } else {
+        setState(() => _pull = 0);
+      }
+    }
+
+    return false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pullT = (_pull / _openThreshold).clamp(0.0, 1.0);
+    final showHint = !_revealed && pullT > 0.02;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizeTransition(
+          sizeFactor: _anim,
+          axis: Axis.vertical,
+          alignment: Alignment.topCenter,
+          child: TapRegion(
+            onTapOutside: (_) {
+              if (_revealed) _closeSearch();
+            },
+            child: _FancySearchPanel(
+              controller: _field,
+              focusNode: _focus,
+              hintText: widget.hintText,
+              onClose: _closeSearch,
+              onSubmitted: (_) => FocusScope.of(context).unfocus(),
+            ),
+          ),
+        ),
+        if (showHint)
+          _PullSearchHint(progress: pullT),
+        Expanded(
+          child: NotificationListener<ScrollNotification>(
+            onNotification: _onScroll,
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: _revealed ? _closeSearch : null,
+              child: ListView(
+                controller: _scroll,
+                physics: const AlwaysScrollableScrollPhysics(
+                  parent: BouncingScrollPhysics(),
+                ),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                children: widget.builder(context, _query),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PullSearchHint extends StatelessWidget {
+  final double progress;
+
+  const _PullSearchHint({required this.progress});
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    final opacity = Curves.easeOut.transform(progress.clamp(0.0, 1.0));
+    return IgnorePointer(
+      child: Padding(
+        padding: EdgeInsets.only(
+          top: 2 + 6 * progress,
+          bottom: 1,
+        ),
+        child: Opacity(
+          opacity: opacity,
+          child: Transform.translate(
+            offset: Offset(0, -6 * (1 - progress)),
+            child: Column(
+              children: [
+                Container(
+                  width: 28 + 8 * progress,
+                  height: 3,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(999),
+                    gradient: LinearGradient(
+                      colors: [
+                        primary.withValues(alpha: 0.25),
+                        primary.withValues(alpha: 0.85),
+                        const Color(0xFF8E6BE8).withValues(alpha: 0.85),
+                      ],
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: primary.withValues(alpha: 0.22 * progress),
+                        blurRadius: 8,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  progress >= 0.95 ? 'Отпусти для поиска' : 'Потяни вниз для поиска',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: primary.withValues(alpha: 0.85),
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.15,
+                      ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FancySearchPanel extends StatelessWidget {
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final String hintText;
+  final VoidCallback onClose;
+  final ValueChanged<String>? onSubmitted;
+
+  const _FancySearchPanel({
+    required this.controller,
+    required this.focusNode,
+    required this.hintText,
+    required this.onClose,
+    this.onSubmitted,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 2),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onVerticalDragEnd: (details) {
+          final v = details.primaryVelocity ?? 0;
+          if (v < -220) onClose();
+        },
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: BackdropFilter(
+            filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Colors.white.withValues(alpha: 0.94),
+                    primary.withValues(alpha: 0.09),
+                    const Color(0xFF8E6BE8).withValues(alpha: 0.11),
+                  ],
+                ),
+                border: Border.all(
+                  color: primary.withValues(alpha: 0.16),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: primary.withValues(alpha: 0.12),
+                    blurRadius: 14,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: Stack(
+                children: [
+                  Positioned(
+                    right: -14,
+                    top: -16,
+                    child: IgnorePointer(
+                      child: Container(
+                        width: 56,
+                        height: 56,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: primary.withValues(alpha: 0.09),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(7, 6, 2, 6),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 30,
+                          height: 30,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(10),
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                primary.withValues(alpha: 0.95),
+                                const Color(0xFF8E6BE8),
+                              ],
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: primary.withValues(alpha: 0.22),
+                                blurRadius: 8,
+                                offset: const Offset(0, 3),
+                              ),
+                            ],
+                          ),
+                          child: const Icon(
+                            Icons.search_rounded,
+                            color: Colors.white,
+                            size: 17,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: controller,
+                            focusNode: focusNode,
+                            textInputAction: TextInputAction.search,
+                            onSubmitted: onSubmitted,
+                            style: const TextStyle(
+                              color: Colors.black,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14,
+                              height: 1.15,
+                            ),
+                            cursorColor: primary,
+                            decoration: InputDecoration(
+                              isCollapsed: true,
+                              border: InputBorder.none,
+                              hintText: hintText,
+                              hintStyle: TextStyle(
+                                color: Colors.black.withValues(alpha: 0.38),
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13.5,
+                              ),
+                            ),
+                          ),
+                        ),
+                        ValueListenableBuilder<TextEditingValue>(
+                          valueListenable: controller,
+                          builder: (_, value, __) {
+                            Widget btn({
+                              required String tooltip,
+                              required VoidCallback onPressed,
+                              required IconData icon,
+                              double size = 18,
+                            }) {
+                              return IconButton(
+                                tooltip: tooltip,
+                                onPressed: onPressed,
+                                visualDensity: VisualDensity.compact,
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(
+                                  minWidth: 32,
+                                  minHeight: 32,
+                                ),
+                                icon: Icon(
+                                  icon,
+                                  size: size,
+                                  color: Colors.black.withValues(alpha: 0.42),
+                                ),
+                              );
+                            }
+
+                            if (value.text.isEmpty) {
+                              return btn(
+                                tooltip: 'Закрыть',
+                                onPressed: onClose,
+                                icon: Icons.close_rounded,
+                              );
+                            }
+                            return Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                btn(
+                                  tooltip: 'Очистить',
+                                  onPressed: controller.clear,
+                                  icon: Icons.backspace_outlined,
+                                  size: 16,
+                                ),
+                                btn(
+                                  tooltip: 'Закрыть',
+                                  onPressed: onClose,
+                                  icon: Icons.close_rounded,
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _HelpSummaryCard extends StatelessWidget {
   const _HelpSummaryCard();
 
@@ -1519,285 +2075,6 @@ class _HelpSummaryCard extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _SubjectControlsCard extends StatelessWidget {
-  final List<int> semesters;
-  final int? currentSemester;
-  final int? selectedSemester;
-  final _UsefulFilter selectedFilter;
-  final bool expanded;
-  final VoidCallback onToggleExpanded;
-  final ValueChanged<int> onSemesterSelected;
-  final ValueChanged<_UsefulFilter> onFilterSelected;
-
-  const _SubjectControlsCard({
-    required this.semesters,
-    required this.currentSemester,
-    required this.selectedSemester,
-    required this.selectedFilter,
-    required this.expanded,
-    required this.onToggleExpanded,
-    required this.onSemesterSelected,
-    required this.onFilterSelected,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final semesterText = selectedSemester == null
-        ? 'Семестр'
-        : selectedSemester == currentSemester
-            ? '$selectedSemester семестр, текущий'
-            : '$selectedSemester семестр';
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.025),
-            blurRadius: 14,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          InkWell(
-            onTap: onToggleExpanded,
-            borderRadius: BorderRadius.circular(16),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
-              child: Row(
-                children: [
-                  Container(
-                    width: 36,
-                    height: 36,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.primary.withValues(alpha: 0.10),
-                      borderRadius: BorderRadius.circular(13),
-                    ),
-                    child: Icon(
-                      Icons.grid_view_rounded,
-                      color: theme.colorScheme.primary,
-                      size: 19,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Предметы семестра',
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            color: Colors.black,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '$semesterText • ${_filterLabel(selectedFilter)}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.labelMedium?.copyWith(
-                            color: Colors.black54,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  AnimatedRotation(
-                    turns: expanded ? 0.5 : 0,
-                    duration: const Duration(milliseconds: 180),
-                    child: const Icon(
-                      Icons.keyboard_arrow_down_rounded,
-                      color: Colors.black54,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          AnimatedCrossFade(
-            firstChild: const SizedBox.shrink(),
-            secondChild: Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: _FilterPill(
-                      text: semesterText,
-                      icon: Icons.school_outlined,
-                      onTap: () => _showSemesterSheet(context),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _FilterPill(
-                      text: _filterLabel(selectedFilter),
-                      icon: Icons.fact_check_outlined,
-                      onTap: () => _showTypeSheet(context),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            crossFadeState:
-                expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-            duration: const Duration(milliseconds: 180),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _showSemesterSheet(BuildContext context) async {
-    final selected = await showModalBottomSheet<int>(
-      context: context,
-      showDragHandle: true,
-      constraints: _fullWidthSheetConstraints(context),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (sheetContext) => SizedBox(
-        width: double.infinity,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 22),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Семестр',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: Colors.black,
-                      fontWeight: FontWeight.w900,
-                    ),
-              ),
-              const SizedBox(height: 10),
-              ...semesters.map(
-                (semester) => _ChoiceSheetTile(
-                  title: 'Семестр $semester',
-                  subtitle: semester == currentSemester ? 'текущий' : null,
-                  selected: semester == selectedSemester,
-                  onTap: () {
-                    Navigator.of(sheetContext).pop(semester);
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (selected != null && selected != selectedSemester) {
-      onSemesterSelected(selected);
-    }
-  }
-
-  Future<void> _showTypeSheet(BuildContext context) async {
-    final selected = await showModalBottomSheet<_UsefulFilter>(
-      context: context,
-      showDragHandle: true,
-      constraints: _fullWidthSheetConstraints(context),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (sheetContext) => SizedBox(
-        width: double.infinity,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 22),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Тип',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: Colors.black,
-                      fontWeight: FontWeight.w900,
-                    ),
-              ),
-              const SizedBox(height: 10),
-              ..._UsefulFilter.values.map(
-                (filter) => _ChoiceSheetTile(
-                  title: _filterLabel(filter),
-                  selected: filter == selectedFilter,
-                  onTap: () {
-                    Navigator.of(sheetContext).pop(filter);
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (selected != null && selected != selectedFilter) {
-      onFilterSelected(selected);
-    }
-  }
-}
-
-class _FilterPill extends StatelessWidget {
-  final String text;
-  final IconData icon;
-  final VoidCallback onTap;
-
-  const _FilterPill({
-    required this.text,
-    required this.icon,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(24),
-      child: Container(
-        height: 42,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: BoxDecoration(
-          color: const Color(0xFFF7F1FF),
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(
-            color: theme.colorScheme.primary.withValues(alpha: 0.08),
-          ),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, size: 17, color: theme.colorScheme.primary),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                text,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: Colors.black87,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-            const Icon(
-              Icons.keyboard_arrow_down_rounded,
-              size: 18,
-              color: Colors.black45,
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -1880,71 +2157,102 @@ class _ChoiceSheetTile extends StatelessWidget {
   }
 }
 
+class _HelpItem {
+  final String group;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  const _HelpItem({
+    required this.group,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  bool matches(String query) {
+    if (query.isEmpty) return true;
+    final q = query.toLowerCase();
+    return group.toLowerCase().contains(q) ||
+        title.toLowerCase().contains(q) ||
+        subtitle.toLowerCase().contains(q);
+  }
+}
+
+const _helpItems = <_HelpItem>[
+  _HelpItem(
+    group: 'Доступы',
+    icon: Icons.login_rounded,
+    title: 'Как зайти в личный кабинет',
+    subtitle: 'Краткая инструкция по входу и восстановлению доступа.',
+  ),
+  _HelpItem(
+    group: 'Доступы',
+    icon: Icons.download_rounded,
+    title: 'Как скачать нужные материалы',
+    subtitle: 'Где искать файлы, методички и шаблоны.',
+  ),
+  _HelpItem(
+    group: 'Документы',
+    icon: Icons.description_outlined,
+    title: 'Как заказать справку',
+    subtitle: 'Основные действия для получения справки в университете.',
+  ),
+  _HelpItem(
+    group: 'Программы',
+    icon: Icons.computer_rounded,
+    title: 'Как установить нужные программы',
+    subtitle: 'AutoCAD, Revit, офисные программы и другое ПО.',
+  ),
+  _HelpItem(
+    group: 'Карта и аудитории',
+    icon: Icons.map_outlined,
+    title: 'Карта и аудитории',
+    subtitle: 'Как найти корпус, кабинет или аудиторию.',
+  ),
+  _HelpItem(
+    group: 'Частые вопросы',
+    icon: Icons.help_outline_rounded,
+    title: 'Частые вопросы',
+    subtitle: 'Ответы на бытовые вопросы по учёбе.',
+  ),
+];
+
 class _HelpSection extends StatelessWidget {
-  const _HelpSection();
+  final String query;
+
+  const _HelpSection({this.query = ''});
 
   @override
   Widget build(BuildContext context) {
+    final filtered = _helpItems.where((item) => item.matches(query)).toList();
+    final groups = <String, List<_HelpItem>>{};
+    for (final item in filtered) {
+      groups.putIfAbsent(item.group, () => []).add(item);
+    }
+
     return Column(
-      children: const [
-        _HelpSummaryCard(),
-        SizedBox(height: 12),
-        _HelpGroupSection(
-          title: 'Доступы',
-          cards: [
-            _HelpCard(
-              icon: Icons.login_rounded,
-              title: 'Как зайти в личный кабинет',
-              subtitle: 'Краткая инструкция по входу и восстановлению доступа.',
+      children: [
+        const _HelpSummaryCard(),
+        const SizedBox(height: 12),
+        if (filtered.isEmpty)
+          const _EmptyState(
+            text: 'По запросу ничего не найдено',
+            compact: true,
+          )
+        else
+          for (final entry in groups.entries)
+            _HelpGroupSection(
+              title: entry.key,
+              cards: [
+                for (final item in entry.value)
+                  _HelpCard(
+                    icon: item.icon,
+                    title: item.title,
+                    subtitle: item.subtitle,
+                  ),
+              ],
             ),
-            _HelpCard(
-              icon: Icons.download_rounded,
-              title: 'Как скачать нужные материалы',
-              subtitle: 'Где искать файлы, методички и шаблоны.',
-            ),
-          ],
-        ),
-        _HelpGroupSection(
-          title: 'Документы',
-          cards: [
-            _HelpCard(
-              icon: Icons.description_outlined,
-              title: 'Как заказать справку',
-              subtitle:
-                  'Основные действия для получения справки в университете.',
-            ),
-          ],
-        ),
-        _HelpGroupSection(
-          title: 'Программы',
-          cards: [
-            _HelpCard(
-              icon: Icons.computer_rounded,
-              title: 'Как установить нужные программы',
-              subtitle: 'AutoCAD, Revit, офисные программы и другое ПО.',
-            ),
-          ],
-        ),
-        _HelpGroupSection(
-          title: 'Карта и аудитории',
-          cards: [
-            _HelpCard(
-              icon: Icons.map_outlined,
-              title: 'Карта и аудитории',
-              subtitle: 'Как найти корпус, кабинет или аудиторию.',
-            ),
-          ],
-        ),
-        _HelpGroupSection(
-          title: 'Частые вопросы',
-          cards: [
-            _HelpCard(
-              icon: Icons.help_outline_rounded,
-              title: 'Частые вопросы',
-              subtitle: 'Ответы на бытовые вопросы по учёбе.',
-            ),
-          ],
-        ),
       ],
     );
   }
@@ -2011,13 +2319,30 @@ class _DemoJob {
     required this.tags,
     required this.accent,
   });
+
+  bool matches(String query) {
+    if (query.isEmpty) return true;
+    final q = query.toLowerCase();
+    return title.toLowerCase().contains(q) ||
+        company.toLowerCase().contains(q) ||
+        type.toLowerCase().contains(q) ||
+        city.toLowerCase().contains(q) ||
+        salary.toLowerCase().contains(q) ||
+        deadline.toLowerCase().contains(q) ||
+        description.toLowerCase().contains(q) ||
+        tags.any((tag) => tag.toLowerCase().contains(q));
+  }
 }
 
 class _JobsSection extends StatelessWidget {
-  const _JobsSection();
+  final String query;
+
+  const _JobsSection({this.query = ''});
 
   @override
   Widget build(BuildContext context) {
+    final jobs = _demoJobs.where((job) => job.matches(query)).toList();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -2025,10 +2350,16 @@ class _JobsSection extends StatelessWidget {
         const SizedBox(height: 12),
         const _JobBoardStats(),
         const SizedBox(height: 12),
-        _JobsGroupSection(
-          title: 'Свежие предложения',
-          jobs: _demoJobs,
-        ),
+        if (jobs.isEmpty)
+          const _EmptyState(
+            text: 'По запросу ничего не найдено',
+            compact: true,
+          )
+        else
+          _JobsGroupSection(
+            title: query.isEmpty ? 'Свежие предложения' : 'Результаты поиска',
+            jobs: jobs,
+          ),
       ],
     );
   }

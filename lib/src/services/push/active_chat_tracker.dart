@@ -5,8 +5,18 @@ class ActiveChatTracker {
   static final ActiveChatTracker instance = ActiveChatTracker._();
 
   String? _chatId;
+  int _messageListDepth = 0;
 
   String? get chatId => _chatId;
+  bool get isViewingMessages => _chatId != null || _messageListDepth > 0;
+
+  void enterMessageList() {
+    _messageListDepth += 1;
+  }
+
+  void leaveMessageList() {
+    if (_messageListDepth > 0) _messageListDepth -= 1;
+  }
 
   void enter(String? chatId) {
     final id = chatId?.trim();

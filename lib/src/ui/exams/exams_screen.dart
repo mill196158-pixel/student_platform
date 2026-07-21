@@ -53,9 +53,9 @@ class _ExamsScreenState extends State<ExamsScreen> {
             title: const Text('Зачёты и экзамены'),
             actions: [
               Padding(
-                padding: const EdgeInsets.only(right: 10),
-                child: _AppBarExportButton(
-                  onTap: () => _showExportSheet(context, state),
+                padding: const EdgeInsets.only(right: 6),
+                child: _AppBarMoreButton(
+                  onExportPdf: () => _showExportSheet(context, state),
                 ),
               ),
             ],
@@ -548,45 +548,52 @@ class _HeroCard extends StatelessWidget {
   }
 }
 
-class _AppBarExportButton extends StatelessWidget {
-  final VoidCallback onTap;
+class _AppBarMoreButton extends StatelessWidget {
+  final VoidCallback onExportPdf;
 
-  const _AppBarExportButton({required this.onTap});
+  const _AppBarMoreButton({required this.onExportPdf});
 
   @override
   Widget build(BuildContext context) {
     final primary = Theme.of(context).colorScheme.primary;
-    return Tooltip(
-      message: 'Экспортировать PDF',
-      child: Material(
-        color: primary.withValues(alpha: .1),
-        borderRadius: BorderRadius.circular(999),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(999),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.picture_as_pdf_outlined, color: primary, size: 18),
-                const SizedBox(width: 6),
-                Text(
-                  'PDF',
-                  style: TextStyle(
-                    color: primary,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: .2,
-                  ),
-                ),
-              ],
-            ),
+    return PopupMenuButton<_ExamsAppBarAction>(
+      tooltip: 'Ещё',
+      offset: const Offset(0, 44),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      onSelected: (action) {
+        if (action == _ExamsAppBarAction.exportPdf) {
+          onExportPdf();
+        }
+      },
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          value: _ExamsAppBarAction.exportPdf,
+          child: Row(
+            children: [
+              Icon(Icons.picture_as_pdf_outlined, color: primary, size: 20),
+              const SizedBox(width: 12),
+              const Text(
+                'Скачать PDF',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ],
           ),
+        ),
+      ],
+      child: Material(
+        color: primary.withValues(alpha: .10),
+        shape: const CircleBorder(),
+        child: const SizedBox(
+          width: 40,
+          height: 40,
+          child: Icon(Icons.more_horiz_rounded, size: 22),
         ),
       ),
     );
   }
 }
+
+enum _ExamsAppBarAction { exportPdf }
 
 class _ExportPillButton extends StatelessWidget {
   final String label;
@@ -1222,7 +1229,7 @@ class _StatsSection extends StatelessWidget {
     return _DetailsSection(
       title: 'Статистика',
       rows: [
-        ('Сложность сдачи', item.difficultyLabel),
+        ('Сложность', item.difficultyLabel),
       ],
     );
   }
@@ -1281,7 +1288,7 @@ class _DifficultyLine extends StatelessWidget {
         const SizedBox(width: 5),
         Flexible(
           child: Text(
-            'Сложность сдачи: ${item.difficultyLabel}',
+            'Сложность: ${item.difficultyLabel}',
             overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Colors.black87,
@@ -1352,7 +1359,7 @@ Future<void> _showVoteSheet(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Оценить сложность сдачи',
+                    'Оценить сложность',
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.w900,
                         ),
@@ -1418,7 +1425,7 @@ class _RatingCircles extends StatelessWidget {
           Row(
             children: [
               const Text(
-                'Сложность сдачи',
+                'Сложность',
                 style: TextStyle(fontWeight: FontWeight.w800),
               ),
               const Spacer(),

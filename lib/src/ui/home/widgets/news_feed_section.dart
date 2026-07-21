@@ -16,25 +16,11 @@ class NewsFeedSection extends StatelessWidget {
   Widget build(BuildContext context) {
     if (news.isEmpty) return const SizedBox.shrink();
 
-    final theme = Theme.of(context);
-
     return Padding(
-      padding: const EdgeInsets.only(top: 18),
+      padding: const EdgeInsets.only(top: 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Text(
-              'Что нового',
-              style: theme.textTheme.titleLarge?.copyWith(
-                color: theme.colorScheme.onSurface,
-                fontWeight: FontWeight.w900,
-                height: 1.1,
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
           SizedBox(
             height: 128,
             child: ListView.separated(

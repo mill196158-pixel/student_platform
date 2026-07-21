@@ -3,13 +3,15 @@ import 'dart:math' as math;
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'package:student_platform/src/ui/learning/data/supabase_learning_repository.dart';
 import 'package:student_platform/src/ui/learning/models/team.dart';
 import 'package:student_platform/src/ui/learning/team_details_screen.dart';
+import 'package:student_platform/src/services/push/active_chat_tracker.dart';
+import 'package:student_platform/src/services/push/app_notifications_api.dart';
+import 'package:student_platform/src/services/push/push_navigation.dart';
 import 'package:student_platform/src/ui/chats/archive_screen.dart';
 import 'package:student_platform/src/ui/chats/direct_chat_screen.dart';
 import 'package:student_platform/src/ui/chats/dm_title.dart';
@@ -19,6 +21,7 @@ import 'package:student_platform/src/ui/chats/forward/forward_picker.dart'
     show ForwardTarget;
 import 'package:student_platform/src/ui/chats/data/chat_archive_api.dart';
 import 'package:student_platform/src/ui/chats/data/dm_api.dart';
+import 'package:student_platform/src/ui/chats/data/chat_summaries_cache.dart';
 import 'package:student_platform/src/ui/chats/core/chat_message_cache_store.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/widgets.dart'; // ChatMessageList
 import 'package:student_platform/src/ui/learning/models/message.dart'; // модель сообщения
@@ -45,6 +48,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
   static const _reloadDebounceEvery = Duration(milliseconds: 300);
   bool _summariesInFlight = false;
   bool _summariesQueued = false;
+  Completer<void>? _summariesReloadCompleter;
 
   bool _hydrated = false; // есть ли быстрый кеш на старте
   Timer? _searchDebounce;
@@ -57,12 +61,8 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     setState(fn);
   }
 
-  static const _cacheKeyPrefix = 'my_chats_cache_v2';
-
-  String _cacheKeyForCurrentUser() {
-    final userId = Supabase.instance.client.auth.currentUser?.id ?? 'anonymous';
-    return '${_cacheKeyPrefix}_$userId';
-  }
+  String get _currentUserId =>
+      Supabase.instance.client.auth.currentUser?.id ?? '';
 
   Future<void> _markChatReadServerSide(String chatId) async {
     // ➜ NEW
@@ -81,6 +81,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
         'p_chat_id': chatId,
         if (lastId != null && lastId.isNotEmpty) 'p_message_id': lastId,
       });
+      await AppNotificationsApi(client: sb).markReadForChat(chatId);
     } catch (e) {
       debugPrint('[MyChatsScreen] mark read RPC error: $e');
     }
@@ -89,13 +90,25 @@ class _MyChatsScreenState extends State<MyChatsScreen>
   @override
   void initState() {
     super.initState();
+    ActiveChatTracker.instance.enterMessageList();
     WidgetsBinding.instance.addObserver(this);
-    _hydrateFromCache(); // мгновенно показываем старый список
-    _load(); // параллельно тянем актуальные данные
+    final raw = ChatSummariesCache.readSync(_currentUserId);
+    if (raw != null) {
+      _applyCachedRaw(raw, notify: false);
+    }
+    unawaited(_initialize());
+  }
+
+  Future<void> _initialize() async {
+    if (!_hydrated) {
+      await _hydrateFromCache();
+    }
+    await _load();
   }
 
   @override
   void dispose() {
+    ActiveChatTracker.instance.leaveMessageList();
     WidgetsBinding.instance.removeObserver(this);
     _reloadDebounce?.cancel();
     _reloadDebounce = null;
@@ -118,7 +131,9 @@ class _MyChatsScreenState extends State<MyChatsScreen>
   }
 
   Future<void> _load() async {
-    _safeSetState(() => _loading = true);
+    if (!_hydrated) {
+      _safeSetState(() => _loading = true);
+    }
     _summariesInFlight = true;
     try {
       final sb = Supabase.instance.client;
@@ -127,6 +142,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
         _safeSetState(() {
           _all = [];
           _visible = [];
+          _hydrated = true;
           _loading = false;
         });
         return;
@@ -185,9 +201,10 @@ class _MyChatsScreenState extends State<MyChatsScreen>
       _safeSetState(() {
         _all = list;
         _applyFilter();
+        _hydrated = true;
         _loading = false;
       });
-      _saveCache(_all);
+      await _saveCache(_all);
       unawaited(_hydrateUnresolvedDmTitles());
 
       _subscribeChatsRealtime();
@@ -282,25 +299,13 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     if (need.isEmpty) return;
 
     try {
-      final ids = need.map((c) => c.peerId!).toSet().toList();
-      final rows = await Supabase.instance.client
-          .from('users')
-          .select('id, name, surname, avatar_url')
-          .inFilter('id', ids);
-      final byId = <String, Map<String, dynamic>>{
-        for (final row in (rows as List))
-          (row['id'] ?? '').toString(): Map<String, dynamic>.from(row as Map),
-      };
-      if (byId.isEmpty || !mounted) return;
-
+      // Direct `users` SELECT is RLS-blocked for peers; resolve via RPC.
       var changed = false;
       for (final c in need) {
-        final row = byId[c.peerId!];
-        if (row == null) continue;
-        final name = (row['name'] ?? '').toString().trim();
-        final surname = (row['surname'] ?? '').toString().trim();
-        final fullName = [name, surname].where((s) => s.isNotEmpty).join(' ');
-        final avatar = (row['avatar_url'] ?? '').toString().trim();
+        final profile = await PushNavigation.resolvePeerProfile(c.peerId!);
+        final fullName =
+            isUnresolvedDmTitle(profile.name) ? '' : profile.name.trim();
+        final avatar = (profile.avatar ?? '').trim();
         if (fullName.isNotEmpty && isUnresolvedDmTitle(c.title)) {
           c.title = fullName;
           changed = true;
@@ -514,9 +519,11 @@ class _MyChatsScreenState extends State<MyChatsScreen>
   Future<void> _reloadSummariesFromRpc() async {
     if (_summariesInFlight) {
       _summariesQueued = true;
-      return;
+      return _summariesReloadCompleter?.future ?? Future<void>.value();
     }
     _summariesInFlight = true;
+    final completer = Completer<void>();
+    _summariesReloadCompleter = completer;
     try {
       do {
         _summariesQueued = false;
@@ -544,10 +551,20 @@ class _MyChatsScreenState extends State<MyChatsScreen>
       final needsAnother = _summariesQueued && mounted;
       _summariesQueued = false;
       _summariesInFlight = false;
+      if (!completer.isCompleted) completer.complete();
+      if (identical(_summariesReloadCompleter, completer)) {
+        _summariesReloadCompleter = null;
+      }
       if (needsAnother) {
         unawaited(_reloadSummariesFromRpc());
       }
     }
+  }
+
+  Future<void> _refreshAfterReturningFromChat() async {
+    _reloadDebounce?.cancel();
+    _reloadDebounce = null;
+    await _reloadSummariesFromRpc();
   }
 
   void _subscribeChatsRealtime() {
@@ -691,9 +708,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
           ),
         ),
       );
-      if (c.chatId != null && c.chatId!.isNotEmpty) {
-        await _refreshUnreadFor(c.chatId!);
-      }
+      await _refreshAfterReturningFromChat();
       return;
     }
 
@@ -705,11 +720,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
         ),
       ),
     );
-
-    final chatId = c.chatId;
-    if (chatId != null && chatId.isNotEmpty) {
-      await _refreshUnreadFor(chatId);
-    }
+    await _refreshAfterReturningFromChat();
   }
 
   Future<void> _markChatRead(_ChatSummary c) async {
@@ -940,9 +951,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
                                     ),
                                   ),
                                 );
-                                if (c.chatId != null && c.chatId!.isNotEmpty) {
-                                  await _refreshUnreadFor(c.chatId!);
-                                }
+                                await _refreshAfterReturningFromChat();
                                 return;
                               }
 
@@ -954,34 +963,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
                                   ),
                                 ),
                               );
-
-                              // ➜ NEW: после возврата обновим unread для этого чата
-                              String? chatId = c.chatId;
-                              if (chatId == null || chatId.isEmpty) {
-                                try {
-                                  final res = await Supabase.instance.client
-                                      .from('chats')
-                                      .select('id')
-                                      .eq('team_id', c.team.id)
-                                      .eq('type', 'team_main')
-                                      .limit(1)
-                                      .maybeSingle();
-                                  if (res != null && res is Map) {
-                                    chatId = (res['id'] ?? '').toString();
-                                    if (mounted) {
-                                      _safeSetState(() {
-                                        final idx = _all.indexWhere(
-                                            (e) => e.team.id == c.team.id);
-                                        if (idx != -1)
-                                          _all[idx].chatId = chatId;
-                                      });
-                                    }
-                                  }
-                                } catch (_) {}
-                              }
-                              if (chatId != null && chatId.isNotEmpty) {
-                                await _refreshUnreadFor(chatId);
-                              }
+                              await _refreshAfterReturningFromChat();
                             },
                             onLongPressStart: (details) {
                               safeDebugLog(
@@ -1179,26 +1161,43 @@ class _MyChatsScreenState extends State<MyChatsScreen>
 
   Future<void> _hydrateFromCache() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final s = prefs.getString(_cacheKeyForCurrentUser());
+      final s = await ChatSummariesCache.read(_currentUserId);
       if (s == null || s.isEmpty) return;
-      final raw = (jsonDecode(s) as List).cast<Map<String, dynamic>>();
-      final list = raw.map(_summaryFromMap).toList()..sort(_compareChats);
-      setState(() {
-        _all = list;
-        _applyFilter();
-        _hydrated = true;
-        _loading = false; // сразу показываем список, без скелетона
-      });
+      if (!mounted) return;
+      _applyCachedRaw(s, notify: true);
       unawaited(_hydrateUnresolvedDmTitles());
     } catch (_) {}
   }
 
+  void _applyCachedRaw(String rawJson, {required bool notify}) {
+    final raw = (jsonDecode(rawJson) as List).cast<Map<String, dynamic>>();
+    final list = raw.map(_summaryFromMap).toList()..sort(_compareChats);
+    void apply() {
+      _all = list;
+      final query = _query.toLowerCase();
+      _visible = query.isEmpty
+          ? List<_ChatSummary>.of(list)
+          : list.where((c) {
+              return c.title.toLowerCase().contains(query) ||
+                  (c.subtitle ?? '').toLowerCase().contains(query) ||
+                  (c.lastAuthor ?? '').toLowerCase().contains(query) ||
+                  (c.lastMsgPreview ?? '').toLowerCase().contains(query);
+            }).toList();
+      _hydrated = true;
+      _loading = false;
+    }
+
+    if (notify) {
+      _safeSetState(apply);
+    } else {
+      apply();
+    }
+  }
+
   Future<void> _saveCache(List<_ChatSummary> list) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
       final data = jsonEncode(list.map(_summaryToMap).toList());
-      await prefs.setString(_cacheKeyForCurrentUser(), data);
+      await ChatSummariesCache.write(_currentUserId, data);
     } catch (_) {}
   }
 
