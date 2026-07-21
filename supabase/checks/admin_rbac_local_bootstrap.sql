@@ -1,7 +1,7 @@
 -- LOCAL ROLE-PLAY BOOTSTRAP ONLY (not a production migration).
 -- Used when the repo migration chain cannot apply from empty DB
 -- (incomplete history / draft migrations). Apply before
--- 20260721184328_admin_rbac_and_audit.sql on a fresh local Supabase.
+-- 20260721202054_admin_rbac_and_audit.sql on a fresh local Supabase.
 -- Do not apply to remote.
 
 begin;

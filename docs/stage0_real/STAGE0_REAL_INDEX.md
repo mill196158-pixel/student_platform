@@ -751,7 +751,7 @@ four news card variants with local image picking via `AdminImagePicker` /
 `StudentHomeView`.
 
 Stage 12.1 prepared a local-only admin RBAC/audit migration
-(`20260721184328_admin_rbac_and_audit.sql`), hardened dangerous `users` column
+(`20260721202054_admin_rbac_and_audit.sql`), hardened dangerous `users` column
 privileges in that migration, and added the Admin Web Auth/capabilities scaffold.
 Backward-compat preflight confirmed remote drafts `20260609093000_*` and
 `20260609133500_*` are not applied; those files were restored to HEAD, and

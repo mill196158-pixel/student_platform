@@ -954,7 +954,7 @@
 - Date: 2026-07-21
 - Branch: `feature/admin-console`
 - Live audit: `public.users` RLS allows self-update; `anon`/`authenticated` had UPDATE on privileged columns including `role`, `is_active`, `primary_group_id`, `must_change_password`.
-- Local migration created via Supabase CLI: `supabase/migrations/20260721184328_admin_rbac_and_audit.sql` (NOT applied to remote).
+- Local migration created via Supabase CLI: `supabase/migrations/20260721202054_admin_rbac_and_audit.sql` (NOT applied to remote).
 - Adds admin roles/permissions/assignments/audit + RPC capabilities; hardens users column privileges.
 - Admin Web: dart-define config, session controller, login/no-access, capability menu filtering; local prototype preserved without backend config.
 - Docs: `docs/admin_console/ADMIN_RBAC_BOOTSTRAP.md`, security review SQL check.
@@ -976,7 +976,7 @@
 - Remote `schema_migrations` / `list_migrations` (project `gwdanmwluhrcfxbnplwd`):
   - `20260609093000_*` NOT applied
   - `20260609133500_*` NOT applied
-  - `20260721184328_admin_rbac_and_audit` NOT applied
+  - `20260721202054_admin_rbac_and_audit` NOT applied
 - Draft migration files restored exactly to HEAD (no residual working-tree edits).
 - Compatibility model in new migration only:
   - column UPDATE grants for safe + legacy payload fields (`university`, `group_name`, `must_change_password`)
@@ -993,9 +993,9 @@
 - Date: 2026-07-21
 - Docker Desktop available; Supabase CLI 2.109.1 installed to `~/.local/share/supabase`.
 - Local stack started with `--exclude storage-api,imgproxy` (broken cached storage image tag).
-- Full repo migration chain cannot apply from empty DB (incomplete history + draft ordering); used ephemeral local bootstrap + `20260721184328_admin_rbac_and_audit.sql` only.
+- Full repo migration chain cannot apply from empty DB (incomplete history + draft ordering); used ephemeral local bootstrap + `20260721202054_admin_rbac_and_audit.sql` only.
 - Applied locally: `local_roleplay_bootstrap`, `admin_rbac_and_audit`.
 - Role-play script: `supabase/checks/admin_rbac_roleplay_runtime.sql` — **23/23 PASS**.
-- No SQL fixes required in `20260721184328_admin_rbac_and_audit.sql`.
+- No SQL fixes required in `20260721202054_admin_rbac_and_audit.sql`.
 - Migrations folder restored after run; bootstrap kept under `supabase/checks/admin_rbac_local_bootstrap.sql`.
 - Remote apply / linked writes / commit / push / deploy: not performed.

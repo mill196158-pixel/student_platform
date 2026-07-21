@@ -1,6 +1,6 @@
 # Admin RBAC bootstrap (after migration review)
 
-Do **not** apply `supabase/migrations/20260721184328_admin_rbac_and_audit.sql`
+Do **not** apply `supabase/migrations/20260721202054_admin_rbac_and_audit.sql`
 until an explicit review approval.
 
 This migration intentionally does **not** assign any `super_admin` by email or UUID.

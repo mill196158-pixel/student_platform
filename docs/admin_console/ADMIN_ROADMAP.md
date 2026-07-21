@@ -4,14 +4,14 @@
 
 ## Current state
 
-- Last updated: 2026-07-21
+- Last updated: 2026-07-22
 - Current branch: `feature/admin-console`
 - Current worktree: `/Users/annasuvorova/student_platform_admin`
 - Base commit: `89f0890`
-- Current stage: 12.1 — Security and RBAC
-- Current status: REVIEW
-- Next action: review локальной миграции `20260721184328_admin_rbac_and_audit.sql` и auth-каркаса Admin; не применять к remote без разрешения.
-- Blockers: remote apply/deploy запрещены до отдельного разрешения; первый `super_admin` назначается только bootstrap-инструкцией после review.
+- Current stage: 12.2 / 12.3 — content renderer / news backend
+- Current status: TODO
+- Next action: начать 12.2/12.3 по roadmap после закрытия housekeeping 12.1.
+- Blockers: none for 12.1 (RBAC applied; `mill453020` is global `super_admin`).
 
 Допустимые статусы: TODO, IN PROGRESS, REVIEW, DONE, BLOCKED. Одновременно только один этап может иметь статус IN PROGRESS.
 
@@ -198,12 +198,12 @@ Student Platform Admin — отдельная визуальная веб-пан
 
 - Goal: подготовить безопасный административный доступ до подключения реальных данных.
 - Deliverables: аудит `users` grants/RLS; локальная миграция admin RBAC/scopes/audit; RPC capabilities; hardening опасных колонок профиля; Admin Auth каркас; bootstrap-инструкция; focused tests.
-- Acceptance criteria: студенту недоступны admin RPC; права только через server assignments; Web Admin без service_role; локальный прототип работает без dart-define; миграция не применена к remote.
-- Status: REVIEW
-- Related files: `supabase/migrations/20260721184328_admin_rbac_and_audit.sql`, `supabase/checks/admin_rbac_security_review.sql`, `docs/admin_console/ADMIN_RBAC_BOOTSTRAP.md`, `admin_console/lib/core/auth/`
-- Commit SHA: отсутствует
-- Remote applied/deployed: нет
-- Notes: live audit confirmed `authenticated`/`anon` could UPDATE `users.role` and other privileged columns; migration revokes those column privileges and adds RPC-only admin access. Do not apply until explicit approval.
+- Acceptance criteria: студенту недоступны admin RPC; права только через server assignments; Web Admin без service_role; локальный прототип работает без dart-define; миграция применена; первый `super_admin` назначен bootstrap-процедурой.
+- Status: DONE
+- Related files: `supabase/migrations/20260721202054_admin_rbac_and_audit.sql`, `supabase/checks/admin_rbac_security_review.sql`, `docs/admin_console/ADMIN_RBAC_BOOTSTRAP.md`, `admin_console/lib/core/auth/`
+- Commit SHA: `81791ba` (+ housekeeping rename commit)
+- Remote applied/deployed: migration `20260721202054` / `admin_rbac_and_audit` applied; Edge/Web Admin deploy не выполнялся
+- Notes: remote history and local filename aligned on `20260721202054`; bootstrap `mill453020` as global `super_admin`; local role-play 23/23 and remote smoke PASS.
 
 ### 12.2 — Shared content renderer
 
@@ -325,14 +325,13 @@ Student Platform Admin — отдельная визуальная веб-пан
 
 ## Session handoff
 
-- Last completed action: этап 12.1 — local runtime role-play **23/23 PASS** on local Supabase; migration `20260721184328` applied only locally.
-- Current task: review + decision о remote apply; затем bootstrap первого `super_admin` по `ADMIN_RBAC_BOOTSTRAP.md`.
-- Files being changed: `supabase/migrations/20260721184328_admin_rbac_and_audit.sql`, `supabase/checks/admin_rbac_*`, `admin_console/lib/core/auth/*`, router/shell, mobile `change_password_screen.dart`, docs.
-- Checks already run: local role-play B/C — 23/23 PASS; `git diff --check` — clean; remote not touched.
-- Known blockers: remote apply / Edge deploy / commit / push запрещены до явного разрешения.
-- Exact next task: после approval — remote apply migration, bootstrap super_admin, затем 12.2/12.3 content renderer.
-- Uncommitted changes: stage 12.1 files listed in git status; commit отсутствует.
-- Last commit: `4a17b82`
-- Push status: branch tracking exists from 12.0; 12.1 not pushed.
-- Remote migration status: `20260609093000_*` / `20260609133500_*` / `20260721184328_*` — не применены.
-- Deploy status: не выполнялся.
+- Last completed action: этап 12.1 DONE — commit `81791ba` + housekeeping rename to `20260721202054_admin_rbac_and_audit.sql`; remote apply/bootstrap/smoke/push complete.
+- Current task: 12.2/12.3 content renderer / news backend wiring.
+- Checks already run: local role-play 23/23; remote privilege/RPC/JWT smoke PASS; migration history aligned local/remote `20260721202054`.
+- Known blockers: none for 12.1.
+- Exact next task: stage 12.2/12.3 per roadmap.
+- Uncommitted leftovers: none after housekeeping.
+- Last commit: housekeeping `chore: align admin RBAC migration history` (after `81791ba`).
+- Push status: `feature/admin-console` synced with origin after housekeeping push.
+- Remote migration status: `admin_rbac_and_audit` = `20260721202054` (local filename matched).
+- Deploy status: Edge/Web Admin deploy не выполнялся.

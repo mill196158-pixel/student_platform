@@ -1,5 +1,5 @@
 -- Stage 12.1 security review + post-apply verification queries.
--- Run AFTER applying 20260721184328_admin_rbac_and_audit.sql on a LOCAL review DB.
+-- Run AFTER applying 20260721202054_admin_rbac_and_audit.sql on a LOCAL review DB.
 -- Do not run against production without approval. Do not insert real secrets.
 --
 -- Runtime role-play requires a local Postgres/Supabase with a student JWT.
