@@ -52,7 +52,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(StudentHomeView), findsOneWidget);
-    expect(find.byType(StudentHomeNewsCard), findsNWidgets(2));
+    // Phone preview shows only published schedule-active cards (not drafts).
+    expect(find.byType(StudentHomeNewsCard), findsOneWidget);
   });
 
   testWidgets('tapping a preview card opens the full story sheet', (

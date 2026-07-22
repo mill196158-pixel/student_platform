@@ -7,7 +7,8 @@
 
 -- ---------------------------------------------------------------------------
 -- 1. Tables have RLS enabled AND forced (no owner bypass).
---    Expect: rls_enabled = true and rls_forced = true for all three tables.
+--    Expect: rls_enabled = true and rls_forced = true for news tables
+--    (+ news_media_cleanup_queue after Stage 12.3).
 -- ---------------------------------------------------------------------------
 select
   c.relname            as table_name,
@@ -16,7 +17,9 @@ select
 from pg_class c
 join pg_namespace n on n.oid = c.relnamespace
 where n.nspname = 'public'
-  and c.relname in ('news_posts', 'news_versions', 'news_views')
+  and c.relname in (
+    'news_posts', 'news_versions', 'news_views', 'news_media_cleanup_queue'
+  )
 order by c.relname;
 
 -- ---------------------------------------------------------------------------
@@ -64,7 +67,9 @@ where n.nspname = 'public'
   and p.proname in (
     'admin_list_news', 'admin_get_news', 'admin_create_news_draft',
     'admin_update_news_draft', 'admin_publish_news', 'admin_unpublish_news',
-    'admin_archive_news', 'admin_duplicate_news', 'admin_reorder_news',
+    'admin_archive_news', 'admin_restore_archived_news',
+    'admin_delete_archived_news', 'admin_record_news_media_cleanup_failure',
+    'admin_duplicate_news', 'admin_reorder_news',
     'admin_list_news_versions', 'admin_restore_news_version',
     'get_my_published_news', 'mark_news_seen',
     'admin_can_manage_news_media', 'admin_can_read_news_media'

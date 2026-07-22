@@ -140,6 +140,43 @@ void main() {
     expect(item.versionNumber, 5);
   });
 
+  test('restoreArchived calls admin_restore_archived_news', () async {
+    final fake = _FakeRpcClient((fn, params) {
+      expect(fn, 'admin_restore_archived_news');
+      expect(params?['p_id'], 'arch-1');
+      return _row(id: 'arch-1', status: 'draft', version: 4);
+    });
+    final repo = SupabaseNewsRepository(rpcClient: fake);
+
+    final item = await repo.restoreArchived('arch-1');
+
+    expect(item.status, NewsStatus.draft);
+    expect(item.versionNumber, 4);
+  });
+
+  test('deleteArchived parses media paths from RPC', () async {
+    final fake = _FakeRpcClient((fn, params) {
+      expect(fn, 'admin_delete_archived_news');
+      expect(params?['p_post_id'], 'arch-1');
+      return {
+        'deleted': true,
+        'id': 'arch-1',
+        'title': 'Архивная',
+        'previous_status': 'archived',
+        'candidate_media_paths': ['news/a.jpg', 'news/shared.jpg'],
+        'media_paths_to_delete': ['news/a.jpg'],
+      };
+    });
+    final repo = SupabaseNewsRepository(rpcClient: fake);
+
+    final result = await repo.deleteArchived('arch-1');
+
+    expect(result.id, 'arch-1');
+    expect(result.title, 'Архивная');
+    expect(result.candidateMediaPaths, ['news/a.jpg', 'news/shared.jpg']);
+    expect(result.mediaPathsToDelete, ['news/a.jpg']);
+  });
+
   test('listVersions parses admin_list_news_versions', () async {
     final fake = _FakeRpcClient((fn, params) {
       expect(fn, 'admin_list_news_versions');

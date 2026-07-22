@@ -31,6 +31,20 @@ abstract class NewsRepository {
 
   Future<NewsItem> archive(String id);
 
+  /// Restores an archived post to [NewsStatus.draft].
+  Future<NewsItem> restoreArchived(String id);
+
+  /// Permanently deletes an archived post. Never deletes published/draft.
+  Future<NewsDeleteResult> deleteArchived(String id);
+
+  /// Records Storage cleanup failures for later retry (server-side queue).
+  Future<void> recordMediaCleanupFailure({
+    required List<String> paths,
+    String? sourceNewsPostId,
+    String? sourceTitle,
+    String? errorText,
+  });
+
   Future<NewsItem> duplicate(String id);
 
   Future<void> reorder(List<String> orderedIds);
@@ -41,6 +55,25 @@ abstract class NewsRepository {
 
   /// Convenience alias used by the editor bootstrap and demo batches.
   Future<List<NewsItem>> loadDraft() => listNews();
+}
+
+/// Result of [NewsRepository.deleteArchived].
+class NewsDeleteResult {
+  const NewsDeleteResult({
+    required this.id,
+    required this.title,
+    this.previousStatus = NewsStatus.archived,
+    this.candidateMediaPaths = const [],
+    this.mediaPathsToDelete = const [],
+  });
+
+  final String id;
+  final String title;
+  final NewsStatus previousStatus;
+  final List<String> candidateMediaPaths;
+
+  /// Orphan paths the server has verified are safe to remove from Storage.
+  final List<String> mediaPathsToDelete;
 }
 
 /// Raised when a repository cannot fulfil a request (e.g. RBAC forbidden).
@@ -66,6 +99,12 @@ class LocalNewsRepository implements NewsRepository {
   late List<NewsItem> _items;
   late int _nextId;
   final Map<String, List<NewsItem>> _versions = {};
+  final List<Map<String, dynamic>> pendingMediaCleanup = [];
+  final List<Map<String, dynamic>> auditTombstones = [];
+
+  /// Test helper: in-memory version snapshots for an id (empty after delete).
+  List<NewsItem> versionsFor(String id) =>
+      List<NewsItem>.from(_versions[id] ?? const <NewsItem>[]);
 
   static const _palette = <List<Color>>[
     [Color(0xFF7367F0), Color(0xFFB784F7)],
@@ -248,6 +287,97 @@ class LocalNewsRepository implements NewsRepository {
       id,
       (item) => item.copyWith(status: NewsStatus.archived),
     );
+  }
+
+  @override
+  Future<NewsItem> restoreArchived(String id) {
+    return _transition(id, (item) {
+      if (!item.isArchived) {
+        throw const NewsRepositoryException(
+          'Удалять или восстанавливать можно только архивные новости.',
+        );
+      }
+      return item.copyWith(status: NewsStatus.draft);
+    });
+  }
+
+  Set<String> _pathsForItem(String id) {
+    final paths = <String>{};
+    final index = _items.indexWhere((e) => e.id == id);
+    if (index >= 0) {
+      final path = _items[index].imagePath;
+      if (path != null && path.isNotEmpty) paths.add(path);
+    }
+    for (final version in _versions[id] ?? const <NewsItem>[]) {
+      final path = version.imagePath;
+      if (path != null && path.isNotEmpty) paths.add(path);
+    }
+    return paths;
+  }
+
+  bool _pathStillReferenced(String path, {required String excludingId}) {
+    for (final item in _items) {
+      if (item.id == excludingId) continue;
+      if (item.imagePath == path) return true;
+    }
+    for (final entry in _versions.entries) {
+      if (entry.key == excludingId) continue;
+      for (final version in entry.value) {
+        if (version.imagePath == path) return true;
+      }
+    }
+    return false;
+  }
+
+  @override
+  Future<NewsDeleteResult> deleteArchived(String id) async {
+    final index = _indexOf(id);
+    final item = _items[index];
+    if (!item.isArchived) {
+      throw const NewsRepositoryException(
+        'Окончательное удаление доступно только для архивных новостей.',
+      );
+    }
+    final candidates = _pathsForItem(id).toList();
+    final toDelete = <String>[
+      for (final path in candidates)
+        if (!_pathStillReferenced(path, excludingId: id)) path,
+    ];
+    _items.removeAt(index);
+    _versions.remove(id);
+    auditTombstones.add({
+      'id': id,
+      'title': item.title,
+      'previous_status': 'archived',
+    });
+    return NewsDeleteResult(
+      id: id,
+      title: item.title,
+      previousStatus: NewsStatus.archived,
+      candidateMediaPaths: candidates,
+      mediaPathsToDelete: toDelete,
+    );
+  }
+
+  @override
+  Future<void> recordMediaCleanupFailure({
+    required List<String> paths,
+    String? sourceNewsPostId,
+    String? sourceTitle,
+    String? errorText,
+  }) async {
+    for (final path in paths) {
+      if (path.trim().isEmpty) continue;
+      if (_pathStillReferenced(path, excludingId: sourceNewsPostId ?? '')) {
+        continue;
+      }
+      pendingMediaCleanup.add({
+        'object_path': path,
+        'source_news_post_id': sourceNewsPostId,
+        'source_title': sourceTitle,
+        'error_text': errorText ?? 'storage_cleanup_failed',
+      });
+    }
   }
 
   @override
