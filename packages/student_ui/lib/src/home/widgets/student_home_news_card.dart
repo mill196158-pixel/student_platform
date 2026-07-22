@@ -264,7 +264,16 @@ class _ImageOnlyCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _NewsImageBackground(item: item, colors: colors, isDark: isDark);
+    // Full-bleed photo only — no padding, overlay, or decorative icon.
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Positioned.fill(
+          child:
+              _NewsImageBackground(item: item, colors: colors, isDark: isDark),
+        ),
+      ],
+    );
   }
 }
 
@@ -280,19 +289,28 @@ class _ImageOverlayCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final darken = item.overlayDarken.clamp(0.0, 0.9);
+    // Layers: image → overlay → text. Image/overlay are Positioned.fill.
     return Stack(
       fit: StackFit.expand,
       children: [
-        _NewsImageBackground(item: item, colors: colors, isDark: true),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Colors.black.withValues(alpha: darken * 0.35),
-                Colors.black.withValues(alpha: darken),
-              ],
+        Positioned.fill(
+          child: _NewsImageBackground(
+            item: item,
+            colors: colors,
+            isDark: true,
+          ),
+        ),
+        Positioned.fill(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.black.withValues(alpha: darken * 0.35),
+                  Colors.black.withValues(alpha: darken),
+                ],
+              ),
             ),
           ),
         ),
@@ -338,13 +356,17 @@ class _ImageWithTextCard extends StatelessWidget {
         children: [
           Expanded(
             flex: 7,
-            child: _NewsImageBackground(
-              item: item,
-              colors: colors,
-              isDark: isDark,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(25),
-              ),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Positioned.fill(
+                  child: _NewsImageBackground(
+                    item: item,
+                    colors: colors,
+                    isDark: isDark,
+                  ),
+                ),
+              ],
             ),
           ),
           Expanded(
@@ -380,13 +402,11 @@ class _NewsImageBackground extends StatelessWidget {
     required this.item,
     required this.colors,
     required this.isDark,
-    this.borderRadius,
   });
 
   final StudentHomeNews item;
   final List<Color> colors;
   final bool isDark;
-  final BorderRadius? borderRadius;
 
   @override
   Widget build(BuildContext context) {
@@ -407,7 +427,6 @@ class _NewsImageBackground extends StatelessWidget {
       bytes: item.imageBytes,
       colors: skeletonColors,
       alignment: item.imageFocus,
-      borderRadius: borderRadius,
       isLoading: item.usesImage && !item.hasImage,
       fit: BoxFit.cover,
     );
