@@ -56,13 +56,16 @@ http://localhost:3000
 http://localhost:3000/**
 ```
 
-Ссылка восстановления пароля из Admin Web использует:
+`resetPasswordForEmail` отправляет `redirectTo` ровно:
 
 ```text
-http://localhost:3000/#/auth/reset-password
+http://localhost:3000/
 ```
 
-Без этого redirect recovery-ссылка из письма не вернёт пользователя в локальный
+Без `#`, `?` и внутреннего route. Supabase сам добавляет recovery-фрагмент в URL;
+приложение ловит `AuthChangeEvent.passwordRecovery` и открывает экран смены пароля.
+
+Без allowlist redirect recovery-ссылка из письма не вернёт пользователя в локальный
 Admin Web.
 
 ## Demo-запуск (локальный прототип)

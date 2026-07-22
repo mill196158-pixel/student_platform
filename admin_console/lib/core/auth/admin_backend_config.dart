@@ -57,9 +57,10 @@ class AdminBackendConfig {
     return null;
   }
 
-  /// Must match real-launch `--web-port=3000` and Supabase Redirect URLs.
-  static const String passwordResetRedirectTo =
-      'http://localhost:3000/#/auth/reset-password';
+  /// Site-root only. Supabase appends the recovery fragment itself.
+  /// Must match real-launch `--web-port=3000` and Redirect URLs.
+  /// Do not include `#`, `?`, or an app route — that breaks token parsing.
+  static const String passwordResetRedirectTo = 'http://localhost:3000/';
 }
 
 /// Backward-compatible alias used by older call sites / tests.

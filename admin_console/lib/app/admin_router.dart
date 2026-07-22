@@ -26,13 +26,14 @@ GoRouter createAdminRouter(AdminSessionController session) {
       final loc = state.matchedLocation;
       final phase = session.phase;
 
+      // Recovery wins over bootstrap/capabilities — do not bounce to login/shell.
+      if (session.isPasswordRecovery) {
+        return loc == '/auth/reset-password' ? null : '/auth/reset-password';
+      }
+
       if (phase == AdminSessionPhase.bootstrapping ||
           phase == AdminSessionPhase.loadingCapabilities) {
         return loc == '/loading' ? null : '/loading';
-      }
-
-      if (phase == AdminSessionPhase.passwordRecovery) {
-        return loc == '/auth/reset-password' ? null : '/auth/reset-password';
       }
 
       if (phase == AdminSessionPhase.localPrototype) {

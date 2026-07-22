@@ -20,18 +20,13 @@ enum AdminSessionPhase {
 /// Owns Supabase Auth session + server-backed capabilities for Admin Web.
 class AdminSessionController extends ChangeNotifier {
   AdminSessionController({
-    Future<void> Function()? initializeSupabase,
-    Future<AdminCapabilities> Function()? loadCapabilities,
-    Future<AuthResponse> Function(String email, String password)? signIn,
-    Future<void> Function()? signOut,
-    Future<void> Function(String email)? resetPasswordForEmail,
-    Future<void> Function(String password)? updatePassword,
-  }) : _initializeSupabase = initializeSupabase,
-       _loadCapabilities = loadCapabilities,
-       _signIn = signIn,
-       _signOut = signOut,
-       _resetPasswordForEmail = resetPasswordForEmail,
-       _updatePassword = updatePassword;
+    this._initializeSupabase,
+    this._loadCapabilities,
+    this._signIn,
+    this._signOut,
+    this._resetPasswordForEmail,
+    this._updatePassword,
+  });
 
   final Future<void> Function()? _initializeSupabase;
   final Future<AdminCapabilities> Function()? _loadCapabilities;
@@ -48,18 +43,31 @@ class AdminSessionController extends ChangeNotifier {
   String? infoMessage;
   bool _supabaseReady = false;
 
+  /// Sticky latch: once recovery is seen, bootstrap/capabilities must not
+  /// overwrite it with login/shell phases.
+  bool _passwordRecoveryLatched = false;
+  bool _authStarted = false;
+
   bool get isLocalPrototype => phase == AdminSessionPhase.localPrototype;
   bool get isConnectedBackend =>
       !isLocalPrototype && AdminBackendConfig.isConfigured;
   bool get isAuthenticated =>
       phase == AdminSessionPhase.ready || phase == AdminSessionPhase.noAccess;
   bool get hasAdminAccess => phase == AdminSessionPhase.ready;
-  bool get isPasswordRecovery => phase == AdminSessionPhase.passwordRecovery;
+  bool get isPasswordRecovery =>
+      _passwordRecoveryLatched || phase == AdminSessionPhase.passwordRecovery;
 
-  Future<void> bootstrap() async {
-    phase = AdminSessionPhase.bootstrapping;
+  /// Initialize Supabase and attach [onAuthStateChange] as early as possible,
+  /// before router/capability checks.
+  Future<void> startAuthEarly() async {
+    if (_authStarted) return;
+    _authStarted = true;
+
     errorMessage = null;
-    infoMessage = null;
+    // Keep infoMessage if returning from password update.
+    if (!_passwordRecoveryLatched) {
+      phase = AdminSessionPhase.bootstrapping;
+    }
     notifyListeners();
 
     if (AdminBackendConfig.isDemoMode) {
@@ -90,19 +98,63 @@ class AdminSessionController extends ChangeNotifier {
         );
       }
       _supabaseReady = true;
-      // Attach ASAP so late PASSWORD_RECOVERY emissions are still handled.
+
+      // Critical: subscribe before any capability / router decisions.
       _attachAuthListener();
 
-      final session = Supabase.instance.client.auth.currentSession;
-      // Recovery may already have been applied during initialize (listener
-      // could miss the first event). Detect via URI / route without reading
-      // token values, or via phase set by the listener.
-      if (phase == AdminSessionPhase.passwordRecovery ||
-          _detectPasswordRecoveryFromUri() ||
-          (session != null && _isResetPasswordRoute())) {
-        phase = AdminSessionPhase.passwordRecovery;
+      // Allow the auth client to process the recovery fragment from the URL.
+      await Future<void>.delayed(Duration.zero);
+
+      if (_passwordRecoveryLatched || _detectPasswordRecoveryFromUri()) {
+        _enterPasswordRecovery();
+      }
+    } catch (_) {
+      if (_passwordRecoveryLatched) {
+        _enterPasswordRecovery();
+        return;
+      }
+      phase = AdminSessionPhase.error;
+      capabilities = AdminCapabilities.empty;
+      errorMessage =
+          'Не удалось подключить безопасный вход. Проверьте конфигурацию и сеть.';
+      notifyListeners();
+    }
+  }
+
+  /// Finish startup after auth is ready. Never overwrites recovery.
+  Future<void> completeBootstrap() async {
+    if (_passwordRecoveryLatched ||
+        phase == AdminSessionPhase.passwordRecovery) {
+      _enterPasswordRecovery();
+      return;
+    }
+
+    if (phase == AdminSessionPhase.localPrototype ||
+        phase == AdminSessionPhase.error) {
+      return;
+    }
+
+    if (!_supabaseReady && !AdminBackendConfig.isDemoMode) {
+      // startAuthEarly failed or was skipped.
+      return;
+    }
+
+    try {
+      if (_initializeSupabase != null) {
+        // Injected test client — no live session unless latched.
+        if (_passwordRecoveryLatched) {
+          _enterPasswordRecovery();
+          return;
+        }
+        phase = AdminSessionPhase.signedOut;
         capabilities = AdminCapabilities.empty;
         notifyListeners();
+        return;
+      }
+
+      final session = Supabase.instance.client.auth.currentSession;
+      if (_passwordRecoveryLatched || _detectPasswordRecoveryFromUri()) {
+        _enterPasswordRecovery();
         return;
       }
 
@@ -115,12 +167,30 @@ class AdminSessionController extends ChangeNotifier {
 
       await refreshCapabilities();
     } catch (_) {
+      if (_passwordRecoveryLatched) {
+        _enterPasswordRecovery();
+        return;
+      }
       phase = AdminSessionPhase.error;
       capabilities = AdminCapabilities.empty;
       errorMessage =
           'Не удалось подключить безопасный вход. Проверьте конфигурацию и сеть.';
       notifyListeners();
     }
+  }
+
+  /// Full bootstrap (tests / fallback when [startAuthEarly] was not used).
+  Future<void> bootstrap() async {
+    await startAuthEarly();
+    await completeBootstrap();
+  }
+
+  void _enterPasswordRecovery() {
+    _passwordRecoveryLatched = true;
+    phase = AdminSessionPhase.passwordRecovery;
+    capabilities = AdminCapabilities.empty;
+    errorMessage = null;
+    notifyListeners();
   }
 
   void _attachAuthListener() {
@@ -130,18 +200,13 @@ class AdminSessionController extends ChangeNotifier {
       return;
     }
     try {
-      _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((
-        data,
-      ) {
+      _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
         if (data.event == AuthChangeEvent.passwordRecovery) {
-          phase = AdminSessionPhase.passwordRecovery;
-          capabilities = AdminCapabilities.empty;
-          errorMessage = null;
-          notifyListeners();
+          _enterPasswordRecovery();
         }
       });
     } catch (_) {
-      // Listener is best-effort; URI detection still covers email links.
+      // Listener is best-effort; URI type=recovery still covers email links.
     }
   }
 
@@ -153,7 +218,8 @@ class AdminSessionController extends ChangeNotifier {
       if (fragment.contains('type=recovery')) {
         return true;
       }
-      if (Uri.base.queryParameters['type'] == 'recovery') {
+      final type = Uri.base.queryParameters['type'];
+      if (type == 'recovery') {
         return true;
       }
     } catch (_) {
@@ -162,21 +228,20 @@ class AdminSessionController extends ChangeNotifier {
     return false;
   }
 
-  bool _isResetPasswordRoute() {
-    try {
-      final fragment = Uri.base.fragment;
-      final path = fragment.split('?').first;
-      final normalized = path.startsWith('/') ? path : '/$path';
-      return normalized == '/auth/reset-password';
-    } catch (_) {
-      return false;
-    }
+  @visibleForTesting
+  void debugEnterPasswordRecovery() {
+    _enterPasswordRecovery();
   }
 
   Future<void> signInWithPassword({
     required String email,
     required String password,
   }) async {
+    if (_passwordRecoveryLatched) {
+      _enterPasswordRecovery();
+      return;
+    }
+
     if (AdminBackendConfig.isDemoMode) {
       phase = AdminSessionPhase.localPrototype;
       notifyListeners();
@@ -205,6 +270,10 @@ class AdminSessionController extends ChangeNotifier {
           email: email.trim(),
           password: password,
         );
+      }
+      if (_passwordRecoveryLatched) {
+        _enterPasswordRecovery();
+        return;
       }
       await refreshCapabilities();
     } on AuthException catch (error) {
@@ -272,21 +341,27 @@ class AdminSessionController extends ChangeNotifier {
           UserAttributes(password: password),
         );
       }
+      _passwordRecoveryLatched = false;
       await signOut();
-      infoMessage = 'Пароль обновлён. Войдите с новым паролем.';
+      infoMessage = 'Пароль изменён';
       notifyListeners();
     } on AuthException catch (error) {
-      phase = AdminSessionPhase.passwordRecovery;
+      _enterPasswordRecovery();
       errorMessage = _friendlyResetError(error);
       notifyListeners();
     } catch (_) {
-      phase = AdminSessionPhase.passwordRecovery;
+      _enterPasswordRecovery();
       errorMessage = 'Не удалось сохранить пароль. Попробуйте ещё раз.';
       notifyListeners();
     }
   }
 
   Future<void> refreshCapabilities() async {
+    if (_passwordRecoveryLatched) {
+      _enterPasswordRecovery();
+      return;
+    }
+
     phase = AdminSessionPhase.loadingCapabilities;
     errorMessage = null;
     notifyListeners();
@@ -296,12 +371,22 @@ class AdminSessionController extends ChangeNotifier {
       final loaded = loader != null
           ? await loader()
           : await _fetchCapabilities();
+
+      if (_passwordRecoveryLatched) {
+        _enterPasswordRecovery();
+        return;
+      }
+
       capabilities = loaded;
       phase = loaded.hasAnyAdminAccess
           ? AdminSessionPhase.ready
           : AdminSessionPhase.noAccess;
       notifyListeners();
     } catch (_) {
+      if (_passwordRecoveryLatched) {
+        _enterPasswordRecovery();
+        return;
+      }
       phase = AdminSessionPhase.error;
       capabilities = AdminCapabilities.empty;
       errorMessage =
@@ -322,6 +407,7 @@ class AdminSessionController extends ChangeNotifier {
       // Still clear local admin state.
     }
 
+    _passwordRecoveryLatched = false;
     capabilities = AdminCapabilities.empty;
     errorMessage = null;
     if (AdminBackendConfig.isDemoMode) {
@@ -366,6 +452,9 @@ class AdminSessionController extends ChangeNotifier {
     }
     if (message.contains('same as') || message.contains('different')) {
       return 'Новый пароль должен отличаться от текущего.';
+    }
+    if (message.contains('otp_expired') || message.contains('expired')) {
+      return 'Ссылка для сброса устарела. Запросите новую.';
     }
     return 'Не удалось выполнить операцию. Попробуйте ещё раз.';
   }

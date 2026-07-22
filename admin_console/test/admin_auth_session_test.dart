@@ -53,11 +53,100 @@ void main() {
     expect(find.text('Забыли пароль?'), findsOneWidget);
   });
 
-  test('password reset redirect target is localhost:3000 hash route', () {
+  test('password reset redirectTo is site root on port 3000', () {
     expect(
       AdminBackendConfig.passwordResetRedirectTo,
-      'http://localhost:3000/#/auth/reset-password',
+      'http://localhost:3000/',
     );
+    expect(AdminBackendConfig.passwordResetRedirectTo, isNot(contains('#')));
+    expect(AdminBackendConfig.passwordResetRedirectTo, isNot(contains('?')));
+    expect(
+      AdminBackendConfig.passwordResetRedirectTo,
+      isNot(contains('reset-password')),
+    );
+  });
+
+  testWidgets('passwordRecovery opens reset screen', (tester) async {
+    AdminBackendConfig.debugDemoModeOverride = false;
+    final session = AdminSessionController(
+      initializeSupabase: () async {},
+      loadCapabilities: () async => AdminCapabilities.empty,
+      signOut: () async {},
+    );
+    session.debugEnterPasswordRecovery();
+
+    await tester.pumpWidget(AdminApp(session: session));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Новый пароль'), findsWidgets);
+    expect(find.text('Повторите пароль'), findsOneWidget);
+    expect(find.text('Сохранить пароль'), findsOneWidget);
+    expect(find.text('Войти'), findsNothing);
+  });
+
+  test('bootstrap does not overwrite passwordRecovery latch', () async {
+    AdminBackendConfig.debugDemoModeOverride = false;
+    var capabilitiesLoaded = false;
+    final session = AdminSessionController(
+      initializeSupabase: () async {},
+      loadCapabilities: () async {
+        capabilitiesLoaded = true;
+        return const AdminCapabilities(
+          userId: 'admin-1',
+          permissions: {'dashboard.view'},
+          assignments: [],
+        );
+      },
+      signOut: () async {},
+    );
+
+    session.debugEnterPasswordRecovery();
+    await session.startAuthEarly();
+    await session.completeBootstrap();
+
+    expect(session.phase, AdminSessionPhase.passwordRecovery);
+    expect(session.isPasswordRecovery, isTrue);
+    expect(capabilitiesLoaded, isFalse);
+  });
+
+  testWidgets('successful password change signs out and opens login', (
+    tester,
+  ) async {
+    AdminBackendConfig.debugDemoModeOverride = false;
+    var signedOut = false;
+    var updatedPassword = '';
+    final session = AdminSessionController(
+      initializeSupabase: () async {},
+      loadCapabilities: () async => AdminCapabilities.empty,
+      signOut: () async {
+        signedOut = true;
+      },
+      updatePassword: (password) async {
+        updatedPassword = password;
+      },
+    );
+    session.debugEnterPasswordRecovery();
+
+    await tester.pumpWidget(AdminApp(session: session));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Новый пароль'),
+      'new-pass-123',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Повторите пароль'),
+      'new-pass-123',
+    );
+    await tester.tap(find.text('Сохранить пароль'));
+    await tester.pumpAndSettle();
+
+    expect(updatedPassword, 'new-pass-123');
+    expect(signedOut, isTrue);
+    expect(session.phase, AdminSessionPhase.signedOut);
+    expect(session.infoMessage, 'Пароль изменён');
+    expect(find.text('Войти'), findsOneWidget);
+    expect(find.text('Пароль изменён'), findsOneWidget);
   });
 
   testWidgets('requestPasswordReset shows info without tokens', (tester) async {
@@ -77,10 +166,13 @@ void main() {
     expect(capturedEmail, 'admin@example.com');
     expect(session.infoMessage, isNotNull);
     expect(session.infoMessage!.toLowerCase(), isNot(contains('access_token')));
-    expect(session.infoMessage!.toLowerCase(), isNot(contains('refresh_token')));
+    expect(
+      session.infoMessage!.toLowerCase(),
+      isNot(contains('refresh_token')),
+    );
   });
 
-  testWidgets('updatePassword signs out and returns to login phase', (
+  testWidgets('updatePassword signs out and sets success message', (
     tester,
   ) async {
     AdminBackendConfig.debugDemoModeOverride = false;
@@ -93,12 +185,12 @@ void main() {
         updated = password == 'new-pass-123';
       },
     );
-    session.phase = AdminSessionPhase.passwordRecovery;
+    session.debugEnterPasswordRecovery();
 
     await session.updatePassword(password: 'new-pass-123');
     expect(updated, isTrue);
     expect(session.phase, AdminSessionPhase.signedOut);
-    expect(session.infoMessage, isNotNull);
+    expect(session.infoMessage, 'Пароль изменён');
   });
 
   testWidgets('no capabilities shows no access', (tester) async {

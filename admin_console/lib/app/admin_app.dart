@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../core/auth/admin_session_controller.dart';
 import 'admin_router.dart';
@@ -15,13 +16,21 @@ class AdminApp extends StatefulWidget {
 
 class _AdminAppState extends State<AdminApp> {
   late final AdminSessionController _session;
-  late final router = createAdminRouter(_session);
+  late final GoRouter router;
 
   @override
   void initState() {
     super.initState();
     _session = widget.session ?? AdminSessionController();
-    _session.bootstrap();
+    router = createAdminRouter(_session);
+
+    if (widget.session != null) {
+      // main() already ran startAuthEarly(); finish capability/session path.
+      _session.completeBootstrap();
+    } else {
+      // Tests / fallback without early auth.
+      _session.bootstrap();
+    }
   }
 
   @override

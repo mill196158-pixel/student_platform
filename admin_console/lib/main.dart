@@ -1,8 +1,14 @@
 import 'package:flutter/widgets.dart';
 
 import 'app/admin_app.dart';
+import 'core/auth/admin_session_controller.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const AdminApp());
+
+  // Auth client + onAuthStateChange must be ready before router/login UI.
+  final session = AdminSessionController();
+  await session.startAuthEarly();
+
+  runApp(AdminApp(session: session));
 }

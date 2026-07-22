@@ -28,6 +28,10 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   Future<void> _submit() async {
     final password = _passwordController.text;
     final confirm = _confirmController.text;
+    if (password.length < 8) {
+      setState(() => _localError = 'Пароль должен быть не короче 8 символов.');
+      return;
+    }
     if (password != confirm) {
       setState(() => _localError = 'Пароли не совпадают.');
       return;
