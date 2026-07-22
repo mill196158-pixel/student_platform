@@ -148,7 +148,7 @@ The draft proposes:
 - authenticated read access for basic reference tables;
 - active-group-scoped read access for group academic metadata and `subject_offerings`;
 - own-row read access for `student_enrollments`;
-- admin manage policies based on the existing `public.users.role = 'admin'` model;
+- admin manage policies based on Stage 12.1 RBAC (`private.can_manage_academic()` / `public.is_admin(auth.uid())`), not editable `users.role`;
 - no regular client write policies for academic structure tables.
 
 The draft must be reviewed before applying. It was not applied.

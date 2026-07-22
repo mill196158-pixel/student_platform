@@ -904,3 +904,98 @@
 - Focused analyze passed with no issues; IDE lints report no errors.
 - Supabase schema/data/RLS changed: no.
 - Git add/commit run: no.
+
+## Student Platform Admin - Stage 12.0 Web foundation
+
+- Date: 2026-07-21
+- Worktree: `/Users/annasuvorova/student_platform_admin`
+- Branch: `feature/admin-console`
+- Base commit: `89f0890`
+- Master roadmap created: `docs/admin_console/ADMIN_ROADMAP.md`
+- Flutter Web project created: `admin_console/`
+- Implemented: routes, responsive desktop shell/Drawer, dashboard, local news editor, mock subjects table, mock teachers table.
+- Data source: local mock data only.
+- Supabase connection/schema/RLS/migrations changed: no.
+- Root mobile `lib/`, Firebase, and neighboring worktree changed: no.
+- Verification: `dart format lib test`, `flutter analyze`, `flutter test`, and `flutter build web` passed.
+- Stage status: REVIEW, pending user visual review.
+- Commit/push/deploy: not performed.
+
+## Student Platform Admin - Stage 12.0 exact preview correction
+
+- Date: 2026-07-21
+- Shared presentation package added: `packages/student_ui/`.
+- Shared components: loaded home composition, news cards/feed, bottom navigation, preview models, and preview light theme.
+- Mobile `HomeScreen` remains the owner of real services, notifications, assignment actions, refresh, and navigation callbacks.
+- `HomeDashboardService` changed: no.
+- Admin Preview now uses `StudentHomeView` with local name/group/date/lesson/assignment/news data.
+- Editable preview area: news only; system cards and bottom navigation are display-only.
+- PWA manifest and repository-relative macOS/Windows launch scripts added.
+- Verification: focused shared/mobile/admin analyze passed; shared/admin widget tests passed; Admin Web build passed.
+- Supabase/Firebase/migrations/deploy/commit/push: not performed.
+- Status: REVIEW, pending exact visual comparison.
+
+## Student Platform Admin - Stage 12.0 visual news editor
+
+- Date: 2026-07-21
+- Worktree: `/Users/annasuvorova/student_platform_admin`
+- Branch: `feature/admin-console`
+- News editor layout: left card list, center height-scaled phone preview, right properties; adaptive medium/narrow stacking.
+- Shared `StudentHomeNews` gained optional `imageBytes`, `imageFocus`, `overlayDarken`; card variants render `gradientText`, `imageOnly`, `imageOverlay`, `imageWithText`.
+- Admin local adapters: `AdminImagePicker`, `AdminImageStore`, `NewsRepository` with in-memory/mock implementations only.
+- Local image pick: JPG/PNG/WebP, max 5 MB, friendly validation errors; bytes kept in memory only (not Git/SharedPreferences/Base64 sources).
+- Editor actions: create, select, reorder, duplicate, hide, delete, draft save; publish remains disabled with explicit notice.
+- Verification: `dart format` on touched Dart files; `packages/student_ui` + `admin_console` focused analyze; shared/admin widget tests including four variants and image retention; `flutter build web`; `git diff --check`.
+- Supabase/Firebase/migrations/deploy/commit/push: not performed.
+- Status: REVIEW, awaiting visual sign-off before 12.1 Auth/RBAC/Storage.
+
+## Student Platform Admin - Stage 12.1 RBAC and auth scaffold
+
+- Date: 2026-07-21
+- Branch: `feature/admin-console`
+- Live audit: `public.users` RLS allows self-update; `anon`/`authenticated` had UPDATE on privileged columns including `role`, `is_active`, `primary_group_id`, `must_change_password`.
+- Local migration created via Supabase CLI: `supabase/migrations/20260721202054_admin_rbac_and_audit.sql` (NOT applied to remote).
+- Adds admin roles/permissions/assignments/audit + RPC capabilities; hardens users column privileges.
+- Admin Web: dart-define config, session controller, login/no-access, capability menu filtering; local prototype preserved without backend config.
+- Docs: `docs/admin_console/ADMIN_RBAC_BOOTSTRAP.md`, security review SQL check.
+- Remote apply / Edge deploy / commit / push: not performed.
+
+## Student Platform Admin - Stage 12.1 security hardening follow-up
+
+- Date: 2026-07-21
+- Tightened `users` UPDATE whitelist to `name, surname, avatar_url, status, updated_at` (removed `group_name`, `university`, `last_seen_at`).
+- Replaced `clear_my_must_change_password` with `auth.users` AFTER UPDATE OF `encrypted_password` private trigger.
+- Replaced `users.role`-based admin checks in unapplied academic drafts with `private.can_manage_academic()`; `public.is_admin(uuid)` now RBAC-only for current `auth.uid()`.
+- Removed `audit.read` from `viewer`; hardened super_admin global/non-expiring + serialized last-super-admin revoke.
+- Local Supabase role-play blocked: Docker unavailable on this host.
+- Remote apply / commit / push: not performed.
+
+## Student Platform Admin - Stage 12.1 backward-compat + migration-history preflight
+
+- Date: 2026-07-21
+- Remote `schema_migrations` / `list_migrations` (project `gwdanmwluhrcfxbnplwd`):
+  - `20260609093000_*` NOT applied
+  - `20260609133500_*` NOT applied
+  - `20260721202054_admin_rbac_and_audit` NOT applied
+- Draft migration files restored exactly to HEAD (no residual working-tree edits).
+- Compatibility model in new migration only:
+  - column UPDATE grants for safe + legacy payload fields (`university`, `group_name`, `must_change_password`)
+  - `private.guard_users_self_update` BEFORE UPDATE blocks real privileged changes; allows unchanged legacy values
+  - Auth password trigger clears `must_change_password` via session GUC bypass
+  - presence remains RPC `touch_my_presence` (no `last_seen_at` column grant)
+  - signup remains `register_local_user` (security definer; anon EXECUTE preserved on remote today)
+- Security review SQL expanded with backward-compat scenarios.
+- Runtime role-play blocker: Docker / local Supabase unavailable.
+- Remote apply / commit / push / deploy: not performed.
+
+## Student Platform Admin - Stage 12.1 local runtime role-play
+
+- Date: 2026-07-21
+- Docker Desktop available; Supabase CLI 2.109.1 installed to `~/.local/share/supabase`.
+- Local stack started with `--exclude storage-api,imgproxy` (broken cached storage image tag).
+- Full repo migration chain cannot apply from empty DB (incomplete history + draft ordering); used ephemeral local bootstrap + `20260721202054_admin_rbac_and_audit.sql` only.
+- Applied locally: `local_roleplay_bootstrap`, `admin_rbac_and_audit`.
+- Role-play script: `supabase/checks/admin_rbac_roleplay_runtime.sql` — **23/23 PASS**.
+- No SQL fixes required in `20260721202054_admin_rbac_and_audit.sql`.
+- Migrations folder restored after run; bootstrap kept under `supabase/checks/admin_rbac_local_bootstrap.sql`.
+- Remote apply / linked writes / commit / push / deploy: not performed.

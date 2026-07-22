@@ -1,4 +1,7 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:student_ui/student_ui.dart';
 
 import 'package:student_platform/src/ui/learning/models/assignment.dart';
 import 'package:student_platform/src/ui/schedule/models/lesson.dart';
@@ -120,6 +123,17 @@ class HomeNewsItem {
   final HomeNewsType type;
   final DateTime createdAt;
   final int priority;
+  final StudentHomeNewsVariant variant;
+  final Alignment imageFocus;
+  final double overlayDarken;
+
+  /// Remote Supabase Storage object path (private bucket). Never a public URL.
+  final String? imagePath;
+
+  /// Decoded image bytes resolved from [imagePath] (memory / disk cache).
+  final Uint8List? imageBytes;
+  final DateTime? publishedAt;
+  final DateTime? updatedAt;
 
   const HomeNewsItem({
     required this.id,
@@ -131,7 +145,51 @@ class HomeNewsItem {
     required this.type,
     required this.createdAt,
     this.priority = 0,
+    this.variant = StudentHomeNewsVariant.gradientText,
+    this.imageFocus = Alignment.center,
+    this.overlayDarken = 0.42,
+    this.imagePath,
+    this.imageBytes,
+    this.publishedAt,
+    this.updatedAt,
   });
+
+  /// Stable cache identity for private news images (never a signed URL).
+  NewsImageCacheKey? get imageCacheKey => NewsImageCacheKey.tryParse(
+        path: imagePath,
+        updatedAt: updatedAt ?? publishedAt ?? createdAt,
+      );
+
+  bool get usesImage =>
+      variant == StudentHomeNewsVariant.imageOnly ||
+      variant == StudentHomeNewsVariant.imageOverlay ||
+      variant == StudentHomeNewsVariant.imageWithText;
+
+  HomeNewsItem copyWith({
+    Uint8List? imageBytes,
+    bool clearImageBytes = false,
+    String? imagePath,
+    DateTime? updatedAt,
+  }) {
+    return HomeNewsItem(
+      id: id,
+      title: title,
+      subtitle: subtitle,
+      body: body,
+      icon: icon,
+      gradientColors: gradientColors,
+      type: type,
+      createdAt: createdAt,
+      priority: priority,
+      variant: variant,
+      imageFocus: imageFocus,
+      overlayDarken: overlayDarken,
+      imagePath: imagePath ?? this.imagePath,
+      imageBytes: clearImageBytes ? null : (imageBytes ?? this.imageBytes),
+      publishedAt: publishedAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
 }
 
 enum HomeNewsType {

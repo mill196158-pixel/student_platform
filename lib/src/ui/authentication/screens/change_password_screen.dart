@@ -40,9 +40,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
       }
 
       await sb.auth.updateUser(UserAttributes(password: _passwordCtrl.text));
-      await sb
-          .from('users')
-          .update({'must_change_password': false}).eq('id', userId);
+      // must_change_password is cleared server-side by an auth.users password trigger.
 
       final prefs = await SharedPreferences.getInstance();
       final cachedUser = prefs.getString('user');

@@ -7,26 +7,22 @@ class ProfileRepository {
   Future<Map<String, dynamic>?> fetchMyProfile() async {
     final uid = _sb.auth.currentUser?.id;
     if (uid == null) return null;
-    return await _sb
-        .from('users')
-        .select()
-        .eq('id', uid)
-        .maybeSingle();
+    return await _sb.from('users').select().eq('id', uid).maybeSingle();
   }
 
+  /// Updates only self-editable profile fields.
+  ///
+  /// `university` / `group_name` are academic identity fields and must not be
+  /// client-writable; they are managed by import/admin flows.
   Future<void> updateProfile({
     required String name,
     required String surname,
-    required String university,
-    required String groupName,
     String? status,
   }) async {
     final uid = _sb.auth.currentUser!.id;
     await _sb.from('users').update({
       'name': name,
       'surname': surname,
-      'university': university,
-      'group_name': groupName,
       if (status != null) 'status': status,
     }).eq('id', uid);
   }
@@ -38,10 +34,11 @@ class ProfileRepository {
     final path = '$uid/$fileName';
 
     await _sb.storage.from('avatars').upload(
-      path,
-      file,
-      fileOptions: const FileOptions(upsert: true, contentType: 'image/jpeg'),
-    );
+          path,
+          file,
+          fileOptions:
+              const FileOptions(upsert: true, contentType: 'image/jpeg'),
+        );
 
     final publicUrl = _sb.storage.from('avatars').getPublicUrl(path);
     await _sb.from('users').update({'avatar_url': publicUrl}).eq('id', uid);

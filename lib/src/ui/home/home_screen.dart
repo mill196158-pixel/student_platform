@@ -3,18 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:student_ui/student_ui.dart';
 
 import 'package:student_platform/src/services/push/app_notifications_api.dart';
 import 'package:student_platform/src/services/push/in_app_notification_bus.dart';
 import 'package:student_platform/src/ui/home/home_dashboard_service.dart';
 import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
-import 'package:student_platform/src/ui/home/widgets/help_card.dart';
-import 'package:student_platform/src/ui/home/widgets/home_header.dart';
-import 'package:student_platform/src/ui/home/widgets/news_feed_section.dart';
-import 'package:student_platform/src/ui/home/widgets/news_story_sheet.dart';
-import 'package:student_platform/src/ui/home/widgets/task_preview_card.dart';
 import 'package:student_platform/src/ui/navigation/main_tab_scope.dart';
-import 'package:student_platform/src/ui/home/widgets/today_summary_card.dart';
 import 'package:student_platform/src/ui/notifications/notification_center_sheet.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -50,7 +45,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _onInAppEvent(InAppNotificationEvent event) async {
-    // Visual toast is handled globally by [InAppToastHost].
     await _refreshUnreadBadge();
   }
 
@@ -63,12 +57,16 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _load() async {
-    if (mounted) {
+    final hadData = _data != null;
+    if (mounted && !hadData) {
       setState(() {
         _loading = true;
         _error = null;
       });
     }
+
+    // Cache-first: paint previously saved news image bytes ASAP.
+    unawaited(_paintCachedNews());
 
     try {
       final results = await Future.wait<Object?>([
@@ -76,127 +74,193 @@ class _HomeScreenState extends State<HomeScreen> {
         _notificationsApi.unreadCount(),
       ]);
       if (!mounted) return;
+      final next = results[0] as HomeDashboardData;
       setState(() {
-        _data = results[0] as HomeDashboardData;
+        _data = _mergeDashboardNewsImages(_data, next);
         _unreadNotificationCount = results[1] as int;
+        _error = null;
       });
-    } catch (e) {
+    } catch (error) {
       if (!mounted) return;
-      setState(() => _error = e);
+      // Keep last good dashboard (and images) on refresh failure.
+      if (!hadData) setState(() => _error = error);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+  Future<void> _paintCachedNews() async {
+    try {
+      final cached = await _service.loadCachedNews();
+      if (!mounted || cached.isEmpty || _data == null) return;
+      setState(() {
+        _data = _mergeDashboardNewsImages(
+          _data,
+          HomeDashboardData(
+            profile: _data!.profile,
+            scheduleDate: _data!.scheduleDate,
+            todayLessons: _data!.todayLessons,
+            assignments: _data!.assignments,
+            news: cached,
+            readNotificationIds: _data!.readNotificationIds,
+            unreadMessagesCount: _data!.unreadMessagesCount,
+            warning: _data!.warning,
+          ),
+        );
+      });
+    } catch (_) {}
+  }
 
-    return Scaffold(
-      backgroundColor:
-          isDark ? const Color(0xFF101820) : const Color(0xFFFAF8FC),
-      body: DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: isDark
-                ? const [Color(0xFF101820), Color(0xFF111827)]
-                : const [Color(0xFFFAF8FC), Color(0xFFF7FBFA)],
-          ),
-        ),
-        child: SafeArea(
-          bottom: false,
-          child: RefreshIndicator(
-            onRefresh: _load,
-            child: _body(),
-          ),
-        ),
-      ),
+  HomeDashboardData _mergeDashboardNewsImages(
+    HomeDashboardData? previous,
+    HomeDashboardData next,
+  ) {
+    if (previous == null) return next;
+    final prevById = {for (final item in previous.news) item.id: item};
+    final news = [
+      for (final item in next.news)
+        if (item.imageBytes == null &&
+            prevById[item.id]?.imageBytes != null &&
+            prevById[item.id]!.imageCacheKey?.id == item.imageCacheKey?.id)
+          item.copyWith(imageBytes: prevById[item.id]!.imageBytes)
+        else
+          item,
+    ];
+    return HomeDashboardData(
+      profile: next.profile,
+      scheduleDate: next.scheduleDate,
+      todayLessons: next.todayLessons,
+      assignments: next.assignments,
+      news: news,
+      readNotificationIds: next.readNotificationIds,
+      unreadMessagesCount: next.unreadMessagesCount,
+      warning: next.warning,
     );
   }
 
-  Widget _body() {
-    if (_loading && _data == null) {
-      return const _LoadingDashboard();
+  @override
+  Widget build(BuildContext context) {
+    final data = _data;
+    if (_loading && data == null) {
+      return const _HomeStatusSurface(child: _LoadingDashboard());
     }
-
-    if (_error != null && _data == null) {
-      return _ErrorDashboard(
-        onRetry: _load,
-        message:
-            'Не удалось загрузить главную. Потяните вниз или попробуйте ещё раз.',
+    if (_error != null && data == null) {
+      return _HomeStatusSurface(
+        child: _ErrorDashboard(
+          onRetry: _load,
+          message:
+              'Не удалось загрузить главную. Потяните вниз или попробуйте ещё раз.',
+        ),
       );
     }
-
-    final data = _data;
     if (data == null) return const SizedBox.shrink();
+
     if (!data.isScheduleForToday && !_loading) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && !_loading) _load();
       });
     }
 
-    return CustomScrollView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      slivers: [
-        SliverToBoxAdapter(
-          child: HomeHeader(
-            profile: data.profile,
-            currentDate: data.scheduleDate,
-            notificationCount: _unreadNotificationCount,
-            onNotificationsTap: () async {
-              await showNotificationCenterSheet(context);
-              if (!mounted) return;
-              final count = await _notificationsApi.unreadCount();
-              if (!mounted) return;
-              setState(() => _unreadNotificationCount = count);
-            },
-          ),
-        ),
-        SliverToBoxAdapter(
-          child: _AnimatedEntry(
-            delay: const Duration(milliseconds: 20),
-            child: NewsFeedSection(
-              news: data.news,
-              onNewsTap: (index) => _showNewsFeed(data.news, index),
-            ),
-          ),
-        ),
-        SliverToBoxAdapter(
-          child: _AnimatedEntry(
-            delay: const Duration(milliseconds: 70),
-            child: TodaySummaryCard(
-              data: data,
-              onTap: () => MainTabScope.switchToTab(context, MainTab.schedule),
-            ),
-          ),
-        ),
-        SliverToBoxAdapter(
-          child: _AnimatedEntry(
-            delay: const Duration(milliseconds: 120),
-            child: _AssignmentsSection(
-              data: data,
-              hiddenAssignmentIds: _hiddenDoneAssignmentIds,
-              markingDoneAssignmentIds: _markingDoneAssignmentIds,
-              onOpen: () => context.push('/my-diary'),
-              onAssignmentTap: _showAssignmentDetails,
-              onAssignmentDoneTap: _markAssignmentDone,
-            ),
-          ),
-        ),
-        SliverToBoxAdapter(
-          child: _AnimatedEntry(
-            delay: const Duration(milliseconds: 170),
-            child: HelpCard(
-              onTap: _showHelpDetails,
-            ),
-          ),
-        ),
-        const SliverToBoxAdapter(child: SizedBox(height: 96)),
-      ],
+    return StudentHomeView(
+      data: _toPresentationData(data),
+      notificationCount: _unreadNotificationCount,
+      onRefresh: _load,
+      onNotificationsTap: _openNotifications,
+      onNewsTap: (index) => _showNewsFeed(data.news, index),
+      onSummaryTap: () => MainTabScope.switchToTab(
+        context,
+        MainTab.schedule,
+      ),
+      onAssignmentsOpen: () => context.push('/my-diary'),
+      onAssignmentTap: (item) {
+        final source = _findAssignment(item.id);
+        if (source != null) _showAssignmentDetails(source);
+      },
+      onAssignmentDoneTap: (item) {
+        final source = _findAssignment(item.id);
+        if (source != null) _markAssignmentDone(source);
+      },
+      onHelpTap: _showHelpDetails,
+      hiddenAssignmentIds: _hiddenDoneAssignmentIds,
+      markingDoneAssignmentIds: _markingDoneAssignmentIds,
     );
+  }
+
+  StudentHomeData _toPresentationData(HomeDashboardData data) {
+    return StudentHomeData(
+      profile: StudentHomeProfile(
+        name: data.profile.displayName,
+        groupName: data.profile.groupName,
+      ),
+      currentDate: data.scheduleDate,
+      lessons: [
+        for (final lesson in data.remainingLessons)
+          StudentHomeLesson(
+            subject: lesson.subject,
+            start: lesson.start,
+            pairNumber: lesson.pairNum,
+            room: lesson.room ?? '',
+            teacher: lesson.teacher ?? '',
+          ),
+      ],
+      assignments: [
+        for (final item in data.assignments)
+          StudentHomeAssignment(
+            id: item.assignment.id,
+            title: item.assignment.title,
+            subject: item.teamName,
+            deadline: _deadlineText(item),
+            status: _assignmentStatus(item),
+            isDone: item.isDone,
+          ),
+      ],
+      news: _presentationNews(data.news),
+      totalLessonsToday: data.totalLessonsToday,
+      assignmentsCount: data.assignmentsCount,
+      lessonsFinishedForToday: data.lessonsFinishedForToday,
+    );
+  }
+
+  List<StudentHomeNews> _presentationNews(List<HomeNewsItem> news) {
+    return [
+      for (final item in news)
+        StudentHomeNews(
+          id: item.id,
+          title: item.title,
+          subtitle: item.subtitle,
+          body: item.body,
+          icon: item.icon,
+          gradientColors: item.gradientColors,
+          variant: item.variant,
+          imageBytes: item.imageBytes,
+          imageFocus: item.imageFocus,
+          overlayDarken: item.overlayDarken,
+          publishedAt: item.publishedAt,
+        ),
+    ];
+  }
+
+  HomeAssignmentPreview? _findAssignment(String id) {
+    for (final item in _data?.assignments ?? const <HomeAssignmentPreview>[]) {
+      if (item.assignment.id == id) return item;
+    }
+    return null;
+  }
+
+  StudentHomeAssignmentStatus _assignmentStatus(HomeAssignmentPreview item) {
+    if (item.isDone) return StudentHomeAssignmentStatus.done;
+    if (item.assignment.status == 'in_progress') {
+      return StudentHomeAssignmentStatus.inProgress;
+    }
+    return StudentHomeAssignmentStatus.notStarted;
+  }
+
+  Future<void> _openNotifications() async {
+    await showNotificationCenterSheet(context);
+    if (!mounted) return;
+    final count = await _notificationsApi.unreadCount();
+    if (!mounted) return;
+    setState(() => _unreadNotificationCount = count);
   }
 
   Future<void> _markAssignmentDone(HomeAssignmentPreview item) async {
@@ -277,11 +341,10 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<bool?> _confirmAssignmentDone(HomeAssignmentPreview item) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final assignment = item.assignment;
     final sheetColor = isDark ? const Color(0xFF182331) : Colors.white;
     final titleColor = isDark ? Colors.white : const Color(0xFF111827);
     final bodyColor = titleColor.withValues(alpha: isDark ? 0.74 : 0.64);
-    final accent = const Color(0xFF2F9D84);
+    const accent = Color(0xFF2F9D84);
 
     return showModalBottomSheet<bool>(
       context: context,
@@ -309,7 +372,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       child: const Icon(
                         Icons.check_rounded,
-                        color: Color(0xFF2F9D84),
+                        color: accent,
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -327,7 +390,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 const SizedBox(height: 14),
                 Text(
-                  assignment.title,
+                  item.assignment.title,
                   maxLines: 3,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleMedium?.copyWith(
@@ -350,12 +413,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     Expanded(
                       child: OutlinedButton(
                         onPressed: () => Navigator.of(sheetContext).pop(false),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: titleColor,
-                          side: BorderSide(
-                            color: titleColor.withValues(alpha: 0.22),
-                          ),
-                        ),
                         child: const Text('Отмена'),
                       ),
                     ),
@@ -383,6 +440,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _showNewsFeed(List<HomeNewsItem> news, int initialIndex) {
     if (news.isEmpty) return;
+    final byId = {for (final item in news) item.id: item};
+    final presentation = _presentationNews(news);
+    final safeIndex = initialIndex.clamp(0, presentation.length - 1);
+    _service.markNewsSeen(presentation[safeIndex].id);
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -390,9 +451,16 @@ class _HomeScreenState extends State<HomeScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
       ),
-      builder: (_) => NewsStorySheet(
-        news: news,
-        initialIndex: initialIndex,
+      builder: (_) => StudentNewsStorySheet(
+        news: presentation,
+        initialIndex: safeIndex,
+        onPageChanged: (id) => _service.markNewsSeen(id),
+        onClosed: (id) => _service.markNewsSeen(id, closed: true),
+        resolveImage: (item) async {
+          final source = byId[item.id];
+          if (source == null) return item.imageBytes;
+          return _service.resolveNewsImageBytes(source);
+        },
       ),
     );
   }
@@ -490,7 +558,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         style: theme.textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.w900,
                           height: 1.12,
-                          color: theme.colorScheme.onSurface,
                         ),
                       ),
                     ),
@@ -516,194 +583,35 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String _assignmentStatusText(HomeAssignmentPreview item) {
     if (item.isDone) return 'выполнено';
-    switch (item.assignment.status) {
-      case 'in_progress':
-        return 'в процессе';
-      case 'published':
-      case 'draft':
-      case null:
-      case '':
-        return 'не начато';
-      default:
-        return item.assignment.status!;
-    }
+    if (item.assignment.status == 'in_progress') return 'в процессе';
+    return 'не начато';
   }
 }
 
-class _AssignmentsSection extends StatelessWidget {
-  final HomeDashboardData data;
-  final Set<String> hiddenAssignmentIds;
-  final Set<String> markingDoneAssignmentIds;
-  final VoidCallback onOpen;
-  final ValueChanged<HomeAssignmentPreview> onAssignmentTap;
-  final ValueChanged<HomeAssignmentPreview> onAssignmentDoneTap;
+class _HomeStatusSurface extends StatelessWidget {
+  const _HomeStatusSurface({required this.child});
 
-  const _AssignmentsSection({
-    required this.data,
-    required this.hiddenAssignmentIds,
-    required this.markingDoneAssignmentIds,
-    required this.onOpen,
-    required this.onAssignmentTap,
-    required this.onAssignmentDoneTap,
-  });
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final assignments = data.assignments
-        .where((item) => !hiddenAssignmentIds.contains(item.assignment.id))
-        .take(4)
-        .toList();
-    final foreground = isDark ? Colors.white : const Color(0xFF1F2937);
-    final mutedForeground = foreground.withValues(alpha: isDark ? 0.76 : 0.66);
-    final accent = isDark ? const Color(0xFFF3C774) : const Color(0xFFB58B3B);
-    final subtitle = assignments.isEmpty
-        ? 'Здесь появятся ближайшие дедлайны'
-        : '${data.assignmentsCount} ${_assignmentWord(data.assignmentsCount)} в списке';
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(24),
-        child: Ink(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(24),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: isDark
-                  ? const [Color(0xFF2B2932), Color(0xFF182331)]
-                  : const [Color(0xFFFFF1D2), Color(0xFFEAF7F2)],
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: (isDark ? Colors.black : const Color(0xFFEFD9AC))
-                    .withValues(alpha: isDark ? 0.24 : 0.28),
-                blurRadius: 18,
-                offset: const Offset(0, 9),
-              ),
-            ],
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Stack(
-              children: [
-                Positioned(
-                  right: -28,
-                  top: -34,
-                  child: _AssignmentsGlow(
-                    size: 104,
-                    color: Colors.white.withValues(alpha: isDark ? 0.06 : 0.24),
-                  ),
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    InkWell(
-                      onTap: onOpen,
-                      borderRadius: BorderRadius.circular(16),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 40,
-                              height: 40,
-                              decoration: BoxDecoration(
-                                color: Colors.white
-                                    .withValues(alpha: isDark ? 0.15 : 0.58),
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child:
-                                  Icon(Icons.task_alt_rounded, color: accent),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Ближайшие задания',
-                                    style: theme.textTheme.titleLarge?.copyWith(
-                                      color: foreground,
-                                      fontWeight: FontWeight.w900,
-                                      height: 1.1,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    subtitle,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      color: mutedForeground,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    if (assignments.isEmpty)
-                      const _EmptyState(
-                        title: 'Пока нет ближайших заданий',
-                        text:
-                            'Если староста добавит задание в чат, оно появится здесь',
-                        icon: Icons.check_circle_outline_rounded,
-                      )
-                    else
-                      ...assignments.map(
-                        (item) => Padding(
-                          padding: EdgeInsets.only(
-                            bottom: item == assignments.last ? 0 : 10,
-                          ),
-                          child: TaskPreviewCard(
-                            item: item,
-                            onTap: () => onAssignmentTap(item),
-                            onDoneTap: () => onAssignmentDoneTap(item),
-                            markingDone: markingDoneAssignmentIds
-                                .contains(item.assignment.id),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Scaffold(
+      backgroundColor:
+          isDark ? const Color(0xFF101820) : const Color(0xFFFAF8FC),
+      body: SafeArea(child: child),
     );
-  }
-
-  String _assignmentWord(int count) {
-    if (count % 10 == 1 && count % 100 != 11) return 'задание';
-    if ([2, 3, 4].contains(count % 10) && ![12, 13, 14].contains(count % 100)) {
-      return 'задания';
-    }
-    return 'заданий';
   }
 }
 
 class _InfoLine extends StatelessWidget {
+  const _InfoLine({required this.label, required this.value});
+
   final String label;
   final String value;
 
-  const _InfoLine({
-    required this.label,
-    required this.value,
-  });
-
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
@@ -713,140 +621,26 @@ class _InfoLine extends StatelessWidget {
             width: 116,
             child: Text(
               '$label:',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.56),
-                fontWeight: FontWeight.w600,
-              ),
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withValues(alpha: 0.56),
+                    fontWeight: FontWeight.w600,
+                  ),
             ),
           ),
           Expanded(
             child: Text(
               value,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurface,
-                fontWeight: FontWeight.w800,
-                height: 1.3,
-              ),
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    height: 1.3,
+                  ),
             ),
           ),
         ],
       ),
-    );
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  final String title;
-  final String text;
-  final IconData icon;
-
-  const _EmptyState({
-    required this.title,
-    required this.text,
-    this.icon = Icons.event_available_outlined,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF182331) : Colors.white,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.04),
-        ),
-      ),
-      child: Column(
-        children: [
-          Container(
-            width: 54,
-            height: 54,
-            decoration: BoxDecoration(
-              color: theme.colorScheme.primary.withValues(alpha: 0.10),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, color: theme.colorScheme.primary),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            text,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.62),
-              height: 1.35,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AssignmentsGlow extends StatelessWidget {
-  final double size;
-  final Color color;
-
-  const _AssignmentsGlow({
-    required this.size,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: color,
-      ),
-    );
-  }
-}
-
-class _AnimatedEntry extends StatelessWidget {
-  final Widget child;
-  final Duration delay;
-
-  const _AnimatedEntry({
-    required this.child,
-    required this.delay,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0, end: 1),
-      duration: Duration(milliseconds: 420 + delay.inMilliseconds),
-      curve: Curves.easeOutCubic,
-      builder: (context, value, child) {
-        final delayedValue =
-            ((value * (420 + delay.inMilliseconds)) - delay.inMilliseconds)
-                    .clamp(0.0, 420.0) /
-                420.0;
-
-        return Opacity(
-          opacity: delayedValue,
-          child: Transform.translate(
-            offset: Offset(0, 18 * (1 - delayedValue)),
-            child: child,
-          ),
-        );
-      },
-      child: child,
     );
   }
 }
@@ -857,63 +651,47 @@ class _LoadingDashboard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(20, 24, 20, 28),
       children: const [
         _SkeletonLine(width: 180, height: 28),
         SizedBox(height: 10),
         _SkeletonLine(width: 240, height: 18),
         SizedBox(height: 18),
-        _SkeletonBlock(height: 82, radius: 22),
-        SizedBox(height: 16),
-        _SkeletonBlock(height: 190, radius: 28),
-        SizedBox(height: 24),
-        _SkeletonLine(width: 132, height: 24),
-        SizedBox(height: 12),
-        _SkeletonBlock(height: 148, radius: 24),
+        _SkeletonBlock(height: 128, radius: 26),
+        SizedBox(height: 22),
+        _SkeletonBlock(height: 190, radius: 24),
         SizedBox(height: 14),
-        _SkeletonBlock(height: 98, radius: 22),
-        SizedBox(height: 12),
-        _SkeletonBlock(height: 98, radius: 22),
+        _SkeletonBlock(height: 220, radius: 24),
       ],
     );
   }
 }
 
 class _ErrorDashboard extends StatelessWidget {
+  const _ErrorDashboard({required this.message, required this.onRetry});
+
   final String message;
   final VoidCallback onRetry;
 
-  const _ErrorDashboard({
-    required this.message,
-    required this.onRetry,
-  });
-
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(24),
       children: [
         SizedBox(height: MediaQuery.sizeOf(context).height * 0.18),
-        Icon(Icons.cloud_off_rounded, size: 56, color: theme.colorScheme.error),
+        Icon(
+          Icons.cloud_off_rounded,
+          size: 56,
+          color: Theme.of(context).colorScheme.error,
+        ),
         const SizedBox(height: 18),
-        Text(
+        const Text(
           'Что-то пошло не так',
           textAlign: TextAlign.center,
-          style:
-              theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
         ),
         const SizedBox(height: 8),
-        Text(
-          message,
-          textAlign: TextAlign.center,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.onSurface.withValues(alpha: 0.62),
-          ),
-        ),
+        Text(message, textAlign: TextAlign.center),
         const SizedBox(height: 18),
         Center(
           child: FilledButton.icon(
@@ -928,31 +706,25 @@ class _ErrorDashboard extends StatelessWidget {
 }
 
 class _SkeletonBlock extends StatelessWidget {
+  const _SkeletonBlock({required this.height, required this.radius});
+
   final double height;
   final double radius;
-
-  const _SkeletonBlock({
-    required this.height,
-    required this.radius,
-  });
 
   @override
   Widget build(BuildContext context) {
     return _SkeletonBase(
-      child: SizedBox(height: height, width: double.infinity),
       radius: radius,
+      child: SizedBox(height: height, width: double.infinity),
     );
   }
 }
 
 class _SkeletonLine extends StatelessWidget {
+  const _SkeletonLine({required this.width, required this.height});
+
   final double width;
   final double height;
-
-  const _SkeletonLine({
-    required this.width,
-    required this.height,
-  });
 
   @override
   Widget build(BuildContext context) {
@@ -964,35 +736,19 @@ class _SkeletonLine extends StatelessWidget {
 }
 
 class _SkeletonBase extends StatelessWidget {
+  const _SkeletonBase({required this.child, required this.radius});
+
   final Widget child;
   final double radius;
-
-  const _SkeletonBase({
-    required this.child,
-    required this.radius,
-  });
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0.45, end: 1),
-      duration: const Duration(milliseconds: 900),
-      curve: Curves.easeInOut,
-      builder: (context, value, child) {
-        return Opacity(
-          opacity: value,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color:
-                  isDark ? Colors.white.withValues(alpha: 0.08) : Colors.white,
-              borderRadius: BorderRadius.circular(radius),
-            ),
-            child: child,
-          ),
-        );
-      },
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.white,
+        borderRadius: BorderRadius.circular(radius),
+      ),
       child: child,
     );
   }
