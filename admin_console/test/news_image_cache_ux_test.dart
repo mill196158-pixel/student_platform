@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:student_platform_admin/core/auth/admin_backend_config.dart';
 import 'package:student_platform_admin/core/auth/admin_capabilities.dart';
 import 'package:student_platform_admin/core/auth/admin_session_controller.dart';
+import 'package:student_platform_admin/features/content/news/admin_image_picker.dart';
 import 'package:student_platform_admin/features/content/news/admin_image_store.dart';
 import 'package:student_platform_admin/features/content/news/news_editor_screen.dart';
 import 'package:student_platform_admin/features/content/news/news_item.dart';
@@ -85,13 +86,25 @@ final Uint8List _png = Uint8List.fromList(<int>[
   0x82,
 ]);
 
+class _FakePicker implements AdminImagePicker {
+  _FakePicker(this.image);
+  final PickedAdminImage? image;
+  @override
+  Future<PickedAdminImage?> pickImage() async => image;
+}
+
 class _FakeRemoteStore implements AdminImageStore, AdminRemoteImageGateway {
-  _FakeRemoteStore({this.delay = const Duration(milliseconds: 40)});
+  _FakeRemoteStore({
+    this.delay = const Duration(milliseconds: 40),
+    this.failUpload = false,
+  });
 
   final Duration delay;
+  final bool failUpload;
   final Map<String, AdminStoredImage> _local = {};
   final NewsImageBytesCache cache = NewsImageBytesCache();
   int downloadCalls = 0;
+  int uploadCalls = 0;
   int _next = 1;
 
   @override
@@ -163,6 +176,10 @@ class _FakeRemoteStore implements AdminImageStore, AdminRemoteImageGateway {
     String? previousPath,
     String version = '0',
   }) async {
+    uploadCalls += 1;
+    if (failUpload) {
+      throw StateError('upload failed');
+    }
     final bytes = getBytes(localImageId);
     if (bytes == null) throw StateError('missing');
     final path = 'news/uploaded-$localImageId.png';
@@ -306,6 +323,96 @@ void main() {
     expect(store.downloadCalls, 1);
     await store.resolveBytes('news/x.png', version: '2');
     expect(store.downloadCalls, 2);
+  });
+
+  testWidgets(
+    'refresh restores server image via download, not empty pick CTA',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final store = _FakeRemoteStore();
+      final seed = _remoteItem(path: 'news/server.png', version: 4);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: NewsEditorScreen(
+              repository: LocalNewsRepository(seed: [seed]),
+              imageStore: store,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Выберите изображение'), findsNothing);
+      expect(find.text('Изображение сохранено'), findsWidgets);
+      expect(store.downloadCalls, 1);
+      final key = NewsImageCacheKey.tryParse(
+        path: 'news/server.png',
+        versionNumber: 4,
+        updatedAt: DateTime.utc(2026, 7, 22),
+      )!;
+      expect(store.peekBytes(key.path, version: key.version), isNotNull);
+    },
+  );
+
+  testWidgets('upload failure blocks publish and keeps previous image_path', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1440, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    const oldPath =
+        'news/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.png';
+    final store = _FakeRemoteStore(failUpload: true);
+    final repo = LocalNewsRepository(
+      seed: [
+        _remoteItem(
+          path: oldPath,
+          version: 1,
+        ).copyWith(status: NewsStatus.draft),
+      ],
+    );
+    final picker = _FakePicker(
+      PickedAdminImage(bytes: _png, fileName: 'new.png', mimeType: 'image/png'),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: NewsEditorScreen(
+            repository: repo,
+            imageStore: store,
+            imagePicker: picker,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Заменить'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('не сохранено'), findsWidgets);
+
+    // Pending local image must disable publish.
+    final publishFinder = find.widgetWithText(FilledButton, 'Опубликовать');
+    expect(publishFinder, findsOneWidget);
+    final publishBtn = tester.widget<FilledButton>(publishFinder);
+    expect(publishBtn.onPressed, isNull);
+
+    await tester.tap(find.text('Сохранить черновик'));
+    await tester.pumpAndSettle();
+
+    expect(store.uploadCalls, 1);
+    final latest = await repo.getNews('n1');
+    expect(latest.imagePath, oldPath);
+    expect(find.textContaining('Не удалось загрузить'), findsWidgets);
   });
 
   testWidgets('logout clears Admin private image cache', (tester) async {
