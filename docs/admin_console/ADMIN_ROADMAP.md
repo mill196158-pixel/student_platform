@@ -9,9 +9,9 @@
 - Current worktree: `/Users/annasuvorova/student_platform_admin`
 - Base commit: `89f0890`
 - Current stage: 12.2 — real news end-to-end
-- Current status: IN REVIEW
-- Next action: remote apply migration `20260722070209_news_posts_and_admin_rpc`, deploy Edge Function `news-media`, physical smoke (см. `NEWS_RUNTIME_SMOKE.md`).
-- Blockers: remote apply/deploy ещё не выполнялись; этап не DONE до smoke.
+- Current status: DONE
+- Next action: recovery-flow stash pop + отдельный commit; затем 12.3 content renderer package.
+- Blockers: none for 12.2.
 
 Допустимые статусы: TODO, IN PROGRESS, REVIEW, DONE, BLOCKED. Одновременно только один этап может иметь статус IN PROGRESS / IN REVIEW как активный.
 
@@ -154,8 +154,8 @@ Student Platform Admin — отдельная визуальная веб-пан
 ### 12.2 — Real news end-to-end
 
 - Goal: администратор создаёт новость в Web Admin, загружает изображение, сохраняет черновик и публикует; после публикации новость появляется в Student Platform без обновления приложения.
-- Status: IN REVIEW
-- Deliverables (код готов, remote apply/deploy pending):
+- Status: DONE
+- Deliverables:
   - Tables: `news_posts`, `news_versions`, `news_views`
   - Statuses: `draft` / `published` / `archived`
   - Fields: sort_order, priority, starts_at/ends_at, audience all|group, variants (`gradientText`, `imageOnly`, `imageOverlay`, `imageWithText`), title/subtitle/body, image_path, focal point, overlay opacity, created_by/updated_by/published_by + timestamps
@@ -167,15 +167,15 @@ Student Platform Admin — отдельная визуальная веб-пан
   - Mobile: cache-first / stale-while-revalidate via `PublishedNewsCache`
   - Checks: `supabase/checks/news_posts_security_review.sql`, `docs/admin_console/NEWS_RUNTIME_SMOKE.md`
 - Related files:
-  - `supabase/migrations/20260722070209_news_posts_and_admin_rpc.sql`
+  - `supabase/migrations/20260722110804_news_posts_and_admin_rpc.sql`
   - `supabase/functions/news-media/`
   - `supabase/checks/news_posts_security_review.sql`
   - `admin_console/lib/features/content/news/`
   - `packages/student_ui/lib/src/home/widgets/student_news_story_sheet.dart`
   - `lib/src/ui/home/home_dashboard_service.dart`
   - `docs/admin_console/NEWS_RUNTIME_SMOKE.md`
-- Commit SHA: отсутствует (ожидает разрешения на commit)
-- Remote applied/deployed: нет — **не ставить DONE до remote apply + deploy + физического smoke**
+- Commit SHA: `60c1e7e` (+ follow-up docs/history align)
+- Remote applied/deployed: migration `20260722110804` / `news_posts_and_admin_rpc` applied; Edge `news-media` v1 ACTIVE (`verify_jwt=true`); runtime smoke PASS
 - Notes: прямые table grants для authenticated запрещены; admin actions пишут `admin_audit_log`; student видит только published + audience/schedule; publish требует `content.publish`.
 
 ### 12.3 — Shared content renderer package
@@ -232,13 +232,12 @@ Student Platform Admin — отдельная визуальная веб-пан
 
 ## Session handoff
 
-- Last completed action: 12.1 DONE remotely.
-- Current task: 12.2 IN REVIEW — код миграции/EF/admin/mobile готов; apply/deploy/smoke не выполнялись.
-- Checks already run (local): format / focused analyze / focused tests / deno check / git diff --check / SQL static review file added.
-- Known blockers: нужны remote apply + `news-media` deploy + physical smoke.
-- Exact next task: после ревью — apply migration, deploy Edge Function, пройти `NEWS_RUNTIME_SMOKE.md`, затем commit/push по разрешению.
-- Uncommitted leftovers: recovery-flow WIP в stash `wip: recovery-flow before stage-12.2` + текущие изменения 12.2.
-- Last commit on branch tip before 12.2 WIP: `be4d631` (password recovery) / prior `cd48cee` housekeeping.
-- Push status: не пушить до разрешения.
-- Remote migration status: `admin_rbac_and_audit` = `20260721202054` applied; `news_posts_and_admin_rpc` = **not applied**.
-- Deploy status: Edge `news-media` не задеплоен.
+- Last completed action: 12.2 DONE — commit `60c1e7e`, remote migration `20260722110804`, Edge `news-media` v1, smoke PASS.
+- Current task: pop recovery stash and commit recovery-flow separately.
+- Checks already run: local format/analyze/tests; remote RPC smoke + security grant checks; Edge unauth 401.
+- Known blockers: none for 12.2.
+- Exact next task: `git stash pop stash@{0}` → verify recovery → separate commit → push.
+- Uncommitted leftovers: recovery-flow in `stash@{0}` until pop.
+- Push status: push after docs/history align commit.
+- Remote migration status: `admin_rbac_and_audit` = `20260721202054`; `news_posts_and_admin_rpc` = `20260722110804`.
+- Deploy status: Edge `news-media` v1 ACTIVE.

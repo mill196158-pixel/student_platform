@@ -5,7 +5,7 @@ student feed. Run after applying the migration and deploying the Edge Function.
 
 ## Prerequisites
 
-- Migration `20260722070209_news_posts_and_admin_rpc.sql` applied.
+- Migration `20260722110804_news_posts_and_admin_rpc.sql` applied.
 - Edge Function `news-media` deployed (`createUpload`, `createDownload`,
   `delete`).
 - Admin user with `content.write` (+ `content.publish` to publish).

@@ -1,7 +1,7 @@
 -- Stage 12.2 — news_posts security review.
 --
 -- Static, read-only checks to run AFTER applying
--- 20260722070209_news_posts_and_admin_rpc.sql. Each query should return zero
+-- 20260722110804_news_posts_and_admin_rpc.sql. Each query should return zero
 -- offending rows (or the expected shape noted above it). Nothing here mutates
 -- data. Do not run before the migration is applied.
 
