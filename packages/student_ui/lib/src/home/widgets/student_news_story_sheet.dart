@@ -270,6 +270,7 @@ class _StoryHero extends StatelessWidget {
     // imageOnly → full-bleed image, no overlays
     // imageOverlay → image + text only (no auto icon)
     // imageWithText → image hero; title/body below sheet (no icon on image)
+    // ClipRRect on the outer container only — no inner padding/stripes.
     return ClipRRect(
       borderRadius: BorderRadius.circular(32),
       child: SizedBox(
@@ -279,27 +280,31 @@ class _StoryHero extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             if (usesPhoto)
-              NewsImageFrame(
-                bytes: item.imageBytes,
-                colors: colors,
-                alignment: item.imageFocus,
-                isLoading: !item.hasImage,
-                fit: BoxFit.cover,
+              Positioned.fill(
+                child: NewsImageFrame(
+                  bytes: item.imageBytes,
+                  colors: colors,
+                  alignment: item.imageFocus,
+                  isLoading: !item.hasImage,
+                  fit: BoxFit.cover,
+                ),
               )
             else
-              _GradientBackground(colors: colors),
+              Positioned.fill(child: _GradientBackground(colors: colors)),
             if (showOverlay)
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.black.withValues(alpha: 0.10),
-                      Colors.black.withValues(
-                        alpha: item.overlayDarken.clamp(0.25, 0.85),
-                      ),
-                    ],
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.black.withValues(alpha: 0.10),
+                        Colors.black.withValues(
+                          alpha: item.overlayDarken.clamp(0.25, 0.85),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
