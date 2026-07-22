@@ -1,7 +1,10 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:student_ui/student_ui.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
@@ -16,14 +19,20 @@ class HomeDashboardService {
     SupabaseClient? client,
     ScheduleRepository? scheduleRepository,
     SupabaseLearningRepository? learningRepository,
+    PublishedNewsCache? newsCache,
+    http.Client? httpClient,
   })  : _sb = client ?? Supabase.instance.client,
         _scheduleRepository = scheduleRepository ?? ScheduleRepository(),
         _learningRepository =
-            learningRepository ?? SupabaseLearningRepository();
+            learningRepository ?? SupabaseLearningRepository(),
+        _newsCache = newsCache ?? PublishedNewsCache(),
+        _http = httpClient ?? http.Client();
 
   final SupabaseClient _sb;
   final ScheduleRepository _scheduleRepository;
   final SupabaseLearningRepository _learningRepository;
+  final PublishedNewsCache _newsCache;
+  final http.Client _http;
 
   Future<HomeDashboardData> load() async {
     final scheduleDate = MskDate.today();
@@ -32,21 +41,114 @@ class HomeDashboardService {
       _loadTodayLessons(scheduleDate),
       _loadAssignments(profile.groupName),
       _loadReadNotificationIds(),
+      _loadPublishedNews(),
     ]);
 
     final lessons = results[0] as List<Lesson>;
     final assignments = results[1] as List<HomeAssignmentPreview>;
     final readNotificationIds = results[2] as Set<String>;
+    final news = results[3] as List<HomeNewsItem>;
 
     return HomeDashboardData(
       profile: profile,
       scheduleDate: scheduleDate,
       todayLessons: lessons,
       assignments: assignments.take(4).toList(),
-      news: _localNews(),
+      news: news,
       readNotificationIds: readNotificationIds,
       unreadMessagesCount: 0,
     );
+  }
+
+  /// Marks a published news post as seen (and optionally closed) for the user.
+  Future<void> markNewsSeen(String newsId, {bool closed = false}) async {
+    final id = newsId.trim();
+    if (id.isEmpty) return;
+    try {
+      await _sb.rpc('mark_news_seen', params: {
+        'p_news_id': id,
+        'p_closed': closed,
+      });
+    } catch (e) {
+      debugPrint('[home] mark_news_seen failed: $e');
+    }
+  }
+
+  /// Cache-first / stale-while-revalidate load of the published news feed.
+  ///
+  /// - Cached items are shown first (fast paint).
+  /// - Fresh items come from `get_my_published_news`.
+  /// - On network failure the cache is kept; it is never cleared on error.
+  /// - The local demo feed is used only when the RPC fails AND there is no
+  ///   cache (e.g. unauthenticated demo). An empty published list stays empty.
+  Future<List<HomeNewsItem>> _loadPublishedNews() async {
+    final cached = await _newsCache.read();
+    try {
+      final response = await _sb.rpc('get_my_published_news');
+      final rows = _asMapList(response);
+      await _newsCache.write(rows);
+      final items = rows.map(mapPublishedNews).toList();
+      return _resolveNewsImages(items);
+    } catch (e) {
+      debugPrint('[home] published news failed: $e');
+      if (cached.isNotEmpty) {
+        return _resolveNewsImages(cached);
+      }
+      return _localNews();
+    }
+  }
+
+  Future<List<HomeNewsItem>> _resolveNewsImages(
+    List<HomeNewsItem> items,
+  ) async {
+    final resolved = <HomeNewsItem>[];
+    for (final item in items) {
+      final path = item.imagePath;
+      if (path == null || path.isEmpty || item.imageBytes != null) {
+        resolved.add(item);
+        continue;
+      }
+      final bytes = await _downloadNewsImage(path);
+      resolved.add(bytes == null ? item : item.copyWith(imageBytes: bytes));
+    }
+    return resolved;
+  }
+
+  Future<Uint8List?> _downloadNewsImage(String path) async {
+    try {
+      final response = await _sb.functions.invoke(
+        'news-media',
+        body: {'action': 'createDownload', 'path': path},
+      );
+      if (response.status >= 400) return null;
+      final data = response.data;
+      if (data is! Map) return null;
+      final signedUrl = (data['signedUrl'] ?? '').toString();
+      if (signedUrl.isEmpty) return null;
+      final download = await _http.get(Uri.parse(signedUrl));
+      if (download.statusCode != 200) return null;
+      return download.bodyBytes;
+    } catch (e) {
+      debugPrint('[home] news image download failed: $e');
+      return null;
+    }
+  }
+
+  static List<Map<String, dynamic>> _asMapList(dynamic data) {
+    if (data is List) {
+      return data
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    }
+    if (data is String && data.isNotEmpty) {
+      try {
+        return _asMapList(jsonDecode(data));
+      } catch (_) {
+        return const [];
+      }
+    }
+    return const [];
   }
 
   Future<void> setAssignmentDone({
@@ -265,4 +367,143 @@ class HomeDashboardService {
       ),
     ];
   }
+}
+
+/// Persists the published news feed for cache-first / stale-while-revalidate.
+///
+/// Only the JSON returned by `get_my_published_news` is stored (never image
+/// bytes). Cache is never cleared on network error.
+class PublishedNewsCache {
+  PublishedNewsCache({Future<SharedPreferences> Function()? prefs})
+      : _prefs = prefs ?? SharedPreferences.getInstance;
+
+  final Future<SharedPreferences> Function() _prefs;
+
+  static const String key = 'home_published_news_v1';
+
+  Future<List<HomeNewsItem>> read() async {
+    try {
+      final prefs = await _prefs();
+      final raw = prefs.getString(key);
+      if (raw == null || raw.isEmpty) return const [];
+      final decoded = jsonDecode(raw);
+      if (decoded is List) {
+        return decoded
+            .whereType<Map>()
+            .map((e) => mapPublishedNews(Map<String, dynamic>.from(e)))
+            .toList();
+      }
+    } catch (e) {
+      debugPrint('[home] news cache read failed: $e');
+    }
+    return const [];
+  }
+
+  Future<void> write(List<Map<String, dynamic>> rows) async {
+    try {
+      final prefs = await _prefs();
+      await prefs.setString(key, jsonEncode(rows));
+    } catch (e) {
+      debugPrint('[home] news cache write failed: $e');
+    }
+  }
+}
+
+/// Maps a `get_my_published_news` row into a [HomeNewsItem].
+HomeNewsItem mapPublishedNews(Map<String, dynamic> json) {
+  final variant = _newsVariantFromString(json['variant']?.toString());
+  final id = (json['id'] ?? '').toString();
+  return HomeNewsItem(
+    id: id,
+    title: (json['title'] ?? '').toString(),
+    subtitle: (json['subtitle'] ?? '').toString(),
+    body: (json['body'] ?? '').toString(),
+    icon: _iconForVariant(variant, id),
+    gradientColors: _newsColorsFromHex(json['gradient_colors']),
+    type: HomeNewsType.update,
+    createdAt: _parseDate(json['created_at']) ?? DateTime.now(),
+    priority: _parseInt(json['priority']),
+    variant: variant,
+    imageFocus: Alignment(
+      _parseDouble(json['image_focus_x']),
+      _parseDouble(json['image_focus_y']),
+    ),
+    overlayDarken: _parseDouble(json['overlay_opacity'], fallback: 0.42),
+    imagePath: _nullableString(json['image_path']),
+    publishedAt: _parseDate(json['published_at']),
+  );
+}
+
+StudentHomeNewsVariant _newsVariantFromString(String? value) {
+  switch (value) {
+    case 'imageOverlay':
+      return StudentHomeNewsVariant.imageOverlay;
+    case 'imageOnly':
+      return StudentHomeNewsVariant.imageOnly;
+    case 'imageWithText':
+      return StudentHomeNewsVariant.imageWithText;
+    case 'gradientText':
+    default:
+      return StudentHomeNewsVariant.gradientText;
+  }
+}
+
+IconData _iconForVariant(StudentHomeNewsVariant variant, String seed) {
+  const icons = [
+    Icons.auto_awesome_rounded,
+    Icons.edit_note_rounded,
+    Icons.folder_copy_outlined,
+    Icons.assignment_turned_in_outlined,
+  ];
+  return icons[seed.hashCode.abs() % icons.length];
+}
+
+List<Color> _newsColorsFromHex(dynamic raw) {
+  const fallback = [Color(0xFF7367F0), Color(0xFFB784F7)];
+  if (raw is List) {
+    final colors = <Color>[];
+    for (final item in raw) {
+      if (item == null) continue;
+      final parsed = _colorFromHex(item.toString());
+      if (parsed != null) colors.add(parsed);
+    }
+    if (colors.length >= 2) return colors;
+    if (colors.length == 1) return [colors.first, colors.first];
+  }
+  return fallback;
+}
+
+Color? _colorFromHex(String value) {
+  var hex = value.replaceAll('#', '').trim();
+  if (hex.length == 3) {
+    hex = hex.split('').map((c) => '$c$c').join();
+  }
+  if (hex.length == 6) hex = 'FF$hex';
+  final parsed = int.tryParse(hex, radix: 16);
+  return parsed == null ? null : Color(parsed);
+}
+
+int _parseInt(dynamic value, {int fallback = 0}) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return int.tryParse(value?.toString() ?? '') ?? fallback;
+}
+
+double _parseDouble(dynamic value, {double fallback = 0}) {
+  if (value is double) return value;
+  if (value is num) return value.toDouble();
+  return double.tryParse(value?.toString() ?? '') ?? fallback;
+}
+
+DateTime? _parseDate(dynamic value) {
+  if (value == null) return null;
+  final text = value.toString().trim();
+  if (text.isEmpty) return null;
+  return DateTime.tryParse(text);
+}
+
+String? _nullableString(dynamic value) {
+  if (value == null) return null;
+  final text = value.toString().trim();
+  return text.isEmpty ? null : text;
 }

@@ -88,6 +88,7 @@ class StudentHomeNews {
     this.imageBytes,
     this.imageFocus = Alignment.center,
     this.overlayDarken = 0.42,
+    this.publishedAt,
   });
 
   final String id;
@@ -97,6 +98,9 @@ class StudentHomeNews {
   final IconData icon;
   final List<Color> gradientColors;
   final StudentHomeNewsVariant variant;
+
+  /// Optional publication timestamp shown in the full story view.
+  final DateTime? publishedAt;
 
   /// Optional local/remote decoded image bytes for card variants that use media.
   /// Kept as presentation data only — storage and upload live outside this package.
@@ -122,6 +126,7 @@ class StudentHomeNews {
     bool clearImageBytes = false,
     Alignment? imageFocus,
     double? overlayDarken,
+    DateTime? publishedAt,
   }) {
     return StudentHomeNews(
       id: id ?? this.id,
@@ -134,6 +139,7 @@ class StudentHomeNews {
       imageBytes: clearImageBytes ? null : (imageBytes ?? this.imageBytes),
       imageFocus: imageFocus ?? this.imageFocus,
       overlayDarken: overlayDarken ?? this.overlayDarken,
+      publishedAt: publishedAt ?? this.publishedAt,
     );
   }
 }

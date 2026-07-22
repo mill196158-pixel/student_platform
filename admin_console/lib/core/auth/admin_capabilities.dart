@@ -22,6 +22,7 @@ class AdminCapabilities {
   bool get canViewDashboard => can('dashboard.view');
   bool get canReadContent => can('content.read') || can('content.write');
   bool get canWriteContent => can('content.write');
+  bool get canPublishContent => can('content.publish');
   bool get canReadAcademic =>
       can('academic.read') || can('subjects.write') || can('teachers.write');
   bool get canWriteSubjects => can('subjects.write');

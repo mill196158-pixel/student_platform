@@ -9,7 +9,6 @@ import 'package:student_platform/src/services/push/app_notifications_api.dart';
 import 'package:student_platform/src/services/push/in_app_notification_bus.dart';
 import 'package:student_platform/src/ui/home/home_dashboard_service.dart';
 import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
-import 'package:student_platform/src/ui/home/widgets/news_story_sheet.dart';
 import 'package:student_platform/src/ui/navigation/main_tab_scope.dart';
 import 'package:student_platform/src/ui/notifications/notification_center_sheet.dart';
 
@@ -159,21 +158,30 @@ class _HomeScreenState extends State<HomeScreen> {
             isDone: item.isDone,
           ),
       ],
-      news: [
-        for (final item in data.news)
-          StudentHomeNews(
-            id: item.id,
-            title: item.title,
-            subtitle: item.subtitle,
-            body: item.body,
-            icon: item.icon,
-            gradientColors: item.gradientColors,
-          ),
-      ],
+      news: _presentationNews(data.news),
       totalLessonsToday: data.totalLessonsToday,
       assignmentsCount: data.assignmentsCount,
       lessonsFinishedForToday: data.lessonsFinishedForToday,
     );
+  }
+
+  List<StudentHomeNews> _presentationNews(List<HomeNewsItem> news) {
+    return [
+      for (final item in news)
+        StudentHomeNews(
+          id: item.id,
+          title: item.title,
+          subtitle: item.subtitle,
+          body: item.body,
+          icon: item.icon,
+          gradientColors: item.gradientColors,
+          variant: item.variant,
+          imageBytes: item.imageBytes,
+          imageFocus: item.imageFocus,
+          overlayDarken: item.overlayDarken,
+          publishedAt: item.publishedAt,
+        ),
+    ];
   }
 
   HomeAssignmentPreview? _findAssignment(String id) {
@@ -376,6 +384,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _showNewsFeed(List<HomeNewsItem> news, int initialIndex) {
     if (news.isEmpty) return;
+    final presentation = _presentationNews(news);
+    final safeIndex = initialIndex.clamp(0, presentation.length - 1);
+    _service.markNewsSeen(presentation[safeIndex].id);
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -383,9 +394,11 @@ class _HomeScreenState extends State<HomeScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
       ),
-      builder: (_) => NewsStorySheet(
-        news: news,
-        initialIndex: initialIndex,
+      builder: (_) => StudentNewsStorySheet(
+        news: presentation,
+        initialIndex: safeIndex,
+        onPageChanged: (id) => _service.markNewsSeen(id),
+        onClosed: (id) => _service.markNewsSeen(id, closed: true),
       ),
     );
   }

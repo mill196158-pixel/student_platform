@@ -8,12 +8,12 @@
 - Current branch: `feature/admin-console`
 - Current worktree: `/Users/annasuvorova/student_platform_admin`
 - Base commit: `89f0890`
-- Current stage: 12.2 / 12.3 — content renderer / news backend
-- Current status: TODO
-- Next action: начать 12.2/12.3 по roadmap после закрытия housekeeping 12.1.
-- Blockers: none for 12.1 (RBAC applied; `mill453020` is global `super_admin`).
+- Current stage: 12.2 — real news end-to-end
+- Current status: IN REVIEW
+- Next action: remote apply migration `20260722070209_news_posts_and_admin_rpc`, deploy Edge Function `news-media`, physical smoke (см. `NEWS_RUNTIME_SMOKE.md`).
+- Blockers: remote apply/deploy ещё не выполнялись; этап не DONE до smoke.
 
-Допустимые статусы: TODO, IN PROGRESS, REVIEW, DONE, BLOCKED. Одновременно только один этап может иметь статус IN PROGRESS.
+Допустимые статусы: TODO, IN PROGRESS, REVIEW, DONE, BLOCKED. Одновременно только один этап может иметь статус IN PROGRESS / IN REVIEW как активный.
 
 ## Product vision
 
@@ -59,31 +59,22 @@ Student Platform Admin — отдельная визуальная веб-пан
 - Web Admin находится в `admin_console/`.
 - Всё хранится в одном GitHub-репозитории.
 - Разработка ведётся в отдельном git worktree.
-- Будущий `packages/content_renderer` используется приложением и админкой.
-- Визуальный компонент новости пишется один раз.
+- Общие presentation widgets живут в `packages/student_ui` (в т.ч. `StudentHomeView`, news cards, `StudentNewsStorySheet`).
+- Отдельный `packages/content_renderer` остаётся следующим шагом унификации (12.3).
 - Изменение контента не требует выпуска новой версии приложения.
 - Новый технический вид UI может требовать обновления приложения.
 - Firebase Hosting используется для размещения сайта.
 - Supabase Auth/RBAC используется для входа и прав.
-- `service_role` запрещён в браузере.
+- `service_role` запрещён в браузере и в mobile.
 - Код должен работать на macOS и Windows.
 - Абсолютные локальные пути запрещены в исходном коде.
 
 ## Current project facts
 
-- Текущие новости главной пока находятся в `lib/src/ui/home/home_dashboard_service.dart` в методе `_localNews()`.
-- В проекте уже есть визуальные home widgets.
-- Существуют `subject_catalog`.
-- Существуют `subject_offerings`.
-- Существуют `subject_student_profiles`.
-- Существуют `subject_offering_student_profiles`.
-- Существуют `teachers`.
-- Существуют `offering_teachers`.
-- Преподаватели пока практически не заполнены.
-- Существует `scripts/import_academic_batch.js`.
-- Push-инфраструктура уже реализована.
-- Firebase настроен.
-- Admin worktree создан от commit `89f0890`.
+- Новости главной: production path — `get_my_published_news` + cache-first в `HomeDashboardService`; `_localNews()` только fallback при ошибке сети без кеша.
+- Существуют `subject_catalog`, `subject_offerings`, `subject_student_profiles`, `subject_offering_student_profiles`, `teachers`, `offering_teachers`.
+- Push-инфраструктура уже реализована; Firebase настроен.
+- Admin worktree: `feature/admin-console`.
 
 ## Security debt
 
@@ -91,9 +82,7 @@ Student Platform Admin — отдельная визуальная веб-пан
 - `anon`/`authenticated` имеют избыточные grants.
 - `users` UPDATE policy потенциально позволяет менять опасные поля.
 - `is_admin()` не должен доверять редактируемому `users.role`.
-- Реальное подключение Web Admin запрещено до этапа RBAC/RLS.
 - RLS нельзя включать механически без проверки текущих Flutter-запросов.
-- На этапе 12.0 Supabase вообще не подключается.
 
 ## News requirements
 
@@ -104,28 +93,18 @@ Student Platform Admin — отдельная визуальная веб-пан
 - `imageOnly`;
 - `imageWithText`.
 
-В будущей рабочей версии нужны:
+Рабочая версия (12.2):
 
-- маленькое изображение карточки;
-- большое изображение новости;
-- заголовок;
-- подзаголовок;
-- основной текст;
-- положение текста;
-- светлый/тёмный текст;
-- затемнение;
-- точка фокуса;
-- порядок;
-- аудитория;
-- дата публикации;
-- дата окончания;
-- push по желанию;
-- черновик;
-- предпросмотр;
-- публикация;
-- архив;
-- восстановление;
-- версии.
+- маленькое изображение карточки / большое в story;
+- title / subtitle / body;
+- focal point + overlay opacity;
+- порядок / приоритет;
+- аудитория all|group;
+- starts_at / ends_at;
+- draft / published / archived;
+- версии и restore;
+- предпросмотр + полный `StudentNewsStorySheet`;
+- публикация без обновления приложения.
 
 ## Subjects requirements
 
@@ -136,35 +115,7 @@ Student Platform Admin — отдельная визуальная веб-пан
 - `subject_offerings` — предмет группы и семестра;
 - `subject_offering_student_profiles` — локальные особенности.
 
-Редактируемая информация:
-
-- название;
-- короткое описание;
-- чего ожидать;
-- как сдать;
-- материалы;
-- частые ошибки;
-- советы;
-- особенности конкретного семестра и преподавателя;
-- статус публикации.
-
 ## Teachers requirements
-
-Предусмотреть:
-
-- таблицу;
-- ФИО;
-- фотографию;
-- кафедру;
-- должность;
-- контакты;
-- описание;
-- предметы;
-- группы;
-- семестры;
-- статус;
-- архив;
-- историю изменений.
 
 Использовать существующие `teachers` и `offering_teachers`.
 
@@ -179,130 +130,88 @@ Student Platform Admin — отдельная визуальная веб-пан
 - Не использовать force/reset.
 - Не изменять чужие или незнакомые файлы.
 - Обновлять roadmap после каждого этапа.
-- Не отмечать этап DONE до пользовательского ревью.
+- Не отмечать этап DONE до пользовательского ревью и remote smoke.
 
 ## Roadmap
 
 ### 12.0 — Web Admin foundation
 
 - Goal: создать автономный desktop-first Flutter Web каркас и локальные UX-прототипы ключевых разделов без подключения к Supabase.
-- Deliverables: Flutter Web проект; структура; маршруты; desktop shell; mock visual news editor; mock subjects table; mock teachers table; документация; Web build.
-- Acceptance criteria: маршруты открываются; shell адаптируется к узкой ширине; mock-редактор новостей поддерживает заявленные локальные действия; таблицы поддерживают поиск и фильтр; targeted-проверки и Web build проходят; пользователь провёл визуальное ревью.
 - Status: REVIEW
-- Related files: `admin_console/`, `packages/student_ui/`, `lib/src/ui/home/home_screen.dart`, `lib/src/ui/navigation/navigation_screen.dart`, `docs/admin_console/ADMIN_ROADMAP.md`, `scripts/run_admin_web.sh`, `scripts/run_admin_web.ps1`
-- Commit SHA: отсутствует
+- Related files: `admin_console/`, `packages/student_ui/`, `docs/admin_console/ADMIN_ROADMAP.md`, `scripts/run_admin_web.sh`
 - Remote applied/deployed: нет
-- Notes: Flutter Web проект, маршруты, адаптивный AdminShell, полноценный локальный визуальный редактор новостей (четыре варианта карточек, локальная загрузка изображений, focal point, затемнение, draft-баннер), mock-таблицы предметов/преподавателей, общий `packages/student_ui`, точный прокручиваемый Home Preview с height-scaled phone frame, PWA manifest, локальные launch-скрипты, тесты и Web build созданы. Мобильный `HomeScreen` продолжает загружать реальные данные через неизменённый `HomeDashboardService` и передаёт готовую presentation-модель общему `StudentHomeView`. Admin Preview передаёт только безопасные mock-данные; редактируемы только новости. Интерфейсы `NewsRepository`/`AdminImageStore`/`AdminImagePicker` готовы к будущей замене на Supabase Auth/RBAC/Storage. Supabase не подключается. Этап не переводится в DONE до пользовательского ревью.
+- Notes: локальный визуальный редактор новостей и mock-таблицы; Supabase не подключался на этом этапе.
 
 ### 12.1 — Security and RBAC
 
 - Goal: подготовить безопасный административный доступ до подключения реальных данных.
-- Deliverables: аудит `users` grants/RLS; локальная миграция admin RBAC/scopes/audit; RPC capabilities; hardening опасных колонок профиля; Admin Auth каркас; bootstrap-инструкция; focused tests.
-- Acceptance criteria: студенту недоступны admin RPC; права только через server assignments; Web Admin без service_role; локальный прототип работает без dart-define; миграция применена; первый `super_admin` назначен bootstrap-процедурой.
 - Status: DONE
 - Related files: `supabase/migrations/20260721202054_admin_rbac_and_audit.sql`, `supabase/checks/admin_rbac_security_review.sql`, `docs/admin_console/ADMIN_RBAC_BOOTSTRAP.md`, `admin_console/lib/core/auth/`
-- Commit SHA: `81791ba` (+ housekeeping rename commit)
+- Commit SHA: `81791ba` (+ housekeeping rename)
 - Remote applied/deployed: migration `20260721202054` / `admin_rbac_and_audit` applied; Edge/Web Admin deploy не выполнялся
-- Notes: remote history and local filename aligned on `20260721202054`; bootstrap `mill453020` as global `super_admin`; local role-play 23/23 and remote smoke PASS.
+- Notes: bootstrap `mill453020` = global `super_admin`; local role-play 23/23; remote smoke PASS.
 
-### 12.2 — Shared content renderer
+### 12.2 — Real news end-to-end
 
-- Goal: обеспечить одинаковое отображение поддерживаемого контента в приложении и админке.
-- Deliverables: `packages/content_renderer`; общие модели; общий `NewsCard`; общий полноэкранный просмотр; одинаковое отображение в app/admin.
-- Acceptance criteria: будут определены перед началом этапа.
+- Goal: администратор создаёт новость в Web Admin, загружает изображение, сохраняет черновик и публикует; после публикации новость появляется в Student Platform без обновления приложения.
+- Status: IN REVIEW
+- Deliverables (код готов, remote apply/deploy pending):
+  - Tables: `news_posts`, `news_versions`, `news_views`
+  - Statuses: `draft` / `published` / `archived`
+  - Fields: sort_order, priority, starts_at/ends_at, audience all|group, variants (`gradientText`, `imageOnly`, `imageOverlay`, `imageWithText`), title/subtitle/body, image_path, focal point, overlay opacity, created_by/updated_by/published_by + timestamps
+  - RPCs (SECURITY DEFINER, RBAC): `admin_list_news`, `admin_get_news`, `admin_create_news_draft`, `admin_update_news_draft`, `admin_publish_news`, `admin_unpublish_news`, `admin_archive_news`, `admin_duplicate_news`, `admin_reorder_news`, `admin_list_news_versions`, `admin_restore_news_version`, `get_my_published_news`, `mark_news_seen`, `admin_can_manage_news_media`, `admin_can_read_news_media`
+  - Storage: private bucket `news-media`
+  - Edge Function: `news-media` (`createUpload` / `createDownload` / `delete`) — JWT + RBAC, no service_role in Flutter
+  - Web Admin: `SupabaseNewsRepository` + `SupabaseAdminImageStore` in real mode; `Local*` in demo
+  - Preview: real `StudentHomeView` + full `StudentNewsStorySheet`
+  - Mobile: cache-first / stale-while-revalidate via `PublishedNewsCache`
+  - Checks: `supabase/checks/news_posts_security_review.sql`, `docs/admin_console/NEWS_RUNTIME_SMOKE.md`
+- Related files:
+  - `supabase/migrations/20260722070209_news_posts_and_admin_rpc.sql`
+  - `supabase/functions/news-media/`
+  - `supabase/checks/news_posts_security_review.sql`
+  - `admin_console/lib/features/content/news/`
+  - `packages/student_ui/lib/src/home/widgets/student_news_story_sheet.dart`
+  - `lib/src/ui/home/home_dashboard_service.dart`
+  - `docs/admin_console/NEWS_RUNTIME_SMOKE.md`
+- Commit SHA: отсутствует (ожидает разрешения на commit)
+- Remote applied/deployed: нет — **не ставить DONE до remote apply + deploy + физического smoke**
+- Notes: прямые table grants для authenticated запрещены; admin actions пишут `admin_audit_log`; student видит только published + audience/schedule; publish требует `content.publish`.
+
+### 12.3 — Shared content renderer package
+
+- Goal: вынести общий renderer в `packages/content_renderer` (сейчас presentation уже частично в `student_ui`).
 - Status: TODO
 - Related files: `packages/content_renderer/` (план)
-- Commit SHA: отсутствует
-- Remote applied/deployed: нет
 - Notes: новый технический вид UI может требовать обновления приложения.
-
-### 12.3 — News backend and visual editor
-
-- Goal: подключить безопасный жизненный цикл новостей к визуальному редактору.
-- Deliverables: `content_posts`; versions; audiences; media; drafts; publish; archive; scheduling; upload; push; cache-first лента приложения.
-- Acceptance criteria: будут определены после завершения этапов 12.1 и 12.2.
-- Status: TODO
-- Related files: будут определены
-- Commit SHA: отсутствует
-- Remote applied/deployed: нет
-- Notes: все записи только через разрешённые RPC или Edge Functions.
 
 ### 12.4 — Subjects management
 
-- Goal: управлять общими и локальными данными предметов без раскрытия технической модели.
-- Deliverables: формы и таблицы для `subject_catalog`, `subject_student_profiles`, `subject_offerings`, `subject_offering_student_profiles`.
-- Acceptance criteria: будут определены перед началом этапа.
 - Status: TODO
-- Related files: будут определены
-- Commit SHA: отсутствует
-- Remote applied/deployed: нет
-- Notes: имя предмета не является техническим ключом.
 
 ### 12.5 — Teachers management
 
-- Goal: управлять преподавателями и их связями с предметами.
-- Deliverables: таблица, профиль, фотография, кафедра, должность, контакты, описание, связи с предметами/группами/семестрами, статус, архив, история.
-- Acceptance criteria: будут определены перед началом этапа.
 - Status: TODO
-- Related files: будут определены
-- Commit SHA: отсутствует
-- Remote applied/deployed: нет
-- Notes: использовать существующие `teachers` и `offering_teachers`.
 
 ### 12.6 — Students and Excel import
 
-- Goal: безопасно управлять студентами и массовым импортом.
-- Deliverables: список студентов; формы; проверки; массовые операции; Excel-импорт.
-- Acceptance criteria: будут определены перед началом этапа.
 - Status: TODO
-- Related files: будут определены
-- Commit SHA: отсутствует
-- Remote applied/deployed: нет
-- Notes: учитывать существующий `scripts/import_academic_batch.js` и staging-first процесс.
 
 ### 12.7 — Schedule and assignments
 
-- Goal: управлять расписанием и заданиями через разрешённые операции.
-- Deliverables: таблицы, фильтры, формы и массовые действия для расписания и заданий.
-- Acceptance criteria: будут определены перед началом этапа.
 - Status: TODO
-- Related files: будут определены
-- Commit SHA: отсутствует
-- Remote applied/deployed: нет
-- Notes: связи предметов должны использовать `subject_offering_id`.
 
 ### 12.8 — Moderation and sanctions
 
-- Goal: дать модераторам понятный и аудируемый рабочий процесс.
-- Deliverables: очереди модерации, решения, санкции, история действий.
-- Acceptance criteria: будут определены перед началом этапа.
 - Status: TODO
-- Related files: будут определены
-- Commit SHA: отсутствует
-- Remote applied/deployed: нет
-- Notes: опасные операции требуют capabilities и audit log.
 
 ### 12.9 — Notifications and monitoring
 
-- Goal: управлять уведомлениями и видеть состояние административных процессов.
-- Deliverables: уведомления, статусы доставки, мониторинг и понятные ошибки.
-- Acceptance criteria: будут определены перед началом этапа.
 - Status: TODO
-- Related files: будут определены
-- Commit SHA: отсутствует
-- Remote applied/deployed: нет
-- Notes: внутренние ошибки базы не показываются пользователю.
 
 ### 12.10 — Extended visual layout controls
 
-- Goal: расширить визуальные настройки в пределах разрешённых компонентов.
-- Deliverables: дополнительные layout-контролы, предпросмотр, версии и безопасные ограничения.
-- Acceptance criteria: будут определены перед началом этапа.
 - Status: TODO
-- Related files: будут определены
-- Commit SHA: отсутствует
-- Remote applied/deployed: нет
-- Notes: админка не становится произвольным редактором базы или UI.
 
 ## Decision log
 
@@ -311,27 +220,25 @@ Student Platform Admin — отдельная визуальная веб-пан
 - Выбран Flutter Web, а не Python desktop.
 - Выбран один репозиторий.
 - Выбран отдельный worktree `feature/admin-console`.
-- Мобильное приложение разрабатывается параллельно.
-- Часть модулей визуальная.
-- Большие справочники табличные.
 - Первым рабочим модулем будут новости.
-- Затем предметы и преподаватели.
 - Admin Preview должен отображать настоящее приложение 1:1.
-- Независимая копия мобильного дизайна не создаётся.
-- Мобильное приложение и Admin Preview используют общие presentation widgets.
-- В preview редактируются только явно разрешённые области.
 - На первом этапе редактируются только новости.
-- Системные блоки отображаются, прокручиваются, но не изменяются.
+
+### 2026-07-22
+
+- Stage 12.2 переопределён как real news e2e (таблицы `news_*`, RPC, Storage, Edge Function, Web Admin + mobile cache-first).
+- `packages/content_renderer` сдвинут в 12.3; общий story sheet временно в `student_ui`.
+- Media: private Supabase Storage bucket + Edge Function signed URLs; без Base64 в БД/Git; без service_role в клиентах.
 
 ## Session handoff
 
-- Last completed action: этап 12.1 DONE — commit `81791ba` + housekeeping rename to `20260721202054_admin_rbac_and_audit.sql`; remote apply/bootstrap/smoke/push complete.
-- Current task: 12.2/12.3 content renderer / news backend wiring.
-- Checks already run: local role-play 23/23; remote privilege/RPC/JWT smoke PASS; migration history aligned local/remote `20260721202054`.
-- Known blockers: none for 12.1.
-- Exact next task: stage 12.2/12.3 per roadmap.
-- Uncommitted leftovers: none after housekeeping.
-- Last commit: housekeeping `chore: align admin RBAC migration history` (after `81791ba`).
-- Push status: `feature/admin-console` synced with origin after housekeeping push.
-- Remote migration status: `admin_rbac_and_audit` = `20260721202054` (local filename matched).
-- Deploy status: Edge/Web Admin deploy не выполнялся.
+- Last completed action: 12.1 DONE remotely.
+- Current task: 12.2 IN REVIEW — код миграции/EF/admin/mobile готов; apply/deploy/smoke не выполнялись.
+- Checks already run (local): format / focused analyze / focused tests / deno check / git diff --check / SQL static review file added.
+- Known blockers: нужны remote apply + `news-media` deploy + physical smoke.
+- Exact next task: после ревью — apply migration, deploy Edge Function, пройти `NEWS_RUNTIME_SMOKE.md`, затем commit/push по разрешению.
+- Uncommitted leftovers: recovery-flow WIP в stash `wip: recovery-flow before stage-12.2` + текущие изменения 12.2.
+- Last commit on branch tip before 12.2 WIP: `be4d631` (password recovery) / prior `cd48cee` housekeeping.
+- Push status: не пушить до разрешения.
+- Remote migration status: `admin_rbac_and_audit` = `20260721202054` applied; `news_posts_and_admin_rpc` = **not applied**.
+- Deploy status: Edge `news-media` не задеплоен.

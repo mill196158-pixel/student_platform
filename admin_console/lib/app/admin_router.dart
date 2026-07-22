@@ -113,7 +113,7 @@ GoRouter createAdminRouter(AdminSessionController session) {
           ),
           GoRoute(
             path: '/content/news',
-            builder: (context, state) => const NewsEditorScreen(),
+            builder: (context, state) => NewsEditorScreen(session: session),
           ),
           GoRoute(
             path: '/academic/subjects',

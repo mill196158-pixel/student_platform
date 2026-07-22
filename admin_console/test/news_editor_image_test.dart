@@ -91,21 +91,6 @@ class _FakePicker implements AdminImagePicker {
   Future<PickedAdminImage?> pickImage() async => image;
 }
 
-class _SeedRepository implements NewsRepository {
-  _SeedRepository(this.items);
-
-  final List<NewsItem> items;
-
-  @override
-  Future<List<NewsItem>> loadDraft() async => List<NewsItem>.from(items);
-
-  @override
-  Future<void> publish(List<NewsItem> items) async {}
-
-  @override
-  Future<void> saveDraft(List<NewsItem> items) async {}
-}
-
 void main() {
   test('image validation accepts png and rejects oversized files', () {
     final ok = LocalAdminImagePicker.validateAndWrap(
@@ -151,16 +136,18 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: NewsEditorScreen(
-            repository: _SeedRepository([
-              NewsItem(
-                id: 1,
-                title: 'Картинка сохраняется',
-                subtitle: 'При смене варианта',
-                variant: StudentHomeNewsVariant.imageOverlay,
-                colors: const [Color(0xFF246B8E), Color(0xFF54B7AD)],
-                imageId: stored.id,
-              ),
-            ]),
+            repository: LocalNewsRepository(
+              seed: [
+                NewsItem(
+                  id: 'local-1',
+                  title: 'Картинка сохраняется',
+                  subtitle: 'При смене варианта',
+                  variant: StudentHomeNewsVariant.imageOverlay,
+                  colors: const [Color(0xFF246B8E), Color(0xFF54B7AD)],
+                  imageId: stored.id,
+                ),
+              ],
+            ),
             imageStore: store,
             imagePicker: _FakePicker(null),
           ),
@@ -200,15 +187,17 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: NewsEditorScreen(
-            repository: _SeedRepository([
-              const NewsItem(
-                id: 1,
-                title: 'Без картинки',
-                subtitle: 'Пока пусто',
-                variant: StudentHomeNewsVariant.imageWithText,
-                colors: [Color(0xFFF3A95F), Color(0xFFE66E75)],
-              ),
-            ]),
+            repository: LocalNewsRepository(
+              seed: const [
+                NewsItem(
+                  id: 'local-1',
+                  title: 'Без картинки',
+                  subtitle: 'Пока пусто',
+                  variant: StudentHomeNewsVariant.imageWithText,
+                  colors: [Color(0xFFF3A95F), Color(0xFFE66E75)],
+                ),
+              ],
+            ),
             imageStore: LocalAdminImageStore(),
             imagePicker: picker,
           ),
