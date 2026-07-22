@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:student_ui/student_ui.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'admin_backend_config.dart';
@@ -406,6 +407,9 @@ class AdminSessionController extends ChangeNotifier {
     } catch (_) {
       // Still clear local admin state.
     }
+
+    // Drop private Admin news image bytes so the next session cannot reuse them.
+    NewsImageBytesCache.instance.clear();
 
     _passwordRecoveryLatched = false;
     capabilities = AdminCapabilities.empty;

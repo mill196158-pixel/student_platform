@@ -11,6 +11,8 @@ import 'news_item.dart';
 abstract class NewsRepository {
   Future<List<NewsItem>> listNews();
 
+  Future<NewsItem> getNews(String id);
+
   Future<NewsItem> createDraft({
     String title = '',
     String subtitle = '',
@@ -18,7 +20,10 @@ abstract class NewsRepository {
     StudentHomeNewsVariant variant = StudentHomeNewsVariant.gradientText,
   });
 
-  Future<NewsItem> updateDraft(NewsItem item);
+  Future<NewsItem> updateDraft(
+    NewsItem item, {
+    NewsImagePathPatch imagePathPatch = NewsImagePathPatch.omit,
+  });
 
   Future<NewsItem> publish(String id);
 
@@ -145,6 +150,11 @@ class LocalNewsRepository implements NewsRepository {
   }
 
   @override
+  Future<NewsItem> getNews(String id) async {
+    return _items[_indexOf(id)];
+  }
+
+  @override
   Future<List<NewsItem>> loadDraft() => listNews();
 
   @override
@@ -175,15 +185,24 @@ class LocalNewsRepository implements NewsRepository {
   }
 
   @override
-  Future<NewsItem> updateDraft(NewsItem item) async {
+  Future<NewsItem> updateDraft(
+    NewsItem item, {
+    NewsImagePathPatch imagePathPatch = NewsImagePathPatch.omit,
+  }) async {
     final index = _indexOf(item.id);
-    if (_items[index].isArchived) {
+    final previous = _items[index];
+    if (previous.isArchived) {
       throw const NewsRepositoryException('Архивную новость нельзя изменить.');
     }
-    final updated = item.copyWith(
-      versionNumber: _items[index].versionNumber + 1,
+    final base = item.copyWith(
+      versionNumber: previous.versionNumber + 1,
       updatedAt: DateTime.now(),
     );
+    final updated = switch (imagePathPatch) {
+      NewsImagePathPatch.omit => base.copyWith(imagePath: previous.imagePath),
+      NewsImagePathPatch.set => base,
+      NewsImagePathPatch.clear => base.copyWith(clearImagePath: true),
+    };
     _items[index] = updated;
     _recordVersion(updated);
     return updated;

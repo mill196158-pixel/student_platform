@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -8,6 +9,7 @@ import 'package:student_ui/student_ui.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
+import 'package:student_platform/src/ui/home/news_image_disk_cache.dart';
 import 'package:student_platform/src/ui/learning/data/supabase_learning_repository.dart';
 import 'package:student_platform/src/ui/learning/models/team.dart';
 import 'package:student_platform/src/ui/schedule/models/lesson.dart';
@@ -20,19 +22,30 @@ class HomeDashboardService {
     ScheduleRepository? scheduleRepository,
     SupabaseLearningRepository? learningRepository,
     PublishedNewsCache? newsCache,
+    NewsImageDiskCache? imageCache,
     http.Client? httpClient,
   })  : _sb = client ?? Supabase.instance.client,
         _scheduleRepository = scheduleRepository ?? ScheduleRepository(),
         _learningRepository =
             learningRepository ?? SupabaseLearningRepository(),
         _newsCache = newsCache ?? PublishedNewsCache(),
+        _imageCache = imageCache ?? NewsImageDiskCache(),
         _http = httpClient ?? http.Client();
 
   final SupabaseClient _sb;
   final ScheduleRepository _scheduleRepository;
   final SupabaseLearningRepository _learningRepository;
   final PublishedNewsCache _newsCache;
+  final NewsImageDiskCache _imageCache;
   final http.Client _http;
+
+  /// Instant cache-first news (JSON + previously saved image bytes).
+  /// Never hits the network.
+  Future<List<HomeNewsItem>> loadCachedNews() async {
+    final cached = await _newsCache.read();
+    if (cached.isEmpty) return const [];
+    return _hydrateImagesFromDisk(cached);
+  }
 
   Future<HomeDashboardData> load() async {
     final scheduleDate = MskDate.today();
@@ -76,42 +89,119 @@ class HomeDashboardService {
 
   /// Cache-first / stale-while-revalidate load of the published news feed.
   ///
-  /// - Cached items are shown first (fast paint).
-  /// - Fresh items come from `get_my_published_news`.
-  /// - On network failure the cache is kept; it is never cleared on error.
-  /// - The local demo feed is used only when the RPC fails AND there is no
-  ///   cache (e.g. unauthenticated demo). An empty published list stays empty.
+  /// - Disk/memory image bytes are attached immediately when available.
+  /// - Fresh metadata comes from `get_my_published_news`.
+  /// - On network failure the feed + last good images are kept.
+  /// - Refresh never clears working image bytes for an unchanged cache key.
   Future<List<HomeNewsItem>> _loadPublishedNews() async {
     final cached = await _newsCache.read();
+    final cachedWithImages = await _hydrateImagesFromDisk(cached);
     try {
       final response = await _sb.rpc('get_my_published_news');
       final rows = _asMapList(response);
       await _newsCache.write(rows);
-      final items = rows.map(mapPublishedNews).toList();
-      return _resolveNewsImages(items);
+      final fresh = rows.map(mapPublishedNews).toList();
+      final merged =
+          _mergeKeepingImages(previous: cachedWithImages, next: fresh);
+      return _resolveNewsImages(merged, prefetchStory: true);
     } catch (e) {
       debugPrint('[home] published news failed: $e');
-      if (cached.isNotEmpty) {
-        return _resolveNewsImages(cached);
+      if (cachedWithImages.isNotEmpty) {
+        // Keep last good cache — do not wipe images on network error.
+        return cachedWithImages;
       }
       return _localNews();
     }
   }
 
-  Future<List<HomeNewsItem>> _resolveNewsImages(
+  List<HomeNewsItem> _mergeKeepingImages({
+    required List<HomeNewsItem> previous,
+    required List<HomeNewsItem> next,
+  }) {
+    final prevById = {for (final item in previous) item.id: item};
+    final merged = <HomeNewsItem>[];
+    for (final item in next) {
+      final old = prevById[item.id];
+      if (old?.imageBytes != null &&
+          old!.imageCacheKey?.id != null &&
+          old.imageCacheKey!.id == item.imageCacheKey?.id) {
+        merged.add(item.copyWith(imageBytes: old.imageBytes));
+      } else {
+        merged.add(item);
+      }
+    }
+    return merged;
+  }
+
+  Future<List<HomeNewsItem>> _hydrateImagesFromDisk(
     List<HomeNewsItem> items,
   ) async {
-    final resolved = <HomeNewsItem>[];
+    final out = <HomeNewsItem>[];
     for (final item in items) {
-      final path = item.imagePath;
-      if (path == null || path.isEmpty || item.imageBytes != null) {
-        resolved.add(item);
+      final key = item.imageCacheKey;
+      if (key == null || item.imageBytes != null) {
+        out.add(item);
         continue;
       }
-      final bytes = await _downloadNewsImage(path);
-      resolved.add(bytes == null ? item : item.copyWith(imageBytes: bytes));
+      final bytes = await _imageCache.peek(key);
+      out.add(bytes == null ? item : item.copyWith(imageBytes: bytes));
+    }
+    return out;
+  }
+
+  Future<List<HomeNewsItem>> _resolveNewsImages(
+    List<HomeNewsItem> items, {
+    bool prefetchStory = false,
+  }) async {
+    final priority = <int>{};
+    for (var i = 0; i < items.length && i < 6; i++) {
+      priority.add(i);
+    }
+    if (prefetchStory && items.isNotEmpty) {
+      priority.add(0);
+      if (items.length > 1) priority.add(1);
+    }
+
+    final resolved = List<HomeNewsItem>.from(items);
+    final futures = <Future<void>>[];
+    for (final index in priority) {
+      futures.add(() async {
+        final item = resolved[index];
+        final key = item.imageCacheKey;
+        if (key == null || item.imageBytes != null) return;
+        final bytes = await _fetchNewsImage(key);
+        if (bytes != null) {
+          resolved[index] = item.copyWith(imageBytes: bytes);
+          // Best-effort cleanup of older versions for the same path.
+          unawaited(_imageCache.pruneOtherVersions(key.path, key.version));
+        }
+      }());
+    }
+    await Future.wait(futures);
+
+    // Warm the rest in the background without blocking first paint.
+    for (var i = 0; i < resolved.length; i++) {
+      if (priority.contains(i)) continue;
+      final item = resolved[i];
+      final key = item.imageCacheKey;
+      if (key == null || item.imageBytes != null) continue;
+      unawaited(_fetchNewsImage(key));
     }
     return resolved;
+  }
+
+  /// Public helper for story sheet: resolve one item without clearing others.
+  Future<Uint8List?> resolveNewsImageBytes(HomeNewsItem item) async {
+    final key = item.imageCacheKey;
+    if (key == null) return null;
+    if (item.imageBytes != null && item.imageBytes!.isNotEmpty) {
+      return item.imageBytes;
+    }
+    return _fetchNewsImage(key);
+  }
+
+  Future<Uint8List?> _fetchNewsImage(NewsImageCacheKey key) {
+    return _imageCache.getOrFetch(key, () => _downloadNewsImage(key.path));
   }
 
   Future<Uint8List?> _downloadNewsImage(String path) async {
@@ -120,16 +210,35 @@ class HomeDashboardService {
         'news-media',
         body: {'action': 'createDownload', 'path': path},
       );
-      if (response.status >= 400) return null;
+      if (response.status >= 400) {
+        debugPrint(
+          '[home] news image createDownload status=${response.status}',
+        );
+        return null;
+      }
       final data = response.data;
-      if (data is! Map) return null;
+      if (data is! Map) {
+        debugPrint('[home] news image createDownload bad payload type');
+        return null;
+      }
       final signedUrl = (data['signedUrl'] ?? '').toString();
-      if (signedUrl.isEmpty) return null;
+      // Never persist or log the signed URL — use it only for this GET.
+      if (signedUrl.isEmpty) {
+        debugPrint('[home] news image createDownload empty url');
+        return null;
+      }
       final download = await _http.get(Uri.parse(signedUrl));
-      if (download.statusCode != 200) return null;
-      return download.bodyBytes;
+      if (download.statusCode != 200) {
+        debugPrint(
+          '[home] news image bytes status=${download.statusCode}',
+        );
+        return null;
+      }
+      final bytes = download.bodyBytes;
+      return bytes.isEmpty ? null : bytes;
     } catch (e) {
-      debugPrint('[home] news image download failed: $e');
+      // Never log JWT / signed URLs / tokens — type only.
+      debugPrint('[home] news image download failed type=${e.runtimeType}');
       return null;
     }
   }
@@ -431,6 +540,7 @@ HomeNewsItem mapPublishedNews(Map<String, dynamic> json) {
     overlayDarken: _parseDouble(json['overlay_opacity'], fallback: 0.42),
     imagePath: _nullableString(json['image_path']),
     publishedAt: _parseDate(json['published_at']),
+    updatedAt: _parseDate(json['updated_at']),
   );
 }
 
@@ -449,10 +559,14 @@ StudentHomeNewsVariant _newsVariantFromString(String? value) {
 }
 
 IconData _iconForVariant(StudentHomeNewsVariant variant, String seed) {
+  // Image variants must not show a decorative folder glyph on the card/story.
+  if (variant != StudentHomeNewsVariant.gradientText) {
+    return Icons.auto_awesome_rounded;
+  }
   const icons = [
     Icons.auto_awesome_rounded,
     Icons.edit_note_rounded,
-    Icons.folder_copy_outlined,
+    Icons.campaign_outlined,
     Icons.assignment_turned_in_outlined,
   ];
   return icons[seed.hashCode.abs() % icons.length];

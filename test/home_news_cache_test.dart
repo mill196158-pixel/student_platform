@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_ui/student_ui.dart';
@@ -64,5 +65,32 @@ void main() {
     });
     final cache = PublishedNewsCache();
     expect(await cache.read(), isEmpty);
+  });
+
+  test('published RPC row with image_path maps into HomeNewsItem', () {
+    final item = mapPublishedNews({
+      ...row(id: 'img-1', variant: 'imageOverlay', title: 'С фото'),
+      'image_path':
+          'news/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.png',
+    });
+    expect(item.imagePath, isNotNull);
+    expect(item.variant, StudentHomeNewsVariant.imageOverlay);
+    expect(item.icon, isNot(Icons.folder_copy_outlined));
+  });
+
+  test('cache-first then server refresh surfaces newly published news',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final cache = PublishedNewsCache();
+    await cache.write([row(id: 'old')]);
+    expect((await cache.read()).map((e) => e.id), ['old']);
+
+    await cache.write([
+      row(id: 'old'),
+      row(id: 'new-pub', variant: 'imageWithText', title: 'Новая'),
+    ]);
+    final refreshed = await cache.read();
+    expect(refreshed.map((e) => e.id), ['old', 'new-pub']);
+    expect(refreshed.last.title, 'Новая');
   });
 }

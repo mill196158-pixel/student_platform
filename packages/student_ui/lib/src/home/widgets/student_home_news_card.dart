@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../home_preview_models.dart';
+import 'news_image_frame.dart';
 
 class StudentHomeNewsFeed extends StatelessWidget {
   const StudentHomeNewsFeed({
@@ -263,21 +264,7 @@ class _ImageOnlyCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        _NewsImageBackground(item: item, colors: colors, isDark: isDark),
-        if (!item.hasImage)
-          Center(
-            child: Icon(
-              Icons.image_outlined,
-              size: 40,
-              color: (isDark ? Colors.white : const Color(0xFF1F2937))
-                  .withValues(alpha: 0.35),
-            ),
-          ),
-      ],
-    );
+    return _NewsImageBackground(item: item, colors: colors, isDark: isDark);
   }
 }
 
@@ -377,15 +364,7 @@ class _ImageWithTextCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                  Row(
-                    children: [
-                      Icon(item.icon, size: 12, color: accent),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: _NewsSubtitle(item: item, color: textColor),
-                      ),
-                    ],
-                  ),
+                  _NewsSubtitle(item: item, color: textColor),
                 ],
               ),
             ),
@@ -411,55 +390,26 @@ class _NewsImageBackground extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fallback = DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: borderRadius,
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: isDark
-              ? [
-                  Color.alphaBlend(
-                    colors.first.withValues(alpha: 0.55),
-                    const Color(0xFF1F2937),
-                  ),
-                  Color.alphaBlend(
-                    colors.last.withValues(alpha: 0.45),
-                    const Color(0xFF111827),
-                  ),
-                ]
-              : colors,
-        ),
-      ),
-      child: item.hasImage
-          ? null
-          : Center(
-              child: Icon(
-                Icons.image_outlined,
-                size: 28,
-                color: (isDark ? Colors.white : const Color(0xFF1F2937))
-                    .withValues(alpha: 0.28),
-              ),
+    final skeletonColors = isDark
+        ? [
+            Color.alphaBlend(
+              colors.first.withValues(alpha: 0.55),
+              const Color(0xFF1F2937),
             ),
-    );
+            Color.alphaBlend(
+              colors.last.withValues(alpha: 0.45),
+              const Color(0xFF111827),
+            ),
+          ]
+        : colors;
 
-    if (!item.hasImage) return fallback;
-
-    final image = Image.memory(
-      item.imageBytes!,
-      fit: BoxFit.cover,
+    return NewsImageFrame(
+      bytes: item.imageBytes,
+      colors: skeletonColors,
       alignment: item.imageFocus,
-      gaplessPlayback: true,
-      errorBuilder: (_, __, ___) => fallback,
-    );
-
-    if (borderRadius == null) {
-      return image;
-    }
-
-    return ClipRRect(
-      borderRadius: borderRadius!,
-      child: image,
+      borderRadius: borderRadius,
+      isLoading: item.usesImage && !item.hasImage,
+      fit: BoxFit.cover,
     );
   }
 }

@@ -9,6 +9,18 @@ enum NewsStatus { draft, published, archived }
 
 enum NewsAudienceType { all, group }
 
+/// How [NewsItem.toPatchJson] should treat `image_path`.
+enum NewsImagePathPatch {
+  /// Leave the server value unchanged (omit the key).
+  omit,
+
+  /// Persist [NewsItem.imagePath] (must be a non-empty storage path).
+  set,
+
+  /// Explicitly clear the server image_path.
+  clear,
+}
+
 /// A single admin news post.
 ///
 /// Bytes for image previews are never persisted here — only a local
@@ -138,11 +150,13 @@ class NewsItem {
   static final _defaultIcons = <IconData>[
     Icons.auto_awesome_rounded,
     Icons.edit_note_rounded,
-    Icons.folder_copy_outlined,
+    Icons.campaign_outlined,
     Icons.assignment_turned_in_outlined,
   ];
 
   IconData get _icon {
+    // Image variants must not rely on a decorative folder/glyph overlay.
+    if (usesImage) return Icons.auto_awesome_rounded;
     final seed = id.hashCode.abs();
     return _defaultIcons[seed % _defaultIcons.length];
   }
@@ -205,14 +219,18 @@ class NewsItem {
   }
 
   /// Patch payload consumed by `admin_update_news_draft(p_id, p_patch)`.
-  Map<String, dynamic> toPatchJson() {
-    return {
+  ///
+  /// By default [imagePathPatch] is [NewsImagePathPatch.omit] so text/variant
+  /// edits never wipe an existing server `image_path`.
+  Map<String, dynamic> toPatchJson({
+    NewsImagePathPatch imagePathPatch = NewsImagePathPatch.omit,
+  }) {
+    final map = <String, dynamic>{
       'title': title,
       'subtitle': subtitle,
       'body': body,
       'variant': variant.label,
       'gradient_colors': colors.map(colorToHex).toList(),
-      'image_path': imagePath ?? '',
       'image_focus_x': imageFocus.x,
       'image_focus_y': imageFocus.y,
       'overlay_opacity': overlayDarken,
@@ -224,6 +242,17 @@ class NewsItem {
       'audience_group_id': audienceGroupId ?? '',
       'sort_order': sortOrder,
     };
+    switch (imagePathPatch) {
+      case NewsImagePathPatch.omit:
+        break;
+      case NewsImagePathPatch.set:
+        map['image_path'] = imagePath ?? '';
+        break;
+      case NewsImagePathPatch.clear:
+        map['image_path'] = '';
+        break;
+    }
+    return map;
   }
 }
 

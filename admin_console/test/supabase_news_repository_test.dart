@@ -108,6 +108,7 @@ void main() {
     expect(sentPatch['title'], 'Обновлено');
     expect(sentPatch['gradient_colors'], contains('#7367F0'));
     expect(sentPatch['variant'], 'gradientText');
+    expect(sentPatch.containsKey('image_path'), isFalse);
   });
 
   test('publish calls admin_publish_news with the id', () async {

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -47,11 +48,15 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
   List<NewsItem> _items = [];
   String? _selectedId;
   final Map<String, Uint8List> _resolvedBytes = {};
-  final Set<String> _pendingUploadIds = {};
+
+  /// Per-item image edit intent. Default = untouched (never wipe server path).
+  final Map<String, _ImageIntent> _imageIntent = {};
+  final Set<String> _resolvingImageIds = {};
 
   bool _loading = true;
   bool _busy = false;
   bool _dirty = false;
+  bool _imageUploading = false;
   String? _imageError;
   String? _banner;
   String? _loadError;
@@ -78,9 +83,12 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
     return SupabaseAdminImageStore(client: client);
   }
 
-  SupabaseAdminImageStore? get _mediaStore {
+  AdminRemoteImageGateway? get _mediaStore {
     final store = _imageStore;
-    return store is SupabaseAdminImageStore ? store : null;
+    if (store is AdminRemoteImageGateway) {
+      return store as AdminRemoteImageGateway;
+    }
+    return null;
   }
 
   bool get _canWrite => widget.session?.capabilities.canWriteContent ?? true;
@@ -120,7 +128,7 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
         _loadError = null;
       });
       _syncControllers();
-      _resolveRemoteImages();
+      _scheduleImagePreloads();
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -131,19 +139,163 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
     }
   }
 
-  Future<void> _resolveRemoteImages() async {
+  NewsImageCacheKey? _cacheKeyFor(NewsItem item) {
+    return NewsImageCacheKey.tryParse(
+      path: item.imagePath,
+      versionNumber: item.versionNumber,
+      updatedAt: item.updatedAt,
+    );
+  }
+
+  /// Prefetch selected + visible list thumbs + next item (single-flight).
+  void _scheduleImagePreloads() {
     final media = _mediaStore;
     if (media == null) return;
-    for (final item in _items) {
-      final path = item.imagePath;
-      if (path == null || path.isEmpty) continue;
-      if (_resolvedBytes.containsKey(item.id)) continue;
-      final bytes = await media.resolveBytes(path);
-      if (!mounted) return;
-      if (bytes != null) {
-        setState(() => _resolvedBytes[item.id] = bytes);
+    final targets = <String>{};
+    final selected = _selected;
+    if (selected != null) targets.add(selected.id);
+    for (final item in _items.take(8)) {
+      targets.add(item.id);
+    }
+    if (selected != null) {
+      final idx = _items.indexWhere((e) => e.id == selected.id);
+      if (idx >= 0 && idx + 1 < _items.length) {
+        targets.add(_items[idx + 1].id);
       }
     }
+    for (final id in targets) {
+      unawaited(_resolveRemoteImageFor(id));
+    }
+  }
+
+  Future<void> _resolveRemoteImageFor(String itemId) async {
+    final media = _mediaStore;
+    if (media == null) return;
+    NewsItem? item;
+    for (final candidate in _items) {
+      if (candidate.id == itemId) {
+        item = candidate;
+        break;
+      }
+    }
+    if (item == null) return;
+    if (_intentFor(itemId) == _ImageIntent.removed) return;
+    if (_intentFor(itemId) == _ImageIntent.pendingLocal) return;
+    final key = _cacheKeyFor(item);
+    if (key == null) return;
+
+    final peeked = media.peekBytes(key.path, version: key.version);
+    if (peeked != null) {
+      if (!mounted) return;
+      setState(() {
+        _resolvedBytes[itemId] = peeked;
+        if (_selectedId == itemId) {
+          _imageError = null;
+        }
+      });
+      return;
+    }
+    if (_resolvedBytes.containsKey(itemId)) return;
+    if (_resolvingImageIds.contains(itemId)) return;
+    _resolvingImageIds.add(itemId);
+    if (mounted && _selectedId == itemId) {
+      setState(() {
+        _imageError = null;
+      });
+    } else if (mounted) {
+      setState(() {});
+    }
+    try {
+      final bytes = await media.resolveBytes(key.path, version: key.version);
+      if (!mounted) return;
+      setState(() {
+        if (bytes != null && bytes.isNotEmpty) {
+          _resolvedBytes[itemId] = bytes;
+          if (_selectedId == itemId) {
+            _imageError = null;
+          }
+        } else if (_selectedId == itemId) {
+          _imageError = 'Не удалось загрузить. Можно повторить.';
+        }
+      });
+    } catch (error) {
+      debugPrint('[admin-news] resolve image failed type=${error.runtimeType}');
+      if (!mounted) return;
+      if (_selectedId == itemId) {
+        setState(() {
+          _imageError = 'Не удалось загрузить. Можно повторить.';
+        });
+      }
+    } finally {
+      _resolvingImageIds.remove(itemId);
+      if (mounted) setState(() {});
+    }
+  }
+
+  _ImageIntent _intentFor(String id) =>
+      _imageIntent[id] ?? _ImageIntent.untouched;
+
+  NewsImageFieldStatus _imageFieldStatus(NewsItem item) {
+    if (_imageUploading && _selectedId == item.id) {
+      return NewsImageFieldStatus.loading;
+    }
+    if (_intentFor(item.id) == _ImageIntent.pendingLocal) {
+      return NewsImageFieldStatus.localPreview;
+    }
+    if (_intentFor(item.id) == _ImageIntent.removed) {
+      return NewsImageFieldStatus.empty;
+    }
+    final hasPath = item.imagePath != null && item.imagePath!.isNotEmpty;
+    final bytes = _bytesForItem(item);
+    if (hasPath) {
+      if (bytes != null && bytes.isNotEmpty) {
+        return NewsImageFieldStatus.saved;
+      }
+      if (_imageError != null && _selectedId == item.id) {
+        return NewsImageFieldStatus.error;
+      }
+      // Demo/local store cannot download remotes; still never show empty pick CTA.
+      if (_mediaStore == null) {
+        return NewsImageFieldStatus.saved;
+      }
+      // Path exists → never show «Выберите изображение» while downloading.
+      return NewsImageFieldStatus.loading;
+    }
+    if (item.imageId != null && _imageStore.getBytes(item.imageId!) != null) {
+      return NewsImageFieldStatus.localPreview;
+    }
+    return NewsImageFieldStatus.empty;
+  }
+
+  String? _imageFieldStatusText(NewsItem item) {
+    if (_imageUploading && _selectedId == item.id) {
+      return 'Отправка в защищённое хранилище…';
+    }
+    final status = _imageFieldStatus(item);
+    if (status == NewsImageFieldStatus.loading) {
+      return 'Получаем файл из защищённого хранилища';
+    }
+    if (status == NewsImageFieldStatus.saved) {
+      return 'JPG, PNG или WebP · до 5 МБ';
+    }
+    if (status == NewsImageFieldStatus.localPreview) {
+      return 'Сохраните черновик, чтобы загрузить файл на сервер';
+    }
+    return null;
+  }
+
+  bool _hasServerImage(NewsItem item) {
+    if (_intentFor(item.id) == _ImageIntent.removed) return false;
+    return item.imagePath != null && item.imagePath!.isNotEmpty;
+  }
+
+  bool _canPublishItem(NewsItem item) {
+    if (!_canPublish || item.isArchived) return false;
+    if (_imageUploading) return false;
+    if (_intentFor(item.id) == _ImageIntent.pendingLocal) return false;
+    if (_imageError != null && _selectedId == item.id) return false;
+    if (item.usesImage && !_hasServerImage(item)) return false;
+    return true;
   }
 
   void _syncControllers() {
@@ -170,6 +322,7 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
   void _select(String id) {
     setState(() => _selectedId = id);
     _syncControllers();
+    _scheduleImagePreloads();
   }
 
   void _replaceItem(NewsItem item) {
@@ -189,12 +342,20 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
   }
 
   Uint8List? _bytesForItem(NewsItem item) {
+    if (_intentFor(item.id) == _ImageIntent.removed) return null;
     final id = item.imageId;
     if (id != null) {
       final bytes = _imageStore.getBytes(id);
       if (bytes != null) return bytes;
     }
-    return _resolvedBytes[item.id];
+    final local = _resolvedBytes[item.id];
+    if (local != null) return local;
+    final key = _cacheKeyFor(item);
+    final media = _mediaStore;
+    if (key != null && media != null) {
+      return media.peekBytes(key.path, version: key.version);
+    }
+    return null;
   }
 
   void _showBanner(String message) {
@@ -261,37 +422,118 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
         _selectedId = copy.id;
       });
       _syncControllers();
-      _resolveRemoteImages();
+      _scheduleImagePreloads();
       _snack('Создана копия');
     });
   }
 
-  /// Uploads any pending local image, then persists field edits via updateDraft.
+  /// Uploads pending local bytes (if any), patches draft, then re-reads server.
   Future<NewsItem?> _saveSelected() async {
     final selected = _selected;
     if (selected == null) return null;
     var toSave = selected;
+    final intent = _intentFor(selected.id);
+    var pathPatch = NewsImagePathPatch.omit;
+    final previousPath = selected.imagePath;
+    String? uploadedPath;
 
     final media = _mediaStore;
     final localId = selected.imageId;
-    if (media != null &&
-        localId != null &&
-        _pendingUploadIds.contains(selected.id)) {
-      final path = await media.uploadPending(
-        localId,
-        previousPath: selected.imagePath,
-      );
-      toSave = selected.copyWith(imagePath: path);
+
+    if (intent == _ImageIntent.pendingLocal) {
+      if (media == null || localId == null) {
+        throw const NewsRepositoryException(
+          'Не удалось загрузить изображение. Выберите файл снова.',
+        );
+      }
+      if (mounted) {
+        setState(() {
+          _imageUploading = true;
+          _imageError = null;
+        });
+      }
+      try {
+        uploadedPath = await media.uploadPending(
+          localId,
+          previousPath: null, // delete old only after successful save
+          version: '${selected.versionNumber + 1}',
+        );
+        toSave = selected.copyWith(imagePath: uploadedPath);
+        pathPatch = NewsImagePathPatch.set;
+      } catch (error) {
+        debugPrint('[admin-news] upload failed type=${error.runtimeType}');
+        if (mounted) {
+          setState(() {
+            _imageUploading = false;
+            _imageError = 'Не удалось загрузить изображение';
+          });
+        }
+        throw const NewsRepositoryException(
+          'Не удалось загрузить изображение. Публикация и сохранение path отменены.',
+        );
+      }
+    } else if (intent == _ImageIntent.removed) {
+      pathPatch = NewsImagePathPatch.clear;
+      toSave = selected.copyWith(clearImagePath: true, clearImageId: true);
     }
 
-    final saved = await _repository.updateDraft(toSave);
-    if (!mounted) return saved;
+    final saved = await _repository.updateDraft(
+      toSave,
+      imagePathPatch: pathPatch,
+    );
+
+    // Re-read authoritative row so refresh/UI always match the server.
+    NewsItem confirmed;
+    try {
+      confirmed = await _repository.getNews(saved.id);
+    } catch (_) {
+      confirmed = saved;
+    }
+
+    if (media != null &&
+        intent == _ImageIntent.pendingLocal &&
+        previousPath != null &&
+        previousPath.isNotEmpty &&
+        previousPath != confirmed.imagePath) {
+      media.invalidatePath(previousPath);
+      await media.deleteRemote(previousPath);
+    }
+    if (media != null &&
+        intent == _ImageIntent.removed &&
+        previousPath != null &&
+        previousPath.isNotEmpty) {
+      media.invalidatePath(previousPath);
+      await media.deleteRemote(previousPath);
+    }
+
+    if (!mounted) return confirmed;
     setState(() {
-      _replaceItem(saved);
-      _pendingUploadIds.remove(saved.id);
+      _replaceItem(confirmed);
+      _imageIntent[confirmed.id] = _ImageIntent.untouched;
+      _imageUploading = false;
       _dirty = false;
+      if (confirmed.imagePath != null && confirmed.imagePath!.isNotEmpty) {
+        _imageError = null;
+        if (localId != null) {
+          final bytes = _imageStore.getBytes(localId);
+          if (bytes != null) {
+            _resolvedBytes[confirmed.id] = bytes;
+            final key = _cacheKeyFor(confirmed);
+            if (key != null) {
+              media?.seedRemoteBytes(
+                path: key.path,
+                version: key.version,
+                bytes: bytes,
+              );
+            }
+          }
+        }
+      } else if (intent == _ImageIntent.removed) {
+        _resolvedBytes.remove(confirmed.id);
+      }
     });
-    return saved;
+    await _resolveRemoteImageFor(confirmed.id);
+    return confirmed;
   }
 
   Future<void> _saveDraft() async {
@@ -313,8 +555,18 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
       return;
     }
     await _runGuarded(() async {
-      if (_dirty) await _saveSelected();
-      final published = await _repository.publish(selected.id);
+      NewsItem current = selected;
+      if (_dirty || _intentFor(selected.id) != _ImageIntent.untouched) {
+        final saved = await _saveSelected();
+        if (saved == null) return;
+        current = saved;
+      }
+      if (!_canPublishItem(current)) {
+        throw const NewsRepositoryException(
+          'Для этого варианта сначала сохраните изображение на сервере.',
+        );
+      }
+      final published = await _repository.publish(current.id);
       if (!mounted) return;
       setState(() => _replaceItem(published));
       _snack('Новость опубликована');
@@ -402,8 +654,11 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
       if (!mounted) return;
       setState(() {
         _imageError = null;
+        // Keep existing imagePath until upload succeeds — do not clear it yet.
+        // Local bytes are shown immediately and kept across save/refresh.
         _replaceItem(selected.copyWith(imageId: stored.id));
-        _pendingUploadIds.add(selected.id);
+        _resolvedBytes[selected.id] = stored.bytes;
+        _imageIntent[selected.id] = _ImageIntent.pendingLocal;
         _dirty = true;
       });
     } on AdminImagePickException catch (error) {
@@ -422,15 +677,37 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
     final selected = _selected;
     if (selected == null) return;
     final previousLocalId = selected.imageId;
+    final previousPath = selected.imagePath;
     setState(() {
-      _replaceItem(selected.copyWith(clearImageId: true, clearImagePath: true));
+      _replaceItem(selected.copyWith(clearImageId: true));
       _resolvedBytes.remove(selected.id);
-      _pendingUploadIds.remove(selected.id);
+      _imageIntent[selected.id] = _ImageIntent.removed;
       _imageError = null;
       _dirty = true;
     });
+    if (previousPath != null && previousPath.isNotEmpty) {
+      _mediaStore?.invalidatePath(previousPath);
+    }
     if (previousLocalId != null) {
       await _imageStore.remove(previousLocalId);
+    }
+  }
+
+  Future<void> _retryImage() async {
+    final selected = _selected;
+    if (selected == null) return;
+    if (_intentFor(selected.id) == _ImageIntent.pendingLocal) {
+      await _saveDraft();
+      return;
+    }
+    if (_hasServerImage(selected)) {
+      final key = _cacheKeyFor(selected);
+      if (key != null) {
+        _mediaStore?.invalidateKey(key.path, key.version);
+      }
+      _resolvedBytes.remove(selected.id);
+      setState(() => _imageError = null);
+      await _resolveRemoteImageFor(selected.id);
     }
   }
 
@@ -458,7 +735,7 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
         _dirty = false;
       });
       _syncControllers();
-      _resolveRemoteImages();
+      _scheduleImagePreloads();
       _snack('Версия $restore восстановлена');
     });
   }
@@ -509,9 +786,10 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
           _EditorHeader(
             selected: _selected,
             dirty: _dirty,
-            busy: _busy,
+            busy: _busy || _imageUploading,
             canWrite: _canWrite,
-            canPublish: _canPublish,
+            canPublish: _selected != null && _canPublishItem(_selected!),
+            canUnpublish: _canPublish,
             banner: _banner,
             onSaveDraft: _saveDraft,
             onPublish: _publish,
@@ -577,7 +855,9 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
             : _PropertiesPanel(
                 selected: _selected!,
                 imageBytes: _bytesForItem(_selected!),
+                imageFieldStatus: _imageFieldStatus(_selected!),
                 imageError: _imageError,
+                imageStatusText: _imageFieldStatusText(_selected!),
                 canWrite: _canWrite,
                 titleController: _titleController,
                 subtitleController: _subtitleController,
@@ -599,6 +879,7 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
                 ),
                 onPickImage: _pickImage,
                 onClearImage: _clearImage,
+                onRetryImage: _retryImage,
                 onDuplicate: _duplicate,
                 onArchive: _archive,
               );
@@ -655,6 +936,7 @@ class _EditorHeader extends StatelessWidget {
     required this.busy,
     required this.canWrite,
     required this.canPublish,
+    required this.canUnpublish,
     required this.banner,
     required this.onSaveDraft,
     required this.onPublish,
@@ -667,6 +949,7 @@ class _EditorHeader extends StatelessWidget {
   final bool busy;
   final bool canWrite;
   final bool canPublish;
+  final bool canUnpublish;
   final String? banner;
   final VoidCallback onSaveDraft;
   final VoidCallback onPublish;
@@ -720,7 +1003,7 @@ class _EditorHeader extends StatelessWidget {
             ),
             if (isPublished)
               FilledButton.tonalIcon(
-                onPressed: (busy || !canPublish) ? null : onUnpublish,
+                onPressed: (busy || !canUnpublish) ? null : onUnpublish,
                 icon: const Icon(Icons.unpublished_outlined),
                 label: const Text('Снять с публикации'),
               )
@@ -1137,7 +1420,9 @@ class _PropertiesPanel extends StatelessWidget {
   const _PropertiesPanel({
     required this.selected,
     required this.imageBytes,
+    required this.imageFieldStatus,
     required this.imageError,
+    required this.imageStatusText,
     required this.canWrite,
     required this.titleController,
     required this.subtitleController,
@@ -1151,13 +1436,16 @@ class _PropertiesPanel extends StatelessWidget {
     required this.onOverlayChanged,
     required this.onPickImage,
     required this.onClearImage,
+    required this.onRetryImage,
     required this.onDuplicate,
     required this.onArchive,
   });
 
   final NewsItem selected;
   final Uint8List? imageBytes;
+  final NewsImageFieldStatus imageFieldStatus;
   final String? imageError;
+  final String? imageStatusText;
   final bool canWrite;
   final TextEditingController titleController;
   final TextEditingController subtitleController;
@@ -1171,6 +1459,7 @@ class _PropertiesPanel extends StatelessWidget {
   final ValueChanged<double> onOverlayChanged;
   final VoidCallback onPickImage;
   final VoidCallback onClearImage;
+  final VoidCallback onRetryImage;
   final VoidCallback onDuplicate;
   final VoidCallback onArchive;
 
@@ -1255,9 +1544,12 @@ class _PropertiesPanel extends StatelessWidget {
             const Divider(height: 28),
             NewsImageField(
               imageBytes: imageBytes,
+              status: imageFieldStatus,
               errorText: imageError,
+              statusText: imageStatusText,
               onPick: onPickImage,
               onClear: onClearImage,
+              onRetry: onRetryImage,
             ),
             const SizedBox(height: 16),
             const Text(
@@ -1391,4 +1683,15 @@ class _ErrorState extends StatelessWidget {
       ),
     );
   }
+}
+
+enum _ImageIntent {
+  /// Keep whatever image_path is already on the server.
+  untouched,
+
+  /// Local bytes selected; upload only on save.
+  pendingLocal,
+
+  /// User explicitly cleared the image; save must clear image_path.
+  removed,
 }

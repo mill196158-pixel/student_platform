@@ -102,6 +102,12 @@ class SupabaseNewsRepository implements NewsRepository {
   }
 
   @override
+  Future<NewsItem> getNews(String id) async {
+    final data = await _call('admin_get_news', {'p_id': id});
+    return NewsItem.fromJson(_asMap(data));
+  }
+
+  @override
   Future<List<NewsItem>> loadDraft() => listNews();
 
   @override
@@ -121,10 +127,13 @@ class SupabaseNewsRepository implements NewsRepository {
   }
 
   @override
-  Future<NewsItem> updateDraft(NewsItem item) async {
+  Future<NewsItem> updateDraft(
+    NewsItem item, {
+    NewsImagePathPatch imagePathPatch = NewsImagePathPatch.omit,
+  }) async {
     final data = await _call('admin_update_news_draft', {
       'p_id': item.id,
-      'p_patch': item.toPatchJson(),
+      'p_patch': item.toPatchJson(imagePathPatch: imagePathPatch),
     });
     return NewsItem.fromJson(_asMap(data));
   }

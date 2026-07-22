@@ -130,9 +130,10 @@ class HomeNewsItem {
   /// Remote Supabase Storage object path (private bucket). Never a public URL.
   final String? imagePath;
 
-  /// Decoded image bytes resolved from [imagePath] (kept in memory only).
+  /// Decoded image bytes resolved from [imagePath] (memory / disk cache).
   final Uint8List? imageBytes;
   final DateTime? publishedAt;
+  final DateTime? updatedAt;
 
   const HomeNewsItem({
     required this.id,
@@ -150,9 +151,26 @@ class HomeNewsItem {
     this.imagePath,
     this.imageBytes,
     this.publishedAt,
+    this.updatedAt,
   });
 
-  HomeNewsItem copyWith({Uint8List? imageBytes}) {
+  /// Stable cache identity for private news images (never a signed URL).
+  NewsImageCacheKey? get imageCacheKey => NewsImageCacheKey.tryParse(
+        path: imagePath,
+        updatedAt: updatedAt ?? publishedAt ?? createdAt,
+      );
+
+  bool get usesImage =>
+      variant == StudentHomeNewsVariant.imageOnly ||
+      variant == StudentHomeNewsVariant.imageOverlay ||
+      variant == StudentHomeNewsVariant.imageWithText;
+
+  HomeNewsItem copyWith({
+    Uint8List? imageBytes,
+    bool clearImageBytes = false,
+    String? imagePath,
+    DateTime? updatedAt,
+  }) {
     return HomeNewsItem(
       id: id,
       title: title,
@@ -166,9 +184,10 @@ class HomeNewsItem {
       variant: variant,
       imageFocus: imageFocus,
       overlayDarken: overlayDarken,
-      imagePath: imagePath,
-      imageBytes: imageBytes ?? this.imageBytes,
+      imagePath: imagePath ?? this.imagePath,
+      imageBytes: clearImageBytes ? null : (imageBytes ?? this.imageBytes),
       publishedAt: publishedAt,
+      updatedAt: updatedAt ?? this.updatedAt,
     );
   }
 }

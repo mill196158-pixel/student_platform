@@ -156,7 +156,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Изображение выбрано'), findsOneWidget);
+    expect(find.textContaining('Изображение выбрано'), findsOneWidget);
 
     await tester.tap(
       find.byType(DropdownButtonFormField<StudentHomeNewsVariant>),
@@ -165,7 +165,7 @@ void main() {
     await tester.tap(find.text('Только картинка').last);
     await tester.pumpAndSettle();
 
-    expect(find.text('Изображение выбрано'), findsOneWidget);
+    expect(find.textContaining('Изображение выбрано'), findsOneWidget);
     expect(store.getBytes(stored.id), isNotNull);
   });
 
@@ -211,7 +211,10 @@ void main() {
     await tester.tap(find.text('Выбрать изображение'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Изображение выбрано'), findsOneWidget);
+    expect(
+      find.textContaining('Изображение выбрано (не сохранено)'),
+      findsWidgets,
+    );
     expect(find.byType(StudentHomeView), findsOneWidget);
   });
 }

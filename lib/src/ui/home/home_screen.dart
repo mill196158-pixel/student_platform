@@ -57,12 +57,16 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _load() async {
-    if (mounted) {
+    final hadData = _data != null;
+    if (mounted && !hadData) {
       setState(() {
         _loading = true;
         _error = null;
       });
     }
+
+    // Cache-first: paint previously saved news image bytes ASAP.
+    unawaited(_paintCachedNews());
 
     try {
       final results = await Future.wait<Object?>([
@@ -70,16 +74,68 @@ class _HomeScreenState extends State<HomeScreen> {
         _notificationsApi.unreadCount(),
       ]);
       if (!mounted) return;
+      final next = results[0] as HomeDashboardData;
       setState(() {
-        _data = results[0] as HomeDashboardData;
+        _data = _mergeDashboardNewsImages(_data, next);
         _unreadNotificationCount = results[1] as int;
+        _error = null;
       });
     } catch (error) {
       if (!mounted) return;
-      setState(() => _error = error);
+      // Keep last good dashboard (and images) on refresh failure.
+      if (!hadData) setState(() => _error = error);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _paintCachedNews() async {
+    try {
+      final cached = await _service.loadCachedNews();
+      if (!mounted || cached.isEmpty || _data == null) return;
+      setState(() {
+        _data = _mergeDashboardNewsImages(
+          _data,
+          HomeDashboardData(
+            profile: _data!.profile,
+            scheduleDate: _data!.scheduleDate,
+            todayLessons: _data!.todayLessons,
+            assignments: _data!.assignments,
+            news: cached,
+            readNotificationIds: _data!.readNotificationIds,
+            unreadMessagesCount: _data!.unreadMessagesCount,
+            warning: _data!.warning,
+          ),
+        );
+      });
+    } catch (_) {}
+  }
+
+  HomeDashboardData _mergeDashboardNewsImages(
+    HomeDashboardData? previous,
+    HomeDashboardData next,
+  ) {
+    if (previous == null) return next;
+    final prevById = {for (final item in previous.news) item.id: item};
+    final news = [
+      for (final item in next.news)
+        if (item.imageBytes == null &&
+            prevById[item.id]?.imageBytes != null &&
+            prevById[item.id]!.imageCacheKey?.id == item.imageCacheKey?.id)
+          item.copyWith(imageBytes: prevById[item.id]!.imageBytes)
+        else
+          item,
+    ];
+    return HomeDashboardData(
+      profile: next.profile,
+      scheduleDate: next.scheduleDate,
+      todayLessons: next.todayLessons,
+      assignments: next.assignments,
+      news: news,
+      readNotificationIds: next.readNotificationIds,
+      unreadMessagesCount: next.unreadMessagesCount,
+      warning: next.warning,
+    );
   }
 
   @override
@@ -384,6 +440,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _showNewsFeed(List<HomeNewsItem> news, int initialIndex) {
     if (news.isEmpty) return;
+    final byId = {for (final item in news) item.id: item};
     final presentation = _presentationNews(news);
     final safeIndex = initialIndex.clamp(0, presentation.length - 1);
     _service.markNewsSeen(presentation[safeIndex].id);
@@ -399,6 +456,11 @@ class _HomeScreenState extends State<HomeScreen> {
         initialIndex: safeIndex,
         onPageChanged: (id) => _service.markNewsSeen(id),
         onClosed: (id) => _service.markNewsSeen(id, closed: true),
+        resolveImage: (item) async {
+          final source = byId[item.id];
+          if (source == null) return item.imageBytes;
+          return _service.resolveNewsImageBytes(source);
+        },
       ),
     );
   }

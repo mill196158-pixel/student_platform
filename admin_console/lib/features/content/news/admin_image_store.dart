@@ -18,6 +18,35 @@ abstract class AdminImageStore {
   Future<void> remove(String imageId);
 }
 
+/// Private-bucket download/upload gateway for admin news images.
+///
+/// Implemented by [SupabaseAdminImageStore]; tests can supply a fake.
+abstract class AdminRemoteImageGateway {
+  Future<Uint8List?> resolveBytes(String? imagePath, {required String version});
+
+  Uint8List? peekBytes(String? imagePath, {required String version});
+
+  void seedRemoteBytes({
+    required String path,
+    required String version,
+    required Uint8List bytes,
+  });
+
+  void invalidatePath(String imagePath);
+
+  void invalidateKey(String imagePath, String version);
+
+  Future<String> uploadPending(
+    String localImageId, {
+    String? previousPath,
+    String version = '0',
+  });
+
+  Future<void> deleteRemote(String imagePath);
+
+  void clearPrivateCache();
+}
+
 class AdminStoredImage {
   const AdminStoredImage({
     required this.id,

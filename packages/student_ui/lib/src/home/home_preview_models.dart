@@ -114,6 +114,12 @@ class StudentHomeNews {
 
   bool get hasImage => imageBytes != null && imageBytes!.isNotEmpty;
 
+  /// Card variants that expect a photo surface (skeleton until bytes arrive).
+  bool get usesImage =>
+      variant == StudentHomeNewsVariant.imageOnly ||
+      variant == StudentHomeNewsVariant.imageOverlay ||
+      variant == StudentHomeNewsVariant.imageWithText;
+
   StudentHomeNews copyWith({
     String? id,
     String? title,

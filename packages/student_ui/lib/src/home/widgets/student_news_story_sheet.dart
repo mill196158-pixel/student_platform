@@ -1,6 +1,9 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import '../home_preview_models.dart';
+import 'news_image_frame.dart';
 
 /// Full-screen story reader for published news.
 ///
@@ -12,6 +15,7 @@ class StudentNewsStorySheet extends StatefulWidget {
     this.initialIndex = 0,
     this.onClosed,
     this.onPageChanged,
+    this.resolveImage,
     super.key,
   });
 
@@ -25,6 +29,10 @@ class StudentNewsStorySheet extends StatefulWidget {
   /// Called with the [StudentHomeNews.id] of each page as it becomes visible.
   final ValueChanged<String>? onPageChanged;
 
+  /// Optional resolver used to ensure current + next story images are ready
+  /// before the user swipes.
+  final Future<Uint8List?> Function(StudentHomeNews item)? resolveImage;
+
   @override
   State<StudentNewsStorySheet> createState() => _StudentNewsStorySheetState();
 }
@@ -32,14 +40,25 @@ class StudentNewsStorySheet extends StatefulWidget {
 class _StudentNewsStorySheetState extends State<StudentNewsStorySheet> {
   late final PageController _controller;
   late int _index;
+  late List<StudentHomeNews> _news;
 
   @override
   void initState() {
     super.initState();
-    _index = widget.news.isEmpty
-        ? 0
-        : widget.initialIndex.clamp(0, widget.news.length - 1);
+    _news = List<StudentHomeNews>.from(widget.news);
+    _index = _news.isEmpty ? 0 : widget.initialIndex.clamp(0, _news.length - 1);
     _controller = PageController(initialPage: _index);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _precacheAround(_index);
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant StudentNewsStorySheet oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.news != widget.news) {
+      _news = List<StudentHomeNews>.from(widget.news);
+    }
   }
 
   @override
@@ -48,9 +67,36 @@ class _StudentNewsStorySheetState extends State<StudentNewsStorySheet> {
     super.dispose();
   }
 
+  Future<void> _precacheAround(int index) async {
+    await _ensureImage(index);
+    if (index + 1 < _news.length) {
+      await _ensureImage(index + 1);
+    }
+  }
+
+  Future<void> _ensureImage(int index) async {
+    if (index < 0 || index >= _news.length) return;
+    final item = _news[index];
+    if (!item.usesImage) return;
+    Uint8List? bytes = item.imageBytes;
+    if ((bytes == null || bytes.isEmpty) && widget.resolveImage != null) {
+      bytes = await widget.resolveImage!(item);
+      if (!mounted || bytes == null || bytes.isEmpty) return;
+      setState(() {
+        _news[index] = item.copyWith(imageBytes: bytes);
+      });
+    }
+    if (!mounted || bytes == null || bytes.isEmpty) return;
+    await precacheImage(
+      MemoryImage(bytes),
+      context,
+      onError: (_, __) {},
+    );
+  }
+
   void _close() {
-    if (widget.news.isNotEmpty) {
-      widget.onClosed?.call(widget.news[_index].id);
+    if (_news.isNotEmpty) {
+      widget.onClosed?.call(_news[_index].id);
     }
     Navigator.of(context).maybePop();
   }
@@ -58,7 +104,7 @@ class _StudentNewsStorySheetState extends State<StudentNewsStorySheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    if (widget.news.isEmpty) {
+    if (_news.isEmpty) {
       return const SizedBox.shrink();
     }
 
@@ -89,18 +135,19 @@ class _StudentNewsStorySheetState extends State<StudentNewsStorySheet> {
                 ],
               ),
               const SizedBox(height: 8),
-              _Dots(count: widget.news.length, index: _index),
+              _Dots(count: _news.length, index: _index),
               const SizedBox(height: 16),
               Expanded(
                 child: PageView.builder(
                   controller: _controller,
-                  itemCount: widget.news.length,
+                  itemCount: _news.length,
                   onPageChanged: (value) {
                     setState(() => _index = value);
-                    widget.onPageChanged?.call(widget.news[value].id);
+                    widget.onPageChanged?.call(_news[value].id);
+                    _precacheAround(value);
                   },
                   itemBuilder: (context, index) {
-                    return _StoryPage(item: widget.news[index]);
+                    return _NewsStoryPage(item: _news[index]);
                   },
                 ),
               ),
@@ -120,33 +167,53 @@ class _StudentNewsStorySheetState extends State<StudentNewsStorySheet> {
   }
 }
 
-class _StoryPage extends StatelessWidget {
-  const _StoryPage({required this.item});
+class _NewsStoryPage extends StatelessWidget {
+  const _NewsStoryPage({required this.item});
 
   final StudentHomeNews item;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final date = item.publishedAt;
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _StoryHero(item: item),
           const SizedBox(height: 22),
-          if (item.body.trim().isNotEmpty)
+          if (item.variant == StudentHomeNewsVariant.imageOnly) ...[
             Text(
-              item.body,
-              style: theme.textTheme.bodyLarge?.copyWith(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.76),
-                height: 1.45,
-                fontWeight: FontWeight.w500,
+              item.title,
+              style: theme.textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.w900,
+                height: 1.05,
               ),
             ),
-          if (item.publishedAt != null) ...[
+            if (item.subtitle.trim().isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                item.subtitle,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  height: 1.25,
+                ),
+              ),
+            ],
+            const SizedBox(height: 14),
+          ],
+          Text(
+            item.body,
+            style: theme.textTheme.bodyLarge?.copyWith(
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.76),
+              height: 1.45,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          if (date != null) ...[
             const SizedBox(height: 18),
             Text(
-              _formatDate(item.publishedAt!),
+              _formatDate(date),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurface.withValues(alpha: 0.52),
                 fontWeight: FontWeight.w700,
@@ -156,6 +223,25 @@ class _StoryPage extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  String _formatDate(DateTime value) {
+    const months = <String>[
+      'января',
+      'февраля',
+      'марта',
+      'апреля',
+      'мая',
+      'июня',
+      'июля',
+      'августа',
+      'сентября',
+      'октября',
+      'ноября',
+      'декабря',
+    ];
+    final local = value.toLocal();
+    return '${local.day} ${months[local.month - 1]} ${local.year}';
   }
 }
 
@@ -176,12 +262,14 @@ class _StoryHero extends StatelessWidget {
             ? Colors.white
             : const Color(0xFF111827);
 
-    final showImage =
-        item.hasImage && item.variant != StudentHomeNewsVariant.gradientText;
-    final showOverlayText = !showImage ||
-        item.variant == StudentHomeNewsVariant.imageOverlay ||
-        item.variant == StudentHomeNewsVariant.imageWithText;
+    final usesPhoto = item.usesImage;
+    final showOverlay =
+        usesPhoto && item.variant == StudentHomeNewsVariant.imageOverlay;
 
+    // gradientText → decorative icon + text
+    // imageOnly → full-bleed image, no overlays
+    // imageOverlay → image + text only (no auto icon)
+    // imageWithText → image hero; title/body below sheet (no icon on image)
     return ClipRRect(
       borderRadius: BorderRadius.circular(32),
       child: SizedBox(
@@ -190,18 +278,17 @@ class _StoryHero extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            if (showImage)
-              Image.memory(
-                item.imageBytes!,
-                fit: BoxFit.cover,
+            if (usesPhoto)
+              NewsImageFrame(
+                bytes: item.imageBytes,
+                colors: colors,
                 alignment: item.imageFocus,
-                gaplessPlayback: true,
-                errorBuilder: (_, __, ___) =>
-                    _GradientBackground(colors: colors),
+                isLoading: !item.hasImage,
+                fit: BoxFit.cover,
               )
             else
               _GradientBackground(colors: colors),
-            if (showImage)
+            if (showOverlay)
               DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
@@ -216,7 +303,7 @@ class _StoryHero extends StatelessWidget {
                   ),
                 ),
               ),
-            if (!showImage)
+            if (!usesPhoto) ...[
               Positioned(
                 right: -24,
                 bottom: -24,
@@ -226,7 +313,6 @@ class _StoryHero extends StatelessWidget {
                   color: onGradient.withValues(alpha: 0.16),
                 ),
               ),
-            if (showOverlayText)
               Padding(
                 padding: const EdgeInsets.all(24),
                 child: Column(
@@ -236,21 +322,16 @@ class _StoryHero extends StatelessWidget {
                       width: 58,
                       height: 58,
                       decoration: BoxDecoration(
-                        color: (showImage ? Colors.white : onGradient)
-                            .withValues(alpha: 0.18),
+                        color: onGradient.withValues(alpha: 0.18),
                         borderRadius: BorderRadius.circular(20),
                       ),
-                      child: Icon(
-                        item.icon,
-                        color: showImage ? Colors.white : onGradient,
-                        size: 30,
-                      ),
+                      child: Icon(item.icon, color: onGradient, size: 30),
                     ),
                     const Spacer(),
                     Text(
                       item.title,
                       style: theme.textTheme.headlineSmall?.copyWith(
-                        color: showImage ? Colors.white : onGradient,
+                        color: onGradient,
                         fontWeight: FontWeight.w900,
                         height: 1.05,
                       ),
@@ -260,8 +341,37 @@ class _StoryHero extends StatelessWidget {
                       Text(
                         item.subtitle,
                         style: theme.textTheme.bodyMedium?.copyWith(
-                          color: (showImage ? Colors.white : onGradient)
-                              .withValues(alpha: 0.84),
+                          color: onGradient.withValues(alpha: 0.84),
+                          fontWeight: FontWeight.w700,
+                          height: 1.25,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+            if (showOverlay)
+              Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Spacer(),
+                    Text(
+                      item.title,
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                        height: 1.05,
+                      ),
+                    ),
+                    if (item.subtitle.trim().isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        item.subtitle,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: Colors.white.withValues(alpha: 0.84),
                           fontWeight: FontWeight.w700,
                           height: 1.25,
                         ),
@@ -316,33 +426,13 @@ class _Dots extends StatelessWidget {
           decoration: BoxDecoration(
             color: active
                 ? Theme.of(context).colorScheme.primary
-                : Theme.of(context)
-                    .colorScheme
-                    .onSurface
-                    .withValues(alpha: 0.18),
+                : Theme.of(
+                    context,
+                  ).colorScheme.onSurface.withValues(alpha: 0.18),
             borderRadius: BorderRadius.circular(999),
           ),
         );
       }),
     );
   }
-}
-
-String _formatDate(DateTime date) {
-  const months = [
-    'января',
-    'февраля',
-    'марта',
-    'апреля',
-    'мая',
-    'июня',
-    'июля',
-    'августа',
-    'сентября',
-    'октября',
-    'ноября',
-    'декабря',
-  ];
-  final local = date.toLocal();
-  return '${local.day} ${months[local.month - 1]} ${local.year}';
 }
