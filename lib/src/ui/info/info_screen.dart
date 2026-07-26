@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ui' as ui;
 
@@ -8,7 +9,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/auth_session.dart';
 import '../../data/academic_context_service.dart';
 import '../../services/auth_service.dart';
+import 'info_subjects_cache.dart';
+import 'subject_difficulty.dart';
 import 'subject_info_screen.dart';
+import 'useful_subject.dart';
+import 'useful_subjects_repository.dart';
 
 enum _UsefulFilter { all, exams, credits, practices, courseWorks }
 
@@ -19,7 +24,28 @@ BoxConstraints _fullWidthSheetConstraints(BuildContext context) {
 }
 
 class InfoScreen extends StatefulWidget {
-  const InfoScreen({super.key});
+  const InfoScreen({
+    super.key,
+    this.subjectsRepository,
+    this.academicContextService,
+    this.planLoader,
+    this.debugUserId,
+  });
+
+  /// Optional DI for tests; production uses [UsefulSubjectsRepository].
+  final UsefulSubjectsRepository? subjectsRepository;
+
+  /// Optional DI for tests; production uses [AcademicContextService].
+  final AcademicContextService? academicContextService;
+
+  /// Optional full-plan loader override for focused cache/refresh tests.
+  final Future<InfoPlanState> Function()? planLoader;
+
+  /// Optional auth user id override for cache-key tests without Supabase auth.
+  final String? debugUserId;
+
+  @visibleForTesting
+  static void debugClearMemoryCache() => _InfoScreenState.clearMemoryCache();
 
   @override
   State<InfoScreen> createState() => _InfoScreenState();
@@ -29,60 +55,223 @@ class _InfoScreenState extends State<InfoScreen> {
   // In-memory (RAM) layer of the cache. Survives across screen re-creations
   // within one app session, so re-opening the tab is instant with no spinner.
   // The SharedPreferences layer keeps data across app restarts.
-  static final Map<String, _UsefulPlanState> _memoryCache = {};
+  static final Map<String, InfoPlanState> _memoryCache = {};
 
-  late Future<_UsefulPlanState> _future;
+  @visibleForTesting
+  static void clearMemoryCache() => _memoryCache.clear();
+
+  late Future<InfoPlanState> _future;
+  InfoPlanState? _latestState;
+  Future<void>? _reloadInFlight;
+  bool _needsRevealAfterCover = false;
   int? _selectedSemester;
   _UsefulFilter _filter = _UsefulFilter.all;
   _UsefulSection _section = _UsefulSection.subjects;
   bool _controlGroupsTouched = false;
   final Set<String> _collapsedControlGroups = {};
 
+  UsefulSubjectsRepository get _subjectsRepository =>
+      widget.subjectsRepository ?? UsefulSubjectsRepository();
+
+  AcademicContextService get _academicContextService =>
+      widget.academicContextService ?? AcademicContextService();
+
+  bool get _isCoveredByRoute => ModalRoute.of(context)?.isCurrent != true;
+
   @override
   void initState() {
     super.initState();
+    InfoSubjectsCache.attachMemoryClear(clearMemoryCache);
+    InfoSubjectsCache.revision.addListener(_onSubjectsCacheInvalidated);
     // Instant RAM cache: show already-loaded subjects on the first frame and
     // refresh quietly in the background.
     final memoryCached = _peekMemoryCache();
     if (memoryCached != null) {
-      _future = Future<_UsefulPlanState>.value(memoryCached);
+      _latestState = memoryCached;
+      _future = Future<InfoPlanState>.value(memoryCached);
       _refreshSilently();
     } else {
       _future = _loadWithCache();
     }
   }
 
-  Future<_UsefulPlanState> _loadFresh() async {
-    final contextData = await AcademicContextService().loadFresh();
+  @override
+  void dispose() {
+    InfoSubjectsCache.revision.removeListener(_onSubjectsCacheInvalidated);
+    InfoSubjectsCache.detachMemoryClear(clearMemoryCache);
+    super.dispose();
+  }
+
+  void _onSubjectsCacheInvalidated() {
+    if (!mounted) return;
+    // Patch under the subject route, then confirm from RPC without jank on pop.
+    _applyOptimisticVotePatch();
+    unawaited(_reloadQuietly());
+  }
+
+  void _publishState(InfoPlanState state) {
+    _latestState = state;
+    _future = Future<InfoPlanState>.value(state);
+  }
+
+  void _commitState(InfoPlanState state) {
+    _publishState(state);
+    if (_isCoveredByRoute) {
+      // Defer FutureBuilder rebuild until subject route is popped.
+      _needsRevealAfterCover = true;
+      return;
+    }
+    setState(() {});
+  }
+
+  void _applyOptimisticVotePatch() {
+    final pending = InfoSubjectsCache.takePendingVote();
+    final current = _latestState;
+    if (pending == null || current == null) return;
+
+    final avg = pending.effectiveDifficulty;
+    final subjects = current.subjects.map((subject) {
+      if (subject.id != pending.subjectOfferingId) return subject;
+      final nextGlobal =
+          avg != null && avg > 0 ? avg : subject.avgDifficultyGlobal;
+      final nextLocal =
+          avg != null && avg > 0 ? 0.0 : subject.avgDifficultyLocal;
+      return UsefulSubject(
+        id: subject.id,
+        title: subject.title,
+        subjectId: subject.subjectId,
+        groupId: subject.groupId,
+        semesterNumber: subject.semesterNumber,
+        controlForm: subject.controlForm,
+        description: subject.description,
+        teacherName: subject.teacherName,
+        teamId: subject.teamId,
+        teamName: subject.teamName,
+        teamIcon: subject.teamIcon,
+        teamGroupName: subject.teamGroupName,
+        chatId: subject.chatId,
+        avgDifficultyGlobal: nextGlobal,
+        avgDifficultyLocal: nextLocal,
+        votesCountGlobal:
+            avg != null && avg > 0 && subject.votesCountGlobal <= 0
+                ? 1
+                : subject.votesCountGlobal,
+        votesCountLocal: subject.votesCountLocal,
+      );
+    }).toList(growable: false);
+
+    _commitState(
+      InfoPlanState(
+        contextData: current.contextData,
+        subjects: subjects,
+        warning: current.warning,
+      ),
+    );
+  }
+
+  Future<void> _reloadQuietly() {
+    if (_reloadInFlight != null) return _reloadInFlight!;
+
+    late final Future<void> future;
+    future = () async {
+      try {
+        final fresh = await _loadFreshAndCache();
+        if (!mounted) return;
+        if (_sameDifficultySnapshot(_latestState, fresh)) {
+          _latestState = fresh;
+          return;
+        }
+        _commitState(fresh);
+      } catch (_) {
+        // Keep last-good data on screen.
+      }
+    }()
+        .whenComplete(() {
+      if (identical(_reloadInFlight, future)) {
+        _reloadInFlight = null;
+      }
+    });
+    _reloadInFlight = future;
+    return future;
+  }
+
+  Future<void> _openSubjectAndRefresh(UsefulSubject item) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => subjectInfoScreenFor(item),
+      ),
+    );
+    if (!mounted) return;
+
+    // One calm reveal after pop if a vote/update landed while covered.
+    // No awaited network reload — that was the source of the list jump.
+    if (_needsRevealAfterCover) {
+      _needsRevealAfterCover = false;
+      final latest = _latestState;
+      if (latest != null) {
+        setState(() => _publishState(latest));
+      }
+    }
+    unawaited(_reloadQuietly());
+  }
+
+  bool _sameDifficultySnapshot(InfoPlanState? a, InfoPlanState? b) {
+    if (identical(a, b)) return true;
+    if (a == null || b == null) return false;
+    if (a.subjects.length != b.subjects.length) return false;
+    if (a.contextData.currentSemesterNumber !=
+        b.contextData.currentSemesterNumber) {
+      return false;
+    }
+    for (var i = 0; i < a.subjects.length; i++) {
+      final left = a.subjects[i];
+      final right = b.subjects[i];
+      if (left.id != right.id) return false;
+      if (left.avgDifficultyGlobal != right.avgDifficultyGlobal) return false;
+      if (left.avgDifficultyLocal != right.avgDifficultyLocal) return false;
+      if (left.votesCountGlobal != right.votesCountGlobal) return false;
+      if (left.votesCountLocal != right.votesCountLocal) return false;
+    }
+    return true;
+  }
+
+  Future<InfoPlanState> _loadFresh() async {
+    if (widget.planLoader != null) {
+      return widget.planLoader!();
+    }
+
+    final contextData = await _academicContextService.loadFresh();
     final groupId = contextData.groupId;
 
     if (groupId == null) {
-      return _UsefulPlanState(
+      return InfoPlanState(
         contextData: contextData,
         subjects: const [],
         warning: contextData.loadWarning ?? 'Учебный контекст не найден',
       );
     }
 
-    final subjects = await _UsefulSubjectsRepository().load(groupId: groupId);
+    final subjects = await _subjectsRepository.load(groupId: groupId);
 
-    return _UsefulPlanState(
+    return InfoPlanState(
       contextData: contextData,
       subjects: subjects,
     );
   }
 
-  Future<_UsefulPlanState> _loadWithCache() async {
+  Future<InfoPlanState> _loadWithCache() async {
     final cached = await _readCachedPlan();
     if (cached != null) {
+      _latestState = cached;
       _refreshSilently();
       return cached;
     }
     return _loadFreshAndCache();
   }
 
-  Future<_UsefulPlanState> _loadFreshAndCache() async {
+  Future<InfoPlanState> _loadFreshAndCache() async {
     final fresh = await _loadFresh();
+    _latestState = fresh;
     if (fresh.warning == null) await _saveCachedPlan(fresh);
     return fresh;
   }
@@ -90,20 +279,26 @@ class _InfoScreenState extends State<InfoScreen> {
   void _refreshSilently() {
     _loadFreshAndCache().then((fresh) {
       if (!mounted) return;
-      setState(() {
-        _future = Future<_UsefulPlanState>.value(fresh);
-      });
+      setState(() => _publishState(fresh));
+    }, onError: (_) {
+      // Keep last-good cache already shown on screen.
     });
   }
 
-  _UsefulPlanState? _peekMemoryCache() {
-    final userId = Supabase.instance.client.auth.currentUser?.id ?? '';
+  String? get _cacheUserId {
+    final debugUserId = widget.debugUserId?.trim() ?? '';
+    if (debugUserId.isNotEmpty) return debugUserId;
+    return Supabase.instance.client.auth.currentUser?.id;
+  }
+
+  InfoPlanState? _peekMemoryCache() {
+    final userId = _cacheUserId ?? '';
     if (userId.isEmpty) return null;
     return _memoryCache[_infoCacheKey(userId)];
   }
 
-  Future<_UsefulPlanState?> _readCachedPlan() async {
-    final userId = Supabase.instance.client.auth.currentUser?.id ?? '';
+  Future<InfoPlanState?> _readCachedPlan() async {
+    final userId = _cacheUserId ?? '';
     if (userId.isEmpty) return null;
     final key = _infoCacheKey(userId);
     final memory = _memoryCache[key];
@@ -122,10 +317,8 @@ class _InfoScreenState extends State<InfoScreen> {
     }
   }
 
-  Future<void> _saveCachedPlan(_UsefulPlanState state) async {
-    final userId = Supabase.instance.client.auth.currentUser?.id ??
-        state.contextData.userId ??
-        '';
+  Future<void> _saveCachedPlan(InfoPlanState state) async {
+    final userId = _cacheUserId ?? state.contextData.userId ?? '';
     if (userId.isEmpty) return;
     final key = _infoCacheKey(userId);
     _memoryCache[key] = state;
@@ -135,18 +328,21 @@ class _InfoScreenState extends State<InfoScreen> {
     } catch (_) {}
   }
 
-  String _infoCacheKey(String userId) => 'info_subjects_cache_v2_$userId';
+  /// Cache schema v3 includes difficulty / vote counts. Old v2 JSON is ignored
+  /// so missing fields cannot surface as a fake `0 / 5`.
+  String _infoCacheKey(String userId) => InfoSubjectsCache.prefsKey(userId);
 
-  Map<String, dynamic> _planToJson(_UsefulPlanState state) => {
+  Map<String, dynamic> _planToJson(InfoPlanState state) => {
         'contextData': _academicContextToJson(state.contextData),
-        'subjects': state.subjects.map(_subjectToJson).toList(),
+        'subjects': state.subjects.map((subject) => subject.toJson()).toList(),
         'warning': state.warning,
       };
 
-  _UsefulPlanState _planFromJson(Map<String, dynamic> json) {
-    return _UsefulPlanState(
+  InfoPlanState _planFromJson(Map<String, dynamic> json) {
+    return InfoPlanState(
       contextData: _academicContextFromJson(_mapFrom(json['contextData'])),
-      subjects: _listFrom(json['subjects']).map(_subjectFromJson).toList(),
+      subjects:
+          _listFrom(json['subjects']).map(UsefulSubject.fromJson).toList(),
       warning: _nullIfEmpty(json['warning']),
     );
   }
@@ -181,40 +377,6 @@ class _InfoScreenState extends State<InfoScreen> {
     );
   }
 
-  Map<String, dynamic> _subjectToJson(_UsefulSubject subject) => {
-        'id': subject.id,
-        'title': subject.title,
-        'subjectId': subject.subjectId,
-        'groupId': subject.groupId,
-        'semesterNumber': subject.semesterNumber,
-        'controlForm': subject.controlForm,
-        'description': subject.description,
-        'teacherName': subject.teacherName,
-        'teamId': subject.teamId,
-        'teamName': subject.teamName,
-        'teamIcon': subject.teamIcon,
-        'teamGroupName': subject.teamGroupName,
-        'chatId': subject.chatId,
-      };
-
-  _UsefulSubject _subjectFromJson(Map<String, dynamic> json) {
-    return _UsefulSubject(
-      id: (json['id'] ?? '').toString(),
-      title: (json['title'] ?? '').toString(),
-      subjectId: _nullIfEmpty(json['subjectId']),
-      groupId: _nullIfEmpty(json['groupId']),
-      semesterNumber: _intOrNull(json['semesterNumber']),
-      controlForm: (json['controlForm'] ?? '').toString(),
-      description: (json['description'] ?? '').toString(),
-      teacherName: (json['teacherName'] ?? '').toString(),
-      teamId: _nullIfEmpty(json['teamId']),
-      teamName: (json['teamName'] ?? '').toString(),
-      teamIcon: (json['teamIcon'] ?? '').toString(),
-      teamGroupName: (json['teamGroupName'] ?? '').toString(),
-      chatId: _nullIfEmpty(json['chatId']),
-    );
-  }
-
   Map<String, dynamic> _mapFrom(dynamic value) {
     if (value is Map) return Map<String, dynamic>.from(value);
     return const <String, dynamic>{};
@@ -245,7 +407,7 @@ class _InfoScreenState extends State<InfoScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF7F7FB),
-      body: FutureBuilder<_UsefulPlanState>(
+      body: FutureBuilder<InfoPlanState>(
         future: _future,
         builder: (context, snapshot) {
           final state = snapshot.data;
@@ -272,8 +434,8 @@ class _InfoScreenState extends State<InfoScreen> {
   }
 
   Widget _buildBody(
-    AsyncSnapshot<_UsefulPlanState> snapshot,
-    _UsefulPlanState? state,
+    AsyncSnapshot<InfoPlanState> snapshot,
+    InfoPlanState? state,
   ) {
     if (snapshot.connectionState != ConnectionState.done) {
       return const Center(child: CircularProgressIndicator());
@@ -349,8 +511,17 @@ class _InfoScreenState extends State<InfoScreen> {
               compact: true,
             )
           else ...[
-            _AcademicContextStrip(
+            InfoAcademicContextStrip(
               contextData: state.contextData,
+              sessionDifficulty: SessionDifficultySummary.fromSubjects(
+                currentSemesterNumber: state.contextData.currentSemesterNumber,
+                subjects: state.subjects.map(
+                  (item) => (
+                    semesterNumber: item.semesterNumber,
+                    difficulty: item.difficulty,
+                  ),
+                ),
+              ),
             ),
             const SizedBox(height: 12),
             _SemesterSubjectsSection(
@@ -360,6 +531,7 @@ class _InfoScreenState extends State<InfoScreen> {
               selectedFilter: _filter,
               subjects: visibleSubjects,
               collapsedGroups: effectiveCollapsedControlGroups,
+              onSubjectOpen: _openSubjectAndRefresh,
               onSortApplied: (semester, filter) {
                 setState(() {
                   if (semester != null) {
@@ -390,7 +562,7 @@ class _InfoScreenState extends State<InfoScreen> {
     );
   }
 
-  bool _matchesFilter(_UsefulSubject item, _UsefulFilter filter) {
+  bool _matchesFilter(UsefulSubject item, _UsefulFilter filter) {
     final text = item.controlForm.toLowerCase();
     switch (filter) {
       case _UsefulFilter.all:
@@ -574,10 +746,10 @@ Color _controlAccent(String label) {
   return const Color(0xFF5667B0);
 }
 
-Map<String, List<_UsefulSubject>> _groupSubjectsByControl(
-  List<_UsefulSubject> subjects,
+Map<String, List<UsefulSubject>> _groupSubjectsByControl(
+  List<UsefulSubject> subjects,
 ) {
-  final grouped = <String, List<_UsefulSubject>>{};
+  final grouped = <String, List<UsefulSubject>>{};
   for (final subject in subjects) {
     final label = _controlGroupLabel(subject.controlForm);
     grouped.putIfAbsent(label, () => []).add(subject);
@@ -603,123 +775,12 @@ String _pluralRu(int count, String one, String few, String many) {
   return many;
 }
 
-class _UsefulSubjectsRepository {
-  _UsefulSubjectsRepository({SupabaseClient? client})
-      : _sb = client ?? Supabase.instance.client;
-
-  final SupabaseClient _sb;
-
-  Future<List<_UsefulSubject>> load({required String groupId}) async {
-    final rows = await _sb
-        .from('subject_offerings')
-        .select(
-          'id,display_name,subject_id,group_id,curriculum_subject_id,semester_number,status',
-        )
-        .eq('group_id', groupId)
-        .order('semester_number')
-        .order('display_name');
-
-    final result = <_UsefulSubject>[];
-
-    for (final raw in rows) {
-      final row = Map<String, dynamic>.from(raw as Map);
-      final subjectId = _stringOrNull(row['subject_id']);
-      final curriculumSubjectId = _stringOrNull(row['curriculum_subject_id']);
-      final subjectOfferingId = _firstNonEmpty([row['id']]);
-
-      Map<String, dynamic>? subject;
-      if (subjectId != null) {
-        subject = _asMap(await _sb
-            .from('subject_catalog')
-            .select('canonical_name,description')
-            .eq('id', subjectId)
-            .maybeSingle());
-      }
-
-      Map<String, dynamic>? curriculum;
-      if (curriculumSubjectId != null) {
-        curriculum = _asMap(await _sb
-            .from('curriculum_subjects')
-            .select('display_name,control_form')
-            .eq('id', curriculumSubjectId)
-            .maybeSingle());
-      }
-
-      final team = _asMap(await _sb
-          .from('teams')
-          .select('id,name,teacher,icon,group_name')
-          .eq('subject_offering_id', subjectOfferingId)
-          .limit(1)
-          .maybeSingle());
-
-      Map<String, dynamic>? chat;
-      final teamId = _stringOrNull(team?['id']);
-      if (teamId != null) {
-        chat = _asMap(await _sb
-            .from('chats')
-            .select('id,type')
-            .eq('team_id', teamId)
-            .eq('type', 'team_main')
-            .limit(1)
-            .maybeSingle());
-      }
-
-      result.add(
-        _UsefulSubject(
-          id: subjectOfferingId,
-          title: _firstNonEmpty([
-            row['display_name'],
-            subject?['canonical_name'],
-            curriculum?['display_name'],
-          ]),
-          subjectId: subjectId,
-          groupId: _stringOrNull(row['group_id']),
-          semesterNumber: _asInt(row['semester_number']),
-          controlForm: _firstNonEmpty([curriculum?['control_form']]),
-          description: _firstNonEmpty([subject?['description']]),
-          teacherName: _firstNonEmpty([team?['teacher']]),
-          teamId: teamId,
-          teamName: _firstNonEmpty([team?['name']]),
-          teamIcon: _firstNonEmpty([team?['icon']]),
-          teamGroupName: _firstNonEmpty([team?['group_name']]),
-          chatId: _stringOrNull(chat?['id']),
-        ),
-      );
-    }
-
-    return result;
-  }
-
-  Map<String, dynamic>? _asMap(dynamic value) {
-    if (value is Map) return Map<String, dynamic>.from(value);
-    return null;
-  }
-
-  String? _stringOrNull(dynamic value) {
-    final text = (value ?? '').toString().trim();
-    return text.isEmpty ? null : text;
-  }
-
-  int? _asInt(dynamic value) {
-    if (value is int) return value;
-    return int.tryParse((value ?? '').toString());
-  }
-
-  String _firstNonEmpty(List<dynamic> values) {
-    for (final value in values) {
-      final text = (value ?? '').toString().trim();
-      if (text.isNotEmpty) return text;
-    }
-    return '';
-  }
-}
-
-class _UsefulPlanState {
+class InfoPlanState {
   final AcademicContext contextData;
-  final List<_UsefulSubject> subjects;
+  final List<UsefulSubject> subjects;
   final String? warning;
 
-  const _UsefulPlanState({
+  const InfoPlanState({
     required this.contextData,
     required this.subjects,
     this.warning,
@@ -734,40 +795,6 @@ class _UsefulPlanState {
       ..sort();
     return values;
   }
-}
-
-class _UsefulSubject {
-  final String id;
-  final String title;
-  final String? subjectId;
-  final String? groupId;
-  final int? semesterNumber;
-  final String controlForm;
-  final String description;
-  final String teacherName;
-  final String? teamId;
-  final String teamName;
-  final String teamIcon;
-  final String teamGroupName;
-  final String? chatId;
-
-  const _UsefulSubject({
-    required this.id,
-    required this.title,
-    this.subjectId,
-    this.groupId,
-    this.semesterNumber,
-    required this.controlForm,
-    required this.description,
-    required this.teacherName,
-    this.teamId,
-    required this.teamName,
-    required this.teamIcon,
-    required this.teamGroupName,
-    this.chatId,
-  });
-
-  bool get hasChat => chatId != null && teamId != null;
 }
 
 String _sectionSubtitle(_UsefulSection section) {
@@ -1124,11 +1151,15 @@ class _SectionChoiceTile extends StatelessWidget {
   }
 }
 
-class _AcademicContextStrip extends StatelessWidget {
+/// Public context strip used by Info tab (exported for focused widget tests).
+class InfoAcademicContextStrip extends StatelessWidget {
   final AcademicContext contextData;
+  final SessionDifficultySummary sessionDifficulty;
 
-  const _AcademicContextStrip({
+  const InfoAcademicContextStrip({
+    super.key,
     required this.contextData,
+    required this.sessionDifficulty,
   });
 
   @override
@@ -1161,35 +1192,6 @@ class _AcademicContextStrip extends StatelessWidget {
         children: [
           Row(
             children: [
-              Container(
-                width: 38,
-                height: 38,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.primary.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Icon(
-                  Icons.account_balance_wallet_outlined,
-                  color: theme.colorScheme.primary,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Учебный профиль',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: Colors.black,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
               Expanded(
                 child: _ContextPill(
                   icon: Icons.groups_2_outlined,
@@ -1208,6 +1210,68 @@ class _AcademicContextStrip extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 10),
+          _SessionDifficultyMeter(summary: sessionDifficulty),
+        ],
+      ),
+    );
+  }
+}
+
+class _SessionDifficultyMeter extends StatelessWidget {
+  final SessionDifficultySummary summary;
+
+  const _SessionDifficultyMeter({required this.summary});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final accent = theme.colorScheme.primary;
+    final hasRatings = summary.hasRatings;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.90),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            hasRatings
+                ? Icons.local_fire_department_rounded
+                : Icons.thermostat_outlined,
+            color: accent,
+            size: 20,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Сложность сессии',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: Colors.black45,
+                    fontWeight: FontWeight.w800,
+                    height: 1.1,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  summary.valueLabel,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: Colors.black87,
+                    fontWeight: FontWeight.w900,
+                    height: 1.15,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -1281,8 +1345,9 @@ class _SemesterSubjectsSection extends StatelessWidget {
   final int? currentSemester;
   final List<int> semesters;
   final _UsefulFilter selectedFilter;
-  final List<_UsefulSubject> subjects;
+  final List<UsefulSubject> subjects;
   final Set<String> collapsedGroups;
+  final ValueChanged<UsefulSubject> onSubjectOpen;
   final void Function(int? semester, _UsefulFilter filter) onSortApplied;
   final ValueChanged<String> onGroupTap;
 
@@ -1293,6 +1358,7 @@ class _SemesterSubjectsSection extends StatelessWidget {
     required this.selectedFilter,
     required this.subjects,
     required this.collapsedGroups,
+    required this.onSubjectOpen,
     required this.onSortApplied,
     required this.onGroupTap,
   });
@@ -1382,6 +1448,7 @@ class _SemesterSubjectsSection extends StatelessWidget {
                 subjects: entry.value,
                 collapsed: collapsedGroups.contains(entry.key),
                 onTap: () => onGroupTap(entry.key),
+                onSubjectOpen: onSubjectOpen,
               ),
               const SizedBox(height: 6),
             ],
@@ -1507,15 +1574,17 @@ class _SemesterSubjectsSection extends StatelessWidget {
 
 class _ControlGroupBlock extends StatelessWidget {
   final String label;
-  final List<_UsefulSubject> subjects;
+  final List<UsefulSubject> subjects;
   final bool collapsed;
   final VoidCallback onTap;
+  final ValueChanged<UsefulSubject> onSubjectOpen;
 
   const _ControlGroupBlock({
     required this.label,
     required this.subjects,
     required this.collapsed,
     required this.onTap,
+    required this.onSubjectOpen,
   });
 
   @override
@@ -1573,7 +1642,11 @@ class _ControlGroupBlock extends StatelessWidget {
           ),
         ),
         if (!collapsed)
-          for (final subject in subjects) _SubjectCard(item: subject),
+          for (final subject in subjects)
+            InfoSubjectCard(
+              item: subject,
+              onOpen: onSubjectOpen,
+            ),
       ],
     );
   }
@@ -1695,7 +1768,9 @@ class _PullSearchHostState extends State<_PullSearchHost>
           setState(() => _pull = 0);
         }
         // Inertial bounce (pixels < 0, not dragging): ignore completely.
-      } else if (_query.isEmpty && pixels > _closeScrollThreshold && delta > 0) {
+      } else if (_query.isEmpty &&
+          pixels > _closeScrollThreshold &&
+          delta > 0) {
         _closeSearch();
       }
     }
@@ -1738,8 +1813,7 @@ class _PullSearchHostState extends State<_PullSearchHost>
             ),
           ),
         ),
-        if (showHint)
-          _PullSearchHint(progress: pullT),
+        if (showHint) _PullSearchHint(progress: pullT),
         Expanded(
           child: NotificationListener<ScrollNotification>(
             onNotification: _onScroll,
@@ -1805,7 +1879,9 @@ class _PullSearchHint extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  progress >= 0.95 ? 'Отпусти для поиска' : 'Потяни вниз для поиска',
+                  progress >= 0.95
+                      ? 'Отпусти для поиска'
+                      : 'Потяни вниз для поиска',
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: primary.withValues(alpha: 0.85),
                         fontWeight: FontWeight.w800,
@@ -2971,10 +3047,16 @@ class _HelpCard extends StatelessWidget {
   }
 }
 
-class _SubjectCard extends StatelessWidget {
-  final _UsefulSubject item;
+/// Public subject card used by Info tab (exported for focused widget tests).
+class InfoSubjectCard extends StatelessWidget {
+  final UsefulSubject item;
+  final ValueChanged<UsefulSubject>? onOpen;
 
-  const _SubjectCard({required this.item});
+  const InfoSubjectCard({
+    super.key,
+    required this.item,
+    this.onOpen,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -2985,7 +3067,13 @@ class _SubjectCard extends StatelessWidget {
     final accent = _controlAccent(controlText);
 
     return InkWell(
-      onTap: () => _open(context),
+      onTap: () {
+        if (onOpen != null) {
+          onOpen!(item);
+          return;
+        }
+        _openSubjectInfo(context, item);
+      },
       borderRadius: BorderRadius.circular(22),
       child: Container(
         margin: const EdgeInsets.only(bottom: 10),
@@ -3037,7 +3125,10 @@ class _SubjectCard extends StatelessWidget {
               runSpacing: 8,
               children: [
                 _MiniControlPill(text: controlText, color: accent),
-                _SubjectPlanPill(color: accent),
+                _SubjectDifficultyPill(
+                  difficulty: item.difficulty,
+                  color: accent,
+                ),
               ],
             ),
           ],
@@ -3045,20 +3136,25 @@ class _SubjectCard extends StatelessWidget {
       ),
     );
   }
+}
 
-  void _open(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => SubjectInfoScreen(
-          title: item.title,
-          subjectId: item.subjectId,
-          subjectOfferingId: item.id,
-          groupId: item.groupId,
-          semesterNumber: item.semesterNumber,
-        ),
-      ),
-    );
-  }
+@visibleForTesting
+SubjectInfoScreen subjectInfoScreenFor(UsefulSubject item) {
+  return SubjectInfoScreen(
+    title: item.title,
+    subjectId: item.subjectId,
+    subjectOfferingId: item.id,
+    groupId: item.groupId,
+    semesterNumber: item.semesterNumber,
+  );
+}
+
+void _openSubjectInfo(BuildContext context, UsefulSubject item) {
+  Navigator.of(context).push(
+    MaterialPageRoute(
+      builder: (_) => subjectInfoScreenFor(item),
+    ),
+  );
 }
 
 class _SubjectAvatar extends StatelessWidget {
@@ -3136,13 +3232,22 @@ class _MiniControlPill extends StatelessWidget {
   }
 }
 
-class _SubjectPlanPill extends StatelessWidget {
+class _SubjectDifficultyPill extends StatelessWidget {
+  final SubjectDifficultySummary difficulty;
   final Color color;
 
-  const _SubjectPlanPill({required this.color});
+  const _SubjectDifficultyPill({
+    required this.difficulty,
+    required this.color,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final hasRating = difficulty.hasRating;
+    final label = hasRating
+        ? 'Сложность: ${difficulty.displayLabel}'
+        : difficulty.displayLabel;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
@@ -3153,10 +3258,16 @@ class _SubjectPlanPill extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.assignment_outlined, color: color, size: 14),
+          Icon(
+            hasRating
+                ? Icons.local_fire_department_rounded
+                : Icons.thermostat_outlined,
+            color: color,
+            size: 14,
+          ),
           const SizedBox(width: 4),
           Text(
-            'Учебный план',
+            label,
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
                   color: color,
                   fontWeight: FontWeight.w900,

@@ -5,6 +5,8 @@ import '../learning/models/team.dart';
 import '../learning/team_details_screen.dart';
 import '../schedule/subject_diary/subject_diary.dart';
 import '../schedule/subject_diary_screen.dart';
+import 'info_subjects_cache.dart';
+import 'subject_difficulty.dart';
 import 'teacher_profile_screen.dart';
 
 class SubjectInfoScreen extends StatefulWidget {
@@ -46,10 +48,11 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
     );
   }
 
-  Future<void> _reload() async {
+  Future<_SubjectInfoData> _reload() async {
     final next = await _load();
-    if (!mounted) return;
+    if (!mounted) return next;
     setState(() => _future = Future<_SubjectInfoData>.value(next));
+    return next;
   }
 
   Future<void> _rateSubject(_SubjectInfoData data) async {
@@ -77,7 +80,15 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
                   difficultyRating: difficulty,
                 );
                 if (sheetContext.mounted) Navigator.of(sheetContext).pop();
-                await _reload();
+                final refreshed = await _reload();
+                // Update Info tab immediately (keep-alive cache would otherwise stay stale).
+                InfoSubjectsCache.stageVoteUpdate(
+                  InfoSubjectVoteUpdate(
+                    subjectOfferingId: refreshed.subjectOfferingId,
+                    effectiveDifficulty: refreshed.subjectDifficultyAvg,
+                  ),
+                );
+                await InfoSubjectsCache.invalidate();
                 if (!mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Оценка сохранена')),
@@ -399,12 +410,15 @@ class _SubjectInfoRepository {
         }
         final global = _asDouble(row['avg_difficulty_global']);
         final local = _asDouble(row['avg_difficulty_local']);
-        final avg = global > 0 ? global : local;
+        final avg = SubjectDifficultySummary(
+          avgDifficultyGlobal: global,
+          avgDifficultyLocal: local,
+        ).effectiveDifficulty;
         final vote = _asMap(row['user_vote']);
         final myScore = vote == null ? null : _asInt(vote['difficulty_rating']);
         final canVote = row['can_vote'] == true;
         return (
-          avg > 0 ? avg : null,
+          avg,
           (myScore != null && myScore >= 1 && myScore <= 5) ? myScore : null,
           canVote,
         );
@@ -414,10 +428,8 @@ class _SubjectInfoRepository {
   }
 
   Future<double?> _loadTeacherRating(String teacherName) async {
-    final normalized = teacherName
-        .trim()
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .toLowerCase();
+    final normalized =
+        teacherName.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
     if (normalized.isEmpty) return null;
     try {
       final target = await _sb
