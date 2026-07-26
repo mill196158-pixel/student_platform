@@ -600,14 +600,9 @@ class _ProfileScreenState extends State<ProfileScreen>
               ),
               const SizedBox(height: 20),
 
-              const _SectionTitle('Учёба'),
-              const SizedBox(height: 10),
-              _ExamsBanner(onTap: () => context.push('/exams')),
-              const SizedBox(height: 12),
-              _PersonalDiaryBanner(onTap: () => context.push('/my-diary')),
-              const SizedBox(height: 12),
-              _MapBanner(
-                onTap: () => Navigator.push(
+              ProfileStudySection(
+                onDiaryTap: () => context.push('/my-diary'),
+                onMapTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (_) => const MapSpbgasuScreen(),
@@ -1107,66 +1102,28 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
-class _ExamsBanner extends StatelessWidget {
-  final VoidCallback onTap;
-  const _ExamsBanner({required this.onTap});
+/// Study shortcuts on the profile tab (kept public for focused widget tests).
+class ProfileStudySection extends StatelessWidget {
+  final VoidCallback onDiaryTap;
+  final VoidCallback onMapTap;
+
+  const ProfileStudySection({
+    super.key,
+    required this.onDiaryTap,
+    required this.onMapTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final colors = const [
-      Color(0xFFDCD0FA),
-      Color(0xFFC9B8F3),
-    ];
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 72),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          gradient: LinearGradient(
-              colors: colors,
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight),
-          boxShadow: [
-            BoxShadow(
-                color: colors.last.withValues(alpha: .25),
-                blurRadius: 16,
-                offset: const Offset(0, 10))
-          ],
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
-          children: [
-            const Icon(Icons.school_outlined,
-                size: 24, color: Color(0xFF7C63D8)),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Текущий семестр',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w800),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Зачёты, экзамены и учебный план',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(color: Colors.black54),
-                  ),
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right),
-          ],
-        ),
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _SectionTitle('Учёба'),
+        const SizedBox(height: 10),
+        _PersonalDiaryBanner(onTap: onDiaryTap),
+        const SizedBox(height: 12),
+        _MapBanner(onTap: onMapTap),
+      ],
     );
   }
 }
