@@ -39,4 +39,14 @@ void main() {
     expect(row['contacts_public']['public_email'], 'a@b.c');
     expect(row['contacts_public']['website'], 'https://example.edu');
   });
+
+  test('suggests subject headers', () {
+    final mapping = suggestSubjectHeaderMapping(const [
+      'Предмет',
+      'Кафедра',
+      'Форма контроля',
+    ]);
+    expect(mapping['canonical_name'], 'Предмет');
+    expect(mapping['control_form'], 'Форма контроля');
+  });
 }

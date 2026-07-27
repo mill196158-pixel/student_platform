@@ -95,5 +95,67 @@ Map<String, dynamic> mapImportRow(
   if (contacts.isNotEmpty) {
     mapped['contacts_public'] = contacts;
   }
+  final linksRaw = (mapped['useful_links'] ?? '').toString().trim();
+  if (linksRaw.isNotEmpty) {
+    mapped['useful_links'] = parseUsefulLinks(linksRaw);
+  }
   return mapped;
+}
+
+/// Parses `title|url` or bare URL lines into JSON-ready maps.
+List<Map<String, String>> parseUsefulLinks(String raw) {
+  final links = <Map<String, String>>[];
+  for (final line in raw.split(RegExp(r'[\n;]+'))) {
+    final trimmed = line.trim();
+    if (trimmed.isEmpty) continue;
+    final parts = trimmed.split('|');
+    if (parts.length >= 2) {
+      final title = parts.first.trim();
+      final url = parts.sublist(1).join('|').trim();
+      if (url.isEmpty) continue;
+      links.add({'title': title.isEmpty ? url : title, 'url': url});
+    } else {
+      links.add({'title': trimmed, 'url': trimmed});
+    }
+  }
+  return links;
+}
+
+/// Suggested field → source header for subject spreadsheets.
+Map<String, String> suggestSubjectHeaderMapping(List<String> headers) {
+  const aliases = <String, List<String>>{
+    'subject_id': ['subject_id', 'id', 'uuid'],
+    'canonical_name': [
+      'предмет',
+      'название',
+      'дисциплина',
+      'subject',
+      'canonical_name',
+      'name',
+    ],
+    'department': ['кафедра', 'department'],
+    'control_form': ['форма контроля', 'контроль', 'control_form', 'exam'],
+    'difficulty_label': ['сложность', 'difficulty'],
+    'description': ['описание', 'description'],
+    'short_description': ['краткое описание', 'short_description'],
+    'learning_outcomes': ['чему научится', 'результаты', 'learning_outcomes'],
+    'requirements': ['требования', 'requirements'],
+    'what_to_expect': ['чего ожидать', 'what_to_expect'],
+    'how_to_pass': ['как сдать', 'how_to_pass'],
+    'useful_materials_note': ['материалы', 'materials'],
+    'useful_links': ['ссылки', 'links', 'полезные ссылки', 'useful_links'],
+    'common_pitfalls': ['ошибки', 'pitfalls'],
+  };
+  final byField = <String, String>{};
+  for (final header in headers) {
+    final normalized = normalizePersonName(header);
+    for (final entry in aliases.entries) {
+      if (byField.containsKey(entry.key)) continue;
+      if (entry.value.map(normalizePersonName).contains(normalized)) {
+        byField[entry.key] = header;
+        break;
+      }
+    }
+  }
+  return byField;
 }
