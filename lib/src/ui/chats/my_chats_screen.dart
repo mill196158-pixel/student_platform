@@ -234,6 +234,8 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     final teamIcon = (row['team_icon'] ?? '').toString();
     final teamTeacher = (row['team_teacher'] ?? '').toString();
     final teamGroupName = (row['team_group_name'] ?? '').toString();
+    final teamKind = (row['team_kind'] ?? 'subject').toString();
+    final isGroupSpace = !isDm && teamKind == 'group_space';
     final titleRaw = (row['title'] ?? '').toString().trim();
     final peerId = (row['peer_id'] ?? '').toString();
     final avatarRaw = (row['avatar_url'] ?? '').toString().trim();
@@ -261,16 +263,20 @@ class _MyChatsScreenState extends State<MyChatsScreen>
       team: Team(
         id: isDm ? '' : teamId,
         name: isDm ? title : (teamName.isNotEmpty ? teamName : title),
-        icon: teamIcon,
+        icon: isGroupSpace
+            ? (teamIcon.isNotEmpty ? teamIcon : 'groups')
+            : teamIcon,
         teacher: teamTeacher,
         groupCode: teamGroupName,
       ),
       title: title,
       subtitle: isDm
           ? null
-          : (teamTeacher.isNotEmpty
-              ? teamTeacher
-              : (teamGroupName.isNotEmpty ? teamGroupName : null)),
+          : (isGroupSpace
+              ? 'Группа'
+              : (teamTeacher.isNotEmpty
+                  ? teamTeacher
+                  : (teamGroupName.isNotEmpty ? teamGroupName : null))),
       lastAuthor: lastAuthorName.isNotEmpty ? lastAuthorName : null,
       lastMsgPreview: preview,
       lastTime: lastAt,

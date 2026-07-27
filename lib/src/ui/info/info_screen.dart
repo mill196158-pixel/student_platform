@@ -14,6 +14,7 @@ import 'subject_difficulty.dart';
 import 'subject_info_screen.dart';
 import 'useful_subject.dart';
 import 'useful_subjects_repository.dart';
+import '../group_space/group_space_screen.dart';
 
 enum _UsefulFilter { all, exams, credits, practices, courseWorks }
 
@@ -1155,11 +1156,13 @@ class _SectionChoiceTile extends StatelessWidget {
 class InfoAcademicContextStrip extends StatelessWidget {
   final AcademicContext contextData;
   final SessionDifficultySummary sessionDifficulty;
+  final VoidCallback? onOpenGroupSpace;
 
   const InfoAcademicContextStrip({
     super.key,
     required this.contextData,
     required this.sessionDifficulty,
+    this.onOpenGroupSpace,
   });
 
   @override
@@ -1167,6 +1170,8 @@ class InfoAcademicContextStrip extends StatelessWidget {
     final theme = Theme.of(context);
     final groupName = contextData.groupName ?? 'Группа не указана';
     final recordBookNumber = contextData.recordBookNumber;
+    final hasGroup = (contextData.groupName ?? '').trim().isNotEmpty ||
+        (contextData.groupId ?? '').trim().isNotEmpty;
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -1213,6 +1218,25 @@ class InfoAcademicContextStrip extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           _SessionDifficultyMeter(summary: sessionDifficulty),
+          if (hasGroup) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                key: const ValueKey('open-group-space'),
+                onPressed: onOpenGroupSpace ??
+                    () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const GroupSpaceScreen(),
+                        ),
+                      );
+                    },
+                icon: const Icon(Icons.forum_outlined, size: 18),
+                label: const Text('Пространство группы'),
+              ),
+            ),
+          ],
         ],
       ),
     );
