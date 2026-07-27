@@ -179,37 +179,148 @@ returns boolean language sql stable security definer set search_path = '' as $$
   );
 $$;
 
+-- Live audit (2026-07-27, project gwdanmwluhrcfxbnplwd, read-only):
+--   users.role: all 'student' (no live starosta values)
+--   team_members.role: all 'member' (subject/team starosta unused in data)
+--   admin_role_assignments: only super_admin (RBAC ≠ group organizer)
+-- Authoritative organizer sources:
+--   1) subject-team team_members.role in (starosta, owner) for same group_id
+--   2) admin grant via set_group_space_organizer -> source='admin'
+-- users.role is NOT used in authorization or ongoing sync (one-time backfill only).
+create table if not exists public.group_space_organizer_grants (
+  group_id uuid not null references public.groups(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
+  source text not null check (source in ('admin', 'subject_team')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (group_id, user_id, source)
+);
+create index if not exists group_space_organizer_grants_user_idx
+  on public.group_space_organizer_grants (user_id);
+alter table public.group_space_organizer_grants enable row level security;
+alter table public.group_space_organizer_grants force row level security;
+revoke all on table public.group_space_organizer_grants from public, anon, authenticated;
+
+-- Active subject teams only (current/active offerings). Archived/historical
+-- semester teams must not keep granting group-space organizer powers.
+create or replace function private.is_active_subject_team_for_group(
+  p_team_id uuid,
+  p_group_id uuid
+) returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1
+    from public.teams t
+    left join public.subject_offerings so on so.id = t.subject_offering_id
+    left join public.academic_terms at
+      on at.id = coalesce(t.academic_term_id, so.academic_term_id)
+    where t.id = p_team_id
+      and t.group_id = p_group_id
+      and coalesce(t.kind, 'subject') = 'subject'
+      and (
+        (so.id is not null and so.status = 'active')
+        or (so.id is null and coalesce(at.is_current, false))
+      )
+      and not exists (
+        select 1
+        from public.chats c
+        join public.chat_academic_archives a on a.chat_id = c.id
+        where c.team_id = t.id
+          and c.type = 'team_main'
+      )
+  );
+$$;
+revoke all on function private.is_active_subject_team_for_group(uuid, uuid)
+  from public, anon, authenticated;
+
+create or replace function private.refresh_group_space_organizer_grants(p_group_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if p_group_id is null then
+    return;
+  end if;
+
+  -- Rebuild subject-team source; preserve durable admin grants.
+  delete from public.group_space_organizer_grants g
+  where g.group_id = p_group_id
+    and g.source = 'subject_team';
+
+  insert into public.group_space_organizer_grants(group_id, user_id, source)
+  select distinct p_group_id, tm.user_id, 'subject_team'
+  from public.team_members tm
+  join public.teams t on t.id = tm.team_id
+  join public.student_enrollments se
+    on se.user_id = tm.user_id
+   and se.group_id = p_group_id
+   and se.status = 'active'
+   and se.ended_at is null
+  where t.group_id = p_group_id
+    and private.is_active_subject_team_for_group(t.id, p_group_id)
+    and tm.role in ('starosta', 'owner')
+  on conflict (group_id, user_id, source) do update
+    set updated_at = now();
+end;
+$$;
+revoke all on function private.refresh_group_space_organizer_grants(uuid)
+  from public, anon, authenticated;
+
+-- Authorization validates current authoritative sources (not a stale cached role).
+-- Never users.role and never admin_role_assignments as organizer identity.
 create or replace function private.is_group_space_organizer(p_group_id uuid)
 returns boolean language sql stable security definer set search_path = '' as $$
-  select private.is_group_space_member(p_group_id) and exists (
-    select 1 from public.team_members tm
-    join public.teams t on t.id = tm.team_id
-    where t.group_id = p_group_id and t.kind = 'group_space' and tm.user_id = auth.uid()
-      and tm.role in ('starosta', 'owner')
+  select private.is_group_space_member(p_group_id) and (
+    exists (
+      select 1 from public.group_space_organizer_grants g
+      where g.group_id = p_group_id
+        and g.user_id = auth.uid()
+        and g.source = 'admin'
+    )
+    or exists (
+      select 1 from public.team_members tm
+      join public.teams t on t.id = tm.team_id
+      where t.group_id = p_group_id
+        and private.is_active_subject_team_for_group(t.id, p_group_id)
+        and tm.user_id = auth.uid()
+        and tm.role in ('starosta', 'owner')
+    )
   );
 $$;
 
 create or replace function private.is_group_space_admin()
 returns boolean language plpgsql stable security definer set search_path = '' as $$
-declare v_ok boolean := false;
+declare
+  v_ok boolean := false;
+  v_perm text;
 begin
-  if coalesce(current_setting('request.jwt.claim.role', true), '') = 'service_role' then return true; end if;
-  if to_regprocedure('private.has_admin_permission(uuid,text,text,uuid)') is null then return false; end if;
-  -- Prefer content/academic editor permission when RBAC helpers exist.
-  begin
-    execute 'select private.has_admin_permission($1, $2, $3, $4)'
-      into v_ok using auth.uid(), 'content.publish', 'global', null::uuid;
-  exception when others then
-    v_ok := false;
-  end;
-  if coalesce(v_ok, false) then return true; end if;
-  begin
-    execute 'select private.has_admin_permission($1, $2, $3, $4)'
-      into v_ok using auth.uid(), 'subjects.write', 'global', null::uuid;
-  exception when others then
-    v_ok := false;
-  end;
-  return coalesce(v_ok, false);
+  if coalesce(current_setting('request.jwt.claim.role', true), '') = 'service_role' then
+    return true;
+  end if;
+  if to_regprocedure('private.has_admin_permission(uuid,text,text,uuid)') is null then
+    return false;
+  end if;
+  -- Group-space admin grants are academic membership ops, not content/news RBAC
+  -- and not automatic organizer rights for the admin user themselves.
+  foreach v_perm in array array['groups.write', 'students.write', 'terms.manage']
+  loop
+    begin
+      execute 'select private.has_admin_permission($1, $2, $3, $4)'
+        into v_ok using auth.uid(), v_perm, 'global', null::uuid;
+    exception when others then
+      v_ok := false;
+    end;
+    if coalesce(v_ok, false) then
+      return true;
+    end if;
+  end loop;
+  return false;
 end $$;
 
 revoke all on function private.current_active_group_id(),
@@ -245,35 +356,131 @@ create policy group_topic_events_member_select on public.group_topic_events for 
 grant select on public.group_collections, public.group_collection_contributions, public.group_collection_events,
   public.group_topic_selections, public.group_topic_options, public.group_topic_picks, public.group_topic_events to authenticated;
 
-create or replace function public.sync_group_space_members(p_group_id uuid default null)
-returns integer language plpgsql security definer set search_path = '' as $$
-declare v_group uuid := coalesce(p_group_id, private.current_active_group_id()); v_team uuid; v_count integer := 0;
+-- Cached group-space team_members.role for UI; auth uses live sources above.
+create or replace function private.apply_group_space_cached_roles(p_group_id uuid)
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_team uuid;
+  v_count integer := 0;
 begin
-  if auth.uid() is null then raise exception 'not_authenticated' using errcode = '28000'; end if;
-  if v_group is null then return 0; end if;
-  if v_group <> private.current_active_group_id() and not private.is_group_space_admin() then raise exception 'forbidden' using errcode = '42501'; end if;
-  v_team := private.group_space_team_id(v_group); if v_team is null then return 0; end if;
+  if p_group_id is null then
+    return 0;
+  end if;
+  v_team := private.group_space_team_id(p_group_id);
+  if v_team is null then
+    return 0;
+  end if;
+
   insert into public.team_members(team_id, user_id, role)
   select
     v_team,
     se.user_id,
-    case when u.role in ('starosta', 'admin') then 'starosta' else 'member' end
+    case
+      when exists (
+        select 1 from public.group_space_organizer_grants g
+        where g.group_id = p_group_id and g.user_id = se.user_id
+      )
+      or exists (
+        select 1 from public.team_members tm
+        join public.teams t on t.id = tm.team_id
+        where t.group_id = p_group_id
+          and private.is_active_subject_team_for_group(t.id, p_group_id)
+          and tm.user_id = se.user_id
+          and tm.role in ('starosta', 'owner')
+      ) then 'starosta'
+      else 'member'
+    end
   from public.student_enrollments se
-  join public.users u on u.id = se.user_id
-  where se.group_id = v_group and se.status = 'active' and se.ended_at is null
+  where se.group_id = p_group_id and se.status = 'active' and se.ended_at is null
   on conflict (team_id, user_id) do update
-    set role = case
-      when public.team_members.role in ('owner', 'starosta') then public.team_members.role
-      else excluded.role
-    end;
+    set role = excluded.role;
   get diagnostics v_count = row_count;
+
   delete from public.chat_members cm using public.chats c
   where c.id = cm.chat_id and c.team_id = v_team and c.type = 'team_main'
-    and not exists (select 1 from public.student_enrollments se where se.user_id = cm.user_id and se.group_id = v_group and se.status = 'active' and se.ended_at is null);
-  delete from public.team_members tm where tm.team_id = v_team
-    and not exists (select 1 from public.student_enrollments se where se.user_id = tm.user_id and se.group_id = v_group and se.status = 'active' and se.ended_at is null);
+    and not exists (
+      select 1 from public.student_enrollments se
+      where se.user_id = cm.user_id and se.group_id = p_group_id
+        and se.status = 'active' and se.ended_at is null
+    );
+  delete from public.team_members tm
+  where tm.team_id = v_team
+    and not exists (
+      select 1 from public.student_enrollments se
+      where se.user_id = tm.user_id and se.group_id = p_group_id
+        and se.status = 'active' and se.ended_at is null
+    );
+  delete from public.group_space_organizer_grants g
+  where g.group_id = p_group_id
+    and not exists (
+      select 1 from public.student_enrollments se
+      where se.user_id = g.user_id and se.group_id = p_group_id
+        and se.status = 'active' and se.ended_at is null
+    );
+  return v_count;
+end;
+$$;
+revoke all on function private.apply_group_space_cached_roles(uuid)
+  from public, anon, authenticated;
+
+create or replace function public.sync_group_space_members(p_group_id uuid default null)
+returns integer language plpgsql security definer set search_path = '' as $$
+declare
+  v_group uuid := coalesce(p_group_id, private.current_active_group_id());
+  v_count integer := 0;
+begin
+  if auth.uid() is null then raise exception 'not_authenticated' using errcode = '28000'; end if;
+  if v_group is null then return 0; end if;
+  if v_group <> private.current_active_group_id() and not private.is_group_space_admin() then
+    raise exception 'forbidden' using errcode = '42501';
+  end if;
+  if private.group_space_team_id(v_group) is null then return 0; end if;
+
+  perform private.refresh_group_space_organizer_grants(v_group);
+  v_count := private.apply_group_space_cached_roles(v_group);
   return v_count;
 end $$;
+
+-- Keep cached roles fresh when subject-team starosta changes (immediate revoke path).
+create or replace function private.trg_subject_team_members_reconcile_group_space()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_team_id uuid := coalesce(new.team_id, old.team_id);
+  v_group uuid;
+  v_kind text;
+begin
+  select t.group_id, coalesce(t.kind, 'subject')
+    into v_group, v_kind
+  from public.teams t
+  where t.id = v_team_id;
+  if v_group is null or v_kind <> 'subject' then
+    return coalesce(new, old);
+  end if;
+  if private.group_space_team_id(v_group) is null then
+    return coalesce(new, old);
+  end if;
+  perform private.refresh_group_space_organizer_grants(v_group);
+  perform private.apply_group_space_cached_roles(v_group);
+  return coalesce(new, old);
+end;
+$$;
+revoke all on function private.trg_subject_team_members_reconcile_group_space()
+  from public, anon, authenticated;
+
+drop trigger if exists trg_subject_team_members_reconcile_group_space on public.team_members;
+create trigger trg_subject_team_members_reconcile_group_space
+after insert or update of role, team_id, user_id or delete
+on public.team_members
+for each row
+execute function private.trg_subject_team_members_reconcile_group_space();
 
 create or replace function public.ensure_group_space()
 returns jsonb language plpgsql security definer set search_path = '' as $$
@@ -335,13 +542,36 @@ end $$;
 
 create or replace function public.set_group_space_organizer(p_group_id uuid, p_user_id uuid, p_is_organizer boolean)
 returns void language plpgsql security definer set search_path = '' as $$
-declare v_team uuid;
+declare
+  v_team uuid;
 begin
-  if not private.is_group_space_admin() then raise exception 'forbidden' using errcode = '42501'; end if;
+  if not private.is_group_space_admin() then
+    raise exception 'forbidden' using errcode = '42501';
+  end if;
   v_team := private.group_space_team_id(p_group_id);
-  if v_team is null or not exists (select 1 from public.student_enrollments se where se.user_id=p_user_id and se.group_id=p_group_id and se.status='active' and se.ended_at is null) then raise exception 'invalid_group_member' using errcode = '22023'; end if;
-  insert into public.team_members(team_id,user_id,role) values(v_team,p_user_id,case when p_is_organizer then 'starosta' else 'member' end)
-  on conflict (team_id,user_id) do update set role=excluded.role;
+  if v_team is null
+     or not exists (
+       select 1 from public.student_enrollments se
+       where se.user_id = p_user_id and se.group_id = p_group_id
+         and se.status = 'active' and se.ended_at is null
+     )
+  then
+    raise exception 'invalid_group_member' using errcode = '22023';
+  end if;
+
+  if p_is_organizer then
+    insert into public.group_space_organizer_grants(group_id, user_id, source)
+    values (p_group_id, p_user_id, 'admin')
+    on conflict (group_id, user_id, source) do update
+      set updated_at = now();
+  else
+    delete from public.group_space_organizer_grants g
+    where g.group_id = p_group_id and g.user_id = p_user_id and g.source = 'admin';
+  end if;
+
+  -- Reconcile explicit group-space role from grants (revokes when grant removed
+  -- unless another authoritative source remains).
+  perform public.sync_group_space_members(p_group_id);
 end $$;
 
 create or replace function public.create_group_collection(p_title text, p_description text default '', p_purpose text default '', p_deadline_at timestamptz default null, p_amount_optional numeric default null)
@@ -508,5 +738,17 @@ do $$ begin
   alter publication supabase_realtime add table public.group_topic_picks, public.group_collections, public.group_collection_contributions;
  end if;
 exception when duplicate_object then null; end $$;
+
+-- One-time migration backfill only: convert legacy users.role='starosta' into durable
+-- admin organizer grants. Ongoing refresh/auth never read users.role.
+insert into public.group_space_organizer_grants(group_id, user_id, source)
+select distinct se.group_id, u.id, 'admin'
+from public.users u
+join public.student_enrollments se
+  on se.user_id = u.id
+ and se.status = 'active'
+ and se.ended_at is null
+where u.role = 'starosta'
+on conflict (group_id, user_id, source) do nothing;
 
 commit;

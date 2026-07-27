@@ -6,8 +6,8 @@
 ## Статус документа
 
 - Дата аудита: **27 июля 2026**
-- Обновлено: **27 июля 2026** (Stage 13.2–13.7 code foundations; Codex READY_WITH_RESIDUALS)
-- Проверенная основная ветка: `refactor/chat-tab` @ `eca7c88`+
+- Обновлено: **27 июля 2026** (Stage 13.2 organizer authority: active subject-team / admin grants; not `users.role`)
+- Проверенная основная ветка: `refactor/chat-tab`
 - Проверенная административная ветка: `feature/admin-console`
 - Репозиторий: `mill196158-pixel/student_platform`
 - Статус карты: **ACTIVE**
@@ -597,7 +597,7 @@ Status: **DONE**
 
 ### 13.2 — Постоянное пространство учебной группы
 
-Status: **CODE FOUNDATION** (`caa3970`) — remote apply + physical smoke pending
+Status: **CODE FOUNDATION** — remote apply + physical smoke pending
 
 - [x] автоматически создавать ровно одно постоянное пространство на учебную группу (`ensure_group_space`, unique `group_id`);
 - [x] не связывать его с предметом или отдельным семестром (`teams.kind='group_space'`);
@@ -608,6 +608,14 @@ Status: **CODE FOUNDATION** (`caa3970`) — remote apply + physical smoke pendin
 - [x] реализовать `Сбор группы` со статусами и подтверждающим скриншотом (UI + RPC; remote DB pending);
 - [x] реализовать `Выбор темы` с лимитами мест и защитой от одновременного выбора;
 - [x] RLS, RPC, Realtime, аудит; умеренные push — позже при remote smoke;
+- [x] **источник organizer (старосты) зафиксирован серверно** — не `users.role`:
+  - live audit: `users.role` все `student`; предметные роли в `team_members.role`; admin RBAC в `admin_role_assignments` отдельно;
+  - auth: член group-space **и** (`group_space_organizer_grants.source='admin'` **или** live `starosta`/`owner` на **активной** subject-team той же группы);
+  - активная subject-team: `private.is_active_subject_team_for_group` — `subject_offerings.status='active'` (или current term без offering) и `team_main` не в `chat_academic_archives`;
+  - sync: `refresh_group_space_organizer_grants` пересобирает только `subject_team`; durable `admin` grants сохраняются; снятие starosta / архив offering отзывает organizer;
+  - `users.role` — только one-time migration backfill → durable admin grant; не участвует в ongoing auth/sync;
+  - назначение вручную после remote apply: RPC `public.set_group_space_organizer(group_id, user_id, true)` от admin с `groups.write` / `students.write` / `terms.manage` (не `content.publish`);
+  - role-play PASS: student forbidden; active starosta can manage; revoke; archived starosta no access; admin RBAC ≠ organizer; client `users.role` spoof denied;
 - [ ] физический smoke участника и организатора;
 - [x] local Docker preflight + security/role-play PASS (`scripts/local_preflight_stage13.sh`);
 - [!] remote apply миграции `20260727140000_stage13_2_group_space.sql` не выполнен.

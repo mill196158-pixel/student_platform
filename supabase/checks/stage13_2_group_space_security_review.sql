@@ -1,11 +1,5 @@
--- Stage 13.2 LOCAL security review. Run only against a disposable local database
--- after 20260727140000_stage13_2_group_space.sql. It does not write application data.
---
--- Validation status note for agents:
--- If the full dependency stack (teams/chats/enrollments/archive helpers) cannot be
--- applied locally in this environment, record UNKNOWN_DB_LOCAL_VALIDATION and do
--- not treat Stage 13.2 as remote-ready. Remote apply remains forbidden without
--- explicit owner permission.
+-- Stage 13.2 LOCAL security review. Assertive; fails on deviation.
+\set ON_ERROR_STOP on
 
 -- A group can have at most one permanent group-space team.
 do $$
@@ -79,9 +73,7 @@ begin
 end;
 $$;
 
--- Capacity/race safety: pick_topic serializes on the option row before counting
--- picks. For a live two-session role-play, create a capacity=1 option and invoke
--- pick_topic from two enrolled users concurrently; exactly one must succeed.
+-- Capacity/race safety: pick_topic serializes on the option row before counting.
 do $$
 declare
   v_src text;
@@ -105,6 +97,66 @@ begin
   ) into v_src;
   if lower(v_src) not like '%t.kind<>''group_space''%' then
     raise exception 'archive_academic_chats_for_term does not exclude group spaces';
+  end if;
+end;
+$$;
+
+-- Organizer auth must use live admin grants / subject-team roles; never users.role.
+do $$
+declare
+  v_auth text;
+  v_refresh text;
+begin
+  select pg_get_functiondef('private.is_group_space_organizer(uuid)'::regprocedure)
+    into v_auth;
+  if position('users.role' in lower(v_auth)) > 0
+     or position('u.role' in lower(v_auth)) > 0 then
+    raise exception 'is_group_space_organizer must not read users.role';
+  end if;
+  if position('group_space_organizer_grants' in lower(v_auth)) = 0 then
+    raise exception 'is_group_space_organizer must honor admin grants';
+  end if;
+  if position('is_active_subject_team_for_group' in lower(v_auth)) = 0 then
+    raise exception 'is_group_space_organizer must scope subject-team starosta to active offerings';
+  end if;
+
+  select pg_get_functiondef('private.refresh_group_space_organizer_grants(uuid)'::regprocedure)
+    into v_refresh;
+  if position('legacy_users_role' in lower(v_refresh)) > 0
+     or position('u.role' in lower(v_refresh)) > 0
+     or position('users.role' in lower(v_refresh)) > 0 then
+    raise exception 'ongoing grant refresh must not use users.role/legacy source';
+  end if;
+  if position('is_active_subject_team_for_group' in lower(v_refresh)) = 0 then
+    raise exception 'grant refresh must rebuild only from active subject teams';
+  end if;
+
+  if not exists (
+    select 1 from pg_trigger t
+    join pg_class c on c.oid = t.tgrelid
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public'
+      and c.relname = 'team_members'
+      and t.tgname = 'trg_subject_team_members_reconcile_group_space'
+      and not t.tgisinternal
+  ) then
+    raise exception 'missing subject-team reconcile trigger for organizer revoke';
+  end if;
+
+  if not exists (
+    select 1 from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public'
+      and c.relname = 'group_space_organizer_grants'
+      and c.relrowsecurity and c.relforcerowsecurity
+  ) then
+    raise exception 'group_space_organizer_grants missing FORCE RLS';
+  end if;
+
+  if has_table_privilege('authenticated', 'public.group_space_organizer_grants', 'insert')
+     or has_table_privilege('authenticated', 'public.group_space_organizer_grants', 'update')
+     or has_table_privilege('authenticated', 'public.group_space_organizer_grants', 'select') then
+    raise exception 'authenticated has direct access to organizer grants';
   end if;
 end;
 $$;
