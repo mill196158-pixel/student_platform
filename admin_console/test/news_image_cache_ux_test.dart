@@ -190,6 +190,13 @@ class _FakeRemoteStore implements AdminImageStore, AdminRemoteImageGateway {
 
   @override
   Future<void> deleteRemote(String imagePath) async {
+    try {
+      await deleteRemoteStrict(imagePath);
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> deleteRemoteStrict(String imagePath) async {
     invalidatePath(imagePath);
   }
 
@@ -201,6 +208,7 @@ NewsItem _remoteItem({
   String id = 'n1',
   String path = 'news/a/b.png',
   int version = 2,
+  NewsStatus status = NewsStatus.published,
 }) {
   return NewsItem(
     id: id,
@@ -209,6 +217,7 @@ NewsItem _remoteItem({
     body: 'body',
     variant: StudentHomeNewsVariant.imageOverlay,
     colors: const [Color(0xFF7367F0), Color(0xFFB784F7)],
+    status: status,
     imagePath: path,
     versionNumber: version,
     updatedAt: DateTime.utc(2026, 7, 22),
@@ -394,6 +403,12 @@ void main() {
         ),
       ),
     );
+    await tester.pumpAndSettle();
+
+    // Draft seed lives on the Drafts tab after archive-tab split.
+    await tester.tap(find.byTooltip('Черновики'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('С фото').first);
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Заменить'));

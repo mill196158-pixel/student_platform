@@ -42,7 +42,12 @@ abstract class AdminRemoteImageGateway {
     String version = '0',
   });
 
+  /// Best-effort delete for save/replace flows. Failures are swallowed.
   Future<void> deleteRemote(String imagePath);
+
+  /// Strict delete for hard-delete cleanup. Throws when Storage removal fails
+  /// so the caller can enqueue [news_media_cleanup_queue] retry work.
+  Future<void> deleteRemoteStrict(String imagePath);
 
   void clearPrivateCache();
 }

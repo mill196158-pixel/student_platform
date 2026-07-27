@@ -12,10 +12,13 @@ import '../../../shared/widgets/publication_status_badge.dart';
 import 'admin_image_picker.dart';
 import 'admin_image_store.dart';
 import 'news_item.dart';
+import 'news_preview.dart';
 import 'news_repository.dart';
 import 'supabase_admin_image_store.dart';
 import 'supabase_news_repository.dart';
 import 'widgets/news_image_field.dart';
+
+enum _NewsListTab { published, drafts, archived }
 
 class NewsEditorScreen extends StatefulWidget {
   const NewsEditorScreen({
@@ -47,6 +50,7 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
 
   List<NewsItem> _items = [];
   String? _selectedId;
+  _NewsListTab _listTab = _NewsListTab.published;
   final Map<String, Uint8List> _resolvedBytes = {};
 
   /// Per-item image edit intent. Default = untouched (never wipe server path).
@@ -55,11 +59,26 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
 
   bool _loading = true;
   bool _busy = false;
+  bool _deleting = false;
   bool _dirty = false;
   bool _imageUploading = false;
   String? _imageError;
   String? _banner;
   String? _loadError;
+
+  NewsAdminListPartitions get _partitions => partitionAdminNews(_items);
+
+  List<NewsItem> get _tabItems {
+    final parts = _partitions;
+    return switch (_listTab) {
+      _NewsListTab.published => parts.published,
+      _NewsListTab.drafts => parts.drafts,
+      _NewsListTab.archived => parts.archived,
+    };
+  }
+
+  List<NewsItem> get _publishedPreviewItems =>
+      _partitions.publishedPreviewItems;
 
   SupabaseClient? _tryClient() {
     try {
@@ -123,9 +142,9 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
       if (!mounted) return;
       setState(() {
         _items = items;
-        _selectedId = items.isNotEmpty ? items.first.id : null;
         _loading = false;
         _loadError = null;
+        _ensureSelectionForTab();
       });
       _syncControllers();
       _scheduleImagePreloads();
@@ -320,7 +339,23 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
   }
 
   void _select(String id) {
-    setState(() => _selectedId = id);
+    NewsItem? item;
+    for (final candidate in _items) {
+      if (candidate.id == id) {
+        item = candidate;
+        break;
+      }
+    }
+    setState(() {
+      _selectedId = id;
+      if (item != null) {
+        _listTab = switch (item.status) {
+          NewsStatus.published => _NewsListTab.published,
+          NewsStatus.draft => _NewsListTab.drafts,
+          NewsStatus.archived => _NewsListTab.archived,
+        };
+      }
+    });
     _syncControllers();
     _scheduleImagePreloads();
   }
@@ -329,6 +364,32 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
     final index = _items.indexWhere((e) => e.id == item.id);
     if (index >= 0) {
       _items[index] = item;
+    }
+  }
+
+  void _ensureSelectionForTab() {
+    final tabItems = _tabItems;
+    if (tabItems.isEmpty) {
+      _selectedId = null;
+      return;
+    }
+    if (_selectedId != null && tabItems.any((e) => e.id == _selectedId)) {
+      return;
+    }
+    _selectedId = tabItems.first.id;
+  }
+
+  void _selectNextAfterRemoval(String removedId, List<NewsItem> before) {
+    final index = before.indexWhere((e) => e.id == removedId);
+    final remaining = before.where((e) => e.id != removedId).toList();
+    if (remaining.isEmpty) {
+      _selectedId = null;
+      return;
+    }
+    if (index >= 0 && index < remaining.length) {
+      _selectedId = remaining[index].id;
+    } else {
+      _selectedId = remaining.last.id;
     }
   }
 
@@ -400,6 +461,7 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
       if (!mounted) return;
       setState(() {
         _items = [..._items, created];
+        _listTab = _NewsListTab.drafts;
         _selectedId = created.id;
       });
       _syncControllers();
@@ -419,6 +481,7 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
       if (!mounted) return;
       setState(() {
         _items = [..._items, copy];
+        _listTab = _NewsListTab.drafts;
         _selectedId = copy.id;
       });
       _syncControllers();
@@ -613,26 +676,163 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
       ),
     );
     if (confirmed != true) return;
+    final before = List<NewsItem>.from(_tabItems);
     await _runGuarded(() async {
       final updated = await _repository.archive(selected.id);
       if (!mounted) return;
-      setState(() => _replaceItem(updated));
+      setState(() {
+        _replaceItem(updated);
+        _selectNextAfterRemoval(updated.id, before);
+      });
+      _syncControllers();
       _snack('Новость в архиве');
     });
   }
 
+  Future<void> _restoreArchived() async {
+    final selected = _selected;
+    if (selected == null || !selected.isArchived) return;
+    if (!_canWrite) {
+      _showBanner('Недостаточно прав.');
+      return;
+    }
+    await _runGuarded(() async {
+      final updated = await _repository.restoreArchived(selected.id);
+      if (!mounted) return;
+      setState(() {
+        _replaceItem(updated);
+        _listTab = _NewsListTab.drafts;
+        _selectedId = updated.id;
+      });
+      _syncControllers();
+      _snack('Новость восстановлена как черновик');
+    });
+  }
+
+  Future<void> _deleteArchivedPermanently() async {
+    final selected = _selected;
+    if (selected == null || !selected.isArchived) return;
+    if (!_canPublish) {
+      _showBanner('Недостаточно прав для окончательного удаления.');
+      return;
+    }
+    if (_deleting || _busy) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Удалить новость навсегда?'),
+        content: const Text(
+          'Новость, её версии и статистику просмотров восстановить будет нельзя',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(dialogContext).colorScheme.error,
+            ),
+            child: const Text('Удалить навсегда'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    if (_deleting || _busy) return;
+
+    final before = List<NewsItem>.from(_tabItems);
+    final removedId = selected.id;
+    setState(() {
+      _deleting = true;
+      _busy = true;
+      _banner = null;
+    });
+
+    try {
+      final result = await _repository.deleteArchived(removedId);
+      var cleanupFailed = false;
+      final media = _mediaStore;
+      final failedPaths = <String>[];
+      for (final path in result.mediaPathsToDelete) {
+        try {
+          if (media != null) {
+            await media.deleteRemoteStrict(path);
+          }
+        } catch (_) {
+          cleanupFailed = true;
+          failedPaths.add(path);
+        }
+      }
+      if (failedPaths.isNotEmpty) {
+        try {
+          await _repository.recordMediaCleanupFailure(
+            paths: failedPaths,
+            sourceNewsPostId: result.id,
+            sourceTitle: result.title,
+            errorText: 'storage_cleanup_failed',
+          );
+        } catch (_) {
+          // Queue write is best-effort; post already deleted.
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _items = _items.where((e) => e.id != removedId).toList();
+        _resolvedBytes.remove(removedId);
+        _imageIntent.remove(removedId);
+        _selectNextAfterRemoval(removedId, before);
+        _dirty = false;
+      });
+      _syncControllers();
+      _snack(
+        cleanupFailed
+            ? 'Новость удалена, очистка файла будет повторена'
+            : 'Новость удалена',
+      );
+    } on NewsRepositoryException catch (error) {
+      _showBanner(error.message);
+    } catch (_) {
+      _showBanner('Не удалось удалить новость. Попробуйте ещё раз.');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _deleting = false;
+          _busy = false;
+        });
+      }
+    }
+  }
+
   Future<void> _move(int delta) async {
+    if (_listTab == _NewsListTab.archived) return;
     final selected = _selected;
     if (selected == null) return;
-    final index = _items.indexWhere((e) => e.id == selected.id);
+    final tabItems = List<NewsItem>.from(_tabItems);
+    final index = tabItems.indexWhere((e) => e.id == selected.id);
     final target = index + delta;
-    if (target < 0 || target >= _items.length) return;
+    if (index < 0 || target < 0 || target >= tabItems.length) return;
+    final moved = tabItems.removeAt(index);
+    tabItems.insert(target, moved);
+    final otherIds = _items
+        .where((e) => !tabItems.any((t) => t.id == e.id))
+        .map((e) => e.id)
+        .toList();
+    final orderedIds = [...tabItems.map((e) => e.id), ...otherIds];
     setState(() {
-      final item = _items.removeAt(index);
-      _items.insert(target, item);
+      for (var i = 0; i < orderedIds.length; i++) {
+        final itemIndex = _items.indexWhere((e) => e.id == orderedIds[i]);
+        if (itemIndex >= 0) {
+          _items[itemIndex] = _items[itemIndex].copyWith(sortOrder: i);
+        }
+      }
+      _items.sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
     });
     await _runGuarded(() async {
-      await _repository.reorder(_items.map((e) => e.id).toList());
+      await _repository.reorder(orderedIds);
     });
   }
 
@@ -833,25 +1033,50 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
       builder: (context, constraints) {
         final wide = constraints.maxWidth >= 1180;
         final medium = constraints.maxWidth >= 860;
-        final visible = _items.where((item) => !item.isHidden).toList();
+        final previewItems = _publishedPreviewItems;
+        final previewSelectedId = previewItems.any((e) => e.id == _selectedId)
+            ? _selectedId
+            : null;
 
         final list = _NewsListPanel(
-          items: _items,
+          tab: _listTab,
+          partitions: _partitions,
           selectedId: _selectedId,
           bytesFor: _bytesForItem,
+          onTabChanged: (tab) {
+            setState(() {
+              _listTab = tab;
+              _ensureSelectionForTab();
+            });
+            _syncControllers();
+            _scheduleImagePreloads();
+          },
           onSelected: _select,
           onMove: _move,
           onCreate: _canWrite ? _create : null,
         );
         final phone = _PhonePreview(
-          items: visible,
-          selectedId: _selectedId,
+          items: previewItems,
+          selectedId: previewSelectedId,
           bytesFor: _bytesForItem,
           onSelected: _select,
-          onOpenStory: (index) => _openStoryPreview(visible, index),
+          onOpenStory: (index) => _openStoryPreview(previewItems, index),
         );
         final props = _selected == null
-            ? const Card(child: Center(child: Text('Выберите новость')))
+            ? Card(
+                child: Center(
+                  child: Text(
+                    _tabItems.isEmpty
+                        ? switch (_listTab) {
+                            _NewsListTab.published =>
+                              'Нет опубликованных новостей',
+                            _NewsListTab.drafts => 'Нет черновиков',
+                            _NewsListTab.archived => 'Архив пуст',
+                          }
+                        : 'Выберите новость',
+                  ),
+                ),
+              )
             : _PropertiesPanel(
                 selected: _selected!,
                 imageBytes: _bytesForItem(_selected!),
@@ -859,6 +1084,9 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
                 imageError: _imageError,
                 imageStatusText: _imageFieldStatusText(_selected!),
                 canWrite: _canWrite,
+                canPublish: _canPublish,
+                deleting: _deleting,
+                busy: _busy,
                 titleController: _titleController,
                 subtitleController: _subtitleController,
                 bodyController: _bodyController,
@@ -882,6 +1110,8 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
                 onRetryImage: _retryImage,
                 onDuplicate: _duplicate,
                 onArchive: _archive,
+                onRestoreArchived: _restoreArchived,
+                onDeletePermanently: _deleteArchivedPermanently,
               );
 
         if (wide) {
@@ -1089,24 +1319,35 @@ class _Banner extends StatelessWidget {
 
 class _NewsListPanel extends StatelessWidget {
   const _NewsListPanel({
-    required this.items,
+    required this.tab,
+    required this.partitions,
     required this.selectedId,
     required this.bytesFor,
+    required this.onTabChanged,
     required this.onSelected,
     required this.onMove,
     required this.onCreate,
   });
 
-  final List<NewsItem> items;
+  final _NewsListTab tab;
+  final NewsAdminListPartitions partitions;
   final String? selectedId;
   final Uint8List? Function(NewsItem item) bytesFor;
+  final ValueChanged<_NewsListTab> onTabChanged;
   final ValueChanged<String> onSelected;
   final ValueChanged<int> onMove;
   final VoidCallback? onCreate;
 
+  List<NewsItem> get items => switch (tab) {
+    _NewsListTab.published => partitions.published,
+    _NewsListTab.drafts => partitions.drafts,
+    _NewsListTab.archived => partitions.archived,
+  };
+
   @override
   Widget build(BuildContext context) {
     final selectedIndex = items.indexWhere((item) => item.id == selectedId);
+    final canReorder = tab != _NewsListTab.archived;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -1121,30 +1362,83 @@ class _NewsListPanel extends StatelessWidget {
                     style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
                   ),
                 ),
-                IconButton(
-                  tooltip: 'Выше',
-                  onPressed: selectedIndex > 0 ? () => onMove(-1) : null,
-                  icon: const Icon(Icons.arrow_upward_rounded),
-                ),
-                IconButton(
-                  tooltip: 'Ниже',
-                  onPressed:
-                      selectedIndex >= 0 && selectedIndex < items.length - 1
-                      ? () => onMove(1)
-                      : null,
-                  icon: const Icon(Icons.arrow_downward_rounded),
-                ),
+                if (canReorder) ...[
+                  IconButton(
+                    tooltip: 'Выше',
+                    onPressed: selectedIndex > 0 ? () => onMove(-1) : null,
+                    icon: const Icon(Icons.arrow_upward_rounded),
+                  ),
+                  IconButton(
+                    tooltip: 'Ниже',
+                    onPressed:
+                        selectedIndex >= 0 && selectedIndex < items.length - 1
+                        ? () => onMove(1)
+                        : null,
+                    icon: const Icon(Icons.arrow_downward_rounded),
+                  ),
+                ],
                 IconButton.filledTonal(
-                  tooltip: 'Создать',
+                  tooltip: 'Создать черновик',
                   onPressed: onCreate,
                   icon: const Icon(Icons.add_rounded),
                 ),
               ],
             ),
-            const Divider(),
+            const SizedBox(height: 8),
+            SegmentedButton<_NewsListTab>(
+              showSelectedIcon: false,
+              segments: [
+                ButtonSegment(
+                  value: _NewsListTab.published,
+                  tooltip: 'Опубликованные',
+                  label: Text('${partitions.published.length}'),
+                  icon: const Icon(Icons.public_rounded, size: 16),
+                ),
+                ButtonSegment(
+                  value: _NewsListTab.drafts,
+                  tooltip: 'Черновики',
+                  label: Text('${partitions.drafts.length}'),
+                  icon: const Icon(Icons.edit_note_rounded, size: 16),
+                ),
+                ButtonSegment(
+                  value: _NewsListTab.archived,
+                  tooltip: 'Архив',
+                  label: Text('${partitions.archived.length}'),
+                  icon: const Icon(Icons.inventory_2_outlined, size: 16),
+                ),
+              ],
+              selected: {tab},
+              onSelectionChanged: (value) {
+                if (value.isNotEmpty) onTabChanged(value.first);
+              },
+              style: const ButtonStyle(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              switch (tab) {
+                _NewsListTab.published => 'Опубликованные',
+                _NewsListTab.drafts => 'Черновики',
+                _NewsListTab.archived => 'Архив',
+              },
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF5C6370),
+              ),
+            ),
+            const Divider(height: 20),
             Expanded(
               child: items.isEmpty
-                  ? const Center(child: Text('Пока нет новостей'))
+                  ? Center(
+                      child: Text(switch (tab) {
+                        _NewsListTab.published => 'Нет опубликованных',
+                        _NewsListTab.drafts => 'Нет черновиков',
+                        _NewsListTab.archived => 'Архив пуст',
+                      }),
+                    )
                   : ListView.separated(
                       itemCount: items.length,
                       separatorBuilder: (_, _) => const SizedBox(height: 8),
@@ -1161,6 +1455,7 @@ class _NewsListPanel extends StatelessWidget {
                           borderRadius: BorderRadius.circular(12),
                           child: ListTile(
                             selected: isSelected,
+                            isThreeLine: true,
                             onTap: () => onSelected(item.id),
                             leading: _ListThumb(
                               index: index,
@@ -1172,23 +1467,26 @@ class _NewsListPanel extends StatelessWidget {
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                             ),
-                            subtitle: Text(
-                              '${item.variant.russianLabel} · ${item.status.russianLabel}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  item.variant.russianLabel,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 4),
+                                PublicationStatusBadge(
+                                  status: item.status.russianLabel,
+                                ),
+                              ],
                             ),
                             trailing: item.isHidden
                                 ? const Icon(
                                     Icons.visibility_off_outlined,
                                     size: 18,
                                   )
-                                : Text(
-                                    '${index + 1}',
-                                    style: const TextStyle(
-                                      color: Color(0xFF6E7180),
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
+                                : null,
                           ),
                         );
                       },
@@ -1424,6 +1722,9 @@ class _PropertiesPanel extends StatelessWidget {
     required this.imageError,
     required this.imageStatusText,
     required this.canWrite,
+    required this.canPublish,
+    required this.deleting,
+    required this.busy,
     required this.titleController,
     required this.subtitleController,
     required this.bodyController,
@@ -1439,6 +1740,8 @@ class _PropertiesPanel extends StatelessWidget {
     required this.onRetryImage,
     required this.onDuplicate,
     required this.onArchive,
+    required this.onRestoreArchived,
+    required this.onDeletePermanently,
   });
 
   final NewsItem selected;
@@ -1447,6 +1750,9 @@ class _PropertiesPanel extends StatelessWidget {
   final String? imageError;
   final String? imageStatusText;
   final bool canWrite;
+  final bool canPublish;
+  final bool deleting;
+  final bool busy;
   final TextEditingController titleController;
   final TextEditingController subtitleController;
   final TextEditingController bodyController;
@@ -1462,6 +1768,8 @@ class _PropertiesPanel extends StatelessWidget {
   final VoidCallback onRetryImage;
   final VoidCallback onDuplicate;
   final VoidCallback onArchive;
+  final VoidCallback onRestoreArchived;
+  final VoidCallback onDeletePermanently;
 
   static const _focusOptions = <(String, Alignment)>[
     ('Центр', Alignment.center),
@@ -1478,9 +1786,16 @@ class _PropertiesPanel extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          const Text(
-            'Свойства карточки',
-            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Свойства карточки',
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+                ),
+              ),
+              PublicationStatusBadge(status: selected.status.russianLabel),
+            ],
           ),
           const SizedBox(height: 16),
           TextField(
@@ -1588,20 +1903,51 @@ class _PropertiesPanel extends StatelessWidget {
             ],
           ],
           const Divider(height: 28),
-          OutlinedButton.icon(
-            onPressed: canWrite ? onDuplicate : null,
-            icon: const Icon(Icons.copy_outlined),
-            label: const Text('Дублировать'),
-          ),
-          const SizedBox(height: 10),
-          TextButton.icon(
-            onPressed: (canWrite && !selected.isArchived) ? onArchive : null,
-            style: TextButton.styleFrom(
-              foregroundColor: Theme.of(context).colorScheme.error,
+          if (selected.isArchived) ...[
+            FilledButton.tonalIcon(
+              onPressed: (canWrite && !busy && !deleting)
+                  ? onRestoreArchived
+                  : null,
+              icon: const Icon(Icons.unarchive_outlined),
+              label: const Text('Восстановить как черновик'),
             ),
-            icon: const Icon(Icons.archive_outlined),
-            label: const Text('В архив'),
-          ),
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              key: const ValueKey('delete-archived-forever'),
+              onPressed: (canPublish && !busy && !deleting)
+                  ? onDeletePermanently
+                  : null,
+              style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+              ),
+              icon: deleting
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.delete_forever_outlined),
+              label: Text(deleting ? 'Удаление…' : 'Удалить окончательно'),
+            ),
+          ] else ...[
+            OutlinedButton.icon(
+              onPressed: canWrite ? onDuplicate : null,
+              icon: const Icon(Icons.copy_outlined),
+              label: const Text('Дублировать'),
+            ),
+            const SizedBox(height: 10),
+            TextButton.icon(
+              onPressed: canWrite ? onArchive : null,
+              style: TextButton.styleFrom(
+                foregroundColor: Theme.of(context).colorScheme.error,
+              ),
+              icon: const Icon(Icons.archive_outlined),
+              label: const Text('В архив'),
+            ),
+          ],
         ],
       ),
     );

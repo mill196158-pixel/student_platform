@@ -172,11 +172,18 @@ class SupabaseAdminImageStore
   Future<void> deleteRemote(String imagePath) async {
     if (imagePath.isEmpty) return;
     try {
-      await _invoke({'action': 'delete', 'path': imagePath});
-      _cache.invalidatePath(imagePath);
+      await deleteRemoteStrict(imagePath);
     } catch (_) {
       // Best-effort cleanup; a stale object is preferable to a failed save.
     }
+  }
+
+  /// Removes a stored object and surfaces failures to the caller.
+  @override
+  Future<void> deleteRemoteStrict(String imagePath) async {
+    if (imagePath.isEmpty) return;
+    await _invoke({'action': 'delete', 'path': imagePath});
+    _cache.invalidatePath(imagePath);
   }
 
   Future<Uint8List?> _downloadOnce(String imagePath) async {

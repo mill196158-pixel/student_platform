@@ -59,9 +59,24 @@ class SupabaseNewsRepository implements NewsRepository {
     if (message.contains('archived_immutable')) {
       return const NewsRepositoryException('Архивную новость нельзя изменить.');
     }
+    if (message.contains('news_must_be_archived')) {
+      return const NewsRepositoryException(
+        'Окончательное удаление и восстановление доступны только для архивных новостей.',
+      );
+    }
     return NewsRepositoryException(
       'Не удалось выполнить операцию. Попробуйте ещё раз.',
     );
+  }
+
+  List<String> _asStringList(dynamic raw) {
+    if (raw is List) {
+      return raw
+          .map((e) => e?.toString().trim() ?? '')
+          .where((e) => e.isNotEmpty)
+          .toList();
+    }
+    return const [];
   }
 
   List<Map<String, dynamic>> _asList(dynamic data) {
@@ -154,6 +169,41 @@ class SupabaseNewsRepository implements NewsRepository {
   Future<NewsItem> archive(String id) async {
     final data = await _call('admin_archive_news', {'p_id': id});
     return NewsItem.fromJson(_asMap(data));
+  }
+
+  @override
+  Future<NewsItem> restoreArchived(String id) async {
+    final data = await _call('admin_restore_archived_news', {'p_id': id});
+    return NewsItem.fromJson(_asMap(data));
+  }
+
+  @override
+  Future<NewsDeleteResult> deleteArchived(String id) async {
+    final data = await _call('admin_delete_archived_news', {'p_post_id': id});
+    final map = _asMap(data);
+    return NewsDeleteResult(
+      id: (map['id'] ?? id).toString(),
+      title: (map['title'] ?? '').toString(),
+      previousStatus: NewsStatus.archived,
+      candidateMediaPaths: _asStringList(map['candidate_media_paths']),
+      mediaPathsToDelete: _asStringList(map['media_paths_to_delete']),
+    );
+  }
+
+  @override
+  Future<void> recordMediaCleanupFailure({
+    required List<String> paths,
+    String? sourceNewsPostId,
+    String? sourceTitle,
+    String? errorText,
+  }) async {
+    if (paths.isEmpty) return;
+    await _call('admin_record_news_media_cleanup_failure', {
+      'p_paths': paths,
+      'p_source_news_post_id': sourceNewsPostId,
+      'p_source_title': sourceTitle,
+      'p_error_text': errorText,
+    });
   }
 
   @override
