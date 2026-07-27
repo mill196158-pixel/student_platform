@@ -6,7 +6,7 @@
 ## Статус документа
 
 - Дата аудита: **27 июля 2026**
-- Обновлено: **27 июля 2026** (Stage 13.7 readiness docs)
+- Обновлено: **27 июля 2026** (Stage 13.2–13.7 code foundations; Codex READY_WITH_RESIDUALS)
 - Проверенная основная ветка: `refactor/chat-tab` @ `eca7c88`+
 - Проверенная административная ветка: `feature/admin-console`
 - Репозиторий: `mill196158-pixel/student_platform`
@@ -682,7 +682,7 @@ Status: **CODE FOUNDATION** (`eca7c88`) — Codex `READY_WITH_RESIDUALS`
 
 ### 13.7 — Первый релиз
 
-Status: **TECH CHECKS DONE (no devices)** — checklist `docs/release_checklist_v1.md`
+Status: **CODE FOUNDATION** (`7a56f56` + fix `6866357`) — Codex `READY_WITH_RESIDUALS`
 
 - [x] полный `flutter analyze` (0 errors; legacy infos/warnings не чистились механически);
 - [x] `flutter test` — 73 passed;
@@ -690,7 +690,10 @@ Status: **TECH CHECKS DONE (no devices)** — checklist `docs/release_checklist_
 - [x] `git diff --check` clean;
 - [x] secret scan: нет клиентских service_role secrets (только env/grants);
 - [x] polling inventory: profile legacy polling + presence/session timers зафиксированы;
+- [x] ordered remote-apply list в `docs/release_checklist_v1.md`;
+- [x] subjects fixture test больше не перезаписывает tracked XLSX;
 - [~] Deno check Edge Functions — `deno` отсутствует локально (residual);
+- [!] UNKNOWN_DB_LOCAL_VALIDATION;
 - [ ] проверка Android / iPhone / push / плохая сеть — требует устройств;
 - [x] release checklist Android+iPhone создан.
 
