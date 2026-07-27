@@ -6,7 +6,7 @@
 ## Статус документа
 
 - Дата аудита: **27 июля 2026**
-- Обновлено: **27 июля 2026** (Stage 13.2 organizer authority: active subject-team / admin grants; not `users.role`)
+- Обновлено: **27 июля 2026** (Stage 13.2 organizer Admin UI in Студенты; authority not `users.role`)
 - Проверенная основная ветка: `refactor/chat-tab`
 - Проверенная административная ветка: `feature/admin-console`
 - Репозиторий: `mill196158-pixel/student_platform`
@@ -614,11 +614,13 @@ Status: **CODE FOUNDATION** — remote apply + physical smoke pending
   - активная subject-team: `private.is_active_subject_team_for_group` — `subject_offerings.status='active'` (или current term без offering) и `team_main` не в `chat_academic_archives`;
   - sync: `refresh_group_space_organizer_grants` пересобирает только `subject_team`; durable `admin` grants сохраняются; снятие starosta / архив offering отзывает organizer;
   - `users.role` — только one-time migration backfill → durable admin grant; не участвует в ongoing auth/sync;
-  - назначение вручную после remote apply: RPC `public.set_group_space_organizer(group_id, user_id, true)` от admin с `groups.write` / `students.write` / `terms.manage` (не `content.publish`);
+  - назначение вручную после remote apply: Web Admin → **Студенты** → выбрать группу → «Организаторы пространства группы» (`admin_set_group_space_organizer` / `set_group_space_organizer`); UI показывает источник (explicit grant vs active subject-team) и не снимает natural starosta как grant;
+  - RPC списка: `admin_list_group_space_organizer_state`; миграция `20260727182537_stage13_2_admin_group_organizer.sql`;
   - role-play PASS: student forbidden; active starosta can manage; revoke; archived starosta no access; admin RBAC ≠ organizer; client `users.role` spoof denied;
 - [ ] физический smoke участника и организатора;
 - [x] local Docker preflight + security/role-play PASS (`scripts/local_preflight_stage13.sh`);
-- [!] remote apply миграции `20260727140000_stage13_2_group_space.sql` не выполнен.
+- [x] Web Admin UI назначения организатора встроен в **Студенты** (без отдельного модуля);
+- [!] remote apply `20260727140000_stage13_2_group_space.sql` + `20260727182537_stage13_2_admin_group_organizer.sql` не выполнен.
 
 Критерий DONE: у каждой группы есть одно понятное долговечное пространство, в котором чат, сбор и выбор темы работают без ручной работы в БД.
 

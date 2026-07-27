@@ -70,7 +70,8 @@ for f in \
   20260727150000_stage13_3_teachers_admin.sql \
   20260727160000_stage13_4_subjects_admin.sql \
   20260727170000_stage13_5_students_groups_terms_admin.sql \
-  20260727180000_stage13_6_reviews_moderation.sql
+  20260727180000_stage13_6_reviews_moderation.sql \
+  20260727182537_stage13_2_admin_group_organizer.sql
 do
   echo "  -> $f"
   run_sql_file "$STASH/$f"

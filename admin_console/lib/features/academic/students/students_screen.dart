@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../core/auth/admin_backend_config.dart';
 import '../../../core/auth/admin_session_controller.dart';
 import '../teachers/teacher_import_service.dart';
+import 'group_space_organizer_dialog.dart';
 import 'students_repository.dart';
 
 class StudentsScreen extends StatefulWidget {
@@ -191,6 +192,18 @@ class _StudentsScreenState extends State<StudentsScreen> {
       ),
     );
     await _load();
+  }
+
+  Future<void> _openGroupOrganizers(
+    GroupItem group, {
+    required bool canManage,
+  }) async {
+    await GroupSpaceOrganizerDialog.open(
+      context,
+      group: group,
+      repository: _repository,
+      canManage: canManage,
+    );
   }
 
   Future<void> _upsertGroup([GroupItem? existing]) async {
@@ -395,6 +408,14 @@ class _StudentsScreenState extends State<StudentsScreen> {
     final canTerms =
         widget.session.isLocalPrototype ||
         widget.session.capabilities.canManageTerms;
+    final canManageOrganizer =
+        widget.session.isLocalPrototype ||
+        widget.session.capabilities.canManageGroupSpaceOrganizer;
+    final canViewOrganizer =
+        widget.session.isLocalPrototype ||
+        widget.session.capabilities.canReadStudents ||
+        widget.session.capabilities.canWriteGroups ||
+        widget.session.capabilities.canManageTerms;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -522,13 +543,22 @@ class _StudentsScreenState extends State<StudentsScreen> {
                     child: InputChip(
                       label: Text('${group.name} (${group.membersCount})'),
                       selected: _groupFilter == group.id,
-                      onSelected: (_) {
+                      avatar: canViewOrganizer
+                          ? const Icon(Icons.shield_outlined, size: 16)
+                          : null,
+                      onSelected: (_) async {
+                        final selected = _groupFilter != group.id;
                         setState(() {
-                          _groupFilter = _groupFilter == group.id
-                              ? null
-                              : group.id;
+                          _groupFilter = selected ? group.id : null;
                         });
-                        _load();
+                        await _load();
+                        if (!mounted || !selected || !canViewOrganizer) {
+                          return;
+                        }
+                        await _openGroupOrganizers(
+                          group,
+                          canManage: canManageOrganizer,
+                        );
                       },
                       onDeleted: canGroups ? () => _upsertGroup(group) : null,
                       deleteIcon: canGroups
@@ -539,6 +569,28 @@ class _StudentsScreenState extends State<StudentsScreen> {
               ],
             ),
           ),
+        if (_groupFilter != null && canViewOrganizer) ...[
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              onPressed: () {
+                final index = _groups.indexWhere((g) => g.id == _groupFilter);
+                if (index < 0) return;
+                _openGroupOrganizers(
+                  _groups[index],
+                  canManage: canManageOrganizer,
+                );
+              },
+              icon: const Icon(Icons.shield_outlined),
+              label: Text(
+                canManageOrganizer
+                    ? 'Организаторы пространства группы'
+                    : 'Посмотреть организаторов пространства',
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: 12),
         Expanded(
           child: Card(

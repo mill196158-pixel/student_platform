@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'group_space_organizer_models.dart';
+
 class StudentItem {
   const StudentItem({
     required this.id,
@@ -93,6 +95,12 @@ abstract class StudentsRepository {
     required List<String> userIds,
     required bool isActive,
   });
+  Future<GroupSpaceOrganizerState> listGroupSpaceOrganizerState(String groupId);
+  Future<void> setGroupSpaceOrganizer({
+    required String groupId,
+    required String userId,
+    required bool isOrganizer,
+  });
 }
 
 class LocalStudentsRepository implements StudentsRepository {
@@ -115,17 +123,30 @@ class LocalStudentsRepository implements StudentsRepository {
           primaryGroupId: 'g1',
           groupName: 'ИВТ-21',
         ),
+        const StudentItem(
+          id: 's3',
+          login: 'starosta',
+          name: 'Олег',
+          surname: 'Старостин',
+          primaryGroupId: 'g1',
+          groupName: 'ИВТ-21',
+        ),
       ],
-      _groups = [const GroupItem(id: 'g1', name: 'ИВТ-21', membersCount: 2)],
+      _groups = [const GroupItem(id: 'g1', name: 'ИВТ-21', membersCount: 3)],
       _terms = [
         const TermItem(id: 't1', label: '2025/2026 · 2', isCurrent: true),
         const TermItem(id: 't2', label: '2026/2027 · 1'),
-      ];
+      ],
+      // Demo: natural organizer from active subject-team starosta.
+      _subjectTeamOrganizers = {'s3'},
+      _adminOrganizerGrants = {};
 
   final List<StudentItem> _students;
   final List<GroupItem> _groups;
   final List<TermItem> _terms;
   final Set<String> _hashes = {};
+  final Set<String> _subjectTeamOrganizers;
+  final Set<String> _adminOrganizerGrants;
 
   @override
   Future<List<StudentItem>> listStudents({
@@ -316,6 +337,67 @@ class LocalStudentsRepository implements StudentsRepository {
     }
     return {'ok': userIds, 'error': <String>[]};
   }
+
+  @override
+  Future<GroupSpaceOrganizerState> listGroupSpaceOrganizerState(
+    String groupId,
+  ) async {
+    final index = _groups.indexWhere((g) => g.id == groupId);
+    if (index < 0) {
+      throw StateError('group_not_found');
+    }
+    final group = _groups[index];
+    final members = _students.where((s) => s.primaryGroupId == groupId).map((
+      s,
+    ) {
+      final hasAdmin = _adminOrganizerGrants.contains(s.id);
+      final hasSubject = _subjectTeamOrganizers.contains(s.id);
+      final sources = <String>[
+        if (hasAdmin) 'admin',
+        if (hasSubject) 'subject_team',
+      ];
+      return GroupSpaceMemberOrganizer(
+        userId: s.id,
+        login: s.login,
+        name: s.name,
+        surname: s.surname,
+        isActive: s.isActive,
+        hasAdminGrant: hasAdmin,
+        hasSubjectTeamAuthority: hasSubject,
+        subjectTeamRoles: hasSubject ? const ['starosta'] : const [],
+        sources: sources,
+      );
+    }).toList();
+    return GroupSpaceOrganizerState(
+      groupId: group.id,
+      groupName: group.name,
+      spaceExists: true,
+      teamId: 'team-$groupId',
+      canManage: true,
+      assistantsSupported: false,
+      members: members,
+    );
+  }
+
+  @override
+  Future<void> setGroupSpaceOrganizer({
+    required String groupId,
+    required String userId,
+    required bool isOrganizer,
+  }) async {
+    final belongs = _students.any(
+      (s) => s.id == userId && s.primaryGroupId == groupId,
+    );
+    if (!belongs) {
+      throw StateError('invalid_group_member');
+    }
+    if (isOrganizer) {
+      _adminOrganizerGrants.add(userId);
+    } else {
+      // Only removes explicit admin grant; natural subject-team authority stays.
+      _adminOrganizerGrants.remove(userId);
+    }
+  }
 }
 
 class SupabaseStudentsRepository implements StudentsRepository {
@@ -477,5 +559,35 @@ class SupabaseStudentsRepository implements StudentsRepository {
     );
     final decoded = result is String ? jsonDecode(result) : result;
     return Map<String, dynamic>.from(decoded as Map);
+  }
+
+  @override
+  Future<GroupSpaceOrganizerState> listGroupSpaceOrganizerState(
+    String groupId,
+  ) async {
+    final result = await _client.rpc(
+      'admin_list_group_space_organizer_state',
+      params: {'p_group_id': groupId},
+    );
+    final decoded = result is String ? jsonDecode(result) : result;
+    return GroupSpaceOrganizerState.fromJson(
+      Map<String, dynamic>.from(decoded as Map),
+    );
+  }
+
+  @override
+  Future<void> setGroupSpaceOrganizer({
+    required String groupId,
+    required String userId,
+    required bool isOrganizer,
+  }) async {
+    await _client.rpc(
+      'admin_set_group_space_organizer',
+      params: {
+        'p_group_id': groupId,
+        'p_user_id': userId,
+        'p_is_organizer': isOrganizer,
+      },
+    );
   }
 }

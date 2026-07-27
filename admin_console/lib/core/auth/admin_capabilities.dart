@@ -38,6 +38,10 @@ class AdminCapabilities {
   bool get canSuspendStudents => can('students.suspend');
   bool get canWriteGroups => can('groups.write');
   bool get canManageTerms => can('terms.manage');
+
+  /// Matches server `private.is_group_space_admin` for organizer grants.
+  bool get canManageGroupSpaceOrganizer =>
+      can('groups.write') || can('students.write') || can('terms.manage');
   bool get canManageRoles => can('roles.manage');
   bool get canReadAudit => can('audit.read');
 
