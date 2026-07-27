@@ -66,14 +66,58 @@ void main() {
     expect(replay['idempotent_replay'], isTrue);
   });
 
-  test('term prepare dry-run and idempotent apply', () async {
+  test(
+    'term backfill dry-run and idempotent apply without set_current',
+    () async {
+      final repo = LocalStudentsRepository();
+      final dry = await repo.prepareTermDryRun('t2');
+      expect(dry['missing_subjects'], greaterThan(0));
+      expect(dry['current_unchanged'], isTrue);
+      expect(
+        () => repo.prepareTermApply(termId: 't2', setCurrent: true),
+        throwsStateError,
+      );
+      final first = await repo.prepareTermApply(termId: 't2');
+      expect(first['idempotent_replay'], isFalse);
+      expect(first['set_current'], isFalse);
+      final second = await repo.prepareTermApply(termId: 't2');
+      expect(second['idempotent_replay'], isTrue);
+    },
+  );
+
+  testWidgets('students screen has no dangerous term transition controls', (
+    tester,
+  ) async {
+    final session = _TestSession(
+      initialPhase: AdminSessionPhase.ready,
+      capabilities: const AdminCapabilities(
+        userId: 'admin-1',
+        permissions: {
+          'dashboard.view',
+          'students.read',
+          'students.write',
+          'terms.manage',
+        },
+        assignments: [],
+      ),
+    );
     final repo = LocalStudentsRepository();
-    final dry = await repo.prepareTermDryRun('t2');
-    expect(dry['missing_offerings'], greaterThan(0));
-    final first = await repo.prepareTermApply(termId: 't2', setCurrent: true);
-    expect(first['idempotent_replay'], isFalse);
-    final second = await repo.prepareTermApply(termId: 't2', setCurrent: true);
-    expect(second['idempotent_replay'], isTrue);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StudentsScreen(session: session, repository: repo),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Студенты и группы'), findsOneWidget);
+    expect(find.textContaining('Сделать текущим'), findsNothing);
+    expect(find.textContaining('apply'), findsNothing);
+    expect(find.textContaining('offerings'), findsNothing);
+    expect(find.textContaining('teams'), findsNothing);
+    expect(find.text('Начать новый семестр'), findsNothing);
+    expect(find.byKey(const Key('students-term-filter')), findsOneWidget);
   });
 
   test('demo organizer lists natural subject-team starosta', () async {

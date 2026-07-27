@@ -30,6 +30,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
   String _query = '';
   bool? _activeFilter = true;
   String? _groupFilter;
+  String? _termFilter;
 
   @override
   void initState() {
@@ -336,64 +337,6 @@ class _StudentsScreenState extends State<StudentsScreen> {
     await _load();
   }
 
-  Future<void> _prepareTerm(TermItem term) async {
-    final dry = await _repository.prepareTermDryRun(term.id);
-    if (!mounted) return;
-    var setCurrent = false;
-    final apply = await showDialog<bool>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setLocal) => AlertDialog(
-          title: Text('Подготовка семестра · ${term.label}'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Групп: ${dry['groups_count'] ?? 0}'),
-              Text('Недостающих offerings: ${dry['missing_offerings'] ?? 0}'),
-              Text('Недостающих teams: ${dry['missing_teams'] ?? 0}'),
-              const SizedBox(height: 8),
-              CheckboxListTile(
-                value: setCurrent,
-                onChanged: (v) => setLocal(() => setCurrent = v ?? false),
-                title: const Text('Сделать текущим после apply'),
-                subtitle: const Text(
-                  'Переключение архивирует предметные чаты прошлого периода.',
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Отмена'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Подтвердить apply'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (apply != true) return;
-    final result = await _repository.prepareTermApply(
-      termId: term.id,
-      setCurrent: setCurrent,
-    );
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          result['idempotent_replay'] == true
-              ? 'Повтор: подготовка уже применена'
-              : 'Offerings +${result['created_offerings'] ?? 0}, teams +${result['created_teams'] ?? 0}',
-        ),
-      ),
-    );
-    await _load();
-  }
-
   @override
   Widget build(BuildContext context) {
     final canWrite =
@@ -405,29 +348,25 @@ class _StudentsScreenState extends State<StudentsScreen> {
     final canGroups =
         widget.session.isLocalPrototype ||
         widget.session.capabilities.canWriteGroups;
-    final canTerms =
-        widget.session.isLocalPrototype ||
-        widget.session.capabilities.canManageTerms;
     final canManageOrganizer =
         widget.session.isLocalPrototype ||
         widget.session.capabilities.canManageGroupSpaceOrganizer;
     final canViewOrganizer =
         widget.session.isLocalPrototype ||
         widget.session.capabilities.canReadStudents ||
-        widget.session.capabilities.canWriteGroups ||
-        widget.session.capabilities.canManageTerms;
+        widget.session.capabilities.canWriteGroups;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Студенты, группы и семестры',
+          'Студенты и группы',
           style: Theme.of(
             context,
           ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
         ),
         const SizedBox(height: 6),
         const Text(
-          'Управление профилями и enrollments. Auth-создание остаётся в CLI/Edge.',
+          'Управление профилями, группами и организаторами пространства. Учебные периоды — в разделе Система.',
         ),
         const SizedBox(height: 16),
         Wrap(
@@ -488,7 +427,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                 icon: const Icon(Icons.group_add),
                 label: const Text('Группа'),
               ),
-            if (canWrite || canTerms)
+            if (canWrite)
               OutlinedButton.icon(
                 onPressed: _showJournal,
                 icon: const Icon(Icons.history),
@@ -508,28 +447,31 @@ class _StudentsScreenState extends State<StudentsScreen> {
                     : () => _bulkSetActive(true),
                 child: const Text('Восстановить выбранных'),
               ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        if (canTerms)
-          SizedBox(
-            height: 56,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              children: [
-                for (final term in _terms)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ActionChip(
-                      label: Text(
-                        '${term.label}${term.isCurrent ? ' · current' : ''}',
+            if (_terms.isNotEmpty)
+              DropdownButton<String?>(
+                key: const Key('students-term-filter'),
+                value: _termFilter,
+                hint: const Text('Семестр'),
+                items: [
+                  const DropdownMenuItem(
+                    value: null,
+                    child: Text('Все семестры'),
+                  ),
+                  ..._terms.map(
+                    (t) => DropdownMenuItem(
+                      value: t.id,
+                      child: Text(
+                        '${t.label}${t.isCurrent ? ' · текущий' : ''}',
                       ),
-                      onPressed: () => _prepareTerm(term),
                     ),
                   ),
-              ],
-            ),
-          ),
+                ],
+                onChanged: (v) {
+                  setState(() => _termFilter = v);
+                },
+              ),
+          ],
+        ),
         const SizedBox(height: 8),
         if (_groups.isNotEmpty)
           SizedBox(

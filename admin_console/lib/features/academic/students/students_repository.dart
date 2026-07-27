@@ -278,8 +278,12 @@ class LocalStudentsRepository implements StudentsRepository {
   Future<Map<String, dynamic>> prepareTermDryRun(String termId) async => {
     'term_id': termId,
     'groups_count': _groups.length,
+    'missing_subjects': 2,
+    'missing_subject_chats': 1,
     'missing_offerings': 2,
     'missing_teams': 1,
+    'current_unchanged': true,
+    'chats_not_archived': true,
   };
 
   @override
@@ -287,17 +291,28 @@ class LocalStudentsRepository implements StudentsRepository {
     required String termId,
     bool setCurrent = false,
   }) async {
-    final key = '$termId:$setCurrent';
+    if (setCurrent) {
+      throw StateError('set_current_forbidden_use_admin_start_next_term');
+    }
+    final key = '$termId:backfill';
     if (_hashes.contains(key)) {
-      return {'idempotent_replay': true};
+      return {
+        'idempotent_replay': true,
+        'current_unchanged': true,
+        'chats_not_archived': true,
+      };
     }
     _hashes.add(key);
     return {
       'idempotent_replay': false,
+      'created_subjects': 2,
+      'created_subject_chats': 1,
       'created_offerings': 2,
       'created_teams': 1,
       'synced_group_spaces': _groups.length,
-      'set_current': setCurrent,
+      'set_current': false,
+      'current_unchanged': true,
+      'chats_not_archived': true,
     };
   }
 

@@ -49,7 +49,7 @@ class AdminShell extends StatelessWidget {
         label: 'Студенты',
         icon: Icons.groups_outlined,
         path: '/academic/students',
-        isVisible: local || caps.canReadStudents || caps.canManageTerms,
+        isVisible: local || caps.canReadStudents || caps.canWriteGroups,
       ),
       _AdminDestination(
         label: 'Модерация',
@@ -60,11 +60,12 @@ class AdminShell extends StatelessWidget {
             caps.can('moderation.read') ||
             caps.can('moderation.write'),
       ),
-      const _AdminDestination(
-        label: 'Система',
-        icon: Icons.settings_outlined,
-        isEnabled: false,
-        isVisible: false,
+      _AdminDestination(
+        label: 'Учебные периоды',
+        icon: Icons.calendar_month_outlined,
+        path: '/system/terms',
+        section: 'Система',
+        isVisible: local || caps.canManageTerms,
       ),
     ].where((item) => item.isVisible).toList(growable: false);
   }
@@ -307,7 +308,6 @@ class _AdminDestination {
     required this.icon,
     this.path,
     this.section,
-    this.isEnabled = true,
     this.isVisible = true,
   });
 
@@ -315,6 +315,7 @@ class _AdminDestination {
   final IconData icon;
   final String? path;
   final String? section;
-  final bool isEnabled;
   final bool isVisible;
+
+  bool get isEnabled => path != null;
 }

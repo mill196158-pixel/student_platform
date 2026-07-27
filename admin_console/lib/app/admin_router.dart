@@ -13,6 +13,7 @@ import '../features/academic/teachers/teachers_screen.dart';
 import '../features/content/news/news_editor_screen.dart';
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/moderation/moderation_screen.dart';
+import '../features/system/terms/terms_screen.dart';
 
 bool _isAuthPublicPath(String loc) {
   return loc == '/login' ||
@@ -71,6 +72,9 @@ GoRouter createAdminRouter(AdminSessionController session) {
         return '/no-access';
       }
       if (loc.startsWith('/academic') && !caps.canReadAcademic) {
+        return '/no-access';
+      }
+      if (loc.startsWith('/system/terms') && !caps.canManageTerms) {
         return '/no-access';
       }
       if (loc == '/dashboard' &&
@@ -133,6 +137,10 @@ GoRouter createAdminRouter(AdminSessionController session) {
           GoRoute(
             path: '/moderation',
             builder: (context, state) => ModerationScreen(session: session),
+          ),
+          GoRoute(
+            path: '/system/terms',
+            builder: (context, state) => TermsScreen(session: session),
           ),
         ],
       ),

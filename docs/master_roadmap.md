@@ -6,12 +6,12 @@
 ## Статус документа
 
 - Дата аудита: **27 июля 2026**
-- Обновлено: **27 июля 2026** (Stage 13.2–13.7 **TECHNICALLY DONE** on remote `gwdanmwluhrcfxbnplwd`)
+- Обновлено: **27 июля 2026** (Stage 13.8 safe academic terms — **CODE PUSHED**, remote apply pending; next: Stage 13.9)
 - Проверенная основная ветка: `refactor/chat-tab`
 - Проверенная административная ветка: `feature/admin-console`
 - Репозиторий: `mill196158-pixel/student_platform`
 - Статус карты: **ACTIVE**
-- Следующий рекомендуемый этап: **PHYSICAL SMOKE** (Android/iPhone) + **REAL XLSX** imports
+- Следующий рекомендуемый этап: **Stage 13.9** (чат группы / темы / сборы), затем remote apply 13.8 по решению владельца + **PHYSICAL SMOKE**
 
 Обозначения:
 
@@ -676,14 +676,45 @@ Status: **TECHNICALLY DONE** schema/Edge/tests — **PHYSICAL SMOKE REQUIRED** +
 - [x] readiness notes + checklist обновлены;
 - [ ] Android / iPhone / push / плохая сеть (**PHYSICAL SMOKE REQUIRED**).
 
+### 13.8 — Безопасные учебные периоды
+
+Status: **CODE PUSHED** (migration local+git only; remote apply **не** выполнен)
+
+Live audit (`gwdanmwluhrcfxbnplwd`):
+
+- текущий семестр: **весна 2026** (`2026-02-01` … `2026-06-30`, `is_current=true`);
+- следующего семестра в БД нет;
+- календарного автопереключения `is_current` нет; cron только архивирует чаты уже неактуальных периодов.
+
+Сделано:
+
+- [x] разделение safe backfill и forward-only `admin_start_next_term`;
+- [x] серверные проверки: только ближайший следующий, lock, dry-run, audit, rollback;
+- [x] UI `Система → Учебные периоды`; опасное действие убрано из «Студенты»;
+- [x] confirmation с обязательным вводом названия нового семестра;
+- [x] `auto_activation_enabled=false` (автоактивация не включена);
+- [x] local SQL security review + assertive role-play PASS;
+- [x] commit + push в `refactor/chat-tab`;
+- [ ] remote apply — только после owner authorization (осень 2026 не создавать в этом этапе).
+
+### 13.9 — Чат группы, выбор темы и сборы
+
+Status: **IN PROGRESS** (local only; remote apply / Edge deploy / commit запрещены до READY FOR REVIEW)
+
+- [ ] убрать «Пространство группы» из Инфо; карточка «Чат группы» в Обучении;
+- [ ] «Выбор темы» + локальный parsing/OCR + review screen;
+- [ ] foundation «Сбор»;
+- [ ] календарь / главная / push mapping без попадания в дневник предметов.
+
 ---
 
 ## 13. Приоритет на ближайшие работы
 
 1. ~~13.2–13.6 code foundations + remote apply + Edge deploy~~ **TECHNICALLY DONE**.
-2. **Владелец:** физический smoke Android/iPhone по `docs/release_checklist_v1.md`.
-3. **Владелец:** реальные Excel (teachers/subjects/students) через Admin dry-run → apply.
-4. Небольшой багфикс-цикл только по подтверждённым дефектам устройств.
+2. ~~Stage 13.8 code push~~ **CODE PUSHED**; remote apply — по отдельному решению владельца.
+3. **Stage 13.9** — чат группы / выбор темы / сборы (local READY FOR REVIEW).
+4. **Владелец:** физический smoke Android/iPhone по `docs/release_checklist_v1.md`.
+5. **Владелец:** реальные Excel (teachers/subjects/students) через Admin dry-run → apply.
 
 Закрыто перед 13.2:
 
