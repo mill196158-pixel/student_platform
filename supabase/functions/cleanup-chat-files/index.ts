@@ -357,9 +357,11 @@ async function sha256Hex(value: string): Promise<string> {
 }
 
 async function hmac(key: Uint8Array, value: string): Promise<Uint8Array> {
+  // Copy into a fresh ArrayBuffer-backed view for Deno/TS BufferSource typing.
+  const keyBytes = Uint8Array.from(key);
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
-    key,
+    keyBytes,
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"],
