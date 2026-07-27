@@ -68,6 +68,7 @@ class SupabaseLearningRepository implements LearningRepository {
       academicTermId:
           _nullableString(m['academic_term_id'] ?? m['academicTermId']),
       semesterNumber: _nullableInt(m['semester_number'] ?? m['semesterNumber']),
+      kind: (m['kind'] ?? m['team_kind'] ?? 'subject').toString(),
     );
   }
 
@@ -80,7 +81,7 @@ class SupabaseLearningRepository implements LearningRepository {
       final rows = await _sb
           .from('teams')
           .select(
-            'id,group_id,subject_id,subject_offering_id,academic_year_id,academic_term_id,semester_number',
+            'id,group_id,subject_id,subject_offering_id,academic_year_id,academic_term_id,semester_number,kind',
           )
           .inFilter('id', ids);
       final byId = <String, Map<String, dynamic>>{};
@@ -100,6 +101,7 @@ class SupabaseLearningRepository implements LearningRepository {
           academicYearId: _nullableString(row['academic_year_id']),
           academicTermId: _nullableString(row['academic_term_id']),
           semesterNumber: _nullableInt(row['semester_number']),
+          kind: (row['kind'] ?? team.kind).toString(),
         );
       }).toList();
     } catch (e) {
@@ -307,6 +309,30 @@ class SupabaseLearningRepository implements LearningRepository {
     final authorName = (m['author_name'] ?? '').toString().trim();
     final authorLogin = (m['author_login'] ?? '').toString().trim();
 
+    String textVal = (m['body'] ?? m['text'] ?? '').toString();
+    String? cardKind;
+    String? cardEntityId;
+    final rawContent = m['content'];
+    if (rawContent is Map) {
+      final contentMap = Map<String, dynamic>.from(rawContent);
+      cardKind = contentMap['card']?.toString();
+      cardEntityId = (contentMap['selection_id'] ?? contentMap['collection_id'])
+          ?.toString();
+    } else if (rawContent is String && rawContent.trimLeft().startsWith('{')) {
+      try {
+        final contentMap = jsonDecode(rawContent);
+        if (contentMap is Map) {
+          cardKind = contentMap['card']?.toString();
+          cardEntityId =
+              (contentMap['selection_id'] ?? contentMap['collection_id'])
+                  ?.toString();
+        }
+      } catch (_) {}
+    }
+    if (textVal.isEmpty && cardKind == null) {
+      textVal = rawContent?.toString() ?? '';
+    }
+
     return Message(
       id: (m['id'] ?? '').toString(),
       chatId: (m['chat_id'] ?? chatId).toString(),
@@ -315,7 +341,7 @@ class SupabaseLearningRepository implements LearningRepository {
       authorName: authorName.isNotEmpty
           ? authorName
           : (authorLogin.isNotEmpty ? authorLogin : (amI ? 'Вы' : 'Студент')),
-      text: (m['text'] ?? m['content'] ?? m['body'] ?? '').toString(),
+      text: textVal,
       at: DateTime.tryParse((m['at'] ?? m['created_at'] ?? '').toString()) ??
           DateTime.now(),
       editedAt:
@@ -337,6 +363,8 @@ class SupabaseLearningRepository implements LearningRepository {
       userReactions: (m['user_reactions'] is List)
           ? (m['user_reactions'] as List).map((e) => e.toString()).toList()
           : null,
+      cardKind: cardKind,
+      cardEntityId: cardEntityId,
     );
   }
 

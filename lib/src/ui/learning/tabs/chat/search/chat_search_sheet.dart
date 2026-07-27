@@ -28,7 +28,8 @@ class _ChatSearchSheetState extends State<ChatSearchSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            const Text('Поиск сообщений', style: TextStyle(fontWeight: FontWeight.w700)),
+            const Text('Поиск сообщений',
+                style: TextStyle(fontWeight: FontWeight.w700)),
             const SizedBox(height: 10),
             TextField(
               controller: widget.controller.field,
@@ -46,7 +47,9 @@ class _ChatSearchSheetState extends State<ChatSearchSheet> {
               },
             ),
             const SizedBox(height: 10),
-            Text(total == 0 ? 'Совпадений: 0' : 'Совпадений: $total  •  Текущая: $idx'),
+            Text(total == 0
+                ? 'Совпадений: 0'
+                : 'Совпадений: $total  •  Текущая: $idx'),
             const SizedBox(height: 8),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
@@ -83,6 +86,3 @@ class _ChatSearchSheetState extends State<ChatSearchSheet> {
     );
   }
 }
-
-
-

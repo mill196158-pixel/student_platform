@@ -9,6 +9,7 @@ class StudentHomeData {
     required this.lessons,
     required this.assignments,
     required this.news,
+    this.groupActions = const [],
     this.totalLessonsToday = 0,
     this.assignmentsCount = 0,
     this.lessonsFinishedForToday = false,
@@ -19,6 +20,7 @@ class StudentHomeData {
   final List<StudentHomeLesson> lessons;
   final List<StudentHomeAssignment> assignments;
   final List<StudentHomeNews> news;
+  final List<StudentHomeGroupAction> groupActions;
   final int totalLessonsToday;
   final int assignmentsCount;
   final bool lessonsFinishedForToday;
@@ -74,6 +76,24 @@ enum StudentHomeAssignmentStatus {
   notStarted,
   inProgress,
   done,
+}
+
+class StudentHomeGroupAction {
+  const StudentHomeGroupAction({
+    required this.id,
+    required this.title,
+    required this.kindLabel,
+    required this.deadlineText,
+    this.teamName,
+    this.myPickText,
+  });
+
+  final String id;
+  final String title;
+  final String kindLabel;
+  final String deadlineText;
+  final String? teamName;
+  final String? myPickText;
 }
 
 class StudentHomeNews {

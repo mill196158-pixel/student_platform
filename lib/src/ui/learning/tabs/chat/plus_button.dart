@@ -35,7 +35,8 @@ class PlusButton extends StatelessWidget {
                     Navigator.pop(context);
                     final res = await _askAssignment(context);
                     if (res == null) return;
-                    await onPropose?.call(res.$1, res.$2, res.$3, res.$4, res.$5);
+                    await onPropose?.call(
+                        res.$1, res.$2, res.$3, res.$4, res.$5);
                   },
                 ),
                 ListTile(
@@ -45,7 +46,8 @@ class PlusButton extends StatelessWidget {
                     Navigator.pop(context);
                     // TODO: Добавить логику создания опроса
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Функция опросов пока в разработке')),
+                      const SnackBar(
+                          content: Text('Функция опросов пока в разработке')),
                     );
                   },
                 ),
@@ -73,43 +75,62 @@ class PlusButton extends StatelessWidget {
     return showDialog<String>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Center(child: Text('Закрепить заметку', style: TextStyle(fontWeight: FontWeight.w700))),
-        content: TextField(controller: c, maxLines: 3, decoration: const InputDecoration(hintText: 'Текст заметки')),
+        title: const Center(
+            child: Text('Закрепить заметку',
+                style: TextStyle(fontWeight: FontWeight.w700))),
+        content: TextField(
+            controller: c,
+            maxLines: 3,
+            decoration: const InputDecoration(hintText: 'Текст заметки')),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Отмена')),
-          FilledButton(onPressed: () => Navigator.pop(context, c.text), child: const Text('Закрепить')),
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Отмена')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, c.text),
+              child: const Text('Закрепить')),
         ],
       ),
     );
   }
 
-  Future<(String, String, String?, String?, List<Map<String, String>>)?> _askAssignment(
-      BuildContext context) async {
+  Future<(String, String, String?, String?, List<Map<String, String>>)?>
+      _askAssignment(BuildContext context) async {
     final title = TextEditingController();
     final desc = TextEditingController();
     final link = TextEditingController();
     final due = TextEditingController();
     final List<Map<String, String>> files = [];
 
-    return showDialog<(String, String, String?, String?, List<Map<String, String>>)>(
+    return showDialog<
+        (String, String, String?, String?, List<Map<String, String>>)>(
       context: context,
       builder: (_) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
           title: const Center(
-            child: Text('Новое задание', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w700)),
+            child: Text('Новое задание',
+                style: TextStyle(
+                    color: Colors.black, fontWeight: FontWeight.w700)),
           ),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(controller: title, decoration: const InputDecoration(labelText: 'Название')),
+                TextField(
+                    controller: title,
+                    decoration: const InputDecoration(labelText: 'Название')),
                 const SizedBox(height: 8),
                 TextField(
-                  controller: desc, minLines: 3, maxLines: 6,
+                  controller: desc,
+                  minLines: 3,
+                  maxLines: 6,
                   decoration: const InputDecoration(labelText: 'Что сделать'),
                 ),
                 const SizedBox(height: 8),
-                TextField(controller: link, decoration: const InputDecoration(labelText: 'Ссылка (опц.)')),
+                TextField(
+                    controller: link,
+                    decoration:
+                        const InputDecoration(labelText: 'Ссылка (опц.)')),
                 const SizedBox(height: 8),
                 TextField(
                   controller: due,
@@ -140,9 +161,11 @@ class PlusButton extends StatelessWidget {
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(
                     onPressed: () async {
-                      final res = await ImagePicker().pickImage(source: ImageSource.gallery);
+                      final res = await ImagePicker()
+                          .pickImage(source: ImageSource.gallery);
                       if (res != null) {
-                        setState(() => files.add({'name': res.name, 'path': res.path}));
+                        setState(() =>
+                            files.add({'name': res.name, 'path': res.path}));
                       }
                     },
                     icon: const Icon(Icons.attach_file),
@@ -160,10 +183,13 @@ class PlusButton extends StatelessWidget {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Отмена')),
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Отмена')),
             FilledButton(
               onPressed: () {
-                if (title.text.trim().isEmpty || desc.text.trim().isEmpty) return;
+                if (title.text.trim().isEmpty || desc.text.trim().isEmpty)
+                  return;
                 Navigator.pop(
                   context,
                   (
@@ -201,29 +227,33 @@ class PlusButton extends StatelessWidget {
       );
 
       final fileService = FileService();
-      
+
       // Тест 1: Проверяем подключение
       final connectionResult = await fileService.testConnection();
-      
+
       if (!connectionResult.success) {
         Navigator.pop(context); // Закрываем диалог загрузки
-        _showErrorDialog(context, '❌ Ошибка подключения', connectionResult.error ?? 'Неизвестная ошибка');
+        _showErrorDialog(context, '❌ Ошибка подключения',
+            connectionResult.error ?? 'Неизвестная ошибка');
         return;
       }
 
       // Тест 2: Пробуем загрузить тестовый файл
       final testResult = await fileService.uploadTestFile();
-      
+
       Navigator.pop(context); // Закрываем диалог загрузки
 
       if (testResult.success) {
-        _showSuccessDialog(context, '✅ Тест успешен!', 
-          'Подключение к Яндекс Storage работает.\n\n'
-          'Тестовый файл загружен:\n'
-          '📁 ${testResult.fileName}\n'
-          '🔗 ${testResult.fileUrl}');
+        _showSuccessDialog(
+            context,
+            '✅ Тест успешен!',
+            'Подключение к Яндекс Storage работает.\n\n'
+                'Тестовый файл загружен:\n'
+                '📁 ${testResult.fileName}\n'
+                '🔗 ${testResult.fileUrl}');
       } else {
-        _showErrorDialog(context, '❌ Ошибка загрузки', testResult.error ?? 'Не удалось загрузить тестовый файл');
+        _showErrorDialog(context, '❌ Ошибка загрузки',
+            testResult.error ?? 'Не удалось загрузить тестовый файл');
       }
 
       fileService.dispose();

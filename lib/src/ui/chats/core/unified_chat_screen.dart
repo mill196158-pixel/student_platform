@@ -25,6 +25,9 @@ import 'package:student_platform/src/ui/learning/tabs/chat/search/chat_search_co
 import 'package:student_platform/src/ui/learning/tabs/chat/search/inline_search_bar.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/selection_bars.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/composer.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/topics/create_topic_selection_screen.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/collections/create_collection_screen.dart';
+import 'package:student_platform/src/ui/learning/data/supabase_learning_repository.dart';
 
 import 'package:student_platform/src/services/file_service.dart';
 import 'package:student_platform/src/services/push/active_chat_tracker.dart';
@@ -1520,6 +1523,10 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     final canProposeAssignments = !isDm &&
         widget.service.supportsAssignments &&
         _canManageAssignments(context);
+    final teamKind = _teamKind(context);
+    final canManageGroupActions = !isDm && _canManageAssignments(context);
+    final showTopicSelection = canManageGroupActions && !isDm;
+    final showCollection = canManageGroupActions && teamKind == 'group_space';
 
     return Scaffold(
       appBar: _selecting
@@ -2062,6 +2069,12 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                               setState(() {}); // на всякий случай перерисовка
                             },
                             showProposeInPlus: canProposeAssignments,
+                            showTopicSelectionInPlus: showTopicSelection,
+                            showCollectionInPlus: showCollection,
+                            onOpenTopicSelection: () =>
+                                unawaited(_openTopicSelection(context)),
+                            onOpenCollection: () =>
+                                unawaited(_openCollection(context)),
                             onPropose: (title, description, link, due,
                                 attachments) async {
                               if (!canProposeAssignments) return;
@@ -2087,6 +2100,34 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     } catch (_) {
       return false;
     }
+  }
+
+  String _teamKind(BuildContext context) {
+    try {
+      return context.select((TeamCubit cubit) => cubit.state.team.kind);
+    } catch (_) {
+      return 'subject';
+    }
+  }
+
+  Future<void> _openTopicSelection(BuildContext context) async {
+    try {
+      final teamId = context.read<TeamCubit>().state.team.id;
+      final chatId = await SupabaseLearningRepository().getMainChatId(teamId);
+      if (chatId.isEmpty || !context.mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => CreateTopicSelectionScreen(chatId: chatId),
+        ),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _openCollection(BuildContext context) async {
+    if (!context.mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const CreateCollectionScreen()),
+    );
   }
 
   void _showMessageActions(BuildContext ctx, Message m,
@@ -2306,9 +2347,8 @@ class _DmBlockedComposerBar extends StatelessWidget {
         : 'Личные сообщения недоступны';
 
     final safeBottom = MediaQuery.paddingOf(context).bottom;
-    final bottomPad = safeBottom > 0
-        ? (safeBottom - 12).clamp(18.0, safeBottom)
-        : 6.0;
+    final bottomPad =
+        safeBottom > 0 ? (safeBottom - 12).clamp(18.0, safeBottom) : 6.0;
 
     return Padding(
       padding: EdgeInsets.only(bottom: bottomPad),

@@ -9,7 +9,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../learning/assignment_details_screen.dart';
 import '../learning/models/team.dart';
 import '../learning/state/team_cubit.dart';
+import '../learning/tabs/chat/data/chat_group_actions_repository.dart';
+import '../learning/tabs/chat/navigation/group_action_deeplink.dart';
 import 'models/lesson.dart';
+import 'models/schedule_group_action_event.dart';
+import 'models/schedule_group_action_mapper.dart';
 import 'lesson_details_screen.dart';
 import 'widgets/lesson_card.dart';
 import 'widgets/mini_calendar.dart';
@@ -205,6 +209,30 @@ class ScheduleRepository {
       return const [];
     }
   }
+
+  Future<List<ScheduleGroupActionEvent>> loadMonthGroupActions(
+    DateTime anchor,
+  ) async {
+    try {
+      final first = DateTime(anchor.year, anchor.month, 1);
+      final last = DateTime(anchor.year, anchor.month + 1, 0, 23, 59, 59);
+      final repo = ChatGroupActionsRepository(client: _sb);
+      final raw = await repo.listMyGroupActionDeadlinesCached(
+        from: first,
+        to: last,
+      );
+      return mapScheduleGroupActionEvents(raw);
+    } catch (e, st) {
+      // ignore: avoid_print
+      print('Schedule group actions load error: $e\n$st');
+      final repo = ChatGroupActionsRepository(client: _sb);
+      final first = DateTime(anchor.year, anchor.month, 1);
+      final last = DateTime(anchor.year, anchor.month + 1, 0, 23, 59, 59);
+      return mapScheduleGroupActionEvents(
+        await repo.peekCachedDeadlines(from: first, to: last),
+      );
+    }
+  }
 }
 
 class ScheduleAssignment {
@@ -342,6 +370,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   bool _weekMode = false; // режим «День»/«Неделя»
   List<Lesson> _all = [];
   List<ScheduleAssignment> _assignments = [];
+  List<ScheduleGroupActionEvent> _groupActions = [];
   RealtimeChannel? _channel;
   RealtimeChannel? _assignmentsChannel;
 
@@ -361,6 +390,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   static const Color _cPractice = Color(0xFF1E88E5);
   static const Color _cLab = Color(0xFF8E24AA);
   static const Color _cAssignment = Color(0xFFF59E0B);
+  static const Color _cGroupAction = Color(0xFF7C63D8);
 
   @override
   void initState() {
@@ -414,8 +444,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     return DateTime(d.year, d.month, d.day).subtract(Duration(days: wd - 1));
   }
 
-  bool _isSameDate(DateTime a, DateTime b) =>
-      MskDate.isSameCalendarDate(a, b);
+  bool _isSameDate(DateTime a, DateTime b) => MskDate.isSameCalendarDate(a, b);
 
   /// Единая точка перезагрузки данных под текущий режим.
   Future<void> _reload() {
@@ -427,11 +456,13 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     final data = await Future.wait<dynamic>([
       _repo.loadMonth(anchor),
       _repo.loadMonthAssignments(anchor),
+      _repo.loadMonthGroupActions(anchor),
     ]);
     if (!mounted) return;
     setState(() {
       _all = data[0] as List<Lesson>;
       _assignments = data[1] as List<ScheduleAssignment>;
+      _groupActions = data[2] as List<ScheduleGroupActionEvent>;
       _loading = false;
     });
     // ВАЖНО: не меняем _selectedDay и не «подскакиваем» к другой дате.
@@ -450,10 +481,12 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
     final lessonsById = <String, Lesson>{};
     final assignmentsById = <String, ScheduleAssignment>{};
+    final groupActionsByKey = <String, ScheduleGroupActionEvent>{};
     for (final anchor in anchors) {
       final data = await Future.wait<dynamic>([
         _repo.loadMonth(anchor),
         _repo.loadMonthAssignments(anchor),
+        _repo.loadMonthGroupActions(anchor),
       ]);
       for (final l in data[0] as List<Lesson>) {
         lessonsById[l.id] = l;
@@ -461,12 +494,17 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       for (final a in data[1] as List<ScheduleAssignment>) {
         assignmentsById[a.id] = a;
       }
+      for (final action in data[2] as List<ScheduleGroupActionEvent>) {
+        groupActionsByKey[action.dedupeKey] = action;
+      }
     }
 
     if (!mounted) return;
     setState(() {
       _all = lessonsById.values.toList();
       _assignments = assignmentsById.values.toList();
+      _groupActions = groupActionsByKey.values.toList()
+        ..sort((a, b) => a.occursAt.compareTo(b.occursAt));
       _loading = false;
     });
   }
@@ -546,6 +584,16 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   List<ScheduleAssignment> get _assignmentsForSelectedDay =>
       _assignmentsForDay(_selectedDay);
 
+  List<ScheduleGroupActionEvent> _groupActionsForDay(DateTime day) {
+    return _groupActions
+        .where((action) => _isSameDate(action.occursAt, day))
+        .toList()
+      ..sort((a, b) => a.occursAt.compareTo(b.occursAt));
+  }
+
+  List<ScheduleGroupActionEvent> get _groupActionsForSelectedDay =>
+      _groupActionsForDay(_selectedDay);
+
   /// Живые статусы пар для дня: все идущие сейчас + одна ближайшая следующая.
   /// Пусто, если [day] — не сегодня. [dayLessons] должен быть отсортирован.
   Map<String, LessonLiveStatus> _liveStatusFor(
@@ -597,6 +645,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           assignment.dueAt != null && _isSameDate(assignment.dueAt!, d),
     )) {
       set.add(_cAssignment);
+    }
+    if (_groupActions.any((action) => _isSameDate(action.occursAt, d))) {
+      set.add(_cGroupAction);
     }
     return set.toList();
   }
@@ -669,6 +720,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   _cPractice: 'Практика',
                   _cLab: 'Лабораторная',
                   _cAssignment: 'Задание',
+                  _cGroupAction: 'Выбор темы / Сбор',
                 },
                 onDatePicked: (picked) {
                   setState(() {
@@ -716,6 +768,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               _cPractice: 'Практика',
               _cLab: 'Лабораторная',
               _cAssignment: 'Задание',
+              _cGroupAction: 'Выбор темы / Сбор',
             }),
 
             const Divider(height: 1),
@@ -738,7 +791,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   Widget _buildDayBody(BuildContext context) {
     final lessons = _forSelectedDay;
     final assignments = _assignmentsForSelectedDay;
-    if (lessons.isEmpty && assignments.isEmpty) {
+    final groupActions = _groupActionsForSelectedDay;
+    if (lessons.isEmpty && assignments.isEmpty && groupActions.isEmpty) {
       return const _EmptyCat();
     }
     final live = _liveStatusFor(lessons, _selectedDay, _nowMsk());
@@ -768,6 +822,17 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             const SizedBox(height: 12),
           ],
         ],
+        if (groupActions.isNotEmpty) ...[
+          const _ScheduleSectionLabel(title: 'Выбор темы / Сбор'),
+          const SizedBox(height: 10),
+          for (final action in groupActions) ...[
+            ScheduleGroupActionCard(
+              event: action,
+              onTap: () => _openGroupAction(action),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ],
       ],
     );
   }
@@ -779,7 +844,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     // Показываем только дни с парами/заданиями — пустые дни не рисуем.
     final contentDays = days
         .where((d) =>
-            _lessonsForDay(d).isNotEmpty || _assignmentsForDay(d).isNotEmpty)
+            _lessonsForDay(d).isNotEmpty ||
+            _assignmentsForDay(d).isNotEmpty ||
+            _groupActionsForDay(d).isNotEmpty)
         .toList();
 
     // Вся неделя пустая — показываем понятную заглушку.
@@ -815,6 +882,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   }) {
     final lessons = _lessonsForDay(day);
     final assignments = _assignmentsForDay(day);
+    final groupActions = _groupActionsForDay(day);
 
     final collapsed = _collapsedDays.contains(_dayKey(day));
     final live = _liveStatusFor(lessons, day, _nowMsk());
@@ -842,6 +910,17 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             ScheduleAssignmentCard(
               assignment: assignment,
               onTap: () => _openAssignmentDetails(assignment),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ],
+        if (groupActions.isNotEmpty) ...[
+          const _ScheduleSectionLabel(title: 'Выбор темы / Сбор'),
+          const SizedBox(height: 10),
+          for (final action in groupActions) ...[
+            ScheduleGroupActionCard(
+              event: action,
+              onTap: () => _openGroupAction(action),
             ),
             const SizedBox(height: 12),
           ],
@@ -962,6 +1041,19 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         builder: (_) => _ScheduleAssignmentDetailsRoute(
           assignment: assignment,
         ),
+      ),
+    );
+  }
+
+  void _openGroupAction(ScheduleGroupActionEvent event) {
+    openGroupActionDeeplink(
+      context,
+      GroupActionDeeplinkArgs.fromDeadline(
+        eventType: event.eventType,
+        entityId: event.entityId,
+        chatId: event.chatId,
+        cardMessageId: event.cardMessageId,
+        teamId: event.teamId,
       ),
     );
   }
@@ -1144,9 +1236,7 @@ class _WeekDayHeader extends StatelessWidget {
                 color: isToday ? primary : theme.colorScheme.surface,
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
-                  color: isToday
-                      ? primary
-                      : primary.withValues(alpha: 0.16),
+                  color: isToday ? primary : primary.withValues(alpha: 0.16),
                 ),
                 boxShadow: isToday
                     ? [
@@ -1402,6 +1492,166 @@ class ScheduleAssignmentCard extends StatelessWidget {
     if (!hasTime) return date;
     return '$date ${due.hour.toString().padLeft(2, '0')}:'
         '${due.minute.toString().padLeft(2, '0')}';
+  }
+}
+
+class ScheduleGroupActionCard extends StatelessWidget {
+  final ScheduleGroupActionEvent event;
+  final VoidCallback onTap;
+
+  const ScheduleGroupActionCard({
+    super.key,
+    required this.event,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    const color = _ScheduleScreenState._cGroupAction;
+    final dueText = ScheduleAssignmentCard._fmtDue(event.occursAt);
+    final teamLabel = (event.teamName ?? '').trim();
+    final pick = (event.myPickText ?? '').trim();
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.06),
+              blurRadius: 14,
+              offset: const Offset(0, 3),
+            ),
+          ],
+          border: Border(
+            left: BorderSide(color: color.withValues(alpha: 0.9), width: 4),
+          ),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 86,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    dueText,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: color,
+                      height: 1.1,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    event.kindLabel,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: Colors.black.withValues(alpha: 0.55),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          event.title.isEmpty ? event.kindLabel : event.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: Colors.black,
+                            height: 1.08,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 9,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: color,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          event.statusLabel,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (teamLabel.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Icon(
+                          event.isTopic
+                              ? Icons.format_list_numbered_rtl
+                              : Icons.volunteer_activism_outlined,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            teamLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: Colors.black.withValues(alpha: 0.70),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  if (pick.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        const Icon(Icons.check_circle_outline, size: 16),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            pick,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: Colors.black.withValues(alpha: 0.70),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -1757,8 +2007,7 @@ class _EmptyCat extends StatelessWidget {
         Lottie.asset('assets/lottie/cat_sleeping.json',
             width: 180, height: 180, repeat: true),
         const SizedBox(height: 12),
-        Text(message,
-            style: const TextStyle(fontSize: 14, color: Colors.grey)),
+        Text(message, style: const TextStyle(fontSize: 14, color: Colors.grey)),
       ]),
     );
   }

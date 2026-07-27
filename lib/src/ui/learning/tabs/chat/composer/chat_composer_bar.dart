@@ -37,6 +37,10 @@ class ChatComposerBar extends StatelessWidget {
   // Controls for showing actions in the plus menu; default true to not break callers
   final bool showFindInPlus;
   final bool showProposeInPlus;
+  final bool showTopicSelectionInPlus;
+  final bool showCollectionInPlus;
+  final VoidCallback? onOpenTopicSelection;
+  final VoidCallback? onOpenCollection;
 
   // sending/upload state to control send button
   final bool isUploading;
@@ -68,6 +72,10 @@ class ChatComposerBar extends StatelessWidget {
     required this.onPropose,
     this.showFindInPlus = true,
     this.showProposeInPlus = true,
+    this.showTopicSelectionInPlus = false,
+    this.showCollectionInPlus = false,
+    this.onOpenTopicSelection,
+    this.onOpenCollection,
     this.isUploading = false,
     this.hasFailedUploads = false,
     this.isSending = false,
@@ -155,6 +163,24 @@ class ChatComposerBar extends StatelessWidget {
                     final res = await showAssignmentFormDialog(context);
                     if (res == null) return;
                     await onPropose(res.$1, res.$2, res.$3, res.$4, res.$5);
+                  },
+                ),
+              if (showTopicSelectionInPlus)
+                ChatPlusAction(
+                  icon: Icons.format_list_numbered_rtl,
+                  title: 'Выбор темы',
+                  subtitle: 'Список тем для распределения в группе',
+                  onTap: () async {
+                    onOpenTopicSelection?.call();
+                  },
+                ),
+              if (showCollectionInPlus)
+                ChatPlusAction(
+                  icon: Icons.volunteer_activism_outlined,
+                  title: 'Сбор',
+                  subtitle: 'Организация взноса (без оплаты в приложении)',
+                  onTap: () async {
+                    onOpenCollection?.call();
                   },
                 ),
               if (showFindInPlus)

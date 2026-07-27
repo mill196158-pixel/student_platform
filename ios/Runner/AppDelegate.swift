@@ -25,6 +25,7 @@ import UIKit
           result(FlutterMethodNotImplemented)
         }
       }
+      TopicOcrChannel.register(with: controller)
     }
 
     return ok

@@ -1,0 +1,70 @@
+import '../../learning/tabs/chat/models/chat_group_actions.dart';
+
+/// Calendar event for topic selection / group collection deadlines (Stage 13.9).
+class ScheduleGroupActionEvent {
+  const ScheduleGroupActionEvent({
+    required this.eventType,
+    required this.entityId,
+    required this.title,
+    required this.occursAt,
+    this.chatId,
+    this.teamId,
+    this.groupId,
+    this.cardMessageId,
+    this.teamName,
+    this.status,
+    this.myPickText,
+  });
+
+  final String eventType;
+  final String entityId;
+  final String title;
+  final DateTime occursAt;
+  final String? chatId;
+  final String? teamId;
+  final String? groupId;
+  final String? cardMessageId;
+  final String? teamName;
+  final String? status;
+  final String? myPickText;
+
+  bool get isTopic => eventType == 'topic_deadline';
+  bool get isCollection => eventType == 'collection_deadline';
+
+  String get kindLabel =>
+      isTopic ? 'Выбор темы' : (isCollection ? 'Сбор' : 'Группа');
+
+  String get statusLabel {
+    final raw = (status ?? '').trim();
+    if (raw.isEmpty) return 'Открыто';
+    switch (raw) {
+      case 'open':
+        return 'Открыто';
+      case 'closed':
+        return 'Закрыто';
+      case 'cancelled':
+        return 'Отменено';
+      default:
+        return raw;
+    }
+  }
+
+  factory ScheduleGroupActionEvent.fromDeadline(GroupActionDeadline deadline) {
+    return ScheduleGroupActionEvent(
+      eventType: deadline.eventType,
+      entityId: deadline.entityId,
+      title: deadline.title,
+      occursAt: deadline.occursAt,
+      chatId: deadline.chatId,
+      teamId: deadline.teamId,
+      groupId: deadline.groupId,
+      cardMessageId: deadline.cardMessageId,
+      teamName: deadline.teamName,
+      status: deadline.status,
+      myPickText: deadline.myPickText,
+    );
+  }
+
+  String get dedupeKey =>
+      '$eventType|$entityId|${occursAt.toUtc().millisecondsSinceEpoch}';
+}

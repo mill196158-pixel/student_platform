@@ -9,6 +9,7 @@ import 'package:student_platform/src/services/push/app_notifications_api.dart';
 import 'package:student_platform/src/services/push/in_app_notification_bus.dart';
 import 'package:student_platform/src/ui/home/home_dashboard_service.dart';
 import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/navigation/group_action_deeplink.dart';
 import 'package:student_platform/src/ui/navigation/main_tab_scope.dart';
 import 'package:student_platform/src/ui/notifications/notification_center_sheet.dart';
 
@@ -105,6 +106,7 @@ class _HomeScreenState extends State<HomeScreen> {
             readNotificationIds: _data!.readNotificationIds,
             unreadMessagesCount: _data!.unreadMessagesCount,
             warning: _data!.warning,
+            groupActions: _data!.groupActions,
           ),
         );
       });
@@ -135,6 +137,7 @@ class _HomeScreenState extends State<HomeScreen> {
       readNotificationIds: next.readNotificationIds,
       unreadMessagesCount: next.unreadMessagesCount,
       warning: next.warning,
+      groupActions: next.groupActions,
     );
   }
 
@@ -161,29 +164,60 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     }
 
-    return StudentHomeView(
-      data: _toPresentationData(data),
-      notificationCount: _unreadNotificationCount,
-      onRefresh: _load,
-      onNotificationsTap: _openNotifications,
-      onNewsTap: (index) => _showNewsFeed(data.news, index),
-      onSummaryTap: () => MainTabScope.switchToTab(
-        context,
-        MainTab.schedule,
-      ),
-      onAssignmentsOpen: () => context.push('/my-diary'),
-      onAssignmentTap: (item) {
-        final source = _findAssignment(item.id);
-        if (source != null) _showAssignmentDetails(source);
-      },
-      onAssignmentDoneTap: (item) {
-        final source = _findAssignment(item.id);
-        if (source != null) _markAssignmentDone(source);
-      },
-      onHelpTap: _showHelpDetails,
-      hiddenAssignmentIds: _hiddenDoneAssignmentIds,
-      markingDoneAssignmentIds: _markingDoneAssignmentIds,
+    return Column(
+      children: [
+        Expanded(
+          child: StudentHomeView(
+            data: _toPresentationData(data),
+            notificationCount: _unreadNotificationCount,
+            onRefresh: _load,
+            onNotificationsTap: _openNotifications,
+            onNewsTap: (index) => _showNewsFeed(data.news, index),
+            onSummaryTap: () => MainTabScope.switchToTab(
+              context,
+              MainTab.schedule,
+            ),
+            onGroupActionTap: _openGroupAction,
+            onAssignmentsOpen: () => context.push('/my-diary'),
+            onAssignmentTap: (item) {
+              final source = _findAssignment(item.id);
+              if (source != null) _showAssignmentDetails(source);
+            },
+            onAssignmentDoneTap: (item) {
+              final source = _findAssignment(item.id);
+              if (source != null) _markAssignmentDone(source);
+            },
+            onHelpTap: _showHelpDetails,
+            hiddenAssignmentIds: _hiddenDoneAssignmentIds,
+            markingDoneAssignmentIds: _markingDoneAssignmentIds,
+          ),
+        ),
+      ],
     );
+  }
+
+  void _openGroupAction(StudentHomeGroupAction action) {
+    final source = _findGroupAction(action.id);
+    if (source == null) return;
+    openGroupActionDeeplink(
+      context,
+      GroupActionDeeplinkArgs.fromDeadline(
+        eventType: source.eventType,
+        entityId: source.entityId,
+        chatId: source.chatId,
+        cardMessageId: source.cardMessageId,
+        teamId: source.teamId,
+      ),
+    );
+  }
+
+  HomeGroupActionPreview? _findGroupAction(String id) {
+    final data = _data;
+    if (data == null) return null;
+    for (final action in data.groupActions) {
+      if ('${action.eventType}|${action.entityId}' == id) return action;
+    }
+    return null;
   }
 
   StudentHomeData _toPresentationData(HomeDashboardData data) {
@@ -215,10 +249,25 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
       ],
       news: _presentationNews(data.news),
+      groupActions: [
+        for (final action in data.groupActions.take(2))
+          StudentHomeGroupAction(
+            id: '${action.eventType}|${action.entityId}',
+            title: action.title,
+            kindLabel: action.kindLabel,
+            deadlineText: _fmtActionDate(action.occursAt),
+            teamName: action.teamName,
+            myPickText: action.myPickText,
+          ),
+      ],
       totalLessonsToday: data.totalLessonsToday,
       assignmentsCount: data.assignmentsCount,
       lessonsFinishedForToday: data.lessonsFinishedForToday,
     );
+  }
+
+  String _fmtActionDate(DateTime dt) {
+    return DateFormat('d MMM, HH:mm', 'ru').format(dt.toLocal());
   }
 
   List<StudentHomeNews> _presentationNews(List<HomeNewsItem> news) {

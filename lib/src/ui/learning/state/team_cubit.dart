@@ -740,6 +740,39 @@ class TeamCubit extends Cubit<TeamState> {
     return uniqueOlder;
   }
 
+  /// Loads chat history until [messageId] is present (bounded). Uses authorized APIs only.
+  Future<bool> ensureMessageVisible(
+    String messageId, {
+    int maxOlderPages = 5,
+  }) async {
+    final target = messageId.trim();
+    if (target.isEmpty) return false;
+
+    bool contains(List<Message> chat) =>
+        chat.any((message) => message.id == target);
+
+    if (contains(state.chat)) return true;
+
+    final direct = await repo.loadMessageById(state.team.id, target);
+    if (direct != null) {
+      emit(state.copyWith(chat: _mergeCachedChat([...state.chat, direct])));
+      return true;
+    }
+
+    for (var page = 0; page < maxOlderPages; page++) {
+      if (state.chat.isEmpty) break;
+      await loadOlderMessages(limit: 50);
+      if (contains(state.chat)) return true;
+      final loaded = await repo.loadMessageById(state.team.id, target);
+      if (loaded != null) {
+        emit(state.copyWith(chat: _mergeCachedChat([...state.chat, loaded])));
+        return true;
+      }
+    }
+
+    return contains(state.chat);
+  }
+
   /// Edit own text message via RPC and patch local cache from the response.
   Future<Message?> editOwnMessage(String messageId, String text) async {
     final updated = await repo.editOwnMessage(messageId, text);

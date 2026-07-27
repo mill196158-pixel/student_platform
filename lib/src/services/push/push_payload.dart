@@ -9,8 +9,32 @@ class PushPayload {
     this.assignmentId,
     this.lessonId,
     this.friendUserId,
+    this.selectionId,
+    this.collectionId,
+    this.cardMessageId,
+    this.messageId,
     this.raw = const {},
   });
+
+  /// Server-issued push types the client knows how to route.
+  static const knownTypes = {
+    'dm_message',
+    'team_message',
+    'team_reply',
+    'friend_request',
+    'friend_accepted',
+    'assignment',
+    'schedule_change',
+    'announcement',
+    'material',
+    'topic_selection_created',
+    'topic_deadline_soon',
+    'topic_reassigned',
+    'topic_pick_changed',
+    'collection_created',
+    'collection_deadline_soon',
+    'collection_contribution_private',
+  };
 
   final int version;
   final String type;
@@ -21,7 +45,13 @@ class PushPayload {
   final String? assignmentId;
   final String? lessonId;
   final String? friendUserId;
+  final String? selectionId;
+  final String? collectionId;
+  final String? cardMessageId;
+  final String? messageId;
   final Map<String, String> raw;
+
+  bool get isKnownType => knownTypes.contains(type);
 
   static PushPayload? tryParse(Map<String, dynamic>? data) {
     if (data == null || data.isEmpty) return null;
@@ -48,6 +78,10 @@ class PushPayload {
       assignmentId: _nonEmpty(normalized['assignment_id']),
       lessonId: _nonEmpty(normalized['lesson_id']),
       friendUserId: _nonEmpty(normalized['friend_user_id']),
+      selectionId: _nonEmpty(normalized['selection_id']),
+      collectionId: _nonEmpty(normalized['collection_id']),
+      cardMessageId: _nonEmpty(normalized['card_message_id']),
+      messageId: _nonEmpty(normalized['message_id']),
       raw: normalized,
     );
   }
@@ -55,7 +89,7 @@ class PushPayload {
   String get dedupeKey {
     final id = notificationId;
     if (id != null && id.isNotEmpty) return 'n:$id';
-    return 't:$type|c:${chatId ?? ''}|a:${assignmentId ?? ''}|l:${lessonId ?? ''}|f:${friendUserId ?? ''}';
+    return 't:$type|c:${chatId ?? ''}|a:${assignmentId ?? ''}|l:${lessonId ?? ''}|f:${friendUserId ?? ''}|s:${selectionId ?? ''}|col:${collectionId ?? ''}';
   }
 
   /// Query-string payload for local notification taps (kept small for OS limits).
@@ -70,6 +104,10 @@ class PushPayload {
       if (assignmentId != null) 'assignment_id': assignmentId!,
       if (lessonId != null) 'lesson_id': lessonId!,
       if (friendUserId != null) 'friend_user_id': friendUserId!,
+      if (selectionId != null) 'selection_id': selectionId!,
+      if (collectionId != null) 'collection_id': collectionId!,
+      if (cardMessageId != null) 'card_message_id': cardMessageId!,
+      if (messageId != null) 'message_id': messageId!,
       if (raw['title'] != null) 'title': raw['title']!,
       if (raw['body'] != null) 'body': raw['body']!,
     };

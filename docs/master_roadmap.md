@@ -6,12 +6,12 @@
 ## Статус документа
 
 - Дата аудита: **27 июля 2026**
-- Обновлено: **27 июля 2026** (Stage 13.8 safe academic terms — **CODE PUSHED**, remote apply pending; next: Stage 13.9)
+- Обновлено: **28 июля 2026** (Stage 13.9 native builds closed — **CODE PUSHED**; remote apply 13.8/13.9 + Edge deploy still pending owner OK)
 - Проверенная основная ветка: `refactor/chat-tab`
 - Проверенная административная ветка: `feature/admin-console`
 - Репозиторий: `mill196158-pixel/student_platform`
 - Статус карты: **ACTIVE**
-- Следующий рекомендуемый этап: **Stage 13.9** (чат группы / темы / сборы), затем remote apply 13.8 по решению владельца + **PHYSICAL SMOKE**
+- Следующий рекомендуемый этап: remote apply 13.8/13.9 по решению владельца + **PHYSICAL SMOKE** (двухустройственный race Android/iPhone)
 
 Обозначения:
 
@@ -699,12 +699,24 @@ Live audit (`gwdanmwluhrcfxbnplwd`):
 
 ### 13.9 — Чат группы, выбор темы и сборы
 
-Status: **IN PROGRESS** (local only; remote apply / Edge deploy / commit запрещены до READY FOR REVIEW)
+Status: **CODE PUSHED** (remote apply / Edge deploy запрещены до owner OK)
 
-- [ ] убрать «Пространство группы» из Инфо; карточка «Чат группы» в Обучении;
-- [ ] «Выбор темы» + локальный parsing/OCR + review screen;
-- [ ] foundation «Сбор»;
-- [ ] календарь / главная / push mapping без попадания в дневник предметов.
+- [x] убрать «Пространство группы» из Инфо; карточка «Чат группы» в Обучении;
+- [x] «Выбор темы» в `+` (group/subject, не DM);
+- [x] on-device OCR: Android Tesseract4Android `rus+eng` (bundled tessdata, offline) + iOS Vision `ru-RU`/`en-US` на iOS 16+; app deployment target остаётся **iOS 15.0** (runtime gating; без SwiftyTesseract / без silent raise to 16); ML Kit убран (ломал iOS 15 и arm64 sim);
+- [x] Excel/Word/PDF/фото → обязательный review (edit/reorder/merge/split/dedupe);
+- [x] foundation «Сбор» + privacy secrets/proofs;
+- [x] сроки в существующем календаре **Расписание** (не Мой дневник / не дневник предмета);
+- [x] главная: компактная сводка ближайших групповых действий + my pick;
+- [x] deep-link Schedule/Home/Push → chat + `card_message_id` highlight;
+- [x] push/in-app pipeline (`group_actions` prefs, enqueue, deadline worker, Edge allowlist; deno check PASS; deploy запрещён);
+- [x] transactional pick/reassign/release + RLS privacy;
+- [x] SQL security/roleplay + notifications checks PASS (local Docker);
+- [x] Flutter focused tests PASS; Admin Web + main Web PASS; Android debug APK PASS; iOS simulator debug PASS;
+- [x] commit + push в `refactor/chat-tab`;
+- [ ] remote apply — только после owner authorization;
+- [ ] Edge Function deploy — только после owner authorization;
+- [ ] PHYSICAL SMOKE: OCR + двухустройственный race pick на Android/iPhone.
 
 ---
 
@@ -712,8 +724,8 @@ Status: **IN PROGRESS** (local only; remote apply / Edge deploy / commit зап�
 
 1. ~~13.2–13.6 code foundations + remote apply + Edge deploy~~ **TECHNICALLY DONE**.
 2. ~~Stage 13.8 code push~~ **CODE PUSHED**; remote apply — по отдельному решению владельца.
-3. **Stage 13.9** — чат группы / выбор темы / сборы (local READY FOR REVIEW).
-4. **Владелец:** физический smoke Android/iPhone по `docs/release_checklist_v1.md`.
+3. ~~Stage 13.9 local + native builds~~ **CODE PUSHED**; remote apply / Edge deploy — по решению владельца.
+4. **Владелец:** authorize remote apply 13.8/13.9 + Edge deploy; физический smoke Android/iPhone.
 5. **Владелец:** реальные Excel (teachers/subjects/students) через Admin dry-run → apply.
 
 Закрыто перед 13.2:

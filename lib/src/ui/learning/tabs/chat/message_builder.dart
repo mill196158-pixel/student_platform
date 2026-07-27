@@ -6,6 +6,7 @@ import 'assignment_bubble.dart';
 import 'file_message_bubble.dart';
 import 'multi_file_bubble.dart';
 import 'message_bubble.dart';
+import 'topics/topic_selection_card.dart';
 
 typedef Bubble = Widget;
 
@@ -220,6 +221,21 @@ Bubble buildBubble({
       time: time,
       reactions: currentCounts.isNotEmpty ? currentCounts : null,
       onReact: onReact,
+      onLongPress: onLongPress,
+      boundaryKey: boundaryKey,
+    );
+  }
+
+  if (m.cardKind == 'topic_selection') {
+    return TopicSelectionCard(
+      message: m,
+      onLongPress: onLongPress,
+      boundaryKey: boundaryKey,
+    );
+  }
+  if (m.cardKind == 'collection') {
+    return CollectionCard(
+      message: m,
       onLongPress: onLongPress,
       boundaryKey: boundaryKey,
     );

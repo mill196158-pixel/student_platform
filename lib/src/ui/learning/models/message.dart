@@ -110,6 +110,8 @@ class Message {
   final ForwardPayloadModel? forward; // payload пересылки
   final String? clientId; // локальный id optimistic-сообщения
   final MessageDeliveryStatus deliveryStatus;
+  final String? cardKind; // topic_selection | collection
+  final String? cardEntityId; // selection_id | collection_id
 
   const Message({
     required this.id,
@@ -133,6 +135,8 @@ class Message {
     this.forward,
     this.clientId,
     this.deliveryStatus = MessageDeliveryStatus.sent,
+    this.cardKind,
+    this.cardEntityId,
   });
 
   bool isMine(String? currentUid) =>
@@ -171,6 +175,8 @@ class Message {
     ForwardPayloadModel? forward,
     String? clientId,
     MessageDeliveryStatus? deliveryStatus,
+    String? cardKind,
+    String? cardEntityId,
   }) {
     return Message(
       id: id ?? this.id,
@@ -194,6 +200,8 @@ class Message {
       forward: forward ?? this.forward,
       clientId: clientId ?? this.clientId,
       deliveryStatus: deliveryStatus ?? this.deliveryStatus,
+      cardKind: cardKind ?? this.cardKind,
+      cardEntityId: cardEntityId ?? this.cardEntityId,
     );
   }
 
@@ -217,6 +225,8 @@ class Message {
         'reactions': reactions,
         'client_id': clientId,
         'delivery_status': deliveryStatus.name,
+        'card_kind': cardKind,
+        'card_entity_id': cardEntityId,
       };
 
   factory Message.fromJson(Map<String, dynamic> j) {
@@ -254,20 +264,39 @@ class Message {
 
     ForwardPayloadModel? fwd;
     String textVal = (j['body'] ?? '').toString();
+    String? cardKind;
+    String? cardEntityId;
+    if (textVal.isEmpty) {
+      textVal = (j['text'] ?? '').toString();
+    }
+    final rawContent = j['content'];
+    if (rawContent is Map) {
+      final contentMap = Map<String, dynamic>.from(rawContent);
+      cardKind = contentMap['card']?.toString();
+      cardEntityId = (contentMap['selection_id'] ?? contentMap['collection_id'])
+          ?.toString();
+    } else if (rawContent is String && rawContent.trimLeft().startsWith('{')) {
+      try {
+        final contentMap = jsonDecode(rawContent);
+        if (contentMap is Map) {
+          cardKind = contentMap['card']?.toString();
+          cardEntityId =
+              (contentMap['selection_id'] ?? contentMap['collection_id'])
+                  ?.toString();
+        }
+      } catch (_) {}
+    }
     if (t == MessageType.forward) {
-      final content = (j['content'] ?? '').toString();
+      final content = rawContent?.toString() ?? '';
       if (content.isNotEmpty) {
         try {
           final map = jsonDecode(content) as Map<String, dynamic>;
           fwd = ForwardPayloadModel.fromJson(map);
-          // keep textVal from body (usually empty) to avoid showing JSON
         } catch (_) {}
       }
-      if (textVal.isEmpty) {
-        textVal = '';
-      }
-    } else if (textVal.isEmpty) {
-      textVal = (j['content'] ?? j['text'] ?? '').toString();
+      textVal = textVal.isEmpty ? '' : textVal;
+    } else if (textVal.isEmpty && rawContent is String && cardKind == null) {
+      textVal = rawContent;
     }
 
     final authorName = (j['author_name'] ?? '').toString().trim();
@@ -301,6 +330,8 @@ class Message {
       forward: fwd,
       clientId: (j['client_id'] ?? j['clientId'])?.toString(),
       deliveryStatus: _parseDeliveryStatus(j['delivery_status']),
+      cardKind: (j['card_kind'] ?? cardKind)?.toString(),
+      cardEntityId: (j['card_entity_id'] ?? cardEntityId)?.toString(),
     );
   }
 

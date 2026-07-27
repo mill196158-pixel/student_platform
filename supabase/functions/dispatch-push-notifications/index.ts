@@ -202,6 +202,17 @@ function resolvePushBody(decision: DeliveryDecision): string {
     if (eventType === "team_message" || eventType === "team_reply") {
       return "Новое сообщение в учебном чате";
     }
+    if (
+      eventType === "topic_selection_created" ||
+      eventType === "collection_created" ||
+      eventType === "topic_deadline_soon" ||
+      eventType === "collection_deadline_soon" ||
+      eventType === "topic_reassigned" ||
+      eventType === "topic_pick_changed" ||
+      eventType === "collection_contribution_private"
+    ) {
+      return "Новое действие в группе";
+    }
   }
 
   return String(decision.body ?? "");
@@ -279,14 +290,21 @@ async function processOutboxRow(args: {
 
   const pushBody = resolvePushBody(decision);
   const pushTitle = String(decision.title ?? "Уведомление");
-  const dataPayload = toStringMap({
+  const rawData = {
     version: "1",
     type: String(decision.event_type ?? row.event_type),
     notification_id: String(decision.notification_id ?? row.app_notification_id ?? ""),
     ...(decision.data ?? {}),
     title: pushTitle,
     body: pushBody,
-  });
+  };
+  const filteredData: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(rawData)) {
+    if (allowedPushDataKeys.has(key)) {
+      filteredData[key] = value;
+    }
+  }
+  const dataPayload = toStringMap(filteredData);
 
   const channelId = channelForEvent(String(decision.event_type ?? row.event_type));
   let successCount = 0;
@@ -488,11 +506,32 @@ function channelForEvent(eventType: string): string {
     case "assignment":
     case "schedule_change":
     case "announcement":
+    case "topic_selection_created":
+    case "topic_deadline_soon":
+    case "topic_reassigned":
+    case "topic_pick_changed":
+    case "collection_created":
+    case "collection_deadline_soon":
+    case "collection_contribution_private":
       return "study";
     default:
       return "messages";
   }
 }
+
+const allowedPushDataKeys = new Set([
+  "version",
+  "type",
+  "notification_id",
+  "chat_id",
+  "team_id",
+  "selection_id",
+  "collection_id",
+  "card_message_id",
+  "message_id",
+  "title",
+  "body",
+]);
 
 function toStringMap(input: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {};

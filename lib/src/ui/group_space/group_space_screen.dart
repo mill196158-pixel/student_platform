@@ -71,14 +71,14 @@ class _GroupSpaceScreenState extends State<GroupSpaceScreen> {
         _topics = topics;
         _loading = false;
         if (!space.exists) {
-          _error = 'Пространство группы пока недоступно';
+          _error = 'Общий чат группы пока недоступен';
         }
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = 'Не удалось загрузить пространство группы';
+        _error = 'Не удалось загрузить чат группы';
       });
     }
   }
@@ -88,7 +88,7 @@ class _GroupSpaceScreenState extends State<GroupSpaceScreen> {
     if (space == null || !space.exists) return;
     final team = Team(
       id: space.teamId!,
-      name: space.title ?? 'Пространство группы',
+      name: space.title ?? 'Общий чат группы',
       teacher: '',
       icon: 'groups',
       groupCode: '',
@@ -270,7 +270,7 @@ class _GroupSpaceScreenState extends State<GroupSpaceScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(space?.title ?? 'Пространство группы'),
+        title: Text(space?.title ?? 'Чат группы'),
       ),
       body: _loading && space == null
           ? const Center(child: CircularProgressIndicator())
@@ -293,12 +293,12 @@ class _GroupSpaceScreenState extends State<GroupSpaceScreen> {
                     FilledButton.icon(
                       onPressed: _openChat,
                       icon: const Icon(Icons.chat_bubble_outline),
-                      label: const Text('Открыть групповой чат'),
+                      label: const Text('Открыть общий чат группы'),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       space.isOrganizer
-                          ? 'Вы организатор пространства'
+                          ? 'Вы организатор чата группы'
                           : 'Участник учебной группы',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: Colors.black54,

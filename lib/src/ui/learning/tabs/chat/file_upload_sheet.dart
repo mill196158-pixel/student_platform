@@ -29,7 +29,8 @@ class _FileUploadSheetState extends State<FileUploadSheet> {
     super.dispose();
   }
 
-  Future<void> _pickAndUploadFile(FileType type, {List<String>? allowedExtensions}) async {
+  Future<void> _pickAndUploadFile(FileType type,
+      {List<String>? allowedExtensions}) async {
     setState(() {
       _isLoading = true;
       _uploadStatus = 'Выбираем файл...';
@@ -135,7 +136,7 @@ class _FileUploadSheetState extends State<FileUploadSheet> {
             ),
           ),
           const SizedBox(height: 16),
-          
+
           // Документы
           _FileCategoryTile(
             icon: Icons.description,
@@ -147,9 +148,9 @@ class _FileUploadSheetState extends State<FileUploadSheet> {
               allowedExtensions: ['pdf', 'doc', 'docx', 'dwg', 'txt'],
             ),
           ),
-          
+
           const SizedBox(height: 8),
-          
+
           // Изображения
           _FileCategoryTile(
             icon: Icons.image,
@@ -158,9 +159,9 @@ class _FileUploadSheetState extends State<FileUploadSheet> {
             color: Colors.green,
             onTap: () => _pickAndUploadImage(ImageSource.gallery),
           ),
-          
+
           const SizedBox(height: 8),
-          
+
           // Архивы
           _FileCategoryTile(
             icon: Icons.archive,
@@ -172,9 +173,9 @@ class _FileUploadSheetState extends State<FileUploadSheet> {
               allowedExtensions: ['zip', 'rar'],
             ),
           ),
-          
+
           const SizedBox(height: 8),
-          
+
           // Другие файлы
           _FileCategoryTile(
             icon: Icons.insert_drive_file,
@@ -183,7 +184,7 @@ class _FileUploadSheetState extends State<FileUploadSheet> {
             color: Colors.grey,
             onTap: () => _pickAndUploadFile(FileType.any),
           ),
-          
+
           if (_isLoading) ...[
             const SizedBox(height: 16),
             const CircularProgressIndicator(),
@@ -194,9 +195,9 @@ class _FileUploadSheetState extends State<FileUploadSheet> {
               textAlign: TextAlign.center,
             ),
           ],
-          
+
           const SizedBox(height: 16),
-          
+
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Отмена'),
@@ -242,4 +243,3 @@ class _FileCategoryTile extends StatelessWidget {
     );
   }
 }
-

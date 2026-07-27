@@ -14,6 +14,7 @@ class Team {
   final String? academicYearId;
   final String? academicTermId;
   final int? semesterNumber;
+  final String kind; // subject | group_space | dm
 
   const Team({
     required this.id,
@@ -29,6 +30,7 @@ class Team {
     this.academicYearId,
     this.academicTermId,
     this.semesterNumber,
+    this.kind = 'subject',
   });
 
   Team copyWith({
@@ -45,6 +47,7 @@ class Team {
     String? academicYearId,
     String? academicTermId,
     int? semesterNumber,
+    String? kind,
   }) {
     return Team(
       id: id ?? this.id,
@@ -60,8 +63,12 @@ class Team {
       academicYearId: academicYearId ?? this.academicYearId,
       academicTermId: academicTermId ?? this.academicTermId,
       semesterNumber: semesterNumber ?? this.semesterNumber,
+      kind: kind ?? this.kind,
     );
   }
+
+  bool get isGroupSpaceChat => kind == 'group_space';
+  bool get isSubjectTeam => kind == 'subject' || kind.isEmpty;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -77,6 +84,7 @@ class Team {
         'academicYearId': academicYearId,
         'academicTermId': academicTermId,
         'semesterNumber': semesterNumber,
+        'kind': kind,
       };
 
   factory Team.fromJson(Map<String, dynamic> j) => Team(
@@ -97,6 +105,7 @@ class Team {
             _nullableString(j['academicTermId'] ?? j['academic_term_id']),
         semesterNumber:
             _nullableInt(j['semesterNumber'] ?? j['semester_number']),
+        kind: (j['kind'] ?? 'subject').toString(),
       );
 
   static String encodeList(List<Team> items) =>

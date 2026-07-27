@@ -100,9 +100,8 @@ class _ComposerState extends State<Composer> {
 
     // Same bottom level as ModernBottomNav; keep home-indicator gesture clear.
     final safeBottom = MediaQuery.paddingOf(context).bottom;
-    final bottomPad = safeBottom > 0
-        ? (safeBottom - 12).clamp(18.0, safeBottom)
-        : 6.0;
+    final bottomPad =
+        safeBottom > 0 ? (safeBottom - 12).clamp(18.0, safeBottom) : 6.0;
 
     return Padding(
       padding: EdgeInsets.only(bottom: bottomPad),

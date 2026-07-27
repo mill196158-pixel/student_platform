@@ -23,7 +23,9 @@ class SearchHighlight extends StatelessWidget {
       decoration: BoxDecoration(
         color: isCurrent ? Colors.amber.withOpacity(0.15) : Colors.transparent,
         borderRadius: BorderRadius.circular(12),
-        border: isCurrent ? Border.all(color: Colors.amber.withOpacity(0.6), width: 1) : null,
+        border: isCurrent
+            ? Border.all(color: Colors.amber.withOpacity(0.6), width: 1)
+            : null,
       ),
       child: child,
     );
@@ -40,5 +42,3 @@ class SearchHighlight extends StatelessWidget {
     return decorated;
   }
 }
-
-

@@ -9,6 +9,7 @@ import 'package:student_platform/src/ui/chats/dm_title.dart';
 import 'package:student_platform/src/ui/friends/friend_profile_screen.dart';
 import 'package:student_platform/src/ui/friends/my_friends_screen.dart';
 import 'package:student_platform/src/ui/learning/models/team.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/navigation/group_action_deeplink.dart';
 import 'package:student_platform/src/ui/learning/team_details_screen.dart';
 import 'package:student_platform/src/ui/navigation/main_tab_scope.dart';
 
@@ -88,6 +89,15 @@ class PushNavigation {
         if (tabContext != null) {
           MainTabScope.switchToTab(tabContext, MainTab.info);
         }
+        break;
+      case 'topic_selection_created':
+      case 'topic_deadline_soon':
+      case 'topic_reassigned':
+      case 'topic_pick_changed':
+      case 'collection_created':
+      case 'collection_deadline_soon':
+      case 'collection_contribution_private':
+        await _openGroupAction(pushContext ?? tabContext!, payload, tabContext);
         break;
       default:
         break;
@@ -187,9 +197,8 @@ class PushNavigation {
     final payloadTitle = normalizeDmTitle(
       payload.raw['title'] ?? payload.raw['peer_name'],
     );
-    var peerName = isUnresolvedDmTitle(payloadTitle)
-        ? kDmTitleFallback
-        : payloadTitle;
+    var peerName =
+        isUnresolvedDmTitle(payloadTitle) ? kDmTitleFallback : payloadTitle;
     String? avatar;
 
     final profile = await resolvePeerProfile(resolvedPeerId);
@@ -273,6 +282,39 @@ class PushNavigation {
     await Navigator.of(navContext).push(
       MaterialPageRoute(
         builder: (_) => TeamDetailsScreen(team: team, initialTabIndex: 1),
+      ),
+    );
+  }
+
+  /// Opens team chat for group-action cards and scrolls to [cardMessageId].
+  static Future<void> _openGroupAction(
+    BuildContext pushContext,
+    PushPayload payload,
+    BuildContext? tabContext,
+  ) async {
+    final navContext = rootNavigatorContext ?? pushContext;
+    if (!navContext.mounted) return;
+
+    final entityId = payload.selectionId ??
+        payload.collectionId ??
+        payload.assignmentId ??
+        '';
+    final entityType = payload.type.contains('collection')
+        ? 'collection_deadline'
+        : 'topic_deadline';
+
+    if (tabContext != null && tabContext.mounted) {
+      MainTabScope.switchToTab(tabContext, MainTab.learning);
+    }
+
+    await openGroupActionDeeplink(
+      navContext,
+      GroupActionDeeplinkArgs(
+        chatId: payload.chatId,
+        cardMessageId: payload.cardMessageId ?? payload.messageId,
+        entityType: entityType,
+        entityId: entityId,
+        teamId: payload.teamId,
       ),
     );
   }

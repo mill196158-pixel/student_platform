@@ -16,6 +16,7 @@ class HomeDashboardData {
   final Set<String> readNotificationIds;
   final int unreadMessagesCount;
   final String? warning;
+  final List<HomeGroupActionPreview> groupActions;
 
   const HomeDashboardData({
     required this.profile,
@@ -26,6 +27,7 @@ class HomeDashboardData {
     this.readNotificationIds = const {},
     this.unreadMessagesCount = 0,
     this.warning,
+    this.groupActions = const [],
   });
 
   int get lessonsCount => remainingLessons.length;
@@ -111,6 +113,38 @@ class HomeAssignmentPreview {
 
   DateTime? get dueAt => assignment.dueAt;
   bool get isDone => assignment.completedByMe || assignment.status == 'done';
+}
+
+class HomeGroupActionPreview {
+  final String eventType;
+  final String entityId;
+  final String title;
+  final DateTime occursAt;
+  final String? chatId;
+  final String? cardMessageId;
+  final String? teamId;
+  final String? teamName;
+  final String? status;
+  final String? myPickText;
+
+  const HomeGroupActionPreview({
+    required this.eventType,
+    required this.entityId,
+    required this.title,
+    required this.occursAt,
+    this.chatId,
+    this.cardMessageId,
+    this.teamId,
+    this.teamName,
+    this.status,
+    this.myPickText,
+  });
+
+  bool get isTopic => eventType == 'topic_deadline';
+  bool get isCollection => eventType == 'collection_deadline';
+
+  String get kindLabel =>
+      isTopic ? 'Выбор темы' : (isCollection ? 'Сбор группы' : 'Группа');
 }
 
 class HomeNewsItem {

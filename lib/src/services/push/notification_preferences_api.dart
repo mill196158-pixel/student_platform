@@ -11,6 +11,7 @@ class NotificationPreferences {
     required this.groupReplies,
     required this.groupMentions,
     required this.groupAllMessages,
+    required this.groupActions,
     required this.showMessagePreview,
     required this.pushEnabled,
   });
@@ -24,6 +25,7 @@ class NotificationPreferences {
   final bool groupReplies;
   final bool groupMentions;
   final bool groupAllMessages;
+  final bool groupActions;
   final bool showMessagePreview;
   final bool pushEnabled;
 
@@ -37,6 +39,7 @@ class NotificationPreferences {
         groupReplies: true,
         groupMentions: true,
         groupAllMessages: false,
+        groupActions: true,
         showMessagePreview: true,
         pushEnabled: true,
       );
@@ -55,6 +58,7 @@ class NotificationPreferences {
       groupReplies: b('group_replies'),
       groupMentions: b('group_mentions'),
       groupAllMessages: b('group_all_messages', fallback: false),
+      groupActions: b('group_actions'),
       showMessagePreview: b('show_message_preview'),
       pushEnabled: b('push_enabled'),
     );
@@ -70,6 +74,7 @@ class NotificationPreferences {
     bool? groupReplies,
     bool? groupMentions,
     bool? groupAllMessages,
+    bool? groupActions,
     bool? showMessagePreview,
     bool? pushEnabled,
   }) {
@@ -83,6 +88,7 @@ class NotificationPreferences {
       if (groupReplies != null) 'group_replies': groupReplies,
       if (groupMentions != null) 'group_mentions': groupMentions,
       if (groupAllMessages != null) 'group_all_messages': groupAllMessages,
+      if (groupActions != null) 'group_actions': groupActions,
       if (showMessagePreview != null)
         'show_message_preview': showMessagePreview,
       if (pushEnabled != null) 'push_enabled': pushEnabled,

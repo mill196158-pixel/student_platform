@@ -58,6 +58,7 @@ class ChatMessageList extends StatelessWidget {
   final VoidCallback? onFocusComposer;
   final VoidCallback? onAttachFile;
   final VoidCallback? onCreateAssignment;
+
   /// When true, empty-state copy is DM-oriented (no team assignment CTAs).
   final bool isDirectChat;
   final bool initialLoading;

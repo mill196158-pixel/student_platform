@@ -12,12 +12,22 @@ void main() {
         'group_id': 'g1',
         'team_id': 't1',
         'chat_id': 'c1',
-        'title': 'Пространство группы',
+        'title': 'Чат группы',
         'is_organizer': true,
       });
       expect(space.exists, isTrue);
       expect(space.isOrganizer, isTrue);
       expect(space.chatId, 'c1');
+      expect(space.title, 'Чат группы');
+    });
+
+    test('default title uses group chat wording', () {
+      final space = GroupSpaceSnapshot.fromJson({
+        'group_id': 'g1',
+        'team_id': 't1',
+        'chat_id': 'c1',
+      });
+      expect(space.title, 'Общий чат группы');
     });
 
     test('missing ids mean space does not exist', () {
@@ -47,9 +57,8 @@ void main() {
     });
   });
 
-  testWidgets('Info strip shows group space entry when group is present',
+  testWidgets('Info strip does not show open-group-space button',
       (tester) async {
-    var opened = false;
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -61,15 +70,12 @@ void main() {
               hasActiveEnrollment: true,
             ),
             sessionDifficulty: const SessionDifficultySummary.empty(),
-            onOpenGroupSpace: () => opened = true,
           ),
         ),
       ),
     );
 
-    expect(find.byKey(const ValueKey('open-group-space')), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('open-group-space')));
-    expect(opened, isTrue);
+    expect(find.byKey(const ValueKey('open-group-space')), findsNothing);
   });
 
   test('collection contribution proof metadata is preserved in map shape', () {

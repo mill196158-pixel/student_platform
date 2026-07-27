@@ -11,6 +11,7 @@ class StudentHomeView extends StatelessWidget {
     this.onNotificationsTap,
     this.onNewsTap,
     this.onSummaryTap,
+    this.onGroupActionTap,
     this.onAssignmentsOpen,
     this.onAssignmentTap,
     this.onAssignmentDoneTap,
@@ -29,6 +30,7 @@ class StudentHomeView extends StatelessWidget {
   final VoidCallback? onNotificationsTap;
   final ValueChanged<int>? onNewsTap;
   final VoidCallback? onSummaryTap;
+  final ValueChanged<StudentHomeGroupAction>? onGroupActionTap;
   final VoidCallback? onAssignmentsOpen;
   final ValueChanged<StudentHomeAssignment>? onAssignmentTap;
   final ValueChanged<StudentHomeAssignment>? onAssignmentDoneTap;
@@ -67,7 +69,11 @@ class StudentHomeView extends StatelessWidget {
         SliverToBoxAdapter(
           child: _AnimatedEntry(
             delay: const Duration(milliseconds: 70),
-            child: _TodaySummaryCard(data: data, onTap: onSummaryTap),
+            child: _TodaySummaryCard(
+              data: data,
+              onTap: onSummaryTap,
+              onGroupActionTap: onGroupActionTap,
+            ),
           ),
         ),
         SliverToBoxAdapter(
@@ -280,10 +286,15 @@ class _NotificationBadge extends StatelessWidget {
 }
 
 class _TodaySummaryCard extends StatelessWidget {
-  const _TodaySummaryCard({required this.data, required this.onTap});
+  const _TodaySummaryCard({
+    required this.data,
+    required this.onTap,
+    this.onGroupActionTap,
+  });
 
   final StudentHomeData data;
   final VoidCallback? onTap;
+  final ValueChanged<StudentHomeGroupAction>? onGroupActionTap;
 
   @override
   Widget build(BuildContext context) {
@@ -414,6 +425,20 @@ class _TodaySummaryCard extends StatelessWidget {
                                 child: _LessonPreview(lesson: lesson),
                               ),
                             ),
+                      if (data.groupActions.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        ...data.groupActions.take(2).map(
+                              (action) => Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: _GroupActionPreview(
+                                  action: action,
+                                  onTap: onGroupActionTap == null
+                                      ? null
+                                      : () => onGroupActionTap!(action),
+                                ),
+                              ),
+                            ),
+                      ],
                     ],
                   ),
                 ],
@@ -499,6 +524,100 @@ class _LessonPreview extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _GroupActionPreview extends StatelessWidget {
+  const _GroupActionPreview({
+    required this.action,
+    this.onTap,
+  });
+
+  final StudentHomeGroupAction action;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final foreground = isDark ? Colors.white : const Color(0xFF1F2937);
+    final accent = isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C63D8);
+    final meta = [
+      action.kindLabel,
+      if ((action.teamName ?? '').trim().isNotEmpty) action.teamName!.trim(),
+      action.deadlineText,
+    ].join(' · ');
+    final pick = (action.myPickText ?? '').trim();
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: isDark ? 0.14 : 0.52),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: accent.withValues(alpha: isDark ? 0.24 : 0.35),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                action.kindLabel == 'Выбор темы'
+                    ? Icons.format_list_numbered_rtl
+                    : Icons.volunteer_activism_outlined,
+                color: accent,
+                size: 20,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      action.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: foreground,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      meta,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: foreground.withValues(alpha: 0.62),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (pick.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        'Ваш выбор: $pick',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: accent,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

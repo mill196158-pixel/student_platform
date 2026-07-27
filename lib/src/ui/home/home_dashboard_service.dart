@@ -9,6 +9,8 @@ import 'package:student_ui/student_ui.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/data/chat_group_actions_repository.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_group_actions.dart';
 import 'package:student_platform/src/ui/home/news_image_disk_cache.dart';
 import 'package:student_platform/src/ui/learning/data/supabase_learning_repository.dart';
 import 'package:student_platform/src/ui/learning/models/team.dart';
@@ -55,12 +57,14 @@ class HomeDashboardService {
       _loadAssignments(profile.groupName),
       _loadReadNotificationIds(),
       _loadPublishedNews(),
+      _loadGroupActionDeadlines(),
     ]);
 
     final lessons = results[0] as List<Lesson>;
     final assignments = results[1] as List<HomeAssignmentPreview>;
     final readNotificationIds = results[2] as Set<String>;
     final news = results[3] as List<HomeNewsItem>;
+    final groupActions = results[4] as List<HomeGroupActionPreview>;
 
     return HomeDashboardData(
       profile: profile,
@@ -70,6 +74,7 @@ class HomeDashboardService {
       news: news,
       readNotificationIds: readNotificationIds,
       unreadMessagesCount: 0,
+      groupActions: groupActions.take(4).toList(),
     );
   }
 
@@ -286,6 +291,33 @@ class HomeDashboardService {
       );
     } catch (e) {
       debugPrint('[home] mark notification read failed: $e');
+    }
+  }
+
+  Future<List<HomeGroupActionPreview>> _loadGroupActionDeadlines() async {
+    try {
+      final repo = ChatGroupActionsRepository(client: _sb);
+      final items = await repo.listMyGroupActionDeadlines();
+      return items
+          .map(
+            (GroupActionDeadline e) => HomeGroupActionPreview(
+              eventType: e.eventType,
+              entityId: e.entityId,
+              title: e.title,
+              occursAt: e.occursAt,
+              chatId: e.chatId,
+              cardMessageId: e.cardMessageId,
+              teamId: e.teamId,
+              teamName: e.teamName,
+              status: e.status,
+              myPickText: e.myPickText,
+            ),
+          )
+          .toList()
+        ..sort((a, b) => a.occursAt.compareTo(b.occursAt));
+    } catch (e) {
+      debugPrint('[home] group action deadlines failed: $e');
+      return const [];
     }
   }
 

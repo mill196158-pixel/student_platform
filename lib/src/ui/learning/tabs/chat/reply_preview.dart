@@ -33,12 +33,17 @@ class ReplyPreview extends StatelessWidget {
                 Text(
                   'Ответ на сообщение',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
-                  ),
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withValues(alpha: 0.6),
+                      ),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  message.text.isNotEmpty ? message.text : 'Сообщение с вложением',
+                  message.text.isNotEmpty
+                      ? message.text
+                      : 'Сообщение с вложением',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.bodyMedium,

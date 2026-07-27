@@ -66,7 +66,8 @@ class PinnedStripContainer extends StatelessWidget {
             if (pins.isNotEmpty) const Divider(height: 12),
             ...pins.map((p) => ListTile(
                   leading: Icon(p.icon),
-                  title: Text(p.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  title: Text(p.title,
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
                   subtitle: p.subtitle != null ? Text(p.subtitle!) : null,
                   trailing: IconButton(
                     icon: const Icon(Icons.close),

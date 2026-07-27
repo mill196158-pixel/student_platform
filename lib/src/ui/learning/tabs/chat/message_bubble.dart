@@ -275,7 +275,8 @@ class MessageBubble extends StatelessWidget {
                             onLongPress: onLongPress,
                             onReact: onReact,
                             reactions: reactions,
-                            onRetryFailed: message.isFailed ? onRetryFailed : null,
+                            onRetryFailed:
+                                message.isFailed ? onRetryFailed : null,
                           ),
                         ],
 

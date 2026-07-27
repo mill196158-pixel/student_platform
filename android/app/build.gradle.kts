@@ -44,6 +44,8 @@ flutter {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    // On-device Cyrillic OCR fallback for topic lists (Stage 13.9).
+    implementation("cz.adaptech.tesseract4android:tesseract4android:4.9.0")
 }
 
 // Apply Google Services only when a real google-services.json is present.

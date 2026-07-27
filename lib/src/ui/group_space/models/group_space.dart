@@ -41,7 +41,7 @@ class GroupSpaceSnapshot {
       groupId: asId(json['group_id']),
       teamId: asId(json['team_id']),
       chatId: asId(json['chat_id']),
-      title: asId(json['title']) ?? 'Пространство группы',
+      title: asId(json['title']) ?? 'Общий чат группы',
       isOrganizer: json['is_organizer'] == true,
     );
   }

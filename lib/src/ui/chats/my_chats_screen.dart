@@ -255,25 +255,34 @@ class _MyChatsScreenState extends State<MyChatsScreen>
 
     final title = isDm
         ? normalizeDmTitle(titleRaw)
-        : (titleRaw.isNotEmpty
-            ? titleRaw
-            : (teamName.isNotEmpty ? teamName : 'Чат'));
+        : (isGroupSpace
+            ? (teamGroupName.isNotEmpty
+                ? teamGroupName
+                : (teamName.isNotEmpty ? teamName : 'Чат группы'))
+            : (titleRaw.isNotEmpty
+                ? titleRaw
+                : (teamName.isNotEmpty ? teamName : 'Чат')));
 
     return _ChatSummary(
       team: Team(
         id: isDm ? '' : teamId,
-        name: isDm ? title : (teamName.isNotEmpty ? teamName : title),
+        name: isDm
+            ? title
+            : (isGroupSpace
+                ? 'Чат группы'
+                : (teamName.isNotEmpty ? teamName : title)),
         icon: isGroupSpace
             ? (teamIcon.isNotEmpty ? teamIcon : 'groups')
             : teamIcon,
         teacher: teamTeacher,
         groupCode: teamGroupName,
+        kind: isDm ? 'dm' : teamKind,
       ),
-      title: title,
+      title: isGroupSpace ? 'Чат группы' : title,
       subtitle: isDm
           ? null
           : (isGroupSpace
-              ? 'Группа'
+              ? '${teamGroupName.isNotEmpty ? teamGroupName : teamName} · общий чат'
               : (teamTeacher.isNotEmpty
                   ? teamTeacher
                   : (teamGroupName.isNotEmpty ? teamGroupName : null))),

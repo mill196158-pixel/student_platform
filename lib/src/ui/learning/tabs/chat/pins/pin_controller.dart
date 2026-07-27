@@ -14,12 +14,13 @@ class PinController extends ChangeNotifier {
     final serverPins = <PinEntry>[];
     for (final m in st.chat) {
       if (m.isPinned) {
-        final title = m.text.trim().isNotEmpty 
-            ? m.text.trim().split('\n').first 
-            : (m.attachments?.isNotEmpty == true 
-                ? m.attachments!.first.fileName 
+        final title = m.text.trim().isNotEmpty
+            ? m.text.trim().split('\n').first
+            : (m.attachments?.isNotEmpty == true
+                ? m.attachments!.first.fileName
                 : 'Сообщение');
-        final subtitle = '${_time(m.at)} • ${m.authorName.isNotEmpty ? m.authorName : m.authorLogin}';
+        final subtitle =
+            '${_time(m.at)} • ${m.authorName.isNotEmpty ? m.authorName : m.authorLogin}';
         serverPins.add(PinEntry.message(
           id: 'msg-${m.id}',
           title: title,
@@ -68,7 +69,8 @@ class PinController extends ChangeNotifier {
 
   void pinAssignment(Assignment a) {
     // Избегаем дублей ручных закрепов одного и того же задания
-    if (_pins.any((p) => p.type == PinType.assignment && p.refId == a.id && !p.isAuto)) {
+    if (_pins.any(
+        (p) => p.type == PinType.assignment && p.refId == a.id && !p.isAuto)) {
       return;
     }
     final entry = PinEntry.assignment(

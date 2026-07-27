@@ -33,6 +33,8 @@ import 'chat/search/inline_search_bar.dart';
 import 'chat/assignments/assignment_form_dialog.dart';
 import 'chat/assignments/edit_assignment_dialog.dart';
 import 'chat/selection_bars.dart';
+import 'chat/topics/create_topic_selection_screen.dart';
+import 'chat/collections/create_collection_screen.dart';
 import '../../chats/core/forward_payload.dart';
 import '../../chats/data/blocks_api.dart';
 import '../../chats/forward/forward_outbox.dart';
@@ -74,10 +76,15 @@ class ChatTab extends StatefulWidget {
 
   /// Completed-semester academic chat: view history/files only.
   final bool readOnly;
+
+  /// Deeplink: scroll to and briefly highlight this message in chat history.
+  final String? highlightMessageId;
+
   const ChatTab({
     super.key,
     this.onSelectingChanged,
     this.readOnly = false,
+    this.highlightMessageId,
   });
   @override
   State<ChatTab> createState() => _ChatTabState();
@@ -323,6 +330,8 @@ class _ChatTabState extends State<ChatTab> {
   Message? _replyTo;
   // Временная подсветка активного сообщения при открытом меню действий
   String? _actionsHoverId;
+  String? _deeplinkHighlightId;
+  bool _deeplinkHighlightStarted = false;
 
   final Set<String> _typingUsers = {};
   Timer? _myTypingOff;
@@ -1128,6 +1137,30 @@ class _ChatTabState extends State<ChatTab> {
     await _chatScroll.scrollToMessage(id);
   }
 
+  Future<void> _runDeeplinkHighlight(String messageId) async {
+    if (!mounted || messageId.trim().isEmpty) return;
+    final cubit = context.read<TeamCubit>();
+    final found = await cubit.ensureMessageVisible(messageId);
+    if (!mounted) return;
+    if (!found) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Сообщение не найдено или недоступно.'),
+        ),
+      );
+      return;
+    }
+    await _scrollToMessage(messageId);
+    if (!mounted) return;
+    setState(() => _deeplinkHighlightId = messageId);
+    Future<void>.delayed(const Duration(seconds: 2), () {
+      if (!mounted) return;
+      if (_deeplinkHighlightId == messageId) {
+        setState(() => _deeplinkHighlightId = null);
+      }
+    });
+  }
+
   // Функция добавления реакции - используется в ChatActions
   Future<void> _addReaction(String msgId, String emoji) async {
     // call RPC to toggle reaction; repository will update DB and realtime will sync
@@ -1630,6 +1663,15 @@ class _ChatTabState extends State<ChatTab> {
           }
 
           // ➜ NEW: если пришёл новый последний id и мы держим низ — отметить прочитанным
+          if (!_deeplinkHighlightStarted &&
+              widget.highlightMessageId != null &&
+              state.chatHasSnapshot) {
+            _deeplinkHighlightStarted = true;
+            final targetId = widget.highlightMessageId!.trim();
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _runDeeplinkHighlight(targetId);
+            });
+          }
           if (list.isNotEmpty) {
             final newLastId = list.last.id;
             final changed = (newLastId != _lastRenderedLastId);
@@ -1744,7 +1786,7 @@ class _ChatTabState extends State<ChatTab> {
                               Supabase.instance.client.auth.currentUser?.id,
                           entrySeenAt: _entrySeenAt,
                           showEntryNewBadge: _showEntryNewBadge,
-                          hoveredMessageId: _actionsHoverId,
+                          hoveredMessageId: _deeplinkHighlightId ?? _actionsHoverId,
                           initialLoading: state.chatInitialLoading,
                           loadError: state.chatError && !state.chatHasSnapshot,
                           onRetryLoad: () {
@@ -1921,6 +1963,13 @@ class _ChatTabState extends State<ChatTab> {
                   hasFailedUploads: _hasFailedAttachments,
                   isSending: _isSending,
                   showProposeInPlus: true,
+                  showTopicSelectionInPlus: !readOnly && state.isStarosta,
+                  showCollectionInPlus: !readOnly &&
+                      state.team.isGroupSpaceChat &&
+                      state.isStarosta,
+                  onOpenTopicSelection: () =>
+                      unawaited(_openTopicSelection(context)),
+                  onOpenCollection: () => unawaited(_openCollection(context)),
                   onSend: () => _send(context),
                   onAddFile: (ui) {
                     _att.add(LocalAttach(
@@ -2150,6 +2199,24 @@ class _ChatTabState extends State<ChatTab> {
   // Получаем chatId для команды
   Future<String> _getChatIdForTeam(String teamId) =>
       _repo.getMainChatId(teamId);
+
+  Future<void> _openTopicSelection(BuildContext context) async {
+    final teamId = context.read<TeamCubit>().state.team.id;
+    final chatId = await _getChatIdForTeam(teamId);
+    if (chatId.isEmpty || !context.mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => CreateTopicSelectionScreen(chatId: chatId),
+      ),
+    );
+  }
+
+  Future<void> _openCollection(BuildContext context) async {
+    if (!context.mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const CreateCollectionScreen()),
+    );
+  }
 
   Future<void> _consumeForwardOutboxIfAny(String chatId) async {
     final data = await ForwardOutbox.tryTakeForChat(chatId);

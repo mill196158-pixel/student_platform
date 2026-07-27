@@ -150,40 +150,40 @@ class GroupSpaceRepository {
   Future<List<Map<String, dynamic>>> listCollectionContributions(
     String collectionId,
   ) async {
-    final res = await _client
-        .from('group_collection_contributions')
-        .select(
-          'id,user_id,participation_status,payment_status,amount,comment,proof_file_id,updated_at',
-        )
-        .eq('collection_id', collectionId)
-        .order('updated_at', ascending: false);
+    // Progress RPC redacts proof ids for non-privileged readers.
+    final res = await _client.rpc(
+      'list_collection_contribution_progress',
+      params: {'p_collection_id': collectionId},
+    );
     final rows = _asList(res);
-    final proofIds = rows
-        .map((e) => e['proof_file_id']?.toString() ?? '')
-        .where((e) => e.isNotEmpty)
-        .toSet()
-        .toList();
-    final proofs = <String, Map<String, dynamic>>{};
-    if (proofIds.isNotEmpty) {
-      final files = await _client
-          .from('chat_files')
-          .select('id,file_name,file_url,file_type')
-          .inFilter('id', proofIds);
-      for (final file in _asList(files)) {
-        final id = file['id']?.toString() ?? '';
-        if (id.isNotEmpty) proofs[id] = file;
-      }
-    }
-    return rows.map((row) {
+    final out = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      final userId = row['user_id']?.toString() ?? '';
       final proofId = row['proof_file_id']?.toString() ?? '';
-      final proof = proofs[proofId];
-      return {
+      Map<String, dynamic>? proof;
+      if (proofId.isNotEmpty && userId.isNotEmpty) {
+        try {
+          final proofRes = await _client.rpc(
+            'get_collection_proof_file',
+            params: {
+              'p_collection_id': collectionId,
+              'p_user_id': userId,
+            },
+          );
+          final mapped = _asMap(proofRes);
+          if (mapped != null) proof = mapped;
+        } catch (_) {
+          // Non-privileged callers must not receive proof URLs.
+        }
+      }
+      out.add({
         ...row,
         'proof_file_name': proof?['file_name'],
         'proof_file_url': proof?['file_url'],
         'proof_file_type': proof?['file_type'],
-      };
-    }).toList();
+      });
+    }
+    return out;
   }
 
   /// Uploads a proof screenshot via the existing chat file pipeline.

@@ -18,12 +18,16 @@ class TeamDetailsScreen extends StatelessWidget {
   final Team team;
   final int initialTabIndex;
 
+  /// Scroll/highlight this chat message after opening the chat tab (deeplink).
+  final String? highlightMessageId;
+
   /// Completed-semester academic chats: history/files readable, no composer.
   final bool readOnly;
   const TeamDetailsScreen({
     super.key,
     required this.team,
     this.initialTabIndex = 1,
+    this.highlightMessageId,
     this.readOnly = false,
   });
 
@@ -35,7 +39,11 @@ class TeamDetailsScreen extends StatelessWidget {
         c.init();
         return c;
       },
-      child: _Body(initialTabIndex: initialTabIndex, readOnly: readOnly),
+      child: _Body(
+        initialTabIndex: initialTabIndex,
+        readOnly: readOnly,
+        highlightMessageId: highlightMessageId,
+      ),
     );
   }
 }
@@ -43,10 +51,12 @@ class TeamDetailsScreen extends StatelessWidget {
 class _Body extends StatefulWidget {
   final int initialTabIndex;
   final bool readOnly;
+  final String? highlightMessageId;
   const _Body({
     super.key,
     this.initialTabIndex = 1,
     this.readOnly = false,
+    this.highlightMessageId,
   });
 
   @override
@@ -187,6 +197,7 @@ class _BodyState extends State<_Body> with SingleTickerProviderStateMixin {
                   ChatTab(
                     onSelectingChanged: (v) => setState(() => _selecting = v),
                     readOnly: widget.readOnly,
+                    highlightMessageId: widget.highlightMessageId,
                   ),
                   const FilesTab(), // без отступов сверху — прижато к табам
                 ],
@@ -323,7 +334,11 @@ class _TeamHeader extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(
-                          team.name,
+                          team.isGroupSpaceChat
+                              ? (team.groupCode.trim().isNotEmpty
+                                  ? team.groupCode.trim()
+                                  : team.name)
+                              : team.name,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.headlineSmall?.copyWith(
@@ -333,14 +348,26 @@ class _TeamHeader extends StatelessWidget {
                             height: 1.05,
                           ),
                         ),
-                        if (team.teacher.trim().isNotEmpty) ...[
+                        if (team.isGroupSpaceChat) ...[
+                          const SizedBox(height: 1),
+                          Text(
+                            'Общий чат группы',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: Colors.black.withValues(alpha: 0.64),
+                              height: 1.1,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ] else if (team.teacher.trim().isNotEmpty) ...[
                           const SizedBox(height: 1),
                           Text(
                             team.teacher,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodySmall?.copyWith(
-                              color: Colors.black.withOpacity(0.64),
+                              color: Colors.black.withValues(alpha: 0.64),
                               height: 1.1,
                               fontSize: 11,
                             ),

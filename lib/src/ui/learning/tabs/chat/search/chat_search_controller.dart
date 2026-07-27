@@ -5,7 +5,7 @@ class ChatSearchController extends ChangeNotifier {
   final TextEditingController field = TextEditingController();
   final ValueNotifier<int> total = ValueNotifier(0);
   final ValueNotifier<int> index = ValueNotifier(0);
-  
+
   String currentTargetId = '';
   List<String> matches = [];
   String _lastQuery = '';
@@ -24,8 +24,8 @@ class ChatSearchController extends ChangeNotifier {
 
   void recompute(List<Message> list, bool Function(Message, String) isMatch) {
     final q = field.text.trim().toLowerCase();
-    matches = q.isEmpty 
-        ? [] 
+    matches = q.isEmpty
+        ? []
         : list.where((m) => isMatch(m, q)).map((m) => m.id).toList();
 
     // Новее сверху, как в исходнике (сортировка по времени DESC)

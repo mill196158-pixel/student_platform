@@ -16,7 +16,8 @@ class ScrollToBottomButton extends StatelessWidget {
         onTap: onTap,
         child: const Padding(
           padding: EdgeInsets.all(10),
-          child: Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white, size: 22),
+          child: Icon(Icons.keyboard_arrow_down_rounded,
+              color: Colors.white, size: 22),
         ),
       ),
     );

@@ -51,6 +51,14 @@ _NotifGroup _groupFor(AppNotificationItem item) {
       return _NotifGroup.chats;
     case 'assignment':
       return _NotifGroup.assignments;
+    case 'topic_selection_created':
+    case 'topic_deadline_soon':
+    case 'topic_reassigned':
+    case 'topic_pick_changed':
+    case 'collection_created':
+    case 'collection_deadline_soon':
+    case 'collection_contribution_private':
+      return _NotifGroup.actions;
     default:
       return _NotifGroup.actions;
   }
@@ -63,6 +71,10 @@ String _threadKey(AppNotificationItem item) {
   if (peerId.isNotEmpty) return 'p:$peerId';
   final assignmentId = (item.data['assignment_id'] ?? '').toString().trim();
   if (assignmentId.isNotEmpty) return 'a:$assignmentId';
+  final selectionId = (item.data['selection_id'] ?? '').toString().trim();
+  if (selectionId.isNotEmpty) return 'sel:$selectionId';
+  final collectionId = (item.data['collection_id'] ?? '').toString().trim();
+  if (collectionId.isNotEmpty) return 'col:$collectionId';
   return 'i:${item.id}';
 }
 

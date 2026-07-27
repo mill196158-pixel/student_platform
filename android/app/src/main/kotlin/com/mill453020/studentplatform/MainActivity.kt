@@ -62,6 +62,52 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "student_platform/topic_ocr"
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "isAvailable" -> {
+                    Thread {
+                        try {
+                            val ok = TopicOcrRecognizer.isAvailable(applicationContext)
+                            runOnUiThread { result.success(ok) }
+                        } catch (_: Exception) {
+                            runOnUiThread { result.success(false) }
+                        }
+                    }.start()
+                }
+                "recognize" -> {
+                    val args = call.arguments as? Map<*, *>
+                    val path = args?.get("path") as? String
+                    val languages = (args?.get("languages") as? String) ?: "rus+eng"
+                    if (path.isNullOrBlank()) {
+                        result.error("bad_args", "Путь к изображению не передан.", null)
+                        return@setMethodCallHandler
+                    }
+                    Thread {
+                        try {
+                            val text = TopicOcrRecognizer.recognize(
+                                context = applicationContext,
+                                imagePath = path,
+                                languages = languages,
+                            )
+                            runOnUiThread { result.success(text) }
+                        } catch (e: Exception) {
+                            runOnUiThread {
+                                result.error(
+                                    "ocr_error",
+                                    e.message ?: "Не удалось распознать текст.",
+                                    null,
+                                )
+                            }
+                        }
+                    }.start()
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     private fun openNotificationSettings() {
