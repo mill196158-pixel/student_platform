@@ -6,12 +6,12 @@
 ## Статус документа
 
 - Дата аудита: **27 июля 2026**
-- Обновлено: **27 июля 2026** (Stage 13.3 code foundation)
-- Проверенная основная ветка: `refactor/chat-tab` @ `23b58c0`
+- Обновлено: **27 июля 2026** (Stage 13.4 code foundation)
+- Проверенная основная ветка: `refactor/chat-tab` @ `dae88aa`
 - Проверенная административная ветка: `feature/admin-console`
 - Репозиторий: `mill196158-pixel/student_platform`
 - Статус карты: **ACTIVE**
-- Следующий рекомендуемый этап: **Stage 13.4 — реальное управление предметами**
+- Следующий рекомендуемый этап: **Stage 13.5 — студенты, группы и семестры**
 
 Обозначения:
 
@@ -635,14 +635,19 @@ Status: **CODE FOUNDATION** (`23b58c0`) — Codex `READY_WITH_RESIDUALS`; remote
 
 ### 13.4 — Реальное управление предметами
 
-- [ ] Admin CRUD;
-- [ ] общие и семестровые поля;
-- [ ] материалы и требования;
-- [ ] преподаватели;
-- [ ] Excel-импорт;
-- [ ] preview мобильного экрана;
-- [ ] publish/archive/version history;
-- [ ] мобильный cache-first.
+Status: **CODE FOUNDATION** (`dae88aa`) — Codex `READY_WITH_RESIDUALS`; remote apply pending
+
+- [x] Admin CRUD subject_catalog + subject_student_profiles;
+- [x] общие поля: описание, outcomes, требования, форма контроля, сложность-лейбл, кафедра;
+- [~] семестровые offering profiles — deep edit отложен (residual);
+- [x] материалы/ссылки (`useful_materials_note` + `useful_links`);
+- [x] преподаватели read-only через offerings;
+- [x] Excel dry-run/import/journal/idempotent replay;
+- [x] preview мобильной карточки;
+- [x] publish/archive/version history + audit;
+- [~] мобильный cache-first через существующий InfoSubjectsCache (не ломает votes);
+- [!] `UNKNOWN_DB_LOCAL_VALIDATION`; remote apply pending; owner Excel unknown;
+- [!] legacy normalized_name collisions → unique index deferred until manual merge.
 
 Критерий DONE: содержимое карточек предметов меняется через Web Admin без релиза приложения.
 
@@ -690,10 +695,10 @@ Status: **CODE FOUNDATION** (`23b58c0`) — Codex `READY_WITH_RESIDUALS`; remote
 
 ## 13. Приоритет на ближайшие работы
 
-1. ~~Провести read-only аудит Stage 13.2~~ — code foundation `caa3970`.
-2. ~~Управление преподавателями~~ — code foundation `23b58c0`.
-3. Затем наполнить и связать предметы (Stage 13.4).
-4. Затем автоматизировать группы, студентов и переход семестра.
+1. ~~Stage 13.2 group space~~ — `caa3970`.
+2. ~~Stage 13.3 teachers~~ — `23b58c0`.
+3. ~~Stage 13.4 subjects~~ — `dae88aa`.
+4. Затем автоматизировать группы, студентов и переход семестра (Stage 13.5).
 5. Только после качественных данных включать текстовые отзывы и модерацию.
 6. После этого — физическое тестирование Android/iPhone и небольшой багфикс-цикл.
 
