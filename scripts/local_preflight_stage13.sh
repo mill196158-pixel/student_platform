@@ -65,13 +65,13 @@ echo "[5/9] Apply dependency + pending migrations in order"
 for f in \
   20260721202054_admin_rbac_and_audit.sql \
   20260722110804_news_posts_and_admin_rpc.sql \
-  20260722121908_admin_news_archive_delete.sql \
-  20260727140000_stage13_2_group_space.sql \
-  20260727150000_stage13_3_teachers_admin.sql \
-  20260727160000_stage13_4_subjects_admin.sql \
-  20260727170000_stage13_5_students_groups_terms_admin.sql \
-  20260727180000_stage13_6_reviews_moderation.sql \
-  20260727182537_stage13_2_admin_group_organizer.sql
+  20260727183823_admin_news_archive_delete.sql \
+  20260727184049_stage13_2_group_space.sql \
+  20260727184156_stage13_3_teachers_admin.sql \
+  20260727184238_stage13_4_subjects_admin.sql \
+  20260727184423_stage13_5_students_groups_terms_admin.sql \
+  20260727184457_stage13_6_reviews_moderation.sql \
+  20260727184511_stage13_2_admin_group_organizer.sql
 do
   echo "  -> $f"
   run_sql_file "$STASH/$f"

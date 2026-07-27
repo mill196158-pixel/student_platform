@@ -1,5 +1,5 @@
 -- Stage 12.3 — archived news hard-delete security review.
--- Run AFTER applying 20260722121908_admin_news_archive_delete.sql.
+-- Run AFTER applying 20260727183823_admin_news_archive_delete.sql.
 -- Read-only. Expect shapes noted in comments.
 
 -- 1) New RPCs are SECURITY DEFINER with locked search_path.

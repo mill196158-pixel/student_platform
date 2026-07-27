@@ -6,12 +6,12 @@
 ## Статус документа
 
 - Дата аудита: **27 июля 2026**
-- Обновлено: **27 июля 2026** (Stage 13.2 organizer Admin UI in Студенты; authority not `users.role`)
+- Обновлено: **27 июля 2026** (Stage 13.2–13.7 **TECHNICALLY DONE** on remote `gwdanmwluhrcfxbnplwd`)
 - Проверенная основная ветка: `refactor/chat-tab`
 - Проверенная административная ветка: `feature/admin-console`
 - Репозиторий: `mill196158-pixel/student_platform`
 - Статус карты: **ACTIVE**
-- Следующий рекомендуемый этап: **remote apply + physical Android/iPhone smoke**
+- Следующий рекомендуемый этап: **PHYSICAL SMOKE** (Android/iPhone) + **REAL XLSX** imports
 
 Обозначения:
 
@@ -597,7 +597,7 @@ Status: **DONE**
 
 ### 13.2 — Постоянное пространство учебной группы
 
-Status: **CODE FOUNDATION** — remote apply + physical smoke pending
+Status: **TECHNICALLY DONE** (remote `20260727184049` + organizer admin `20260727184511`) — **PHYSICAL SMOKE REQUIRED**
 
 - [x] автоматически создавать ровно одно постоянное пространство на учебную группу (`ensure_group_space`, unique `group_id`);
 - [x] не связывать его с предметом или отдельным семестром (`teams.kind='group_space'`);
@@ -605,115 +605,84 @@ Status: **CODE FOUNDATION** — remote apply + physical smoke pending
 - [x] сохранить основной групповой чат при смене семестра (исключён из academic archive);
 - [x] гарантировать уникальность пространства на сервере;
 - [x] не добавлять свободное создание произвольных команд в первой версии (`revoke insert on teams`);
-- [x] реализовать `Сбор группы` со статусами и подтверждающим скриншотом (UI + RPC; remote DB pending);
+- [x] реализовать `Сбор группы` со статусами и подтверждающим скриншотом (UI + RPC);
 - [x] реализовать `Выбор темы` с лимитами мест и защитой от одновременного выбора;
-- [x] RLS, RPC, Realtime, аудит; умеренные push — позже при remote smoke;
-- [x] **источник organizer (старосты) зафиксирован серверно** — не `users.role`:
-  - live audit: `users.role` все `student`; предметные роли в `team_members.role`; admin RBAC в `admin_role_assignments` отдельно;
-  - auth: член group-space **и** (`group_space_organizer_grants.source='admin'` **или** live `starosta`/`owner` на **активной** subject-team той же группы);
-  - активная subject-team: `private.is_active_subject_team_for_group` — `subject_offerings.status='active'` (или current term без offering) и `team_main` не в `chat_academic_archives`;
-  - sync: `refresh_group_space_organizer_grants` пересобирает только `subject_team`; durable `admin` grants сохраняются; снятие starosta / архив offering отзывает organizer;
-  - `users.role` — только one-time migration backfill → durable admin grant; не участвует в ongoing auth/sync;
-  - назначение вручную после remote apply: Web Admin → **Студенты** → выбрать группу → «Организаторы пространства группы» (`admin_set_group_space_organizer` / `set_group_space_organizer`); UI показывает источник (explicit grant vs active subject-team) и не снимает natural starosta как grant;
-  - RPC списка: `admin_list_group_space_organizer_state`; миграция `20260727182537_stage13_2_admin_group_organizer.sql`;
-  - role-play PASS: student forbidden; active starosta can manage; revoke; archived starosta no access; admin RBAC ≠ organizer; client `users.role` spoof denied;
-- [ ] физический smoke участника и организатора;
-- [x] local Docker preflight + security/role-play PASS (`scripts/local_preflight_stage13.sh`);
-- [x] Web Admin UI назначения организатора встроен в **Студенты** (без отдельного модуля);
-- [!] remote apply `20260727140000_stage13_2_group_space.sql` + `20260727182537_stage13_2_admin_group_organizer.sql` не выполнен.
+- [x] RLS, RPC, Realtime, аудит; remote security review PASS;
+- [x] organizer authority: admin grant **или** active subject-team `starosta`/`owner` (не `users.role`);
+- [x] Web Admin: **Студенты → группа → Организаторы пространства группы**;
+- [x] remote apply выполнен;
+- [ ] физический smoke участника и организатора (**PHYSICAL SMOKE REQUIRED**).
 
 Критерий DONE: у каждой группы есть одно понятное долговечное пространство, в котором чат, сбор и выбор темы работают без ручной работы в БД.
 
 ### 13.3 — Реальное управление преподавателями
 
-Status: **CODE FOUNDATION** (`23b58c0`) — Codex `READY_WITH_RESIDUALS`; remote apply pending
+Status: **TECHNICALLY DONE** (remote `20260727184156`) — **REAL XLSX REQUIRED** for production fill; `teacher-media` deferred
 
 - [x] канонический `teachers.id` + bridge `teacher_difficulty_targets.canonical_teacher_id`;
 - [x] безопасная миграция legacy-связей (только однозначные совпадения ФИО);
-- [x] Admin CRUD: поиск, фильтр статуса, сортировка, create/edit, publish/archive/restore через версии;
-- [x] Excel preview/dry-run/import с mapping layer, journal и idempotent replay;
-- [~] фото: поле/placeholder есть; upload Edge Function `teacher-media` отложен;
-- [x] связь с предметами (read-only related subjects из `offering_teachers`);
-- [x] мобильный cache-first published profile + admin phone preview;
-- [x] publish/archive/version history + admin audit;
-- [x] targeted security review SQL prepared;
-- [x] local Docker preflight PASS;
-- [!] remote apply `20260727150000_stage13_3_teachers_admin.sql` не выполнен;
-- [!] реальный owner Excel отсутствует — используется расширяемый mapping + fixture.
+- [x] Admin CRUD + Excel dry-run/import mapping;
+- [~] фото / `teacher-media` отложен;
+- [x] remote apply + security review PASS;
+- [!] реальный owner Excel не импортировался (**REAL XLSX REQUIRED**).
 
 Критерий DONE: администратор без SQL загружает Excel, проверяет и публикует преподавателей.
 
 ### 13.4 — Реальное управление предметами
 
-Status: **CODE FOUNDATION** (`dae88aa`) — Codex `READY_WITH_RESIDUALS`; remote apply pending
+Status: **TECHNICALLY DONE** (remote `20260727184238`) — **REAL XLSX REQUIRED** for content fill
 
 - [x] Admin CRUD subject_catalog + subject_student_profiles;
-- [x] общие поля: описание, outcomes, требования, форма контроля, сложность-лейбл, кафедра;
-- [~] семестровые offering profiles — deep edit отложен (residual);
-- [x] материалы/ссылки (`useful_materials_note` + `useful_links`);
-- [x] преподаватели read-only через offerings;
-- [x] Excel dry-run/import/journal/idempotent replay;
-- [x] preview мобильной карточки;
-- [x] publish/archive/version history + audit;
-- [~] мобильный cache-first через существующий InfoSubjectsCache (не ломает votes);
-- [x] local Docker preflight PASS; remote apply pending; owner Excel unknown;
-- [!] legacy normalized_name collisions → unique index deferred until manual merge.
+- [x] Excel dry-run/import/journal; fixture не импортировался в production;
+- [x] remote apply + security review PASS;
+- [~] deep offering profiles / legacy name collisions — residual;
+- [!] реальный owner Excel (**REAL XLSX REQUIRED**).
 
 Критерий DONE: содержимое карточек предметов меняется через Web Admin без релиза приложения.
 
 ### 13.5 — Студенты, группы и семестры
 
-Status: **CODE FOUNDATION** (`82d9cfc`) — Codex `READY_WITH_RESIDUALS`
+Status: **TECHNICALLY DONE** (remote `20260727184423`) — **REAL XLSX REQUIRED** for bulk student import
 
-- [x] Admin студенты: поиск/фильтр/edit/block/restore/assign group + bulk confirm;
-- [x] Excel dry-run/import только для существующих auth users (no service_role);
-- [x] группы list/create/edit + состав через enrollments/filter;
-- [x] terms list + prepare dry-run/apply (offerings/teams + group space sync);
-- [x] set current term (архив предметных чатов через существующий trigger);
-- [x] журнал операций с RBAC-фильтрацией;
+- [x] Admin студенты/группы/семестры + group-space sync;
+- [x] Excel dry-run/import без client `service_role`;
+- [x] organizer management в Студенты;
+- [x] remote apply + security review PASS;
 - [~] auth.create и полный rollback семестра — residual;
-- [x] local Docker preflight PASS; remote apply pending.
+- [!] реальный student Excel (**REAL XLSX REQUIRED**).
 
 Критерий DONE: новый семестр запускается управляемо без ручной работы в БД.
 
 ### 13.6 — Отзывы и модерация
 
-Status: **CODE FOUNDATION** (`eca7c88`) — Codex `READY_WITH_RESIDUALS`
+Status: **TECHNICALLY DONE** (remote `20260727184457`) — **PHYSICAL SMOKE REQUIRED**
 
-- [x] структурированные теги + summary без раскрытия автора;
-- [x] текстовые отзывы подготовлены, **выключены** feature flag `reviews.text_enabled=false`;
-- [x] один активный отзыв / edit / report / hide-restore / journal;
-- [x] очередь модерации Admin + moderator RBAC;
-- [x] rate limits / validation / conflict on restore;
+- [x] structured tags + summary; `reviews.structured_enabled=true`;
+- [x] text reviews off: `reviews.text_enabled=false`;
+- [x] moderation RBAC; remote security review PASS;
 - [~] push автору при модерации — deferred;
-- [!] remote apply pending; physical student/moderator smoke pending.
+- [ ] physical student/moderator smoke (**PHYSICAL SMOKE REQUIRED**).
 
 Критерий DONE: отзывы полезны, модерируемы и не создают юридически/этически опасный раздел.
 
 ### 13.7 — Первый релиз
 
-Status: **CODE FOUNDATION** (`7a56f56` + fix `6866357`) — Codex `READY_WITH_RESIDUALS`
+Status: **TECHNICALLY DONE** schema/Edge/tests — **PHYSICAL SMOKE REQUIRED** + **REAL XLSX REQUIRED**
 
 - [x] полный `flutter analyze` (0 errors; legacy infos/warnings не чистились механически);
-- [x] `flutter test` — 73 passed;
-- [x] admin analyze clean + Stage 13.3–13.6 focused tests passed;
-- [x] `git diff --check` clean;
-- [x] secret scan: нет клиентских service_role secrets (только env/grants);
-- [x] polling inventory: profile legacy polling + presence/session timers зафиксированы;
-- [x] ordered remote-apply list в `docs/release_checklist_v1.md`;
-- [x] subjects fixture test больше не перезаписывает tracked XLSX;
-- [x] Deno check Edge Functions — PASS (4 functions);
-- [x] local Docker preflight + Stage13 security/role-play — PASS;
-- [ ] проверка Android / iPhone / push / плохая сеть — требует устройств;
-- [x] release checklist Android+iPhone создан.
+- [x] Stage 13 focused tests PASS; admin 13.3–13.6 PASS;
+- [x] secret scan clean; Deno check PASS;
+- [x] remote migrations applied; Edge Functions redeployed (unauth 401);
+- [x] readiness notes + checklist обновлены;
+- [ ] Android / iPhone / push / плохая сеть (**PHYSICAL SMOKE REQUIRED**).
 
 ---
 
 ## 13. Приоритет на ближайшие работы
 
-1. ~~13.2–13.6 code foundations~~ на `refactor/chat-tab`.
-2. **Владелец:** remote apply миграций + deploy Edge Functions.
-3. **Владелец:** физический smoke Android/iPhone по `docs/release_checklist_v1.md`.
+1. ~~13.2–13.6 code foundations + remote apply + Edge deploy~~ **TECHNICALLY DONE**.
+2. **Владелец:** физический smoke Android/iPhone по `docs/release_checklist_v1.md`.
+3. **Владелец:** реальные Excel (teachers/subjects/students) через Admin dry-run → apply.
 4. Небольшой багфикс-цикл только по подтверждённым дефектам устройств.
 
 Закрыто перед 13.2:
@@ -739,8 +708,8 @@ Status: **CODE FOUNDATION** (`7a56f56` + fix `6866357`) — Codex `READY_WITH_RE
 - [ ] обновить старый `docs/admin_console/ADMIN_ROADMAP.md` (вторичный, не блокирует 13.2);
 - [x] обновлять чекбоксы после каждого review/apply/commit/push;
 - [x] не отмечать этап DONE без пользовательского и технического smoke;
-- [!] миграцию `20260722121908_admin_news_archive_delete.sql` **не применять** без явного разрешения;
-- [!] Edge Functions не деплоить и force push не делать без разрешения.
+- [x] remote apply Stage 13 + news archive выполнен (owner-authorized 2026-07-27);
+- [x] Edge Functions Stage 13 redeployed; force push по-прежнему запрещён.
 
 ---
 

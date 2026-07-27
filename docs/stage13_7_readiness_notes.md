@@ -1,54 +1,66 @@
-# Stage 13.7 — technical readiness notes (no physical devices)
+# Stage 13.7 — technical readiness notes
 
-## Automated results (2026-07-27, local preflight cleared)
+## Status split (2026-07-27)
+
+| Layer | Status |
+|---|---|
+| Schema + RPC + RLS (13.2–13.6 + news archive + organizer admin) | **TECHNICALLY DONE** (applied on remote `gwdanmwluhrcfxbnplwd`) |
+| Edge Functions (`news-media`, `generate-upload-url`, `cleanup-chat-files`, `dispatch-push-notifications`) | **TECHNICALLY DONE** (redeployed; unauth → 401) |
+| Flutter/Admin automated tests | **TECHNICALLY DONE** |
+| Real owner Excel import to production | **REAL XLSX REQUIRED** (not run; fixtures not imported) |
+| Android / iPhone / push / poor network | **PHYSICAL SMOKE REQUIRED** |
+
+## Automated results
 
 | Check | Result |
 |---|---|
-| `flutter analyze` (app) | exit 0; **0 errors**; ~194 infos/warnings mostly deprecated `withOpacity` (not mass-fixed) |
-| `flutter test` (app) | **73 passed** |
-| `flutter analyze` (admin_console) | **No issues** |
-| Admin focused tests 13.3–13.6 | **11 passed** |
-| `packages/admin_import_mapping` tests | **4 passed** |
+| `flutter analyze` (app) | exit 0; **0 errors**; 194 infos/warnings (mostly deprecated `withOpacity`, not mass-fixed) |
+| Stage 13 app tests (group-space/info/profile) | **31 passed** |
+| `flutter analyze` (admin academic/auth) | **No issues** |
+| Admin Stage 13.3–13.6 focused tests | **18 passed** |
 | `git diff --check` | clean |
-| Secrets scan | no client-embedded service_role secrets / no Admin service_role client |
-| Deno Edge check | **PASS** (`cleanup-chat-files`, `generate-upload-url`, `dispatch-push-notifications`, `news-media`) |
-| Local Supabase/Docker | **PASS** via `scripts/local_preflight_stage13.sh` |
-| Stage13 security reviews | **PASS** (13.2–13.6) |
-| Stage13 runtime role-play | **PASS** (6/6 scenarios) |
+| Secrets scan | no client-embedded `service_role` |
+| Deno Edge check | **PASS** (4 functions) |
+| Remote security reviews (assertive) | **PASS** news + 13.2–13.6 |
+| Remote feature flags | `reviews.structured_enabled=true`, `reviews.text_enabled=false` |
 
-## Local validation method
+## Remote migrations applied (project `gwdanmwluhrcfxbnplwd`)
 
-Repo migration history is incomplete for empty-DB `supabase db reset`. Local preflight:
+| Remote version | Name | Post-check |
+|---|---|---|
+| `20260727183823` | `admin_news_archive_delete` | PASS |
+| `20260727184049` | `stage13_2_group_space` | PASS |
+| `20260727184156` | `stage13_3_teachers_admin` | PASS |
+| `20260727184238` | `stage13_4_subjects_admin` | PASS |
+| `20260727184423` | `stage13_5_students_groups_terms_admin` | PASS |
+| `20260727184457` | `stage13_6_reviews_moderation` | PASS |
+| `20260727184511` | `stage13_2_admin_group_organizer` | PASS |
 
-1. Parks historical migrations.
-2. Starts clean Supabase Docker.
-3. Applies live-shaped `supabase/local/pre_stage13_baseline.sql` (read-only remote introspection + recovered academic core). **Never apply baseline to remote.**
-4. Applies dependency + pending migrations in order (admin RBAC → news → news archive → Stage 13.2–13.6).
-5. Runs `supabase/checks/stage13_local_runtime_roleplay.sql` and `stage13_*_security_review.sql`.
+Local filenames were `git mv`-aligned to these remote timestamps (SQL unchanged).
 
-`UNKNOWN_DB_LOCAL_VALIDATION` cleared.
+Organizer admin migration applied **after** 13.5 (depends on `stage13_5_can` / `admin_ensure_group_space_for_group`).
 
-## Known non-blockers (not local-DB residuals)
+## Edge deploy
 
-- Profile tab still uses legacy polling (`profile_screen.dart`) — outside chat Realtime path.
-- Presence/session timers remain intentional.
-- Text reviews feature-flagged off.
-- Auth student create remains CLI/Edge-only.
-- Owner Excel mapping still extensible (no real owner file).
-- Physical Android/iPhone smoke still owner-gated.
+| Function | Version | verify_jwt | Unauth smoke |
+|---|---|---|---|
+| `news-media` | 2 | true | 401 |
+| `generate-upload-url` | 7 | true | 401 |
+| `cleanup-chat-files` | 4 | false (custom bearer) | 401 missing bearer |
+| `dispatch-push-notifications` | 4 | false (custom bearer) | 401 missing bearer |
 
-## Codex
+`teacher-media` remains deferred (not deployed).
 
-- After local preflight + Deno + assertive checks + concurrent race (`9fd2957`): **READY**
-- `UNKNOWN_DB_LOCAL_VALIDATION` cleared.
+## Intentionally not changed on production
 
-## Remote apply status (read-only MCP, project `gwdanmwluhrcfxbnplwd`)
+- No fixture Excel imports
+- No synthetic teachers/students/subjects/reviews/groups left in DB
+- No mass push sends
+- `users.role` starosta backfill was 0 rows
+- No entity_reviews rows created
 
-Live migrations end at `20260722110804_news_posts_and_admin_rpc`. Not applied yet:
+## Remaining owner work
 
-1. `20260722121908_admin_news_archive_delete.sql`
-2. `20260727140000_stage13_2_group_space.sql`
-3. `20260727150000_stage13_3_teachers_admin.sql`
-4. `20260727160000_stage13_4_subjects_admin.sql`
-5. `20260727170000_stage13_5_students_groups_terms_admin.sql`
-6. `20260727180000_stage13_6_reviews_moderation.sql`
+1. **REAL XLSX REQUIRED** — import teachers/subjects/students with real files via Admin dry-run → apply.
+2. **PHYSICAL SMOKE REQUIRED** — Android/iPhone checklist in `docs/release_checklist_v1.md` (chat, group space, push, offline).
+3. Assign first organizers via Admin: **Студенты → группа → Организаторы пространства группы** (or rely on active subject-team starosta).
