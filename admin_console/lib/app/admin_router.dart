@@ -7,6 +7,7 @@ import '../core/auth/login_screen.dart';
 import '../core/auth/no_access_screen.dart';
 import '../core/auth/reset_password_screen.dart';
 import '../core/navigation/admin_shell.dart';
+import '../features/academic/students/students_screen.dart';
 import '../features/academic/subjects/subjects_screen.dart';
 import '../features/academic/teachers/teachers_screen.dart';
 import '../features/content/news/news_editor_screen.dart';
@@ -123,6 +124,10 @@ GoRouter createAdminRouter(AdminSessionController session) {
           GoRoute(
             path: '/academic/teachers',
             builder: (context, state) => TeachersScreen(session: session),
+          ),
+          GoRoute(
+            path: '/academic/students',
+            builder: (context, state) => StudentsScreen(session: session),
           ),
         ],
       ),

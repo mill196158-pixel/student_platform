@@ -121,6 +121,28 @@ List<Map<String, String>> parseUsefulLinks(String raw) {
   return links;
 }
 
+/// Suggested field → source header for student spreadsheets.
+Map<String, String> suggestStudentHeaderMapping(List<String> headers) {
+  const aliases = <String, List<String>>{
+    'login': ['логин', 'login', 'username', 'студбилет', 'номер'],
+    'name': ['имя', 'name', 'first_name'],
+    'surname': ['фамилия', 'surname', 'last_name'],
+    'group_name': ['группа', 'group', 'group_name'],
+  };
+  final byField = <String, String>{};
+  for (final header in headers) {
+    final normalized = normalizePersonName(header);
+    for (final entry in aliases.entries) {
+      if (byField.containsKey(entry.key)) continue;
+      if (entry.value.map(normalizePersonName).contains(normalized)) {
+        byField[entry.key] = header;
+        break;
+      }
+    }
+  }
+  return byField;
+}
+
 /// Suggested field → source header for subject spreadsheets.
 Map<String, String> suggestSubjectHeaderMapping(List<String> headers) {
   const aliases = <String, List<String>>{

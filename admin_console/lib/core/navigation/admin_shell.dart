@@ -45,11 +45,11 @@ class AdminShell extends StatelessWidget {
         path: '/academic/teachers',
         isVisible: local || caps.canReadAcademic,
       ),
-      const _AdminDestination(
+      _AdminDestination(
         label: 'Студенты',
         icon: Icons.groups_outlined,
-        isEnabled: false,
-        isVisible: false,
+        path: '/academic/students',
+        isVisible: local || caps.canReadStudents || caps.canManageTerms,
       ),
       const _AdminDestination(
         label: 'Модерация',

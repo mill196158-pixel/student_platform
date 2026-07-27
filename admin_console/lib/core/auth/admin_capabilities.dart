@@ -24,9 +24,20 @@ class AdminCapabilities {
   bool get canWriteContent => can('content.write');
   bool get canPublishContent => can('content.publish');
   bool get canReadAcademic =>
-      can('academic.read') || can('subjects.write') || can('teachers.write');
+      can('academic.read') ||
+      can('subjects.write') ||
+      can('teachers.write') ||
+      can('students.read') ||
+      can('students.write') ||
+      can('groups.write') ||
+      can('terms.manage');
   bool get canWriteSubjects => can('subjects.write');
   bool get canWriteTeachers => can('teachers.write');
+  bool get canReadStudents => can('students.read') || can('students.write');
+  bool get canWriteStudents => can('students.write');
+  bool get canSuspendStudents => can('students.suspend');
+  bool get canWriteGroups => can('groups.write');
+  bool get canManageTerms => can('terms.manage');
   bool get canManageRoles => can('roles.manage');
   bool get canReadAudit => can('audit.read');
 
