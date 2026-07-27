@@ -6,12 +6,12 @@
 ## Статус документа
 
 - Дата аудита: **27 июля 2026**
-- Обновлено: **27 июля 2026** (Stage 13.5 code foundation)
-- Проверенная основная ветка: `refactor/chat-tab` @ `82d9cfc`
+- Обновлено: **27 июля 2026** (Stage 13.7 readiness docs)
+- Проверенная основная ветка: `refactor/chat-tab` @ `eca7c88`+
 - Проверенная административная ветка: `feature/admin-console`
 - Репозиторий: `mill196158-pixel/student_platform`
 - Статус карты: **ACTIVE**
-- Следующий рекомендуемый этап: **Stage 13.6 — отзывы и модерация**
+- Следующий рекомендуемый этап: **remote apply + physical Android/iPhone smoke**
 
 Обозначения:
 
@@ -668,42 +668,40 @@ Status: **CODE FOUNDATION** (`82d9cfc`) — Codex `READY_WITH_RESIDUALS`
 
 ### 13.6 — Отзывы и модерация
 
-- [ ] структурированные теги;
-- [ ] текстовые отзывы;
-- [ ] очередь модерации;
-- [ ] жалобы и санкции;
-- [ ] правила приватности;
-- [ ] защита от дублей и накрутки;
-- [ ] физические сценарии student/moderator.
+Status: **CODE FOUNDATION** (`eca7c88`) — Codex `READY_WITH_RESIDUALS`
+
+- [x] структурированные теги + summary без раскрытия автора;
+- [x] текстовые отзывы подготовлены, **выключены** feature flag `reviews.text_enabled=false`;
+- [x] один активный отзыв / edit / report / hide-restore / journal;
+- [x] очередь модерации Admin + moderator RBAC;
+- [x] rate limits / validation / conflict on restore;
+- [~] push автору при модерации — deferred;
+- [!] remote apply pending; physical student/moderator smoke pending.
 
 Критерий DONE: отзывы полезны, модерируемы и не создают юридически/этически опасный раздел.
 
 ### 13.7 — Первый релиз
 
-- [ ] проверка Android;
-- [ ] проверка iPhone;
-- [ ] push foreground/background/terminated;
-- [ ] плохая сеть и офлайн-кеш;
-- [ ] новый пользователь;
-- [ ] смена пароля;
-- [ ] пустая группа;
-- [ ] переход семестра;
-- [ ] архив;
-- [ ] импорт данных;
-- [ ] доступность;
-- [ ] исправление только подтверждённых багов;
-- [ ] release checklist и версия.
+Status: **TECH CHECKS DONE (no devices)** — checklist `docs/release_checklist_v1.md`
+
+- [x] полный `flutter analyze` (0 errors; legacy infos/warnings не чистились механически);
+- [x] `flutter test` — 73 passed;
+- [x] admin analyze clean + Stage 13.3–13.6 focused tests passed;
+- [x] `git diff --check` clean;
+- [x] secret scan: нет клиентских service_role secrets (только env/grants);
+- [x] polling inventory: profile legacy polling + presence/session timers зафиксированы;
+- [~] Deno check Edge Functions — `deno` отсутствует локально (residual);
+- [ ] проверка Android / iPhone / push / плохая сеть — требует устройств;
+- [x] release checklist Android+iPhone создан.
 
 ---
 
 ## 13. Приоритет на ближайшие работы
 
-1. ~~Stage 13.2~~ `caa3970`.
-2. ~~Stage 13.3~~ `23b58c0`.
-3. ~~Stage 13.4~~ `dae88aa`.
-4. ~~Stage 13.5~~ `82d9cfc`.
-5. Затем отзывы и модерация (Stage 13.6).
-6. После этого — физическое тестирование Android/iPhone и небольшой багфикс-цикл.
+1. ~~13.2–13.6 code foundations~~ на `refactor/chat-tab`.
+2. **Владелец:** remote apply миграций + deploy Edge Functions.
+3. **Владелец:** физический smoke Android/iPhone по `docs/release_checklist_v1.md`.
+4. Небольшой багфикс-цикл только по подтверждённым дефектам устройств.
 
 Закрыто перед 13.2:
 
