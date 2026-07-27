@@ -6,12 +6,12 @@
 ## Статус документа
 
 - Дата аудита: **27 июля 2026**
-- Обновлено: **27 июля 2026** (Stage 13.2 code foundation)
-- Проверенная основная ветка: `refactor/chat-tab` @ `caa3970`
+- Обновлено: **27 июля 2026** (Stage 13.3 code foundation)
+- Проверенная основная ветка: `refactor/chat-tab` @ `23b58c0`
 - Проверенная административная ветка: `feature/admin-console`
 - Репозиторий: `mill196158-pixel/student_platform`
 - Статус карты: **ACTIVE**
-- Следующий рекомендуемый этап: **Stage 13.3 — реальное управление преподавателями и Excel**
+- Следующий рекомендуемый этап: **Stage 13.4 — реальное управление предметами**
 
 Обозначения:
 
@@ -616,15 +616,20 @@ Status: **CODE FOUNDATION** (`caa3970`) — remote apply + physical smoke pendin
 
 ### 13.3 — Реальное управление преподавателями
 
-- [ ] канонический `teachers.id`;
-- [ ] миграция связей и рейтингов;
-- [ ] реальный Admin CRUD;
-- [ ] Excel preview/dry-run/import;
-- [ ] фото и профиль;
-- [ ] связь с предметами;
-- [ ] мобильный предпросмотр;
-- [ ] publish/archive/version history;
-- [ ] targeted security checks.
+Status: **CODE FOUNDATION** (`23b58c0`) — Codex `READY_WITH_RESIDUALS`; remote apply pending
+
+- [x] канонический `teachers.id` + bridge `teacher_difficulty_targets.canonical_teacher_id`;
+- [x] безопасная миграция legacy-связей (только однозначные совпадения ФИО);
+- [x] Admin CRUD: поиск, фильтр статуса, сортировка, create/edit, publish/archive/restore через версии;
+- [x] Excel preview/dry-run/import с mapping layer, journal и idempotent replay;
+- [~] фото: поле/placeholder есть; upload Edge Function `teacher-media` отложен;
+- [x] связь с предметами (read-only related subjects из `offering_teachers`);
+- [x] мобильный cache-first published profile + admin phone preview;
+- [x] publish/archive/version history + admin audit;
+- [x] targeted security review SQL prepared;
+- [!] `UNKNOWN_DB_LOCAL_VALIDATION`;
+- [!] remote apply `20260727150000_stage13_3_teachers_admin.sql` не выполнен;
+- [!] реальный owner Excel отсутствует — используется расширяемый mapping + fixture.
 
 Критерий DONE: администратор без SQL загружает Excel, проверяет и публикует преподавателей.
 
@@ -685,9 +690,9 @@ Status: **CODE FOUNDATION** (`caa3970`) — remote apply + physical smoke pendin
 
 ## 13. Приоритет на ближайшие работы
 
-1. **Провести read-only аудит Stage 13.2** и затем реализовать постоянное пространство группы, сбор и выбор темы.
-2. Начать управление преподавателями с реального Excel и dry-run импорта.
-3. Затем наполнить и связать предметы.
+1. ~~Провести read-only аудит Stage 13.2~~ — code foundation `caa3970`.
+2. ~~Управление преподавателями~~ — code foundation `23b58c0`.
+3. Затем наполнить и связать предметы (Stage 13.4).
 4. Затем автоматизировать группы, студентов и переход семестра.
 5. Только после качественных данных включать текстовые отзывы и модерацию.
 6. После этого — физическое тестирование Android/iPhone и небольшой багфикс-цикл.
