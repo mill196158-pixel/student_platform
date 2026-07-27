@@ -6,12 +6,12 @@
 ## Статус документа
 
 - Дата аудита: **27 июля 2026**
-- Обновлено: **27 июля 2026** (Stage 13.4 code foundation)
-- Проверенная основная ветка: `refactor/chat-tab` @ `dae88aa`
+- Обновлено: **27 июля 2026** (Stage 13.5 code foundation)
+- Проверенная основная ветка: `refactor/chat-tab` @ `82d9cfc`
 - Проверенная административная ветка: `feature/admin-console`
 - Репозиторий: `mill196158-pixel/student_platform`
 - Статус карты: **ACTIVE**
-- Следующий рекомендуемый этап: **Stage 13.5 — студенты, группы и семестры**
+- Следующий рекомендуемый этап: **Stage 13.6 — отзывы и модерация**
 
 Обозначения:
 
@@ -653,13 +653,16 @@ Status: **CODE FOUNDATION** (`dae88aa`) — Codex `READY_WITH_RESIDUALS`; remote
 
 ### 13.5 — Студенты, группы и семестры
 
-- [ ] импорт списка студентов;
-- [ ] управление группами;
-- [ ] dry-run нового семестра;
-- [ ] создание offerings/teams/chats;
-- [ ] закрытие старого периода;
-- [ ] журнал и откат;
-- [ ] защита массовых действий.
+Status: **CODE FOUNDATION** (`82d9cfc`) — Codex `READY_WITH_RESIDUALS`
+
+- [x] Admin студенты: поиск/фильтр/edit/block/restore/assign group + bulk confirm;
+- [x] Excel dry-run/import только для существующих auth users (no service_role);
+- [x] группы list/create/edit + состав через enrollments/filter;
+- [x] terms list + prepare dry-run/apply (offerings/teams + group space sync);
+- [x] set current term (архив предметных чатов через существующий trigger);
+- [x] журнал операций с RBAC-фильтрацией;
+- [~] auth.create и полный rollback семестра — residual;
+- [!] UNKNOWN_DB_LOCAL_VALIDATION; remote apply pending.
 
 Критерий DONE: новый семестр запускается управляемо без ручной работы в БД.
 
@@ -695,11 +698,11 @@ Status: **CODE FOUNDATION** (`dae88aa`) — Codex `READY_WITH_RESIDUALS`; remote
 
 ## 13. Приоритет на ближайшие работы
 
-1. ~~Stage 13.2 group space~~ — `caa3970`.
-2. ~~Stage 13.3 teachers~~ — `23b58c0`.
-3. ~~Stage 13.4 subjects~~ — `dae88aa`.
-4. Затем автоматизировать группы, студентов и переход семестра (Stage 13.5).
-5. Только после качественных данных включать текстовые отзывы и модерацию.
+1. ~~Stage 13.2~~ `caa3970`.
+2. ~~Stage 13.3~~ `23b58c0`.
+3. ~~Stage 13.4~~ `dae88aa`.
+4. ~~Stage 13.5~~ `82d9cfc`.
+5. Затем отзывы и модерация (Stage 13.6).
 6. После этого — физическое тестирование Android/iPhone и небольшой багфикс-цикл.
 
 Закрыто перед 13.2:
