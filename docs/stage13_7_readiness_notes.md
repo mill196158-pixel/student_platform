@@ -1,34 +1,45 @@
 # Stage 13.7 — technical readiness notes (no physical devices)
 
-## Automated results (2026-07-27)
+## Automated results (2026-07-27, local preflight cleared)
 
 | Check | Result |
 |---|---|
-| `flutter analyze` (app) | exit 0; **0 errors**; ~194 infos/warnings mostly deprecated `withOpacity` / unused (not mass-fixed) |
+| `flutter analyze` (app) | exit 0; **0 errors**; ~194 infos/warnings mostly deprecated `withOpacity` (not mass-fixed) |
 | `flutter test` (app) | **73 passed** |
 | `flutter analyze` (admin_console) | **No issues** |
 | Admin focused tests 13.3–13.6 | **11 passed** |
 | `packages/admin_import_mapping` tests | **4 passed** |
 | `git diff --check` | clean |
-| Secrets scan | no client-embedded service_role secrets |
-| Deno Edge check | **blocked**: `deno` not installed locally |
-| SQL local role-play | **UNKNOWN_DB_LOCAL_VALIDATION** (no full student_platform local DB stack) |
+| Secrets scan | no client-embedded service_role secrets / no Admin service_role client |
+| Deno Edge check | **PASS** (`cleanup-chat-files`, `generate-upload-url`, `dispatch-push-notifications`, `news-media`) |
+| Local Supabase/Docker | **PASS** via `scripts/local_preflight_stage13.sh` |
+| Stage13 security reviews | **PASS** (13.2–13.6) |
+| Stage13 runtime role-play | **PASS** (6/6 scenarios) |
 
-## Known non-blockers recorded
+## Local validation method
+
+Repo migration history is incomplete for empty-DB `supabase db reset`. Local preflight:
+
+1. Parks historical migrations.
+2. Starts clean Supabase Docker.
+3. Applies live-shaped `supabase/local/pre_stage13_baseline.sql` (read-only remote introspection + recovered academic core). **Never apply baseline to remote.**
+4. Applies dependency + pending migrations in order (admin RBAC → news → news archive → Stage 13.2–13.6).
+5. Runs `supabase/checks/stage13_local_runtime_roleplay.sql` and `stage13_*_security_review.sql`.
+
+`UNKNOWN_DB_LOCAL_VALIDATION` cleared.
+
+## Known non-blockers (not local-DB residuals)
 
 - Profile tab still uses legacy polling (`profile_screen.dart`) — outside chat Realtime path.
 - Presence/session timers remain intentional.
 - Text reviews feature-flagged off.
 - Auth student create remains CLI/Edge-only.
+- Owner Excel mapping still extensible (no real owner file).
+- Physical Android/iPhone smoke still owner-gated.
 
 ## Codex
 
-- First pass: **NO-GO** (missing ordered remote-apply list; subjects test rewrote fixture).
-- After fix `6866357`: **READY_WITH_RESIDUALS** (Deno unavailable, UNKNOWN_DB, profile polling, remote/physical owner-gated).
-
-## Physical / owner-gated
-
-See `docs/release_checklist_v1.md`.
+- After local preflight + Deno: target **READY** without `UNKNOWN_DB_LOCAL_VALIDATION`.
 
 ## Remote apply status (read-only MCP, project `gwdanmwluhrcfxbnplwd`)
 

@@ -609,7 +609,7 @@ Status: **CODE FOUNDATION** (`caa3970`) — remote apply + physical smoke pendin
 - [x] реализовать `Выбор темы` с лимитами мест и защитой от одновременного выбора;
 - [x] RLS, RPC, Realtime, аудит; умеренные push — позже при remote smoke;
 - [ ] физический smoke участника и организатора;
-- [!] `UNKNOWN_DB_LOCAL_VALIDATION` — полный local stack dependency apply не завершён;
+- [x] local Docker preflight + security/role-play PASS (`scripts/local_preflight_stage13.sh`);
 - [!] remote apply миграции `20260727140000_stage13_2_group_space.sql` не выполнен.
 
 Критерий DONE: у каждой группы есть одно понятное долговечное пространство, в котором чат, сбор и выбор темы работают без ручной работы в БД.
@@ -627,7 +627,7 @@ Status: **CODE FOUNDATION** (`23b58c0`) — Codex `READY_WITH_RESIDUALS`; remote
 - [x] мобильный cache-first published profile + admin phone preview;
 - [x] publish/archive/version history + admin audit;
 - [x] targeted security review SQL prepared;
-- [!] `UNKNOWN_DB_LOCAL_VALIDATION`;
+- [x] local Docker preflight PASS;
 - [!] remote apply `20260727150000_stage13_3_teachers_admin.sql` не выполнен;
 - [!] реальный owner Excel отсутствует — используется расширяемый mapping + fixture.
 
@@ -646,7 +646,7 @@ Status: **CODE FOUNDATION** (`dae88aa`) — Codex `READY_WITH_RESIDUALS`; remote
 - [x] preview мобильной карточки;
 - [x] publish/archive/version history + audit;
 - [~] мобильный cache-first через существующий InfoSubjectsCache (не ломает votes);
-- [!] `UNKNOWN_DB_LOCAL_VALIDATION`; remote apply pending; owner Excel unknown;
+- [x] local Docker preflight PASS; remote apply pending; owner Excel unknown;
 - [!] legacy normalized_name collisions → unique index deferred until manual merge.
 
 Критерий DONE: содержимое карточек предметов меняется через Web Admin без релиза приложения.
@@ -662,7 +662,7 @@ Status: **CODE FOUNDATION** (`82d9cfc`) — Codex `READY_WITH_RESIDUALS`
 - [x] set current term (архив предметных чатов через существующий trigger);
 - [x] журнал операций с RBAC-фильтрацией;
 - [~] auth.create и полный rollback семестра — residual;
-- [!] UNKNOWN_DB_LOCAL_VALIDATION; remote apply pending.
+- [x] local Docker preflight PASS; remote apply pending.
 
 Критерий DONE: новый семестр запускается управляемо без ручной работы в БД.
 
@@ -692,8 +692,8 @@ Status: **CODE FOUNDATION** (`7a56f56` + fix `6866357`) — Codex `READY_WITH_RE
 - [x] polling inventory: profile legacy polling + presence/session timers зафиксированы;
 - [x] ordered remote-apply list в `docs/release_checklist_v1.md`;
 - [x] subjects fixture test больше не перезаписывает tracked XLSX;
-- [~] Deno check Edge Functions — `deno` отсутствует локально (residual);
-- [!] UNKNOWN_DB_LOCAL_VALIDATION;
+- [x] Deno check Edge Functions — PASS (4 functions);
+- [x] local Docker preflight + Stage13 security/role-play — PASS;
 - [ ] проверка Android / iPhone / push / плохая сеть — требует устройств;
 - [x] release checklist Android+iPhone создан.
 

@@ -254,9 +254,18 @@ begin
   if v_group <> private.current_active_group_id() and not private.is_group_space_admin() then raise exception 'forbidden' using errcode = '42501'; end if;
   v_team := private.group_space_team_id(v_group); if v_team is null then return 0; end if;
   insert into public.team_members(team_id, user_id, role)
-  select v_team, se.user_id, 'member' from public.student_enrollments se
+  select
+    v_team,
+    se.user_id,
+    case when u.role in ('starosta', 'admin') then 'starosta' else 'member' end
+  from public.student_enrollments se
+  join public.users u on u.id = se.user_id
   where se.group_id = v_group and se.status = 'active' and se.ended_at is null
-  on conflict do nothing;
+  on conflict (team_id, user_id) do update
+    set role = case
+      when public.team_members.role in ('owner', 'starosta') then public.team_members.role
+      else excluded.role
+    end;
   get diagnostics v_count = row_count;
   delete from public.chat_members cm using public.chats c
   where c.id = cm.chat_id and c.team_id = v_team and c.type = 'team_main'

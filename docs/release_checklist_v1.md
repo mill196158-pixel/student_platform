@@ -54,6 +54,6 @@
 - PDF экспорт отложен
 - `teacher-media` upload отложен
 - Profile screen legacy polling (не чат)
-- UNKNOWN_DB_LOCAL_VALIDATION без полного local stack
+- Local preflight cleared: `scripts/local_preflight_stage13.sh` (baseline + pending migrations + security/role-play)
 - Auth.create студентов только CLI/Edge
 - Физические устройства обязательны для финального GO
