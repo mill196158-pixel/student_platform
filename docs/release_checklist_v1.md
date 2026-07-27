@@ -5,10 +5,17 @@
 
 ## Перед сборкой (владелец)
 
-1. Применить remote-миграции по порядку (см. итоговый отчёт Stage 13).
-2. Задеплоить Edge Functions: `news-media`, `generate-upload-url`, `cleanup-chat-files`, `dispatch-push-notifications` (+ позже `teacher-media` если нужен).
-3. Проверить feature flags: `reviews.text_enabled=false`, `reviews.structured_enabled=true` (или продуктовое решение).
-4. Подготовить реальные Excel (преподаватели/предметы/студенты) — mapping расширяемый, точный файл не зафиксирован.
+1. Применить remote-миграции **строго по порядку** (только с явным разрешением):
+   1. `20260722121908_admin_news_archive_delete.sql` (+ связанные news archive RPC/queue, если ещё не на remote)
+   2. `20260727140000_stage13_2_group_space.sql`
+   3. `20260727150000_stage13_3_teachers_admin.sql`
+   4. `20260727160000_stage13_4_subjects_admin.sql`
+   5. `20260727170000_stage13_5_students_groups_terms_admin.sql`
+   6. `20260727180000_stage13_6_reviews_moderation.sql`
+2. После apply: прогнать security SQL checks из `supabase/checks/stage13_*_security_review.sql` и smoke Admin list screens.
+3. Задеплоить Edge Functions: `news-media`, `generate-upload-url`, `cleanup-chat-files`, `dispatch-push-notifications` (+ позже `teacher-media` если нужен).
+4. Проверить feature flags: `reviews.text_enabled=false`, `reviews.structured_enabled=true` (или продуктовое решение).
+5. Подготовить реальные Excel (преподаватели/предметы/студенты) — mapping расширяемый, точный файл не зафиксирован.
 
 ## Android
 

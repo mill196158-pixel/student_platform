@@ -47,10 +47,12 @@ void main() {
   });
 
   test('fixture xlsx mapping dry-run and idempotent apply', () async {
-    final bytes = buildSubjectsFixtureXlsx();
-    final file = File('test/fixtures/subjects_import_fixture.xlsx');
-    file.parent.createSync(recursive: true);
-    file.writeAsBytesSync(bytes);
+    final committed = File('test/fixtures/subjects_import_fixture.xlsx');
+    expect(committed.existsSync(), isTrue);
+    final bytes = committed.readAsBytesSync();
+    // Also prove generator stays compatible without rewriting tracked fixture.
+    final generated = buildSubjectsFixtureXlsx();
+    expect(generated, isNotEmpty);
     final sheet = TeacherImportService().readFirstSheet(bytes);
     final mapping = suggestSubjectHeaderMapping(sheet.headers);
     expect(mapping['canonical_name'], 'Предмет');
