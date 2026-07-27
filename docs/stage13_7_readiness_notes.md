@@ -39,7 +39,8 @@ Repo migration history is incomplete for empty-DB `supabase db reset`. Local pre
 
 ## Codex
 
-- After local preflight + Deno: target **READY** without `UNKNOWN_DB_LOCAL_VALIDATION`.
+- After local preflight + Deno + assertive checks + concurrent race (`9fd2957`): **READY**
+- `UNKNOWN_DB_LOCAL_VALIDATION` cleared.
 
 ## Remote apply status (read-only MCP, project `gwdanmwluhrcfxbnplwd`)
 
