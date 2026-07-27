@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 class TeacherProfileScreen extends StatefulWidget {
   final String teacherName;
+  final String? teacherId;
   final String? subjectTitle;
   final String? department;
   final int? semesterNumber;
@@ -16,6 +17,7 @@ class TeacherProfileScreen extends StatefulWidget {
   const TeacherProfileScreen({
     super.key,
     required this.teacherName,
+    this.teacherId,
     this.subjectTitle,
     this.department,
     this.semesterNumber,
@@ -34,6 +36,8 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
   bool _ratingLoading = true;
   bool _ratingSubmitting = false;
   double? _subjectDifficultyAvg;
+  String? _publishedName;
+  String? _publishedAbout;
 
   @override
   void initState() {
@@ -41,6 +45,49 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
     _subjectDifficultyAvg = widget.subjectDifficultyAvg;
     _loadRating();
     _loadSubjectDifficulty();
+    _loadPublishedProfile();
+  }
+
+  Future<void> _loadPublishedProfile() async {
+    final id = (widget.teacherId ?? '').trim();
+    if (id.isEmpty) return;
+    final cacheKey = 'teacher_published_profile_v1_$id';
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cached = prefs.getString(cacheKey);
+      if (cached != null && cached.isNotEmpty && mounted) {
+        final map = jsonDecode(cached);
+        if (map is Map) {
+          setState(() {
+            final name = map['full_name']?.toString().trim();
+            final about = map['about_text']?.toString().trim();
+            _publishedName = name?.isEmpty == false ? name : null;
+            _publishedAbout = about?.isEmpty == false ? about : null;
+          });
+        }
+      }
+    } catch (_) {}
+    try {
+      final raw = await Supabase.instance.client.rpc(
+        'get_published_teacher',
+        params: {'p_id': id},
+      );
+      if (raw is! Map || !mounted) return;
+      final name = raw['full_name']?.toString().trim();
+      final about = raw['about_text']?.toString().trim();
+      setState(() {
+        _publishedName = name?.isEmpty == false ? name : null;
+        _publishedAbout = about?.isEmpty == false ? about : null;
+      });
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(cacheKey, jsonEncode(raw));
+    } on PostgrestException catch (error) {
+      // Keep the legacy name-based profile only when this local-only RPC has
+      // not reached the backend/schema cache yet.
+      if (error.code != 'PGRST202' && error.code != '42883') return;
+    } catch (_) {
+      // Existing name-based difficulty flow remains available offline.
+    }
   }
 
   Future<void> _loadRating() async {
@@ -117,7 +164,8 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final name = _clean(widget.teacherName) ?? 'Преподаватель';
+    final name =
+        _clean(_publishedName) ?? _clean(widget.teacherName) ?? 'Преподаватель';
     final subject = _clean(widget.subjectTitle);
     final departmentName = _clean(widget.department);
     final averageScore = _rating?.averageScore ?? widget.difficultyScore;
@@ -153,13 +201,15 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
                 ),
                 child: Column(
                   children: [
-                    if (_rating?.aboutOrNull != null) ...[
+                    if ((_clean(_publishedAbout) ?? _rating?.aboutOrNull) !=
+                        null) ...[
                       _ProfileCard(
                         icon: Icons.info_outline_rounded,
                         title: 'О преподавателе',
                         compact: true,
                         child: _AboutTeacherBlock(
-                          text: _rating!.aboutOrNull!,
+                          text:
+                              _clean(_publishedAbout) ?? _rating!.aboutOrNull!,
                         ),
                       ),
                       const SizedBox(height: 10),
@@ -925,9 +975,8 @@ class _SubjectRow extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.labelSmall?.copyWith(
-                          color: hasSubjectScore
-                              ? Colors.black87
-                              : Colors.black45,
+                          color:
+                              hasSubjectScore ? Colors.black87 : Colors.black45,
                           fontWeight: FontWeight.w800,
                         ),
                       ),

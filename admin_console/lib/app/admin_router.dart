@@ -122,7 +122,7 @@ GoRouter createAdminRouter(AdminSessionController session) {
           ),
           GoRoute(
             path: '/academic/teachers',
-            builder: (context, state) => const TeachersScreen(),
+            builder: (context, state) => TeachersScreen(session: session),
           ),
         ],
       ),

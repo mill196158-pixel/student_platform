@@ -32,6 +32,8 @@ dependencies:
     sdk: flutter
   student_ui:
     path: ../packages/student_ui
+  admin_import_mapping:
+    path: ../packages/admin_import_mapping
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -40,6 +42,7 @@ dependencies:
   file_picker: ^11.0.2
   supabase_flutter: ^2.16.0
   http: ^1.2.0
+  excel: ^4.0.6
 
 dev_dependencies:
   flutter_test:
