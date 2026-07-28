@@ -84,15 +84,12 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
         canManage = false;
       }
     }
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => TopicSelectionDetailScreen(
-          chatId: chatId,
-          selection: _selection!,
-          repository: repo,
-          canManage: canManage ?? false,
-        ),
-      ),
+    await showTopicSelectionChooser(
+      context,
+      chatId: chatId,
+      selection: _selection!,
+      repository: repo,
+      canManage: canManage,
     );
     if (mounted) await _load();
   }

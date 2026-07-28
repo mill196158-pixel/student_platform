@@ -180,10 +180,13 @@ class ChatGroupActionsRepository {
     String description = '',
     String purpose = '',
     DateTime? deadlineAt,
+    String amountMode = 'none',
     double? amountOptional,
+    double? amountTotal,
     String instructions = '',
     String paymentDetails = '',
   }) async {
+    final mode = amountMode.trim().toLowerCase();
     final id = await _client.rpc(
       'create_group_collection',
       params: {
@@ -191,7 +194,9 @@ class ChatGroupActionsRepository {
         'p_description': description,
         'p_purpose': purpose,
         'p_deadline_at': deadlineAt?.toIso8601String(),
-        'p_amount_optional': amountOptional,
+        'p_amount_mode': mode.isEmpty ? 'none' : mode,
+        'p_amount_optional': mode == 'per_person' ? amountOptional : null,
+        'p_amount_total': mode == 'total' ? amountTotal : null,
         'p_instructions': instructions,
         'p_payment_details': paymentDetails,
       },
