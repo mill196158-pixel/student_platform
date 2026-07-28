@@ -31,9 +31,9 @@ class ScheduleGroupActionEvent {
   bool get isTopic => eventType == 'topic_deadline';
   bool get isCollection => eventType == 'collection_deadline';
 
-  /// Neutral badge for Schedule UI (never show technical kind words).
-  String get neutralBadge =>
-      isTopic ? 'Задание по предмету' : (isCollection ? 'Задание группы' : '');
+  /// Neutral badge for Schedule UI — no sectional/kind language, no enums.
+  /// Prefer empty; status is shown separately via [statusLabel].
+  String get neutralBadge => '';
 
   @Deprecated('Use neutralBadge / real title instead of technical kind labels')
   String get kindLabel => neutralBadge;

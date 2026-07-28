@@ -25,17 +25,17 @@ class ScheduleCalendarItem {
   String get title {
     if (groupAction != null) {
       final t = groupAction!.title.trim();
-      return t.isEmpty ? groupAction!.neutralBadge : t;
+      return t.isEmpty ? 'Задание' : t;
     }
     return (assignment?.title ?? '').trim();
   }
 
+  /// Status-only when useful; never sectional "Задание группы/по предмету".
   String? get badge {
     switch (kind) {
       case ScheduleCalendarItemKind.subjectTask:
-        return 'Задание по предмету';
       case ScheduleCalendarItemKind.groupTask:
-        return 'Задание группы';
+        return groupAction?.statusLabel;
       case ScheduleCalendarItemKind.assignment:
         return null;
     }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../common/friendly_empty_state.dart';
 import '../state/team_cubit.dart';
 import '../models/assignment.dart';
 import '../models/team.dart';
@@ -134,56 +135,19 @@ class _AssignmentsEmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                color: cs.primaryContainer.withValues(alpha: .55),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.assignment_outlined,
-                size: 34,
-                color: cs.primary,
-              ),
+    return FriendlyEmptyState(
+      lottieAsset: 'assets/lottie/empty_assignments_fox.json',
+      fallbackIcon: Icons.assignment_outlined,
+      title: 'Заданий пока нет',
+      subtitle:
+          'Чтобы задание появилось у всех, нужны 2 голоса одногруппников.',
+      action: onCreate == null
+          ? null
+          : FilledButton.icon(
+              onPressed: onCreate,
+              icon: const Icon(Icons.assignment_add, size: 18),
+              label: const Text('Создать задание'),
             ),
-            const SizedBox(height: 16),
-            Text(
-              'Заданий пока нет',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Чтобы задание появилось у всех, нужны 2 голоса одногруппников.',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: cs.onSurfaceVariant,
-                height: 1.25,
-              ),
-            ),
-            if (onCreate != null) ...[
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: onCreate,
-                icon: const Icon(Icons.assignment_add, size: 18),
-                label: const Text('Создать задание'),
-              ),
-            ],
-          ],
-        ),
-      ),
     );
   }
 }

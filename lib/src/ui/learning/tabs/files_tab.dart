@@ -5,6 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../common/friendly_empty_state.dart';
 import '../models/chat_file.dart';
 import '../models/message.dart';
 import '../state/team_cubit.dart';
@@ -368,7 +369,15 @@ class _FilesTabState extends State<FilesTab>
   }
 
   Widget _buildImagesGrid(List<ChatFile> list) {
-    if (list.isEmpty) return _emptyState('Пока нет изображений');
+    if (list.isEmpty) {
+      return const FriendlyEmptyState(
+        lottieAsset: 'assets/lottie/empty_images_cat.json',
+        fallbackIcon: Icons.photo_outlined,
+        title: 'Пока нет изображений',
+        subtitle: 'Загрузите фото — они появятся здесь.',
+        animationHeight: 128,
+      );
+    }
     return GridView.builder(
       padding: const EdgeInsets.all(12),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -455,7 +464,12 @@ class _FilesTabState extends State<FilesTab>
   }
 
   Widget _buildDocsList(List<ChatFile> list) {
-    if (list.isEmpty) return _emptyState('Пока нет файлов');
+    if (list.isEmpty) {
+      return _emptyState(
+        'Пока нет файлов',
+        icon: Icons.folder_open_outlined,
+      );
+    }
     return ListView.separated(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       itemCount: list.length,
@@ -499,14 +513,20 @@ class _FilesTabState extends State<FilesTab>
     );
   }
 
-  Widget _emptyState(String text) {
+  Widget _emptyState(String text, {IconData icon = Icons.folder_open}) {
+    final cs = Theme.of(context).colorScheme;
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.folder_open, size: 48, color: Colors.grey),
+          Icon(icon, size: 48, color: cs.onSurfaceVariant),
           const SizedBox(height: 8),
-          Text(text, style: TextStyle(color: Colors.grey.shade600)),
+          Text(
+            text,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: cs.onSurfaceVariant,
+                ),
+          ),
         ],
       ),
     );

@@ -189,9 +189,9 @@ void main() {
         }),
       ]);
       expect(events[0].title, 'Выбрать тему доклада');
-      expect(events[0].neutralBadge, 'Задание по предмету');
+      expect(events[0].neutralBadge, isEmpty);
       expect(events[1].title, 'Скинуться на подарок преподавателю');
-      expect(events[1].neutralBadge, 'Задание группы');
+      expect(events[1].neutralBadge, isEmpty);
       expect(events[1].statusLabel, 'Открыто');
       for (final e in events) {
         expect(e.neutralBadge.toLowerCase().contains('topic'), isFalse);
@@ -199,6 +199,8 @@ void main() {
         expect(e.title.contains('topic_selection'), isFalse);
         expect(e.neutralBadge, isNot(equals('Выбор темы')));
         expect(e.neutralBadge, isNot(equals('Сбор')));
+        expect(e.neutralBadge, isNot(equals('Задание по предмету')));
+        expect(e.neutralBadge, isNot(equals('Задание группы')));
       }
     });
 

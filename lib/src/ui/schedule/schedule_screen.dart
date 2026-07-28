@@ -390,7 +390,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   static const Color _cPractice = Color(0xFF1E88E5);
   static const Color _cLab = Color(0xFF8E24AA);
   static const Color _cAssignment = Color(0xFFF59E0B);
-  static const Color _cGroupAction = Color(0xFF7C63D8);
 
   @override
   void initState() {
@@ -581,9 +580,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
   List<Lesson> get _forSelectedDay => _lessonsForDay(_selectedDay);
 
-  List<ScheduleAssignment> get _assignmentsForSelectedDay =>
-      _assignmentsForDay(_selectedDay);
-
   List<ScheduleGroupActionEvent> _groupActionsForDay(DateTime day) {
     return _groupActions
         .where((action) => _isSameDate(action.occursAt, day))
@@ -591,8 +587,14 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       ..sort((a, b) => a.occursAt.compareTo(b.occursAt));
   }
 
-  List<ScheduleGroupActionEvent> get _groupActionsForSelectedDay =>
-      _groupActionsForDay(_selectedDay);
+  /// Ordinary assignments + topic/collection deadlines in one deadline-sorted list.
+  List<_ScheduleDueEntry> _dueEntriesForDay(DateTime day) {
+    final entries = <_ScheduleDueEntry>[
+      for (final a in _assignmentsForDay(day)) _ScheduleDueEntry.assignment(a),
+      for (final g in _groupActionsForDay(day)) _ScheduleDueEntry.groupAction(g),
+    ]..sort((a, b) => a.occursAt.compareTo(b.occursAt));
+    return entries;
+  }
 
   /// Живые статусы пар для дня: все идущие сейчас + одна ближайшая следующая.
   /// Пусто, если [day] — не сегодня. [dayLessons] должен быть отсортирован.
@@ -640,14 +642,13 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           break;
       }
     }
-    if (_assignments.any(
-      (assignment) =>
-          assignment.dueAt != null && _isSameDate(assignment.dueAt!, d),
-    )) {
+    final hasDue = _assignments.any(
+          (assignment) =>
+              assignment.dueAt != null && _isSameDate(assignment.dueAt!, d),
+        ) ||
+        _groupActions.any((action) => _isSameDate(action.occursAt, d));
+    if (hasDue) {
       set.add(_cAssignment);
-    }
-    if (_groupActions.any((action) => _isSameDate(action.occursAt, d))) {
-      set.add(_cGroupAction);
     }
     return set.toList();
   }
@@ -720,7 +721,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   _cPractice: 'Практика',
                   _cLab: 'Лабораторная',
                   _cAssignment: 'Задание',
-                  _cGroupAction: 'Задания группы',
                 },
                 onDatePicked: (picked) {
                   setState(() {
@@ -768,7 +768,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               _cPractice: 'Практика',
               _cLab: 'Лабораторная',
               _cAssignment: 'Задание',
-              _cGroupAction: 'Задания группы',
             }),
 
             const Divider(height: 1),
@@ -790,9 +789,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
   Widget _buildDayBody(BuildContext context) {
     final lessons = _forSelectedDay;
-    final assignments = _assignmentsForSelectedDay;
-    final groupActions = _groupActionsForSelectedDay;
-    if (lessons.isEmpty && assignments.isEmpty && groupActions.isEmpty) {
+    final dueEntries = _dueEntriesForDay(_selectedDay);
+    if (lessons.isEmpty && dueEntries.isEmpty) {
       return const _EmptyCat();
     }
     final live = _liveStatusFor(lessons, _selectedDay, _nowMsk());
@@ -811,25 +809,30 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           ),
           const SizedBox(height: 12),
         ],
-        if (assignments.isNotEmpty || groupActions.isNotEmpty) ...[
+        if (dueEntries.isNotEmpty) ...[
           const _ScheduleSectionLabel(title: 'Задания к дате'),
           const SizedBox(height: 10),
-          for (final assignment in assignments) ...[
-            ScheduleAssignmentCard(
-              assignment: assignment,
-              onTap: () => _openAssignmentDetails(assignment),
-            ),
-            const SizedBox(height: 12),
-          ],
-          for (final action in groupActions) ...[
-            ScheduleGroupActionCard(
-              event: action,
-              onTap: () => _openGroupAction(action),
-            ),
+          for (final entry in dueEntries) ...[
+            _buildDueEntryCard(entry),
             const SizedBox(height: 12),
           ],
         ],
       ],
+    );
+  }
+
+  Widget _buildDueEntryCard(_ScheduleDueEntry entry) {
+    final assignment = entry.assignment;
+    if (assignment != null) {
+      return ScheduleAssignmentCard(
+        assignment: assignment,
+        onTap: () => _openAssignmentDetails(assignment),
+      );
+    }
+    final action = entry.groupAction!;
+    return ScheduleGroupActionCard(
+      event: action,
+      onTap: () => _openGroupAction(action),
     );
   }
 
@@ -877,8 +880,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     required bool isToday,
   }) {
     final lessons = _lessonsForDay(day);
-    final assignments = _assignmentsForDay(day);
-    final groupActions = _groupActionsForDay(day);
+    final dueEntries = _dueEntriesForDay(day);
 
     final collapsed = _collapsedDays.contains(_dayKey(day));
     final live = _liveStatusFor(lessons, day, _nowMsk());
@@ -899,21 +901,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           ),
           const SizedBox(height: 12),
         ],
-        if (assignments.isNotEmpty || groupActions.isNotEmpty) ...[
+        if (dueEntries.isNotEmpty) ...[
           const _ScheduleSectionLabel(title: 'Задания к дате'),
           const SizedBox(height: 10),
-          for (final assignment in assignments) ...[
-            ScheduleAssignmentCard(
-              assignment: assignment,
-              onTap: () => _openAssignmentDetails(assignment),
-            ),
-            const SizedBox(height: 12),
-          ],
-          for (final action in groupActions) ...[
-            ScheduleGroupActionCard(
-              event: action,
-              onTap: () => _openGroupAction(action),
-            ),
+          for (final entry in dueEntries) ...[
+            _buildDueEntryCard(entry),
             const SizedBox(height: 12),
           ],
         ],
@@ -931,7 +923,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             weekdayName: _weekdayFull(day.weekday),
             dateLabel: '${day.day} ${_monthGenitive(day.month)}',
             lessonCount: lessons.length,
-            assignmentCount: assignments.length,
+            assignmentCount: dueEntries.length,
             isToday: isToday,
             collapsed: collapsed,
             onTap: () => _toggleDayCollapsed(day),
@@ -1487,6 +1479,7 @@ class ScheduleAssignmentCard extends StatelessWidget {
   }
 }
 
+/// Same card basis as [ScheduleAssignmentCard]; thematic icon is the only kind cue.
 class ScheduleGroupActionCard extends StatelessWidget {
   final ScheduleGroupActionEvent event;
   final VoidCallback onTap;
@@ -1500,10 +1493,14 @@ class ScheduleGroupActionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    const color = _ScheduleScreenState._cGroupAction;
+    const color = _ScheduleScreenState._cAssignment;
     final dueText = ScheduleAssignmentCard._fmtDue(event.occursAt);
     final teamLabel = (event.teamName ?? '').trim();
     final pick = (event.myPickText ?? '').trim();
+    final title = event.title.trim().isEmpty ? 'Задание' : event.title.trim();
+    final kindIcon = event.isTopic
+        ? Icons.format_list_numbered_rtl
+        : Icons.volunteer_activism_outlined;
 
     return InkWell(
       onTap: onTap,
@@ -1544,10 +1541,9 @@ class ScheduleGroupActionCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    event.neutralBadge,
+                    'дедлайн',
                     style: theme.textTheme.labelSmall?.copyWith(
-                      color:
-                          theme.colorScheme.onSurface.withValues(alpha: 0.55),
+                      color: Colors.black.withValues(alpha: 0.55),
                     ),
                   ),
                 ],
@@ -1561,16 +1557,18 @@ class ScheduleGroupActionCard extends StatelessWidget {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2, right: 8),
+                        child: Icon(kindIcon, size: 18, color: color),
+                      ),
                       Expanded(
                         child: Text(
-                          event.title.isEmpty
-                              ? event.neutralBadge
-                              : event.title,
+                          title,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.w800,
-                            color: theme.colorScheme.onSurface,
+                            color: Colors.black,
                             height: 1.08,
                           ),
                         ),
@@ -1584,6 +1582,13 @@ class ScheduleGroupActionCard extends StatelessWidget {
                         decoration: BoxDecoration(
                           color: color,
                           borderRadius: BorderRadius.circular(10),
+                          boxShadow: [
+                            BoxShadow(
+                              color: color.withValues(alpha: 0.26),
+                              blurRadius: 8,
+                              offset: const Offset(0, 3),
+                            )
+                          ],
                         ),
                         child: Text(
                           event.statusLabel,
@@ -1600,12 +1605,7 @@ class ScheduleGroupActionCard extends StatelessWidget {
                     const SizedBox(height: 6),
                     Row(
                       children: [
-                        Icon(
-                          event.isTopic
-                              ? Icons.format_list_numbered_rtl
-                              : Icons.volunteer_activism_outlined,
-                          size: 16,
-                        ),
+                        const Icon(Icons.groups_outlined, size: 16),
                         const SizedBox(width: 6),
                         Expanded(
                           child: Text(
@@ -1648,6 +1648,25 @@ class ScheduleGroupActionCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Unified row for "Задания к дате" (ordinary assignment or group action).
+class _ScheduleDueEntry {
+  const _ScheduleDueEntry._({this.assignment, this.groupAction});
+
+  factory _ScheduleDueEntry.assignment(ScheduleAssignment a) =>
+      _ScheduleDueEntry._(assignment: a);
+
+  factory _ScheduleDueEntry.groupAction(ScheduleGroupActionEvent g) =>
+      _ScheduleDueEntry._(groupAction: g);
+
+  final ScheduleAssignment? assignment;
+  final ScheduleGroupActionEvent? groupAction;
+
+  DateTime get occursAt =>
+      assignment?.dueAt ??
+      groupAction?.occursAt ??
+      DateTime.fromMillisecondsSinceEpoch(0);
 }
 
 class _AssignmentBadge extends StatelessWidget {
