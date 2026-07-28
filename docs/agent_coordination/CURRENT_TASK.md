@@ -19,6 +19,7 @@
   * `20260727235000_stage13_9_chat_topics_collections`
   * `20260727235317_stage13_9_group_action_notifications`
   * `20260727235707_stage13_9_fix_card_msg_type` (card `msg_type` text hotfix)
+  * `20260728000451_stage13_8_fix_lifecycle_search_path` (search_path hardening)
 * Stage 13.8/13.9 security reviews PASS; notification role-play PASS after hotfix
 * Edge `dispatch-push-notifications` **v5** ACTIVE (`verify_jwt=false`, custom bearer; unauth → 401)
 * Current term unchanged: **весна 2026**; autumn 2026 not created; pending outbox = 0

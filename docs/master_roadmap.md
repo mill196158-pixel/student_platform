@@ -694,7 +694,8 @@ Live post-apply (`gwdanmwluhrcfxbnplwd`):
 - [x] confirmation с обязательным вводом названия нового семестра;
 - [x] `auto_activation_enabled=false` (автоактивация не включена);
 - [x] local + remote SQL security review / smoke PASS;
-- [x] remote apply + commit/push closeout.
+- [x] remote apply + commit/push closeout;
+- [x] advisor hardening: `private.stage13_8_lifecycle` `search_path=''` (`20260728000451`).
 
 ### 13.9 — Чат группы, выбор темы и сборы
 
