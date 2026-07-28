@@ -6,7 +6,7 @@
 ## Статус документа
 
 - Дата аудита: **27 июля 2026**
-- Обновлено: **28 июля 2026** (Stage 13.8 + 13.9 remote apply + `dispatch-push-notifications` v5 — **TECHNICALLY DONE**; physical OCR/race/push smoke remain)
+- Обновлено: **28 июля 2026** (Stage 13.11.1 keyboard focus hotfix DONE; physical OCR/race/push smoke remain)
 - Проверенная основная ветка: `refactor/chat-tab`
 - Проверенная административная ветка: `feature/admin-console`
 - Репозиторий: `mill196158-pixel/student_platform`
@@ -754,8 +754,9 @@ Edge Function: not redeployed (unchanged in 13.10).
 3. ~~Stage 13.9~~ **TECHNICALLY DONE** (remote applied + Edge v5).
 4. ~~Stage 13.10~~ **TECHNICALLY DONE** (remote applied `20260728101245`).
 5. ~~**Stage 13.11**~~ **TECHNICALLY DONE** — remote `20260728140108_stage13_11_membership_capabilities_ux`; Codex APPROVE (14/14); smoke PASS.
-6. **Владелец:** PHYSICAL OCR smoke + two-device topic race + controlled push на Android/iPhone.
-7. **Владелец:** реальные Excel (teachers/subjects/students) через Admin dry-run → apply.
+6. ~~**Stage 13.11.1**~~ **DONE** — keyboard focus hotfix (`KeyboardDismissScope`: dismiss scroll only on `dragDetails`; no inset false-unfocus); Codex APPROVE (9/9); Flutter-only.
+7. **Владелец:** PHYSICAL OCR smoke + two-device topic race + controlled push на Android/iPhone.
+8. **Владелец:** реальные Excel (teachers/subjects/students) через Admin dry-run → apply.
 
 ### 13.11 — доступность групповых действий, единая модель заданий, финальный UX
 
@@ -776,6 +777,16 @@ Edge Function: not redeployed (unchanged in 13.11).
 - [x] SQL security/roleplay PASS; Flutter 13.9–13.11 PASS; Web/Admin Web/Android debug APK;
 - [x] remote apply + rollback smoke; counts unchanged;
 - [ ] PHYSICAL / TWO-DEVICE / PUSH smokes — owner-check (from 13.9).
+
+### 13.11.1 — keyboard focus hotfix (Выбор темы / Скинуться)
+
+Status: **DONE** / Codex **APPROVE** (9/9)
+
+Flutter-only: no migration / no remote apply / no Edge.
+
+- [x] Root cause: `ScrollUpdateNotification` with `|scrollDelta|>2` from keyboard `viewInsets` re-layout → immediate `unfocus`;
+- [x] Fix in shared `KeyboardDismissScope`: dismiss on scroll only when `dragDetails != null`; tap-outside stays `GestureDetector.onTap` (arena loses to TextField);
+- [x] Regression tests `test/keyboard_dismiss_scope_stage13_11_1_test.dart` + Stage 13.10/13.11 keyboard tests PASS.
 
 Закрыто перед 13.2:
 
