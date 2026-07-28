@@ -1,9 +1,16 @@
 # CURRENT_TASK
 
-* Status: STAGE_13_10_TECHNICALLY_DONE — physical OCR smoke + two-device topic race + controlled push remain (owner)
+* Status: STAGE_13_11_CODE_READY — awaiting Codex thread APPROVE + Supabase MCP auth for remote apply / live 24002820 audit
 * Branch: `refactor/chat-tab`
 * Codex thread: `019fa373-81f2-7962-a8c9-81d86cb62311`
 * Remote project: `gwdanmwluhrcfxbnplwd`
+* PR: https://github.com/mill196158-pixel/student_platform/pull/1
+* Local HEAD: Stage 13.11 migration `20260728105753_stage13_11_membership_capabilities_ux` (not remote-applied)
+
+## Stage 13.11 blockers (owner / desktop auth)
+
+* Codex CLI/MCP not authenticated in this cloud agent (`codex login` required; thread resume unavailable).
+* Supabase MCP `needsAuth` — interactive OAuth only in Cursor desktop IDE. Blocks live audit of `24002820` and controlled remote apply.
 
 ## Done technically
 

@@ -753,8 +753,9 @@ Edge Function: not redeployed (unchanged in 13.10).
 2. ~~Stage 13.8~~ **TECHNICALLY DONE** (remote applied).
 3. ~~Stage 13.9~~ **TECHNICALLY DONE** (remote applied + Edge v5).
 4. ~~Stage 13.10~~ **TECHNICALLY DONE** (remote applied `20260728101245`).
-5. **Владелец:** PHYSICAL OCR smoke + two-device topic race + controlled push на Android/iPhone.
-6. **Владелец:** реальные Excel (teachers/subjects/students) через Admin dry-run → apply.
+5. **Stage 13.11** — CODE READY on `refactor/chat-tab` (membership create, silent caps, unified schedule, form redesign, Lottie). Remote apply blocked until Codex APPROVE + Supabase MCP auth.
+6. **Владелец:** PHYSICAL OCR smoke + two-device topic race + controlled push на Android/iPhone.
+7. **Владелец:** реальные Excel (teachers/subjects/students) через Admin dry-run → apply.
 
 Закрыто перед 13.2:
 

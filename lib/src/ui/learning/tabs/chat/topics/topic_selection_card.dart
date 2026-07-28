@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../models/message.dart';
 import '../../../state/team_cubit.dart';
@@ -104,9 +105,6 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
     final progress = (_selection != null && _selection!.totalCapacity > 0)
         ? 'Выбрано ${_selection!.takenSlots} из ${_selection!.totalCapacity}'
         : null;
-    final cta = closed
-        ? 'Смотреть'
-        : (_selection?.allowChange == true ? 'Изменить выбор' : 'Выбрать тему');
 
     return GestureDetector(
       key: widget.boundaryKey,
@@ -157,7 +155,7 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
                 if (!closed && _selection?.allowChange == true)
                   TextButton(
                     onPressed: _openDetail,
-                    child: Text(cta),
+                    child: const Text('Изменить выбор'),
                   ),
                 if (closed)
                   FilledButton.tonal(
@@ -181,7 +179,7 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
 }
 
 /// In-chat card for `content.card = collection` («Скинуться»).
-class CollectionCard extends StatelessWidget {
+class CollectionCard extends StatefulWidget {
   const CollectionCard({
     super.key,
     required this.message,
@@ -196,24 +194,144 @@ class CollectionCard extends StatelessWidget {
   final VoidCallback? onOpenChat;
 
   @override
+  State<CollectionCard> createState() => _CollectionCardState();
+}
+
+class _CollectionCardState extends State<CollectionCard> {
+  Map<String, dynamic>? _collection;
+  bool _loading = true;
+  bool _reporting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final id = widget.message.cardEntityId;
+    if (id == null || id.isEmpty) {
+      setState(() => _loading = false);
+      return;
+    }
+    try {
+      final res = await Supabase.instance.client.rpc('list_group_collections');
+      Map<String, dynamic>? found;
+      if (res is List) {
+        for (final row in res) {
+          if (row is Map && row['id']?.toString() == id) {
+            found = Map<String, dynamic>.from(row);
+            break;
+          }
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _collection = found;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _open() async {
+    if (widget.onOpenChat != null) {
+      widget.onOpenChat!();
+      return;
+    }
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const GroupSpaceScreen()),
+    );
+    if (mounted) await _load();
+  }
+
+  Future<void> _markTransferred() async {
+    final id = widget.message.cardEntityId;
+    if (id == null || id.isEmpty || _reporting) return;
+    setState(() => _reporting = true);
+    try {
+      await Supabase.instance.client.rpc(
+        'upsert_my_collection_contribution',
+        params: {
+          'p_collection_id': id,
+          'p_participation_status': 'joining',
+          'p_payment_status': 'reported',
+          'p_comment': 'Я перевёл',
+        },
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Отметили: «Я перевёл»')),
+      );
+      await _load();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось отметить перевод')),
+      );
+    } finally {
+      if (mounted) setState(() => _reporting = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final title =
-        message.text.replaceFirst(RegExp(r'^(Сбор|Скинуться):\s*'), '').trim();
+    final fallbackTitle = widget.message.text
+        .replaceFirst(RegExp(r'^(Сбор|Скинуться):\s*'), '')
+        .trim();
+    final title = (_collection?['title']?.toString() ?? fallbackTitle).trim();
+    final purpose = (_collection?['purpose']?.toString() ?? '').trim();
+    final status = (_collection?['status']?.toString() ?? 'open').trim();
+    final closed = status != 'open';
+    final deadlineRaw = _collection?['deadline_at']?.toString();
+    final deadline = DateTime.tryParse(deadlineRaw ?? '');
+    final reported =
+        (_collection?['my_payment_status']?.toString() ?? '').trim();
+    final organizerStatus = (_collection?['my_organizer_status']?.toString() ??
+            _collection?['organizer_status']?.toString() ??
+            '')
+        .trim();
+    final progressText = () {
+      final done = int.tryParse(
+            _collection?['confirmed_count']?.toString() ?? '',
+          ) ??
+          int.tryParse(_collection?['paid_count']?.toString() ?? '') ??
+          0;
+      final total = int.tryParse(
+            _collection?['member_count']?.toString() ?? '',
+          ) ??
+          int.tryParse(_collection?['total_members']?.toString() ?? '') ??
+          0;
+      if (total > 0) return 'Прогресс $done из $total';
+      return null;
+    }();
+
+    String myStatusLabel() {
+      if (reported == 'confirmed' || organizerStatus == 'confirmed') {
+        return 'Подтверждено';
+      }
+      if (reported == 'not_received' || organizerStatus == 'not_received') {
+        return 'Не поступило';
+      }
+      if (reported == 'needs_clarification' ||
+          organizerStatus == 'needs_clarification') {
+        return 'Уточнить';
+      }
+      if (reported == 'reported' || reported == 'pending_review') {
+        return 'Перевёл — на проверке';
+      }
+      return 'Ожидает';
+    }
 
     return GestureDetector(
-      key: boundaryKey,
-      onLongPress: onLongPress,
-      onTap: () {
-        if (onOpenChat != null) {
-          onOpenChat!();
-          return;
-        }
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const GroupSpaceScreen()),
-        );
-      },
+      key: widget.boundaryKey,
+      onLongPress: widget.onLongPress,
+      onTap: _open,
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 4),
         padding: const EdgeInsets.all(12),
@@ -222,43 +340,79 @@ class CollectionCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: cs.secondary.withValues(alpha: 0.35)),
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.volunteer_activism_outlined, color: cs.secondary),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Скинуться',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: cs.secondary,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    title.isNotEmpty ? title : 'Без названия',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Переводы вне приложения. Нажмите, чтобы отметить.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: cs.onSurface.withValues(alpha: 0.6),
-                    ),
-                  ),
-                ],
+            Text(
+              'Скинуться',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: cs.secondary,
+                fontWeight: FontWeight.w700,
               ),
             ),
-            Icon(Icons.chevron_right,
-                color: cs.onSurface.withValues(alpha: 0.45)),
+            const SizedBox(height: 2),
+            Text(
+              title.isNotEmpty ? title : 'Без названия',
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: cs.onSurface,
+              ),
+            ),
+            if (purpose.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                purpose,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+            ],
+            const SizedBox(height: 6),
+            Text(
+              [
+                if (deadline != null) 'До ${_fmt(deadline)}',
+                if (progressText != null) progressText,
+                if (_loading) '…' else 'Мой статус: ${myStatusLabel()}',
+                if (closed) 'Закрыто',
+              ].where((e) => e.isNotEmpty).join(' · '),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: cs.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                if (!closed)
+                  FilledButton.tonal(
+                    onPressed: _reporting ? null : _markTransferred,
+                    child: _reporting
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Я перевёл'),
+                  ),
+                TextButton(
+                  onPressed: _open,
+                  child: Text(closed ? 'Смотреть' : 'Подробнее'),
+                ),
+              ],
+            ),
           ],
         ),
       ),
     );
+  }
+
+  String _fmt(DateTime dt) {
+    return '${dt.day.toString().padLeft(2, '0')}.'
+        '${dt.month.toString().padLeft(2, '0')} '
+        '${dt.hour.toString().padLeft(2, '0')}:'
+        '${dt.minute.toString().padLeft(2, '0')}';
   }
 }
