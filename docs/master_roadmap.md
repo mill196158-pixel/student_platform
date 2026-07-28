@@ -6,12 +6,12 @@
 ## Статус документа
 
 - Дата аудита: **27 июля 2026**
-- Обновлено: **28 июля 2026** (Stage 13.9 native builds closed — **CODE PUSHED**; remote apply 13.8/13.9 + Edge deploy still pending owner OK)
+- Обновлено: **28 июля 2026** (Stage 13.8 + 13.9 remote apply + `dispatch-push-notifications` v5 — **TECHNICALLY DONE**; physical OCR/race/push smoke remain)
 - Проверенная основная ветка: `refactor/chat-tab`
 - Проверенная административная ветка: `feature/admin-console`
 - Репозиторий: `mill196158-pixel/student_platform`
 - Статус карты: **ACTIVE**
-- Следующий рекомендуемый этап: remote apply 13.8/13.9 по решению владельца + **PHYSICAL SMOKE** (двухустройственный race Android/iPhone)
+- Следующий рекомендуемый этап: **PHYSICAL OCR SMOKE** + two-device topic race + controlled push; затем REAL XLSX
 
 Обозначения:
 
@@ -678,13 +678,13 @@ Status: **TECHNICALLY DONE** schema/Edge/tests — **PHYSICAL SMOKE REQUIRED** +
 
 ### 13.8 — Безопасные учебные периоды
 
-Status: **CODE PUSHED** (migration local+git only; remote apply **не** выполнен)
+Status: **TECHNICALLY DONE** (remote `20260727234755_stage13_8_safe_academic_terms`)
 
-Live audit (`gwdanmwluhrcfxbnplwd`):
+Live post-apply (`gwdanmwluhrcfxbnplwd`):
 
-- текущий семестр: **весна 2026** (`2026-02-01` … `2026-06-30`, `is_current=true`);
-- следующего семестра в БД нет;
-- календарного автопереключения `is_current` нет; cron только архивирует чаты уже неактуальных периодов.
+- текущий семестр остался **весна 2026** (`is_current=true`, `auto_activation_enabled=false`);
+- осень 2026 не создана; `chat_academic_archives=0`;
+- прямого UPDATE `is_current` нет (guard trigger); `admin_set_current_term` → `use_admin_start_next_term`.
 
 Сделано:
 
@@ -693,39 +693,38 @@ Live audit (`gwdanmwluhrcfxbnplwd`):
 - [x] UI `Система → Учебные периоды`; опасное действие убрано из «Студенты»;
 - [x] confirmation с обязательным вводом названия нового семестра;
 - [x] `auto_activation_enabled=false` (автоактивация не включена);
-- [x] local SQL security review + assertive role-play PASS;
-- [x] commit + push в `refactor/chat-tab`;
-- [ ] remote apply — только после owner authorization (осень 2026 не создавать в этом этапе).
+- [x] local + remote SQL security review / smoke PASS;
+- [x] remote apply + commit/push closeout.
 
 ### 13.9 — Чат группы, выбор темы и сборы
 
-Status: **CODE PUSHED** (remote apply / Edge deploy запрещены до owner OK)
+Status: **TECHNICALLY DONE** (remote `20260727235000` + `20260727235317` + hotfix `20260727235707`; Edge `dispatch-push-notifications` v5)
 
 - [x] убрать «Пространство группы» из Инфо; карточка «Чат группы» в Обучении;
 - [x] «Выбор темы» в `+` (group/subject, не DM);
-- [x] on-device OCR: Android Tesseract4Android `rus+eng` (bundled tessdata, offline) + iOS Vision `ru-RU`/`en-US` на iOS 16+; app deployment target остаётся **iOS 15.0** (runtime gating; без SwiftyTesseract / без silent raise to 16); ML Kit убран (ломал iOS 15 и arm64 sim);
+- [x] on-device OCR: Android Tesseract4Android `rus+eng` (bundled tessdata, offline) + iOS Vision `ru-RU`/`en-US` на iOS 16+; app deployment target остаётся **iOS 15.0**;
 - [x] Excel/Word/PDF/фото → обязательный review (edit/reorder/merge/split/dedupe);
 - [x] foundation «Сбор» + privacy secrets/proofs;
-- [x] сроки в существующем календаре **Расписание** (не Мой дневник / не дневник предмета);
+- [x] сроки в существующем календаре **Расписание**;
 - [x] главная: компактная сводка ближайших групповых действий + my pick;
 - [x] deep-link Schedule/Home/Push → chat + `card_message_id` highlight;
-- [x] push/in-app pipeline (`group_actions` prefs, enqueue, deadline worker, Edge allowlist; deno check PASS; deploy запрещён);
+- [x] push/in-app pipeline (`group_actions` prefs, enqueue, deadline worker, Edge allowlist; deno check PASS; **deployed v5**);
 - [x] transactional pick/reassign/release + RLS privacy;
-- [x] SQL security/roleplay + notifications checks PASS (local Docker);
-- [x] Flutter focused tests PASS; Admin Web + main Web PASS; Android debug APK PASS; iOS simulator debug PASS;
-- [x] commit + push в `refactor/chat-tab`;
-- [ ] remote apply — только после owner authorization;
-- [ ] Edge Function deploy — только после owner authorization;
-- [ ] PHYSICAL SMOKE: OCR + двухустройственный race pick на Android/iPhone.
+- [x] SQL security/roleplay + notifications checks PASS (remote; card `msg_type='text'` hotfix);
+- [x] Flutter focused tests / Admin Web / main Web / Android APK / iOS simulator PASS;
+- [x] remote apply + Edge deploy + commit/push closeout;
+- [ ] PHYSICAL OCR SMOKE — REQUIRED;
+- [ ] TWO-DEVICE TOPIC RACE — REQUIRED;
+- [ ] CONTROLLED PUSH — REQUIRED.
 
 ---
 
 ## 13. Приоритет на ближайшие работы
 
 1. ~~13.2–13.6 code foundations + remote apply + Edge deploy~~ **TECHNICALLY DONE**.
-2. ~~Stage 13.8 code push~~ **CODE PUSHED**; remote apply — по отдельному решению владельца.
-3. ~~Stage 13.9 local + native builds~~ **CODE PUSHED**; remote apply / Edge deploy — по решению владельца.
-4. **Владелец:** authorize remote apply 13.8/13.9 + Edge deploy; физический smoke Android/iPhone.
+2. ~~Stage 13.8~~ **TECHNICALLY DONE** (remote applied).
+3. ~~Stage 13.9~~ **TECHNICALLY DONE** (remote applied + Edge v5).
+4. **Владелец:** PHYSICAL OCR smoke + two-device topic race + controlled push на Android/iPhone.
 5. **Владелец:** реальные Excel (teachers/subjects/students) через Admin dry-run → apply.
 
 Закрыто перед 13.2:

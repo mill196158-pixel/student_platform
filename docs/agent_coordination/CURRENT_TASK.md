@@ -1,6 +1,6 @@
 # CURRENT_TASK
 
-* Status: STAGE_13_2_TO_13_7_TECHNICALLY_DONE — physical smoke + real Excel remain
+* Status: STAGE_13_8_AND_13_9_TECHNICALLY_DONE — physical OCR smoke + two-device topic race + controlled push remain
 * Branch: `refactor/chat-tab`
 * Codex thread: `019fa373-81f2-7962-a8c9-81d86cb62311`
 * Remote project: `gwdanmwluhrcfxbnplwd`
@@ -15,15 +15,23 @@
   * `20260727184423_stage13_5_students_groups_terms_admin`
   * `20260727184457_stage13_6_reviews_moderation`
   * `20260727184511_stage13_2_admin_group_organizer` (after 13.5)
-* Security reviews PASS; Edge Functions redeployed; Flutter/Admin tests PASS
-* Organizer Admin UI: **Студенты** `/academic/students` → group chip → Организаторы пространства группы
+  * `20260727234755_stage13_8_safe_academic_terms`
+  * `20260727235000_stage13_9_chat_topics_collections`
+  * `20260727235317_stage13_9_group_action_notifications`
+  * `20260727235707_stage13_9_fix_card_msg_type` (card `msg_type` text hotfix)
+* Stage 13.8/13.9 security reviews PASS; notification role-play PASS after hotfix
+* Edge `dispatch-push-notifications` **v5** ACTIVE (`verify_jwt=false`, custom bearer; unauth → 401)
+* Current term unchanged: **весна 2026**; autumn 2026 not created; pending outbox = 0
 
 ## Residuals (non-technical / owner)
 
-* **PHYSICAL SMOKE REQUIRED** — Android/iPhone
+* **PHYSICAL OCR SMOKE REQUIRED** — Android/iPhone
+* **TWO-DEVICE TOPIC RACE REQUIRED**
+* **CONTROLLED PUSH REQUIRED** — one real group-action notification path on device
 * **REAL XLSX REQUIRED** — production imports (dry-run first; no fixtures)
 
 ## Constraints
 
 * No force-push
 * No teacher-media deploy until explicitly requested
+* Do not create autumn 2026 / do not flip current term without explicit owner OK
