@@ -231,9 +231,9 @@ Bubble buildBubble({
   }
 
   if (m.cardKind == 'topic_selection') {
-    // Chat-level can_edit_own applies only to the author's own card (isMe).
+    // Author may edit/delete own open list before activity (server-enforced).
     final canEditOwn = isMe && (canEditOwnBeforeActivity ?? false);
-    final canDelete = (canDeleteGroupAction ?? false) || canEditOwn;
+    final canDelete = (canDeleteGroupAction ?? false) || isMe;
     return TopicSelectionCard(
       message: m,
       onLongPress: onLongPress,
@@ -244,8 +244,8 @@ Bubble buildBubble({
     );
   }
   if (m.cardKind == 'collection') {
-    final canEditOwn = isMe && (canEditOwnBeforeActivity ?? false);
-    final canDelete = (canDeleteGroupAction ?? false) || canEditOwn;
+    // Author may delete own open collection with no activity (server-enforced).
+    final canDelete = (canDeleteGroupAction ?? false) || isMe;
     return CollectionCard(
       message: m,
       onLongPress: onLongPress,

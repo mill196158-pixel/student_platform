@@ -27,6 +27,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../common/keyboard_dismiss_scope.dart';
 import '../data/chat_group_actions_repository.dart';
+import 'topic_option_edit_sheet.dart';
 
 /// Maps known server RPC error codes (see the Stage 13.12 SQL migration:
 /// `version_conflict`, `option_occupied`, `selection_unavailable`,
@@ -372,19 +373,16 @@ class _TopicOptionsEditorScreenState extends State<TopicOptionsEditorScreen> {
     });
   }
 
-  Future<_OptionDraft?> _showOptionEditorSheet({TopicEditRow? existing}) {
-    return showModalBottomSheet<_OptionDraft>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _OptionEditorSheet(
-        initialTitle: existing?.title ?? '',
-        initialCapacity: existing?.capacity ?? 1,
-        minCapacity: existing?.taken ?? 0,
-        isNew: existing == null,
-      ),
+  Future<_OptionDraft?> _showOptionEditorSheet({TopicEditRow? existing}) async {
+    final draft = await showTopicOptionEditSheet(
+      context,
+      initialTitle: existing?.title ?? '',
+      initialCapacity: existing?.capacity ?? 1,
+      minCapacity: existing?.taken ?? 0,
+      isNew: existing == null,
     );
+    if (draft == null) return null;
+    return _OptionDraft(draft.title, draft.capacity);
   }
 
   Future<void> _addOption() async {
@@ -948,7 +946,11 @@ class _TopicOptionsEditorScreenState extends State<TopicOptionsEditorScreen> {
         border: Border(
             top: BorderSide(color: Colors.black.withValues(alpha: 0.06))),
       ),
+      // Critical: Scaffold.bottomNavigationBar gives a tall maxHeight.
+      // Column defaults to MainAxisSize.max and expands to fill the screen
+      // → body height collapses to 0 → blank white page (Stage 13.12.1).
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (_metaDirty) ...[
@@ -1022,120 +1024,6 @@ class _OptionDraft {
   final int capacity;
 }
 
-class _OptionEditorSheet extends StatefulWidget {
-  const _OptionEditorSheet({
-    required this.initialTitle,
-    required this.initialCapacity,
-    required this.minCapacity,
-    required this.isNew,
-  });
-
-  final String initialTitle;
-  final int initialCapacity;
-  final int minCapacity;
-  final bool isNew;
-
-  @override
-  State<_OptionEditorSheet> createState() => _OptionEditorSheetState();
-}
-
-class _OptionEditorSheetState extends State<_OptionEditorSheet> {
-  late final _titleCtrl = TextEditingController(text: widget.initialTitle);
-  late final _capCtrl =
-      TextEditingController(text: widget.initialCapacity.toString());
-
-  @override
-  void dispose() {
-    _titleCtrl.dispose();
-    _capCtrl.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    final title = _titleCtrl.text.trim();
-    if (title.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Введите название темы')),
-      );
-      return;
-    }
-    var capacity = int.tryParse(_capCtrl.text.trim()) ?? widget.initialCapacity;
-    if (capacity < widget.minCapacity) capacity = widget.minCapacity;
-    if (capacity < 1) capacity = 1;
-    Navigator.of(context).pop(_OptionDraft(title, capacity));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final viewInsets = MediaQuery.viewInsetsOf(context);
-    return Padding(
-      padding: EdgeInsets.only(bottom: viewInsets.bottom),
-      child: Material(
-        color: cs.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-        child: KeyboardDismissScope(
-          child: SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 42,
-                      height: 4,
-                      margin: const EdgeInsets.only(bottom: 16),
-                      decoration: BoxDecoration(
-                        color: cs.outlineVariant,
-                        borderRadius: BorderRadius.circular(99),
-                      ),
-                    ),
-                  ),
-                  Text(
-                    widget.isNew ? 'Новая тема' : 'Изменить тему',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
-                        ),
-                  ),
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: _titleCtrl,
-                    autofocus: true,
-                    textInputAction: TextInputAction.next,
-                    decoration: const InputDecoration(labelText: 'Название'),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _capCtrl,
-                    keyboardType: TextInputType.number,
-                    textInputAction: TextInputAction.done,
-                    decoration: InputDecoration(
-                      labelText: 'Мест',
-                      helperText: widget.minCapacity > 0
-                          ? 'Уже выбрали: ${widget.minCapacity}'
-                          : null,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  FilledButton(
-                    onPressed: _submit,
-                    style:
-                        FilledButton.styleFrom(minimumSize: const Size(0, 48)),
-                    child: const Text('Сохранить'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _ConfirmSheet extends StatelessWidget {
   const _ConfirmSheet({
     required this.title,
@@ -1202,68 +1090,26 @@ class _EditorHeroHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(22),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              cs.primary.withValues(alpha: 0.14),
-              cs.primaryContainer.withValues(alpha: 0.55),
-              const Color(0xFFF6F7FB),
-            ],
-            stops: const [0.0, 0.45, 1.0],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Редактирование тем',
+          style: theme.textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.w800,
+            color: cs.onSurface,
+            height: 1.15,
           ),
         ),
-        child: Row(
-          children: [
-            Container(
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                color: cs.surface,
-                borderRadius: BorderRadius.circular(18),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.06),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Icon(Icons.edit_note_rounded, color: cs.primary, size: 28),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Управление темами',
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w900,
-                      color: Colors.black,
-                      height: 1.1,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Правки применяются сразу и видны участникам чата',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: Colors.black.withValues(alpha: 0.62),
-                      height: 1.25,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+        const SizedBox(height: 4),
+        Text(
+          'Изменения сразу видны участникам чата',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: cs.onSurfaceVariant,
+            height: 1.25,
+          ),
         ),
-      ),
+      ],
     );
   }
 }

@@ -126,6 +126,7 @@ class HomeGroupActionPreview {
   final String? teamName;
   final String? status;
   final String? myPickText;
+  final bool canDelete;
 
   const HomeGroupActionPreview({
     required this.eventType,
@@ -138,13 +139,15 @@ class HomeGroupActionPreview {
     this.teamName,
     this.status,
     this.myPickText,
+    this.canDelete = false,
   });
 
   bool get isTopic => eventType == 'topic_deadline';
   bool get isCollection => eventType == 'collection_deadline';
 
+  /// Card type label — not the list title (e.g. «Доклад» is a list name).
   String get kindLabel =>
-      isTopic ? 'Задание по предмету' : (isCollection ? 'Задание группы' : '');
+      isTopic ? 'Тема' : (isCollection ? 'Сбор' : '');
 }
 
 class HomeNewsItem {

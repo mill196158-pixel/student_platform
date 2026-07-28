@@ -14,6 +14,7 @@ class ScheduleGroupActionEvent {
     this.teamName,
     this.status,
     this.myPickText,
+    this.canDelete = false,
   });
 
   final String eventType;
@@ -27,6 +28,7 @@ class ScheduleGroupActionEvent {
   final String? teamName;
   final String? status;
   final String? myPickText;
+  final bool canDelete;
 
   bool get isTopic => eventType == 'topic_deadline';
   bool get isCollection => eventType == 'collection_deadline';
@@ -67,6 +69,7 @@ class ScheduleGroupActionEvent {
       teamName: deadline.teamName,
       status: deadline.status,
       myPickText: deadline.myPickText,
+      canDelete: deadline.canDelete,
     );
   }
 

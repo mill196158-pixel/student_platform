@@ -173,13 +173,13 @@ class _AssignmentsTabState extends State<AssignmentsTab> {
       final t = _topics[index];
       return _GroupActionAssignmentTile(
         title: t.title,
-        kindLabel: 'Выбор темы',
+        kindLabel: 'Темы',
         icon: Icons.format_list_numbered_rtl,
         subtitle: t.isOpen
             ? (t.totalCapacity > 0
                 ? 'Выбрано ${t.takenSlots} из ${t.totalCapacity}'
                 : 'Активно')
-            : 'Задание завершено',
+            : 'Темы закрыты',
         onOpen: () => _openGroupAction(
           context,
           kind: ChatActionCardKind.topicSelection,
@@ -193,9 +193,9 @@ class _AssignmentsTabState extends State<AssignmentsTab> {
     final status = (c['status'] ?? 'open').toString();
     return _GroupActionAssignmentTile(
       title: (c['title'] ?? 'Скинуться').toString(),
-      kindLabel: 'Скинуться',
+      kindLabel: 'Сбор',
       icon: Icons.volunteer_activism_outlined,
-      subtitle: status == 'open' ? 'Активно' : 'Задание завершено',
+      subtitle: status == 'open' ? 'Активно' : 'Сбор закрыт',
       onOpen: () => _openGroupAction(
         context,
         kind: ChatActionCardKind.groupCollection,
@@ -280,54 +280,87 @@ class _GroupActionAssignmentTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
+    final accent = cs.primary;
+    // Match _AssignmentRowTile: soft gradient card, not a flat bordered box.
     return Material(
-      color: cs.surface,
-      borderRadius: BorderRadius.circular(16),
+      color: Colors.transparent,
       child: InkWell(
         onTap: onOpen,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+        borderRadius: BorderRadius.circular(22),
+        child: Ink(
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.5)),
-          ),
-          child: Row(
-            children: [
-              Icon(icon, color: cs.primary),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      kindLabel,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: cs.primary,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      title.isEmpty ? 'Задание' : title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: cs.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Colors.white,
+                accent.withValues(alpha: 0.035),
+                const Color(0xFFFBF9FE),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 12,
+                offset: const Offset(0, 5),
               ),
-              Icon(Icons.chevron_right, color: cs.onSurfaceVariant),
             ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(icon, color: accent, size: 22),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        kindLabel,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: accent,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        title.isEmpty ? 'Задание' : title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          // Light card surface (same as assignment rows) —
+                          // always dark ink for readable contrast.
+                          color: Colors.black,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: Colors.black.withValues(alpha: 0.55),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.chevron_right,
+                  color: Colors.black.withValues(alpha: 0.45),
+                ),
+              ],
+            ),
           ),
         ),
       ),

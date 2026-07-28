@@ -207,14 +207,90 @@ class ChatGroupActionsRepository {
   /// Marks the current user's contribution as "reported" (self-declared
   /// transfer). Shared by [CollectionCard] and [UnifiedTaskDetailsScreen] so
   /// both surfaces call the exact same RPC/params.
-  Future<void> createCollectionContributionReport(String collectionId) {
+  ///
+  /// Optional [proofFileId] is a standalone `chat_files` row (no chat
+  /// message) uploaded via the normal chat attachment pipeline.
+  Future<void> createCollectionContributionReport(
+    String collectionId, {
+    String? proofFileId,
+    String comment = 'Я перевёл',
+  }) {
     return _client.rpc(
       'upsert_my_collection_contribution',
       params: {
         'p_collection_id': collectionId,
         'p_participation_status': 'joining',
         'p_payment_status': 'reported',
-        'p_comment': 'Я перевёл',
+        'p_comment': comment,
+        if (proofFileId != null && proofFileId.isNotEmpty)
+          'p_proof_file_id': proofFileId,
+      },
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> listCollectionContributionProgress(
+    String collectionId,
+  ) async {
+    final res = await _client.rpc(
+      'list_collection_contribution_progress',
+      params: {'p_collection_id': collectionId},
+    );
+    if (res is List) {
+      return res
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    }
+    return const [];
+  }
+
+  /// Authorized proof URL for organizer / self — never via plain chat_files.
+  Future<Map<String, dynamic>?> getCollectionProofFile({
+    required String collectionId,
+    required String userId,
+  }) async {
+    final res = await _client.rpc(
+      'get_collection_proof_file',
+      params: {
+        'p_collection_id': collectionId,
+        'p_user_id': userId,
+      },
+    );
+    if (res is Map<String, dynamic>) return res;
+    if (res is Map) return Map<String, dynamic>.from(res);
+    return null;
+  }
+
+  Future<void> confirmCollectionContribution({
+    required String collectionId,
+    required String userId,
+    required String paymentStatus,
+    String? organizerComment,
+  }) {
+    return _client.rpc(
+      'confirm_collection_contribution',
+      params: {
+        'p_collection_id': collectionId,
+        'p_user_id': userId,
+        'p_payment_status': paymentStatus,
+        if (organizerComment != null) 'p_organizer_comment': organizerComment,
+      },
+    );
+  }
+
+  /// Reschedule collection deadline (organizer or author). Requires
+  /// `update_group_collection_deadline` (Stage 13.12.4 migration).
+  Future<void> updateCollectionDeadline({
+    required String collectionId,
+    required DateTime deadlineAt,
+    int? expectedVersion,
+  }) {
+    return _client.rpc(
+      'update_group_collection_deadline',
+      params: {
+        'p_collection_id': collectionId,
+        'p_deadline_at': deadlineAt.toUtc().toIso8601String(),
+        if (expectedVersion != null) 'p_expected_version': expectedVersion,
       },
     );
   }
@@ -230,6 +306,21 @@ class ChatGroupActionsRepository {
         'p_entity_id': entityId,
       },
     );
+  }
+
+  /// Server SoT for whether the current user may cancel this entity.
+  Future<bool> canDeleteGroupAction({
+    required String kind,
+    required String entityId,
+  }) async {
+    final res = await _client.rpc(
+      'group_action_can_delete',
+      params: {
+        'p_kind': kind,
+        'p_entity_id': entityId,
+      },
+    );
+    return res == true;
   }
 
   Future<void> updateTopicSelectionBeforeActivity({

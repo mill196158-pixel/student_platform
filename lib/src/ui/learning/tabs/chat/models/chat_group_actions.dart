@@ -124,6 +124,7 @@ class GroupActionDeadline {
     this.teamName,
     this.status,
     this.myPickText,
+    this.canDelete = false,
   });
 
   final String eventType;
@@ -137,6 +138,7 @@ class GroupActionDeadline {
   final String? teamName;
   final String? status;
   final String? myPickText;
+  final bool canDelete;
 
   bool get isTopic => eventType == 'topic_deadline';
   bool get isCollection => eventType == 'collection_deadline';
@@ -165,6 +167,7 @@ class GroupActionDeadline {
       status: _nullableId(json['status'] ?? payloadMap?['status']),
       myPickText:
           _nullableId(json['my_pick_text'] ?? payloadMap?['my_pick_text']),
+      canDelete: json['can_delete'] == true,
     );
   }
 

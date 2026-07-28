@@ -132,6 +132,11 @@ class TeamCubit extends Cubit<TeamState> {
 
   // ----------- INIT -----------
   Future<void> init() async {
+    // Avoid empty-chat flash before hydrate/network: show loading immediately.
+    if (!state.chatHasSnapshot) {
+      emit(state.copyWith(chatRefreshing: true, chatError: false));
+    }
+
     if (state.assignments.isEmpty) {
       final persistedAssignments = await _loadPersistedAssignmentsSnapshot();
       if (persistedAssignments.isNotEmpty) {

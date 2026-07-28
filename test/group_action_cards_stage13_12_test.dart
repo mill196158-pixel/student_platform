@@ -5,16 +5,18 @@
 //  * Envelope parsing still drives Message.cardKind/cardEntityId.
 //  * A card-bearing message renders TopicSelectionCard/CollectionCard, never
 //    the raw JSON via MessageBubble.
-//  * A closed/compact card shows "Задание завершено" + title, never JSON.
+//  * A closed/compact card shows kind-specific closed copy + title, never JSON.
 //  * ChatActionCardsCache merge/tombstone/invalidate semantics.
 //  * Deep-link args + UnifiedTaskDetailsScreen constructor/route smoke.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/data/chat_action_cards_cache.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/data/chat_group_actions_repository.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/message_builder.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_card_envelope.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/navigation/group_action_deeplink.dart';
@@ -146,7 +148,7 @@ void main() {
   });
 
   group('Stage 13.12 closed/compact card copy', () {
-    testWidgets('closed topic card shows "Задание завершено" + title, no JSON',
+    testWidgets('closed topic card shows "Темы закрыты" + title, no JSON',
         (tester) async {
       final cache = ChatActionCardsCache();
       cache.seed(ChatActionCardEntry.fromBatchJson({
@@ -179,13 +181,13 @@ void main() {
       ));
       await tester.pump();
 
-      expect(find.text('Задание завершено'), findsOneWidget);
+      expect(find.text('Темы закрыты'), findsOneWidget);
       expect(find.textContaining('Темы докладов по экологии'), findsOneWidget);
       expect(find.textContaining('{"card"'), findsNothing);
       expect(find.textContaining(_topicUuid), findsNothing);
     });
 
-    testWidgets('closed collection card shows "Задание завершено" + title, no JSON',
+    testWidgets('closed collection card shows "Сбор закрыт" + title, no JSON',
         (tester) async {
       final cache = ChatActionCardsCache();
       cache.seed(ChatActionCardEntry.fromBatchJson({
@@ -216,7 +218,7 @@ void main() {
       ));
       await tester.pump();
 
-      expect(find.text('Задание завершено'), findsOneWidget);
+      expect(find.text('Сбор закрыт'), findsOneWidget);
       expect(find.textContaining('Подарок преподавателю'), findsOneWidget);
       expect(find.textContaining('{"card"'), findsNothing);
     });
@@ -253,10 +255,13 @@ void main() {
       ));
       await tester.pump();
 
-      expect(find.text('Выбор темы'), findsOneWidget);
+      expect(find.text('Темы'), findsOneWidget);
+      expect(find.text('Открыть'), findsOneWidget);
       expect(find.text('Темы докладов'), findsOneWidget);
-      expect(find.textContaining('Выбрано 1 из 4'), findsOneWidget);
-      expect(find.text('Выбрать тему'), findsOneWidget);
+      expect(find.textContaining('Занято 1 из 4'), findsOneWidget);
+      // Compact card: tap opens details — no bulky tonal CTA button.
+      expect(find.text('Выбрать тему'), findsNothing);
+      expect(find.byIcon(Icons.chevron_right_rounded), findsOneWidget);
     });
   });
 
@@ -433,4 +438,230 @@ void main() {
       );
     });
   });
+
+  group('Stage 13.12.1 author-only edit + pick toggle', () {
+    test('author before activity may edit; organizer/non-author may not', () {
+      const author = 'user-author';
+      final open = <String, dynamic>{
+        'created_by': author,
+        'taken_slots': 0,
+        'can_manage': true,
+      };
+      expect(
+        canAuthorEditTopicSelectionBeforeActivity(
+          currentUserId: author,
+          details: open,
+        ),
+        isTrue,
+      );
+      expect(
+        canAuthorEditTopicSelectionBeforeActivity(
+          currentUserId: 'organizer-other',
+          details: open,
+        ),
+        isFalse,
+      );
+    });
+
+    test('author loses edit after first pick', () {
+      expect(
+        canAuthorEditTopicSelectionBeforeActivity(
+          currentUserId: 'user-author',
+          details: {
+            'created_by': 'user-author',
+            'taken_slots': 1,
+          },
+        ),
+        isFalse,
+      );
+    });
+
+    testWidgets(
+        'collection details hide attach/report after done statuses',
+        (tester) async {
+      for (final status in [
+        'reported',
+        'pending',
+        'pending_review',
+        'confirmed',
+      ]) {
+        final client = SupabaseClient(
+          'https://example.invalid',
+          'anon-key',
+          authOptions: const AuthClientOptions(autoRefreshToken: false),
+        );
+        final repo = _RecordingTopicRepo(
+          client: client,
+          details: {
+            'available': true,
+            'status': 'open',
+            'title': 'На собаке',
+            'amount_mode': 'per_person',
+            'amount_optional': 1000,
+            'my_status': status,
+          },
+        );
+        await tester.pumpWidget(MaterialApp(
+          home: UnifiedTaskDetailsScreen(
+            kind: 'collection',
+            entityId: _collectionUuid,
+            chatId: 'chat-1',
+            repository: repo,
+            cache: ChatActionCardsCache(),
+            client: client,
+          ),
+        ));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(find.text('Отметить исполненным'), findsNothing,
+            reason: 'status=$status');
+        expect(find.text('Прикрепить чек или скриншот'), findsNothing,
+            reason: 'status=$status');
+        expect(find.textContaining('Исполнено'), findsWidgets,
+            reason: 'status=$status');
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
+    });
+
+    testWidgets('tap free topic picks without dialog; tap own pick cancels',
+        (tester) async {
+      final client = SupabaseClient(
+        'https://example.invalid',
+        'anon-key',
+        authOptions: const AuthClientOptions(autoRefreshToken: false),
+      );
+      final repo = _RecordingTopicRepo(
+        client: client,
+        details: {
+          'available': true,
+          'status': 'open',
+          'title': 'Темы',
+          'allow_change': true,
+          'taken_slots': 0,
+          'total_capacity': 2,
+          'my_pick_text': '',
+          'options': [
+            {
+              'id': 'opt-a',
+              'title': 'Тема А',
+              'capacity': 1,
+              'taken': 0,
+              'my_pick': false,
+            },
+            {
+              'id': 'opt-b',
+              'title': 'Тема Б',
+              'capacity': 1,
+              'taken': 0,
+              'my_pick': false,
+            },
+          ],
+        },
+      );
+
+      await tester.pumpWidget(MaterialApp(
+        home: UnifiedTaskDetailsScreen(
+          kind: 'topic_selection',
+          entityId: _topicUuid,
+          chatId: 'chat-1',
+          // No cardMessageId → cache refreshEntity is a no-op (no network).
+          repository: repo,
+          cache: ChatActionCardsCache(),
+          client: client,
+        ),
+      ));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(find.text('Подтвердить выбор'), findsNothing);
+      expect(find.text('Тема А'), findsOneWidget);
+
+      await tester.tap(find.text('Тема А'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(repo.picked, ['opt-a']);
+      expect(repo.cancelled, isEmpty);
+      expect(find.text('Подтвердить выбор'), findsNothing);
+
+      // Reload after pick marked opt-a as my_pick.
+      await tester.tap(find.text('Тема А'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(repo.cancelled, [_topicUuid]);
+    });
+  });
+}
+
+/// Test double for topic pick/cancel without network RPCs.
+class _RecordingTopicRepo extends ChatGroupActionsRepository {
+  _RecordingTopicRepo({
+    required SupabaseClient client,
+    required this.details,
+  }) : super(client: client);
+
+  Map<String, dynamic> details;
+  final List<String> picked = <String>[];
+  final List<String> cancelled = <String>[];
+
+  @override
+  Future<Map<String, dynamic>> getTaskDetails({
+    required String chatId,
+    required String kind,
+    required String entityId,
+  }) async =>
+      Map<String, dynamic>.from(details);
+
+  @override
+  Future<bool> canDeleteGroupAction({
+    required String kind,
+    required String entityId,
+  }) async =>
+      details['can_delete'] == true;
+
+  @override
+  Future<void> pickTopic({
+    required String selectionId,
+    required String optionId,
+  }) async {
+    picked.add(optionId);
+    final options = (details['options'] as List)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    for (final o in options) {
+      o['my_pick'] = o['id'] == optionId;
+      if (o['id'] == optionId) {
+        o['taken'] = 1;
+      }
+    }
+    details = {
+      ...details,
+      'my_pick_text': options
+          .firstWhere((o) => o['id'] == optionId)['title']
+          .toString(),
+      'taken_slots': 1,
+      'options': options,
+    };
+  }
+
+  @override
+  Future<void> cancelTopicPick(String selectionId) async {
+    cancelled.add(selectionId);
+    final options = (details['options'] as List)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    for (final o in options) {
+      if (o['my_pick'] == true) {
+        o['my_pick'] = false;
+        o['taken'] = 0;
+      }
+    }
+    details = {
+      ...details,
+      'my_pick_text': '',
+      'taken_slots': 0,
+      'options': options,
+    };
+  }
 }

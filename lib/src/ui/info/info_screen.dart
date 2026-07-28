@@ -915,7 +915,7 @@ class _UsefulHeader extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Информация',
+                            'База',
                             style: theme.textTheme.headlineSmall?.copyWith(
                               fontSize: compact ? 30 : null,
                               fontWeight: FontWeight.w800,

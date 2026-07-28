@@ -189,7 +189,7 @@ class ChatComposerBar extends StatelessWidget {
               if (showTopicSelectionInPlus)
                 ChatPlusAction(
                   icon: Icons.format_list_numbered_rtl,
-                  title: 'Выбор темы',
+                  title: 'Создать список тем',
                   subtitle: topicSelectionEnabled || capabilitiesLoading
                       ? 'Список тем для распределения по предмету'
                       : (topicSelectionDisabledReason ?? 'Недоступно'),
@@ -203,7 +203,7 @@ class ChatComposerBar extends StatelessWidget {
               if (showCollectionInPlus)
                 ChatPlusAction(
                   icon: Icons.volunteer_activism_outlined,
-                  title: 'Скинуться',
+                  title: 'Сбор денег',
                   subtitle: collectionEnabled || capabilitiesLoading
                       ? 'Организация взноса (без оплаты в приложении)'
                       : (collectionDisabledReason ?? 'Недоступно'),

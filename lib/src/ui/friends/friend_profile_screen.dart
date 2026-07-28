@@ -790,7 +790,7 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
               controller: _scroll,
               padding: EdgeInsets.fromLTRB(
                 16,
-                media.padding.top + 50,
+                media.padding.top + 44,
                 16,
                 24 + media.padding.bottom,
               ),
@@ -1109,8 +1109,11 @@ class _Header extends StatelessWidget {
     return Container(
       width: 88,
       height: 88,
-      color: colorScheme.secondaryContainer,
       alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: colorScheme.secondaryContainer,
+        shape: BoxShape.circle,
+      ),
       child: Icon(
         Icons.person,
         size: 44,

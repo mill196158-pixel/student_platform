@@ -58,6 +58,7 @@ class ChatActionCardEntry {
     this.legacyGroupSpace = false,
     this.organizerStats,
     this.canManage,
+    this.canDelete,
     this.options,
     this.tombstoned = false,
   });
@@ -86,6 +87,8 @@ class ChatActionCardEntry {
   final bool legacyGroupSpace;
   final Map<String, dynamic>? organizerStats;
   final bool? canManage;
+  /// Server SoT from batch projection (`group_action_can_delete` rules).
+  final bool? canDelete;
   final List<Map<String, dynamic>>? options;
 
   /// True when this row was explicitly marked deleted/unavailable client-side
@@ -126,6 +129,7 @@ class ChatActionCardEntry {
       legacyGroupSpace: legacyGroupSpace,
       organizerStats: organizerStats,
       canManage: canManage,
+      canDelete: canDelete,
       options: options,
       tombstoned: tombstoned ?? this.tombstoned,
     );
@@ -165,6 +169,7 @@ class ChatActionCardEntry {
           ? Map<String, dynamic>.from(row['organizer_stats'] as Map)
           : null,
       canManage: row['can_manage'] is bool ? row['can_manage'] as bool : null,
+      canDelete: row['can_delete'] is bool ? row['can_delete'] as bool : null,
       options: row['options'] is List
           ? (row['options'] as List)
               .whereType<Map>()
@@ -252,6 +257,7 @@ class ChatActionCardEntry {
         'legacy_group_space': legacyGroupSpace,
         'organizer_stats': organizerStats,
         'can_manage': canManage,
+        'can_delete': canDelete,
         'options': options,
         'tombstoned': tombstoned,
       };
@@ -290,6 +296,7 @@ class ChatActionCardEntry {
           ? Map<String, dynamic>.from(map['organizer_stats'] as Map)
           : null,
       canManage: map['can_manage'] is bool ? map['can_manage'] as bool : null,
+      canDelete: map['can_delete'] is bool ? map['can_delete'] as bool : null,
       options: map['options'] is List
           ? (map['options'] as List)
               .whereType<Map>()

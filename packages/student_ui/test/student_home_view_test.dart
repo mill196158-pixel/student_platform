@@ -55,7 +55,7 @@ void main() {
 
     expect(find.text('Привет, Минь 👋'), findsOneWidget);
     expect(find.text('Сводка дня'), findsOneWidget);
-    expect(find.text('Ближайшие задания'), findsOneWidget);
+    expect(find.text('Ближайшие дела'), findsOneWidget);
 
     await tester.tap(find.text('Главная стала полезнее'));
     expect(selectedIndex, 0);

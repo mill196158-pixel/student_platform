@@ -10,6 +10,7 @@ import 'models/team.dart';
 import 'state/team_cubit.dart';
 import 'tabs/assignments_tab.dart';
 import 'tabs/chat_tab.dart';
+import 'tabs/chat/team/team_chat_notice.dart';
 import 'tabs/files_tab.dart';
 import 'tabs/assignments/view_mode.dart';
 import 'widgets/team_avatar.dart';
@@ -121,7 +122,7 @@ class _BodyState extends State<_Body> with SingleTickerProviderStateMixin {
                             const _RoundBackButton(), // назад слева в шапке
                         trailing: showAssignmentsActions
                             ? const AssignmentsViewModeButton()
-                            : null,
+                            : _TeamChatHeaderActions(team: team),
                       ),
                     )
                   : const SizedBox(width: double.infinity, height: 0),
@@ -206,6 +207,219 @@ class _BodyState extends State<_Body> with SingleTickerProviderStateMixin {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Group chat: direct Info + Members. Subject chat: modern schedule-style ⋯.
+class _TeamChatHeaderActions extends StatelessWidget {
+  const _TeamChatHeaderActions({required this.team});
+
+  final Team team;
+
+  void _openInfo(BuildContext context) {
+    showTeamChatNoticeSheet(context: context, teamId: team.id);
+  }
+
+  void _openMembers(BuildContext context) {
+    final canExport = context.read<TeamCubit>().state.isStarosta;
+    showTeamMembersSheet(
+      context: context,
+      teamId: team.id,
+      teamTitle: team.isGroupSpaceChat
+          ? (team.groupCode.trim().isNotEmpty ? team.groupCode : team.name)
+          : team.name,
+      groupLabel: team.groupCode.trim().isEmpty ? null : team.groupCode.trim(),
+      canExportRoster: canExport,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
+
+    if (team.isGroupSpaceChat) {
+      // «В чате группы просто информация» + участники отдельными иконками.
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _HeaderRoundButton(
+            tooltip: 'Информация',
+            icon: Icons.info_outline_rounded,
+            onPressed: () => _openInfo(context),
+          ),
+          const SizedBox(width: 6),
+          _HeaderRoundButton(
+            tooltip: 'Участники',
+            icon: Icons.groups_rounded,
+            onPressed: () => _openMembers(context),
+          ),
+        ],
+      );
+    }
+
+    return PopupMenuButton<String>(
+      tooltip: 'Ещё',
+      onSelected: (value) {
+        if (value == 'notice') _openInfo(context);
+        if (value == 'members') _openMembers(context);
+      },
+      position: PopupMenuPosition.under,
+      offset: const Offset(0, 10),
+      elevation: 18,
+      color: Colors.white,
+      surfaceTintColor: Colors.white,
+      shadowColor: Colors.black.withValues(alpha: 0.18),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(22),
+        side: BorderSide(color: primary.withValues(alpha: 0.08)),
+      ),
+      constraints: const BoxConstraints(minWidth: 244),
+      itemBuilder: (ctx) => const [
+        PopupMenuItem(
+          value: 'notice',
+          height: 58,
+          padding: EdgeInsets.symmetric(horizontal: 8),
+          child: _TeamMenuItem(
+            icon: Icons.info_outline_rounded,
+            title: 'Информация',
+            subtitle: 'Общая доска для группы',
+          ),
+        ),
+        PopupMenuDivider(height: 8),
+        PopupMenuItem(
+          value: 'members',
+          height: 58,
+          padding: EdgeInsets.symmetric(horizontal: 8),
+          child: _TeamMenuItem(
+            icon: Icons.groups_rounded,
+            title: 'Участники',
+            subtitle: 'Список по алфавиту с номерами',
+          ),
+        ),
+      ],
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.78),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: primary.withValues(alpha: 0.10)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.08),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Icon(Icons.more_horiz_rounded, color: primary, size: 24),
+      ),
+    );
+  }
+}
+
+class _HeaderRoundButton extends StatelessWidget {
+  const _HeaderRoundButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.78),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: primary.withValues(alpha: 0.10)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.08),
+                  blurRadius: 18,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Icon(icon, color: primary, size: 22),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TeamMenuItem extends StatelessWidget {
+  const _TeamMenuItem({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
+    return Row(
+      children: [
+        Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: primary.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Icon(icon, color: primary, size: 20),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: const Color(0xFF111827),
+                  fontWeight: FontWeight.w800,
+                  height: 1.05,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: const Color(0xFF6B7280),
+                  height: 1.1,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

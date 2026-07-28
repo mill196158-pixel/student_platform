@@ -252,9 +252,7 @@ class _GroupChatCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: theme.colorScheme.surface,
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(
-            color: theme.colorScheme.primary.withValues(alpha: 0.28),
-          ),
+          // Match other team tiles — no special purple border.
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.06),
@@ -341,9 +339,7 @@ class _GroupChatGridCard extends StatelessWidget {
             decoration: BoxDecoration(
               color: theme.colorScheme.surface,
               borderRadius: BorderRadius.circular(18),
-              border: Border.all(
-                color: theme.colorScheme.primary.withValues(alpha: 0.28),
-              ),
+              // Match other team tiles — no special purple border.
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withValues(alpha: 0.06),

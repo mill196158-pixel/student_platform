@@ -1691,7 +1691,10 @@ class _ChatTabState extends State<ChatTab> {
           return previous.chat != current.chat ||
               previous.team != current.team ||
               previous.assignments != current.assignments ||
-              previous.loading != current.loading;
+              previous.loading != current.loading ||
+              previous.chatRefreshing != current.chatRefreshing ||
+              previous.chatHasSnapshot != current.chatHasSnapshot ||
+              previous.chatError != current.chatError;
         },
         builder: (context, state) {
           final safeBottom = MediaQuery.of(context).padding.bottom;

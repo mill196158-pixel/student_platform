@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../data/personal_diary_service.dart';
+import '../learning/tabs/chat/navigation/group_action_deeplink.dart';
 import '../schedule/subject_diary/subject_diary.dart';
 import '../schedule/subject_diary_screen.dart';
 
@@ -120,22 +121,22 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
                       ),
                       SizedBox(height: compact ? 14 : 18),
                       _SectionTitle(
-                        title: 'Ближайшие задания',
-                        subtitle:
-                            '${data.totalAssignments} групповых • ${data.personalTasksActive} личных активных',
+                        title: 'Ближайшие дела',
+                        subtitle: _upcomingSectionSubtitle(data, upcomingItems),
                       ),
                       const SizedBox(height: 8),
                       if (upcomingItems.isEmpty)
                         const _EmptyCard(
-                          text: 'Активных ближайших заданий пока нет.',
+                          text: 'Активных ближайших дел пока нет.',
                         )
                       else
                         _CollapsibleTasksSection(
                           title: 'Активные ближайшие',
-                          subtitle: '${upcomingItems.length} скрыто',
+                          subtitle: '${upcomingItems.length} в списке',
                           icon: Icons.upcoming_rounded,
                           items: upcomingItems,
                           itemBuilder: _buildUpcomingCard,
+                          initiallyExpanded: true,
                         ),
                       if (hiddenDoneItems.isNotEmpty)
                         _CollapsibleTasksSection(
@@ -194,6 +195,9 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
   List<_UpcomingDiaryItem> _buildUpcomingItems(PersonalDiaryData data) {
     final items = <_UpcomingDiaryItem>[
       ...data.upcomingAssignments.map(_UpcomingDiaryItem.groupAssignment),
+      ...data.groupActions
+          .where((a) => !a.isCompleted)
+          .map(_UpcomingDiaryItem.groupAction),
       ...data.upcomingPersonalTasks.map(_UpcomingDiaryItem.personalTask),
     ].where((item) => !_isUpcomingItemDone(item)).toList()
       ..sort((a, b) {
@@ -210,10 +214,47 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
   List<_UpcomingDiaryItem> _buildDoneUpcomingItems(PersonalDiaryData data) {
     final items = <_UpcomingDiaryItem>[
       ...data.publishedAssignments.map(_UpcomingDiaryItem.groupAssignment),
+      ...data.groupActions
+          .where((a) => a.isCompleted)
+          .map(_UpcomingDiaryItem.groupAction),
       ...data.personalTasks.map(_UpcomingDiaryItem.personalTask),
     ].where(_isUpcomingItemDone).toList()
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return items.take(8).toList();
+  }
+
+  String _upcomingSectionSubtitle(
+    PersonalDiaryData data,
+    List<_UpcomingDiaryItem> upcoming,
+  ) {
+    var assignments = 0;
+    var topics = 0;
+    var collections = 0;
+    var personal = 0;
+    for (final item in upcoming) {
+      if (item.assignment != null) {
+        assignments++;
+      } else if (item.groupAction != null) {
+        if (item.groupAction!.isTopic) {
+          topics++;
+        } else if (item.groupAction!.isCollection) {
+          collections++;
+        }
+      } else {
+        personal++;
+      }
+    }
+    final parts = <String>[
+      if (assignments > 0) '$assignments зад.',
+      if (topics > 0) '$topics тем.',
+      if (collections > 0) '$collections сбор.',
+      if (personal > 0 || upcoming.isEmpty)
+        '$personal личн.',
+    ];
+    if (parts.isEmpty) {
+      return '${data.personalTasksActive} личных активных';
+    }
+    return parts.join(' • ');
   }
 
   PersonalDiaryData _dataWithCreatedTask(
@@ -239,6 +280,7 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
       latestEntries: data.latestEntries,
       publishedAssignments: data.publishedAssignments,
       upcomingAssignments: data.upcomingAssignments,
+      groupActions: data.groupActions,
       personalTasks: tasks,
       upcomingPersonalTasks: upcomingTasks,
       totalEntries: data.totalEntries,
@@ -299,6 +341,13 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
         onToggleDone: () => _toggleAssignmentDone(assignment),
       );
     }
+    final groupAction = item.groupAction;
+    if (groupAction != null) {
+      return _GroupActionDiaryCard(
+        action: groupAction,
+        onTap: () => _openGroupAction(groupAction),
+      );
+    }
     final task = item.task!;
     return _PersonalTaskCard(
       task: task,
@@ -311,7 +360,23 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
   bool _isUpcomingItemDone(_UpcomingDiaryItem item) {
     final assignment = item.assignment;
     if (assignment != null) return _assignmentDone(assignment);
+    final groupAction = item.groupAction;
+    if (groupAction != null) return groupAction.isCompleted;
     return _taskStatus(item.task!) == 'done';
+  }
+
+  Future<void> _openGroupAction(PersonalDiaryGroupAction action) async {
+    await openGroupActionDeeplink(
+      context,
+      GroupActionDeeplinkArgs.fromDeadline(
+        eventType: action.eventType,
+        entityId: action.entityId,
+        chatId: action.chatId,
+        cardMessageId: action.cardMessageId,
+        teamId: action.teamId,
+      ),
+    );
+    if (mounted) _refresh();
   }
 
   bool _assignmentDone(PersonalDiaryAssignment assignment) {
@@ -741,16 +806,42 @@ enum _AddEntryMode {
 
 class _UpcomingDiaryItem {
   final PersonalDiaryAssignment? assignment;
+  final PersonalDiaryGroupAction? groupAction;
   final PersonalDiaryTask? task;
 
-  const _UpcomingDiaryItem.groupAssignment(this.assignment) : task = null;
-  const _UpcomingDiaryItem.personalTask(this.task) : assignment = null;
+  const _UpcomingDiaryItem.groupAssignment(this.assignment)
+      : groupAction = null,
+        task = null;
+  const _UpcomingDiaryItem.groupAction(this.groupAction)
+      : assignment = null,
+        task = null;
+  const _UpcomingDiaryItem.personalTask(this.task)
+      : assignment = null,
+        groupAction = null;
 
-  DateTime? get dueAt => assignment?.dueAt ?? task?.dueAt;
-  DateTime get createdAt => assignment?.createdAt ?? task!.createdAt;
-  String get title => assignment?.title ?? task!.title;
-  String get subjectTitle => assignment?.subjectTitle ?? task!.subjectTitle;
-  String? get description => assignment?.description ?? task?.description;
+  DateTime? get dueAt =>
+      assignment?.dueAt ?? groupAction?.occursAt ?? task?.dueAt;
+  DateTime get createdAt =>
+      assignment?.createdAt ?? groupAction?.occursAt ?? task!.createdAt;
+  String get title =>
+      assignment?.title ?? groupAction?.displayTitle ?? task!.title;
+  String get subjectTitle =>
+      assignment?.subjectTitle ??
+      groupAction?.teamName ??
+      groupAction?.kindLabel ??
+      task!.subjectTitle;
+  String? get description =>
+      assignment?.description ??
+      (groupAction == null
+          ? task?.description
+          : [
+              groupAction!.kindLabel,
+              if ((groupAction!.myPickText ?? '').trim().isNotEmpty &&
+                  groupAction!.isTopic)
+                'список «${groupAction!.title}»',
+              if ((groupAction!.statusLine ?? '').trim().isNotEmpty)
+                groupAction!.statusLine!,
+            ].join(' · '));
 }
 
 typedef _SavePersonalTask = Future<PersonalDiaryTask> Function({
@@ -2300,6 +2391,7 @@ class _CollapsibleTasksSection extends StatelessWidget {
   final IconData icon;
   final List<_UpcomingDiaryItem> items;
   final Widget Function(_UpcomingDiaryItem item) itemBuilder;
+  final bool initiallyExpanded;
 
   const _CollapsibleTasksSection({
     required this.title,
@@ -2307,6 +2399,7 @@ class _CollapsibleTasksSection extends StatelessWidget {
     required this.icon,
     required this.items,
     required this.itemBuilder,
+    this.initiallyExpanded = false,
   });
 
   @override
@@ -2317,6 +2410,7 @@ class _CollapsibleTasksSection extends StatelessWidget {
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
+          initiallyExpanded: initiallyExpanded,
           tilePadding: const EdgeInsets.symmetric(horizontal: 14),
           childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
           leading: Icon(
@@ -2338,6 +2432,141 @@ class _CollapsibleTasksSection extends StatelessWidget {
                 ?.copyWith(color: Colors.black54),
           ),
           children: items.map(itemBuilder).toList(),
+        ),
+      ),
+    );
+  }
+}
+
+class _GroupActionDiaryCard extends StatelessWidget {
+  const _GroupActionDiaryCard({
+    required this.action,
+    required this.onTap,
+  });
+
+  final PersonalDiaryGroupAction action;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final done = action.isCompleted;
+    final accent =
+        done ? const Color(0xFF2F9D84) : const Color(0xFF7C63D8);
+    final listHint = action.isTopic &&
+            (action.myPickText ?? '').trim().isNotEmpty &&
+            action.title.trim().isNotEmpty
+        ? 'список «${action.title.trim()}»'
+        : null;
+    final meta = [
+      if (listHint != null) listHint,
+      if ((action.teamName ?? '').trim().isNotEmpty) action.teamName!.trim(),
+      'до ${_fmtDate(action.occursAt)}',
+    ].join(' • ');
+    final statusText = (action.statusLine ?? '').trim().isNotEmpty
+        ? action.statusLine!.trim()
+        : (done ? 'Выполнено' : 'Не выполнено');
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: _cardDecoration(),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: .12),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      action.isTopic
+                          ? Icons.edit_note_rounded
+                          : Icons.payments_outlined,
+                      color: accent,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          action.displayTitle,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(
+                                fontWeight: FontWeight.w900,
+                                color: Colors.black,
+                              ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          meta,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: Colors.black54,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  _KindBadge(text: action.kindLabel),
+                  const SizedBox(width: 8),
+                  _PlainStatusBadge(text: statusText, done: done),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PlainStatusBadge extends StatelessWidget {
+  const _PlainStatusBadge({
+    required this.text,
+    required this.done,
+  });
+
+  final String text;
+  final bool done;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = done ? const Color(0xFF2F9D84) : const Color(0xFFB58B3B);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: .12),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.w900,
+          fontSize: 12,
         ),
       ),
     );

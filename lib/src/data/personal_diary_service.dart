@@ -4,6 +4,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'academic_context_service.dart';
+import '../ui/learning/tabs/chat/data/chat_group_actions_repository.dart';
+import '../ui/learning/tabs/chat/models/chat_group_actions.dart';
+import '../ui/learning/tabs/chat/models/group_action_labels.dart';
 import '../ui/schedule/subject_diary/subject_diary.dart';
 
 class PersonalDiaryData {
@@ -15,6 +18,7 @@ class PersonalDiaryData {
   final List<PersonalDiaryLatestEntry> latestEntries;
   final List<PersonalDiaryAssignment> publishedAssignments;
   final List<PersonalDiaryAssignment> upcomingAssignments;
+  final List<PersonalDiaryGroupAction> groupActions;
   final List<PersonalDiaryTask> personalTasks;
   final List<PersonalDiaryTask> upcomingPersonalTasks;
   final int totalEntries;
@@ -35,6 +39,7 @@ class PersonalDiaryData {
     required this.latestEntries,
     this.publishedAssignments = const [],
     this.upcomingAssignments = const [],
+    this.groupActions = const [],
     this.personalTasks = const [],
     this.upcomingPersonalTasks = const [],
     required this.totalEntries,
@@ -46,6 +51,70 @@ class PersonalDiaryData {
     this.personalTasksActive = 0,
     this.personalTasksDone = 0,
   });
+}
+
+/// Topic / collection deadline row for «Ближайшие дела» in personal diary.
+class PersonalDiaryGroupAction {
+  const PersonalDiaryGroupAction({
+    required this.eventType,
+    required this.entityId,
+    required this.title,
+    required this.occursAt,
+    this.chatId,
+    this.cardMessageId,
+    this.teamId,
+    this.teamName,
+    this.myPickText,
+    this.canDelete = false,
+  });
+
+  final String eventType;
+  final String entityId;
+  final String title;
+  final DateTime occursAt;
+  final String? chatId;
+  final String? cardMessageId;
+  final String? teamId;
+  final String? teamName;
+  final String? myPickText;
+  final bool canDelete;
+
+  bool get isTopic => eventType == 'topic_deadline';
+  bool get isCollection => eventType == 'collection_deadline';
+
+  String get kindLabel =>
+      isTopic ? 'Тема' : (isCollection ? 'Сбор' : 'Дело');
+
+  String get displayTitle {
+    if (isTopic && (myPickText ?? '').trim().isNotEmpty) {
+      return topicFollowUpTitle(myPickText!);
+    }
+    return title;
+  }
+
+  bool get isCompleted =>
+      isCollection && collectionMyPickIsDoneForParticipant(myPickText);
+
+  String? get statusLine {
+    if (isCollection) return collectionHomeStatusLine(myPickText);
+    if (isTopic && (myPickText ?? '').trim().isNotEmpty) return 'Тема занята';
+    return null;
+  }
+
+  factory PersonalDiaryGroupAction.fromDeadline(GroupActionDeadline e) {
+    return PersonalDiaryGroupAction(
+      eventType: e.eventType,
+      entityId: e.entityId,
+      title: e.title,
+      occursAt: e.occursAt,
+      chatId: e.chatId,
+      cardMessageId: e.cardMessageId,
+      teamId: e.teamId,
+      teamName: e.teamName,
+      myPickText: e.myPickText,
+      canDelete: e.canDelete,
+    );
+  }
 }
 
 class PersonalDiarySubject {
@@ -259,7 +328,7 @@ class PersonalDiaryService {
   }
 
   String _cacheKey(String userId, int? semesterNumber) =>
-      'personal_diary_data_cache_v2_${userId}_${semesterNumber ?? 'auto'}';
+      'personal_diary_data_cache_v3_${userId}_${semesterNumber ?? 'auto'}';
 
   Future<PersonalDiaryData> load({int? semesterNumber}) async {
     final context = await _academicContextService.loadFresh();
@@ -541,6 +610,7 @@ class PersonalDiaryService {
     final personalTasksTotal = personalTasks.length;
     final personalTasksDone = personalTasks.where((task) => task.isDone).length;
     final personalTasksActive = personalTasksTotal - personalTasksDone;
+    final groupActions = await _loadGroupActions();
 
     return PersonalDiaryData(
       academicContext: context,
@@ -551,6 +621,7 @@ class PersonalDiaryService {
       latestEntries: limitedLatest,
       publishedAssignments: publishedAssignments,
       upcomingAssignments: upcomingAssignments,
+      groupActions: groupActions,
       personalTasks: personalTasks,
       upcomingPersonalTasks: upcomingPersonalTasks,
       totalEntries: totalEntries,
@@ -562,6 +633,24 @@ class PersonalDiaryService {
       personalTasksActive: personalTasksActive,
       personalTasksDone: personalTasksDone,
     );
+  }
+
+  Future<List<PersonalDiaryGroupAction>> _loadGroupActions() async {
+    try {
+      final repo = ChatGroupActionsRepository(client: _sb);
+      final items = await repo.listMyGroupActionDeadlinesCached();
+      final seen = <String>{};
+      final out = <PersonalDiaryGroupAction>[];
+      for (final item in items) {
+        final key = '${item.eventType}|${item.entityId}';
+        if (!seen.add(key)) continue;
+        out.add(PersonalDiaryGroupAction.fromDeadline(item));
+      }
+      out.sort((a, b) => a.occursAt.compareTo(b.occursAt));
+      return out;
+    } catch (_) {
+      return const [];
+    }
   }
 
   PersonalDiaryData _emptyData(
@@ -578,6 +667,7 @@ class PersonalDiaryService {
       latestEntries: const [],
       publishedAssignments: const [],
       upcomingAssignments: const [],
+      groupActions: const [],
       personalTasks: const [],
       upcomingPersonalTasks: const [],
       totalEntries: 0,
@@ -602,6 +692,7 @@ class PersonalDiaryService {
             data.publishedAssignments.map(_assignmentToJson).toList(),
         'upcomingAssignments':
             data.upcomingAssignments.map(_assignmentToJson).toList(),
+        'groupActions': data.groupActions.map(_groupActionToJson).toList(),
         'personalTasks': data.personalTasks.map(_taskToJson).toList(),
         'upcomingPersonalTasks':
             data.upcomingPersonalTasks.map(_taskToJson).toList(),
@@ -633,6 +724,8 @@ class PersonalDiaryService {
       upcomingAssignments: _listFrom(json['upcomingAssignments'])
           .map(_assignmentFromJson)
           .toList(),
+      groupActions:
+          _listFrom(json['groupActions']).map(_groupActionFromJson).toList(),
       personalTasks:
           _listFrom(json['personalTasks']).map(_taskFromJson).toList(),
       upcomingPersonalTasks:
@@ -645,6 +738,35 @@ class PersonalDiaryService {
       personalTasksTotal: _asInt(json['personalTasksTotal']) ?? 0,
       personalTasksActive: _asInt(json['personalTasksActive']) ?? 0,
       personalTasksDone: _asInt(json['personalTasksDone']) ?? 0,
+    );
+  }
+
+  Map<String, dynamic> _groupActionToJson(PersonalDiaryGroupAction a) => {
+        'event_type': a.eventType,
+        'entity_id': a.entityId,
+        'title': a.title,
+        'occurs_at': a.occursAt.toIso8601String(),
+        'chat_id': a.chatId,
+        'card_message_id': a.cardMessageId,
+        'team_id': a.teamId,
+        'team_name': a.teamName,
+        'my_pick_text': a.myPickText,
+        'can_delete': a.canDelete,
+      };
+
+  PersonalDiaryGroupAction _groupActionFromJson(Map<String, dynamic> json) {
+    return PersonalDiaryGroupAction(
+      eventType: (json['event_type'] ?? '').toString(),
+      entityId: (json['entity_id'] ?? '').toString(),
+      title: (json['title'] ?? '').toString(),
+      occursAt: DateTime.tryParse((json['occurs_at'] ?? '').toString()) ??
+          DateTime.now(),
+      chatId: _nullIfEmpty(json['chat_id']),
+      cardMessageId: _nullIfEmpty(json['card_message_id']),
+      teamId: _nullIfEmpty(json['team_id']),
+      teamName: _nullIfEmpty(json['team_name']),
+      myPickText: _nullIfEmpty(json['my_pick_text']),
+      canDelete: json['can_delete'] == true,
     );
   }
 

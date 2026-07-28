@@ -128,7 +128,7 @@ void main() {
       final preview = envelope.humanPreview();
       expect(preview.contains('{'), false);
       expect(preview.contains(_topicUuid), false);
-      expect(preview, contains('Выбор темы'));
+      expect(preview, contains('Темы'));
     });
 
     test('collection preview is human readable', () {
@@ -163,7 +163,7 @@ void main() {
       expect(m.cardEntityId, _topicUuid);
       expect(m.text.contains('{'), false);
       expect(m.text.contains(_topicUuid), false);
-      expect(m.text, contains('Выбор темы'));
+      expect(m.text, contains('Темы'));
     });
 
     test('body=JSON (no separate text) → cardKind set, text human-readable',
@@ -268,7 +268,7 @@ void main() {
 
       expect(preview.contains('{'), false);
       expect(preview.contains(_topicUuid), false);
-      expect(preview, contains('Выбор темы'));
+      expect(preview, contains('Темы'));
     });
 
     test('forMessage falls back to sanitized text for non-card messages', () {

@@ -168,13 +168,14 @@ class ChatCardEnvelope {
   }
 
   /// Human-readable, never-JSON preview text for this card.
+  /// Display labels only — wire kind stays `topic_selection` / `collection`.
   String humanPreview({String? title}) {
     final t = (title ?? '').trim();
     switch (kind) {
       case ChatCardKind.topicSelection:
-        return t.isNotEmpty ? 'Выбор темы: $t' : 'Выбор темы';
+        return t.isNotEmpty ? 'Темы: $t' : 'Темы';
       case ChatCardKind.groupCollection:
-        return t.isNotEmpty ? 'Скинуться: $t' : 'Скинуться';
+        return t.isNotEmpty ? 'Сбор: $t' : 'Сбор';
       case ChatCardKind.assignment:
         return t.isNotEmpty ? 'Задание: $t' : 'Задание';
     }

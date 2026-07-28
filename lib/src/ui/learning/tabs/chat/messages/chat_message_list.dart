@@ -4,6 +4,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' as services;
 import 'package:flutter_chat_reactions/flutter_chat_reactions.dart' as fcr;
+import 'package:lottie/lottie.dart';
 import '../../../models/message.dart';
 import '../date_separator.dart';
 import '../swipe_to_reply.dart';
@@ -1737,16 +1738,29 @@ class _EmptyChatState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            Icons.chat_bubble_outline_rounded,
-            size: 56,
-            color: theme.colorScheme.primary.withValues(alpha: .45),
+          SizedBox(
+            width: 148,
+            height: 148,
+            child: Lottie.asset(
+              'assets/lottie/empty_chat_fox.json',
+              fit: BoxFit.contain,
+              repeat: !reduceMotion,
+              animate: !reduceMotion,
+              errorBuilder: (context, error, stackTrace) {
+                return Icon(
+                  Icons.chat_bubble_outline_rounded,
+                  size: 56,
+                  color: theme.colorScheme.primary.withValues(alpha: .45),
+                );
+              },
+            ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 8),
           Text(
             'Сообщений пока нет',
             style: theme.textTheme.titleMedium?.copyWith(

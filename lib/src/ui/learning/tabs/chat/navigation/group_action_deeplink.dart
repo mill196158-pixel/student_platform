@@ -69,6 +69,9 @@ Future<void> openGroupActionDeeplink(
   BuildContext context,
   GroupActionDeeplinkArgs args, {
   SupabaseClient? client,
+  /// When opening from an already-visible team chat, pass a no-op (or pop-only)
+  /// callback so we do not push a second TeamDetailsScreen.
+  void Function(String? cardMessageId)? onOpenDiscussion,
 }) async {
   final sb = client ?? Supabase.instance.client;
   if (sb.auth.currentUser == null) {
@@ -100,7 +103,7 @@ Future<void> openGroupActionDeeplink(
 
   Future<void> openChat() async {
     if (!context.mounted) return;
-    await Navigator.of(context).push(
+    await Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute(
         builder: (_) => TeamDetailsScreen(
           team: team,
@@ -125,9 +128,10 @@ Future<void> openGroupActionDeeplink(
     chatId: chatId,
     teamId: teamId,
     cardMessageId: args.cardMessageId,
-    onOpenDiscussion: (_) {
-      unawaited(openChat());
-    },
+    onOpenDiscussion: onOpenDiscussion ??
+        (_) {
+          unawaited(openChat());
+        },
   );
 }
 

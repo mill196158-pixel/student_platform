@@ -10,21 +10,43 @@ import 'package:student_platform/src/ui/schedule/models/schedule_group_action_ma
 import 'package:student_ui/student_ui.dart';
 
 void main() {
-  test('PersonalDiaryData has no group action deadlines field', () {
+  test('PersonalDiaryData holds group action deadlines', () {
     const ctx = AcademicContext(hasActiveEnrollment: false);
-    expect(
-      PersonalDiaryData(
-        academicContext: ctx,
-        availableSemesters: const [],
-        selectedSemesterNumber: null,
-        allSubjects: const [],
-        subjects: const [],
-        latestEntries: const [],
-        totalEntries: 0,
-        totalFiles: 0,
-      ),
-      isA<PersonalDiaryData>(),
+    final occursAt = DateTime.utc(2026, 8, 1, 12);
+    final data = PersonalDiaryData(
+      academicContext: ctx,
+      availableSemesters: const [],
+      selectedSemesterNumber: null,
+      allSubjects: const [],
+      subjects: const [],
+      latestEntries: const [],
+      groupActions: [
+        PersonalDiaryGroupAction(
+          eventType: 'topic_deadline',
+          entityId: 'sel-1',
+          title: 'Доклад',
+          occursAt: occursAt,
+          myPickText: 'SQL и транзакции',
+          teamName: 'Математика',
+        ),
+        PersonalDiaryGroupAction(
+          eventType: 'collection_deadline',
+          entityId: 'col-1',
+          title: 'Сбор на пиццу',
+          occursAt: occursAt.add(const Duration(days: 1)),
+          myPickText: 'Отметил перевод',
+        ),
+      ],
+      totalEntries: 0,
+      totalFiles: 0,
     );
+
+    expect(data.groupActions, hasLength(2));
+    expect(data.groupActions.first.isTopic, isTrue);
+    expect(data.groupActions.first.isCompleted, isFalse);
+    expect(data.groupActions.first.displayTitle, 'Подготовить «SQL и транзакции»');
+    expect(data.groupActions.last.isCollection, isTrue);
+    expect(data.groupActions.last.isCompleted, isTrue);
   });
 
   test('mapScheduleGroupActionEvents dedupes by type entity occurs_at', () {
@@ -94,11 +116,13 @@ void main() {
       groupActions: const [
         StudentHomeGroupAction(
           id: 'topic_deadline|s1',
-          title: 'Темы докладов',
-          kindLabel: 'Выбор темы',
+          title: 'Доклад',
+          kindLabel: 'Тема',
           deadlineText: '1 авг., 15:00',
           teamName: 'Математика',
           myPickText: 'SQL и транзакции',
+          isTopic: true,
+          followUpTitle: 'Подготовить «SQL и транзакции»',
         ),
       ],
     );
@@ -111,8 +135,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Темы докладов'), findsOneWidget);
-    expect(find.textContaining('Ваш выбор: SQL и транзакции'), findsOneWidget);
+    expect(find.text('Подготовить «SQL и транзакции»'), findsOneWidget);
+    expect(find.textContaining('Тема · список «Доклад»'), findsOneWidget);
   });
 
   test('HomeGroupActionPreview maps enriched deadline fields', () {

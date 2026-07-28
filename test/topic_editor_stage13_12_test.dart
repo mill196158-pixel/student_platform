@@ -296,7 +296,37 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
 
-      expect(_text('Управление темами'), findsOneWidget);
+      expect(_text('Редактирование тем'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+        'bottom bar stays compact so the editor body is visible (no white screen)',
+        (tester) async {
+      // Stage 13.12.1 regression: Scaffold.bottomNavigationBar + Column
+      // without MainAxisSize.min expands to the full viewport and collapses
+      // the body to height 0 → blank white page.
+      await tester.pumpWidget(MaterialApp(
+        home: TopicOptionsEditorScreen(
+          chatId: 'chat-1',
+          selectionId: 'sel-1',
+          title: 'Темы докладов',
+          selectionRowVersion: 1,
+          canManage: true,
+          options: const [
+            TopicEditRow(id: 'o1', title: 'Тема 1', capacity: 1),
+          ],
+          repository: _fakeRepo(),
+        ),
+      ));
+      await tester.pump();
+
+      expect(_text('Редактирование тем'), findsOneWidget);
+      expect(_text('Тема 1'), findsOneWidget);
+      expect(_text('Добавить тему'), findsOneWidget);
+
+      final bodySize = tester.getSize(find.byType(CustomScrollView).first);
+      expect(bodySize.height, greaterThan(200));
       expect(tester.takeException(), isNull);
     });
   });

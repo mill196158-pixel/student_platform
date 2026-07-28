@@ -62,6 +62,7 @@ class StudentHomeAssignment {
     required this.deadline,
     this.status = StudentHomeAssignmentStatus.notStarted,
     this.isDone = false,
+    this.dueAt,
   });
 
   final String id;
@@ -70,6 +71,9 @@ class StudentHomeAssignment {
   final String deadline;
   final StudentHomeAssignmentStatus status;
   final bool isDone;
+
+  /// Used to merge with group-action deadlines in «Ближайшие дела».
+  final DateTime? dueAt;
 }
 
 enum StudentHomeAssignmentStatus {
@@ -86,6 +90,14 @@ class StudentHomeGroupAction {
     required this.deadlineText,
     this.teamName,
     this.myPickText,
+    this.occursAt,
+    this.isTopic = false,
+    this.isCollection = false,
+    this.followUpTitle,
+    this.statusLine,
+    this.isPendingReview = false,
+    this.isCompleted = false,
+    this.canDelete = false,
   });
 
   final String id;
@@ -94,6 +106,27 @@ class StudentHomeGroupAction {
   final String deadlineText;
   final String? teamName;
   final String? myPickText;
+
+  /// Used to merge with assignments in «Ближайшие дела».
+  final DateTime? occursAt;
+
+  final bool isTopic;
+  final bool isCollection;
+
+  /// When set (topic picked), shown as the row title instead of [title].
+  final String? followUpTitle;
+
+  /// Extra status under the meta line (e.g. «Исполнено», «Тема занята»).
+  final String? statusLine;
+
+  /// Soft green «на проверке» styling for reported collection transfers.
+  final bool isPendingReview;
+
+  /// Confirmed / fully done (normally filtered from upcoming).
+  final bool isCompleted;
+
+  /// Author/organizer may cancel (server SoT via deadlines projection).
+  final bool canDelete;
 }
 
 class StudentHomeNews {

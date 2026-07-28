@@ -833,6 +833,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     return ScheduleGroupActionCard(
       event: action,
       onTap: () => _openGroupAction(action),
+      onDelete: action.canDelete ? () => _deleteGroupAction(action) : null,
     );
   }
 
@@ -1027,6 +1028,54 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _deleteGroupAction(ScheduleGroupActionEvent event) async {
+    if (!event.canDelete) return;
+    final kind = event.isTopic ? 'topic_selection' : 'group_collection';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(event.isTopic ? 'Удалить список тем?' : 'Удалить сбор?'),
+        content: const Text('Действие будет отменено для всех участников.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await ChatGroupActionsRepository().deleteGroupAction(
+        kind: kind,
+        entityId: event.entityId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _groupActions =
+            _groupActions.where((e) => e.entityId != event.entityId).toList();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(event.isTopic ? 'Список тем удалён' : 'Сбор удалён'),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Не удалось удалить. Возможно, уже есть отметки участников.',
+          ),
+        ),
+      );
+    }
   }
 
   void _openGroupAction(ScheduleGroupActionEvent event) {
@@ -1483,11 +1532,13 @@ class ScheduleAssignmentCard extends StatelessWidget {
 class ScheduleGroupActionCard extends StatelessWidget {
   final ScheduleGroupActionEvent event;
   final VoidCallback onTap;
+  final VoidCallback? onDelete;
 
   const ScheduleGroupActionCard({
     super.key,
     required this.event,
     required this.onTap,
+    this.onDelete,
   });
 
   @override
@@ -1573,7 +1624,26 @@ class ScheduleGroupActionCard extends StatelessWidget {
                           ),
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      if (onDelete != null)
+                        PopupMenuButton<String>(
+                          padding: EdgeInsets.zero,
+                          icon: Icon(
+                            Icons.more_vert_rounded,
+                            size: 20,
+                            color: Colors.black.withValues(alpha: 0.55),
+                          ),
+                          onSelected: (v) {
+                            if (v == 'delete') onDelete!();
+                          },
+                          itemBuilder: (_) => const [
+                            PopupMenuItem(
+                              value: 'delete',
+                              child: Text('Удалить'),
+                            ),
+                          ],
+                        )
+                      else
+                        const SizedBox(width: 8),
                       Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 9,

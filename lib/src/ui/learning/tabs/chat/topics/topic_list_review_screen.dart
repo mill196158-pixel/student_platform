@@ -23,6 +23,7 @@ import 'topic_list_parser.dart';
 import 'topic_list_review_controller.dart';
 import 'topic_ocr_adapter.dart';
 import 'topic_ocr_ui_helpers.dart';
+import 'topic_option_edit_sheet.dart';
 
 /// Review/edit topic list before publishing to chat.
 class TopicListReviewScreen extends StatefulWidget {
@@ -303,18 +304,15 @@ class _TopicListReviewScreenState extends State<TopicListReviewScreen> {
   }
 
   Future<_TopicDraftDialogResult?> _showTopicEditorSheet(
-      {TopicDraft? existing}) {
-    return showModalBottomSheet<_TopicDraftDialogResult>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _TopicEditorSheet(
-        initialTitle: existing?.title ?? '',
-        initialCapacity: existing?.capacity ?? 1,
-        isNew: existing == null,
-      ),
+      {TopicDraft? existing}) async {
+    final draft = await showTopicOptionEditSheet(
+      context,
+      initialTitle: existing?.title ?? '',
+      initialCapacity: existing?.capacity ?? 1,
+      isNew: existing == null,
     );
+    if (draft == null) return null;
+    return _TopicDraftDialogResult(draft.title, draft.capacity);
   }
 
   Future<void> _addOption() async {
@@ -1138,114 +1136,6 @@ class _RowMenuSheet extends StatelessWidget {
                   'excel_column'),
             const SizedBox(height: 8),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _TopicEditorSheet extends StatefulWidget {
-  const _TopicEditorSheet({
-    required this.initialTitle,
-    required this.initialCapacity,
-    required this.isNew,
-  });
-
-  final String initialTitle;
-  final int initialCapacity;
-  final bool isNew;
-
-  @override
-  State<_TopicEditorSheet> createState() => _TopicEditorSheetState();
-}
-
-class _TopicEditorSheetState extends State<_TopicEditorSheet> {
-  late final _titleCtrl = TextEditingController(text: widget.initialTitle);
-  late final _capCtrl =
-      TextEditingController(text: widget.initialCapacity.toString());
-
-  @override
-  void dispose() {
-    _titleCtrl.dispose();
-    _capCtrl.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    final title = _titleCtrl.text.trim();
-    if (title.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Введите название темы')),
-      );
-      return;
-    }
-    final capacity =
-        (int.tryParse(_capCtrl.text.trim()) ?? widget.initialCapacity)
-            .clamp(1, 999);
-    Navigator.of(context).pop(_TopicDraftDialogResult(title, capacity));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final viewInsets = MediaQuery.viewInsetsOf(context);
-    return Padding(
-      padding: EdgeInsets.only(bottom: viewInsets.bottom),
-      child: Material(
-        color: cs.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-        child: KeyboardDismissScope(
-          child: SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 42,
-                      height: 4,
-                      margin: const EdgeInsets.only(bottom: 16),
-                      decoration: BoxDecoration(
-                        color: cs.outlineVariant,
-                        borderRadius: BorderRadius.circular(99),
-                      ),
-                    ),
-                  ),
-                  Text(
-                    widget.isNew ? 'Новая тема' : 'Изменить тему',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w800),
-                  ),
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: _titleCtrl,
-                    autofocus: true,
-                    textInputAction: TextInputAction.next,
-                    decoration: const InputDecoration(labelText: 'Название'),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _capCtrl,
-                    keyboardType: TextInputType.number,
-                    textInputAction: TextInputAction.done,
-                    decoration: const InputDecoration(labelText: 'Мест'),
-                  ),
-                  const SizedBox(height: 16),
-                  FilledButton(
-                    onPressed: _submit,
-                    style:
-                        FilledButton.styleFrom(minimumSize: const Size(0, 48)),
-                    child: const Text('Сохранить'),
-                  ),
-                ],
-              ),
-            ),
-          ),
         ),
       ),
     );

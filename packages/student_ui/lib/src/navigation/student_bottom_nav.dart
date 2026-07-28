@@ -168,7 +168,7 @@ class _StudentBottomNavState extends State<StudentBottomNav> {
 
 const studentBottomNavItems = [
   StudentBottomNavItem(icon: Icons.home_rounded, label: 'Главная'),
-  StudentBottomNavItem(icon: Icons.info_outline_rounded, label: 'Инфо'),
+  StudentBottomNavItem(icon: Icons.info_outline_rounded, label: 'База'),
   StudentBottomNavItem(icon: Icons.menu_book_rounded, label: 'Обучение'),
   StudentBottomNavItem(
     icon: Icons.calendar_today_rounded,

@@ -11,7 +11,8 @@ class AppTheme {
   factory AppTheme.light() {
     final mode = ThemeMode.light;
     final appColors = AppColors.light();
-    final themeData = ThemeData.light().copyWith(
+    final base = ThemeData.light(useMaterial3: true);
+    final themeData = base.copyWith(
       primaryColor: appColors.primary,
       scaffoldBackgroundColor: appColors.background,
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
@@ -20,12 +21,18 @@ class AppTheme {
       ),
       appBarTheme: AppBarTheme(
         backgroundColor: appColors.background,
+        foregroundColor: appColors.contentText1,
+        titleTextStyle: base.textTheme.titleLarge?.copyWith(
+          color: appColors.header,
+          fontWeight: FontWeight.w700,
+        ),
         iconTheme: IconThemeData(color: appColors.contentText1),
       ),
-      textTheme: TextTheme(
-        displayLarge: TextStyle(color: appColors.header),
-        bodyLarge: TextStyle(color: appColors.contentText1),
-        bodyMedium: TextStyle(color: appColors.contentText2),
+      // Keep full Material typography; only recolor. A sparse TextTheme()
+      // left title/headline styles without colors → near-invisible titles.
+      textTheme: base.textTheme.apply(
+        bodyColor: appColors.contentText1,
+        displayColor: appColors.header,
       ),
       dividerColor: appColors.divider,
     );
@@ -35,7 +42,8 @@ class AppTheme {
   factory AppTheme.dark() {
     final mode = ThemeMode.dark;
     final appColors = AppColors.dark();
-    final themeData = ThemeData.dark().copyWith(
+    final base = ThemeData.dark(useMaterial3: true);
+    final themeData = base.copyWith(
       primaryColor: appColors.primary,
       scaffoldBackgroundColor: appColors.background,
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
@@ -44,12 +52,16 @@ class AppTheme {
       ),
       appBarTheme: AppBarTheme(
         backgroundColor: appColors.background,
+        foregroundColor: appColors.contentText1,
+        titleTextStyle: base.textTheme.titleLarge?.copyWith(
+          color: appColors.header,
+          fontWeight: FontWeight.w700,
+        ),
         iconTheme: IconThemeData(color: appColors.contentText1),
       ),
-      textTheme: TextTheme(
-        displayLarge: TextStyle(color: appColors.header),
-        bodyLarge: TextStyle(color: appColors.contentText1),
-        bodyMedium: TextStyle(color: appColors.contentText2),
+      textTheme: base.textTheme.apply(
+        bodyColor: appColors.contentText1,
+        displayColor: appColors.header,
       ),
       dividerColor: appColors.divider,
     );

@@ -311,6 +311,7 @@ class HomeDashboardService {
               teamName: e.teamName,
               status: e.status,
               myPickText: e.myPickText,
+              canDelete: e.canDelete,
             ),
           )
           .toList()
@@ -475,7 +476,7 @@ class HomeDashboardService {
         title: 'Материалы',
         subtitle: 'Полезные файлы появятся по семестрам',
         body:
-            'Полезные ссылки, файлы и материалы по предметам будут доступны в разделе «Информация».',
+            'Полезные ссылки, файлы и материалы по предметам будут доступны в разделе «База».',
         icon: Icons.menu_book_outlined,
         gradientColors: const [Color(0xFFC5EFE5), Color(0xFFAEE3D8)],
         type: HomeNewsType.materials,

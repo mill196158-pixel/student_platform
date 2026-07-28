@@ -1063,7 +1063,7 @@ class _TopicHeroHeader extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Выбор темы',
+                        'Создать список тем',
                         style: theme.textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.w900,
                           color: Colors.black,

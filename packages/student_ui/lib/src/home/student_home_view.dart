@@ -12,6 +12,7 @@ class StudentHomeView extends StatelessWidget {
     this.onNewsTap,
     this.onSummaryTap,
     this.onGroupActionTap,
+    this.onGroupActionDelete,
     this.onAssignmentsOpen,
     this.onAssignmentTap,
     this.onAssignmentDoneTap,
@@ -31,6 +32,7 @@ class StudentHomeView extends StatelessWidget {
   final ValueChanged<int>? onNewsTap;
   final VoidCallback? onSummaryTap;
   final ValueChanged<StudentHomeGroupAction>? onGroupActionTap;
+  final ValueChanged<StudentHomeGroupAction>? onGroupActionDelete;
   final VoidCallback? onAssignmentsOpen;
   final ValueChanged<StudentHomeAssignment>? onAssignmentTap;
   final ValueChanged<StudentHomeAssignment>? onAssignmentDoneTap;
@@ -72,7 +74,6 @@ class StudentHomeView extends StatelessWidget {
             child: _TodaySummaryCard(
               data: data,
               onTap: onSummaryTap,
-              onGroupActionTap: onGroupActionTap,
             ),
           ),
         ),
@@ -86,6 +87,8 @@ class StudentHomeView extends StatelessWidget {
               onOpen: onAssignmentsOpen,
               onAssignmentTap: onAssignmentTap,
               onAssignmentDoneTap: onAssignmentDoneTap,
+              onGroupActionTap: onGroupActionTap,
+              onGroupActionDelete: onGroupActionDelete,
             ),
           ),
         ),
@@ -289,12 +292,10 @@ class _TodaySummaryCard extends StatelessWidget {
   const _TodaySummaryCard({
     required this.data,
     required this.onTap,
-    this.onGroupActionTap,
   });
 
   final StudentHomeData data;
   final VoidCallback? onTap;
-  final ValueChanged<StudentHomeGroupAction>? onGroupActionTap;
 
   @override
   Widget build(BuildContext context) {
@@ -416,6 +417,8 @@ class _TodaySummaryCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 12),
+                      // Day summary = pairs/schedule only. Group actions
+                      // (topic / collection) belong under «Ближайшие дела».
                       if (data.lessons.isEmpty)
                         _NoLessonsPreview(text: emptyText)
                       else
@@ -425,20 +428,6 @@ class _TodaySummaryCard extends StatelessWidget {
                                 child: _LessonPreview(lesson: lesson),
                               ),
                             ),
-                      if (data.groupActions.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        ...data.groupActions.take(2).map(
-                              (action) => Padding(
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: _GroupActionPreview(
-                                  action: action,
-                                  onTap: onGroupActionTap == null
-                                      ? null
-                                      : () => onGroupActionTap!(action),
-                                ),
-                              ),
-                            ),
-                      ],
                     ],
                   ),
                 ],
@@ -470,12 +459,8 @@ class _LessonPreview extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: isDark ? 0.14 : 0.52),
+        color: Colors.white.withValues(alpha: isDark ? 0.14 : 0.62),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: (isDark ? Colors.white : const Color(0xFFD9CCF5))
-              .withValues(alpha: isDark ? 0.16 : 0.45),
-        ),
       ),
       child: Row(
         children: [
@@ -533,22 +518,39 @@ class _GroupActionPreview extends StatelessWidget {
   const _GroupActionPreview({
     required this.action,
     this.onTap,
+    this.onDelete,
   });
 
   final StudentHomeGroupAction action;
   final VoidCallback? onTap;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final foreground = isDark ? Colors.white : const Color(0xFF1F2937);
     final accent = isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C63D8);
+    final displayTitle =
+        (action.followUpTitle ?? '').trim().isNotEmpty
+            ? action.followUpTitle!.trim()
+            : action.title;
+    final listTitle = action.title.trim();
+    final hasPickedTopic = (action.followUpTitle ?? '').trim().isNotEmpty;
+    // Type first (Тема / Сбор). List name is separate — «Доклад» ≠ задание.
+    final kind = action.isTopic
+        ? 'Тема'
+        : (action.isCollection
+            ? 'Сбор'
+            : (action.kindLabel.trim().isEmpty
+                ? 'Дело'
+                : action.kindLabel.trim()));
     final meta = [
-      action.kindLabel,
+      kind,
+      if (hasPickedTopic && listTitle.isNotEmpty) 'список «$listTitle»',
       if ((action.teamName ?? '').trim().isNotEmpty) action.teamName!.trim(),
       action.deadlineText,
     ].join(' · ');
-    final pick = (action.myPickText ?? '').trim();
+    final status = (action.statusLine ?? '').trim();
 
     return Material(
       color: Colors.transparent,
@@ -558,18 +560,15 @@ class _GroupActionPreview extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: isDark ? 0.14 : 0.52),
+            color: Colors.white.withValues(alpha: isDark ? 0.14 : 0.78),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: accent.withValues(alpha: isDark ? 0.24 : 0.35),
-            ),
           ),
           child: Row(
             children: [
               Icon(
-                action.kindLabel == 'Выбор темы'
-                    ? Icons.format_list_numbered_rtl
-                    : Icons.volunteer_activism_outlined,
+                action.isTopic
+                    ? Icons.edit_note_rounded
+                    : Icons.payments_outlined,
                 color: accent,
                 size: 20,
               ),
@@ -579,7 +578,7 @@ class _GroupActionPreview extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      action.title,
+                      displayTitle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -599,14 +598,14 @@ class _GroupActionPreview extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    if (pick.isNotEmpty) ...[
+                    if (status.isNotEmpty) ...[
                       const SizedBox(height: 2),
                       Text(
-                        'Ваш выбор: $pick',
+                        status,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          color: accent,
+                          color: const Color(0xFF2F9D84),
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
                         ),
@@ -615,6 +614,24 @@ class _GroupActionPreview extends StatelessWidget {
                   ],
                 ),
               ),
+              if (onDelete != null)
+                PopupMenuButton<String>(
+                  padding: EdgeInsets.zero,
+                  icon: Icon(
+                    Icons.more_vert_rounded,
+                    size: 18,
+                    color: foreground.withValues(alpha: 0.55),
+                  ),
+                  onSelected: (v) {
+                    if (v == 'delete') onDelete!();
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Text('Удалить'),
+                    ),
+                  ],
+                ),
             ],
           ),
         ),
@@ -636,12 +653,8 @@ class _NoLessonsPreview extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: isDark ? 0.14 : 0.52),
+        color: Colors.white.withValues(alpha: isDark ? 0.14 : 0.62),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: (isDark ? Colors.white : const Color(0xFFD9CCF5))
-              .withValues(alpha: isDark ? 0.16 : 0.45),
-        ),
       ),
       child: Row(
         children: [
@@ -670,6 +683,8 @@ class _AssignmentsSection extends StatelessWidget {
     required this.onOpen,
     required this.onAssignmentTap,
     required this.onAssignmentDoneTap,
+    this.onGroupActionTap,
+    this.onGroupActionDelete,
   });
 
   final StudentHomeData data;
@@ -678,143 +693,179 @@ class _AssignmentsSection extends StatelessWidget {
   final VoidCallback? onOpen;
   final ValueChanged<StudentHomeAssignment>? onAssignmentTap;
   final ValueChanged<StudentHomeAssignment>? onAssignmentDoneTap;
+  final ValueChanged<StudentHomeGroupAction>? onGroupActionTap;
+  final ValueChanged<StudentHomeGroupAction>? onGroupActionDelete;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final assignments = data.assignments
+    final visibleAssignments = data.assignments
         .where((item) => !hiddenAssignmentIds.contains(item.id))
-        .take(4)
         .toList();
+    // One merged, deadline-sorted feed with a shared cap (compact section).
+    final upcoming = <_UpcomingItem>[
+      for (final a in visibleAssignments) _UpcomingItem.assignment(a),
+      // Confirmed money transfers leave the upcoming list (done).
+      for (final g in data.groupActions.where((e) => !e.isCompleted))
+        _UpcomingItem.groupAction(g),
+    ]..sort((a, b) {
+        // Dated items first (soonest → latest); undated last so they do not
+        // steal the shared 4-item cap from real deadlines.
+        final aAt = a.sortAt;
+        final bAt = b.sortAt;
+        if (aAt == null && bAt == null) return 0;
+        if (aAt == null) return 1;
+        if (bAt == null) return -1;
+        return aAt.compareTo(bAt);
+      });
+    final capped = upcoming.take(4).toList();
     final foreground = isDark ? Colors.white : const Color(0xFF1F2937);
     final mutedForeground = foreground.withValues(alpha: isDark ? 0.76 : 0.66);
     final accent = isDark ? const Color(0xFFF3C774) : const Color(0xFFB58B3B);
-    final subtitle = assignments.isEmpty
-        ? 'Здесь появятся ближайшие дедлайны'
-        : '${data.assignmentsCount} ${_assignmentWord(data.assignmentsCount)} в списке';
+    final subtitle = _upcomingSubtitle(capped);
 
+    // Section title sits outside the tinted card (not trapped in an oval).
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(24),
-        child: Ink(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(24),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: isDark
-                  ? const [Color(0xFF2B2932), Color(0xFF182331)]
-                  : const [Color(0xFFFFF1D2), Color(0xFFEAF7F2)],
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: (isDark ? Colors.black : const Color(0xFFEFD9AC))
-                    .withValues(alpha: isDark ? 0.24 : 0.28),
-                blurRadius: 18,
-                offset: const Offset(0, 9),
-              ),
-            ],
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Stack(
-              children: [
-                Positioned(
-                  right: -28,
-                  top: -34,
-                  child: _GlowBubble(
-                    size: 104,
-                    opacity: isDark ? 0.06 : 0.24,
-                  ),
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    InkWell(
-                      onTap: onOpen,
-                      borderRadius: BorderRadius.circular(16),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 40,
-                              height: 40,
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(
-                                  alpha: isDark ? 0.15 : 0.58,
-                                ),
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child: Icon(
-                                Icons.task_alt_rounded,
-                                color: accent,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Ближайшие задания',
-                                    style: theme.textTheme.titleLarge?.copyWith(
-                                      color: foreground,
-                                      fontWeight: FontWeight.w900,
-                                      height: 1.1,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    subtitle,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      color: mutedForeground,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: onOpen,
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                children: [
+                  Icon(Icons.event_note_rounded, color: accent, size: 22),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Ближайшие дела',
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            color: foreground,
+                            fontWeight: FontWeight.w900,
+                            height: 1.1,
+                          ),
                         ),
-                      ),
+                        const SizedBox(height: 2),
+                        Text(
+                          subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: mutedForeground,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 12),
-                    if (assignments.isEmpty)
-                      const _EmptyAssignments()
-                    else
-                      ...assignments.map(
-                        (item) => Padding(
-                          padding: EdgeInsets.only(
-                            bottom: item == assignments.last ? 0 : 10,
-                          ),
-                          child: _TaskPreviewCard(
-                            item: item,
-                            onTap: onAssignmentTap == null
-                                ? null
-                                : () => onAssignmentTap!(item),
-                            onDoneTap: onAssignmentDoneTap == null
-                                ? null
-                                : () => onAssignmentDoneTap!(item),
-                            markingDone: markingDoneAssignmentIds.contains(
-                              item.id,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ],
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
+          const SizedBox(height: 10),
+          Material(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+            child: Ink(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: isDark
+                      ? const [Color(0xFF2B2932), Color(0xFF182331)]
+                      : const [Color(0xFFFFF1D2), Color(0xFFEAF7F2)],
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: (isDark ? Colors.black : const Color(0xFFEFD9AC))
+                        .withValues(alpha: isDark ? 0.24 : 0.22),
+                    blurRadius: 16,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: capped.isEmpty
+                    ? const _EmptyAssignments()
+                    : Column(
+                        children: [
+                          for (var i = 0; i < capped.length; i++)
+                            Padding(
+                              padding: EdgeInsets.only(
+                                bottom: i == capped.length - 1 ? 0 : 8,
+                              ),
+                              child: capped[i].when(
+                                assignment: (a) => _TaskPreviewCard(
+                                  item: a,
+                                  onTap: onAssignmentTap == null
+                                      ? null
+                                      : () => onAssignmentTap!(a),
+                                  onDoneTap: onAssignmentDoneTap == null
+                                      ? null
+                                      : () => onAssignmentDoneTap!(a),
+                                  markingDone:
+                                      markingDoneAssignmentIds.contains(a.id),
+                                ),
+                                groupAction: (g) => _GroupActionPreview(
+                                  action: g,
+                                  onTap: onGroupActionTap == null
+                                      ? null
+                                      : () => onGroupActionTap!(g),
+                                  onDelete: (onGroupActionDelete != null &&
+                                          g.canDelete)
+                                      ? () => onGroupActionDelete!(g)
+                                      : null,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
+  }
+}
+
+class _UpcomingItem {
+  const _UpcomingItem._({
+    this.assignment,
+    this.groupAction,
+    required this.sortAt,
+  });
+
+  factory _UpcomingItem.assignment(StudentHomeAssignment a) => _UpcomingItem._(
+        assignment: a,
+        sortAt: a.dueAt,
+      );
+
+  factory _UpcomingItem.groupAction(StudentHomeGroupAction g) =>
+      _UpcomingItem._(
+        groupAction: g,
+        sortAt: g.occursAt,
+      );
+
+  final StudentHomeAssignment? assignment;
+  final StudentHomeGroupAction? groupAction;
+  final DateTime? sortAt;
+
+  T when<T>({
+    required T Function(StudentHomeAssignment a) assignment,
+    required T Function(StudentHomeGroupAction g) groupAction,
+  }) {
+    if (this.assignment != null) return assignment(this.assignment!);
+    return groupAction(this.groupAction!);
   }
 }
 
@@ -833,35 +884,26 @@ class _TaskPreviewCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final titleColor = isDark ? Colors.white : const Color(0xFF111827);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final titleColor = isDark ? Colors.white : const Color(0xFF1F2937);
     final statusColor =
         item.isDone ? const Color(0xFF2F9D84) : const Color(0xFFB58B3B);
-    final deadlineColor =
-        isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C63D8);
-    final subjectColor =
-        isDark ? const Color(0xFF9DE7D8) : const Color(0xFF2F9D84);
+    final meta = [
+      'Задание',
+      if (item.subject.trim().isNotEmpty) item.subject.trim(),
+      item.deadline,
+      _statusText(item),
+    ].where((e) => e.trim().isNotEmpty).join(' · ');
 
+    // Compact row — same density as day-summary lesson/action previews.
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(22),
+      borderRadius: BorderRadius.circular(16),
       child: Container(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF182331) : Colors.white,
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(
-            color:
-                isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.04),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? 0.20 : 0.05),
-              blurRadius: 18,
-              offset: const Offset(0, 8),
-            ),
-          ],
+          color: Colors.white.withValues(alpha: isDark ? 0.14 : 0.78),
+          borderRadius: BorderRadius.circular(16),
         ),
         child: Row(
           children: [
@@ -870,44 +912,33 @@ class _TaskPreviewCard extends StatelessWidget {
               loading: markingDone,
               color: statusColor,
               onTap: onDoneTap,
+              compact: true,
             ),
-            const SizedBox(width: 14),
+            const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     item.title,
-                    maxLines: 2,
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleMedium?.copyWith(
+                    style: TextStyle(
                       color: titleColor,
+                      fontSize: 13,
                       fontWeight: FontWeight.w900,
-                      height: 1.12,
                     ),
                   ),
-                  const SizedBox(height: 6),
-                  _Pill(
-                    icon: Icons.school_outlined,
-                    text: item.subject.isEmpty ? 'Команда' : item.subject,
-                    color: subjectColor,
-                  ),
-                  const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 6,
-                    children: [
-                      _Pill(
-                        icon: Icons.schedule_rounded,
-                        text: item.deadline,
-                        color: deadlineColor,
-                      ),
-                      _Pill(
-                        icon: Icons.flag_outlined,
-                        text: _statusText(item),
-                        color: statusColor,
-                      ),
-                    ],
+                  const SizedBox(height: 3),
+                  Text(
+                    meta,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: titleColor.withValues(alpha: 0.62),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ],
               ),
@@ -925,12 +956,14 @@ class _DoneCheckButton extends StatelessWidget {
     required this.loading,
     required this.color,
     required this.onTap,
+    this.compact = false,
   });
 
   final bool done;
   final bool loading;
   final Color color;
   final VoidCallback? onTap;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -939,20 +972,23 @@ class _DoneCheckButton extends StatelessWidget {
         ? const Color(0xFF2F9D84)
         : color.withValues(alpha: isDark ? 0.20 : 0.13);
     final iconColor = done ? Colors.white : color;
+    final size = compact ? 36.0 : 48.0;
+    final radius = compact ? 12.0 : 16.0;
+    final iconSize = compact ? 20.0 : 27.0;
     return Tooltip(
       message: done ? 'Задание выполнено' : 'Отметить выполненным',
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: loading ? null : onTap,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(radius),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
-            width: 48,
-            height: 48,
+            width: size,
+            height: size,
             decoration: BoxDecoration(
               color: fillColor,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(radius),
               border: Border.all(
                 color: done
                     ? const Color(0xFF2F9D84)
@@ -963,14 +999,14 @@ class _DoneCheckButton extends StatelessWidget {
             child: Center(
               child: loading
                   ? SizedBox(
-                      width: 18,
-                      height: 18,
+                      width: compact ? 14 : 18,
+                      height: compact ? 14 : 18,
                       child: CircularProgressIndicator(
                         strokeWidth: 2.2,
                         color: iconColor,
                       ),
                     )
-                  : Icon(Icons.check_rounded, color: iconColor, size: 27),
+                  : Icon(Icons.check_rounded, color: iconColor, size: iconSize),
             ),
           ),
         ),
@@ -1094,11 +1130,6 @@ class _HelpCard extends StatelessWidget {
                   ),
             color: isDark ? const Color(0xFF182331) : null,
             borderRadius: BorderRadius.circular(28),
-            border: Border.all(
-              color: isDark
-                  ? Colors.white10
-                  : const Color(0xFFD9CCF5).withValues(alpha: 0.55),
-            ),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.05),
@@ -1252,6 +1283,58 @@ String _assignmentWord(int count) {
     return 'задания';
   }
   return 'заданий';
+}
+
+String _topicWord(int count) {
+  if (count % 10 == 1 && count % 100 != 11) return 'тема';
+  if ([2, 3, 4].contains(count % 10) && ![12, 13, 14].contains(count % 100)) {
+    return 'темы';
+  }
+  return 'тем';
+}
+
+String _collectionWord(int count) {
+  if (count % 10 == 1 && count % 100 != 11) return 'сбор';
+  if ([2, 3, 4].contains(count % 10) && ![12, 13, 14].contains(count % 100)) {
+    return 'сбора';
+  }
+  return 'сборов';
+}
+
+String _upcomingSubtitle(List<_UpcomingItem> items) {
+  if (items.isEmpty) return 'Здесь появятся ближайшие дедлайны';
+  var assignments = 0;
+  var topics = 0;
+  var collections = 0;
+  for (final item in items) {
+    item.when(
+      assignment: (_) => assignments++,
+      groupAction: (g) {
+        if (g.isTopic) {
+          topics++;
+        } else if (g.isCollection) {
+          collections++;
+        }
+      },
+    );
+  }
+  final parts = <String>[
+    if (assignments > 0) '$assignments ${_assignmentWord(assignments)}',
+    if (topics > 0) '$topics ${_topicWord(topics)}',
+    if (collections > 0) '$collections ${_collectionWord(collections)}',
+  ];
+  if (parts.isEmpty) {
+    return '${items.length} ${_dealWord(items.length)} в списке';
+  }
+  return parts.join(' · ');
+}
+
+String _dealWord(int count) {
+  if (count % 10 == 1 && count % 100 != 11) return 'дело';
+  if ([2, 3, 4].contains(count % 10) && ![12, 13, 14].contains(count % 100)) {
+    return 'дела';
+  }
+  return 'дел';
 }
 
 String _statusText(StudentHomeAssignment item) {
