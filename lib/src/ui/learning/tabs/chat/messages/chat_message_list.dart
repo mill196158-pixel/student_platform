@@ -11,6 +11,7 @@ import '../search/chat_search_controller.dart';
 import '../search/search_highlight.dart';
 import '../message_builder.dart';
 import '../message_receipt.dart';
+import '../models/chat_card_envelope.dart';
 
 class ChatMessageList extends StatelessWidget {
   final List<Message> messages;
@@ -208,7 +209,7 @@ class ChatMessageList extends StatelessWidget {
               if (_isBlockedAuthorContentHidden(reply)) {
                 replyPreviewText = 'Сообщение заблокированного пользователя';
               } else {
-                final t = (reply.text).toString().trim();
+                final t = ChatCardPreview.forMessage(reply).trim();
                 if (t.isNotEmpty) {
                   replyPreviewText = t;
                 } else {

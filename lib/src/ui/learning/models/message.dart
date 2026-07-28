@@ -4,6 +4,7 @@
 
 import 'dart:convert';
 import 'chat_file.dart';
+import '../tabs/chat/models/chat_card_envelope.dart';
 
 enum MessageType { text, file, assignmentDraft, assignmentPublished, forward }
 
@@ -263,30 +264,20 @@ class Message {
     }
 
     ForwardPayloadModel? fwd;
-    String textVal = (j['body'] ?? '').toString();
-    String? cardKind;
-    String? cardEntityId;
-    if (textVal.isEmpty) {
-      textVal = (j['text'] ?? '').toString();
-    }
     final rawContent = j['content'];
-    if (rawContent is Map) {
-      final contentMap = Map<String, dynamic>.from(rawContent);
-      cardKind = contentMap['card']?.toString();
-      cardEntityId = (contentMap['selection_id'] ?? contentMap['collection_id'])
-          ?.toString();
-    } else if (rawContent is String && rawContent.trimLeft().startsWith('{')) {
-      try {
-        final contentMap = jsonDecode(rawContent);
-        if (contentMap is Map) {
-          cardKind = contentMap['card']?.toString();
-          cardEntityId =
-              (contentMap['selection_id'] ?? contentMap['collection_id'])
-                  ?.toString();
-        }
-      } catch (_) {}
-    }
-    if (t == MessageType.forward) {
+    final isForward = t == MessageType.forward;
+
+    final resolved = ChatCardEnvelope.resolveTextAndCard(
+      body: (j['body'])?.toString(),
+      text: (j['text'])?.toString(),
+      content: rawContent,
+      isForward: isForward,
+    );
+    String textVal = resolved.text;
+    String? cardKind = resolved.cardKind;
+    String? cardEntityId = resolved.cardEntityId;
+
+    if (isForward) {
       final content = rawContent?.toString() ?? '';
       if (content.isNotEmpty) {
         try {
@@ -294,9 +285,6 @@ class Message {
           fwd = ForwardPayloadModel.fromJson(map);
         } catch (_) {}
       }
-      textVal = textVal.isEmpty ? '' : textVal;
-    } else if (textVal.isEmpty && rawContent is String && cardKind == null) {
-      textVal = rawContent;
     }
 
     final authorName = (j['author_name'] ?? '').toString().trim();

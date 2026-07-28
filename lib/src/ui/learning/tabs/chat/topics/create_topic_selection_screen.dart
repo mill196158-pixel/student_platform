@@ -581,8 +581,7 @@ class _CreateTopicSelectionScreenState
         '${dt.minute.toString().padLeft(2, '0')}';
   }
 
-  bool get _canContinue =>
-      !_parsing && _titleCtrl.text.trim().isNotEmpty;
+  bool get _canContinue => !_parsing && _titleCtrl.text.trim().isNotEmpty;
 
   @override
   Widget build(BuildContext context) {
@@ -732,8 +731,7 @@ class _CreateTopicSelectionScreenState
                         const SizedBox(height: 8),
                         _SoftSwitchTile(
                           title: 'Показывать, кто выбрал',
-                          subtitle:
-                              'Иначе имена видят только организаторы',
+                          subtitle: 'Иначе имена видят только организаторы',
                           value: _showResultsToAll,
                           onChanged: (v) =>
                               setState(() => _showResultsToAll = v),
@@ -747,8 +745,7 @@ class _CreateTopicSelectionScreenState
                         const SizedBox(height: 10),
                         _SoftActionTile(
                           icon: Icons.attach_file_rounded,
-                          title: _sourceFileName ??
-                              'Excel, Word, PDF или фото',
+                          title: _sourceFileName ?? 'Excel, Word, PDF или фото',
                           subtitle: hasSource
                               ? 'Можно заменить другим файлом'
                               : 'Список тем подставится в проверку',
@@ -781,8 +778,7 @@ class _CreateTopicSelectionScreenState
                                     _sourceFileName!,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: theme.textTheme.bodyMedium
-                                        ?.copyWith(
+                                    style: theme.textTheme.bodyMedium?.copyWith(
                                       fontWeight: FontWeight.w700,
                                       color: Colors.black87,
                                     ),
@@ -803,8 +799,8 @@ class _CreateTopicSelectionScreenState
                                             _sourceUploadFuture = null;
                                           });
                                         },
-                                  icon: const Icon(Icons.close_rounded,
-                                      size: 20),
+                                  icon:
+                                      const Icon(Icons.close_rounded, size: 20),
                                 ),
                               ],
                             ),

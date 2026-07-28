@@ -24,6 +24,7 @@ import 'package:student_platform/src/ui/chats/data/dm_api.dart';
 import 'package:student_platform/src/ui/chats/data/chat_summaries_cache.dart';
 import 'package:student_platform/src/ui/chats/core/chat_message_cache_store.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/widgets.dart'; // ChatMessageList
+import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_card_envelope.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart'; // модель сообщения
 import 'package:student_platform/src/ui/learning/state/team_cubit.dart';
 import 'package:student_platform/src/utils/safe_debug_log.dart';
@@ -1129,15 +1130,23 @@ class _MyChatsScreenState extends State<MyChatsScreen>
       return 'Пересланные сообщения';
     }
 
+    // 0) карточка (topic_selection / collection / assignment) — никогда не
+    // показываем сырой JSON, только человекочитаемый превью.
+    final dynamic rawContent = row['content'];
+    final cardEnvelope = ChatCardEnvelope.tryParse(rawContent) ??
+        ChatCardEnvelope.tryParse((row['body'] ?? '').toString());
+    if (cardEnvelope != null) {
+      return cardEnvelope.humanPreview();
+    }
+
     // 1) сначала пробуем body (явный текст)
     final body = (row['body'] ?? '').toString().trim();
-    if (body.isNotEmpty) {
+    if (body.isNotEmpty && !ChatCardPreview.looksLikeCardJson(body)) {
       final fg = fgPreviewFromText(body);
       return fg ?? body;
     }
 
     // 2) если нет body — пробуем content (вдруг там JSON или строка)
-    final dynamic rawContent = row['content'];
     if (rawContent is String && rawContent.isNotEmpty) {
       try {
         final decoded = jsonDecode(rawContent);
@@ -1151,7 +1160,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
       } catch (_) {
         // не JSON → вернуть строку как есть (но без FG-маркера)
         final s = rawContent.trim();
-        if (s.isNotEmpty) {
+        if (s.isNotEmpty && !ChatCardPreview.looksLikeCardJson(s)) {
           final fg = fgPreviewFromText(s);
           return fg ?? s;
         }

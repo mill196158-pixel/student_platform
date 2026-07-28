@@ -1,5 +1,20 @@
 import 'topic_list_models.dart';
 
+/// Case-insensitive, trimmed-title duplicate detector shared by the review
+/// screen (draft list) and unit tests. Returns the normalized (lowercased)
+/// title keys that appear more than once — never the raw titles, so callers
+/// can highlight every row whose normalized title is in this set.
+Set<String> duplicateTopicTitles(List<TopicDraft> topics) {
+  final seen = <String>{};
+  final dupes = <String>{};
+  for (final topic in topics) {
+    final key = topic.title.trim().toLowerCase();
+    if (key.isEmpty) continue;
+    if (!seen.add(key)) dupes.add(key);
+  }
+  return dupes;
+}
+
 /// Pure state helper for reviewing parsed topics before publish.
 class TopicListReviewController {
   TopicListReviewController({List<TopicDraft>? initial})
@@ -12,6 +27,12 @@ class TopicListReviewController {
   int get length => _topics.length;
 
   bool get isEmpty => _topics.isEmpty;
+
+  /// Normalized title keys that appear more than once in the current list.
+  Set<String> get duplicateKeys => duplicateTopicTitles(_topics);
+
+  /// Count of rows with a blank (whitespace-only) title.
+  int get emptyCount => _topics.where((t) => t.title.trim().isEmpty).length;
 
   /// Replaces current list with parsed topics (after user confirms import).
   void applyParseResult(TopicParseResult result) {
@@ -95,6 +116,26 @@ class TopicListReviewController {
   void setCapacityAt(int index, int capacity) {
     if (index < 0 || index >= _topics.length) return;
     _topics[index] = _topics[index].copyWith(capacity: capacity.clamp(1, 9999));
+  }
+
+  /// Drops rows with a blank (whitespace-only) title.
+  void removeEmpty() {
+    _topics = _topics.where((t) => t.title.trim().isNotEmpty).toList();
+  }
+
+  /// Removes rows at the given indices (used by multi-select bulk delete).
+  void removeIndices(Iterable<int> indices) {
+    final toRemove = indices.toSet();
+    _topics = [
+      for (var i = 0; i < _topics.length; i++)
+        if (!toRemove.contains(i)) _topics[i],
+    ];
+  }
+
+  /// Inserts [topic] back at [index] (clamped) — used by undo-delete.
+  void insertAt(int index, TopicDraft topic) {
+    final at = index.clamp(0, _topics.length);
+    _topics.insert(at, topic);
   }
 
   /// Case-insensitive dedupe preserving first occurrence.

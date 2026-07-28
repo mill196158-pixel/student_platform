@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../models/team.dart';
 import '../../../team_details_screen.dart';
+import '../data/chat_action_cards_cache.dart';
+import '../unified_task_details_screen.dart';
 
 /// Deep-link target for topic/collection card messages in team chat.
 class GroupActionDeeplinkArgs {
@@ -56,7 +60,11 @@ class GroupActionDeeplinkArgs {
       );
 }
 
-/// Opens [TeamDetailsScreen] chat tab and scrolls to [GroupActionDeeplinkArgs.cardMessageId].
+/// Opens [UnifiedTaskDetailsScreen] for topic/collection deep links (Stage
+/// 13.12), falling back to the [TeamDetailsScreen] chat tab (scrolled to
+/// [GroupActionDeeplinkArgs.cardMessageId]) when the kind/chat cannot be
+/// resolved, or when the user taps "Открыть обсуждение" from the details
+/// screen.
 Future<void> openGroupActionDeeplink(
   BuildContext context,
   GroupActionDeeplinkArgs args, {
@@ -69,8 +77,9 @@ Future<void> openGroupActionDeeplink(
   }
 
   var teamId = (args.teamId ?? '').trim();
-  if (teamId.isEmpty && (args.chatId ?? '').trim().isNotEmpty) {
-    teamId = await _resolveTeamIdFromChat(sb, args.chatId!.trim()) ?? '';
+  var chatId = (args.chatId ?? '').trim();
+  if (teamId.isEmpty && chatId.isNotEmpty) {
+    teamId = await _resolveTeamIdFromChat(sb, chatId) ?? '';
   }
   if (teamId.isEmpty) {
     _showFallback(context, 'Чат недоступен или удалён.');
@@ -83,16 +92,68 @@ Future<void> openGroupActionDeeplink(
     return;
   }
 
+  if (chatId.isEmpty) {
+    chatId = await _resolveMainChatIdFromTeam(sb, teamId) ?? '';
+  }
+
   if (!context.mounted) return;
-  await Navigator.of(context).push(
-    MaterialPageRoute(
-      builder: (_) => TeamDetailsScreen(
-        team: team,
-        initialTabIndex: 1,
-        highlightMessageId: args.cardMessageId,
+
+  Future<void> openChat() async {
+    if (!context.mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => TeamDetailsScreen(
+          team: team,
+          initialTabIndex: 1,
+          highlightMessageId: args.cardMessageId,
+        ),
       ),
-    ),
+    );
+  }
+
+  final kind = _kindFromEntityType(args.entityType);
+  final entityId = args.entityId.trim();
+  if (kind == null || chatId.isEmpty || entityId.isEmpty) {
+    await openChat();
+    return;
+  }
+
+  await openUnifiedTaskDetails(
+    context,
+    kind: kind,
+    entityId: entityId,
+    chatId: chatId,
+    teamId: teamId,
+    cardMessageId: args.cardMessageId,
+    onOpenDiscussion: (_) {
+      unawaited(openChat());
+    },
   );
+}
+
+String? _kindFromEntityType(String entityType) {
+  final t = entityType.trim().toLowerCase();
+  if (t.contains('topic')) return ChatActionCardKind.topicSelection;
+  if (t.contains('collection')) return ChatActionCardKind.groupCollection;
+  return null;
+}
+
+Future<String?> _resolveMainChatIdFromTeam(
+  SupabaseClient sb,
+  String teamId,
+) async {
+  try {
+    final row = await sb
+        .from('chats')
+        .select('id')
+        .eq('team_id', teamId)
+        .eq('type', 'team_main')
+        .maybeSingle();
+    final id = (row?['id'] ?? '').toString().trim();
+    return id.isEmpty ? null : id;
+  } catch (_) {
+    return null;
+  }
 }
 
 Future<String?> _resolveTeamIdFromChat(SupabaseClient sb, String chatId) async {

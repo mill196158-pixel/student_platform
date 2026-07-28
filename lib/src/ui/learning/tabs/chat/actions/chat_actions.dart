@@ -21,6 +21,7 @@ import '../../../state/team_cubit.dart';
 import '../../../utils/chat_copied_file_cache.dart';
 import '../../../widgets/file_card.dart';
 import '../message_builder.dart';
+import '../models/chat_card_envelope.dart';
 
 enum _ChatActionsResultKind {
   reply,
@@ -74,7 +75,7 @@ class ChatActions {
   }
 
   static String _copyTextForMessage(Message message) {
-    final text = message.text.trim();
+    final text = ChatCardPreview.forMessage(message).trim();
     if (text.isEmpty) return '';
 
     final markerIndex = text.indexOf('__FG__:');

@@ -86,7 +86,8 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
     if (_saving) return false;
     if (_titleCtrl.text.trim().isEmpty) return false;
     if (_amountMode == _AmountMode.none) return true;
-    final amount = double.tryParse(_amountCtrl.text.trim().replaceAll(',', '.'));
+    final amount =
+        double.tryParse(_amountCtrl.text.trim().replaceAll(',', '.'));
     return amount != null && amount > 0;
   }
 
@@ -180,7 +181,8 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
     KeyboardDismissScope.unfocus(context);
     HapticFeedback.lightImpact();
 
-    final amount = double.tryParse(_amountCtrl.text.trim().replaceAll(',', '.'));
+    final amount =
+        double.tryParse(_amountCtrl.text.trim().replaceAll(',', '.'));
     // Optional link / attachments are stored locally for a future repository
     // pass-through; payment instructions stay the source of truth for now.
     final link = _linkCtrl.text.trim();
@@ -202,8 +204,7 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
         description: _descCtrl.text.trim(),
         deadlineAt: _deadline,
         amountMode: _amountModeRpc,
-        amountOptional:
-            _amountMode == _AmountMode.perPerson ? amount : null,
+        amountOptional: _amountMode == _AmountMode.perPerson ? amount : null,
         amountTotal: _amountMode == _AmountMode.total ? amount : null,
         instructions: instructions,
         paymentDetails: _paymentCtrl.text.trim(),

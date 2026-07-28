@@ -1,12 +1,37 @@
+// =============================
+// FILE: lib/src/ui/learning/tabs/chat/topics/topic_selection_card.dart
+// =============================
+//
+// Stage 13.12 — chat bubble previews for `topic_selection` / `collection`
+// cards, redesigned to read from the shared [ChatActionCardsCache] batch
+// cache (see chat/data/chat_action_cards_cache.dart) instead of each card
+// independently calling a chat-wide "list all selections/collections" RPC.
+// Tapping either card now opens [UnifiedTaskDetailsScreen] — the single
+// task-action destination — instead of the old chat-scoped chooser sheet
+// (topic) or [GroupSpaceScreen] (collection, which leaked peer proofs /
+// comments to participants).
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../models/message.dart';
-import '../../../../group_space/group_space_screen.dart';
+import '../data/chat_action_cards_cache.dart';
 import '../data/chat_composer_capabilities_repository.dart';
 import '../data/chat_group_actions_repository.dart';
-import '../models/chat_group_actions.dart';
-import 'topic_selection_detail_screen.dart';
+import '../unified_task_details_screen.dart';
+
+String _fmtDate(DateTime dt) {
+  return '${dt.day.toString().padLeft(2, '0')}.'
+      '${dt.month.toString().padLeft(2, '0')} '
+      '${dt.hour.toString().padLeft(2, '0')}:'
+      '${dt.minute.toString().padLeft(2, '0')}';
+}
+
+bool _looksLikeUuid(String value) {
+  final v = value.trim();
+  if (v.isEmpty) return false;
+  return RegExp(
+    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+  ).hasMatch(v);
+}
 
 /// Compact in-chat preview for `content.card = topic_selection`.
 class TopicSelectionCard extends StatefulWidget {
@@ -17,6 +42,7 @@ class TopicSelectionCard extends StatefulWidget {
     this.boundaryKey,
     this.repository,
     this.capabilitiesRepository,
+    this.cache,
     this.onOpenChat,
     this.canManage,
     this.canDelete,
@@ -28,6 +54,7 @@ class TopicSelectionCard extends StatefulWidget {
   final Key? boundaryKey;
   final ChatGroupActionsRepository? repository;
   final ChatComposerCapabilitiesRepository? capabilitiesRepository;
+  final ChatActionCardsCache? cache;
   final VoidCallback? onOpenChat;
 
   /// Server SoT: `can_moderate_topic_selection`. Never inferred from TeamCubit.
@@ -40,8 +67,11 @@ class TopicSelectionCard extends StatefulWidget {
 }
 
 class _TopicSelectionCardState extends State<TopicSelectionCard> {
-  ChatTopicSelection? _selection;
+  ChatActionCardEntry? _entry;
   bool _loading = true;
+
+  ChatActionCardsCache get _cache =>
+      widget.cache ?? ChatActionCardsCache.instance;
 
   @override
   void initState() {
@@ -49,22 +79,44 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
     _load();
   }
 
+  @override
+  void didUpdateWidget(covariant TopicSelectionCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.message.cardEntityId != widget.message.cardEntityId ||
+        oldWidget.message.chatId != widget.message.chatId) {
+      _load();
+    }
+  }
+
   Future<void> _load() async {
     final selectionId = widget.message.cardEntityId;
-    if (selectionId == null || selectionId.isEmpty) {
-      setState(() => _loading = false);
+    final chatId = widget.message.chatId;
+    if (selectionId == null || selectionId.isEmpty || chatId.isEmpty) {
+      if (mounted) setState(() => _loading = false);
       return;
     }
-    final repo = widget.repository ?? ChatGroupActionsRepository();
+
+    // Synchronous pre-fill from the in-memory cache. Assigned directly
+    // (no setState) since this always runs before the first build — either
+    // during initState's synchronous prelude or synchronously at the top of
+    // this async function on subsequent calls.
+    final cached = _cache.peek(ChatActionCardKind.topicSelection, selectionId);
+    if (cached != null) {
+      _entry = cached;
+      _loading = false;
+    }
+
     try {
-      final chatId = widget.message.chatId;
-      final list = chatId.isNotEmpty
-          ? await repo.listTopicSelectionsForChat(chatId, cacheFirst: true)
-          : const <ChatTopicSelection>[];
-      final found = list.where((e) => e.id == selectionId).toList();
+      final entry = await _cache.ensureLoaded(
+        chatId,
+        kind: ChatActionCardKind.topicSelection,
+        entityId: selectionId,
+        cardMessageId:
+            _looksLikeUuid(widget.message.id) ? widget.message.id : null,
+      );
       if (!mounted) return;
       setState(() {
-        _selection = found.isNotEmpty ? found.first : null;
+        _entry = entry ?? _entry;
         _loading = false;
       });
     } catch (_) {
@@ -73,71 +125,26 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
     }
   }
 
-  Future<_TopicCardCapabilities> _resolveCapabilities() async {
-    final explicitManage = widget.canManage;
-    final explicitDelete = widget.canDelete;
-    final explicitEdit = widget.canEditOwnBeforeActivity;
-    if (explicitManage != null &&
-        explicitDelete != null &&
-        explicitEdit != null) {
-      return _TopicCardCapabilities(
-        canManage: explicitManage,
-        canDelete: explicitDelete,
-        canEditOwnBeforeActivity: explicitEdit,
-      );
-    }
-
-    final chatId = widget.message.chatId;
-    if (chatId.isEmpty) {
-      return _TopicCardCapabilities(
-        canManage: explicitManage ?? false,
-        canDelete: explicitDelete ?? false,
-        canEditOwnBeforeActivity: explicitEdit ?? false,
-      );
-    }
-
-    try {
-      final caps = await (widget.capabilitiesRepository ??
-              ChatComposerCapabilitiesRepository())
-          .load(chatId);
-      // Edit-own requires entity ownership (isMe), which only buildBubble can
-      // supply. Fail closed when props are absent — never grant chat-level
-      // can_edit_own to every viewer of the card.
-      return _TopicCardCapabilities(
-        canManage: explicitManage ?? caps.canModerateTopicSelection,
-        canDelete: explicitDelete ?? caps.canDeleteGroupAction,
-        canEditOwnBeforeActivity: explicitEdit ?? false,
-      );
-    } catch (_) {
-      return _TopicCardCapabilities(
-        canManage: explicitManage ?? false,
-        canDelete: explicitDelete ?? false,
-        canEditOwnBeforeActivity: explicitEdit ?? false,
-      );
-    }
-  }
-
   Future<void> _openDetail() async {
-    if (_selection == null) {
+    final selectionId = widget.message.cardEntityId;
+    final chatId = widget.message.chatId;
+    if (selectionId == null || selectionId.isEmpty || chatId.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Не удалось открыть выбор темы')),
       );
       return;
     }
-    final chatId = widget.message.chatId;
-    if (chatId.isEmpty) return;
-    final repo = widget.repository ?? ChatGroupActionsRepository();
-    final caps = await _resolveCapabilities();
-    if (!mounted) return;
-    await showTopicSelectionChooser(
+    await openUnifiedTaskDetails(
       context,
+      kind: ChatActionCardKind.topicSelection,
+      entityId: selectionId,
       chatId: chatId,
-      selection: _selection!,
-      repository: repo,
-      canManage: caps.canManage,
-      canDelete: caps.canDelete,
-      canEditOwnBeforeActivity: caps.canEditOwnBeforeActivity,
+      cardMessageId: _entry?.cardMessageId ??
+          (_looksLikeUuid(widget.message.id) ? widget.message.id : null),
+      title: _entry?.title,
+      repository: widget.repository,
+      cache: _cache,
     );
     if (mounted) await _load();
   }
@@ -146,11 +153,15 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final title = _selection?.title ??
+    final entry = _entry;
+    final fallbackTitle =
         widget.message.text.replaceFirst(RegExp(r'^Выбор темы:\s*'), '');
-    final closed = _selection != null && !_selection!.isOpen;
-    final progress = (_selection != null && _selection!.totalCapacity > 0)
-        ? 'Выбрано ${_selection!.takenSlots} из ${_selection!.totalCapacity}'
+    final title =
+        (entry?.title.isNotEmpty ?? false) ? entry!.title : fallbackTitle;
+    final unavailable = entry != null && !entry.available;
+    final closed = entry != null && entry.available && entry.isClosed;
+    final progress = (entry != null && entry.totalCapacity > 0)
+        ? 'Выбрано ${entry.takenSlots} из ${entry.totalCapacity}'
         : null;
 
     return GestureDetector(
@@ -165,76 +176,79 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: cs.primary.withValues(alpha: 0.35)),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title.isNotEmpty ? title : 'Без названия',
-              style: theme.textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w800,
-                color: cs.onSurface,
+        child: _loading && entry == null
+            ? const _CardSkeleton()
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _CardBadge(label: 'Выбор темы', color: cs.primary),
+                  const SizedBox(height: 6),
+                  Text(
+                    title.isNotEmpty ? title : 'Без названия',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: cs.onSurface,
+                    ),
+                  ),
+                  if ((entry?.description ?? '').trim().isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      entry!.description.trim(),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                  if (unavailable) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Недоступно',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: cs.error,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ] else if (closed) ...[
+                    const SizedBox(height: 10),
+                    _ClosedCompactRow(title: title),
+                  ] else ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      [
+                        if (entry?.deadlineAt != null)
+                          'До ${_fmtDate(entry!.deadlineAt!)}',
+                        if (progress != null) progress,
+                        if (entry?.myPickText != null)
+                          'Моя тема: ${entry!.myPickText}',
+                      ].where((e) => e.isNotEmpty).join(' · '),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      alignment: WrapAlignment.end,
+                      children: [
+                        FilledButton.tonal(
+                          onPressed: _openDetail,
+                          child: Text(
+                            (entry?.myPickText != null)
+                                ? 'Изменить выбор'
+                                : 'Выбрать тему',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
               ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              [
-                if (_selection?.deadlineAt != null)
-                  'До ${_fmt(_selection!.deadlineAt!)}',
-                if (progress != null) progress,
-                if (closed) 'Закрыто',
-                if (_loading) '…',
-              ].where((e) => e.isNotEmpty).join(' · '),
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: cs.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              alignment: WrapAlignment.end,
-              children: [
-                if (!closed)
-                  FilledButton.tonal(
-                    onPressed: _openDetail,
-                    child: const Text('Выбрать тему'),
-                  ),
-                if (!closed && _selection?.allowChange == true)
-                  TextButton(
-                    onPressed: _openDetail,
-                    child: const Text('Изменить выбор'),
-                  ),
-                if (closed)
-                  FilledButton.tonal(
-                    onPressed: _openDetail,
-                    child: const Text('Смотреть'),
-                  ),
-              ],
-            ),
-          ],
-        ),
       ),
     );
   }
-
-  String _fmt(DateTime dt) {
-    return '${dt.day.toString().padLeft(2, '0')}.'
-        '${dt.month.toString().padLeft(2, '0')} '
-        '${dt.hour.toString().padLeft(2, '0')}:'
-        '${dt.minute.toString().padLeft(2, '0')}';
-  }
-}
-
-class _TopicCardCapabilities {
-  const _TopicCardCapabilities({
-    required this.canManage,
-    required this.canDelete,
-    required this.canEditOwnBeforeActivity,
-  });
-
-  final bool canManage;
-  final bool canDelete;
-  final bool canEditOwnBeforeActivity;
 }
 
 /// In-chat card for `content.card = collection` («Скинуться»).
@@ -247,6 +261,7 @@ class CollectionCard extends StatefulWidget {
     this.onOpenChat,
     this.repository,
     this.capabilitiesRepository,
+    this.cache,
     this.canManage,
     this.canDelete,
   });
@@ -257,6 +272,7 @@ class CollectionCard extends StatefulWidget {
   final VoidCallback? onOpenChat;
   final ChatGroupActionsRepository? repository;
   final ChatComposerCapabilitiesRepository? capabilitiesRepository;
+  final ChatActionCardsCache? cache;
   final bool? canManage;
   final bool? canDelete;
 
@@ -265,12 +281,14 @@ class CollectionCard extends StatefulWidget {
 }
 
 class _CollectionCardState extends State<CollectionCard> {
-  Map<String, dynamic>? _collection;
+  ChatActionCardEntry? _entry;
   bool _loading = true;
   bool _reporting = false;
-  bool _deleting = false;
   bool _canManage = false;
   bool _canDelete = false;
+
+  ChatActionCardsCache get _cache =>
+      widget.cache ?? ChatActionCardsCache.instance;
 
   @override
   void initState() {
@@ -288,6 +306,10 @@ class _CollectionCardState extends State<CollectionCard> {
         oldWidget.canDelete != widget.canDelete) {
       _canManage = widget.canManage ?? _canManage;
       _canDelete = widget.canDelete ?? _canDelete;
+    }
+    if (oldWidget.message.cardEntityId != widget.message.cardEntityId ||
+        oldWidget.message.chatId != widget.message.chatId) {
+      _load();
     }
   }
 
@@ -316,24 +338,29 @@ class _CollectionCardState extends State<CollectionCard> {
 
   Future<void> _load() async {
     final id = widget.message.cardEntityId;
-    if (id == null || id.isEmpty) {
-      setState(() => _loading = false);
+    final chatId = widget.message.chatId;
+    if (id == null || id.isEmpty || chatId.isEmpty) {
+      if (mounted) setState(() => _loading = false);
       return;
     }
+
+    final cached = _cache.peek(ChatActionCardKind.groupCollection, id);
+    if (cached != null) {
+      _entry = cached;
+      _loading = false;
+    }
+
     try {
-      final res = await Supabase.instance.client.rpc('list_group_collections');
-      Map<String, dynamic>? found;
-      if (res is List) {
-        for (final row in res) {
-          if (row is Map && row['id']?.toString() == id) {
-            found = Map<String, dynamic>.from(row);
-            break;
-          }
-        }
-      }
+      final entry = await _cache.ensureLoaded(
+        chatId,
+        kind: ChatActionCardKind.groupCollection,
+        entityId: id,
+        cardMessageId:
+            _looksLikeUuid(widget.message.id) ? widget.message.id : null,
+      );
       if (!mounted) return;
       setState(() {
-        _collection = found;
+        _entry = entry ?? _entry;
         _loading = false;
       });
     } catch (_) {
@@ -343,13 +370,25 @@ class _CollectionCardState extends State<CollectionCard> {
   }
 
   Future<void> _open() async {
-    if (widget.onOpenChat != null) {
-      widget.onOpenChat!();
+    final id = widget.message.cardEntityId;
+    final chatId = widget.message.chatId;
+    if (id == null || id.isEmpty || chatId.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось открыть сбор')),
+      );
       return;
     }
-    if (!mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const GroupSpaceScreen()),
+    await openUnifiedTaskDetails(
+      context,
+      kind: ChatActionCardKind.groupCollection,
+      entityId: id,
+      chatId: chatId,
+      cardMessageId: _entry?.cardMessageId ??
+          (_looksLikeUuid(widget.message.id) ? widget.message.id : null),
+      title: _entry?.title,
+      repository: widget.repository,
+      cache: _cache,
     );
     if (mounted) await _load();
   }
@@ -359,16 +398,10 @@ class _CollectionCardState extends State<CollectionCard> {
     if (id == null || id.isEmpty || _reporting) return;
     setState(() => _reporting = true);
     try {
-      await Supabase.instance.client.rpc(
-        'upsert_my_collection_contribution',
-        params: {
-          'p_collection_id': id,
-          'p_participation_status': 'joining',
-          'p_payment_status': 'reported',
-          'p_comment': 'Я перевёл',
-        },
-      );
+      await (widget.repository ?? ChatGroupActionsRepository())
+          .createCollectionContributionReport(id);
       if (!mounted) return;
+      _cache.invalidate(ChatActionCardKind.groupCollection, id);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Отметили: «Я перевёл»')),
       );
@@ -385,7 +418,7 @@ class _CollectionCardState extends State<CollectionCard> {
 
   Future<void> _deleteCollection() async {
     final id = widget.message.cardEntityId;
-    if (id == null || id.isEmpty || _deleting || !_canDelete) return;
+    if (id == null || id.isEmpty || !_canDelete) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -404,10 +437,10 @@ class _CollectionCardState extends State<CollectionCard> {
       ),
     );
     if (confirmed != true || !mounted) return;
-    setState(() => _deleting = true);
     try {
       final repo = widget.repository ?? ChatGroupActionsRepository();
       await repo.deleteGroupAction(kind: 'collection', entityId: id);
+      _cache.markTombstone(ChatActionCardKind.groupCollection, id);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Сбор удалён')),
@@ -418,60 +451,51 @@ class _CollectionCardState extends State<CollectionCard> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Не удалось удалить сбор')),
       );
-    } finally {
-      if (mounted) setState(() => _deleting = false);
     }
+  }
+
+  bool _canShowDelete(bool closed) {
+    if (!_canDelete || closed) return false;
+    if (_canManage) return true;
+    final entry = _entry;
+    if (entry == null) return true;
+    final hasActivity = entry.takenSlots > 0 ||
+        (entry.myStatus != null &&
+            entry.myStatus != 'none' &&
+            entry.myStatus!.isNotEmpty) ||
+        (entry.organizerStats != null &&
+            ((entry.organizerStats!['confirmed'] as num?) ?? 0) > 0);
+    return !hasActivity;
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
+    final entry = _entry;
     final fallbackTitle = widget.message.text
         .replaceFirst(RegExp(r'^(Сбор|Скинуться):\s*'), '')
         .trim();
-    final title = (_collection?['title']?.toString() ?? fallbackTitle).trim();
-    final purpose = (_collection?['purpose']?.toString() ?? '').trim();
-    final status = (_collection?['status']?.toString() ?? 'open').trim();
-    final closed = status != 'open';
-    final deadlineRaw = _collection?['deadline_at']?.toString();
-    final deadline = DateTime.tryParse(deadlineRaw ?? '');
-    final reported =
-        (_collection?['my_payment_status']?.toString() ?? '').trim();
-    final organizerStatus = (_collection?['my_organizer_status']?.toString() ??
-            _collection?['organizer_status']?.toString() ??
-            '')
-        .trim();
-    final progressText = () {
-      final done = int.tryParse(
-            _collection?['confirmed_count']?.toString() ?? '',
-          ) ??
-          int.tryParse(_collection?['paid_count']?.toString() ?? '') ??
-          0;
-      final total = int.tryParse(
-            _collection?['member_count']?.toString() ?? '',
-          ) ??
-          int.tryParse(_collection?['total_members']?.toString() ?? '') ??
-          0;
-      if (total > 0) return 'Прогресс $done из $total';
-      return null;
-    }();
+    final title =
+        (entry?.title.isNotEmpty ?? false) ? entry!.title : fallbackTitle;
+    final unavailable = entry != null && !entry.available;
+    final closed = entry != null && entry.available && entry.isClosed;
 
     String myStatusLabel() {
-      if (reported == 'confirmed' || organizerStatus == 'confirmed') {
-        return 'Подтверждено';
+      final status = entry?.myStatus ?? 'none';
+      switch (status) {
+        case 'confirmed':
+          return 'Подтверждено';
+        case 'not_received':
+          return 'Не поступило';
+        case 'needs_clarification':
+          return 'Уточнить';
+        case 'reported':
+        case 'pending_review':
+          return 'Перевёл — на проверке';
+        default:
+          return 'Ожидает';
       }
-      if (reported == 'not_received' || organizerStatus == 'not_received') {
-        return 'Не поступило';
-      }
-      if (reported == 'needs_clarification' ||
-          organizerStatus == 'needs_clarification') {
-        return 'Уточнить';
-      }
-      if (reported == 'reported' || reported == 'pending_review') {
-        return 'Перевёл — на проверке';
-      }
-      return 'Ожидает';
     }
 
     return GestureDetector(
@@ -486,121 +510,175 @@ class _CollectionCardState extends State<CollectionCard> {
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: cs.secondary.withValues(alpha: 0.35)),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Скинуться',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: cs.secondary,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              title.isNotEmpty ? title : 'Без названия',
-              style: theme.textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w800,
-                color: cs.onSurface,
-              ),
-            ),
-            if (purpose.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Text(
-                purpose,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: cs.onSurfaceVariant,
-                ),
-              ),
-            ],
-            const SizedBox(height: 6),
-            Text(
-              [
-                if (deadline != null) 'До ${_fmt(deadline)}',
-                if (progressText != null) progressText,
-                if (_loading) '…' else 'Мой статус: ${myStatusLabel()}',
-                if (closed) 'Закрыто',
-              ].where((e) => e.isNotEmpty).join(' · '),
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: cs.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              children: [
-                if (!closed)
-                  FilledButton.tonal(
-                    onPressed: _reporting ? null : _markTransferred,
-                    child: _reporting
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Я перевёл'),
-                  ),
-                TextButton(
-                  onPressed: _open,
-                  child: Text(closed ? 'Смотреть' : 'Подробнее'),
-                ),
-                if (_canShowDelete(closed, reported, organizerStatus) &&
-                    !closed)
-                  TextButton(
-                    onPressed: _deleting ? null : _deleteCollection,
-                    child: Text(
-                      _deleting ? 'Удаление…' : 'Удалить',
-                      style: TextStyle(color: cs.error),
-                    ),
-                  ),
-                if (_canManage && !closed)
+        child: _loading && entry == null
+            ? const _CardSkeleton()
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _CardBadge(label: 'Скинуться', color: cs.secondary),
+                  const SizedBox(height: 4),
                   Text(
-                    'Орг.',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: cs.secondary,
-                      fontWeight: FontWeight.w700,
+                    title.isNotEmpty ? title : 'Без названия',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: cs.onSurface,
                     ),
                   ),
-              ],
-            ),
-          ],
+                  if ((entry?.purpose ?? '').trim().isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      entry!.purpose.trim(),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                  if (unavailable) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Недоступно',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: cs.error,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ] else if (closed) ...[
+                    const SizedBox(height: 10),
+                    _ClosedCompactRow(title: title),
+                  ] else ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      [
+                        if (entry?.deadlineAt != null)
+                          'До ${_fmtDate(entry!.deadlineAt!)}',
+                        'Мой статус: ${myStatusLabel()}',
+                      ].where((e) => e.isNotEmpty).join(' · '),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      children: [
+                        FilledButton.tonal(
+                          onPressed: _reporting ? null : _markTransferred,
+                          child: _reporting
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Text('Я перевёл'),
+                        ),
+                        TextButton(
+                          onPressed: _open,
+                          child: const Text('Подробнее'),
+                        ),
+                        if (_canShowDelete(closed))
+                          TextButton(
+                            onPressed: _deleteCollection,
+                            child: Text(
+                              'Удалить',
+                              style: TextStyle(color: cs.error),
+                            ),
+                          ),
+                        if (_canManage)
+                          Text(
+                            'Орг.',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: cs.secondary,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+class _CardBadge extends StatelessWidget {
+  const _CardBadge({required this.label, required this.color});
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.w800,
+          fontSize: 11.5,
         ),
       ),
     );
   }
+}
 
-  bool _canShowDelete(
-    bool closed,
-    String reported,
-    String organizerStatus,
-  ) {
-    if (!_canDelete || closed) return false;
-    // Organizer may delete anytime; author-only path hides after first activity.
-    if (_canManage) return true;
-    if (_collection?['has_activity'] == true) return false;
-    final joined =
-        int.tryParse(_collection?['joined_count']?.toString() ?? '') ?? 0;
-    final confirmed = int.tryParse(
-          _collection?['confirmed_count']?.toString() ?? '',
-        ) ??
-        0;
-    final paid =
-        int.tryParse(_collection?['paid_count']?.toString() ?? '') ?? 0;
-    final hasActivity = joined > 0 ||
-        confirmed > 0 ||
-        paid > 0 ||
-        (reported.isNotEmpty && reported != 'unmarked') ||
-        (organizerStatus.isNotEmpty && organizerStatus != 'unmarked');
-    return !hasActivity;
+class _ClosedCompactRow extends StatelessWidget {
+  const _ClosedCompactRow({required this.title});
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    return Row(
+      children: [
+        Icon(Icons.task_alt_rounded, size: 16, color: cs.onSurfaceVariant),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            'Задание завершено',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: cs.onSurfaceVariant,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    );
   }
+}
 
-  String _fmt(DateTime dt) {
-    return '${dt.day.toString().padLeft(2, '0')}.'
-        '${dt.month.toString().padLeft(2, '0')} '
-        '${dt.hour.toString().padLeft(2, '0')}:'
-        '${dt.minute.toString().padLeft(2, '0')}';
+class _CardSkeleton extends StatelessWidget {
+  const _CardSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    Widget bar(double width, double height) => Container(
+          width: width,
+          height: height,
+          decoration: BoxDecoration(
+            color: cs.onSurface.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(6),
+          ),
+        );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        bar(72, 14),
+        const SizedBox(height: 8),
+        bar(160, 16),
+        const SizedBox(height: 8),
+        bar(120, 12),
+      ],
+    );
   }
 }

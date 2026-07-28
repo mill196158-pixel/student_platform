@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../models/message.dart';
 import '../../../models/assignment.dart';
 import '../../../state/team_cubit.dart';
+import '../models/chat_card_envelope.dart';
 import '../pinned_strip.dart';
 
 class PinController extends ChangeNotifier {
@@ -14,8 +15,9 @@ class PinController extends ChangeNotifier {
     final serverPins = <PinEntry>[];
     for (final m in st.chat) {
       if (m.isPinned) {
-        final title = m.text.trim().isNotEmpty
-            ? m.text.trim().split('\n').first
+        final previewText = ChatCardPreview.forMessage(m).trim();
+        final title = previewText.isNotEmpty
+            ? previewText.split('\n').first
             : (m.attachments?.isNotEmpty == true
                 ? m.attachments!.first.fileName
                 : 'Сообщение');

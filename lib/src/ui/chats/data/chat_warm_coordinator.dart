@@ -8,6 +8,7 @@ import 'package:student_platform/src/services/image_cache_service.dart';
 import 'package:student_platform/src/ui/chats/data/chat_preload_service.dart';
 import 'package:student_platform/src/ui/chats/data/chat_summaries_cache.dart';
 import 'package:student_platform/src/ui/chats/dm_title.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_card_envelope.dart';
 import 'package:student_platform/src/utils/safe_debug_log.dart';
 
 /// App-level quiet warm-up while the user is in the app (not necessarily in chats).
@@ -238,9 +239,22 @@ class ChatWarmCoordinator with WidgetsBindingObserver {
   }
 
   static String _buildPreviewFromRow(Map<String, dynamic> row) {
-    final body = (row['body'] ?? row['content'] ?? '').toString().trim();
-    if (body.isNotEmpty) {
+    final rawContent = row['content'];
+    final cardEnvelope = ChatCardEnvelope.tryParse(rawContent) ??
+        ChatCardEnvelope.tryParse((row['body'] ?? '').toString());
+    if (cardEnvelope != null) {
+      return cardEnvelope.humanPreview();
+    }
+
+    final body = (row['body'] ?? '').toString().trim();
+    if (body.isNotEmpty && !ChatCardPreview.looksLikeCardJson(body)) {
       return body.length > 120 ? '${body.substring(0, 120)}…' : body;
+    }
+    if (rawContent is String &&
+        rawContent.trim().isNotEmpty &&
+        !ChatCardPreview.looksLikeCardJson(rawContent)) {
+      final s = rawContent.trim();
+      return s.length > 120 ? '${s.substring(0, 120)}…' : s;
     }
     final msgType = (row['msg_type'] ?? '').toString();
     if (msgType == 'file' || msgType == 'image') return '📎 Вложение';

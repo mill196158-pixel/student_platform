@@ -204,6 +204,21 @@ class ChatGroupActionsRepository {
     return id.toString();
   }
 
+  /// Marks the current user's contribution as "reported" (self-declared
+  /// transfer). Shared by [CollectionCard] and [UnifiedTaskDetailsScreen] so
+  /// both surfaces call the exact same RPC/params.
+  Future<void> createCollectionContributionReport(String collectionId) {
+    return _client.rpc(
+      'upsert_my_collection_contribution',
+      params: {
+        'p_collection_id': collectionId,
+        'p_participation_status': 'joining',
+        'p_payment_status': 'reported',
+        'p_comment': 'Я перевёл',
+      },
+    );
+  }
+
   Future<void> deleteGroupAction({
     required String kind,
     required String entityId,
@@ -247,6 +262,132 @@ class ChatGroupActionsRepository {
         'p_status': status,
       },
     );
+  }
+
+  /// Stage 13.12 continuation — thin pointer + options for the unified
+  /// details screen and the published-topic editor's "refresh after
+  /// conflict" flow. `p_kind` is one of `topic_selection` | `collection` |
+  /// `assignment` (server also accepts the legacy `topic`/`collection` wire
+  /// aliases). Returns `{'available': false, ...}` rather than throwing when
+  /// the entity is gone/closed.
+  Future<Map<String, dynamic>> getTaskDetails({
+    required String chatId,
+    required String kind,
+    required String entityId,
+  }) async {
+    final res = await _client.rpc('get_task_details', params: {
+      'p_kind': kind,
+      'p_entity_id': entityId,
+      'p_chat_id': chatId,
+    });
+    return _asMap(res) ?? const {};
+  }
+
+  /// Edits selection-level fields with optimistic concurrency
+  /// (`p_expected_version` = last-known `row_version`). Throws with a
+  /// `version_conflict` / `selection_unavailable` / `forbidden` message on
+  /// the server's rejection reasons — see `friendlyTopicEditError`.
+  Future<Map<String, dynamic>> updateTopicSelection({
+    required String selectionId,
+    required int expectedVersion,
+    String? title,
+    String? description,
+    DateTime? deadlineAt,
+    bool? allowChange,
+  }) async {
+    final res = await _client.rpc('update_topic_selection', params: {
+      'p_selection_id': selectionId,
+      'p_expected_version': expectedVersion,
+      'p_title': title,
+      'p_description': description,
+      'p_deadline_at': deadlineAt?.toIso8601String(),
+      'p_allow_change': allowChange,
+    });
+    return _asMap(res) ?? const {};
+  }
+
+  /// Edits a single topic option (title/capacity). `p_expected_version` is
+  /// checked against the *selection's* `row_version` server-side (shared
+  /// optimistic-concurrency token across all mutators of one selection).
+  /// Raises `option_occupied` if a lower capacity would drop below the
+  /// number of members who already picked this option.
+  Future<Map<String, dynamic>> updateTopicOption({
+    required String optionId,
+    required int expectedVersion,
+    String? title,
+    int? capacity,
+  }) async {
+    final res = await _client.rpc('update_topic_option', params: {
+      'p_option_id': optionId,
+      'p_expected_version': expectedVersion,
+      'p_title': title,
+      'p_capacity': capacity,
+    });
+    return _asMap(res) ?? const {};
+  }
+
+  /// Persists a full reorder of `p_option_ids` (must be exactly the current
+  /// option-id set for the selection, in the new order).
+  Future<Map<String, dynamic>> reorderTopicOptions({
+    required String selectionId,
+    required int expectedVersion,
+    required List<String> optionIds,
+  }) async {
+    final res = await _client.rpc('reorder_topic_options', params: {
+      'p_selection_id': selectionId,
+      'p_expected_version': expectedVersion,
+      'p_option_ids': optionIds,
+    });
+    return _asMap(res) ?? const {};
+  }
+
+  /// Deletes a topic option. Raises `option_occupied` if any member already
+  /// picked it — callers must not offer delete for occupied rows.
+  Future<Map<String, dynamic>> removeTopicOption({
+    required String optionId,
+    required int expectedVersion,
+  }) async {
+    final res = await _client.rpc('remove_topic_option', params: {
+      'p_option_id': optionId,
+      'p_expected_version': expectedVersion,
+    });
+    return _asMap(res) ?? const {};
+  }
+
+  /// Adds a topic option to an already-published selection with optimistic
+  /// concurrency. Falls back to the legacy unversioned `add_topic_option`
+  /// RPC (no `row_version` in the response) when the backend doesn't yet
+  /// expose `add_topic_option_with_version`.
+  Future<Map<String, dynamic>> addTopicOptionWithVersion({
+    required String selectionId,
+    required String title,
+    int capacity = 1,
+    int? expectedVersion,
+  }) async {
+    try {
+      final res = await _client.rpc('add_topic_option_with_version', params: {
+        'p_selection_id': selectionId,
+        'p_title': title,
+        'p_capacity': capacity,
+        'p_expected_version': expectedVersion,
+      });
+      return _asMap(res) ?? const {};
+    } catch (e) {
+      if (!_isMissingRpc(e)) rethrow;
+      final id = await _client.rpc('add_topic_option', params: {
+        'p_selection_id': selectionId,
+        'p_title': title,
+        'p_capacity': capacity,
+        'p_sort_order': 0,
+      });
+      return {'ok': true, 'option_id': id?.toString()};
+    }
+  }
+
+  bool _isMissingRpc(Object e) {
+    final text = e.toString().toLowerCase();
+    return text.contains('pgrst202') ||
+        text.contains('could not find the function');
   }
 
   Future<List<GroupActionDeadline>> listMyGroupActionDeadlines({

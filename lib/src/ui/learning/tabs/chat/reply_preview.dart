@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../models/message.dart';
+import 'models/chat_card_envelope.dart';
 
 class ReplyPreview extends StatelessWidget {
   final Message message;
@@ -41,8 +42,8 @@ class ReplyPreview extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  message.text.isNotEmpty
-                      ? message.text
+                  ChatCardPreview.forMessage(message).isNotEmpty
+                      ? ChatCardPreview.forMessage(message)
                       : 'Сообщение с вложением',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,

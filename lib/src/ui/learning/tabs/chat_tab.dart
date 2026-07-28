@@ -35,8 +35,10 @@ import 'chat/assignments/edit_assignment_dialog.dart';
 import 'chat/selection_bars.dart';
 import 'chat/topics/create_topic_selection_screen.dart';
 import 'chat/collections/create_collection_screen.dart';
+import 'chat/data/chat_action_cards_cache.dart';
 import 'chat/data/chat_composer_capabilities_repository.dart';
 import 'chat/models/chat_composer_capabilities.dart';
+import 'chat/models/chat_card_envelope.dart';
 import '../../chats/core/forward_payload.dart';
 import '../../chats/data/blocks_api.dart';
 import '../../chats/forward/forward_outbox.dart';
@@ -358,6 +360,8 @@ class _ChatTabState extends State<ChatTab> {
   // Показывать ли «Новые сообщения» в эту сессию (замораживаем на входе)
   bool _showEntryNewBadge = false;
   String _lastPrecachedImageSignature = '';
+  String _lastHydratedActionCardsSignature = '';
+  String? _boundActionCardsChatId;
 
   // Глобальный кэш
   final GlobalCache _globalCache = GlobalCache();
@@ -630,6 +634,11 @@ class _ChatTabState extends State<ChatTab> {
 
   @override
   void dispose() {
+    final boundCardsChat = _boundActionCardsChatId;
+    if (boundCardsChat != null && boundCardsChat.isNotEmpty) {
+      unawaited(ChatActionCardsCache.instance.unbindRealtime(boundCardsChat));
+      _boundActionCardsChatId = null;
+    }
     ActiveChatTracker.instance.leave(_trackedChatId);
     // ➜ NEW: финальная подстраховка
     try {
@@ -710,6 +719,41 @@ class _ChatTabState extends State<ChatTab> {
         precacheImage(CachedNetworkImageProvider(url), context);
       }
     });
+  }
+
+  /// Stage 13.12: single batch RPC per page load for every visible
+  /// topic_selection/collection card, instead of each [TopicSelectionCard]/
+  /// [CollectionCard] independently listing the whole chat's actions.
+  void _hydrateActionCards(List<Message> messages) {
+    String? chatId;
+    final ids = <String>[];
+    for (final m in messages) {
+      final kind = m.cardKind;
+      final entityId = m.cardEntityId;
+      if (kind == null || kind.isEmpty || entityId == null || entityId.isEmpty) {
+        continue;
+      }
+      chatId ??= m.chatId.isNotEmpty ? m.chatId : null;
+      ids.add('$kind:$entityId');
+    }
+    if (chatId == null || ids.isEmpty) return;
+
+    final signature = '$chatId::${ids.join(',')}';
+    if (signature == _lastHydratedActionCardsSignature) return;
+    _lastHydratedActionCardsSignature = signature;
+
+    unawaited(
+      ChatActionCardsCache.instance.hydrateForMessages(chatId, messages),
+    );
+    // Bind Realtime once per ChatTab/chatId — not on every hydrate signature.
+    if (_boundActionCardsChatId != chatId) {
+      final prev = _boundActionCardsChatId;
+      if (prev != null && prev.isNotEmpty) {
+        unawaited(ChatActionCardsCache.instance.unbindRealtime(prev));
+      }
+      _boundActionCardsChatId = chatId;
+      unawaited(ChatActionCardsCache.instance.bindRealtime(chatId));
+    }
   }
 
   bool _isNearHistoryTop() {
@@ -1660,6 +1704,7 @@ class _ChatTabState extends State<ChatTab> {
           final list = state.chat;
           if (list.isNotEmpty) {
             _precacheRecentChatImages(list);
+            _hydrateActionCards(list);
           }
           final pins = _pinsCtl.buildFromState(state);
           // prune keys to avoid leaks
@@ -2177,7 +2222,7 @@ class _ChatTabState extends State<ChatTab> {
         setState(() => _replyTo = m);
         break;
       case 'Скопировать':
-        final text = m.text.trim();
+        final text = ChatCardPreview.forMessage(m).trim();
         if (text.isNotEmpty) {
           await services.Clipboard.setData(services.ClipboardData(text: text));
         }

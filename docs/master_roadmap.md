@@ -6,7 +6,7 @@
 ## Статус документа
 
 - Дата аудита: **27 июля 2026**
-- Обновлено: **28 июля 2026** (Stage 13.11.1 keyboard focus hotfix DONE; physical OCR/race/push smoke remain)
+- Обновлено: **28 июля 2026** (Stage 13.12 group-action cards + unified details DONE; physical OCR/race/push smoke remain)
 - Проверенная основная ветка: `refactor/chat-tab`
 - Проверенная административная ветка: `feature/admin-console`
 - Репозиторий: `mill196158-pixel/student_platform`
@@ -755,8 +755,9 @@ Edge Function: not redeployed (unchanged in 13.10).
 4. ~~Stage 13.10~~ **TECHNICALLY DONE** (remote applied `20260728101245`).
 5. ~~**Stage 13.11**~~ **TECHNICALLY DONE** — remote `20260728140108_stage13_11_membership_capabilities_ux`; Codex APPROVE (14/14); smoke PASS.
 6. ~~**Stage 13.11.1**~~ **DONE** — keyboard focus hotfix (`KeyboardDismissScope`: dismiss scroll only on `dragDetails`; no inset false-unfocus); Codex APPROVE (9/9); Flutter-only.
-7. **Владелец:** PHYSICAL OCR smoke + two-device topic race + controlled push на Android/iPhone.
-8. **Владелец:** реальные Excel (teachers/subjects/students) через Admin dry-run → apply.
+7. ~~**Stage 13.12**~~ **DONE** — card envelope + batch cards + UnifiedTaskDetailsScreen + deep topic editor; remote `20260728165633_stage13_12_group_action_cards_unified_details`; Codex APPROVE (15/15).
+8. **Владелец:** PHYSICAL OCR smoke + two-device topic race + controlled push на Android/iPhone.
+9. **Владелец:** реальные Excel (teachers/subjects/students) через Admin dry-run → apply.
 
 ### 13.11 — доступность групповых действий, единая модель заданий, финальный UX
 
@@ -787,6 +788,19 @@ Flutter-only: no migration / no remote apply / no Edge.
 - [x] Root cause: `ScrollUpdateNotification` with `|scrollDelta|>2` from keyboard `viewInsets` re-layout → immediate `unfocus`;
 - [x] Fix in shared `KeyboardDismissScope`: dismiss on scroll only when `dragDetails != null`; tap-outside stays `GestureDetector.onTap` (arena loses to TextField);
 - [x] Regression tests `test/keyboard_dismiss_scope_stage13_11_1_test.dart` + Stage 13.10/13.11 keyboard tests PASS.
+
+### 13.12 — полноценные карточки групповых действий + unified details
+
+Status: **DONE** / Codex **APPROVE** (15/15)
+
+Remote migration: `20260728165633_stage13_12_group_action_cards_unified_details` (project `gwdanmwluhrcfxbnplwd`).
+
+- [x] Root cause JSON-as-text: `get_chat_messages_page` preferred `content` over `body` and omitted structured `content` → Flutter `cardKind` null;
+- [x] `ChatCardEnvelope` + sanitized previews/copy/reply/pin; never show raw card JSON;
+- [x] Batch `get_chat_action_cards_batch` + cache (no N+1); `get_task_details`; topic option mutators with `row_version`;
+- [x] Redesigned Topic/Collection chat cards; deep topic editor; UnifiedTaskDetailsScreen;
+- [x] Schedule/deeplink → details first; Assignments tab unified; keyboard 13.11.1 preserved;
+- [x] Remote apply + roleplay; messages count unchanged (261); Edge not redeployed.
 
 Закрыто перед 13.2:
 

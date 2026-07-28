@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../common/friendly_empty_state.dart';
 import '../state/team_cubit.dart';
@@ -7,13 +8,74 @@ import '../models/assignment.dart';
 import '../models/team.dart';
 import '../assignment_details_screen.dart';
 import 'chat/assignments/assignment_form_dialog.dart';
+import 'chat/data/chat_action_cards_cache.dart';
+import 'chat/data/chat_group_actions_repository.dart';
+import 'chat/models/chat_group_actions.dart';
+import 'chat/unified_task_details_screen.dart';
 
 // общий notifier
 import 'assignments/view_mode.dart';
 
-class AssignmentsTab extends StatelessWidget {
+class AssignmentsTab extends StatefulWidget {
   final Team team;
   const AssignmentsTab({super.key, required this.team});
+
+  @override
+  State<AssignmentsTab> createState() => _AssignmentsTabState();
+}
+
+class _AssignmentsTabState extends State<AssignmentsTab> {
+  String? _chatId;
+  List<ChatTopicSelection> _topics = const [];
+  List<Map<String, dynamic>> _collections = const [];
+
+  Team get team => widget.team;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadGroupActions();
+  }
+
+  Future<void> _loadGroupActions() async {
+    try {
+      final sb = Supabase.instance.client;
+      final rows = await sb
+          .from('chats')
+          .select('id')
+          .eq('team_id', team.id)
+          .eq('type', 'team_main')
+          .limit(1);
+      final chatId = rows.isNotEmpty ? (rows.first['id'] ?? '').toString() : '';
+      final repo = ChatGroupActionsRepository(client: sb);
+      final topics = chatId.isEmpty
+          ? const <ChatTopicSelection>[]
+          : await repo.listTopicSelectionsForChat(chatId, cacheFirst: true);
+
+      // list_group_collections is group-scoped and does not return team_id.
+      // Show collections only in permanent group_space chats.
+      List<Map<String, dynamic>> collections = const [];
+      if (team.kind == 'group_space') {
+        try {
+          final res = await sb.rpc('list_group_collections');
+          if (res is List) {
+            collections = res
+                .whereType<Map>()
+                .map((e) => Map<String, dynamic>.from(e))
+                .where((e) => (e['status']?.toString() ?? '') != 'draft')
+                .toList();
+          }
+        } catch (_) {}
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _chatId = chatId.isEmpty ? null : chatId;
+        _topics = topics.where((t) => t.status != 'cancelled').toList();
+        _collections = collections;
+      });
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -36,7 +98,8 @@ class AssignmentsTab extends StatelessWidget {
               return a.createdAt.compareTo(b.createdAt);
             });
 
-            if (items.isEmpty) {
+            final actionCount = _topics.length + _collections.length;
+            if (items.isEmpty && actionCount == 0) {
               return _AssignmentsEmptyState(
                 onCreate: () => _createAssignment(context),
               );
@@ -52,31 +115,44 @@ class AssignmentsTab extends StatelessWidget {
                       crossAxisSpacing: 12,
                       childAspectRatio: .92,
                     ),
-                    itemCount: items.length,
-                    itemBuilder: (context, i) => _AssignmentCardTile(
-                      a: items[i],
-                      onOpen: () => _openDetails(context, items[i].id),
-                      onToggle: () => context
-                          .read<TeamCubit>()
-                          .toggleCompleted(items[i].id),
-                    ),
+                    itemCount: items.length + actionCount,
+                    itemBuilder: (context, i) {
+                      if (i < items.length) {
+                        return _AssignmentCardTile(
+                          a: items[i],
+                          onOpen: () => _openDetails(context, items[i].id),
+                          onToggle: () => context
+                              .read<TeamCubit>()
+                              .toggleCompleted(items[i].id),
+                        );
+                      }
+                      return _groupActionTile(context, i - items.length);
+                    },
                   )
                 : ListView.separated(
                     padding: const EdgeInsets.fromLTRB(16, 10, 16, 88),
-                    itemCount: items.length,
+                    itemCount: items.length + actionCount,
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
-                    itemBuilder: (context, i) => _AssignmentRowTile(
-                      a: items[i],
-                      onOpen: () => _openDetails(context, items[i].id),
-                      onToggle: () => context
-                          .read<TeamCubit>()
-                          .toggleCompleted(items[i].id),
-                    ),
+                    itemBuilder: (context, i) {
+                      if (i < items.length) {
+                        return _AssignmentRowTile(
+                          a: items[i],
+                          onOpen: () => _openDetails(context, items[i].id),
+                          onToggle: () => context
+                              .read<TeamCubit>()
+                              .toggleCompleted(items[i].id),
+                        );
+                      }
+                      return _groupActionTile(context, i - items.length);
+                    },
                   );
 
             return Stack(
               children: [
-                list,
+                RefreshIndicator(
+                  onRefresh: _loadGroupActions,
+                  child: list,
+                ),
                 Positioned(
                   right: 16,
                   bottom: 16,
@@ -90,6 +166,65 @@ class AssignmentsTab extends StatelessWidget {
         );
       },
     );
+  }
+
+  Widget _groupActionTile(BuildContext context, int index) {
+    if (index < _topics.length) {
+      final t = _topics[index];
+      return _GroupActionAssignmentTile(
+        title: t.title,
+        kindLabel: 'Выбор темы',
+        icon: Icons.format_list_numbered_rtl,
+        subtitle: t.isOpen
+            ? (t.totalCapacity > 0
+                ? 'Выбрано ${t.takenSlots} из ${t.totalCapacity}'
+                : 'Активно')
+            : 'Задание завершено',
+        onOpen: () => _openGroupAction(
+          context,
+          kind: ChatActionCardKind.topicSelection,
+          entityId: t.id,
+          cardMessageId: t.cardMessageId,
+          title: t.title,
+        ),
+      );
+    }
+    final c = _collections[index - _topics.length];
+    final status = (c['status'] ?? 'open').toString();
+    return _GroupActionAssignmentTile(
+      title: (c['title'] ?? 'Скинуться').toString(),
+      kindLabel: 'Скинуться',
+      icon: Icons.volunteer_activism_outlined,
+      subtitle: status == 'open' ? 'Активно' : 'Задание завершено',
+      onOpen: () => _openGroupAction(
+        context,
+        kind: ChatActionCardKind.groupCollection,
+        entityId: (c['id'] ?? '').toString(),
+        cardMessageId: c['card_message_id']?.toString(),
+        title: (c['title'] ?? '').toString(),
+      ),
+    );
+  }
+
+  Future<void> _openGroupAction(
+    BuildContext context, {
+    required String kind,
+    required String entityId,
+    String? cardMessageId,
+    String? title,
+  }) async {
+    final chatId = _chatId ?? '';
+    if (chatId.isEmpty || entityId.isEmpty) return;
+    await openUnifiedTaskDetails(
+      context,
+      kind: kind,
+      entityId: entityId,
+      chatId: chatId,
+      teamId: team.id,
+      cardMessageId: cardMessageId,
+      title: title,
+    );
+    if (mounted) await _loadGroupActions();
   }
 
   void _openDetails(BuildContext context, String id) {
@@ -123,6 +258,80 @@ class AssignmentsTab extends StatelessWidget {
         ),
       );
     }
+  }
+}
+
+class _GroupActionAssignmentTile extends StatelessWidget {
+  const _GroupActionAssignmentTile({
+    required this.title,
+    required this.kindLabel,
+    required this.icon,
+    required this.subtitle,
+    required this.onOpen,
+  });
+
+  final String title;
+  final String kindLabel;
+  final IconData icon;
+  final String subtitle;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    return Material(
+      color: cs.surface,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onOpen,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.5)),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, color: cs.primary),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      kindLabel,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: cs.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      title.isEmpty ? 'Задание' : title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, color: cs.onSurfaceVariant),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 

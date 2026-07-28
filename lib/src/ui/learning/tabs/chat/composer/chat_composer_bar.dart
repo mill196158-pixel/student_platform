@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../models/message.dart';
 import '../composer.dart';
+import '../models/chat_card_envelope.dart';
 import '../typing_line.dart';
 import '../assignments/assignment_form_dialog.dart';
 import 'chat_plus_menu.dart';
@@ -250,7 +251,7 @@ class ChatComposerBar extends StatelessWidget {
   }
 
   String _replyPreview(Message message) {
-    final text = message.text.trim();
+    final text = ChatCardPreview.forMessage(message).trim();
     if (text.isNotEmpty) return text;
 
     if (message.type == MessageType.assignmentDraft ||

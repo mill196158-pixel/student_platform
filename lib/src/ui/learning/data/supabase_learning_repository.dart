@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:student_platform/src/ui/learning/data/learning_repository.dart';
 import 'package:student_platform/src/ui/learning/models/team.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_card_envelope.dart';
 import 'package:student_platform/src/ui/learning/models/file_item.dart';
 import 'package:student_platform/src/ui/learning/models/assignment.dart';
 import 'package:student_platform/src/ui/learning/models/chat_file.dart'; // ДОБАВЛЕНО!
@@ -309,29 +310,15 @@ class SupabaseLearningRepository implements LearningRepository {
     final authorName = (m['author_name'] ?? '').toString().trim();
     final authorLogin = (m['author_login'] ?? '').toString().trim();
 
-    String textVal = (m['body'] ?? m['text'] ?? '').toString();
-    String? cardKind;
-    String? cardEntityId;
     final rawContent = m['content'];
-    if (rawContent is Map) {
-      final contentMap = Map<String, dynamic>.from(rawContent);
-      cardKind = contentMap['card']?.toString();
-      cardEntityId = (contentMap['selection_id'] ?? contentMap['collection_id'])
-          ?.toString();
-    } else if (rawContent is String && rawContent.trimLeft().startsWith('{')) {
-      try {
-        final contentMap = jsonDecode(rawContent);
-        if (contentMap is Map) {
-          cardKind = contentMap['card']?.toString();
-          cardEntityId =
-              (contentMap['selection_id'] ?? contentMap['collection_id'])
-                  ?.toString();
-        }
-      } catch (_) {}
-    }
-    if (textVal.isEmpty && cardKind == null) {
-      textVal = rawContent?.toString() ?? '';
-    }
+    final resolved = ChatCardEnvelope.resolveTextAndCard(
+      body: (m['body'])?.toString(),
+      text: (m['text'])?.toString(),
+      content: rawContent,
+    );
+    final String textVal = resolved.text;
+    final String? cardKind = resolved.cardKind;
+    final String? cardEntityId = resolved.cardEntityId;
 
     return Message(
       id: (m['id'] ?? '').toString(),
