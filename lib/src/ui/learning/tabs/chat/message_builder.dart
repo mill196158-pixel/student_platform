@@ -210,6 +210,10 @@ Bubble buildBubble({
   bool selected = false,
   Key? boundaryKey,
   int? receiptTicks,
+  bool? canModerateTopicSelection,
+  bool? canDeleteGroupAction,
+  bool? canModerateCollection,
+  bool? canEditOwnBeforeActivity,
 }) {
   // Current message reactions as counts
   final Map<String, int> currentCounts = reactions[m.id] ?? <String, int>{};
@@ -227,17 +231,27 @@ Bubble buildBubble({
   }
 
   if (m.cardKind == 'topic_selection') {
+    // Chat-level can_edit_own applies only to the author's own card (isMe).
+    final canEditOwn = isMe && (canEditOwnBeforeActivity ?? false);
+    final canDelete = (canDeleteGroupAction ?? false) || canEditOwn;
     return TopicSelectionCard(
       message: m,
       onLongPress: onLongPress,
       boundaryKey: boundaryKey,
+      canManage: canModerateTopicSelection,
+      canDelete: canDelete,
+      canEditOwnBeforeActivity: canEditOwn,
     );
   }
   if (m.cardKind == 'collection') {
+    final canEditOwn = isMe && (canEditOwnBeforeActivity ?? false);
+    final canDelete = (canDeleteGroupAction ?? false) || canEditOwn;
     return CollectionCard(
       message: m,
       onLongPress: onLongPress,
       boundaryKey: boundaryKey,
+      canManage: canModerateCollection,
+      canDelete: canDelete,
     );
   }
 

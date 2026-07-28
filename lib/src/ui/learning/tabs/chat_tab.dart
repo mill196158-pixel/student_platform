@@ -1851,6 +1851,14 @@ class _ChatTabState extends State<ChatTab> {
                             // ignore: unawaited_futures
                             _createAssignmentFromComposerAction();
                           },
+                          canModerateTopicSelection:
+                              _composerCaps?.canModerateTopicSelection,
+                          canModerateCollection:
+                              _composerCaps?.canModerateCollection,
+                          canDeleteGroupAction:
+                              _composerCaps?.canDeleteGroupAction,
+                          canEditOwnBeforeActivity:
+                              _composerCaps?.canEditOwnBeforeActivity,
                           selectingMessages: _selectingMessages,
                           selectedMessageIds: _selectedMessageIds,
                           onToggleSelect: (id) {

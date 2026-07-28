@@ -1,5 +1,5 @@
 -- Stage 13.11 — membership-based creation, split capabilities, delete moderation.
--- Local only until Codex APPROVE + controlled remote apply.
+-- Remote applied as 20260728140108_stage13_11_membership_capabilities_ux.
 
 -- ---------------------------------------------------------------------------
 -- 1) Create vs moderate helpers (do NOT reuse one isOrganizer for all actions)
@@ -161,17 +161,66 @@ alter table public.group_collections
 alter table public.group_collections
   drop constraint if exists group_collections_amount_mode_check;
 
-alter table public.group_collections
-  add constraint group_collections_amount_mode_check
-  check (amount_mode in ('none', 'per_person', 'total'));
-
 update public.group_collections
 set amount_mode = case
-  when amount_optional is not null and coalesce(amount_mode, 'none') = 'none'
+  when amount_optional is not null
+       and amount_total is null
+       and coalesce(amount_mode, 'none') in ('none', 'per_person')
     then 'per_person'
+  when amount_total is not null
+       and coalesce(amount_mode, 'none') in ('none', 'total')
+    then 'total'
+  when coalesce(amount_mode, 'none') not in ('none', 'per_person', 'total')
+    then 'none'
   else coalesce(amount_mode, 'none')
 end
 where true;
+
+-- Normalize contradictory pairs before CHECK (XOR amount columns).
+update public.group_collections
+set amount_optional = null
+where amount_mode = 'total';
+
+update public.group_collections
+set amount_total = null
+where amount_mode = 'per_person';
+
+update public.group_collections
+set amount_optional = null,
+    amount_total = null
+where amount_mode = 'none';
+
+update public.group_collections
+set amount_mode = 'none',
+    amount_optional = null,
+    amount_total = null
+where amount_mode = 'per_person' and amount_optional is null;
+
+update public.group_collections
+set amount_mode = 'none',
+    amount_optional = null,
+    amount_total = null
+where amount_mode = 'total' and amount_total is null;
+
+alter table public.group_collections
+  add constraint group_collections_amount_mode_check
+  check (
+    (
+      amount_mode = 'none'
+      and amount_optional is null
+      and amount_total is null
+    )
+    or (
+      amount_mode = 'per_person'
+      and amount_optional is not null
+      and amount_total is null
+    )
+    or (
+      amount_mode = 'total'
+      and amount_total is not null
+      and amount_optional is null
+    )
+  );
 
 -- ---------------------------------------------------------------------------
 -- 3) Composer capabilities SoT — split create vs moderate
@@ -987,3 +1036,74 @@ grant execute on function
 to authenticated, service_role;
 
 -- Direct table writes stay closed; grants unchanged from Stage 13.9/13.10.
+
+-- ---------------------------------------------------------------------------
+-- 5) list_group_collections — expose has_activity + amount mode for UI gating
+-- ---------------------------------------------------------------------------
+create or replace function public.list_group_collections()
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_group uuid := private.current_active_group_id();
+  v_manage boolean;
+begin
+  if v_group is null or not private.is_group_space_member(v_group) then
+    return '[]'::jsonb;
+  end if;
+  v_manage := private.is_group_space_organizer(v_group);
+  return coalesce(
+    (
+      select jsonb_agg(
+        jsonb_build_object(
+          'id', c.id,
+          'title', c.title,
+          'description', c.description,
+          'purpose', c.purpose,
+          'status', c.status,
+          'deadline_at', c.deadline_at,
+          'amount_optional', c.amount_optional,
+          'amount_mode', c.amount_mode,
+          'amount_total', c.amount_total,
+          'created_by', c.created_by,
+          'has_activity', private.collection_has_activity(c.id),
+          'instructions', c.instructions,
+          'payment_details', case
+            when v_manage then coalesce((
+              select s.payment_details
+              from public.group_collection_secrets s
+              where s.collection_id = c.id
+            ), '')
+            else ''
+          end,
+          'card_message_id', c.card_message_id,
+          'joined_count', (
+            select count(*) from public.group_collection_contributions x
+            where x.collection_id = c.id and x.participation_status = 'joining'
+          ),
+          'confirmed_count', (
+            select count(*) from public.group_collection_contributions x
+            where x.collection_id = c.id and x.payment_status = 'confirmed'
+          ),
+          'paid_count', (
+            select count(*) from public.group_collection_contributions x
+            where x.collection_id = c.id
+              and coalesce(x.payment_status, 'unmarked') <> 'unmarked'
+          )
+        )
+        order by c.created_at desc
+      )
+      from public.group_collections c
+      where c.group_id = v_group and c.status <> 'cancelled'
+    ),
+    '[]'::jsonb
+  );
+end;
+$$;
+
+revoke all on function public.list_group_collections() from public, anon;
+grant execute on function public.list_group_collections()
+  to authenticated, service_role;

@@ -72,6 +72,12 @@ class ChatMessageList extends StatelessWidget {
   final Set<String>? revealedBlockedMessageIds;
   final void Function(String messageId)? onRevealBlockedMessage;
 
+  /// Server SoT composer capabilities for group-action cards (Stage 13.11).
+  final bool? canModerateTopicSelection;
+  final bool? canModerateCollection;
+  final bool? canDeleteGroupAction;
+  final bool? canEditOwnBeforeActivity;
+
   const ChatMessageList({
     super.key,
     required this.messages,
@@ -111,6 +117,10 @@ class ChatMessageList extends StatelessWidget {
     this.blockedUserIds,
     this.revealedBlockedMessageIds,
     this.onRevealBlockedMessage,
+    this.canModerateTopicSelection,
+    this.canModerateCollection,
+    this.canDeleteGroupAction,
+    this.canEditOwnBeforeActivity,
   });
 
   @override
@@ -272,6 +282,10 @@ class ChatMessageList extends StatelessWidget {
                   hoveredMessageId == m.id),
               boundaryKey: null,
               receiptTicks: receiptTicks,
+              canModerateTopicSelection: canModerateTopicSelection,
+              canModerateCollection: canModerateCollection,
+              canDeleteGroupAction: canDeleteGroupAction,
+              canEditOwnBeforeActivity: canEditOwnBeforeActivity,
             );
 
             final previewBubble = buildBubble(
@@ -297,6 +311,10 @@ class ChatMessageList extends StatelessWidget {
               onRetryFailed:
                   m.isFailed ? () => onRetryFailedText?.call(m) : null,
               selected: true,
+              canModerateTopicSelection: canModerateTopicSelection,
+              canModerateCollection: canModerateCollection,
+              canDeleteGroupAction: canDeleteGroupAction,
+              canEditOwnBeforeActivity: canEditOwnBeforeActivity,
               boundaryKey: null,
               receiptTicks: receiptTicks,
             );

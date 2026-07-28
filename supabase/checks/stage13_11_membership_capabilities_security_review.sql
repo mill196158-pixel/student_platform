@@ -79,6 +79,16 @@ begin
     raise exception 'get_chat_composer_capabilities exposed to anon/public: %', v_acl;
   end if;
 
+  -- amount_mode XOR columns
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'group_collections_amount_mode_check'
+      and contype = 'c'
+  ) then
+    raise exception 'missing group_collections_amount_mode_check';
+  end if;
+
   raise notice 'stage13_11 security review PASS';
 end;
 $$;

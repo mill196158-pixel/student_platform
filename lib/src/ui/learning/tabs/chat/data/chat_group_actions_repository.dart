@@ -217,6 +217,38 @@ class ChatGroupActionsRepository {
     );
   }
 
+  Future<void> updateTopicSelectionBeforeActivity({
+    required String selectionId,
+    String? title,
+    String? description,
+    DateTime? deadlineAt,
+    bool? allowChange,
+  }) {
+    return _client.rpc(
+      'update_topic_selection_before_activity',
+      params: {
+        'p_selection_id': selectionId,
+        'p_title': title,
+        'p_description': description,
+        'p_deadline_at': deadlineAt?.toIso8601String(),
+        'p_allow_change': allowChange,
+      },
+    );
+  }
+
+  Future<void> closeTopicSelection({
+    required String selectionId,
+    String status = 'closed',
+  }) {
+    return _client.rpc(
+      'close_topic_selection',
+      params: {
+        'p_selection_id': selectionId,
+        'p_status': status,
+      },
+    );
+  }
+
   Future<List<GroupActionDeadline>> listMyGroupActionDeadlines({
     DateTime? from,
     DateTime? to,

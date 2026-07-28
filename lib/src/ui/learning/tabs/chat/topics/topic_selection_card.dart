@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../models/message.dart';
-import '../../../state/team_cubit.dart';
 import '../../../../group_space/group_space_screen.dart';
+import '../data/chat_composer_capabilities_repository.dart';
 import '../data/chat_group_actions_repository.dart';
 import '../models/chat_group_actions.dart';
 import 'topic_selection_detail_screen.dart';
@@ -17,16 +16,24 @@ class TopicSelectionCard extends StatefulWidget {
     this.onLongPress,
     this.boundaryKey,
     this.repository,
+    this.capabilitiesRepository,
     this.onOpenChat,
     this.canManage,
+    this.canDelete,
+    this.canEditOwnBeforeActivity,
   });
 
   final Message message;
   final VoidCallback? onLongPress;
   final Key? boundaryKey;
   final ChatGroupActionsRepository? repository;
+  final ChatComposerCapabilitiesRepository? capabilitiesRepository;
   final VoidCallback? onOpenChat;
+
+  /// Server SoT: `can_moderate_topic_selection`. Never inferred from TeamCubit.
   final bool? canManage;
+  final bool? canDelete;
+  final bool? canEditOwnBeforeActivity;
 
   @override
   State<TopicSelectionCard> createState() => _TopicSelectionCardState();
@@ -66,6 +73,50 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
     }
   }
 
+  Future<_TopicCardCapabilities> _resolveCapabilities() async {
+    final explicitManage = widget.canManage;
+    final explicitDelete = widget.canDelete;
+    final explicitEdit = widget.canEditOwnBeforeActivity;
+    if (explicitManage != null &&
+        explicitDelete != null &&
+        explicitEdit != null) {
+      return _TopicCardCapabilities(
+        canManage: explicitManage,
+        canDelete: explicitDelete,
+        canEditOwnBeforeActivity: explicitEdit,
+      );
+    }
+
+    final chatId = widget.message.chatId;
+    if (chatId.isEmpty) {
+      return _TopicCardCapabilities(
+        canManage: explicitManage ?? false,
+        canDelete: explicitDelete ?? false,
+        canEditOwnBeforeActivity: explicitEdit ?? false,
+      );
+    }
+
+    try {
+      final caps = await (widget.capabilitiesRepository ??
+              ChatComposerCapabilitiesRepository())
+          .load(chatId);
+      // Edit-own requires entity ownership (isMe), which only buildBubble can
+      // supply. Fail closed when props are absent — never grant chat-level
+      // can_edit_own to every viewer of the card.
+      return _TopicCardCapabilities(
+        canManage: explicitManage ?? caps.canModerateTopicSelection,
+        canDelete: explicitDelete ?? caps.canDeleteGroupAction,
+        canEditOwnBeforeActivity: explicitEdit ?? false,
+      );
+    } catch (_) {
+      return _TopicCardCapabilities(
+        canManage: explicitManage ?? false,
+        canDelete: explicitDelete ?? false,
+        canEditOwnBeforeActivity: explicitEdit ?? false,
+      );
+    }
+  }
+
   Future<void> _openDetail() async {
     if (_selection == null) {
       if (!mounted) return;
@@ -77,20 +128,16 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
     final chatId = widget.message.chatId;
     if (chatId.isEmpty) return;
     final repo = widget.repository ?? ChatGroupActionsRepository();
-    var canManage = widget.canManage;
-    if (canManage == null) {
-      try {
-        canManage = context.read<TeamCubit>().state.isStarosta;
-      } catch (_) {
-        canManage = false;
-      }
-    }
+    final caps = await _resolveCapabilities();
+    if (!mounted) return;
     await showTopicSelectionChooser(
       context,
       chatId: chatId,
       selection: _selection!,
       repository: repo,
-      canManage: canManage,
+      canManage: caps.canManage,
+      canDelete: caps.canDelete,
+      canEditOwnBeforeActivity: caps.canEditOwnBeforeActivity,
     );
     if (mounted) await _load();
   }
@@ -178,6 +225,18 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
   }
 }
 
+class _TopicCardCapabilities {
+  const _TopicCardCapabilities({
+    required this.canManage,
+    required this.canDelete,
+    required this.canEditOwnBeforeActivity,
+  });
+
+  final bool canManage;
+  final bool canDelete;
+  final bool canEditOwnBeforeActivity;
+}
+
 /// In-chat card for `content.card = collection` («Скинуться»).
 class CollectionCard extends StatefulWidget {
   const CollectionCard({
@@ -186,12 +245,20 @@ class CollectionCard extends StatefulWidget {
     this.onLongPress,
     this.boundaryKey,
     this.onOpenChat,
+    this.repository,
+    this.capabilitiesRepository,
+    this.canManage,
+    this.canDelete,
   });
 
   final Message message;
   final VoidCallback? onLongPress;
   final Key? boundaryKey;
   final VoidCallback? onOpenChat;
+  final ChatGroupActionsRepository? repository;
+  final ChatComposerCapabilitiesRepository? capabilitiesRepository;
+  final bool? canManage;
+  final bool? canDelete;
 
   @override
   State<CollectionCard> createState() => _CollectionCardState();
@@ -201,11 +268,50 @@ class _CollectionCardState extends State<CollectionCard> {
   Map<String, dynamic>? _collection;
   bool _loading = true;
   bool _reporting = false;
+  bool _deleting = false;
+  bool _canManage = false;
+  bool _canDelete = false;
 
   @override
   void initState() {
     super.initState();
+    _canManage = widget.canManage ?? false;
+    _canDelete = widget.canDelete ?? false;
     _load();
+    _resolveCapabilities();
+  }
+
+  @override
+  void didUpdateWidget(covariant CollectionCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.canManage != widget.canManage ||
+        oldWidget.canDelete != widget.canDelete) {
+      _canManage = widget.canManage ?? _canManage;
+      _canDelete = widget.canDelete ?? _canDelete;
+    }
+  }
+
+  Future<void> _resolveCapabilities() async {
+    if (widget.canManage != null && widget.canDelete != null) {
+      if (!mounted) return;
+      setState(() {
+        _canManage = widget.canManage!;
+        _canDelete = widget.canDelete!;
+      });
+      return;
+    }
+    final chatId = widget.message.chatId;
+    if (chatId.isEmpty) return;
+    try {
+      final caps = await (widget.capabilitiesRepository ??
+              ChatComposerCapabilitiesRepository())
+          .load(chatId);
+      if (!mounted) return;
+      setState(() {
+        _canManage = widget.canManage ?? caps.canModerateCollection;
+        _canDelete = widget.canDelete ?? caps.canDeleteGroupAction;
+      });
+    } catch (_) {}
   }
 
   Future<void> _load() async {
@@ -274,6 +380,46 @@ class _CollectionCardState extends State<CollectionCard> {
       );
     } finally {
       if (mounted) setState(() => _reporting = false);
+    }
+  }
+
+  Future<void> _deleteCollection() async {
+    final id = widget.message.cardEntityId;
+    if (id == null || id.isEmpty || _deleting || !_canDelete) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Удалить сбор?'),
+        content: const Text('Сбор будет отменён для всех участников.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _deleting = true);
+    try {
+      final repo = widget.repository ?? ChatGroupActionsRepository();
+      await repo.deleteGroupAction(kind: 'collection', entityId: id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Сбор удалён')),
+      );
+      await _load();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось удалить сбор')),
+      );
+    } finally {
+      if (mounted) setState(() => _deleting = false);
     }
   }
 
@@ -401,12 +547,54 @@ class _CollectionCardState extends State<CollectionCard> {
                   onPressed: _open,
                   child: Text(closed ? 'Смотреть' : 'Подробнее'),
                 ),
+                if (_canShowDelete(closed, reported, organizerStatus) &&
+                    !closed)
+                  TextButton(
+                    onPressed: _deleting ? null : _deleteCollection,
+                    child: Text(
+                      _deleting ? 'Удаление…' : 'Удалить',
+                      style: TextStyle(color: cs.error),
+                    ),
+                  ),
+                if (_canManage && !closed)
+                  Text(
+                    'Орг.',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: cs.secondary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
               ],
             ),
           ],
         ),
       ),
     );
+  }
+
+  bool _canShowDelete(
+    bool closed,
+    String reported,
+    String organizerStatus,
+  ) {
+    if (!_canDelete || closed) return false;
+    // Organizer may delete anytime; author-only path hides after first activity.
+    if (_canManage) return true;
+    if (_collection?['has_activity'] == true) return false;
+    final joined =
+        int.tryParse(_collection?['joined_count']?.toString() ?? '') ?? 0;
+    final confirmed = int.tryParse(
+          _collection?['confirmed_count']?.toString() ?? '',
+        ) ??
+        0;
+    final paid =
+        int.tryParse(_collection?['paid_count']?.toString() ?? '') ?? 0;
+    final hasActivity = joined > 0 ||
+        confirmed > 0 ||
+        paid > 0 ||
+        (reported.isNotEmpty && reported != 'unmarked') ||
+        (organizerStatus.isNotEmpty && organizerStatus != 'unmarked');
+    return !hasActivity;
   }
 
   String _fmt(DateTime dt) {

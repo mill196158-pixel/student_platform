@@ -1731,6 +1731,14 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                           // В ЛС аватары не показываем принципиально
                           forceHideAvatars: widget.hideAvatars || isDm,
                           isDirectChat: isDm,
+                          canModerateTopicSelection:
+                              _composerCaps?.canModerateTopicSelection,
+                          canModerateCollection:
+                              _composerCaps?.canModerateCollection,
+                          canDeleteGroupAction:
+                              _composerCaps?.canDeleteGroupAction,
+                          canEditOwnBeforeActivity:
+                              _composerCaps?.canEditOwnBeforeActivity,
                           onRetryFailedText:
                               isDm ? (m) => unawaited(_retryFailedDm(m)) : null,
                           onFocusComposer: () {

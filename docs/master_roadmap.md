@@ -753,9 +753,29 @@ Edge Function: not redeployed (unchanged in 13.10).
 2. ~~Stage 13.8~~ **TECHNICALLY DONE** (remote applied).
 3. ~~Stage 13.9~~ **TECHNICALLY DONE** (remote applied + Edge v5).
 4. ~~Stage 13.10~~ **TECHNICALLY DONE** (remote applied `20260728101245`).
-5. **Stage 13.11** — CODE READY on `refactor/chat-tab` (membership create, silent caps, unified schedule, form redesign, Lottie). Remote apply blocked until Codex APPROVE + Supabase MCP auth.
+5. ~~**Stage 13.11**~~ **TECHNICALLY DONE** — remote `20260728140108_stage13_11_membership_capabilities_ux`; Codex APPROVE (14/14); smoke PASS.
 6. **Владелец:** PHYSICAL OCR smoke + two-device topic race + controlled push на Android/iPhone.
 7. **Владелец:** реальные Excel (teachers/subjects/students) через Admin dry-run → apply.
+
+### 13.11 — доступность групповых действий, единая модель заданий, финальный UX
+
+Status: **DONE** (technically) / Codex **APPROVE / READY**
+
+Remote migration: `20260728140108_stage13_11_membership_capabilities_ux` (project `gwdanmwluhrcfxbnplwd`).
+
+Edge Function: not redeployed (unchanged in 13.11).
+
+Сделано:
+
+- [x] создание topic/collection по active membership (не organizer-only);
+- [x] organizer moderation/delete отдельно от create;
+- [x] silent capabilities cache (нет «Проверяем права»);
+- [x] единый раздел «Задания к дате» в расписании (4 леген-цвета: Лекция/Практика/Лабораторная/Задание);
+- [x] redesign «Выбор темы» / «Скинуться» в стиле «Новое задание»;
+- [x] Lottie empty states + reduce motion + MIT README;
+- [x] SQL security/roleplay PASS; Flutter 13.9–13.11 PASS; Web/Admin Web/Android debug APK;
+- [x] remote apply + rollback smoke; counts unchanged;
+- [ ] PHYSICAL / TWO-DEVICE / PUSH smokes — owner-check (from 13.9).
 
 Закрыто перед 13.2:
 

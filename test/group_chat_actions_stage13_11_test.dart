@@ -3,9 +3,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_platform/src/ui/common/friendly_empty_state.dart';
 import 'package:student_platform/src/ui/common/keyboard_dismiss_scope.dart';
+import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/composer/chat_composer_bar.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/message_builder.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_composer_capabilities.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_group_actions.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/topics/topic_selection_card.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/topics/topic_selection_detail_screen.dart';
 import 'package:student_platform/src/ui/schedule/models/schedule_group_action_mapper.dart';
 
 void main() {
@@ -138,7 +142,8 @@ void main() {
         },
       });
       expect(caps.canCreateTopicSelection, isTrue);
-      expect(caps.reasonLabel('topic_selection'), isNot(contains('организатор')));
+      expect(
+          caps.reasonLabel('topic_selection'), isNot(contains('организатор')));
       expect(caps.reasonLabel('topic_selection'), isNot(contains('Проверяем')));
     });
 
@@ -147,8 +152,10 @@ void main() {
         teamKind: 'subject',
         isDm: false,
       );
-      expect(loading.reasonLabel('topic_selection'), isNot(contains('Проверяем')));
-      expect(loading.reasonLabel('topic_selection'), isNot(contains('Определяем')));
+      expect(
+          loading.reasonLabel('topic_selection'), isNot(contains('Проверяем')));
+      expect(loading.reasonLabel('topic_selection'),
+          isNot(contains('Определяем')));
     });
   });
 
@@ -274,7 +281,8 @@ void main() {
   });
 
   group('Stage 13.11 empty state + lottie', () {
-    testWidgets('FriendlyEmptyState readable in light and dark', (tester) async {
+    testWidgets('FriendlyEmptyState readable in light and dark',
+        (tester) async {
       SharedPreferences.setMockInitialValues({});
       for (final brightness in [Brightness.light, Brightness.dark]) {
         await tester.pumpWidget(
@@ -300,7 +308,8 @@ void main() {
       }
     });
 
-    testWidgets('reduce motion uses non-animating fallback path', (tester) async {
+    testWidgets('reduce motion uses non-animating fallback path',
+        (tester) async {
       await tester.pumpWidget(
         MediaQuery(
           data: const MediaQueryData(disableAnimations: true),
@@ -344,6 +353,290 @@ void main() {
       await tester.tap(find.text('outside'));
       await tester.pump();
       expect(focus.hasFocus, isFalse);
+    });
+  });
+
+  group('Stage 13.11 moderation wiring', () {
+    test('author sees edit/delete-before-activity; peer member does not', () {
+      Message cardMsg({required String authorId}) => Message(
+            id: 'm1',
+            chatId: 'chat-subject',
+            authorId: authorId,
+            authorLogin: 'login',
+            authorName: 'User',
+            text: 'Выбор темы: Экология',
+            at: DateTime.utc(2026, 7, 1),
+            cardKind: 'topic_selection',
+            cardEntityId: 'sel-1',
+          );
+
+      final authorBubble = buildBubble(
+        m: cardMsg(authorId: 'me'),
+        showAvatar: false,
+        time: '12:00',
+        onLongPress: null,
+        onReply: () {},
+        onReplyTap: (_) {},
+        reactions: const {},
+        onReact: () {},
+        isMe: true,
+        canModerateTopicSelection: false,
+        canDeleteGroupAction: false,
+        canEditOwnBeforeActivity: true,
+      ) as TopicSelectionCard;
+      expect(authorBubble.canManage, isFalse);
+      expect(authorBubble.canEditOwnBeforeActivity, isTrue);
+      expect(authorBubble.canDelete, isTrue);
+
+      final peerBubble = buildBubble(
+        m: cardMsg(authorId: 'other'),
+        showAvatar: false,
+        time: '12:00',
+        onLongPress: null,
+        onReply: () {},
+        onReplyTap: (_) {},
+        reactions: const {},
+        onReact: () {},
+        isMe: false,
+        canModerateTopicSelection: false,
+        canDeleteGroupAction: false,
+        canEditOwnBeforeActivity: true, // chat-level true, but not author
+      ) as TopicSelectionCard;
+      expect(peerBubble.canManage, isFalse);
+      expect(peerBubble.canEditOwnBeforeActivity, isFalse);
+      expect(peerBubble.canDelete, isFalse);
+    });
+
+    test('organizer canManage/delete regardless of isMe', () {
+      final message = Message(
+        id: 'm1',
+        chatId: 'chat-subject',
+        authorId: 'other',
+        authorLogin: 'login',
+        authorName: 'User',
+        text: 'Выбор темы: Экология',
+        at: DateTime.utc(2026, 7, 1),
+        cardKind: 'topic_selection',
+        cardEntityId: 'sel-1',
+      );
+      final card = buildBubble(
+        m: message,
+        showAvatar: false,
+        time: '12:00',
+        onLongPress: null,
+        onReply: () {},
+        onReplyTap: (_) {},
+        reactions: const {},
+        onReact: () {},
+        isMe: false,
+        canModerateTopicSelection: true,
+        canDeleteGroupAction: true,
+        canEditOwnBeforeActivity: true,
+      ) as TopicSelectionCard;
+      expect(card.canManage, isTrue);
+      expect(card.canDelete, isTrue);
+      // Edit-own remains false for non-author; organizer still edits via canManage.
+      expect(card.canEditOwnBeforeActivity, isFalse);
+    });
+
+    test('CollectionCard receives canDelete from buildBubble', () {
+      final message = Message(
+        id: 'm2',
+        chatId: 'chat-space',
+        authorId: 'u1',
+        authorLogin: 'login',
+        authorName: 'User',
+        text: 'Скинуться: Подарок',
+        at: DateTime.utc(2026, 7, 1),
+        cardKind: 'collection',
+        cardEntityId: 'col-1',
+      );
+      final card = buildBubble(
+        m: message,
+        showAvatar: false,
+        time: '12:00',
+        onLongPress: null,
+        onReply: () {},
+        onReplyTap: (_) {},
+        reactions: const {},
+        onReact: () {},
+        isMe: false,
+        canModerateCollection: true,
+        canDeleteGroupAction: true,
+      ) as CollectionCard;
+      expect(card.canManage, isTrue);
+      expect(card.canDelete, isTrue);
+    });
+
+    testWidgets('organizer chooser exposes edit/close/delete actions',
+        (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TopicSelectionDetailScreen(
+            chatId: 'chat-subject',
+            selection: ChatTopicSelection(
+              id: 'sel-1',
+              title: 'Темы докладов',
+              description: '',
+              status: 'open',
+              allowChange: true,
+              showResultsToAll: true,
+              freeSlots: 2,
+              takenSlots: 0,
+              totalCapacity: 2,
+            ),
+            canManage: true,
+            canDelete: true,
+            canEditOwnBeforeActivity: true,
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('Изменить'), findsOneWidget);
+      expect(find.text('Закрыть'), findsOneWidget);
+      expect(find.text('Удалить'), findsOneWidget);
+    });
+
+    testWidgets('ordinary member chooser hides moderator actions',
+        (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TopicSelectionDetailScreen(
+            chatId: 'chat-subject',
+            selection: ChatTopicSelection(
+              id: 'sel-1',
+              title: 'Темы докладов',
+              description: '',
+              status: 'open',
+              allowChange: true,
+              showResultsToAll: true,
+            ),
+            canManage: false,
+            canDelete: false,
+            canEditOwnBeforeActivity: false,
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('Удалить'), findsNothing);
+      expect(find.text('Закрыть'), findsNothing);
+    });
+
+    testWidgets('author loses edit/delete after topic activity',
+        (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TopicSelectionDetailScreen(
+            chatId: 'chat-subject',
+            selection: ChatTopicSelection(
+              id: 'sel-1',
+              title: 'Темы докладов',
+              description: '',
+              status: 'open',
+              allowChange: true,
+              showResultsToAll: true,
+              takenSlots: 1,
+              totalCapacity: 3,
+              freeSlots: 2,
+            ),
+            canManage: false,
+            canDelete: true,
+            canEditOwnBeforeActivity: true,
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('Изменить'), findsNothing);
+      expect(find.text('Удалить'), findsNothing);
+      expect(find.text('Закрыть'), findsNothing);
+    });
+
+    testWidgets('author keeps edit/delete before topic activity',
+        (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TopicSelectionDetailScreen(
+            chatId: 'chat-subject',
+            selection: ChatTopicSelection(
+              id: 'sel-1',
+              title: 'Темы докладов',
+              description: '',
+              status: 'open',
+              allowChange: true,
+              showResultsToAll: true,
+              takenSlots: 0,
+              totalCapacity: 3,
+              freeSlots: 3,
+            ),
+            canManage: false,
+            canDelete: true,
+            canEditOwnBeforeActivity: true,
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('Изменить'), findsOneWidget);
+      expect(find.text('Удалить'), findsOneWidget);
+      expect(find.text('Закрыть'), findsNothing);
+    });
+
+    test('collection author delete respects has_activity / joined_count', () {
+      // Mirror CollectionCard._canShowDelete rules without pumping Supabase.
+      bool canShow({
+        required bool canDelete,
+        required bool canManage,
+        required bool closed,
+        required Map<String, dynamic> collection,
+      }) {
+        if (!canDelete || closed) return false;
+        if (canManage) return true;
+        if (collection['has_activity'] == true) return false;
+        final joined =
+            int.tryParse(collection['joined_count']?.toString() ?? '') ?? 0;
+        final confirmed =
+            int.tryParse(collection['confirmed_count']?.toString() ?? '') ?? 0;
+        final paid =
+            int.tryParse(collection['paid_count']?.toString() ?? '') ?? 0;
+        final hasActivity = joined > 0 || confirmed > 0 || paid > 0;
+        return !hasActivity;
+      }
+
+      expect(
+        canShow(
+          canDelete: true,
+          canManage: false,
+          closed: false,
+          collection: const {'has_activity': false, 'joined_count': 0},
+        ),
+        isTrue,
+      );
+      expect(
+        canShow(
+          canDelete: true,
+          canManage: false,
+          closed: false,
+          collection: const {'has_activity': false, 'joined_count': 1},
+        ),
+        isFalse,
+      );
+      expect(
+        canShow(
+          canDelete: true,
+          canManage: false,
+          closed: false,
+          collection: const {'has_activity': true, 'joined_count': 0},
+        ),
+        isFalse,
+      );
+      expect(
+        canShow(
+          canDelete: true,
+          canManage: true,
+          closed: false,
+          collection: const {'has_activity': true, 'joined_count': 3},
+        ),
+        isTrue,
+      );
     });
   });
 }

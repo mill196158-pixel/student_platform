@@ -16,6 +16,8 @@ Future<void> showTopicSelectionChooser(
   required ChatTopicSelection selection,
   ChatGroupActionsRepository? repository,
   bool canManage = false,
+  bool canDelete = false,
+  bool canEditOwnBeforeActivity = false,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -27,6 +29,8 @@ Future<void> showTopicSelectionChooser(
       selection: selection,
       repository: repository,
       canManage: canManage,
+      canDelete: canDelete,
+      canEditOwnBeforeActivity: canEditOwnBeforeActivity,
       asBottomSheet: true,
     ),
   );
@@ -40,6 +44,8 @@ class TopicSelectionDetailScreen extends StatefulWidget {
     required this.selection,
     this.repository,
     this.canManage = false,
+    this.canDelete = false,
+    this.canEditOwnBeforeActivity = false,
     this.asBottomSheet = false,
   });
 
@@ -47,6 +53,8 @@ class TopicSelectionDetailScreen extends StatefulWidget {
   final ChatTopicSelection selection;
   final ChatGroupActionsRepository? repository;
   final bool canManage;
+  final bool canDelete;
+  final bool canEditOwnBeforeActivity;
   final bool asBottomSheet;
 
   @override
@@ -187,8 +195,7 @@ class _TopicSelectionDetailScreenState
       ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
   }
 
-  int get _freeCount =>
-      _options.where((o) => !o.isFull || o.myPick).length;
+  int get _freeCount => _options.where((o) => !o.isFull || o.myPick).length;
   int get _takenCount => _options.where((o) => o.isFull && !o.myPick).length;
 
   String _friendlyPickError(Object e) {
@@ -287,6 +294,148 @@ class _TopicSelectionDetailScreenState
     );
   }
 
+  Future<void> _editBeforeActivity() async {
+    final selection = _selection ?? widget.selection;
+    final titleCtrl = TextEditingController(text: selection.title);
+    final descCtrl = TextEditingController(text: selection.description);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Изменить выбор темы'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: titleCtrl,
+              decoration: const InputDecoration(labelText: 'Название'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: descCtrl,
+              decoration: const InputDecoration(labelText: 'Описание'),
+              maxLines: 2,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Сохранить'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _acting = true);
+    try {
+      await _repo.updateTopicSelectionBeforeActivity(
+        selectionId: selection.id,
+        title: titleCtrl.text.trim(),
+        description: descCtrl.text.trim(),
+      );
+      await _load(silent: true);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Сохранено')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Не удалось изменить. Возможно, уже есть выборы участников.',
+          ),
+        ),
+      );
+    } finally {
+      titleCtrl.dispose();
+      descCtrl.dispose();
+      if (mounted) setState(() => _acting = false);
+    }
+  }
+
+  Future<void> _closeSelection() async {
+    final selection = _selection ?? widget.selection;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Закрыть выбор темы?'),
+        content: const Text('Новые выборы будут недоступны.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Закрыть'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _acting = true);
+    try {
+      await _repo.closeTopicSelection(selectionId: selection.id);
+      await _load(silent: true);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Выбор темы закрыт')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось закрыть')),
+      );
+    } finally {
+      if (mounted) setState(() => _acting = false);
+    }
+  }
+
+  Future<void> _deleteSelection() async {
+    final selection = _selection ?? widget.selection;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Удалить выбор темы?'),
+        content: const Text('Действие будет отменено для всех участников.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _acting = true);
+    try {
+      await _repo.deleteGroupAction(
+        kind: 'topic',
+        entityId: selection.id,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Выбор темы удалён')),
+      );
+      Navigator.of(context).pop();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось удалить')),
+      );
+      if (mounted) setState(() => _acting = false);
+    }
+  }
+
   Future<void> _openSearchSheet() async {
     KeyboardDismissScope.unfocus(context);
     final initial = _searchCtrl.text;
@@ -318,16 +467,15 @@ class _TopicSelectionDetailScreenState
     final myPick = _myPickOption;
     final filtered = _filtered;
     final viewInsets = MediaQuery.viewInsetsOf(context);
-    final maxHeight = MediaQuery.sizeOf(context).height *
-        (widget.asBottomSheet ? 0.92 : 1.0);
+    final maxHeight =
+        MediaQuery.sizeOf(context).height * (widget.asBottomSheet ? 0.92 : 1.0);
 
     final body = Column(
       children: [
         Expanded(
           child: KeyboardDismissScope(
             child: CustomScrollView(
-              keyboardDismissBehavior:
-                  ScrollViewKeyboardDismissBehavior.onDrag,
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               slivers: [
                 SliverToBoxAdapter(
                   child: Padding(
@@ -369,6 +517,64 @@ class _TopicSelectionDetailScreenState
                           freeSlots: selection.freeSlots,
                           totalCapacity: selection.totalCapacity,
                         ),
+                        if (() {
+                          final hasActivity = selection.takenSlots > 0;
+                          final authorBeforeActivity =
+                              widget.canEditOwnBeforeActivity && !hasActivity;
+                          final canDeleteNow = widget.canManage ||
+                              (widget.canDelete &&
+                                  (widget.canManage || !hasActivity));
+                          return selection.isOpen &&
+                              (widget.canManage ||
+                                  authorBeforeActivity ||
+                                  canDeleteNow);
+                        }()) ...[
+                          const SizedBox(height: 10),
+                          Builder(
+                            builder: (context) {
+                              final hasActivity = selection.takenSlots > 0;
+                              final authorBeforeActivity =
+                                  widget.canEditOwnBeforeActivity &&
+                                      !hasActivity;
+                              final showDelete = widget.canManage ||
+                                  (widget.canDelete && !hasActivity) ||
+                                  authorBeforeActivity;
+                              return Wrap(
+                                spacing: 8,
+                                runSpacing: 4,
+                                children: [
+                                  if (widget.canManage || authorBeforeActivity)
+                                    OutlinedButton.icon(
+                                      onPressed:
+                                          _acting ? null : _editBeforeActivity,
+                                      icon: const Icon(Icons.edit_outlined,
+                                          size: 18),
+                                      label: const Text('Изменить'),
+                                    ),
+                                  if (widget.canManage)
+                                    OutlinedButton.icon(
+                                      onPressed:
+                                          _acting ? null : _closeSelection,
+                                      icon: const Icon(Icons.lock_outline,
+                                          size: 18),
+                                      label: const Text('Закрыть'),
+                                    ),
+                                  if (showDelete)
+                                    OutlinedButton.icon(
+                                      onPressed:
+                                          _acting ? null : _deleteSelection,
+                                      icon: Icon(Icons.delete_outline,
+                                          size: 18, color: cs.error),
+                                      label: Text(
+                                        'Удалить',
+                                        style: TextStyle(color: cs.error),
+                                      ),
+                                    ),
+                                ],
+                              );
+                            },
+                          ),
+                        ],
                         if (myPick != null) ...[
                           const SizedBox(height: 12),
                           Container(
@@ -418,8 +624,7 @@ class _TopicSelectionDetailScreenState
                                 Expanded(
                                   child: Text(
                                     _raceMessage!,
-                                    style:
-                                        theme.textTheme.bodyMedium?.copyWith(
+                                    style: theme.textTheme.bodyMedium?.copyWith(
                                       fontWeight: FontWeight.w700,
                                       color: const Color(0xFFB71C1C),
                                     ),
@@ -429,8 +634,8 @@ class _TopicSelectionDetailScreenState
                                   tooltip: 'Скрыть',
                                   onPressed: () =>
                                       setState(() => _raceMessage = null),
-                                  icon: const Icon(Icons.close_rounded,
-                                      size: 18),
+                                  icon:
+                                      const Icon(Icons.close_rounded, size: 18),
                                 ),
                               ],
                             ),
@@ -464,8 +669,7 @@ class _TopicSelectionDetailScreenState
                               ),
                               child: Row(
                                 children: [
-                                  Icon(Icons.search_rounded,
-                                      color: cs.primary),
+                                  Icon(Icons.search_rounded, color: cs.primary),
                                   const SizedBox(width: 10),
                                   Expanded(
                                     child: Text(
@@ -581,9 +785,7 @@ class _TopicSelectionDetailScreenState
                               borderRadius: BorderRadius.circular(16),
                               child: InkWell(
                                 borderRadius: BorderRadius.circular(16),
-                                onTap: !selection.isOpen ||
-                                        _acting ||
-                                        taken
+                                onTap: !selection.isOpen || _acting || taken
                                     ? null
                                     : () => _pick(o),
                                 child: Container(
@@ -605,8 +807,7 @@ class _TopicSelectionDetailScreenState
                                           children: [
                                             Text(
                                               o.title,
-                                              style: theme
-                                                  .textTheme.titleSmall
+                                              style: theme.textTheme.titleSmall
                                                   ?.copyWith(
                                                 fontWeight: FontWeight.w800,
                                                 color: taken
@@ -619,8 +820,7 @@ class _TopicSelectionDetailScreenState
                                               taken
                                                   ? 'Занято'
                                                   : 'Свободно ${o.freeSlots} из ${o.capacity}',
-                                              style: theme
-                                                  .textTheme.bodySmall
+                                              style: theme.textTheme.bodySmall
                                                   ?.copyWith(
                                                 color: taken
                                                     ? const Color(0xFFE53935)
@@ -630,13 +830,11 @@ class _TopicSelectionDetailScreenState
                                               ),
                                             ),
                                             if (names.isNotEmpty &&
-                                                selection
-                                                    .showResultsToAll) ...[
+                                                selection.showResultsToAll) ...[
                                               const SizedBox(height: 4),
                                               Text(
                                                 names.join(', '),
-                                                style: theme
-                                                    .textTheme.bodySmall
+                                                style: theme.textTheme.bodySmall
                                                     ?.copyWith(
                                                   color: Colors.black45,
                                                 ),
@@ -665,10 +863,10 @@ class _TopicSelectionDetailScreenState
                                           o.isFull)
                                         IconButton(
                                           tooltip: 'Действия организатора',
-                                          onPressed: () => _releaseForUser(
-                                              names.first, o),
-                                          icon: const Icon(
-                                              Icons.manage_accounts),
+                                          onPressed: () =>
+                                              _releaseForUser(names.first, o),
+                                          icon:
+                                              const Icon(Icons.manage_accounts),
                                         ),
                                     ],
                                   ),
@@ -833,8 +1031,7 @@ class _TopicSearchSheetState extends State<_TopicSearchSheet> {
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton(
-                    onPressed: () =>
-                        Navigator.pop(context, _ctrl.text.trim()),
+                    onPressed: () => Navigator.pop(context, _ctrl.text.trim()),
                     style: FilledButton.styleFrom(
                       minimumSize: const Size(0, 48),
                       shape: RoundedRectangleBorder(
@@ -926,7 +1123,8 @@ class _ChooserHero extends StatelessWidget {
                       ),
                     ],
                   ),
-                  child: Icon(Icons.topic_outlined, color: cs.primary, size: 28),
+                  child:
+                      Icon(Icons.topic_outlined, color: cs.primary, size: 28),
                 ),
                 const SizedBox(width: 14),
                 Expanded(

@@ -221,12 +221,27 @@ begin
     from public.users u
     where u.login = '24002820'
     limit 1;
-    -- best-effort: if they have a subject membership, capabilities must allow create
+    -- Prefer an active subject team (group_id + enrollment), never inactive orphans.
     select tm.team_id into v_subject_team
     from public.team_members tm
     join public.teams t on t.id = tm.team_id
+    join public.student_enrollments se
+      on se.user_id = tm.user_id
+     and se.group_id = t.group_id
+     and se.status = 'active'
+     and se.ended_at is null
     where tm.user_id = v_stu
       and coalesce(t.kind, 'subject') = 'subject'
+      and t.group_id is not null
+      and private.is_active_subject_team_for_group(t.id, t.group_id)
+      and not exists (
+        select 1
+        from public.chats c
+        join public.chat_academic_archives a on a.chat_id = c.id
+        where c.team_id = t.id
+          and c.type = 'team_main'
+      )
+    order by t.name
     limit 1;
     if v_subject_team is not null then
       v_subject_chat := private.team_main_chat_id(v_subject_team);
