@@ -39,6 +39,13 @@ class ChatComposerBar extends StatelessWidget {
   final bool showProposeInPlus;
   final bool showTopicSelectionInPlus;
   final bool showCollectionInPlus;
+  final bool proposeEnabled;
+  final bool topicSelectionEnabled;
+  final bool collectionEnabled;
+  final bool capabilitiesLoading;
+  final String? proposeDisabledReason;
+  final String? topicSelectionDisabledReason;
+  final String? collectionDisabledReason;
   final VoidCallback? onOpenTopicSelection;
   final VoidCallback? onOpenCollection;
 
@@ -74,6 +81,13 @@ class ChatComposerBar extends StatelessWidget {
     this.showProposeInPlus = true,
     this.showTopicSelectionInPlus = false,
     this.showCollectionInPlus = false,
+    this.proposeEnabled = true,
+    this.topicSelectionEnabled = true,
+    this.collectionEnabled = true,
+    this.capabilitiesLoading = false,
+    this.proposeDisabledReason,
+    this.topicSelectionDisabledReason,
+    this.collectionDisabledReason,
     this.onOpenTopicSelection,
     this.onOpenCollection,
     this.isUploading = false,
@@ -157,8 +171,14 @@ class ChatComposerBar extends StatelessWidget {
                 ChatPlusAction(
                   icon: Icons.assignment_add,
                   title: 'Новое задание',
-                  subtitle: 'Чтобы появилось у всех — нужны 2 голоса',
+                  subtitle: capabilitiesLoading
+                      ? 'Проверяем права…'
+                      : (proposeEnabled
+                          ? 'Чтобы появилось у всех — нужны 2 голоса'
+                          : (proposeDisabledReason ?? 'Недоступно')),
                   emphasized: true,
+                  enabled: proposeEnabled && !capabilitiesLoading,
+                  loading: capabilitiesLoading,
                   onTap: () async {
                     final res = await showAssignmentFormDialog(context);
                     if (res == null) return;
@@ -169,7 +189,13 @@ class ChatComposerBar extends StatelessWidget {
                 ChatPlusAction(
                   icon: Icons.format_list_numbered_rtl,
                   title: 'Выбор темы',
-                  subtitle: 'Список тем для распределения в группе',
+                  subtitle: capabilitiesLoading
+                      ? 'Проверяем права…'
+                      : (topicSelectionEnabled
+                          ? 'Список тем для распределения по предмету'
+                          : (topicSelectionDisabledReason ?? 'Недоступно')),
+                  enabled: topicSelectionEnabled && !capabilitiesLoading,
+                  loading: capabilitiesLoading,
                   onTap: () async {
                     onOpenTopicSelection?.call();
                   },
@@ -177,8 +203,14 @@ class ChatComposerBar extends StatelessWidget {
               if (showCollectionInPlus)
                 ChatPlusAction(
                   icon: Icons.volunteer_activism_outlined,
-                  title: 'Сбор',
-                  subtitle: 'Организация взноса (без оплаты в приложении)',
+                  title: 'Скинуться',
+                  subtitle: capabilitiesLoading
+                      ? 'Проверяем права…'
+                      : (collectionEnabled
+                          ? 'Организация взноса (без оплаты в приложении)'
+                          : (collectionDisabledReason ?? 'Недоступно')),
+                  enabled: collectionEnabled && !capabilitiesLoading,
+                  loading: capabilitiesLoading,
                   onTap: () async {
                     onOpenCollection?.call();
                   },

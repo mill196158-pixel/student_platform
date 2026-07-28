@@ -720,7 +720,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   _cPractice: 'Практика',
                   _cLab: 'Лабораторная',
                   _cAssignment: 'Задание',
-                  _cGroupAction: 'Выбор темы / Сбор',
+                  _cGroupAction: 'Задания группы',
                 },
                 onDatePicked: (picked) {
                   setState(() {
@@ -768,7 +768,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               _cPractice: 'Практика',
               _cLab: 'Лабораторная',
               _cAssignment: 'Задание',
-              _cGroupAction: 'Выбор темы / Сбор',
+              _cGroupAction: 'Задания группы',
             }),
 
             const Divider(height: 1),
@@ -811,7 +811,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           ),
           const SizedBox(height: 12),
         ],
-        if (assignments.isNotEmpty) ...[
+        if (assignments.isNotEmpty || groupActions.isNotEmpty) ...[
           const _ScheduleSectionLabel(title: 'Задания к дате'),
           const SizedBox(height: 10),
           for (final assignment in assignments) ...[
@@ -821,10 +821,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             ),
             const SizedBox(height: 12),
           ],
-        ],
-        if (groupActions.isNotEmpty) ...[
-          const _ScheduleSectionLabel(title: 'Выбор темы / Сбор'),
-          const SizedBox(height: 10),
           for (final action in groupActions) ...[
             ScheduleGroupActionCard(
               event: action,
@@ -903,7 +899,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           ),
           const SizedBox(height: 12),
         ],
-        if (assignments.isNotEmpty) ...[
+        if (assignments.isNotEmpty || groupActions.isNotEmpty) ...[
           const _ScheduleSectionLabel(title: 'Задания к дате'),
           const SizedBox(height: 10),
           for (final assignment in assignments) ...[
@@ -913,10 +909,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             ),
             const SizedBox(height: 12),
           ],
-        ],
-        if (groupActions.isNotEmpty) ...[
-          const _ScheduleSectionLabel(title: 'Выбор темы / Сбор'),
-          const SizedBox(height: 10),
           for (final action in groupActions) ...[
             ScheduleGroupActionCard(
               event: action,
@@ -1552,9 +1544,10 @@ class ScheduleGroupActionCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    event.kindLabel,
+                    event.neutralBadge,
                     style: theme.textTheme.labelSmall?.copyWith(
-                      color: Colors.black.withValues(alpha: 0.55),
+                      color:
+                          theme.colorScheme.onSurface.withValues(alpha: 0.55),
                     ),
                   ),
                 ],
@@ -1570,12 +1563,14 @@ class ScheduleGroupActionCard extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          event.title.isEmpty ? event.kindLabel : event.title,
+                          event.title.isEmpty
+                              ? event.neutralBadge
+                              : event.title,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.w800,
-                            color: Colors.black,
+                            color: theme.colorScheme.onSurface,
                             height: 1.08,
                           ),
                         ),

@@ -13,6 +13,8 @@ import '../models/chat_group_actions.dart';
 import 'mlkit_topic_ocr_adapter.dart';
 import 'pdfrx_topic_pdf_page_renderer.dart';
 import 'topic_image_preprocess.dart';
+import '../../../../common/keyboard_dismiss_scope.dart';
+import 'topic_extraction_service.dart';
 import 'topic_list_models.dart';
 import 'topic_list_parser.dart';
 import 'topic_list_review_screen.dart';
@@ -51,7 +53,6 @@ class _CreateTopicSelectionScreenState
   final _imagePreprocessor = createDefaultTopicImagePreprocessor();
 
   DateTime? _deadline;
-  DateTime? _completionDeadline;
   bool _allowChange = true;
   bool _showResultsToAll = true;
   String? _sourceFileName;
@@ -98,38 +99,45 @@ class _CreateTopicSelectionScreenState
     return _ownedOcrAdapter ??= createDefaultTopicOcrAdapter();
   }
 
-  Future<void> _pickDeadline({required bool completion}) async {
+  TopicExtractionService get _extraction =>
+      LocalTopicExtractionService(parser: _parser);
+
+  Future<void> _pickDeadline() async {
+    KeyboardDismissScope.unfocus(context);
     final now = DateTime.now();
     final picked = await showDatePicker(
       context: context,
       firstDate: now,
       lastDate: now.add(const Duration(days: 730)),
-      initialDate: now,
-      helpText: completion ? 'Срок выполнения' : 'Дедлайн выбора',
+      initialDate: _deadline ?? now,
+      helpText: 'Выбрать до',
+      cancelText: 'Отмена',
+      confirmText: 'Выбрать',
     );
     if (picked == null || !mounted) return;
     final time = await showTimePicker(
       context: context,
-      initialTime: TimeOfDay.fromDateTime(now.add(const Duration(hours: 2))),
+      initialTime: TimeOfDay.fromDateTime(
+        _deadline ?? now.add(const Duration(hours: 2)),
+      ),
+      helpText: 'Выбрать до',
+      cancelText: 'Отмена',
+      confirmText: 'Готово',
     );
     if (time == null || !mounted) return;
-    final value = DateTime(
-      picked.year,
-      picked.month,
-      picked.day,
-      time.hour,
-      time.minute,
-    );
     setState(() {
-      if (completion) {
-        _completionDeadline = value;
-      } else {
-        _deadline = value;
-      }
+      _deadline = DateTime(
+        picked.year,
+        picked.month,
+        picked.day,
+        time.hour,
+        time.minute,
+      );
     });
   }
 
   Future<void> _pickSourceFile() async {
+    KeyboardDismissScope.unfocus(context);
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: _allowedExtensions,
@@ -180,6 +188,7 @@ class _CreateTopicSelectionScreenState
   }
 
   Future<void> _pickImageSource(ImageSource source) async {
+    KeyboardDismissScope.unfocus(context);
     final file = await _fileService.pickImage(source: source);
     if (file == null || !mounted) return;
 
@@ -366,6 +375,7 @@ class _CreateTopicSelectionScreenState
     required List<TopicOptionDraft> initialOptions,
     TopicParseResult? parseResult,
   }) async {
+    KeyboardDismissScope.unfocus(context);
     final sourceId = await _ensureSourceUploaded();
     if (!mounted) return;
 
@@ -381,7 +391,7 @@ class _CreateTopicSelectionScreenState
           title: _titleCtrl.text.trim(),
           description: _descCtrl.text.trim(),
           deadlineAt: _deadline,
-          completionDeadlineAt: _completionDeadline,
+          completionDeadlineAt: null,
           allowChange: _allowChange,
           showResultsToAll: _showResultsToAll,
           sourceFileId: sourceId,
@@ -438,7 +448,7 @@ class _CreateTopicSelectionScreenState
         setState(() => _sourceFileBytes = prepared);
       }
 
-      var result = await _parser.parseBytes(
+      var result = await _extraction.extractFromBytes(
         bytes: bytes,
         sourceName: name,
         ocr: _ocrAdapter(),
@@ -541,133 +551,166 @@ class _CreateTopicSelectionScreenState
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
     return Scaffold(
       appBar: AppBar(title: const Text('Выбор темы')),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            TextFormField(
-              controller: _titleCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Название',
-                hintText: 'Например: Темы докладов',
+      body: KeyboardDismissScope(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            children: [
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
+                  children: [
+                    Text(
+                      'Новый выбор темы',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Название, один срок и список тем. Распознанный файл '
+                      'заполнит эту же форму.',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: cs.onSurface.withValues(alpha: 0.65),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    TextFormField(
+                      controller: _titleCtrl,
+                      textInputAction: TextInputAction.next,
+                      decoration: const InputDecoration(
+                        labelText: 'Название',
+                        hintText: 'Например: Выбрать тему доклада',
+                        border: OutlineInputBorder(),
+                      ),
+                      validator: (v) =>
+                          (v ?? '').trim().isEmpty ? 'Укажите название' : null,
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _descCtrl,
+                      minLines: 2,
+                      maxLines: 4,
+                      textInputAction: TextInputAction.done,
+                      onEditingComplete: () =>
+                          KeyboardDismissScope.unfocus(context),
+                      decoration: const InputDecoration(
+                        labelText: 'Краткое описание',
+                        hintText: 'Необязательно',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Выбрать до'),
+                      subtitle: Text(_fmt(_deadline)),
+                      trailing: const Icon(Icons.event_outlined),
+                      onTap: _pickDeadline,
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Разрешить смену темы'),
+                      value: _allowChange,
+                      onChanged: (v) => setState(() => _allowChange = v),
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Показывать, кто выбрал'),
+                      subtitle: const Text(
+                        'Иначе только организаторы видят занятость по именам',
+                      ),
+                      value: _showResultsToAll,
+                      onChanged: (v) => setState(() => _showResultsToAll = v),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Источник тем',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: _pickSourceFile,
+                      icon: const Icon(Icons.attach_file_outlined),
+                      label: Text(
+                        _sourceFileName ?? 'Excel, Word, PDF или фото',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: _parsing ? null : _showImagePickOptions,
+                      icon: const Icon(Icons.photo_camera_outlined),
+                      label: const Text('Сфотографировать список'),
+                    ),
+                    if (_parseProgress != null) ...[
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(child: Text(_parseProgress!)),
+                        ],
+                      ),
+                    ],
+                    if (_uploadWarning != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        _uploadWarning!,
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: cs.error),
+                      ),
+                    ],
+                  ],
+                ),
               ),
-              validator: (v) =>
-                  (v ?? '').trim().isEmpty ? 'Укажите название' : null,
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _descCtrl,
-              minLines: 2,
-              maxLines: 4,
-              decoration: const InputDecoration(
-                labelText: 'Описание',
-                hintText: 'Необязательно',
-              ),
-            ),
-            const SizedBox(height: 12),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Дедлайн выбора'),
-              subtitle: Text(_fmt(_deadline)),
-              trailing: const Icon(Icons.event_outlined),
-              onTap: () => _pickDeadline(completion: false),
-            ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Срок выполнения (необязательно)'),
-              subtitle: Text(_fmt(_completionDeadline)),
-              trailing: const Icon(Icons.event_available_outlined),
-              onTap: () => _pickDeadline(completion: true),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Разрешить смену темы'),
-              value: _allowChange,
-              onChanged: (v) => setState(() => _allowChange = v),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Показывать результаты всем'),
-              subtitle: const Text(
-                'Иначе только организаторы видят, кто что выбрал',
-              ),
-              value: _showResultsToAll,
-              onChanged: (v) => setState(() => _showResultsToAll = v),
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: _pickSourceFile,
-              icon: const Icon(Icons.attach_file_outlined),
-              label: Text(
-                _sourceFileName ?? 'Исходный файл (Excel, Word, PDF, фото)',
-              ),
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: _parsing ? null : _showImagePickOptions,
-              icon: const Icon(Icons.photo_camera_outlined),
-              label: const Text('Сфотографировать или выбрать из галереи'),
-            ),
-            if (_parseProgress != null) ...[
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+              SafeArea(
+                top: false,
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(16, 8, 16, 12 + bottomInset),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (_sourceFileName != null) ...[
+                        FilledButton(
+                          onPressed: _parsing ? null : _continueFromParse,
+                          child: _parsing
+                              ? const SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Text('Распознать и проверить'),
+                        ),
+                        const SizedBox(height: 8),
+                        OutlinedButton(
+                          onPressed: _parsing ? null : _continueManual,
+                          child: const Text('Ввести темы вручную'),
+                        ),
+                      ] else
+                        FilledButton(
+                          onPressed: _continueManual,
+                          child: const Text('Ввести темы вручную'),
+                        ),
+                    ],
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(child: Text(_parseProgress!)),
-                ],
+                ),
               ),
             ],
-            if (_uploadWarning != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                _uploadWarning!,
-                style:
-                    theme.textTheme.bodySmall?.copyWith(color: Colors.orange),
-              ),
-            ],
-            if (_sourceFileId != null) ...[
-              const SizedBox(height: 4),
-              Text(
-                'Файл загружен в чат',
-                style: theme.textTheme.bodySmall?.copyWith(color: Colors.green),
-              ),
-            ],
-            const SizedBox(height: 20),
-            Text(
-              'Дальше — проверка списка тем перед публикацией в чат.',
-              style: theme.textTheme.bodySmall?.copyWith(color: Colors.black54),
-            ),
-            const SizedBox(height: 16),
-            if (_sourceFileName != null) ...[
-              FilledButton(
-                onPressed: _parsing ? null : _continueFromParse,
-                child: _parsing
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('Разобрать файл и проверить'),
-              ),
-              const SizedBox(height: 8),
-              OutlinedButton(
-                onPressed: _parsing ? null : _continueManual,
-                child: const Text('Добавить темы вручную'),
-              ),
-            ] else
-              FilledButton(
-                onPressed: _continueManual,
-                child: const Text('Добавить темы вручную'),
-              ),
-          ],
+          ),
         ),
       ),
     );

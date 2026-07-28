@@ -47,7 +47,7 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
       firstDate: now,
       lastDate: now.add(const Duration(days: 730)),
       initialDate: now,
-      helpText: 'Дедлайн сбора',
+      helpText: 'Скинуться до',
     );
     if (picked == null || !mounted) return;
     final time = await showTimePicker(
@@ -82,12 +82,12 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
       if (!mounted) return;
       Navigator.of(context).pop(true);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Сбор создан и опубликован в чат')),
+        const SnackBar(content: Text('«Скинуться» опубликовано в чат')),
       );
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Не удалось создать сбор')),
+        const SnackBar(content: Text('Не удалось создать «Скинуться»')),
       );
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -107,11 +107,12 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Сбор группы')),
+      appBar: AppBar(title: const Text('Скинуться')),
       body: Form(
         key: _formKey,
         child: ListView(
           padding: const EdgeInsets.all(16),
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
           children: [
             TextFormField(
               controller: _titleCtrl,
@@ -144,7 +145,7 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
             const SizedBox(height: 8),
             ListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('Дедлайн'),
+              title: const Text('Скинуться до'),
               subtitle: Text(_fmt(_deadline)),
               trailing: const Icon(Icons.event_outlined),
               onTap: _pickDeadline,

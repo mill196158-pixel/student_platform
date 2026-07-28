@@ -144,7 +144,7 @@ class HomeGroupActionPreview {
   bool get isCollection => eventType == 'collection_deadline';
 
   String get kindLabel =>
-      isTopic ? 'Выбор темы' : (isCollection ? 'Сбор группы' : 'Группа');
+      isTopic ? 'Задание по предмету' : (isCollection ? 'Задание группы' : '');
 }
 
 class HomeNewsItem {

@@ -127,8 +127,13 @@ void main() {
   });
 
   test('Plus menu visibility matrix for chat kinds', () {
-    bool showTopic({required bool isDm, required bool canManage}) =>
-        !isDm && canManage;
+    // Stage 13.10 product matrix supersedes 13.9 (topic subject-only).
+    bool showTopic({
+      required bool isDm,
+      required bool canManage,
+      required String teamKind,
+    }) =>
+        !isDm && canManage && teamKind == 'subject';
     bool showCollection({
       required bool isDm,
       required bool canManage,
@@ -136,8 +141,15 @@ void main() {
     }) =>
         !isDm && canManage && teamKind == 'group_space';
 
-    expect(showTopic(isDm: true, canManage: true), isFalse);
-    expect(showTopic(isDm: false, canManage: true), isTrue);
+    expect(showTopic(isDm: true, canManage: true, teamKind: 'dm'), isFalse);
+    expect(
+      showTopic(isDm: false, canManage: true, teamKind: 'subject'),
+      isTrue,
+    );
+    expect(
+      showTopic(isDm: false, canManage: true, teamKind: 'group_space'),
+      isFalse,
+    );
     expect(
       showCollection(isDm: false, canManage: true, teamKind: 'subject'),
       isFalse,

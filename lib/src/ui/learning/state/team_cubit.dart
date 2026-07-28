@@ -511,7 +511,7 @@ class TeamCubit extends Cubit<TeamState> {
     await _hydrateAssignmentIdsInChat();
   }
 
-  // ----- роль старосты -----
+  // ----- роль старосты / организатора -----
   Future<bool> _fetchIsStarosta(String teamId) async {
     final sb = Supabase.instance.client;
     final uid = sb.auth.currentUser?.id;
@@ -523,11 +523,44 @@ class TeamCubit extends Cubit<TeamState> {
           .eq('team_id', teamId)
           .eq('user_id', uid)
           .maybeSingle();
-      if (row == null) return false;
-      final role = (row['role'] ?? '').toString();
-      return ['starosta', 'teacher', 'admin', 'owner'].contains(role);
-    } catch (_) {
+      if (row != null) {
+        final role = (row['role'] ?? '').toString();
+        if (['starosta', 'teacher', 'admin', 'owner'].contains(role)) {
+          return true;
+        }
+      }
+      // Group-space organizers may be granted without a privileged team_members
+      // role until cache sync; check grants by team.group_id.
+      final team = state.team;
+      if (team.isGroupSpaceChat || team.kind == 'group_space') {
+        final groupId = await _resolveGroupIdForTeam(teamId);
+        if (groupId == null || groupId.isEmpty) return false;
+        final grant = await sb
+            .from('group_space_organizer_grants')
+            .select('user_id')
+            .eq('group_id', groupId)
+            .eq('user_id', uid)
+            .maybeSingle();
+        return grant != null;
+      }
       return false;
+    } catch (_) {
+      // Keep last-known role on transient network errors.
+      return state.isStarosta;
+    }
+  }
+
+  Future<String?> _resolveGroupIdForTeam(String teamId) async {
+    try {
+      final row = await Supabase.instance.client
+          .from('teams')
+          .select('group_id')
+          .eq('id', teamId)
+          .maybeSingle();
+      final id = row?['group_id']?.toString().trim() ?? '';
+      return id.isEmpty ? null : id;
+    } catch (_) {
+      return null;
     }
   }
 

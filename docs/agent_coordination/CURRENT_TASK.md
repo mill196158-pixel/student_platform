@@ -1,6 +1,6 @@
 # CURRENT_TASK
 
-* Status: STAGE_13_8_AND_13_9_TECHNICALLY_DONE — physical OCR smoke + two-device topic race + controlled push remain
+* Status: STAGE_13_10_TECHNICALLY_DONE — physical OCR smoke + two-device topic race + controlled push remain (owner)
 * Branch: `refactor/chat-tab`
 * Codex thread: `019fa373-81f2-7962-a8c9-81d86cb62311`
 * Remote project: `gwdanmwluhrcfxbnplwd`
@@ -20,8 +20,11 @@
   * `20260727235317_stage13_9_group_action_notifications`
   * `20260727235707_stage13_9_fix_card_msg_type` (card `msg_type` text hotfix)
   * `20260728000451_stage13_8_fix_lifecycle_search_path` (search_path hardening)
-* Stage 13.8/13.9 security reviews PASS; notification role-play PASS after hotfix
-* Edge `dispatch-push-notifications` **v5** ACTIVE (`verify_jwt=false`, custom bearer; unauth → 401)
+  * `20260728101245_stage13_10_group_actions_ux`
+* Stage 13.10: composer capabilities matrix, subject-only topics, group_space collections («Скинуться»), assignment RPC harden, collection FSM + `organizer_comment`, legacy group_space topic cancelled
+* Local: ephemeral assignments baseline + full behavioral roleplay PASS; security review PASS
+* Remote: assertive security PASS; BEGIN…ROLLBACK behavioral smoke PASS; counts unchanged (assignments=4, votes=8, messages=259, teams=20, outbox backlog=0)
+* Edge `dispatch-push-notifications` **v5** ACTIVE — **not redeployed** in 13.10 (unchanged)
 * Current term unchanged: **весна 2026**; autumn 2026 not created; pending outbox = 0
 
 ## Residuals (non-technical / owner)

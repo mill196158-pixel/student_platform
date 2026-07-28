@@ -31,8 +31,12 @@ class ScheduleGroupActionEvent {
   bool get isTopic => eventType == 'topic_deadline';
   bool get isCollection => eventType == 'collection_deadline';
 
-  String get kindLabel =>
-      isTopic ? 'Выбор темы' : (isCollection ? 'Сбор' : 'Группа');
+  /// Neutral badge for Schedule UI (never show technical kind words).
+  String get neutralBadge =>
+      isTopic ? 'Задание по предмету' : (isCollection ? 'Задание группы' : '');
+
+  @Deprecated('Use neutralBadge / real title instead of technical kind labels')
+  String get kindLabel => neutralBadge;
 
   String get statusLabel {
     final raw = (status ?? '').trim();
@@ -45,7 +49,8 @@ class ScheduleGroupActionEvent {
       case 'cancelled':
         return 'Отменено';
       default:
-        return raw;
+        // Never leak raw technical tokens into Schedule UI.
+        return 'Открыто';
     }
   }
 

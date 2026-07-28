@@ -421,7 +421,7 @@ class _TopicListReviewScreenState extends State<TopicListReviewScreen> {
         title: widget.title,
         description: widget.description,
         deadlineAt: widget.deadlineAt,
-        completionDeadlineAt: widget.completionDeadlineAt,
+        completionDeadlineAt: null,
         allowChange: widget.allowChange,
         showResultsToAll: widget.showResultsToAll,
         sourceFileId: widget.sourceFileId,

@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../../common/keyboard_dismiss_scope.dart';
 import '../../../models/assignment.dart';
 
 typedef AssignmentFormResult = (
@@ -75,6 +76,7 @@ class _AssignmentFormSheetState extends State<_AssignmentFormSheet> {
   }
 
   Future<void> _pickDueDate() async {
+    KeyboardDismissScope.unfocus(context);
     final now = DateTime.now();
     final initial = _parseDue(_due) ?? now;
     final picked = await showDatePicker(
@@ -97,6 +99,7 @@ class _AssignmentFormSheetState extends State<_AssignmentFormSheet> {
 
   Future<void> _pickAttachments() async {
     if (_pickingFile) return;
+    KeyboardDismissScope.unfocus(context);
     setState(() => _pickingFile = true);
     try {
       final result = await FilePicker.platform.pickFiles(allowMultiple: true);
@@ -119,6 +122,7 @@ class _AssignmentFormSheetState extends State<_AssignmentFormSheet> {
 
   void _submit() {
     if (!(_formKey.currentState?.validate() ?? false)) return;
+    KeyboardDismissScope.unfocus(context);
     HapticFeedback.lightImpact();
     final link = _link.text.trim();
     Navigator.pop(context, (
@@ -156,218 +160,227 @@ class _AssignmentFormSheetState extends State<_AssignmentFormSheet> {
               child: Column(
                 children: [
                   Expanded(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
-                      child: Form(
-                        key: _formKey,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                          Center(
-                            child: Container(
-                              width: 42,
-                              height: 4,
-                              margin: const EdgeInsets.only(bottom: 14),
-                              decoration: BoxDecoration(
-                                color: cs.outlineVariant,
-                                borderRadius: BorderRadius.circular(99),
-                              ),
-                            ),
-                          ),
-                          _HeroHeader(isEditing: _isEditing),
-                          const SizedBox(height: 20),
-                          _SectionLabel(
-                            icon: Icons.edit_note_rounded,
-                            label: 'Суть задания',
-                          ),
-                          const SizedBox(height: 10),
-                          TextFormField(
-                            controller: _title,
-                            autofocus: !_isEditing,
-                            textInputAction: TextInputAction.next,
-                            textCapitalization: TextCapitalization.sentences,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w700,
-                              color: Colors.black87,
-                            ),
-                            decoration: _fieldDecoration(
-                              label: 'Название',
-                              hint: 'Например: Практика по интегралам',
-                              icon: Icons.title_rounded,
-                              suffix: titleLen > 0
-                                  ? Text(
-                                      '$titleLen',
-                                      style: TextStyle(
-                                        color: cs.onSurfaceVariant,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    )
-                                  : null,
-                            ),
-                            validator: (value) => (value ?? '').trim().isEmpty
-                                ? 'Добавь название задания'
-                                : null,
-                          ),
-                          const SizedBox(height: 12),
-                          TextFormField(
-                            controller: _desc,
-                            minLines: 4,
-                            maxLines: 8,
-                            textInputAction: TextInputAction.newline,
-                            textCapitalization: TextCapitalization.sentences,
-                            style: const TextStyle(color: Colors.black87),
-                            decoration: _fieldDecoration(
-                              label: 'Что сделать',
-                              hint:
-                                  'Опиши задачу, формат сдачи и важные условия',
-                              icon: Icons.notes_rounded,
-                              alignLabelWithHint: true,
-                            ),
-                            validator: (value) => (value ?? '').trim().isEmpty
-                                ? 'Опиши, что нужно сделать'
-                                : null,
-                          ),
-                          const SizedBox(height: 20),
-                          _SectionLabel(
-                            icon: Icons.event_available_rounded,
-                            label: 'Срок',
-                            trailing: _due == null
-                                ? 'Необязательно'
-                                : 'Выбран: $_due',
-                          ),
-                          const SizedBox(height: 10),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
+                    child: KeyboardDismissScope(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
+                        keyboardDismissBehavior:
+                            ScrollViewKeyboardDismissBehavior.onDrag,
+                        child: Form(
+                          key: _formKey,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              _QuickChip(
-                                label: 'Завтра',
-                                selected: _isDueInDays(1),
-                                onTap: () => _setQuickDue(1),
-                              ),
-                              _QuickChip(
-                                label: '+3 дня',
-                                selected: _isDueInDays(3),
-                                onTap: () => _setQuickDue(3),
-                              ),
-                              _QuickChip(
-                                label: 'Через неделю',
-                                selected: _isDueInDays(7),
-                                onTap: () => _setQuickDue(7),
-                              ),
-                              _QuickChip(
-                                label: 'Календарь',
-                                icon: Icons.calendar_month_rounded,
-                                selected: _due != null &&
-                                    !_isDueInDays(1) &&
-                                    !_isDueInDays(3) &&
-                                    !_isDueInDays(7),
-                                onTap: _pickDueDate,
-                              ),
-                              if (_due != null)
-                                _QuickChip(
-                                  label: 'Сбросить',
-                                  icon: Icons.close_rounded,
-                                  selected: false,
-                                  tone: _ChipTone.muted,
-                                  onTap: () => setState(() => _due = null),
-                                ),
-                            ],
-                          ),
-                          const SizedBox(height: 20),
-                          _SectionLabel(
-                            icon: Icons.attachment_rounded,
-                            label: 'Материалы',
-                            trailing: 'Ссылка и файлы',
-                          ),
-                          const SizedBox(height: 10),
-                          if (!_showLink)
-                            _SoftActionTile(
-                              icon: Icons.link_rounded,
-                              title: 'Добавить ссылку',
-                              subtitle: 'Google Drive, GitHub, LMS…',
-                              onTap: () => setState(() => _showLink = true),
-                            )
-                          else ...[
-                            TextFormField(
-                              controller: _link,
-                              keyboardType: TextInputType.url,
-                              textInputAction: TextInputAction.done,
-                              style: const TextStyle(color: Colors.black87),
-                              decoration: _fieldDecoration(
-                                label: 'Ссылка',
-                                hint: 'https://…',
-                                icon: Icons.link_rounded,
-                                suffix: IconButton(
-                                  tooltip: 'Убрать ссылку',
-                                  onPressed: () {
-                                    _link.clear();
-                                    setState(() => _showLink = false);
-                                  },
-                                  icon: const Icon(Icons.close_rounded,
-                                      size: 20),
+                              Center(
+                                child: Container(
+                                  width: 42,
+                                  height: 4,
+                                  margin: const EdgeInsets.only(bottom: 14),
+                                  decoration: BoxDecoration(
+                                    color: cs.outlineVariant,
+                                    borderRadius: BorderRadius.circular(99),
+                                  ),
                                 ),
                               ),
-                            ),
-                            const SizedBox(height: 8),
-                          ],
-                          const SizedBox(height: 8),
-                          _SoftActionTile(
-                            icon: Icons.upload_file_rounded,
-                            title: _pickingFile
-                                ? 'Выбираем файлы…'
-                                : 'Прикрепить файлы',
-                            subtitle: _files.isEmpty
-                                ? 'PDF, фото, документы — по желанию'
-                                : 'Файлов: ${_files.length}',
-                            busy: _pickingFile,
-                            onTap: _pickingFile ? null : _pickAttachments,
-                          ),
-                          if (_files.isNotEmpty) ...[
-                            const SizedBox(height: 10),
-                            for (var i = 0; i < _files.length; i++)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: _AttachmentTile(
-                                  name: _files[i]['name'] ?? 'Файл',
-                                  path: _files[i]['path'] ?? '',
-                                  onRemove: () =>
-                                      setState(() => _files.removeAt(i)),
+                              _HeroHeader(isEditing: _isEditing),
+                              const SizedBox(height: 20),
+                              _SectionLabel(
+                                icon: Icons.edit_note_rounded,
+                                label: 'Суть задания',
+                              ),
+                              const SizedBox(height: 10),
+                              TextFormField(
+                                controller: _title,
+                                autofocus: !_isEditing,
+                                textInputAction: TextInputAction.next,
+                                textCapitalization:
+                                    TextCapitalization.sentences,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.black87,
                                 ),
+                                decoration: _fieldDecoration(
+                                  label: 'Название',
+                                  hint: 'Например: Практика по интегралам',
+                                  icon: Icons.title_rounded,
+                                  suffix: titleLen > 0
+                                      ? Text(
+                                          '$titleLen',
+                                          style: TextStyle(
+                                            color: cs.onSurfaceVariant,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        )
+                                      : null,
+                                ),
+                                validator: (value) =>
+                                    (value ?? '').trim().isEmpty
+                                        ? 'Добавь название задания'
+                                        : null,
                               ),
-                          ],
-                          const SizedBox(height: 8),
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: cs.primary.withValues(alpha: 0.06),
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(
-                                color: cs.primary.withValues(alpha: 0.10),
+                              const SizedBox(height: 12),
+                              TextFormField(
+                                controller: _desc,
+                                minLines: 4,
+                                maxLines: 8,
+                                textInputAction: TextInputAction.newline,
+                                textCapitalization:
+                                    TextCapitalization.sentences,
+                                style: const TextStyle(color: Colors.black87),
+                                decoration: _fieldDecoration(
+                                  label: 'Что сделать',
+                                  hint:
+                                      'Опиши задачу, формат сдачи и важные условия',
+                                  icon: Icons.notes_rounded,
+                                  alignLabelWithHint: true,
+                                ),
+                                validator: (value) =>
+                                    (value ?? '').trim().isEmpty
+                                        ? 'Опиши, что нужно сделать'
+                                        : null,
                               ),
-                            ),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Icon(Icons.tips_and_updates_outlined,
-                                    size: 18, color: cs.primary),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    _isEditing
-                                        ? 'После сохранения карточка обновится в чате и на вкладке «Задания».'
-                                        : 'Чтобы задание появилось у всех, нужны 2 голоса одногруппников.',
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      color: cs.onSurfaceVariant,
-                                      height: 1.35,
+                              const SizedBox(height: 20),
+                              _SectionLabel(
+                                icon: Icons.event_available_rounded,
+                                label: 'Срок',
+                                trailing: _due == null
+                                    ? 'Необязательно'
+                                    : 'Выбран: $_due',
+                              ),
+                              const SizedBox(height: 10),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  _QuickChip(
+                                    label: 'Завтра',
+                                    selected: _isDueInDays(1),
+                                    onTap: () => _setQuickDue(1),
+                                  ),
+                                  _QuickChip(
+                                    label: '+3 дня',
+                                    selected: _isDueInDays(3),
+                                    onTap: () => _setQuickDue(3),
+                                  ),
+                                  _QuickChip(
+                                    label: 'Через неделю',
+                                    selected: _isDueInDays(7),
+                                    onTap: () => _setQuickDue(7),
+                                  ),
+                                  _QuickChip(
+                                    label: 'Календарь',
+                                    icon: Icons.calendar_month_rounded,
+                                    selected: _due != null &&
+                                        !_isDueInDays(1) &&
+                                        !_isDueInDays(3) &&
+                                        !_isDueInDays(7),
+                                    onTap: _pickDueDate,
+                                  ),
+                                  if (_due != null)
+                                    _QuickChip(
+                                      label: 'Сбросить',
+                                      icon: Icons.close_rounded,
+                                      selected: false,
+                                      tone: _ChipTone.muted,
+                                      onTap: () => setState(() => _due = null),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 20),
+                              _SectionLabel(
+                                icon: Icons.attachment_rounded,
+                                label: 'Материалы',
+                                trailing: 'Ссылка и файлы',
+                              ),
+                              const SizedBox(height: 10),
+                              if (!_showLink)
+                                _SoftActionTile(
+                                  icon: Icons.link_rounded,
+                                  title: 'Добавить ссылку',
+                                  subtitle: 'Google Drive, GitHub, LMS…',
+                                  onTap: () => setState(() => _showLink = true),
+                                )
+                              else ...[
+                                TextFormField(
+                                  controller: _link,
+                                  keyboardType: TextInputType.url,
+                                  textInputAction: TextInputAction.done,
+                                  style: const TextStyle(color: Colors.black87),
+                                  decoration: _fieldDecoration(
+                                    label: 'Ссылка',
+                                    hint: 'https://…',
+                                    icon: Icons.link_rounded,
+                                    suffix: IconButton(
+                                      tooltip: 'Убрать ссылку',
+                                      onPressed: () {
+                                        _link.clear();
+                                        setState(() => _showLink = false);
+                                      },
+                                      icon: const Icon(Icons.close_rounded,
+                                          size: 20),
                                     ),
                                   ),
                                 ),
+                                const SizedBox(height: 8),
                               ],
-                            ),
+                              const SizedBox(height: 8),
+                              _SoftActionTile(
+                                icon: Icons.upload_file_rounded,
+                                title: _pickingFile
+                                    ? 'Выбираем файлы…'
+                                    : 'Прикрепить файлы',
+                                subtitle: _files.isEmpty
+                                    ? 'PDF, фото, документы — по желанию'
+                                    : 'Файлов: ${_files.length}',
+                                busy: _pickingFile,
+                                onTap: _pickingFile ? null : _pickAttachments,
+                              ),
+                              if (_files.isNotEmpty) ...[
+                                const SizedBox(height: 10),
+                                for (var i = 0; i < _files.length; i++)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 8),
+                                    child: _AttachmentTile(
+                                      name: _files[i]['name'] ?? 'Файл',
+                                      path: _files[i]['path'] ?? '',
+                                      onRemove: () =>
+                                          setState(() => _files.removeAt(i)),
+                                    ),
+                                  ),
+                              ],
+                              const SizedBox(height: 8),
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: cs.primary.withValues(alpha: 0.06),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: cs.primary.withValues(alpha: 0.10),
+                                  ),
+                                ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Icon(Icons.tips_and_updates_outlined,
+                                        size: 18, color: cs.primary),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        _isEditing
+                                            ? 'После сохранения карточка обновится в чате и на вкладке «Задания».'
+                                            : 'Чтобы задание появилось у всех, нужны 2 голоса одногруппников.',
+                                        style:
+                                            theme.textTheme.bodySmall?.copyWith(
+                                          color: cs.onSurfaceVariant,
+                                          height: 1.35,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
                         ),
                       ),
                     ),
@@ -569,9 +582,7 @@ class _HeroHeader extends StatelessWidget {
                     ],
                   ),
                   child: Icon(
-                    isEditing
-                        ? Icons.edit_note_rounded
-                        : Icons.assignment_add,
+                    isEditing ? Icons.edit_note_rounded : Icons.assignment_add,
                     color: cs.primary,
                     size: 28,
                   ),
@@ -696,9 +707,8 @@ class _QuickChip extends StatelessWidget {
         : (isMuted
             ? Colors.black.withValues(alpha: 0.05)
             : const Color(0xFFF6F7FB));
-    final fg = selected
-        ? cs.onPrimary
-        : (isMuted ? Colors.black54 : Colors.black87);
+    final fg =
+        selected ? cs.onPrimary : (isMuted ? Colors.black54 : Colors.black87);
 
     return Material(
       color: bg,
@@ -711,9 +721,7 @@ class _QuickChip extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(999),
             border: Border.all(
-              color: selected
-                  ? Colors.transparent
-                  : const Color(0xFFE1E5EF),
+              color: selected ? Colors.transparent : const Color(0xFFE1E5EF),
             ),
           ),
           child: Row(
@@ -864,9 +872,7 @@ class _AttachmentTile extends StatelessWidget {
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(
-              isImage
-                  ? Icons.image_outlined
-                  : Icons.insert_drive_file_outlined,
+              isImage ? Icons.image_outlined : Icons.insert_drive_file_outlined,
               size: 18,
               color: cs.primary,
             ),

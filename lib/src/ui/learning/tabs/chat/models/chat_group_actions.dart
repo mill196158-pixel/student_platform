@@ -33,6 +33,9 @@ class ChatTopicSelection {
   bool get isOpen => status == 'open';
 
   factory ChatTopicSelection.fromJson(Map<String, dynamic> json) {
+    final deadline = DateTime.tryParse(json['deadline_at']?.toString() ?? '');
+    final completion =
+        DateTime.tryParse(json['completion_deadline_at']?.toString() ?? '');
     return ChatTopicSelection(
       id: json['id'].toString(),
       title: (json['title'] ?? '').toString(),
@@ -40,9 +43,9 @@ class ChatTopicSelection {
       status: (json['status'] ?? 'open').toString(),
       allowChange: json['allow_change'] != false,
       showResultsToAll: json['show_results_to_all'] != false,
-      deadlineAt: DateTime.tryParse(json['deadline_at']?.toString() ?? ''),
-      completionDeadlineAt:
-          DateTime.tryParse(json['completion_deadline_at']?.toString() ?? ''),
+      // Canonical UI deadline: prefer deadline_at, fall back to legacy completion.
+      deadlineAt: deadline ?? completion,
+      completionDeadlineAt: completion,
       sourceFileId: _nullableId(json['source_file_id']),
       cardMessageId: _nullableId(json['card_message_id']),
       freeSlots: _asInt(json['free_slots']),

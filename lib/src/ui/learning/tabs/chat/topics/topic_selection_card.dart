@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../models/message.dart';
+import '../../../state/team_cubit.dart';
+import '../../../../group_space/group_space_screen.dart';
 import '../data/chat_group_actions_repository.dart';
 import '../models/chat_group_actions.dart';
 import 'topic_selection_detail_screen.dart';
 
-/// In-chat card for `content.card = topic_selection`.
+/// Compact in-chat preview for `content.card = topic_selection`.
 class TopicSelectionCard extends StatefulWidget {
   const TopicSelectionCard({
     super.key,
@@ -14,6 +17,7 @@ class TopicSelectionCard extends StatefulWidget {
     this.boundaryKey,
     this.repository,
     this.onOpenChat,
+    this.canManage,
   });
 
   final Message message;
@@ -21,6 +25,7 @@ class TopicSelectionCard extends StatefulWidget {
   final Key? boundaryKey;
   final ChatGroupActionsRepository? repository;
   final VoidCallback? onOpenChat;
+  final bool? canManage;
 
   @override
   State<TopicSelectionCard> createState() => _TopicSelectionCardState();
@@ -71,15 +76,25 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
     final chatId = widget.message.chatId;
     if (chatId.isEmpty) return;
     final repo = widget.repository ?? ChatGroupActionsRepository();
+    var canManage = widget.canManage;
+    if (canManage == null) {
+      try {
+        canManage = context.read<TeamCubit>().state.isStarosta;
+      } catch (_) {
+        canManage = false;
+      }
+    }
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => TopicSelectionDetailScreen(
           chatId: chatId,
           selection: _selection!,
           repository: repo,
+          canManage: canManage ?? false,
         ),
       ),
     );
+    if (mounted) await _load();
   }
 
   @override
@@ -88,17 +103,12 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
     final cs = theme.colorScheme;
     final title = _selection?.title ??
         widget.message.text.replaceFirst(RegExp(r'^Выбор темы:\s*'), '');
-    final subtitle = _loading
+    final myState = _loading
         ? 'Загрузка…'
         : (_selection == null
-            ? 'Нажмите, чтобы открыть выбор темы'
-            : [
-                if (_selection!.deadlineAt != null)
-                  'Дедлайн: ${_fmt(_selection!.deadlineAt!)}',
-                if (_selection!.totalCapacity > 0)
-                  'Свободно ${_selection!.freeSlots} из ${_selection!.totalCapacity}',
-                'Статус: ${_statusLabel(_selection!.status)}',
-              ].join(' · '));
+            ? 'Открыть выбор'
+            : (_selection!.isOpen ? 'Можно выбрать' : 'Закрыто'));
+    final cta = _selection == null ? 'Открыть' : 'Выбрать тему';
 
     return GestureDetector(
       key: widget.boundaryKey,
@@ -112,39 +122,36 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: cs.primary.withValues(alpha: 0.35)),
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.format_list_numbered_rtl, color: cs.primary),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Выбор темы',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: cs.primary,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    title.isNotEmpty ? title : 'Без названия',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.black54,
-                    ),
-                  ),
-                ],
+            Text(
+              title.isNotEmpty ? title : 'Без названия',
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w800,
               ),
             ),
-            const Icon(Icons.chevron_right, color: Colors.black45),
+            const SizedBox(height: 6),
+            Text(
+              [
+                if (_selection?.deadlineAt != null)
+                  'До ${_fmt(_selection!.deadlineAt!)}',
+                if (_selection != null && _selection!.totalCapacity > 0)
+                  'Свободно ${_selection!.freeSlots}/${_selection!.totalCapacity}',
+                myState,
+              ].where((e) => e.isNotEmpty).join(' · '),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: cs.onSurface.withValues(alpha: 0.65),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.tonal(
+                onPressed: _openDetail,
+                child: Text(cta),
+              ),
+            ),
           ],
         ),
       ),
@@ -153,26 +160,13 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
 
   String _fmt(DateTime dt) {
     return '${dt.day.toString().padLeft(2, '0')}.'
-        '${dt.month.toString().padLeft(2, '0')}. '
+        '${dt.month.toString().padLeft(2, '0')} '
         '${dt.hour.toString().padLeft(2, '0')}:'
         '${dt.minute.toString().padLeft(2, '0')}';
   }
-
-  String _statusLabel(String status) {
-    switch (status) {
-      case 'open':
-        return 'открыт';
-      case 'closed':
-        return 'закрыт';
-      case 'cancelled':
-        return 'отменён';
-      default:
-        return status;
-    }
-  }
 }
 
-/// In-chat card for `content.card = collection`.
+/// In-chat card for `content.card = collection` («Скинуться»).
 class CollectionCard extends StatelessWidget {
   const CollectionCard({
     super.key,
@@ -191,12 +185,21 @@ class CollectionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final title = message.text.replaceFirst(RegExp(r'^Сбор:\s*'), '').trim();
+    final title =
+        message.text.replaceFirst(RegExp(r'^(Сбор|Скинуться):\s*'), '').trim();
 
     return GestureDetector(
       key: boundaryKey,
       onLongPress: onLongPress,
-      onTap: onOpenChat,
+      onTap: () {
+        if (onOpenChat != null) {
+          onOpenChat!();
+          return;
+        }
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const GroupSpaceScreen()),
+        );
+      },
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 4),
         padding: const EdgeInsets.all(12),
@@ -214,7 +217,7 @@ class CollectionCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Сбор группы',
+                    'Скинуться',
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: cs.secondary,
                       fontWeight: FontWeight.w700,
@@ -229,15 +232,16 @@ class CollectionCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Приложение не принимает платежи — переводы вне приложения.',
+                    'Переводы вне приложения. Нажмите, чтобы отметить.',
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.black54,
+                      color: cs.onSurface.withValues(alpha: 0.6),
                     ),
                   ),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right, color: Colors.black45),
+            Icon(Icons.chevron_right,
+                color: cs.onSurface.withValues(alpha: 0.45)),
           ],
         ),
       ),

@@ -27,6 +27,8 @@ import 'package:student_platform/src/ui/learning/tabs/chat/selection_bars.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/composer.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/topics/create_topic_selection_screen.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/collections/create_collection_screen.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/data/chat_composer_capabilities_repository.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_composer_capabilities.dart';
 import 'package:student_platform/src/ui/learning/data/supabase_learning_repository.dart';
 
 import 'package:student_platform/src/services/file_service.dart';
@@ -156,6 +158,10 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   // якорь для «⋯»
   final GlobalKey _kebabKey = GlobalKey();
 
+  final _capsRepo = ChatComposerCapabilitiesRepository();
+  ChatComposerCapabilities? _composerCaps;
+  bool _capsLoading = true;
+
   @override
   void initState() {
     super.initState();
@@ -171,6 +177,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         if (_isDm) _saveDraftDmDebounced();
       });
 
+    // ignore: discarded_futures
+    _loadComposerCapabilities();
     _scroll.addListener(_onScroll);
     // Attach typing listener only for non-DM (group) chats
     if (!_isDm) {
@@ -1520,13 +1528,19 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     final theme = Theme.of(context);
 
     final isDm = widget.service.mode == ChatMode.dm;
-    final canProposeAssignments = !isDm &&
+    final caps = _composerCaps ??
+        ChatComposerCapabilities.structuralLoading(
+          teamKind: _teamKind(context),
+          isDm: isDm,
+        );
+    final showPropose = !isDm &&
         widget.service.supportsAssignments &&
-        _canManageAssignments(context);
-    final teamKind = _teamKind(context);
-    final canManageGroupActions = !isDm && _canManageAssignments(context);
-    final showTopicSelection = canManageGroupActions && !isDm;
-    final showCollection = canManageGroupActions && teamKind == 'group_space';
+        caps.showProposeAssignment;
+    final canProposeAssignments = showPropose && caps.canProposeAssignment;
+    final showTopicSelection = !isDm && caps.showTopicSelection;
+    final showCollection = !isDm && caps.showCollection;
+    final topicEnabled = caps.canCreateTopicSelection;
+    final collectionEnabled = caps.canCreateCollection;
 
     return Scaffold(
       appBar: _selecting
@@ -2068,9 +2082,19 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                               _search.setActive(true);
                               setState(() {}); // на всякий случай перерисовка
                             },
-                            showProposeInPlus: canProposeAssignments,
+                            showProposeInPlus: showPropose,
                             showTopicSelectionInPlus: showTopicSelection,
                             showCollectionInPlus: showCollection,
+                            capabilitiesLoading: _capsLoading,
+                            proposeEnabled: canProposeAssignments,
+                            topicSelectionEnabled: topicEnabled,
+                            collectionEnabled: collectionEnabled,
+                            proposeDisabledReason:
+                                caps.reasonLabel('propose_assignment'),
+                            topicSelectionDisabledReason:
+                                caps.reasonLabel('topic_selection'),
+                            collectionDisabledReason:
+                                caps.reasonLabel('collection'),
                             onOpenTopicSelection: () =>
                                 unawaited(_openTopicSelection(context)),
                             onOpenCollection: () =>
@@ -2110,7 +2134,44 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     }
   }
 
+  Future<void> _loadComposerCapabilities() async {
+    if (!mounted) return;
+    final isDm = widget.service.mode == ChatMode.dm;
+    String teamKind = 'subject';
+    bool isOrganizer = false;
+    try {
+      final st = context.read<TeamCubit>().state;
+      teamKind = st.team.kind;
+      isOrganizer = st.isStarosta;
+    } catch (_) {}
+    setState(() {
+      _composerCaps ??= ChatComposerCapabilities.structuralLoading(
+        teamKind: teamKind,
+        isDm: isDm,
+      );
+      _capsLoading = true;
+    });
+    try {
+      final chatId = await widget.service.ensureChatId();
+      final caps = await _capsRepo.load(
+        chatId,
+        fallbackTeamKind: teamKind,
+        isDm: isDm,
+        localIsOrganizer: isOrganizer,
+      );
+      if (!mounted) return;
+      setState(() {
+        _composerCaps = caps;
+        _capsLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _capsLoading = false);
+    }
+  }
+
   Future<void> _openTopicSelection(BuildContext context) async {
+    if (_composerCaps?.canCreateTopicSelection != true) return;
     try {
       final teamId = context.read<TeamCubit>().state.team.id;
       final chatId = await SupabaseLearningRepository().getMainChatId(teamId);
@@ -2120,14 +2181,17 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
           builder: (_) => CreateTopicSelectionScreen(chatId: chatId),
         ),
       );
+      unawaited(_loadComposerCapabilities());
     } catch (_) {}
   }
 
   Future<void> _openCollection(BuildContext context) async {
+    if (_composerCaps?.canCreateCollection != true) return;
     if (!context.mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const CreateCollectionScreen()),
     );
+    unawaited(_loadComposerCapabilities());
   }
 
   void _showMessageActions(BuildContext ctx, Message m,

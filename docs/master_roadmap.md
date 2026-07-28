@@ -718,6 +718,33 @@ Status: **TECHNICALLY DONE** (remote `20260727235000` + `20260727235317` + hotfi
 - [ ] TWO-DEVICE TOPIC RACE — REQUIRED;
 - [ ] CONTROLLED PUSH — REQUIRED.
 
+### 13.10 — продуктовый UX групповых функций после 13.9
+
+Status: **DONE** (technically) / Codex **APPROVE / READY**
+
+Remote migration: `20260728101245_stage13_10_group_actions_ux` (project `gwdanmwluhrcfxbnplwd`).
+
+Edge Function: not redeployed (unchanged in 13.10).
+
+Корневые причины исчезающих действий:
+
+- Flutter `isStarosta` через `team_members` расходился с SQL organizer/topic rights;
+- async `roleLoading` молча скрывал пункты меню;
+- product matrix 13.9 показывала topic и в `group_space`.
+
+Сделано:
+
+- [x] матрица: topic только subject; «Скинуться» только group_space; DM — ничего; ordinary assignment в обоих team-чатах;
+- [x] `get_chat_composer_capabilities` + стабильное `+` (loading/disabled, не silent hide);
+- [x] legacy topic create в group_space закрыт сервером; один canonical `deadline_at`;
+- [x] legacy open group_space topic selection cancelled on apply + `pick_topic` subject-only;
+- [x] Schedule: presentation `CalendarItem`, реальные названия, нейтральные badge, без «Выбор темы/Сбор»;
+- [x] modern topic create/chooser + `TopicExtractionService`; keyboard dismiss scope;
+- [x] grid-плитка «Чат группы»; collection statuses + organizer controls;
+- [x] assignment compatibility proof (ephemeral local baseline + full roleplay; remote rollback smoke);
+- [x] remote apply + assertive security + rollback smoke; real assignments/messages/teams unchanged;
+- [ ] PHYSICAL / TWO-DEVICE / PUSH smokes — owner-check (from 13.9; not part of 13.10 closeout).
+
 ---
 
 ## 13. Приоритет на ближайшие работы
@@ -725,8 +752,9 @@ Status: **TECHNICALLY DONE** (remote `20260727235000` + `20260727235317` + hotfi
 1. ~~13.2–13.6 code foundations + remote apply + Edge deploy~~ **TECHNICALLY DONE**.
 2. ~~Stage 13.8~~ **TECHNICALLY DONE** (remote applied).
 3. ~~Stage 13.9~~ **TECHNICALLY DONE** (remote applied + Edge v5).
-4. **Владелец:** PHYSICAL OCR smoke + two-device topic race + controlled push на Android/iPhone.
-5. **Владелец:** реальные Excel (teachers/subjects/students) через Admin dry-run → apply.
+4. ~~Stage 13.10~~ **TECHNICALLY DONE** (remote applied `20260728101245`).
+5. **Владелец:** PHYSICAL OCR smoke + two-device topic race + controlled push на Android/iPhone.
+6. **Владелец:** реальные Excel (teachers/subjects/students) через Admin dry-run → apply.
 
 Закрыто перед 13.2:
 

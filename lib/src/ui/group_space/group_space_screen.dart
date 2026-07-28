@@ -441,6 +441,24 @@ class _CollectionDetailScreenState extends State<_CollectionDetailScreen> {
     super.dispose();
   }
 
+  String _paymentStatusLabel(String status) {
+    switch (status) {
+      case 'reported':
+      case 'pending_review':
+        return 'Участник сообщил';
+      case 'confirmed':
+        return 'Получено';
+      case 'not_received':
+        return 'Не поступило';
+      case 'needs_clarification':
+      case 'rejected':
+        return 'Нужно уточнение';
+      case 'unmarked':
+      default:
+        return 'Не отмечено';
+    }
+  }
+
   Future<void> _loadContributions() async {
     try {
       final rows = await widget.repository
@@ -476,14 +494,13 @@ class _CollectionDetailScreenState extends State<_CollectionDetailScreen> {
       await widget.repository.upsertMyContribution(
         collectionId: widget.collection.id,
         participationStatus: _participation,
-        paymentStatus:
-            _participation == 'joining' ? 'pending_review' : 'unmarked',
+        paymentStatus: _participation == 'joining' ? 'reported' : 'unmarked',
         comment: _commentCtrl.text.trim(),
         proofFileId: proofId,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Отметка сохранена')),
+        const SnackBar(content: Text('Отметка «Я перевёл» сохранена')),
       );
       if (widget.isOrganizer) {
         await _loadContributions();
@@ -550,7 +567,7 @@ class _CollectionDetailScreenState extends State<_CollectionDetailScreen> {
           const SizedBox(height: 16),
           FilledButton(
             onPressed: c.isOpen && !_saving ? _save : null,
-            child: Text(_saving ? 'Сохранение…' : 'Сохранить'),
+            child: Text(_saving ? 'Сохранение…' : 'Я перевёл'),
           ),
           if (widget.isOrganizer) ...[
             const SizedBox(height: 20),
@@ -569,25 +586,23 @@ class _CollectionDetailScreenState extends State<_CollectionDetailScreen> {
               ..._contributions.map((row) {
                 final userId = row['user_id']?.toString() ?? '';
                 final payment = row['payment_status']?.toString() ?? 'unmarked';
-                final participation =
-                    row['participation_status']?.toString() ?? 'unmarked';
                 final proofUrl = row['proof_file_url']?.toString() ?? '';
-                final proofName = row['proof_file_name']?.toString() ?? '';
                 final hasProof = proofUrl.isNotEmpty ||
                     (row['proof_file_id']?.toString() ?? '').isNotEmpty;
+                final canReview = payment != 'confirmed';
                 return ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: Text(userId),
                   subtitle: Text(
-                    'Участие: $participation · Оплата: $payment'
-                    '${hasProof ? ' · скриншот: ${proofName.isEmpty ? 'файл' : proofName}' : ''}',
+                    '${_paymentStatusLabel(payment)}'
+                    '${hasProof ? ' · есть подтверждение' : ''}',
                   ),
                   trailing: Wrap(
                     spacing: 4,
                     children: [
                       if (proofUrl.isNotEmpty)
                         IconButton(
-                          tooltip: 'Открыть скриншот',
+                          tooltip: 'Открыть подтверждение',
                           onPressed: () async {
                             final uri = Uri.tryParse(proofUrl);
                             if (uri == null) return;
@@ -598,9 +613,9 @@ class _CollectionDetailScreenState extends State<_CollectionDetailScreen> {
                           },
                           icon: const Icon(Icons.open_in_new),
                         ),
-                      if (payment == 'pending_review') ...[
+                      if (canReview) ...[
                         IconButton(
-                          tooltip: 'Подтвердить',
+                          tooltip: 'Получено',
                           onPressed: () async {
                             await widget.repository.confirmContribution(
                               collectionId: c.id,
@@ -612,16 +627,28 @@ class _CollectionDetailScreenState extends State<_CollectionDetailScreen> {
                           icon: const Icon(Icons.check_circle_outline),
                         ),
                         IconButton(
-                          tooltip: 'Отклонить',
+                          tooltip: 'Не поступило',
                           onPressed: () async {
                             await widget.repository.confirmContribution(
                               collectionId: c.id,
                               userId: userId,
-                              paymentStatus: 'rejected',
+                              paymentStatus: 'not_received',
                             );
                             await _loadContributions();
                           },
                           icon: const Icon(Icons.cancel_outlined),
+                        ),
+                        IconButton(
+                          tooltip: 'Нужно уточнение',
+                          onPressed: () async {
+                            await widget.repository.confirmContribution(
+                              collectionId: c.id,
+                              userId: userId,
+                              paymentStatus: 'needs_clarification',
+                            );
+                            await _loadContributions();
+                          },
+                          icon: const Icon(Icons.help_outline),
                         ),
                       ],
                     ],
@@ -638,7 +665,7 @@ class _CollectionDetailScreenState extends State<_CollectionDetailScreen> {
                   );
                   if (mounted) Navigator.pop(context);
                 },
-                child: const Text('Закрыть сбор'),
+                child: const Text('Закрыть'),
               ),
             ],
           ],

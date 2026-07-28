@@ -35,6 +35,8 @@ import 'chat/assignments/edit_assignment_dialog.dart';
 import 'chat/selection_bars.dart';
 import 'chat/topics/create_topic_selection_screen.dart';
 import 'chat/collections/create_collection_screen.dart';
+import 'chat/data/chat_composer_capabilities_repository.dart';
+import 'chat/models/chat_composer_capabilities.dart';
 import '../../chats/core/forward_payload.dart';
 import '../../chats/data/blocks_api.dart';
 import '../../chats/forward/forward_outbox.dart';
@@ -178,6 +180,9 @@ class _ChatTabState extends State<ChatTab> {
   bool _forwardPackageAttached = false;
   final List<String> _forwardSelectedIds = [];
   final List<String> _stagedForwardFileIds = [];
+  final _capsRepo = ChatComposerCapabilitiesRepository();
+  ChatComposerCapabilities? _composerCaps;
+  bool _capsLoading = true;
   bool _canDeleteMessage(Message m) {
     final uid = Supabase.instance.client.auth.currentUser?.id;
     if (uid == null || uid.isEmpty || m.authorId != uid) return false;
@@ -544,6 +549,10 @@ class _ChatTabState extends State<ChatTab> {
     // One blocked-authors snapshot for this group/team screen.
     // ignore: discarded_futures
     _loadBlockedUserIds();
+
+    // Composer + capabilities (stable menu; independent of message list).
+    // ignore: discarded_futures
+    _loadComposerCapabilities();
 
     // Показываем статистику кэша
     _globalCache.showCacheStats();
@@ -1786,7 +1795,8 @@ class _ChatTabState extends State<ChatTab> {
                               Supabase.instance.client.auth.currentUser?.id,
                           entrySeenAt: _entrySeenAt,
                           showEntryNewBadge: _showEntryNewBadge,
-                          hoveredMessageId: _deeplinkHighlightId ?? _actionsHoverId,
+                          hoveredMessageId:
+                              _deeplinkHighlightId ?? _actionsHoverId,
                           initialLoading: state.chatInitialLoading,
                           loadError: state.chatError && !state.chatHasSnapshot,
                           onRetryLoad: () {
@@ -1962,11 +1972,27 @@ class _ChatTabState extends State<ChatTab> {
                   isUploading: _isUploadingAttachments,
                   hasFailedUploads: _hasFailedAttachments,
                   isSending: _isSending,
-                  showProposeInPlus: true,
-                  showTopicSelectionInPlus: !readOnly && state.isStarosta,
+                  showProposeInPlus: !readOnly &&
+                      (_composerCaps?.showProposeAssignment ?? true),
+                  showTopicSelectionInPlus: !readOnly &&
+                      (_composerCaps?.showTopicSelection ??
+                          (!state.team.isGroupSpaceChat)),
                   showCollectionInPlus: !readOnly &&
-                      state.team.isGroupSpaceChat &&
-                      state.isStarosta,
+                      (_composerCaps?.showCollection ??
+                          state.team.isGroupSpaceChat),
+                  capabilitiesLoading: !readOnly && _capsLoading,
+                  proposeEnabled: !readOnly &&
+                      (_composerCaps?.canProposeAssignment ?? false),
+                  topicSelectionEnabled: !readOnly &&
+                      (_composerCaps?.canCreateTopicSelection ?? false),
+                  collectionEnabled: !readOnly &&
+                      (_composerCaps?.canCreateCollection ?? false),
+                  proposeDisabledReason:
+                      _composerCaps?.reasonLabel('propose_assignment'),
+                  topicSelectionDisabledReason:
+                      _composerCaps?.reasonLabel('topic_selection'),
+                  collectionDisabledReason:
+                      _composerCaps?.reasonLabel('collection'),
                   onOpenTopicSelection: () =>
                       unawaited(_openTopicSelection(context)),
                   onOpenCollection: () => unawaited(_openCollection(context)),
@@ -2200,7 +2226,43 @@ class _ChatTabState extends State<ChatTab> {
   Future<String> _getChatIdForTeam(String teamId) =>
       _repo.getMainChatId(teamId);
 
+  Future<void> _loadComposerCapabilities() async {
+    if (!mounted) return;
+    final teamState = context.read<TeamCubit>().state;
+    final team = teamState.team;
+    final structural = ChatComposerCapabilities.structuralLoading(
+      teamKind: team.kind,
+      isDm: false,
+    );
+    setState(() {
+      _composerCaps = _composerCaps ?? structural;
+      _capsLoading = true;
+    });
+    try {
+      final chatId = await _getChatIdForTeam(team.id);
+      final caps = await _capsRepo.load(
+        chatId,
+        fallbackTeamKind: team.kind,
+        localIsOrganizer: teamState.isStarosta,
+      );
+      if (!mounted) return;
+      setState(() {
+        _composerCaps = caps;
+        _capsLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _capsLoading = false);
+    }
+  }
+
   Future<void> _openTopicSelection(BuildContext context) async {
+    if (_composerCaps?.canCreateTopicSelection != true) {
+      _showSelectionSnack(
+        _composerCaps?.reasonLabel('topic_selection') ?? 'Недоступно',
+      );
+      return;
+    }
     final teamId = context.read<TeamCubit>().state.team.id;
     final chatId = await _getChatIdForTeam(teamId);
     if (chatId.isEmpty || !context.mounted) return;
@@ -2209,13 +2271,22 @@ class _ChatTabState extends State<ChatTab> {
         builder: (_) => CreateTopicSelectionScreen(chatId: chatId),
       ),
     );
+    // Capabilities must not depend on publish result; refresh auth only.
+    unawaited(_loadComposerCapabilities());
   }
 
   Future<void> _openCollection(BuildContext context) async {
+    if (_composerCaps?.canCreateCollection != true) {
+      _showSelectionSnack(
+        _composerCaps?.reasonLabel('collection') ?? 'Недоступно',
+      );
+      return;
+    }
     if (!context.mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const CreateCollectionScreen()),
     );
+    unawaited(_loadComposerCapabilities());
   }
 
   Future<void> _consumeForwardOutboxIfAny(String chatId) async {

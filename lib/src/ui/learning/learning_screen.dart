@@ -179,7 +179,8 @@ class _BodyState extends State<_Body> {
                         itemCount: items.length + (groupChat != null ? 1 : 0),
                         itemBuilder: (_, i) {
                           if (groupChat != null && i == 0) {
-                            return _GroupChatCard(
+                            return _GroupChatGridCard(
+                              key: const ValueKey('learning-group-chat-grid'),
                               team: groupChat,
                               groupName: groupName,
                             );
@@ -217,7 +218,7 @@ class _BodyState extends State<_Body> {
   }
 }
 
-/// Permanent academic group chat entry (Stage 13.9) — not a subject card.
+/// Permanent academic group chat — list mode (Stage 13.9/13.10).
 class _GroupChatCard extends StatelessWidget {
   const _GroupChatCard({
     super.key,
@@ -231,6 +232,7 @@ class _GroupChatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final onSurface = theme.colorScheme.onSurface;
     return InkWell(
       key: const ValueKey('open-learning-group-chat'),
       onTap: () => Navigator.of(context).push(
@@ -278,7 +280,7 @@ class _GroupChatCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w800,
-                      color: Colors.black,
+                      color: onSurface,
                       height: 1.12,
                     ),
                   ),
@@ -288,30 +290,120 @@ class _GroupChatCard extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.black.withValues(alpha: 0.62),
+                      color: onSurface.withValues(alpha: 0.62),
                     ),
                   ),
                 ],
               ),
             ),
-            if (team.unread > 0)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.primary,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  '${team.unread}',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
+            if (team.unread > 0) _UnreadBadge(count: team.unread),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Grid tile matching [_TeamGridCard] geometry; badge «Группа».
+class _GroupChatGridCard extends StatelessWidget {
+  const _GroupChatGridCard({
+    super.key,
+    required this.team,
+    required this.groupName,
+  });
+
+  final Team team;
+  final String groupName;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final onSurface = theme.colorScheme.onSurface;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 170;
+        final avatarSize = compact ? 32.0 : 36.0;
+        return InkWell(
+          key: const ValueKey('open-learning-group-chat-grid'),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => TeamDetailsScreen(
+                team: team.copyWith(
+                  name: groupName,
+                  icon: team.icon.isNotEmpty ? team.icon : 'groups',
+                ),
+                initialTabIndex: 1,
+              ),
+            ),
+          ),
+          borderRadius: BorderRadius.circular(18),
+          child: Container(
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surface,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: theme.colorScheme.primary.withValues(alpha: 0.28),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.06),
+                  blurRadius: 14,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            padding: EdgeInsets.all(compact ? 9 : 11),
+            child: Stack(
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        TeamAvatar(
+                          icon: team.icon.isNotEmpty ? team.icon : 'groups',
+                          name: 'Чат группы',
+                          size: avatarSize,
+                        ),
+                        const Spacer(),
+                      ],
+                    ),
+                    SizedBox(height: compact ? 6 : 8),
+                    Text(
+                      'Чат группы',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: onSurface,
+                        height: 1.08,
+                        fontSize: compact ? 13 : 14,
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      'Группа · $groupName',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: onSurface.withValues(alpha: 0.58),
+                        height: 1.1,
+                        fontSize: compact ? 11 : 12,
+                      ),
+                    ),
+                  ],
+                ),
+                if (team.unread > 0)
+                  Positioned(
+                    top: 0,
+                    right: 0,
+                    child: _UnreadBadge(count: team.unread),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
