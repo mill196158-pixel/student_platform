@@ -170,16 +170,16 @@ class ChatComposerBar extends StatelessWidget {
               if (showProposeInPlus)
                 ChatPlusAction(
                   icon: Icons.assignment_add,
-                  title: 'Новое задание',
-                  subtitle: capabilitiesLoading
-                      ? 'Проверяем права…'
-                      : (proposeEnabled
-                          ? 'Чтобы появилось у всех — нужны 2 голоса'
-                          : (proposeDisabledReason ?? 'Недоступно')),
+                  title: 'Создать задание',
+                  subtitle: proposeEnabled || capabilitiesLoading
+                      ? 'Чтобы появилось у всех — нужны 2 голоса'
+                      : (proposeDisabledReason ?? 'Недоступно'),
                   emphasized: true,
-                  enabled: proposeEnabled && !capabilitiesLoading,
-                  loading: capabilitiesLoading,
+                  // Keep tile visible; only disable when auth is known-false.
+                  enabled: proposeEnabled || capabilitiesLoading,
+                  loading: capabilitiesLoading && !proposeEnabled,
                   onTap: () async {
+                    if (!proposeEnabled) return;
                     final res = await showAssignmentFormDialog(context);
                     if (res == null) return;
                     await onPropose(res.$1, res.$2, res.$3, res.$4, res.$5);
@@ -189,14 +189,13 @@ class ChatComposerBar extends StatelessWidget {
                 ChatPlusAction(
                   icon: Icons.format_list_numbered_rtl,
                   title: 'Выбор темы',
-                  subtitle: capabilitiesLoading
-                      ? 'Проверяем права…'
-                      : (topicSelectionEnabled
-                          ? 'Список тем для распределения по предмету'
-                          : (topicSelectionDisabledReason ?? 'Недоступно')),
-                  enabled: topicSelectionEnabled && !capabilitiesLoading,
-                  loading: capabilitiesLoading,
+                  subtitle: topicSelectionEnabled || capabilitiesLoading
+                      ? 'Список тем для распределения по предмету'
+                      : (topicSelectionDisabledReason ?? 'Недоступно'),
+                  enabled: topicSelectionEnabled || capabilitiesLoading,
+                  loading: capabilitiesLoading && !topicSelectionEnabled,
                   onTap: () async {
+                    if (!topicSelectionEnabled) return;
                     onOpenTopicSelection?.call();
                   },
                 ),
@@ -204,14 +203,13 @@ class ChatComposerBar extends StatelessWidget {
                 ChatPlusAction(
                   icon: Icons.volunteer_activism_outlined,
                   title: 'Скинуться',
-                  subtitle: capabilitiesLoading
-                      ? 'Проверяем права…'
-                      : (collectionEnabled
-                          ? 'Организация взноса (без оплаты в приложении)'
-                          : (collectionDisabledReason ?? 'Недоступно')),
-                  enabled: collectionEnabled && !capabilitiesLoading,
-                  loading: capabilitiesLoading,
+                  subtitle: collectionEnabled || capabilitiesLoading
+                      ? 'Организация взноса (без оплаты в приложении)'
+                      : (collectionDisabledReason ?? 'Недоступно'),
+                  enabled: collectionEnabled || capabilitiesLoading,
+                  loading: capabilitiesLoading && !collectionEnabled,
                   onTap: () async {
+                    if (!collectionEnabled) return;
                     onOpenCollection?.call();
                   },
                 ),

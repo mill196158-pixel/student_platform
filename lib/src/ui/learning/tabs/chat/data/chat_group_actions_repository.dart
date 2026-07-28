@@ -204,6 +204,19 @@ class ChatGroupActionsRepository {
     return id.toString();
   }
 
+  Future<void> deleteGroupAction({
+    required String kind,
+    required String entityId,
+  }) {
+    return _client.rpc(
+      'delete_group_action',
+      params: {
+        'p_kind': kind,
+        'p_entity_id': entityId,
+      },
+    );
+  }
+
   Future<List<GroupActionDeadline>> listMyGroupActionDeadlines({
     DateTime? from,
     DateTime? to,

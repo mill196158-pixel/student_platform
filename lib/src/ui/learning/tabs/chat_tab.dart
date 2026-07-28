@@ -2234,10 +2234,29 @@ class _ChatTabState extends State<ChatTab> {
       teamKind: team.kind,
       isDm: false,
     );
-    setState(() {
-      _composerCaps = _composerCaps ?? structural;
-      _capsLoading = true;
-    });
+    // Keep last successful caps visible; only show silent spinner when unknown.
+    if (_composerCaps == null) {
+      try {
+        final chatId = await _getChatIdForTeam(team.id);
+        final cached = await _capsRepo.peekCache(chatId);
+        if (!mounted) return;
+        setState(() {
+          _composerCaps = cached ?? structural;
+          _capsLoading = cached == null;
+        });
+      } catch (_) {
+        if (!mounted) return;
+        setState(() {
+          _composerCaps = structural;
+          _capsLoading = true;
+        });
+      }
+    } else {
+      setState(() => _capsLoading =
+          _composerCaps?.canCreateTopicSelection != true &&
+              _composerCaps?.canProposeAssignment != true &&
+              _composerCaps?.canCreateCollection != true);
+    }
     try {
       final chatId = await _getChatIdForTeam(team.id);
       final caps = await _capsRepo.load(

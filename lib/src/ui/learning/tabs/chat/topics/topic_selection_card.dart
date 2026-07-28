@@ -100,12 +100,13 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
     final cs = theme.colorScheme;
     final title = _selection?.title ??
         widget.message.text.replaceFirst(RegExp(r'^Выбор темы:\s*'), '');
-    final myState = _loading
-        ? 'Загрузка…'
-        : (_selection == null
-            ? 'Открыть выбор'
-            : (_selection!.isOpen ? 'Можно выбрать' : 'Закрыто'));
-    final cta = _selection == null ? 'Открыть' : 'Выбрать тему';
+    final closed = _selection != null && !_selection!.isOpen;
+    final progress = (_selection != null && _selection!.totalCapacity > 0)
+        ? 'Выбрано ${_selection!.takenSlots} из ${_selection!.totalCapacity}'
+        : null;
+    final cta = closed
+        ? 'Смотреть'
+        : (_selection?.allowChange == true ? 'Изменить выбор' : 'Выбрать тему');
 
     return GestureDetector(
       key: widget.boundaryKey,
@@ -126,6 +127,7 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
               title.isNotEmpty ? title : 'Без названия',
               style: theme.textTheme.titleSmall?.copyWith(
                 fontWeight: FontWeight.w800,
+                color: cs.onSurface,
               ),
             ),
             const SizedBox(height: 6),
@@ -133,21 +135,36 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
               [
                 if (_selection?.deadlineAt != null)
                   'До ${_fmt(_selection!.deadlineAt!)}',
-                if (_selection != null && _selection!.totalCapacity > 0)
-                  'Свободно ${_selection!.freeSlots}/${_selection!.totalCapacity}',
-                myState,
+                if (progress != null) progress,
+                if (closed) 'Закрыто',
+                if (_loading) '…',
               ].where((e) => e.isNotEmpty).join(' · '),
               style: theme.textTheme.bodySmall?.copyWith(
-                color: cs.onSurface.withValues(alpha: 0.65),
+                color: cs.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 10),
-            Align(
-              alignment: Alignment.centerRight,
-              child: FilledButton.tonal(
-                onPressed: _openDetail,
-                child: Text(cta),
-              ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              alignment: WrapAlignment.end,
+              children: [
+                if (!closed)
+                  FilledButton.tonal(
+                    onPressed: _openDetail,
+                    child: const Text('Выбрать тему'),
+                  ),
+                if (!closed && _selection?.allowChange == true)
+                  TextButton(
+                    onPressed: _openDetail,
+                    child: Text(cta),
+                  ),
+                if (closed)
+                  FilledButton.tonal(
+                    onPressed: _openDetail,
+                    child: const Text('Смотреть'),
+                  ),
+              ],
             ),
           ],
         ),

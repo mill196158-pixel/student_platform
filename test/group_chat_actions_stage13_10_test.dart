@@ -140,10 +140,10 @@ void main() {
       await tester
           .pump(); // sheet open; avoid settle (loading spinner animates)
       await tester.pump(const Duration(milliseconds: 300));
-      expect(find.text('Новое задание'), findsOneWidget);
+      expect(find.text('Создать задание'), findsOneWidget);
       expect(find.text('Выбор темы'), findsOneWidget);
       expect(find.text('Скинуться'), findsNothing);
-      expect(find.text('Проверяем права…'), findsWidgets);
+      expect(find.textContaining('Проверяем'), findsNothing);
     });
 
     testWidgets('Скинуться label used instead of Сбор', (tester) async {

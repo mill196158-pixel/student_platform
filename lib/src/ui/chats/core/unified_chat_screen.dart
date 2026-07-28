@@ -2144,13 +2144,32 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       teamKind = st.team.kind;
       isOrganizer = st.isStarosta;
     } catch (_) {}
-    setState(() {
-      _composerCaps ??= ChatComposerCapabilities.structuralLoading(
-        teamKind: teamKind,
-        isDm: isDm,
-      );
-      _capsLoading = true;
-    });
+    if (_composerCaps == null) {
+      try {
+        final chatId = await widget.service.ensureChatId();
+        final cached = await _capsRepo.peekCache(chatId);
+        if (!mounted) return;
+        setState(() {
+          _composerCaps = cached ??
+              ChatComposerCapabilities.structuralLoading(
+                teamKind: teamKind,
+                isDm: isDm,
+              );
+          _capsLoading = cached == null;
+        });
+      } catch (_) {
+        if (!mounted) return;
+        setState(() {
+          _composerCaps = ChatComposerCapabilities.structuralLoading(
+            teamKind: teamKind,
+            isDm: isDm,
+          );
+          _capsLoading = true;
+        });
+      }
+    } else {
+      setState(() => _capsLoading = false);
+    }
     try {
       final chatId = await widget.service.ensureChatId();
       final caps = await _capsRepo.load(
