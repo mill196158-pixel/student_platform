@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../content/content_models.dart';
+import '../content/student_home_promo_card.dart';
 import 'home_preview_models.dart';
 import 'widgets/student_home_news_card.dart';
 
@@ -17,6 +19,8 @@ class StudentHomeView extends StatelessWidget {
     this.onAssignmentTap,
     this.onAssignmentDoneTap,
     this.onHelpTap,
+    this.homePromo,
+    this.homePromoIsDemo = true,
     this.hiddenAssignmentIds = const {},
     this.markingDoneAssignmentIds = const {},
     this.selectedNewsId,
@@ -37,6 +41,12 @@ class StudentHomeView extends StatelessWidget {
   final ValueChanged<StudentHomeAssignment>? onAssignmentTap;
   final ValueChanged<StudentHomeAssignment>? onAssignmentDoneTap;
   final VoidCallback? onHelpTap;
+
+  /// Managed home promo payload. When null, uses built-in demo stub.
+  final HomePromoPayload? homePromo;
+
+  /// When true, shows «Пример» badge (demo origin / pre-migration fallback).
+  final bool homePromoIsDemo;
   final Set<String> hiddenAssignmentIds;
   final Set<String> markingDoneAssignmentIds;
   final String? selectedNewsId;
@@ -71,10 +81,7 @@ class StudentHomeView extends StatelessWidget {
         SliverToBoxAdapter(
           child: _AnimatedEntry(
             delay: const Duration(milliseconds: 70),
-            child: _TodaySummaryCard(
-              data: data,
-              onTap: onSummaryTap,
-            ),
+            child: _TodaySummaryCard(data: data, onTap: onSummaryTap),
           ),
         ),
         SliverToBoxAdapter(
@@ -95,7 +102,11 @@ class StudentHomeView extends StatelessWidget {
         SliverToBoxAdapter(
           child: _AnimatedEntry(
             delay: const Duration(milliseconds: 170),
-            child: _HelpCard(onTap: onHelpTap),
+            child: StudentHomePromoCard(
+              payload: homePromo ?? HomePromoPayload.demoStuckWithAssignment,
+              onTap: onHelpTap,
+              showDemoBadge: homePromoIsDemo || homePromo == null,
+            ),
           ),
         ),
         const SliverToBoxAdapter(child: SizedBox(height: 96)),
@@ -103,8 +114,9 @@ class StudentHomeView extends StatelessWidget {
     );
 
     return Scaffold(
-      backgroundColor:
-          isDark ? const Color(0xFF101820) : const Color(0xFFFAF8FC),
+      backgroundColor: isDark
+          ? const Color(0xFF101820)
+          : const Color(0xFFFAF8FC),
       bottomNavigationBar: bottomNavigationBar,
       body: DecoratedBox(
         decoration: BoxDecoration(
@@ -214,8 +226,9 @@ class _RoundNotificationButton extends StatelessWidget {
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-              color:
-                  isDark ? Colors.white.withValues(alpha: 0.08) : Colors.white,
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.08)
+                  : Colors.white,
               borderRadius: BorderRadius.circular(18),
               border: Border.all(
                 color: isDark
@@ -289,10 +302,7 @@ class _NotificationBadge extends StatelessWidget {
 }
 
 class _TodaySummaryCard extends StatelessWidget {
-  const _TodaySummaryCard({
-    required this.data,
-    required this.onTap,
-  });
+  const _TodaySummaryCard({required this.data, required this.onTap});
 
   final StudentHomeData data;
   final VoidCallback? onTap;
@@ -305,13 +315,13 @@ class _TodaySummaryCard extends StatelessWidget {
     final title = count > 0
         ? 'Сегодня $count ${_lessonWord(count)}'
         : data.lessonsFinishedForToday
-            ? 'Пары закончились'
-            : 'Сегодня выходной';
+        ? 'Пары закончились'
+        : 'Сегодня выходной';
     final subtitle = count > 0
         ? 'Кратко по расписанию на день'
         : data.lessonsFinishedForToday
-            ? 'На сегодня больше ничего нет'
-            : 'Пар нет, можно закрыть задания или отдохнуть';
+        ? 'На сегодня больше ничего нет'
+        : 'Пар нет, можно закрыть задания или отдохнуть';
     final emptyText = data.lessonsFinishedForToday
         ? 'Пары на сегодня закончились'
         : 'Сегодня пар нет';
@@ -360,10 +370,7 @@ class _TodaySummaryCard extends StatelessWidget {
                   Positioned(
                     right: 38,
                     bottom: -36,
-                    child: _GlowBubble(
-                      size: 76,
-                      opacity: isDark ? 0.06 : 0.13,
-                    ),
+                    child: _GlowBubble(size: 76, opacity: isDark ? 0.06 : 0.13),
                   ),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -422,7 +429,9 @@ class _TodaySummaryCard extends StatelessWidget {
                       if (data.lessons.isEmpty)
                         _NoLessonsPreview(text: emptyText)
                       else
-                        ...data.lessons.take(2).map(
+                        ...data.lessons
+                            .take(2)
+                            .map(
                               (lesson) => Padding(
                                 padding: const EdgeInsets.only(bottom: 8),
                                 child: _LessonPreview(lesson: lesson),
@@ -515,11 +524,7 @@ class _LessonPreview extends StatelessWidget {
 }
 
 class _GroupActionPreview extends StatelessWidget {
-  const _GroupActionPreview({
-    required this.action,
-    this.onTap,
-    this.onDelete,
-  });
+  const _GroupActionPreview({required this.action, this.onTap, this.onDelete});
 
   final StudentHomeGroupAction action;
   final VoidCallback? onTap;
@@ -530,20 +535,19 @@ class _GroupActionPreview extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final foreground = isDark ? Colors.white : const Color(0xFF1F2937);
     final accent = isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C63D8);
-    final displayTitle =
-        (action.followUpTitle ?? '').trim().isNotEmpty
-            ? action.followUpTitle!.trim()
-            : action.title;
+    final displayTitle = (action.followUpTitle ?? '').trim().isNotEmpty
+        ? action.followUpTitle!.trim()
+        : action.title;
     final listTitle = action.title.trim();
     final hasPickedTopic = (action.followUpTitle ?? '').trim().isNotEmpty;
     // Type first (Тема / Сбор). List name is separate — «Доклад» ≠ задание.
     final kind = action.isTopic
         ? 'Тема'
         : (action.isCollection
-            ? 'Сбор'
-            : (action.kindLabel.trim().isEmpty
-                ? 'Дело'
-                : action.kindLabel.trim()));
+              ? 'Сбор'
+              : (action.kindLabel.trim().isEmpty
+                    ? 'Дело'
+                    : action.kindLabel.trim()));
     final meta = [
       kind,
       if (hasPickedTopic && listTitle.isNotEmpty) 'список «$listTitle»',
@@ -626,10 +630,7 @@ class _GroupActionPreview extends StatelessWidget {
                     if (v == 'delete') onDelete!();
                   },
                   itemBuilder: (_) => const [
-                    PopupMenuItem(
-                      value: 'delete',
-                      child: Text('Удалить'),
-                    ),
+                    PopupMenuItem(value: 'delete', child: Text('Удалить')),
                   ],
                 ),
             ],
@@ -704,21 +705,22 @@ class _AssignmentsSection extends StatelessWidget {
         .where((item) => !hiddenAssignmentIds.contains(item.id))
         .toList();
     // One merged, deadline-sorted feed with a shared cap (compact section).
-    final upcoming = <_UpcomingItem>[
-      for (final a in visibleAssignments) _UpcomingItem.assignment(a),
-      // Confirmed money transfers leave the upcoming list (done).
-      for (final g in data.groupActions.where((e) => !e.isCompleted))
-        _UpcomingItem.groupAction(g),
-    ]..sort((a, b) {
-        // Dated items first (soonest → latest); undated last so they do not
-        // steal the shared 4-item cap from real deadlines.
-        final aAt = a.sortAt;
-        final bAt = b.sortAt;
-        if (aAt == null && bAt == null) return 0;
-        if (aAt == null) return 1;
-        if (bAt == null) return -1;
-        return aAt.compareTo(bAt);
-      });
+    final upcoming =
+        <_UpcomingItem>[
+          for (final a in visibleAssignments) _UpcomingItem.assignment(a),
+          // Confirmed money transfers leave the upcoming list (done).
+          for (final g in data.groupActions.where((e) => !e.isCompleted))
+            _UpcomingItem.groupAction(g),
+        ]..sort((a, b) {
+          // Dated items first (soonest → latest); undated last so they do not
+          // steal the shared 4-item cap from real deadlines.
+          final aAt = a.sortAt;
+          final bAt = b.sortAt;
+          if (aAt == null && bAt == null) return 0;
+          if (aAt == null) return 1;
+          if (bAt == null) return -1;
+          return aAt.compareTo(bAt);
+        });
     final capped = upcoming.take(4).toList();
     final foreground = isDark ? Colors.white : const Color(0xFF1F2937);
     final mutedForeground = foreground.withValues(alpha: isDark ? 0.76 : 0.66);
@@ -812,15 +814,16 @@ class _AssignmentsSection extends StatelessWidget {
                                   onDoneTap: onAssignmentDoneTap == null
                                       ? null
                                       : () => onAssignmentDoneTap!(a),
-                                  markingDone:
-                                      markingDoneAssignmentIds.contains(a.id),
+                                  markingDone: markingDoneAssignmentIds
+                                      .contains(a.id),
                                 ),
                                 groupAction: (g) => _GroupActionPreview(
                                   action: g,
                                   onTap: onGroupActionTap == null
                                       ? null
                                       : () => onGroupActionTap!(g),
-                                  onDelete: (onGroupActionDelete != null &&
+                                  onDelete:
+                                      (onGroupActionDelete != null &&
                                           g.canDelete)
                                       ? () => onGroupActionDelete!(g)
                                       : null,
@@ -845,16 +848,11 @@ class _UpcomingItem {
     required this.sortAt,
   });
 
-  factory _UpcomingItem.assignment(StudentHomeAssignment a) => _UpcomingItem._(
-        assignment: a,
-        sortAt: a.dueAt,
-      );
+  factory _UpcomingItem.assignment(StudentHomeAssignment a) =>
+      _UpcomingItem._(assignment: a, sortAt: a.dueAt);
 
   factory _UpcomingItem.groupAction(StudentHomeGroupAction g) =>
-      _UpcomingItem._(
-        groupAction: g,
-        sortAt: g.occursAt,
-      );
+      _UpcomingItem._(groupAction: g, sortAt: g.occursAt);
 
   final StudentHomeAssignment? assignment;
   final StudentHomeGroupAction? groupAction;
@@ -886,8 +884,9 @@ class _TaskPreviewCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final titleColor = isDark ? Colors.white : const Color(0xFF1F2937);
-    final statusColor =
-        item.isDone ? const Color(0xFF2F9D84) : const Color(0xFFB58B3B);
+    final statusColor = item.isDone
+        ? const Color(0xFF2F9D84)
+        : const Color(0xFFB58B3B);
     final meta = [
       'Задание',
       if (item.subject.trim().isNotEmpty) item.subject.trim(),
@@ -1016,11 +1015,7 @@ class _DoneCheckButton extends StatelessWidget {
 }
 
 class _Pill extends StatelessWidget {
-  const _Pill({
-    required this.icon,
-    required this.text,
-    required this.color,
-  });
+  const _Pill({required this.icon, required this.text, required this.color});
 
   final IconData icon;
   final String text;
@@ -1099,105 +1094,6 @@ class _EmptyAssignments extends StatelessWidget {
   }
 }
 
-class _HelpCard extends StatelessWidget {
-  const _HelpCard({required this.onTap});
-
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final titleColor = isDark ? Colors.white : const Color(0xFF111827);
-    final bodyColor =
-        isDark ? Colors.white.withValues(alpha: 0.72) : const Color(0xFF64748B);
-    final accent = isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C63D8);
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(28),
-        child: Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            gradient: isDark
-                ? null
-                : const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [Color(0xFFFFFBFF), Color(0xFFF3EEF9)],
-                  ),
-            color: isDark ? const Color(0xFF182331) : null,
-            borderRadius: BorderRadius.circular(28),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.05),
-                blurRadius: 22,
-                offset: const Offset(0, 10),
-              ),
-            ],
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: isDark ? 0.18 : 0.12),
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Icon(Icons.psychology_alt_outlined, color: accent),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Застрял с заданием?',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        color: titleColor,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Можно разобрать задачу, подготовиться к сдаче или понять, с чего начать.',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: bodyColor,
-                        height: 1.35,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    FilledButton(
-                      onPressed: onTap,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: accent,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                      ),
-                      child: const Text(
-                        'Получить помощь',
-                        style: TextStyle(fontWeight: FontWeight.w800),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _GlowBubble extends StatelessWidget {
   const _GlowBubble({required this.size, required this.opacity});
 
@@ -1232,8 +1128,8 @@ class _AnimatedEntry extends StatelessWidget {
       builder: (context, value, child) {
         final delayedValue =
             ((value * (420 + delay.inMilliseconds)) - delay.inMilliseconds)
-                    .clamp(0.0, 420.0) /
-                420.0;
+                .clamp(0.0, 420.0) /
+            420.0;
         return Opacity(
           opacity: delayedValue,
           child: Transform.translate(

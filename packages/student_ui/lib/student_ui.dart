@@ -1,5 +1,7 @@
 library;
 
+export 'src/content/content_models.dart';
+export 'src/content/student_home_promo_card.dart';
 export 'src/home/home_preview_models.dart';
 export 'src/home/news_image_bytes_cache.dart';
 export 'src/home/student_home_view.dart';
