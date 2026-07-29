@@ -282,30 +282,30 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 
 ## N. Stage 15.1 — Home promo
 
-- [ ] «Застрял с заданием?» → managed promo
-- [ ] Редактируется заголовок
-- [ ] Редактируется подзаголовок
-- [ ] Редактируется изображение/иллюстрация
-- [ ] Редактируется градиент
-- [ ] Редактируется иконка
-- [ ] Редактируется CTA
-- [ ] Редактируется внутренний маршрут
-- [ ] Редактируется проверенная внешняя ссылка
-- [ ] Редактируется аудитория
-- [ ] Редактируется период показа
-- [ ] Редактируется порядок
-- [ ] Возможность закрыть карточку
-- [ ] Политика повторного показа
-- [ ] Статус draft
-- [ ] Статус published
-- [ ] Статус archived
-- [ ] Origin/status demo
-- [ ] Renderer в `packages/student_ui`
-- [ ] Admin Preview = тот же renderer
-- [ ] Mobile = тот же renderer
-- [ ] Cache-first + resume/refresh
-- [ ] Widget/golden tests promo
-- [ ] Codex APPROVE 15.1
+- [x] «Застрял с заданием?» → managed promo
+- [x] Редактируется заголовок
+- [x] Редактируется подзаголовок
+- [ ] Редактируется изображение/иллюстрация *(отключено до signed-URL/media path; Codex 15.1 APPROVE с этим residual)*
+- [x] Редактируется градиент
+- [x] Редактируется иконка
+- [x] Редактируется CTA
+- [x] Редактируется внутренний маршрут
+- [x] Редактируется проверенная внешняя ссылка
+- [x] Редактируется аудитория
+- [x] Редактируется период показа
+- [x] Редактируется порядок
+- [x] Возможность закрыть карточку
+- [x] Политика повторного показа
+- [x] Статус draft
+- [x] Статус published
+- [x] Статус archived
+- [x] Origin/status demo
+- [x] Renderer в `packages/student_ui`
+- [x] Admin Preview = тот же renderer
+- [x] Mobile = тот же renderer
+- [x] Cache-first + resume/refresh
+- [x] Widget/golden tests promo
+- [x] Codex APPROVE 15.1
 
 ---
 

@@ -10,6 +10,7 @@ import '../core/navigation/admin_shell.dart';
 import '../features/academic/students/students_screen.dart';
 import '../features/academic/subjects/subjects_screen.dart';
 import '../features/academic/teachers/teachers_screen.dart';
+import '../features/content/home_promo/home_promo_editor_screen.dart';
 import '../features/content/news/news_editor_screen.dart';
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/moderation/moderation_screen.dart';
@@ -121,6 +122,11 @@ GoRouter createAdminRouter(AdminSessionController session) {
           GoRoute(
             path: '/content/news',
             builder: (context, state) => NewsEditorScreen(session: session),
+          ),
+          GoRoute(
+            path: '/content/home-promo',
+            builder: (context, state) =>
+                HomePromoEditorScreen(session: session),
           ),
           GoRoute(
             path: '/academic/subjects',

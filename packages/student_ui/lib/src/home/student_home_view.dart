@@ -19,8 +19,10 @@ class StudentHomeView extends StatelessWidget {
     this.onAssignmentTap,
     this.onAssignmentDoneTap,
     this.onHelpTap,
+    this.onHomePromoDismiss,
     this.homePromo,
     this.homePromoIsDemo = false,
+    this.hideHomePromo = false,
     this.hiddenAssignmentIds = const {},
     this.markingDoneAssignmentIds = const {},
     this.selectedNewsId,
@@ -41,12 +43,16 @@ class StudentHomeView extends StatelessWidget {
   final ValueChanged<StudentHomeAssignment>? onAssignmentTap;
   final ValueChanged<StudentHomeAssignment>? onAssignmentDoneTap;
   final VoidCallback? onHelpTap;
+  final VoidCallback? onHomePromoDismiss;
 
-  /// Managed home promo payload. When null, uses built-in demo stub.
+  /// Managed home promo payload. When null and not [hideHomePromo], uses demo stub.
   final HomePromoPayload? homePromo;
 
-  /// When true, shows «Пример». Null [homePromo] fallback is always demo-labeled.
+  /// When true, shows «Пример».
   final bool homePromoIsDemo;
+
+  /// Successful empty server list — do not resurrect demo (Stage 14.1).
+  final bool hideHomePromo;
   final Set<String> hiddenAssignmentIds;
   final Set<String> markingDoneAssignmentIds;
   final String? selectedNewsId;
@@ -99,16 +105,19 @@ class StudentHomeView extends StatelessWidget {
             ),
           ),
         ),
-        SliverToBoxAdapter(
-          child: _AnimatedEntry(
-            delay: const Duration(milliseconds: 170),
-            child: StudentHomePromoCard(
-              payload: homePromo ?? HomePromoPayload.demoStuckWithAssignment,
-              onTap: onHelpTap,
-              showDemoBadge: homePromoIsDemo || homePromo == null,
+        if (!hideHomePromo)
+          SliverToBoxAdapter(
+            child: _AnimatedEntry(
+              delay: const Duration(milliseconds: 170),
+              child: StudentHomePromoCard(
+                payload: homePromo ?? HomePromoPayload.demoStuckWithAssignment,
+                onTap: onHelpTap,
+                onDismiss: onHomePromoDismiss,
+                showDemoBadge:
+                    homePromoIsDemo || (homePromo == null && !hideHomePromo),
+              ),
             ),
           ),
-        ),
         const SliverToBoxAdapter(child: SizedBox(height: 96)),
       ],
     );

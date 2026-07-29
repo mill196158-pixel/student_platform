@@ -126,6 +126,25 @@ void main() {
     );
   });
 
+  testWidgets('StudentHomePromoCard shows dismiss control when dismissible',
+      (tester) async {
+    var dismissed = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StudentHomePromoCard(
+            payload: HomePromoPayload.demoStuckWithAssignment.copyWith(
+              dismissible: true,
+            ),
+            onDismiss: () => dismissed = true,
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byTooltip('Скрыть'));
+    expect(dismissed, isTrue);
+  });
+
   testWidgets('StudentHomePromoCard renders typed fields without raw JSON',
       (tester) async {
     var taps = 0;

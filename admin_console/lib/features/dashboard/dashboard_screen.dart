@@ -33,6 +33,13 @@ class DashboardScreen extends StatelessWidget {
                 onTap: () => context.go('/content/news'),
               ),
               _DashboardCard(
+                title: 'Главная promo',
+                subtitle: 'Управляемый блок «Застрял с заданием?»',
+                icon: Icons.home_outlined,
+                color: const Color(0xFF5B8A72),
+                onTap: () => context.go('/content/home-promo'),
+              ),
+              _DashboardCard(
                 title: 'Предметы',
                 subtitle: 'Справочник и готовность материалов',
                 icon: Icons.menu_book_outlined,

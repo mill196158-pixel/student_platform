@@ -5,9 +5,12 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:student_ui/student_ui.dart';
 
+import 'package:url_launcher/url_launcher.dart';
+
 import 'package:student_platform/src/services/push/app_notifications_api.dart';
 import 'package:student_platform/src/services/push/in_app_notification_bus.dart';
 import 'package:student_platform/src/ui/home/home_dashboard_service.dart';
+import 'package:student_platform/src/ui/home/home_promo_service.dart';
 import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/models/group_action_labels.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/navigation/group_action_deeplink.dart';
@@ -21,14 +24,18 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final HomeDashboardService _service = HomeDashboardService();
+  final HomePromoService _promoService = HomePromoService();
   final AppNotificationsApi _notificationsApi = AppNotificationsApi();
 
   HomeDashboardData? _data;
+  HomePromoLoadResult _promo = const HomePromoLoadResult(isDemoFallback: true);
   Object? _error;
   bool _loading = true;
   int _unreadNotificationCount = 0;
+  int _promoLoadGeneration = 0;
+  String? _recordedImpressionId;
   final Set<String> _hiddenDoneAssignmentIds = {};
   final Set<String> _markingDoneAssignmentIds = {};
   StreamSubscription<InAppNotificationEvent>? _inAppSub;
@@ -36,14 +43,23 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
     _inAppSub = InAppNotificationBus.instance.stream.listen(_onInAppEvent);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _inAppSub?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_load());
+    }
   }
 
   Future<void> _onInAppEvent(InAppNotificationEvent event) async {
@@ -70,18 +86,26 @@ class _HomeScreenState extends State<HomeScreen> {
     // Cache-first: paint previously saved news image bytes ASAP.
     unawaited(_paintCachedNews());
 
+    final promoGeneration = ++_promoLoadGeneration;
+    // Await cache paint before remote so a slow cache cannot overwrite fresher data.
+    await _paintCachedPromo(promoGeneration);
+
     try {
       final results = await Future.wait<Object?>([
         _service.load(),
         _notificationsApi.unreadCount(),
+        _loadPromoSafe(),
       ]);
-      if (!mounted) return;
+      if (!mounted || promoGeneration != _promoLoadGeneration) return;
       final next = results[0] as HomeDashboardData;
+      final promo = results[2] as HomePromoLoadResult;
       setState(() {
         _data = _mergeDashboardNewsImages(_data, next);
         _unreadNotificationCount = results[1] as int;
+        _promo = promo;
         _error = null;
       });
+      _maybeRecordPromoImpression(promo);
     } catch (error) {
       if (!mounted) return;
       // Keep last good dashboard (and images) on refresh failure.
@@ -89,6 +113,33 @@ class _HomeScreenState extends State<HomeScreen> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<HomePromoLoadResult> _loadPromoSafe() async {
+    try {
+      return await _promoService.load();
+    } catch (error) {
+      debugPrint('[home] promo load failed: $error');
+      // Hard errors: last-good cache only. Demo only when RPC is truly missing
+      // (handled inside service) — never treat permission/DB failures as demo.
+      final cached = await _promoService.loadCached();
+      if (cached.card != null) {
+        return HomePromoLoadResult(card: cached.card, loadError: true);
+      }
+      return const HomePromoLoadResult(loadError: true, intentionallyEmpty: true);
+    }
+  }
+
+  Future<void> _paintCachedPromo(int generation) async {
+    try {
+      final cached = await _promoService.loadCached();
+      if (!mounted ||
+          generation != _promoLoadGeneration ||
+          cached.card == null) {
+        return;
+      }
+      setState(() => _promo = cached);
+    } catch (_) {}
   }
 
   Future<void> _paintCachedNews() async {
@@ -188,7 +239,13 @@ class _HomeScreenState extends State<HomeScreen> {
               final source = _findAssignment(item.id);
               if (source != null) _markAssignmentDone(source);
             },
-            onHelpTap: _showHelpDetails,
+            homePromo: _promo.hidePromoStrip
+                ? null
+                : (_promo.isDemoFallback ? null : _promo.payload),
+            homePromoIsDemo: _promo.showDemoBadge,
+            hideHomePromo: _promo.hidePromoStrip,
+            onHelpTap: _onHomePromoTap,
+            onHomePromoDismiss: _onHomePromoDismiss,
             hiddenAssignmentIds: _hiddenDoneAssignmentIds,
             markingDoneAssignmentIds: _markingDoneAssignmentIds,
           ),
@@ -263,14 +320,13 @@ class _HomeScreenState extends State<HomeScreen> {
             occursAt: action.occursAt,
             isTopic: action.isTopic,
             isCollection: action.isCollection,
-            followUpTitle: action.isTopic &&
-                    (action.myPickText ?? '').trim().isNotEmpty
-                ? topicFollowUpTitle(action.myPickText!)
-                : null,
+            followUpTitle:
+                action.isTopic && (action.myPickText ?? '').trim().isNotEmpty
+                    ? topicFollowUpTitle(action.myPickText!)
+                    : null,
             statusLine: action.isCollection
                 ? collectionHomeStatusLine(action.myPickText)
-                : (action.isTopic &&
-                        (action.myPickText ?? '').trim().isNotEmpty
+                : (action.isTopic && (action.myPickText ?? '').trim().isNotEmpty
                     ? 'Тема занята'
                     : null),
             isPendingReview: false,
@@ -564,14 +620,92 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _maybeRecordPromoImpression(HomePromoLoadResult promo) {
+    final id = promo.card?.id;
+    if (id == null ||
+        promo.isDemoFallback ||
+        promo.hidePromoStrip ||
+        promo.loadError) {
+      return;
+    }
+    if (_recordedImpressionId == id) return;
+    _recordedImpressionId = id;
+    unawaited(_promoService.recordEvent(id, 'impression'));
+  }
+
+  Future<void> _onHomePromoTap() async {
+    final managedId = _promo.card?.id;
+    if (managedId != null &&
+        !_promo.isDemoFallback &&
+        !_promo.hidePromoStrip) {
+      await _promoService.recordEvent(managedId, 'click');
+    }
+
+    final payload = _promo.payload;
+    final route = payload.ctaRoute?.trim();
+    if (route != null && route.isNotEmpty) {
+      if (route == '/help' || route == '/my-diary') {
+        if (route == '/my-diary') {
+          context.push('/my-diary');
+          return;
+        }
+        _showHelpDetails();
+        return;
+      }
+      try {
+        context.push(route);
+        return;
+      } catch (_) {
+        // Fall through to URL / sheet.
+      }
+    }
+    final url = payload.ctaUrl?.trim();
+    if (url != null && url.isNotEmpty) {
+      final uri = Uri.tryParse(url);
+      if (uri != null &&
+          (uri.scheme == 'https' || uri.scheme == 'http') &&
+          await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        return;
+      }
+    }
+    _showHelpDetails();
+  }
+
+  Future<void> _onHomePromoDismiss() async {
+    final id = _promo.card?.id;
+    if (id == null || _promo.isDemoFallback) {
+      setState(() {
+        _promo = const HomePromoLoadResult(intentionallyEmpty: true);
+      });
+      return;
+    }
+    try {
+      await _promoService.dismiss(id);
+      if (!mounted) return;
+      // Optimistic hide; successful empty must not resurrect demo (14.1).
+      setState(() {
+        _promo = const HomePromoLoadResult(intentionallyEmpty: true);
+      });
+      final refreshed = await _loadPromoSafe();
+      if (!mounted) return;
+      setState(() => _promo = refreshed);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось скрыть карточку.')),
+      );
+    }
+  }
+
   void _showHelpDetails() {
     _showDetailsSheet(
-      title: 'Помощь с заданием',
-      icon: Icons.psychology_alt_outlined,
+      title: _promo.payload.title,
+      icon: _promo.payload.iconData,
       accent: const Color(0xFF8A72D8),
       children: [
         Text(
-          'Здесь можно будет разобрать задачу, подготовиться к сдаче или понять, с чего начать. Раздел помощи будет добавлен позже.',
+          _promo.payload.subtitle,
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 height: 1.45,
                 color: Theme.of(context)

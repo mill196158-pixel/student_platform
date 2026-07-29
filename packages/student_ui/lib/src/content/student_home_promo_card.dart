@@ -10,12 +10,14 @@ class StudentHomePromoCard extends StatelessWidget {
     super.key,
     required this.payload,
     this.onTap,
+    this.onDismiss,
     this.showDemoBadge = false,
     this.padding = const EdgeInsets.symmetric(horizontal: 20),
   });
 
   final HomePromoPayload payload;
   final VoidCallback? onTap;
+  final VoidCallback? onDismiss;
   final bool showDemoBadge;
   final EdgeInsetsGeometry padding;
 
@@ -37,9 +39,8 @@ class StudentHomePromoCard extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final titleColor = isDark ? Colors.white : const Color(0xFF111827);
-    final bodyColor = isDark
-        ? Colors.white.withValues(alpha: 0.72)
-        : const Color(0xFF64748B);
+    final bodyColor =
+        isDark ? Colors.white.withValues(alpha: 0.72) : const Color(0xFF64748B);
     final accent = isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C63D8);
 
     final lightGradient = payload.gradientColors.length >= 2
@@ -76,68 +77,90 @@ class StudentHomePromoCard extends StatelessWidget {
                 ),
               ],
             ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Stack(
               children: [
-                Container(
-                  width: 52,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    color: accent.withValues(alpha: isDark ? 0.18 : 0.12),
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: Icon(payload.iconData, color: accent),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (showDemoBadge) ...[
-                        Text(
-                          'Пример',
-                          style: theme.textTheme.labelMedium?.copyWith(
-                            color: accent,
-                            fontWeight: FontWeight.w800,
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 52,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        color: accent.withValues(alpha: isDark ? 0.18 : 0.12),
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: Icon(payload.iconData, color: accent),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (showDemoBadge) ...[
+                            Text(
+                              'Пример',
+                              style: theme.textTheme.labelMedium?.copyWith(
+                                color: accent,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                          ],
+                          Text(
+                            payload.title,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              color: titleColor,
+                              fontWeight: FontWeight.w900,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 6),
-                      ],
-                      Text(
-                        payload.title,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          color: titleColor,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        payload.subtitle,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: bodyColor,
-                          height: 1.35,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      FilledButton(
-                        onPressed: onTap,
-                        style: FilledButton.styleFrom(
-                          backgroundColor: accent,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
+                          const SizedBox(height: 8),
+                          Text(
+                            payload.subtitle,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: bodyColor,
+                              height: 1.35,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                        ),
-                        child: Text(
-                          payload.ctaLabel,
-                          style: const TextStyle(fontWeight: FontWeight.w800),
-                        ),
+                          const SizedBox(height: 14),
+                          FilledButton(
+                            onPressed: onTap,
+                            style: FilledButton.styleFrom(
+                              backgroundColor: accent,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 16),
+                            ),
+                            child: Text(
+                              payload.ctaLabel,
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                    if (payload.dismissible && onDismiss != null)
+                      const SizedBox(width: 28),
+                  ],
                 ),
+                if (payload.dismissible && onDismiss != null)
+                  Positioned(
+                    top: -4,
+                    right: -4,
+                    child: IconButton(
+                      tooltip: 'Скрыть',
+                      onPressed: onDismiss,
+                      icon: Icon(
+                        Icons.close_rounded,
+                        size: 20,
+                        color: bodyColor,
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),

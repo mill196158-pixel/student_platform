@@ -188,6 +188,57 @@ class HomePromoPayload {
 
   IconData get iconData => contentIconForKey(iconKey);
 
+  /// Wire format for `home_promo_v1` RPCs (snake_case).
+  Map<String, dynamic> toWireJson() {
+    return {
+      'title': title,
+      'subtitle': subtitle,
+      'icon_key': iconKey,
+      'gradient_colors': [
+        for (final color in gradientColors) _colorToHex(color),
+      ],
+      'cta_label': ctaLabel,
+      'dismissible': dismissible,
+      if (imageAssetId != null) 'image_asset_id': imageAssetId,
+      if (ctaRoute != null) 'cta_route': ctaRoute,
+      if (ctaUrl != null) 'cta_url': ctaUrl,
+      if (reshowAfterHours != null) 'reshow_after_hours': reshowAfterHours,
+    };
+  }
+
+  HomePromoPayload copyWith({
+    String? title,
+    String? subtitle,
+    String? iconKey,
+    List<Color>? gradientColors,
+    String? ctaLabel,
+    bool? dismissible,
+    String? imageAssetId,
+    String? ctaRoute,
+    String? ctaUrl,
+    int? reshowAfterHours,
+    bool clearImageAssetId = false,
+    bool clearCtaRoute = false,
+    bool clearCtaUrl = false,
+    bool clearReshowAfterHours = false,
+  }) {
+    return HomePromoPayload(
+      title: title ?? this.title,
+      subtitle: subtitle ?? this.subtitle,
+      iconKey: iconKey ?? this.iconKey,
+      gradientColors: gradientColors ?? this.gradientColors,
+      ctaLabel: ctaLabel ?? this.ctaLabel,
+      dismissible: dismissible ?? this.dismissible,
+      imageAssetId:
+          clearImageAssetId ? null : (imageAssetId ?? this.imageAssetId),
+      ctaRoute: clearCtaRoute ? null : (ctaRoute ?? this.ctaRoute),
+      ctaUrl: clearCtaUrl ? null : (ctaUrl ?? this.ctaUrl),
+      reshowAfterHours: clearReshowAfterHours
+          ? null
+          : (reshowAfterHours ?? this.reshowAfterHours),
+    );
+  }
+
   static Color? _parseColor(Object? raw) {
     if (raw is! String) return null;
     var hex = raw.trim();
@@ -197,6 +248,11 @@ class HomePromoPayload {
     final value = int.tryParse(hex, radix: 16);
     if (value == null) return null;
     return Color(value);
+  }
+
+  static String _colorToHex(Color color) {
+    final value = color.toARGB32() & 0xFFFFFF;
+    return '#${value.toRadixString(16).padLeft(6, '0').toUpperCase()}';
   }
 }
 
