@@ -1026,7 +1026,7 @@ Status: **16.2 DONE (local)** / Codex **APPROVE_WITH_NOTES**; **16.3 DONE (local
 
 ## Stage 17 — Вакансии
 
-Status: **UI SCAFFOLD (local, uncommitted)** / SQL foundation Codex **APPROVE_WITH_NOTES** (`5629da9`) — product UI not APPROVE; remote apply pending owner; checklist §T unchecked
+Status: **DONE (local)** / Codex **APPROVE** — §T closed; remote apply / Edge deploy pending owner
 
 - [ ] отдельная доменная модель (не generic content JSON);
 - [ ] создание админом; предложение пользователем через форму; *(local Admin editor + ProposeVacancyScreen scaffold)*

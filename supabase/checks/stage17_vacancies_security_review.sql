@@ -1,7 +1,8 @@
 -- Stage 17 — vacancies domain security review.
 --
 -- Static, read-only checks to run AFTER applying
--- 20260729151000_stage17_vacancies_domain.sql. Each query should return zero
+-- 20260729151000_stage17_vacancies_domain.sql and
+-- 20260729151050_stage17_vacancies_p1_hardening.sql.
 -- offending rows (or the expected shape noted above it). Nothing here mutates
 -- data. Do not run before the migration is applied.
 --
@@ -10,7 +11,7 @@
 
 -- ---------------------------------------------------------------------------
 -- 1. Every Stage 17 table has RLS enabled AND forced (no owner bypass).
---    Expect: 8 rows, rls_enabled = true and rls_forced = true for all.
+--    Expect: 9 rows, rls_enabled = true and rls_forced = true for all.
 -- ---------------------------------------------------------------------------
 select
   c.relname             as table_name,
@@ -25,6 +26,7 @@ where n.nspname = 'public'
     'vacancy_audience_groups',
     'vacancy_audience_users',
     'vacancy_assets',
+    'vacancy_asset_upload_intents',
     'vacancy_media_cleanup_queue',
     'vacancy_reports',
     'vacancy_moderation_actions'
@@ -44,6 +46,7 @@ from (
   values
     ('vacancies'), ('vacancy_versions'), ('vacancy_audience_groups'),
     ('vacancy_audience_users'), ('vacancy_assets'),
+    ('vacancy_asset_upload_intents'),
     ('vacancy_media_cleanup_queue'), ('vacancy_reports'),
     ('vacancy_moderation_actions')
 ) as t(table_name)
@@ -72,7 +75,7 @@ order by table_name, grantee, privilege_type;
 
 -- ---------------------------------------------------------------------------
 -- 3. service_role holds the table DML instead.
---    Expect: SELECT/INSERT/UPDATE/DELETE for each of the 8 tables.
+--    Expect: SELECT/INSERT/UPDATE/DELETE for each of the 9 tables.
 -- ---------------------------------------------------------------------------
 select
   table_name,
@@ -439,6 +442,7 @@ declare
   v_tables text[] := array[
     'vacancies', 'vacancy_versions', 'vacancy_audience_groups',
     'vacancy_audience_users', 'vacancy_assets',
+    'vacancy_asset_upload_intents',
     'vacancy_media_cleanup_queue', 'vacancy_reports',
     'vacancy_moderation_actions'
   ];
@@ -799,4 +803,330 @@ begin
   end if;
 
   raise notice 'stage17 P1 rework assertions: PASS';
+end $$;
+
+-- ===========================================================================
+-- P1 ROUND 2 ASSERTIONS (Codex REJECT round 2 — post-hardening migration)
+-- Requires 20260729151050_stage17_vacancies_p1_hardening.sql applied.
+-- ===========================================================================
+
+-- ---------------------------------------------------------------------------
+-- 26. Content edits fail-closed outside draft|submitted|rejected.
+--     Expect: one row, uses_editable_guard = true.
+-- ---------------------------------------------------------------------------
+select
+  p.proname,
+  (p.prosrc like '%vacancy_assert_editable_content%') as uses_editable_guard
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname in ('admin_update_vacancy_draft', 'admin_set_vacancy_audience');
+
+-- ---------------------------------------------------------------------------
+-- 27. admin_update_vacancy_draft must NOT allow in_moderation|approved edits.
+--     Expect: zero rows (no legacy allow-list).
+-- ---------------------------------------------------------------------------
+select p.proname
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'admin_update_vacancy_draft'
+  and p.prosrc like '%in_moderation%'
+  and p.prosrc like '%approved%'
+  and p.prosrc not like '%vacancy_assert_editable_content%';
+
+-- ---------------------------------------------------------------------------
+-- 28. Client-trusted asset register is deprecated.
+--     Expect: one row, raises_deprecated = true.
+-- ---------------------------------------------------------------------------
+select
+  p.proname,
+  (p.prosrc like '%deprecated_use_upload_intent%') as raises_deprecated
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'admin_register_vacancy_asset';
+
+-- ---------------------------------------------------------------------------
+-- 29. Upload intent + finalize RPCs exist; intent never returns storage_path.
+--     Expect: zero rows missing; intent RPC has no path leak.
+-- ---------------------------------------------------------------------------
+select r.proname as missing_rpc
+from (
+  values
+    ('admin_create_vacancy_asset_upload_intent'),
+    ('admin_finalize_vacancy_asset_upload'),
+    ('service_vacancy_upload_intent_storage_path'),
+    ('authorize_vacancy_asset_download'),
+    ('service_vacancy_asset_storage_path'),
+    ('admin_list_vacancy_moderation_actions')
+) as r(proname)
+where not exists (
+  select 1 from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public' and p.proname = r.proname
+);
+
+select p.proname
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'admin_create_vacancy_asset_upload_intent'
+  and p.prosrc like '%storage_path%'
+  and p.prosrc like '%return jsonb_build_object%'
+  and p.prosrc like '%''storage_path''%';
+
+-- ---------------------------------------------------------------------------
+-- 30. Finalize reads MIME/size from storage.objects (fail-closed).
+--     Expect: one row, all flags true.
+-- ---------------------------------------------------------------------------
+select
+  p.proname,
+  (p.prosrc like '%storage.objects%') as reads_storage,
+  (p.prosrc like '%storage_mime_missing%') as fail_closed_mime,
+  (p.prosrc like '%mime_mismatch%') as checks_intent_mime
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'admin_finalize_vacancy_asset_upload';
+
+-- ---------------------------------------------------------------------------
+-- 31. explicit_users_count requires active enrollment.
+--     Expect: one row, checks_enrollment = true.
+-- ---------------------------------------------------------------------------
+select
+  p.proname,
+  (p.prosrc like '%student_enrollments%'
+   and p.prosrc like '%explicit_users_count%') as checks_enrollment
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'private'
+  and p.proname = 'vacancy_preview_audience_count';
+
+-- ---------------------------------------------------------------------------
+-- 0c. HARD GATE for P1 round 2. Raises on any violation. Read-only.
+-- ---------------------------------------------------------------------------
+do $$
+begin
+  if not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'public'::regnamespace
+      and p.proname = 'admin_update_vacancy_draft'
+      and p.prosrc like '%vacancy_assert_editable_content%'
+  ) then
+    raise exception
+      'stage17 P1r2 FAIL: admin_update_vacancy_draft missing editable guard';
+  end if;
+
+  if not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'public'::regnamespace
+      and p.proname = 'admin_set_vacancy_audience'
+      and p.prosrc like '%vacancy_assert_editable_content%'
+  ) then
+    raise exception
+      'stage17 P1r2 FAIL: admin_set_vacancy_audience missing editable guard';
+  end if;
+
+  if not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'public'::regnamespace
+      and p.proname = 'admin_register_vacancy_asset'
+      and p.prosrc like '%deprecated_use_upload_intent%'
+  ) then
+    raise exception
+      'stage17 P1r2 FAIL: admin_register_vacancy_asset still trusts client path';
+  end if;
+
+  if not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'public'::regnamespace
+      and p.proname = 'admin_finalize_vacancy_asset_upload'
+      and p.prosrc like '%storage.objects%'
+      and p.prosrc like '%storage_mime_missing%'
+  ) then
+    raise exception
+      'stage17 P1r2 FAIL: finalize does not fail-closed on storage metadata';
+  end if;
+
+  if not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'private'::regnamespace
+      and p.proname = 'vacancy_preview_audience_count'
+      and p.prosrc like '%student_enrollments%'
+  ) then
+    raise exception
+      'stage17 P1r2 FAIL: explicit_users_count ignores enrollment';
+  end if;
+
+  if not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'public'::regnamespace
+      and p.proname = 'authorize_vacancy_asset_download'
+  ) then
+    raise exception
+      'stage17 P1r2 FAIL: authorize_vacancy_asset_download missing';
+  end if;
+
+  raise notice 'stage17 P1 round 2 assertions: PASS';
+end $$;
+
+-- ===========================================================================
+-- P1 ROUND 3 ASSERTIONS (Codex REJECT round 3 — cleanup worker + assets + gates)
+-- Requires 20260729151050_stage17_vacancies_p1_hardening.sql (extended).
+-- ===========================================================================
+
+-- ---------------------------------------------------------------------------
+-- 32. Vacancy cleanup worker RPCs exist and are service_role-only.
+--     Expect: zero rows missing; zero client grants.
+-- ---------------------------------------------------------------------------
+select r.proname as missing_rpc
+from (
+  values
+    ('claim_vacancy_media_cleanup_batch'),
+    ('complete_vacancy_media_cleanup'),
+    ('fail_vacancy_media_cleanup')
+) as r(proname)
+where not exists (
+  select 1 from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public' and p.proname = r.proname
+);
+
+select
+  routine_name,
+  grantee
+from information_schema.routine_privileges
+where routine_schema = 'public'
+  and routine_name in (
+    'claim_vacancy_media_cleanup_batch',
+    'complete_vacancy_media_cleanup',
+    'fail_vacancy_media_cleanup',
+    'service_vacancy_upload_intent_storage_path',
+    'service_vacancy_asset_storage_path'
+  )
+  and grantee in ('anon', 'authenticated', 'PUBLIC', 'public')
+order by routine_name, grantee;
+
+-- ---------------------------------------------------------------------------
+-- 33. Cleanup claim uses pending-only leases (processed_at IS NULL).
+--     Expect: one row, pending_only = true.
+-- ---------------------------------------------------------------------------
+select
+  p.proname,
+  (p.prosrc ilike '%processed_at is null%') as pending_only
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'claim_vacancy_media_cleanup_batch';
+
+-- ---------------------------------------------------------------------------
+-- 34. vacancy_asset_upload_intents: FORCE RLS + no client DML.
+--     Expect: one row forced; zero client grants.
+-- ---------------------------------------------------------------------------
+select
+  c.relname             as table_name,
+  c.relrowsecurity      as rls_enabled,
+  c.relforcerowsecurity as rls_forced
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'public'
+  and c.relname = 'vacancy_asset_upload_intents';
+
+select
+  table_name,
+  grantee,
+  privilege_type
+from information_schema.role_table_grants
+where table_schema = 'public'
+  and table_name = 'vacancy_asset_upload_intents'
+  and grantee in ('anon', 'authenticated', 'PUBLIC', 'public');
+
+-- ---------------------------------------------------------------------------
+-- 35. get_my_vacancies returns typed assets (not bare asset_ids).
+--     Expect: one row, emits_assets = true; zero rows still emitting asset_ids.
+-- ---------------------------------------------------------------------------
+select
+  p.proname,
+  (p.prosrc like '%''assets''%') as emits_assets
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'get_my_vacancies';
+
+select p.proname
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'get_my_vacancies'
+  and p.prosrc like '%''asset_ids''%';
+
+-- ---------------------------------------------------------------------------
+-- 0d. HARD GATE for P1 round 3. Raises on any violation. Read-only.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_bad integer;
+begin
+  -- vacancy_asset_upload_intents FORCE RLS + no client DML
+  if not exists (
+    select 1 from pg_class c
+    where c.relnamespace = 'public'::regnamespace
+      and c.relname = 'vacancy_asset_upload_intents'
+      and c.relrowsecurity
+      and c.relforcerowsecurity
+  ) then
+    raise exception
+      'stage17 P1r3 FAIL: vacancy_asset_upload_intents missing FORCE RLS';
+  end if;
+
+  select count(*) into v_bad
+  from information_schema.role_table_grants
+  where table_schema = 'public'
+    and table_name = 'vacancy_asset_upload_intents'
+    and grantee in ('anon', 'authenticated', 'PUBLIC', 'public');
+  if v_bad > 0 then
+    raise exception
+      'stage17 P1r3 FAIL: % client grant(s) on vacancy_asset_upload_intents', v_bad;
+  end if;
+
+  -- Service-only upload/download/cleanup RPCs
+  select count(*) into v_bad
+  from information_schema.routine_privileges
+  where routine_schema = 'public'
+    and routine_name in (
+      'service_vacancy_upload_intent_storage_path',
+      'service_vacancy_asset_storage_path',
+      'claim_vacancy_media_cleanup_batch',
+      'complete_vacancy_media_cleanup',
+      'fail_vacancy_media_cleanup'
+    )
+    and grantee in ('anon', 'authenticated', 'PUBLIC', 'public');
+  if v_bad > 0 then
+    raise exception
+      'stage17 P1r3 FAIL: % client grant(s) on service vacancy media RPCs', v_bad;
+  end if;
+
+  if not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'public'::regnamespace
+      and p.proname = 'claim_vacancy_media_cleanup_batch'
+      and p.prosrc ilike '%processed_at is null%'
+  ) then
+    raise exception
+      'stage17 P1r3 FAIL: cleanup claim missing processed_at IS NULL';
+  end if;
+
+  if not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'public'::regnamespace
+      and p.proname = 'get_my_vacancies'
+      and p.prosrc like '%''assets''%'
+      and p.prosrc like '%mime_type%'
+  ) then
+    raise exception
+      'stage17 P1r3 FAIL: get_my_vacancies missing typed assets payload';
+  end if;
+
+  raise notice 'stage17 P1 round 3 assertions: PASS';
 end $$;

@@ -20,6 +20,10 @@ import 'info_subjects_cache.dart';
 import 'subject_attachment_open.dart';
 import 'subject_difficulty.dart';
 import 'reference_service.dart';
+import 'propose_vacancy_screen.dart';
+import 'vacancy_media_service.dart';
+import 'vacancy_service.dart';
+import 'vacancy_submission_service.dart';
 import 'subject_info_screen.dart';
 import 'useful_subject.dart';
 import 'useful_subjects_repository.dart';
@@ -39,6 +43,9 @@ class InfoScreen extends StatefulWidget {
     this.academicContextService,
     this.planLoader,
     this.debugUserId,
+    this.vacancyService,
+    this.vacancySubmissionService,
+    this.vacancyMediaService,
     this.referenceService,
     this.initialSectionName,
   });
@@ -55,7 +62,14 @@ class InfoScreen extends StatefulWidget {
   /// Optional auth user id override for cache-key tests without Supabase auth.
   final String? debugUserId;
 
+  /// Optional DI for tests; production uses [VacancyService].
+  final VacancyService? vacancyService;
 
+  /// Optional DI for tests; production uses [VacancySubmissionService].
+  final VacancySubmissionService? vacancySubmissionService;
+
+  /// Optional DI for tests; production uses [VacancyMediaService].
+  final VacancyMediaService? vacancyMediaService;
 
   /// Optional DI for tests; production uses [ReferenceService].
   final ReferenceService? referenceService;
@@ -95,6 +109,13 @@ class _InfoScreenState extends State<InfoScreen> {
       const ReferenceLoadResult(isDemoFallback: true);
   int _referenceLoadGeneration = 0;
   bool _referenceLoadInFlight = false;
+  late final VacancyService _vacancyService;
+  late final VacancySubmissionService _vacancySubmissionService;
+  late final VacancyMediaService _vacancyMediaService;
+  VacancyLoadResult _vacancies =
+      const VacancyLoadResult(isDemoFallback: true);
+  int _vacancyLoadGeneration = 0;
+  bool _vacancyLoadInFlight = false;
 
   UsefulSubjectsRepository get _subjectsRepository =>
       widget.subjectsRepository ?? UsefulSubjectsRepository();
@@ -107,6 +128,24 @@ class _InfoScreenState extends State<InfoScreen> {
   @override
   void initState() {
     super.initState();
+    _vacancyService = widget.vacancyService ??
+        VacancyService(
+          currentUserId: () =>
+              widget.debugUserId ??
+              Supabase.instance.client.auth.currentUser?.id,
+        );
+    _vacancySubmissionService = widget.vacancySubmissionService ??
+        VacancySubmissionService(
+          currentUserId: () =>
+              widget.debugUserId ??
+              Supabase.instance.client.auth.currentUser?.id,
+        );
+    _vacancyMediaService = widget.vacancyMediaService ??
+        VacancyMediaService(
+          currentUserId: () =>
+              widget.debugUserId ??
+              Supabase.instance.client.auth.currentUser?.id,
+        );
     _referenceService = widget.referenceService ??
         ReferenceService(
           currentUserId: () =>
@@ -131,8 +170,43 @@ class _InfoScreenState extends State<InfoScreen> {
       _future = _loadWithCache();
     }
     unawaited(_loadReference());
+    unawaited(_loadVacancies());
   }
 
+  Future<void> _loadVacancies() async {
+    if (_vacancyLoadInFlight) return;
+    final generation = ++_vacancyLoadGeneration;
+    _vacancyLoadInFlight = true;
+    try {
+      final cached = await _vacancyService.loadCached();
+      if (!mounted || generation != _vacancyLoadGeneration) return;
+      if (cached.cards.isNotEmpty) {
+        setState(() => _vacancies = cached);
+      }
+      try {
+        final next = await _vacancyService.load();
+        if (!mounted || generation != _vacancyLoadGeneration) return;
+        setState(() => _vacancies = next);
+      } catch (error) {
+        debugPrint('[info] vacancies load failed: $error');
+        if (!mounted || generation != _vacancyLoadGeneration) return;
+        if (_vacancies.cards.isNotEmpty) {
+          setState(
+            () => _vacancies = VacancyLoadResult(
+              cards: _vacancies.cards,
+              loadError: true,
+            ),
+          );
+        } else {
+          setState(
+            () => _vacancies = const VacancyLoadResult(loadError: true),
+          );
+        }
+      }
+    } finally {
+      _vacancyLoadInFlight = false;
+    }
+  }
 
   Future<void> _loadReference() async {
     if (_referenceLoadInFlight) return;
@@ -536,7 +610,14 @@ class _InfoScreenState extends State<InfoScreen> {
         key: const ValueKey('jobs-search'),
         hintText: 'Найти вакансию, компанию, тег…',
         builder: (context, query) => [
-          _JobsSection(query: query),
+          _JobsSection(
+            query: query,
+            vacancies: _vacancies,
+            onRefresh: _loadVacancies,
+            submissionService: _vacancySubmissionService,
+            vacancyService: _vacancyService,
+            vacancyMediaService: _vacancyMediaService,
+          ),
         ],
       );
     }
@@ -721,7 +802,8 @@ class _InfoScreenState extends State<InfoScreen> {
     if (selected == _UsefulSection.help) {
       unawaited(_loadReference());
     } else if (selected == _UsefulSection.jobs) {
-      }
+      unawaited(_loadVacancies());
+    }
   }
 
   void _showInfoSheet(BuildContext context) {
@@ -2573,99 +2655,76 @@ class _HelpSection extends StatelessWidget {
   }
 }
 
-const _demoJobs = [
-  _DemoJob(
-    title: 'Junior Flutter Developer',
-    company: 'Campus Lab',
-    type: 'Стажировка',
-    city: 'Гибрид',
-    salary: 'от 35 000 ₽',
-    deadline: 'до 30 июня',
-    description:
-        'Помощь с мобильным приложением, простые экраны, фиксы UI и работа с наставником.',
-    tags: ['Flutter', 'Dart', 'UI'],
-    accent: Color(0xFF6A4BBC),
-  ),
-  _DemoJob(
-    title: 'Ассистент преподавателя по программированию',
-    company: 'Кафедра ИТ',
-    type: 'Подработка',
-    city: 'Университет',
-    salary: 'по договорённости',
-    deadline: 'на этой неделе',
-    description:
-        'Проверка лабораторных, помощь первокурсникам и подготовка коротких материалов.',
-    tags: ['Python', 'Алгоритмы', 'Коммуникация'],
-    accent: Color(0xFF2F80ED),
-  ),
-  _DemoJob(
-    title: 'Дизайнер презентаций и лендингов',
-    company: 'Студенческий проект',
-    type: 'Проект',
-    city: 'Удалённо',
-    salary: 'за задачу',
-    deadline: 'можно сегодня',
-    description:
-        'Нужно красиво упаковывать идеи: презентации, простые макеты и визуалы для демо.',
-    tags: ['Figma', 'Canva', 'Визуал'],
-    accent: Color(0xFFE16B8C),
-  ),
-];
-
-class _DemoJob {
-  final String title;
-  final String company;
-  final String type;
-  final String city;
-  final String salary;
-  final String deadline;
-  final String description;
-  final List<String> tags;
-  final Color accent;
-
-  const _DemoJob({
-    required this.title,
-    required this.company,
-    required this.type,
-    required this.city,
-    required this.salary,
-    required this.deadline,
-    required this.description,
-    required this.tags,
-    required this.accent,
-  });
-
-  bool matches(String query) {
-    if (query.isEmpty) return true;
-    final q = query.toLowerCase();
-    return title.toLowerCase().contains(q) ||
-        company.toLowerCase().contains(q) ||
-        type.toLowerCase().contains(q) ||
-        city.toLowerCase().contains(q) ||
-        salary.toLowerCase().contains(q) ||
-        deadline.toLowerCase().contains(q) ||
-        description.toLowerCase().contains(q) ||
-        tags.any((tag) => tag.toLowerCase().contains(q));
-  }
-}
-
 class _JobsSection extends StatelessWidget {
   final String query;
+  final VacancyLoadResult vacancies;
+  final Future<void> Function() onRefresh;
+  final VacancySubmissionService submissionService;
+  final VacancyService vacancyService;
+  final VacancyMediaService vacancyMediaService;
 
-  const _JobsSection({this.query = ''});
+  const _JobsSection({
+    this.query = '',
+    required this.vacancies,
+    required this.onRefresh,
+    required this.submissionService,
+    required this.vacancyService,
+    required this.vacancyMediaService,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final jobs = _demoJobs.where((job) => job.matches(query)).toList();
+    if (vacancies.hideVacancies) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _JobsHeroCard(submissionService: submissionService),
+          const SizedBox(height: 12),
+          const _JobBoardStats(),
+          const SizedBox(height: 12),
+          const _EmptyState(
+            text: 'Вакансии пока пусты',
+            compact: true,
+          ),
+        ],
+      );
+    }
+
+    if (vacancies.showLoadError) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _JobsHeroCard(submissionService: submissionService),
+          const SizedBox(height: 12),
+          const _JobBoardStats(),
+          const SizedBox(height: 12),
+          _EmptyState(
+            text: 'Не удалось обновить вакансии',
+            compact: true,
+            actionLabel: 'Повторить',
+            onAction: () => unawaited(onRefresh()),
+          ),
+        ],
+      );
+    }
+
+    final cards = vacancies.displayCards
+        .where((card) => card.matchesQuery(query))
+        .toList();
+    final showRpcBadge = vacancies.rpcUnavailable && vacancies.isDemoFallback;
+    final activeCount = vacancies.displayCards.length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const _JobsHeroCard(),
+        _JobsHeroCard(
+          showLegacyDemoBadge: showRpcBadge,
+          submissionService: submissionService,
+        ),
         const SizedBox(height: 12),
-        const _JobBoardStats(),
+        _JobBoardStats(activeCount: activeCount),
         const SizedBox(height: 12),
-        if (jobs.isEmpty)
+        if (cards.isEmpty)
           const _EmptyState(
             text: 'По запросу ничего не найдено',
             compact: true,
@@ -2673,7 +2732,10 @@ class _JobsSection extends StatelessWidget {
         else
           _JobsGroupSection(
             title: query.isEmpty ? 'Свежие предложения' : 'Результаты поиска',
-            jobs: jobs,
+            cards: cards,
+            showDemoBadge: vacancies.isDemoFallback,
+            vacancyService: vacancyService,
+            vacancyMediaService: vacancyMediaService,
           ),
       ],
     );
@@ -2681,7 +2743,13 @@ class _JobsSection extends StatelessWidget {
 }
 
 class _JobsHeroCard extends StatelessWidget {
-  const _JobsHeroCard();
+  final bool showLegacyDemoBadge;
+  final VacancySubmissionService submissionService;
+
+  const _JobsHeroCard({
+    this.showLegacyDemoBadge = false,
+    required this.submissionService,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -2738,7 +2806,9 @@ class _JobsHeroCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            'Здесь студенты смогут искать подработки, стажировки и проектные задачи. Публикацию и правила модерации подключим отдельным шагом.',
+            showLegacyDemoBadge
+                ? 'Пример — managed RPC ещё не применён'
+                : 'Здесь студенты смогут искать подработки, стажировки и проектные задачи. Публикацию и правила модерации подключим отдельным шагом.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: Colors.white.withValues(alpha: 0.88),
                   height: 1.35,
@@ -2748,9 +2818,9 @@ class _JobsHeroCard extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: () => _showPostJobPlaceholder(context),
+              onPressed: () => _openProposeVacancy(context),
               icon: const Icon(Icons.add_rounded),
-              label: const Text('Оставить вакансию'),
+              label: const Text('Предложить вакансию'),
               style: FilledButton.styleFrom(
                 backgroundColor: Colors.white,
                 foregroundColor: primary,
@@ -2763,31 +2833,11 @@ class _JobsHeroCard extends StatelessWidget {
     );
   }
 
-  void _showPostJobPlaceholder(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      constraints: _fullWidthSheetConstraints(context),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Размещение вакансии',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w900,
-                  ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Форма появится позже. Пока можно показать идею: студент или модератор добавляет вакансию, а мы решаем правила публикации.',
-            ),
-          ],
+  void _openProposeVacancy(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => ProposeVacancyScreen(
+          submissionService: submissionService,
         ),
       ),
     );
@@ -2795,21 +2845,24 @@ class _JobsHeroCard extends StatelessWidget {
 }
 
 class _JobBoardStats extends StatelessWidget {
-  const _JobBoardStats();
+  final int? activeCount;
+
+  const _JobBoardStats({this.activeCount});
 
   @override
   Widget build(BuildContext context) {
-    return const Row(
+    final activeLabel = activeCount?.toString() ?? '3';
+    return Row(
       children: [
         Expanded(
           child: _JobStatPill(
             icon: Icons.flash_on_rounded,
-            title: '3',
+            title: activeLabel,
             subtitle: 'активные',
           ),
         ),
-        SizedBox(width: 10),
-        Expanded(
+        const SizedBox(width: 10),
+        const Expanded(
           child: _JobStatPill(
             icon: Icons.verified_user_outlined,
             title: 'скоро',
@@ -2888,11 +2941,17 @@ class _JobStatPill extends StatelessWidget {
 
 class _JobsGroupSection extends StatelessWidget {
   final String title;
-  final List<_DemoJob> jobs;
+  final List<ManagedVacancyCard> cards;
+  final bool showDemoBadge;
+  final VacancyService vacancyService;
+  final VacancyMediaService vacancyMediaService;
 
   const _JobsGroupSection({
     required this.title,
-    required this.jobs,
+    required this.cards,
+    required this.showDemoBadge,
+    required this.vacancyService,
+    required this.vacancyMediaService,
   });
 
   @override
@@ -2927,7 +2986,7 @@ class _JobsGroupSection extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '${jobs.length}',
+                  '${cards.length}',
                   style: const TextStyle(
                     color: Colors.black45,
                     fontWeight: FontWeight.w800,
@@ -2936,204 +2995,76 @@ class _JobsGroupSection extends StatelessWidget {
               ],
             ),
           ),
-          for (final job in jobs) _JobCard(job: job),
+          for (final card in cards)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: StudentVacancyCard(
+                payload: card.payload,
+                showDemoBadge: showDemoBadge || card.showDemoBadge,
+                expiresLabel: vacancyExpiresLabel(card.expiresAt),
+                hasContacts: card.hasContacts,
+                onTap: () => _openVacancy(context, card, showDemoBadge),
+              ),
+            ),
         ],
       ),
     );
   }
-}
 
-class _JobCard extends StatelessWidget {
-  final _DemoJob job;
-
-  const _JobCard({required this.job});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return InkWell(
-      onTap: () => _showDetails(context),
-      borderRadius: BorderRadius.circular(24),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              theme.colorScheme.surface,
-              const Color(0xFFF8F4FF),
-            ],
-          ),
-          borderRadius: BorderRadius.circular(24),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.045),
-              blurRadius: 18,
-              offset: const Offset(0, 5),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 42,
-                  height: 42,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: job.accent.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(15),
-                  ),
-                  child: Icon(
-                    Icons.business_center_outlined,
-                    color: job.accent,
-                    size: 22,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        job.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          color: Colors.black,
-                          fontWeight: FontWeight.w900,
-                          height: 1.12,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${job.company} • ${job.city}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: Colors.black54,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                const Icon(Icons.chevron_right_rounded, color: Colors.black38),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              job.description,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: Colors.black.withValues(alpha: 0.62),
-                height: 1.32,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _JobChip(text: job.type, color: job.accent),
-                _JobChip(text: job.salary, color: job.accent),
-                _JobChip(text: job.deadline, color: job.accent),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showDetails(BuildContext context) {
+  void _openVacancy(
+    BuildContext context,
+    ManagedVacancyCard card,
+    bool sectionDemoFallback,
+  ) {
+    final isDemo = sectionDemoFallback || card.showDemoBadge;
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       showDragHandle: true,
       constraints: _fullWidthSheetConstraints(context),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (context) => SizedBox(
-        width: double.infinity,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                job.title,
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: Colors.black,
-                      fontWeight: FontWeight.w900,
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.75,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        builder: (context, scrollController) => SingleChildScrollView(
+          controller: scrollController,
+          child: StudentVacancyDetailSheet(
+            card: card,
+            showDemoBadge: isDemo,
+            onOpenExternalUrl: isDemo
+                ? null
+                : (url) async {
+                    final uri = Uri.parse(url);
+                    if (await canLaunchUrl(uri)) {
+                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    }
+                  },
+            onRevealContacts: isDemo || !card.hasContacts
+                ? null
+                : () => vacancyService.fetchContacts(card.id),
+            onOpenAsset: isDemo
+                ? null
+                : (assetId) async {
+                    final url = await vacancyMediaService.openAsset(assetId);
+                    if (url == null) return;
+                    final uri = Uri.parse(url);
+                    if (await canLaunchUrl(uri)) {
+                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    }
+                  },
+            onReport: isDemo
+                ? null
+                : (reason, note) => vacancyService.reportVacancy(
+                      vacancyId: card.id,
+                      reason: reason,
+                      note: note,
                     ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                '${job.company} • ${job.city}',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Colors.black54,
-                      fontWeight: FontWeight.w700,
-                    ),
-              ),
-              const SizedBox(height: 14),
-              Text(job.description),
-              const SizedBox(height: 14),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final tag in job.tags)
-                    _JobChip(text: tag, color: job.accent),
-                ],
-              ),
-              const SizedBox(height: 18),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Понятно'),
-                ),
-              ),
-            ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _JobChip extends StatelessWidget {
-  final String text;
-  final Color color;
-
-  const _JobChip({
-    required this.text,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.09),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        text,
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: color,
-              fontWeight: FontWeight.w900,
-            ),
       ),
     );
   }
@@ -3173,115 +3104,6 @@ class _HelpGroupSection extends StatelessWidget {
           ),
           ...cards,
         ],
-      ),
-    );
-  }
-}
-
-class _HelpCard extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-
-  const _HelpCard({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return InkWell(
-      onTap: () => _showPlaceholder(context),
-      borderRadius: BorderRadius.circular(26),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              theme.colorScheme.surface,
-              const Color(0xFFF8F4FF),
-            ],
-          ),
-          borderRadius: BorderRadius.circular(26),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.045),
-              blurRadius: 18,
-              offset: const Offset(0, 5),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: const Color(0xFF6A4BBC).withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Icon(icon, color: const Color(0xFF6A4BBC)),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: Colors.black,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.black.withValues(alpha: 0.62),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right_rounded, color: Colors.black38),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showPlaceholder(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      constraints: _fullWidthSheetConstraints(context),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) => SizedBox(
-        width: double.infinity,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w900,
-                    ),
-              ),
-              const SizedBox(height: 8),
-              const Text('Подробную инструкцию добавим в справочник.'),
-            ],
-          ),
-        ),
       ),
     );
   }

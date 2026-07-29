@@ -5,6 +5,7 @@
 --   20260729150600_stage16_2_subject_assets.sql
 --   20260729150700_stage16_3_reference_corrections.sql
 --   20260729151000_stage17_vacancies_domain.sql
+--   20260729151050_stage17_vacancies_p1_hardening.sql
 --   20260729152000_stage18_reviews_points_moderation.sql
 --   20260729153000_stage19_import_studio_foundation.sql
 --
@@ -554,11 +555,13 @@ declare
   v_student uuid;
   v_vacancy uuid;
   v_asset uuid;
+  v_intent_id uuid;
   v_json jsonb;
   v_versions_before integer;
   v_versions_after integer;
   v_expired integer;
   v_status text;
+  v_storage_path text;
 begin
   v_admin := pg_temp.rp_admin_with(array['content.write']);
   if v_admin is null then
@@ -601,9 +604,48 @@ begin
     )
   );
 
-  -- Fixture: force the published+overdue state that cron is meant to find. The
-  -- normal route (submit -> moderate -> publish) is covered by the Stage 17
-  -- lifecycle scenarios; here only the cron transition is under test.
+  -- P1r2: approved/in_moderation content edits must fail-closed.
+  update public.vacancies v set status = 'approved' where v.id = v_vacancy;
+  perform pg_temp.rp_as_user(v_admin);
+  perform pg_temp.rp_expect_exception(
+    '17.2b approved vacancy content edit blocked',
+    format(
+      'select public.admin_update_vacancy_draft(%L::uuid, %L::jsonb, %s::integer)',
+      v_vacancy,
+      '{"title":"Hacked"}'::jsonb,
+      (select row_version from public.vacancies where id = v_vacancy)
+    ),
+    '55000'
+  );
+
+  update public.vacancies v set status = 'in_moderation' where v.id = v_vacancy;
+  perform pg_temp.rp_expect_exception(
+    '17.2c in_moderation audience edit blocked',
+    format(
+      'select public.admin_set_vacancy_audience(%L::uuid, %L, %L::uuid[], %L::uuid[], %s::integer)',
+      v_vacancy,
+      'all',
+      '{}'::uuid[],
+      '{}'::uuid[],
+      (select row_version from public.vacancies where id = v_vacancy)
+    ),
+    '55000'
+  );
+
+  perform pg_temp.rp_expect_exception(
+    '17.2d deprecated client asset register blocked',
+    format(
+      'select public.admin_register_vacancy_asset(%L::uuid, %L, %L, %s::bigint)',
+      v_vacancy,
+      'vacancy/' || v_vacancy::text || '/evil.pdf',
+      'application/pdf',
+      1024
+    ),
+    '55000',
+    'deprecated_use_upload_intent'
+  );
+
+  -- Fixture: force the published+overdue state that cron is meant to find.
   update public.vacancies v set
     status = 'published',
     audience_mode = 'all',
@@ -659,12 +701,31 @@ begin
   );
 
   -- Asset safety: a PUBLISHED vacancy must not lose a file under it.
+  -- Use intent+finalize path (admin_register_vacancy_asset is deprecated).
+  update public.vacancies v set status = 'draft' where v.id = v_vacancy;
+
   perform pg_temp.rp_as_user(v_admin);
-  v_json := public.admin_register_vacancy_asset(
+  v_json := public.admin_create_vacancy_asset_upload_intent(
     p_vacancy_id => v_vacancy,
-    p_storage_path => 'vacancy/' || v_vacancy::text || '/roleplay.pdf',
-    p_mime_type => 'application/pdf',
-    p_byte_size => 4096,
+    p_mime_type => 'application/pdf'
+  );
+  v_intent_id := (v_json ->> 'intent_id')::uuid;
+
+  select i.storage_path into v_storage_path
+  from public.vacancy_asset_upload_intents i
+  where i.id = v_intent_id;
+
+  insert into storage.objects (bucket_id, name, owner, metadata)
+  values (
+    'content-media',
+    v_storage_path,
+    v_admin,
+    jsonb_build_object('mimetype', 'application/pdf', 'size', 4096)
+  )
+  on conflict do nothing;
+
+  v_json := public.admin_finalize_vacancy_asset_upload(
+    p_intent_id => v_intent_id,
     p_title => 'роль-плей вложение'
   );
   v_asset := (v_json ->> 'id')::uuid;

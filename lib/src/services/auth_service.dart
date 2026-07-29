@@ -15,6 +15,8 @@ import 'package:student_platform/src/ui/info/content_media_service.dart';
 import 'package:student_platform/src/ui/info/subject_card_service.dart';
 import 'package:student_platform/src/ui/info/subject_media_service.dart';
 import 'package:student_platform/src/ui/info/reference_service.dart';
+import 'package:student_platform/src/ui/info/vacancy_service.dart';
+import 'package:student_platform/src/ui/info/vacancy_media_service.dart';
 import 'package:student_platform/src/ui/profile/profile_feed_service.dart';
 
 class AuthService {
@@ -77,6 +79,12 @@ class AuthService {
       currentUserId: () => _sb.auth.currentUser?.id,
     ).clearAll();
     await ReferenceService(
+      currentUserId: () => _sb.auth.currentUser?.id,
+    ).clearAll();
+    await VacancyService(
+      currentUserId: () => _sb.auth.currentUser?.id,
+    ).clearAll();
+    await VacancyMediaService(
       currentUserId: () => _sb.auth.currentUser?.id,
     ).clearAll();
     await NewsImageDiskCache().clear();

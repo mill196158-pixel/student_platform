@@ -26,3 +26,9 @@ entrypoint = "./functions/subject-media/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/content-media/index.ts"
+
+# Stage 17: vacancy-media signed I/O + cleanup (local only; deploy owner-gated).
+[functions.vacancy-media]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/vacancy-media/index.ts"

@@ -14,6 +14,7 @@ import '../features/content/home_promo/home_promo_editor_screen.dart';
 import '../features/content/news/news_editor_screen.dart';
 import '../features/content/profile_feed/profile_feed_editor_screen.dart';
 import '../features/content/reference/reference_editor_screen.dart';
+import '../features/content/vacancies/vacancy_editor_screen.dart';
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/moderation/moderation_screen.dart';
 import '../features/system/terms/terms_screen.dart';
@@ -139,6 +140,11 @@ GoRouter createAdminRouter(AdminSessionController session) {
             path: '/content/reference',
             builder: (context, state) =>
                 ReferenceEditorScreen(session: session),
+          ),
+          GoRoute(
+            path: '/content/vacancies',
+            builder: (context, state) =>
+                VacancyEditorScreen(session: session),
           ),
           GoRoute(
             path: '/academic/subjects',
