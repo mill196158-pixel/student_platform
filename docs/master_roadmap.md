@@ -1089,7 +1089,7 @@ Status: **FOUNDATION DRAFT (local)** / Codex **APPROVE_WITH_NOTES** (`3772b4a`) 
 
 ## Stage 20 — AI-функции (только спецификация)
 
-Status: **SPEC DRAFTED** — не DONE; Codex ещё не APPROVE; платный AI не внедрять
+Status: **SPEC DONE** / Codex **APPROVE** (`e279c53`) — платный AI не внедрять
 
 Варианты для документа:
 
@@ -1114,7 +1114,7 @@ Status: **SPEC DRAFTED** — не DONE; Codex ещё не APPROVE; платны�
 
 ## Stage 21 — Перенос инфраструктуры в РФ (только roadmap)
 
-Status: **SPEC DRAFTED** — не DONE; Codex ещё не APPROVE; перенос сейчас не выполнять
+Status: **ROADMAP DONE** / Codex **APPROVE** (`e279c53`) — перенос сейчас не выполнять
 
 План:
 
