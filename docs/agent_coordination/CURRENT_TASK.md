@@ -1,29 +1,41 @@
 # CURRENT_TASK
 
-* Status: **STAGE_13_12_8_MEMBERS_PROFILE_ROSTER_PDF** / Codex **APPROVE**
-* Branch: `refactor/chat-tab`
+* Status: **STAGE_14A_SQL_FOUNDATION** / docs gate Codex **APPROVE_WITH_NOTES**
+* Branch: `feature/content-platform`
+* Worktree: `/Users/annasuvorova/student_platform_content`
 * Codex thread: `019fa373-81f2-7962-a8c9-81d86cb62311`
-* Remote project: `gwdanmwluhrcfxbnplwd`
-* PR: https://github.com/mill196158-pixel/student_platform/pull/1
+* Remote: `gwdanmwluhrcfxbnplwd` (read-only; no apply)
 
-## Stage 13.12.8
+## Active substage
 
-* Members row → FriendProfileScreen
-* «PDF для преподавателя»: A4 roster №|ФИО|Оценка|Подпись|Примечание
-* Server `can_export_roster` via get_team_members_directory
-* No DB bulk member import (export-only for teacher workflow)
-* Migration applied: stage13_12_8_team_roster_export_capability
+Stage 14A — local SQL foundation only:
 
-## Residuals (owner)
+* tables, constraints, indexes
+* fail-closed PL/pgSQL payload validator
+* audience + concurrency helpers
+* RLS / FORCE / grants
+* Admin + mobile RPC foundations
+* SQL security + behavioral role-play tests
 
-* **PHYSICAL OCR SMOKE REQUIRED**
-* **TWO-DEVICE TOPIC RACE REQUIRED**
-* **CONTROLLED PUSH REQUIRED**
-* **REAL XLSX REQUIRED**
+Notes from docs APPROVE:
+
+* `admin_reorder_content_placement` requires expected `row_version` for every affected item; deterministic locks; full rollback on conflict
+* `admin_create_content_draft` is the exception (no prior row_version)
+
+## Out of scope this slice
+
+* Dart models / renderers (Stage 14B)
+* Home promo UI wiring (15.1)
+* Remote apply / Edge deploy / push / real import
 
 ## Constraints
 
-* No force-push
-* No teacher-media deploy until explicitly requested
-* Do not create autumn 2026 / do not flip current term without explicit owner OK
-* Do not apply remote Supabase without explicit permission
+* No remote migration apply
+* No Edge deploy
+* No GitHub push
+* No service_role in Web
+* Do not edit already-applied migrations
+
+## Next gate
+
+Implement → tests → Codex review of full diff → fix P0/P1 → APPROVE → local commit → Stage 14B typed Dart models

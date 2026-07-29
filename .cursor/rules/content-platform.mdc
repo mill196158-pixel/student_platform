@@ -1,0 +1,58 @@
+---
+description: Content Platform Stages 14–21 control system — mandatory docs, checklist, Codex gates
+alwaysApply: true
+---
+
+# Content Platform control system
+
+Correct Content Platform worktree:
+
+`/Users/annasuvorova/student_platform_content`
+
+Working branch: `feature/content-platform`  
+Base: `origin/refactor/chat-tab`  
+Codex thread: `019fa373-81f2-7962-a8c9-81d86cb62311`  
+Remote: `gwdanmwluhrcfxbnplwd` (read-only unless owner authorizes)
+
+## Before every continuation of work
+
+Read all three:
+
+1. `docs/master_roadmap.md`
+2. `docs/agent_coordination/CURRENT_TASK.md`
+3. `docs/content_platform/ACCEPTANCE_CHECKLIST.md`
+
+Also use `docs/content_platform/CONTENT_PLATFORM_SPEC.md` for architecture decisions.
+
+Do not invent a second roadmap. Update the existing `docs/master_roadmap.md` only.
+
+## Checklist discipline
+
+* Every owner requirement is an atomic checkbox in `ACCEPTANCE_CHECKLIST.md`.
+* Do **not** skip checkboxes.
+* Do **not** merge many requirements into a vague “готово”.
+* Mark `[x]` only when that item has **code + tests + Codex APPROVE** (docs-only items: Codex APPROVE on the docs package).
+* If blocked, record the blocker in `CURRENT_TASK.md` and move to the next independent substage.
+
+## Codex gates
+
+* Before a stage/substage: send architecture + real schema findings to Codex.
+* After implementation: send full diff + test results to Codex.
+* Fix P0/P1 before APPROVE.
+* No Stage/substage DONE without Codex APPROVE.
+* After APPROVE: update checklist + CURRENT_TASK, then continue.
+
+## Hard bans until owner says otherwise
+
+* No remote Supabase migration apply
+* No Edge Function deploy
+* No GitHub push (including force-push)
+* No real data import
+* No `service_role` in Flutter Web / Admin Web
+* No deleting existing production data
+* No editing already-applied migrations
+* Prefer extending existing tables; create new ones only with documented proof that extension is unsafe
+
+## Stage 13 protection
+
+Do not rewrite completed Stage 13 chats, group actions, news archive, or RBAC without confirmed necessity.
