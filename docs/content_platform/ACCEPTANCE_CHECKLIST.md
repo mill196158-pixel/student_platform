@@ -1,9 +1,9 @@
 # Content Platform — Acceptance Checklist
 
-Status: **ACTIVE**  
-Updated: **2026-07-29** (restored atomic after Codex CHANGES_REQUESTED)  
-Rule: mark `[x]` only with **code + tests + Codex APPROVE** for that item.  
-Docs-only items: Codex APPROVE on the docs package.  
+Status: **ACTIVE**
+Updated: **2026-07-29** (restored atomic after Codex CHANGES_REQUESTED)
+Rule: mark `[x]` only with **code + tests + Codex APPROVE** for that item.
+Docs-only items: Codex APPROVE on the docs package.
 Do **not** merge requirements into vague “готово”.
 
 Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (see CURRENT_TASK)
@@ -41,7 +41,7 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 
 ## B. Read-only audit evidence
 
-- [ ] Evidence-файл аудита создан (дата, локальный HEAD, remote migration tail, проверенные объекты; без секретов/ПДн)
+- [x] Evidence-файл аудита создан (дата, локальный HEAD, remote migration tail, проверенные объекты; без секретов/ПДн)
 - [ ] Изучен news backend
 - [ ] Изучен news editor (Admin)
 - [ ] Изучен `packages/student_ui`
