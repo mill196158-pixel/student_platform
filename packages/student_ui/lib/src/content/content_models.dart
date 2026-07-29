@@ -509,6 +509,16 @@ IconData contentIconForKey(String key) {
       return Icons.help_outline_rounded;
     case 'work':
       return Icons.work_outline_rounded;
+    case 'login':
+      return Icons.login_rounded;
+    case 'download':
+      return Icons.download_rounded;
+    case 'description':
+      return Icons.description_outlined;
+    case 'computer':
+      return Icons.computer_rounded;
+    case 'map':
+      return Icons.map_outlined;
     default:
       return Icons.auto_awesome_outlined;
   }

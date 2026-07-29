@@ -5,9 +5,13 @@
 --
 -- Covers the locked SPEC 15.2 semantics end to end:
 --   legacy all / legacy group / junctions-as-sole-source / OR of groups+users /
---   setter invariants and validation / draft-only audience edits / preview
---   safety / draft-hidden-archived never leaking / duplicate + restore keeping
---   the junction audience / no direct table or private-helper access.
+--   setter invariants, validation and optimistic concurrency / draft-only
+--   audience edits / preview safety / draft-hidden-archived never leaking /
+--   duplicate + restore keeping the junction audience / no direct table or
+--   private-helper access for clients.
+--
+-- All setter calls use named arguments so the script stays valid if the
+-- p_expected_version position ever moves.
 
 begin;
 
@@ -105,8 +109,33 @@ begin
 end;
 $fn$;
 
+-- Setter call with the current version_number (the happy concurrency path).
+create or replace function pg_temp.rp_set_audience(
+  p_admin uuid,
+  p_post_id uuid,
+  p_mode text,
+  p_group_ids uuid[],
+  p_user_ids uuid[]
+)
+returns jsonb
+language plpgsql as $fn$
+declare
+  v_version int;
+begin
+  select version_number into v_version from public.news_posts where id = p_post_id;
+  perform pg_temp.rp_as_user(p_admin);
+  return public.admin_set_news_audience(
+    p_id => p_post_id,
+    p_mode => p_mode,
+    p_expected_version => v_version,
+    p_group_ids => p_group_ids,
+    p_user_ids => p_user_ids
+  );
+end;
+$fn$;
+
 -- Audience edits are draft-only, so re-targeting a live post means
--- unpublish -> set audience -> publish. The admin identity is passed in.
+-- unpublish -> set audience -> publish.
 create or replace function pg_temp.rp_retarget(
   p_admin uuid,
   p_post_id uuid,
@@ -120,19 +149,17 @@ language plpgsql as $fn$
 declare
   v_json jsonb;
   v_status text;
-  v_version integer;
 begin
   perform pg_temp.rp_as_user(p_admin);
-  select status, version_number into v_status, v_version
-  from public.news_posts where id = p_post_id;
+  select status into v_status from public.news_posts where id = p_post_id;
   if v_status = 'published' then
     perform public.admin_unpublish_news(p_post_id);
-    select version_number into v_version from public.news_posts where id = p_post_id;
   end if;
-  v_json := public.admin_set_news_audience(
-    p_post_id, p_mode, v_version, p_group_ids, p_user_ids
+  v_json := pg_temp.rp_set_audience(
+    p_admin, p_post_id, p_mode, p_group_ids, p_user_ids
   );
   if p_publish then
+    perform pg_temp.rp_as_user(p_admin);
     perform public.admin_publish_news(p_post_id);
   end if;
   return v_json;
@@ -153,6 +180,7 @@ declare
   v_json jsonb;
   v_preview jsonb;
   v_version int;
+  v_target_version int;
   v_expected int;
   v_eligible int;
 begin
@@ -326,11 +354,15 @@ begin
   );
 
   -- Audience edits are draft-only: a live post must be unpublished first.
+  select version_number into v_target_version from public.news_posts where id = v_post;
   perform pg_temp.rp_expect_exception(
     '02e audience of a published post cannot be edited in place',
     format(
-      $sql$select public.admin_set_news_audience(%L::uuid, 'all', (select version_number from public.news_posts where id = %L::uuid), '{}'::uuid[], '{}'::uuid[])$sql$,
-      v_post, v_post
+      $sql$select public.admin_set_news_audience(
+        p_id => %L::uuid, p_mode => 'all', p_expected_version => %s,
+        p_group_ids => '{}'::uuid[], p_user_ids => '{}'::uuid[]
+      )$sql$,
+      v_post, v_target_version
     ),
     '55000',
     'draft_only'
@@ -500,6 +532,7 @@ begin
     'news_audience_group_requires_target'
   );
 
+  perform pg_temp.rp_as_user(v_admin);
   perform pg_temp.rp_expect_exception(
     '06c publishing an inconsistent audience is refused',
     format($sql$select public.admin_publish_news(%L::uuid)$sql$, v_post),
@@ -510,11 +543,8 @@ begin
   v_json := pg_temp.rp_retarget(
     v_admin, v_post, 'groups', array[v_group], '{}'::uuid[], false
   );
-  perform pg_temp.rp_as_user(v_admin);
-  v_json := public.admin_set_news_audience(
-    v_post, 'all',
-    (select version_number from public.news_posts where id = v_post),
-    array[v_group], array[v_student]
+  v_json := pg_temp.rp_set_audience(
+    v_admin, v_post, 'all', array[v_group], array[v_student]
   );
   perform pg_temp.rp_pass(
     '06d mode all clears both junctions and the legacy group',
@@ -530,11 +560,17 @@ begin
   -- ---------------------------------------------------------------------
   -- 07 Setter input validation (post is a draft here)
   -- ---------------------------------------------------------------------
+  select version_number into v_target_version from public.news_posts where id = v_post;
+  perform pg_temp.rp_as_user(v_admin);
+
   perform pg_temp.rp_expect_exception(
     '07a unknown audience mode is rejected',
     format(
-      $sql$select public.admin_set_news_audience(%L::uuid, 'everyone', (select version_number from public.news_posts where id = %L::uuid), '{}'::uuid[], '{}'::uuid[])$sql$,
-      v_post, v_post
+      $sql$select public.admin_set_news_audience(
+        p_id => %L::uuid, p_mode => 'everyone', p_expected_version => %s,
+        p_group_ids => '{}'::uuid[], p_user_ids => '{}'::uuid[]
+      )$sql$,
+      v_post, v_target_version
     ),
     '22023',
     'invalid_audience_mode'
@@ -542,8 +578,11 @@ begin
   perform pg_temp.rp_expect_exception(
     '07b groups mode requires at least one group',
     format(
-      $sql$select public.admin_set_news_audience(%L::uuid, 'groups', (select version_number from public.news_posts where id = %L::uuid), '{}'::uuid[], '{}'::uuid[])$sql$,
-      v_post, v_post
+      $sql$select public.admin_set_news_audience(
+        p_id => %L::uuid, p_mode => 'groups', p_expected_version => %s,
+        p_group_ids => '{}'::uuid[], p_user_ids => '{}'::uuid[]
+      )$sql$,
+      v_post, v_target_version
     ),
     '22023',
     'audience_groups_required'
@@ -551,8 +590,11 @@ begin
   perform pg_temp.rp_expect_exception(
     '07c users mode requires at least one user',
     format(
-      $sql$select public.admin_set_news_audience(%L::uuid, 'users', (select version_number from public.news_posts where id = %L::uuid), '{}'::uuid[], '{}'::uuid[])$sql$,
-      v_post, v_post
+      $sql$select public.admin_set_news_audience(
+        p_id => %L::uuid, p_mode => 'users', p_expected_version => %s,
+        p_group_ids => '{}'::uuid[], p_user_ids => '{}'::uuid[]
+      )$sql$,
+      v_post, v_target_version
     ),
     '22023',
     'audience_users_required'
@@ -560,8 +602,11 @@ begin
   perform pg_temp.rp_expect_exception(
     '07d groups_and_users requires both sides',
     format(
-      $sql$select public.admin_set_news_audience(%L::uuid, 'groups_and_users', (select version_number from public.news_posts where id = %L::uuid), array[%L::uuid], '{}'::uuid[])$sql$,
-      v_post, v_post, v_group
+      $sql$select public.admin_set_news_audience(
+        p_id => %L::uuid, p_mode => 'groups_and_users', p_expected_version => %s,
+        p_group_ids => array[%L::uuid], p_user_ids => '{}'::uuid[]
+      )$sql$,
+      v_post, v_target_version, v_group
     ),
     '22023',
     'audience_groups_and_users_required'
@@ -569,8 +614,12 @@ begin
   perform pg_temp.rp_expect_exception(
     '07e unknown group id is rejected',
     format(
-      $sql$select public.admin_set_news_audience(%L::uuid, 'groups', (select version_number from public.news_posts where id = %L::uuid), array['00000000-0000-0000-0000-000000000000'::uuid], '{}'::uuid[])$sql$,
-      v_post, v_post
+      $sql$select public.admin_set_news_audience(
+        p_id => %L::uuid, p_mode => 'groups', p_expected_version => %s,
+        p_group_ids => array['00000000-0000-0000-0000-000000000000'::uuid],
+        p_user_ids => '{}'::uuid[]
+      )$sql$,
+      v_post, v_target_version
     ),
     '22023',
     'unknown_group_'
@@ -584,8 +633,11 @@ begin
     perform pg_temp.rp_expect_exception(
       '07f ineligible explicit user is rejected',
       format(
-        $sql$select public.admin_set_news_audience(%L::uuid, 'users', (select version_number from public.news_posts where id = %L::uuid), '{}'::uuid[], array[%L::uuid])$sql$,
-        v_post, v_post, v_ineligible
+        $sql$select public.admin_set_news_audience(
+          p_id => %L::uuid, p_mode => 'users', p_expected_version => %s,
+          p_group_ids => '{}'::uuid[], p_user_ids => array[%L::uuid]
+        )$sql$,
+        v_post, v_target_version, v_ineligible
       ),
       '22023',
       'ineligible_audience_user_'
@@ -610,6 +662,12 @@ begin
     ),
     '22023',
     'use_admin_set_news_audience'
+  );
+  perform pg_temp.rp_pass(
+    '07i rejected setter calls left the audience untouched',
+    (select version_number from public.news_posts where id = v_post) = v_target_version
+      and not private.news_audience_uses_junctions(v_post),
+    format('version=%s', v_target_version)
   );
 
   -- ---------------------------------------------------------------------
@@ -664,12 +722,16 @@ begin
     ''
   );
 
+  select version_number into v_target_version from public.news_posts where id = v_post;
   perform pg_temp.rp_as_user(v_admin);
   perform pg_temp.rp_expect_exception(
     '08g archived post audience cannot be re-targeted',
     format(
-      $sql$select public.admin_set_news_audience(%L::uuid, 'all', (select version_number from public.news_posts where id = %L::uuid), '{}'::uuid[], '{}'::uuid[])$sql$,
-      v_post, v_post
+      $sql$select public.admin_set_news_audience(
+        p_id => %L::uuid, p_mode => 'all', p_expected_version => %s,
+        p_group_ids => '{}'::uuid[], p_user_ids => '{}'::uuid[]
+      )$sql$,
+      v_post, v_target_version
     ),
     '55000',
     'draft_only'
@@ -697,8 +759,11 @@ begin
   perform pg_temp.rp_expect_exception(
     '09c student cannot set a news audience',
     format(
-      $sql$select public.admin_set_news_audience(%L::uuid, 'all', (select version_number from public.news_posts where id = %L::uuid), '{}'::uuid[], '{}'::uuid[])$sql$,
-      v_post, v_post
+      $sql$select public.admin_set_news_audience(
+        p_id => %L::uuid, p_mode => 'all', p_expected_version => null,
+        p_group_ids => '{}'::uuid[], p_user_ids => '{}'::uuid[]
+      )$sql$,
+      v_post
     ),
     '42501',
     'forbidden'
@@ -725,13 +790,12 @@ begin
   perform pg_temp.rp_as_user(v_admin);
   v_json := public.admin_create_news_draft('RP 15.2 targeted', 'sub', 'body', 'gradientText');
   v_post2 := (v_json ->> 'id')::uuid;
-  v_json := public.admin_set_news_audience(
-    v_post2, 'groups_and_users',
-    (select version_number from public.news_posts where id = v_post2),
-    array[v_group], array[v_student]
+  v_json := pg_temp.rp_set_audience(
+    v_admin, v_post2, 'groups_and_users', array[v_group], array[v_student]
   );
   v_version := (v_json ->> 'version_number')::int;
 
+  perform pg_temp.rp_as_user(v_admin);
   v_json := public.admin_duplicate_news(v_post2);
   v_dup := (v_json ->> 'id')::uuid;
   perform pg_temp.rp_pass(
@@ -743,10 +807,8 @@ begin
     v_json::text
   );
 
-  v_json := public.admin_set_news_audience(
-    v_post2, 'all',
-    (select version_number from public.news_posts where id = v_post2),
-    '{}'::uuid[], '{}'::uuid[]
+  v_json := pg_temp.rp_set_audience(
+    v_admin, v_post2, 'all', '{}'::uuid[], '{}'::uuid[]
   );
   perform pg_temp.rp_pass(
     '10b audience really was widened before the restore',
@@ -754,6 +816,7 @@ begin
     v_json::text
   );
 
+  perform pg_temp.rp_as_user(v_admin);
   v_json := public.admin_restore_news_version(v_post2, v_version);
   perform pg_temp.rp_pass(
     '10c restoring a version restores its junction audience',
@@ -764,14 +827,16 @@ begin
   );
 
   -- Optimistic concurrency guard on the setter.
-  select version_number into v_version from public.news_posts where id = v_post2;
+  select version_number into v_target_version from public.news_posts where id = v_post2;
+  perform pg_temp.rp_as_user(v_admin);
   perform pg_temp.rp_expect_exception(
     '10d stale expected_version is a conflict',
     format(
       $sql$select public.admin_set_news_audience(
-        %L::uuid, 'all', %s, '{}'::uuid[], '{}'::uuid[]
+        p_id => %L::uuid, p_mode => 'all', p_expected_version => %s,
+        p_group_ids => '{}'::uuid[], p_user_ids => '{}'::uuid[]
       )$sql$,
-      v_post2, v_version - 1
+      v_post2, v_target_version - 1
     ),
     '40001',
     'version_conflict'
@@ -779,13 +844,14 @@ begin
   perform pg_temp.rp_pass(
     '10e conflicting audience write changed nothing',
     private.news_audience_uses_junctions(v_post2)
-      and (select version_number from public.news_posts where id = v_post2) = v_version,
-    format('version=%s', v_version)
+      and (select version_number from public.news_posts where id = v_post2) = v_target_version,
+    format('version=%s', v_target_version)
   );
 
   -- ---------------------------------------------------------------------
   -- 11 Admin list/get payloads stay parseable for every existing post
   -- ---------------------------------------------------------------------
+  perform pg_temp.rp_as_user(v_admin);
   v_json := public.admin_list_news(null, true);
   perform pg_temp.rp_pass(
     '11a admin_list_news exposes mode + junctions for every post',
