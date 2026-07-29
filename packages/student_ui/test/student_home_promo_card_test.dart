@@ -19,20 +19,115 @@ void main() {
     );
   });
 
-  test('ManagedContentCard.tryParseHomePromo ignores foreign templates', () {
+  test('HomePromoPayload.tryParse never throws on malformed types', () {
     expect(
-      ManagedContentCard.tryParseHomePromo({
-        'id': 'x',
-        'template_key': 'reference_article_v1',
-        'payload': {'title': 'a'},
+      HomePromoPayload.tryParse({
+        'title': 12,
+        'subtitle': 'Текст',
+        'icon_key': 'help',
+        'cta_label': 'Открыть',
+        'gradient_colors': ['#7367F0', '#B784F7'],
+        'dismissible': true,
+      }),
+      isNull,
+    );
+    expect(
+      HomePromoPayload.tryParse({
+        'title': 'Заголовок',
+        'subtitle': 'Текст',
+        'icon_key': 'help',
+        'cta_label': 'Открыть',
+        'gradient_colors': 'not-a-list',
+        'dismissible': true,
+      }),
+      isNull,
+    );
+    expect(
+      HomePromoPayload.tryParse({
+        'title': 'Заголовок',
+        'subtitle': 'Текст',
+        'icon_key': 'help',
+        'cta_label': 'Открыть',
+        'gradient_colors': ['#7367F0', '#B784F7'],
+        'dismissible': 'yes',
       }),
       isNull,
     );
   });
 
-  testWidgets('StudentHomePromoCard renders typed fields without raw JSON', (
-    tester,
-  ) async {
+  test('ManagedContentCard.tryParseHomePromo enforces schema_version=1', () {
+    expect(
+      ManagedContentCard.tryParseHomePromo({
+        'id': 'x',
+        'template_key': 'home_promo_v1',
+        'schema_version': 2,
+        'origin': 'admin',
+        'payload': {
+          'title': 'Заголовок',
+          'subtitle': 'Текст',
+          'icon_key': 'help',
+          'cta_label': 'Открыть',
+          'gradient_colors': ['#7367F0', '#B784F7'],
+          'dismissible': true,
+        },
+      }),
+      isNull,
+    );
+    expect(
+      ManagedContentCard.tryParseHomePromo({
+        'id': 'x',
+        'template_key': 'home_promo_v1',
+        'origin': 'admin',
+        'payload': {
+          'title': 'Заголовок',
+          'subtitle': 'Текст',
+          'icon_key': 'help',
+          'cta_label': 'Открыть',
+          'gradient_colors': ['#7367F0', '#B784F7'],
+          'dismissible': true,
+        },
+      }),
+      isNull,
+    );
+    expect(
+      ManagedContentCard.tryParseHomePromo({
+        'id': 'x',
+        'template_key': 'home_promo_v1',
+        'schema_version': 1,
+        'origin': 'weird',
+        'payload': {
+          'title': 'Заголовок',
+          'subtitle': 'Текст',
+          'icon_key': 'help',
+          'cta_label': 'Открыть',
+          'gradient_colors': ['#7367F0', '#B784F7'],
+          'dismissible': true,
+        },
+      }),
+      isNull,
+    );
+    expect(
+      ManagedContentCard.tryParseHomePromo({
+        'id': 'ok',
+        'template_key': 'home_promo_v1',
+        'schema_version': 1,
+        'origin': 'demo',
+        'placement': 'home_promo',
+        'payload': {
+          'title': 'Заголовок',
+          'subtitle': 'Текст',
+          'icon_key': 'help',
+          'cta_label': 'Открыть',
+          'gradient_colors': ['#7367F0', '#B784F7'],
+          'dismissible': true,
+        },
+      }),
+      isNotNull,
+    );
+  });
+
+  testWidgets('StudentHomePromoCard renders typed fields without raw JSON',
+      (tester) async {
     var taps = 0;
     await tester.pumpWidget(
       MaterialApp(

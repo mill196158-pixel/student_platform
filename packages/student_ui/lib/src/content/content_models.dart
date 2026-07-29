@@ -6,7 +6,8 @@ enum ContentPlacement {
   profileFeed,
   reference;
 
-  static ContentPlacement? tryParse(String? raw) {
+  static ContentPlacement? tryParse(Object? raw) {
+    if (raw is! String) return null;
     switch (raw) {
       case 'home_promo':
         return ContentPlacement.homePromo;
@@ -26,7 +27,9 @@ enum ContentOrigin {
   importSource,
   userSubmission;
 
-  static ContentOrigin tryParse(String? raw) {
+  /// Fail-closed: unknown origin returns null.
+  static ContentOrigin? tryParse(Object? raw) {
+    if (raw is! String) return null;
     switch (raw) {
       case 'demo':
         return ContentOrigin.demo;
@@ -37,7 +40,7 @@ enum ContentOrigin {
       case 'user_submission':
         return ContentOrigin.userSubmission;
       default:
-        return ContentOrigin.admin;
+        return null;
     }
   }
 
@@ -54,6 +57,36 @@ enum ContentOrigin {
         return 'Заявка';
     }
   }
+}
+
+String? _readString(Map<String, dynamic> json, List<String> keys) {
+  for (final key in keys) {
+    final value = json[key];
+    if (value == null) continue;
+    if (value is! String) return null;
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return null;
+    return trimmed;
+  }
+  return null;
+}
+
+int? _readInt(Map<String, dynamic> json, List<String> keys) {
+  for (final key in keys) {
+    final value = json[key];
+    if (value == null) continue;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return null;
+  }
+  return null;
+}
+
+bool? _readBool(Map<String, dynamic> json, String key) {
+  final value = json[key];
+  if (value == null) return null;
+  if (value is bool) return value;
+  return null;
 }
 
 /// Typed home promo payload for template `home_promo_v1`.
@@ -95,56 +128,62 @@ class HomePromoPayload {
     ctaRoute: '/help',
   );
 
+  /// Fail-closed parser: returns null on missing/malformed fields (never throws).
   static HomePromoPayload? tryParse(Map<String, dynamic>? json) {
     if (json == null) return null;
-    final title = (json['title'] as String?)?.trim() ?? '';
-    final subtitle = (json['subtitle'] as String?)?.trim() ?? '';
-    final iconKey =
-        (json['iconKey'] as String?)?.trim() ??
-        (json['icon_key'] as String?)?.trim() ??
-        '';
-    final ctaLabel =
-        (json['ctaLabel'] as String?)?.trim() ??
-        (json['cta_label'] as String?)?.trim() ??
-        '';
-    if (title.isEmpty ||
-        subtitle.isEmpty ||
-        iconKey.isEmpty ||
-        ctaLabel.isEmpty) {
-      return null;
-    }
+    try {
+      final title = _readString(json, const ['title']);
+      final subtitle = _readString(json, const ['subtitle']);
+      final iconKey = _readString(json, const ['iconKey', 'icon_key']);
+      final ctaLabel = _readString(json, const ['ctaLabel', 'cta_label']);
+      if (title == null ||
+          subtitle == null ||
+          iconKey == null ||
+          ctaLabel == null) {
+        return null;
+      }
 
-    final gradientRaw = json['gradientColors'] ?? json['gradient_colors'];
-    final colors = <Color>[];
-    if (gradientRaw is List) {
+      final dismissible = _readBool(json, 'dismissible');
+      if (dismissible == null) return null;
+
+      final gradientRaw = json['gradientColors'] ?? json['gradient_colors'];
+      if (gradientRaw is! List) return null;
+      final colors = <Color>[];
       for (final item in gradientRaw) {
         final parsed = _parseColor(item);
-        if (parsed != null) colors.add(parsed);
+        if (parsed == null) return null;
+        colors.add(parsed);
       }
-    }
-    if (colors.length < 2) {
-      colors
-        ..clear()
-        ..addAll(const [Color(0xFFFFFBFF), Color(0xFFF3EEF9)]);
-    }
+      if (colors.length < 2 || colors.length > 4) return null;
 
-    final dismissible = json['dismissible'] == true;
-    final reshow = json['reshowAfterHours'] ?? json['reshow_after_hours'];
+      final imageAssetId =
+          _readString(json, const ['imageAssetId', 'image_asset_id']);
+      final ctaRoute = _readString(json, const ['ctaRoute', 'cta_route']);
+      final ctaUrl = _readString(json, const ['ctaUrl', 'cta_url']);
+      final reshow = _readInt(json, const [
+        'reshowAfterHours',
+        'reshow_after_hours',
+      ]);
+      if (json.containsKey('reshow_after_hours') ||
+          json.containsKey('reshowAfterHours')) {
+        if (reshow == null || reshow < 1 || reshow > 8760) return null;
+      }
 
-    return HomePromoPayload(
-      title: title,
-      subtitle: subtitle,
-      iconKey: iconKey,
-      gradientColors: colors,
-      ctaLabel: ctaLabel,
-      dismissible: dismissible,
-      imageAssetId:
-          (json['imageAssetId'] as String?) ??
-          (json['image_asset_id'] as String?),
-      ctaRoute: (json['ctaRoute'] as String?) ?? (json['cta_route'] as String?),
-      ctaUrl: (json['ctaUrl'] as String?) ?? (json['cta_url'] as String?),
-      reshowAfterHours: reshow is int ? reshow : int.tryParse('$reshow'),
-    );
+      return HomePromoPayload(
+        title: title,
+        subtitle: subtitle,
+        iconKey: iconKey,
+        gradientColors: colors,
+        ctaLabel: ctaLabel,
+        dismissible: dismissible,
+        imageAssetId: imageAssetId,
+        ctaRoute: ctaRoute,
+        ctaUrl: ctaUrl,
+        reshowAfterHours: reshow,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   IconData get iconData => contentIconForKey(iconKey);
@@ -185,38 +224,64 @@ class ManagedContentCard {
   final HomePromoPayload homePromo;
   final bool showDemoBadge;
 
+  /// Fail-closed parser for `home_promo_v1` / schema_version 1.
   static ManagedContentCard? tryParseHomePromo(Map<String, dynamic> json) {
-    final id = (json['id'] as String?)?.trim() ?? '';
-    if (id.isEmpty) return null;
-    final templateKey =
-        (json['template_key'] as String?) ??
-        (json['templateKey'] as String?) ??
-        '';
-    if (templateKey != 'home_promo_v1') return null;
-    final payloadRaw = json['payload'];
-    final payloadMap = payloadRaw is Map
-        ? Map<String, dynamic>.from(payloadRaw)
-        : <String, dynamic>{};
-    final payload = HomePromoPayload.tryParse(payloadMap);
-    if (payload == null) return null;
-    final origin = ContentOrigin.tryParse(
-      (json['origin'] as String?) ?? 'admin',
-    );
-    return ManagedContentCard(
-      id: id,
-      templateKey: templateKey,
-      schemaVersion:
-          (json['schema_version'] as int?) ??
-          (json['schemaVersion'] as int?) ??
-          1,
-      origin: origin,
-      placement: ContentPlacement.homePromo,
-      sortOrder:
-          (json['sort_order'] as int?) ?? (json['sortOrder'] as int?) ?? 0,
-      priority: (json['priority'] as int?) ?? 0,
-      homePromo: payload,
-      showDemoBadge: origin == ContentOrigin.demo,
-    );
+    try {
+      final id = _readString(json, const ['id']);
+      if (id == null) return null;
+
+      final templateKeyRaw = _readString(json, const [
+        'template_key',
+        'templateKey',
+      ]);
+      if (templateKeyRaw == null || templateKeyRaw != 'home_promo_v1') {
+        return null;
+      }
+
+      final schemaVersionRaw = _readInt(json, const [
+        'schema_version',
+        'schemaVersion',
+      ]);
+      if (schemaVersionRaw == null || schemaVersionRaw != 1) {
+        return null;
+      }
+
+      if (json.containsKey('placement') || json.containsKey('placements')) {
+        final placementRaw = json['placement'];
+        if (placementRaw != null &&
+            ContentPlacement.tryParse(placementRaw) !=
+                ContentPlacement.homePromo) {
+          return null;
+        }
+      }
+
+      final origin = ContentOrigin.tryParse(json['origin']);
+      if (origin == null) return null;
+
+      final payloadRaw = json['payload'];
+      if (payloadRaw is! Map) return null;
+      final payload = HomePromoPayload.tryParse(
+        Map<String, dynamic>.from(payloadRaw),
+      );
+      if (payload == null) return null;
+
+      final sortOrder = _readInt(json, const ['sort_order', 'sortOrder']) ?? 0;
+      final priority = _readInt(json, const ['priority']) ?? 0;
+
+      return ManagedContentCard(
+        id: id,
+        templateKey: templateKeyRaw,
+        schemaVersion: schemaVersionRaw,
+        origin: origin,
+        placement: ContentPlacement.homePromo,
+        sortOrder: sortOrder,
+        priority: priority,
+        homePromo: payload,
+        showDemoBadge: origin == ContentOrigin.demo,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 }
 

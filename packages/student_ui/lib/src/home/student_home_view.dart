@@ -20,7 +20,7 @@ class StudentHomeView extends StatelessWidget {
     this.onAssignmentDoneTap,
     this.onHelpTap,
     this.homePromo,
-    this.homePromoIsDemo = true,
+    this.homePromoIsDemo = false,
     this.hiddenAssignmentIds = const {},
     this.markingDoneAssignmentIds = const {},
     this.selectedNewsId,
@@ -45,7 +45,7 @@ class StudentHomeView extends StatelessWidget {
   /// Managed home promo payload. When null, uses built-in demo stub.
   final HomePromoPayload? homePromo;
 
-  /// When true, shows «Пример» badge (demo origin / pre-migration fallback).
+  /// When true, shows «Пример». Null [homePromo] fallback is always demo-labeled.
   final bool homePromoIsDemo;
   final Set<String> hiddenAssignmentIds;
   final Set<String> markingDoneAssignmentIds;
@@ -114,9 +114,8 @@ class StudentHomeView extends StatelessWidget {
     );
 
     return Scaffold(
-      backgroundColor: isDark
-          ? const Color(0xFF101820)
-          : const Color(0xFFFAF8FC),
+      backgroundColor:
+          isDark ? const Color(0xFF101820) : const Color(0xFFFAF8FC),
       bottomNavigationBar: bottomNavigationBar,
       body: DecoratedBox(
         decoration: BoxDecoration(
@@ -226,9 +225,8 @@ class _RoundNotificationButton extends StatelessWidget {
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.08)
-                  : Colors.white,
+              color:
+                  isDark ? Colors.white.withValues(alpha: 0.08) : Colors.white,
               borderRadius: BorderRadius.circular(18),
               border: Border.all(
                 color: isDark
@@ -315,13 +313,13 @@ class _TodaySummaryCard extends StatelessWidget {
     final title = count > 0
         ? 'Сегодня $count ${_lessonWord(count)}'
         : data.lessonsFinishedForToday
-        ? 'Пары закончились'
-        : 'Сегодня выходной';
+            ? 'Пары закончились'
+            : 'Сегодня выходной';
     final subtitle = count > 0
         ? 'Кратко по расписанию на день'
         : data.lessonsFinishedForToday
-        ? 'На сегодня больше ничего нет'
-        : 'Пар нет, можно закрыть задания или отдохнуть';
+            ? 'На сегодня больше ничего нет'
+            : 'Пар нет, можно закрыть задания или отдохнуть';
     final emptyText = data.lessonsFinishedForToday
         ? 'Пары на сегодня закончились'
         : 'Сегодня пар нет';
@@ -429,9 +427,7 @@ class _TodaySummaryCard extends StatelessWidget {
                       if (data.lessons.isEmpty)
                         _NoLessonsPreview(text: emptyText)
                       else
-                        ...data.lessons
-                            .take(2)
-                            .map(
+                        ...data.lessons.take(2).map(
                               (lesson) => Padding(
                                 padding: const EdgeInsets.only(bottom: 8),
                                 child: _LessonPreview(lesson: lesson),
@@ -544,10 +540,10 @@ class _GroupActionPreview extends StatelessWidget {
     final kind = action.isTopic
         ? 'Тема'
         : (action.isCollection
-              ? 'Сбор'
-              : (action.kindLabel.trim().isEmpty
-                    ? 'Дело'
-                    : action.kindLabel.trim()));
+            ? 'Сбор'
+            : (action.kindLabel.trim().isEmpty
+                ? 'Дело'
+                : action.kindLabel.trim()));
     final meta = [
       kind,
       if (hasPickedTopic && listTitle.isNotEmpty) 'список «$listTitle»',
@@ -705,22 +701,21 @@ class _AssignmentsSection extends StatelessWidget {
         .where((item) => !hiddenAssignmentIds.contains(item.id))
         .toList();
     // One merged, deadline-sorted feed with a shared cap (compact section).
-    final upcoming =
-        <_UpcomingItem>[
-          for (final a in visibleAssignments) _UpcomingItem.assignment(a),
-          // Confirmed money transfers leave the upcoming list (done).
-          for (final g in data.groupActions.where((e) => !e.isCompleted))
-            _UpcomingItem.groupAction(g),
-        ]..sort((a, b) {
-          // Dated items first (soonest → latest); undated last so they do not
-          // steal the shared 4-item cap from real deadlines.
-          final aAt = a.sortAt;
-          final bAt = b.sortAt;
-          if (aAt == null && bAt == null) return 0;
-          if (aAt == null) return 1;
-          if (bAt == null) return -1;
-          return aAt.compareTo(bAt);
-        });
+    final upcoming = <_UpcomingItem>[
+      for (final a in visibleAssignments) _UpcomingItem.assignment(a),
+      // Confirmed money transfers leave the upcoming list (done).
+      for (final g in data.groupActions.where((e) => !e.isCompleted))
+        _UpcomingItem.groupAction(g),
+    ]..sort((a, b) {
+        // Dated items first (soonest → latest); undated last so they do not
+        // steal the shared 4-item cap from real deadlines.
+        final aAt = a.sortAt;
+        final bAt = b.sortAt;
+        if (aAt == null && bAt == null) return 0;
+        if (aAt == null) return 1;
+        if (bAt == null) return -1;
+        return aAt.compareTo(bAt);
+      });
     final capped = upcoming.take(4).toList();
     final foreground = isDark ? Colors.white : const Color(0xFF1F2937);
     final mutedForeground = foreground.withValues(alpha: isDark ? 0.76 : 0.66);
@@ -814,16 +809,15 @@ class _AssignmentsSection extends StatelessWidget {
                                   onDoneTap: onAssignmentDoneTap == null
                                       ? null
                                       : () => onAssignmentDoneTap!(a),
-                                  markingDone: markingDoneAssignmentIds
-                                      .contains(a.id),
+                                  markingDone:
+                                      markingDoneAssignmentIds.contains(a.id),
                                 ),
                                 groupAction: (g) => _GroupActionPreview(
                                   action: g,
                                   onTap: onGroupActionTap == null
                                       ? null
                                       : () => onGroupActionTap!(g),
-                                  onDelete:
-                                      (onGroupActionDelete != null &&
+                                  onDelete: (onGroupActionDelete != null &&
                                           g.canDelete)
                                       ? () => onGroupActionDelete!(g)
                                       : null,
@@ -884,9 +878,8 @@ class _TaskPreviewCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final titleColor = isDark ? Colors.white : const Color(0xFF1F2937);
-    final statusColor = item.isDone
-        ? const Color(0xFF2F9D84)
-        : const Color(0xFFB58B3B);
+    final statusColor =
+        item.isDone ? const Color(0xFF2F9D84) : const Color(0xFFB58B3B);
     final meta = [
       'Задание',
       if (item.subject.trim().isNotEmpty) item.subject.trim(),
@@ -1128,8 +1121,8 @@ class _AnimatedEntry extends StatelessWidget {
       builder: (context, value, child) {
         final delayedValue =
             ((value * (420 + delay.inMilliseconds)) - delay.inMilliseconds)
-                .clamp(0.0, 420.0) /
-            420.0;
+                    .clamp(0.0, 420.0) /
+                420.0;
         return Opacity(
           opacity: delayedValue,
           child: Transform.translate(
