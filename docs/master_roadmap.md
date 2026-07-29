@@ -1063,32 +1063,33 @@ Codex **APPROVE** 18 (local commit on `feature/content-platform`; apply/deploy o
 
 ## Stage 19 — Import Studio
 
-Status: **UI SCAFFOLD (local, uncommitted)** / SQL foundation Codex **APPROVE_WITH_NOTES** (`3772b4a`) — Admin hub dry-run state machine local; product not APPROVE; remote apply pending owner; checklist §X/§Y unchecked
+Status: **FOUNDATION DONE (local)** / Codex **APPROVE_WITH_NOTES** — §Y foundation closed; apply domains teachers/subjects/students; validate-only groups/terms/curriculum; remaining domain expansions + rollback/warnings unchecked; remote apply pending owner
 
 Домены:
 
-- [ ] преподаватели; предметы; студенты; группы; семестры;
-- [ ] учебные планы групп; offering; связи преподавателей; enrollment.
+- [x] преподаватели; предметы; студенты; группы; семестры; *(apply: teachers/subjects/students; validate-only: groups/terms/curriculum)*
+- [ ] учебные планы групп apply; offering; связи преподавателей; enrollment. *(curriculum validate-only only in foundation)*
 
 Для каждого импорта:
 
-- [ ] скачать шаблон Excel;
-- [ ] визуальный предпросмотр таблицы в админке;
-- [ ] обязательные/необязательные колонки + примеры;
-- [ ] ошибки обычным языком;
-- [ ] загрузка XLSX; определение листов; mapping колонок;
-- [ ] dry-run; таблица валидных/ошибочных строк; diff до apply;
+- [x] скачать шаблон Excel;
+- [x] визуальный предпросмотр таблицы в админке;
+- [x] обязательные/необязательные колонки + примеры;
+- [x] ошибки обычным языком;
+- [x] загрузка XLSX; определение листов; mapping колонок;
+- [x] dry-run; таблица валидных/ошибочных строк; diff до apply;
 - [ ] предупреждение о создаваемых предметах/командах/чатах;
-- [ ] apply только после подтверждения; audit/import batch id;
-- [ ] повторный запуск без дублей; безопасный rollback batch где возможно.
+- [x] apply только после подтверждения; audit/import batch id;
+- [x] повторный запуск без дублей; *(safe rollback batch — foundation refuses; deferred)*
 
 Цепочка учебного плана группы (существующая):
 
 - [ ] academic term → group → subject_catalog → curriculum → subject_offering → offering_teachers → enrollment → team/chat;
-- [ ] не связывать по отображаемому названию при наличии ID;
-- [ ] не переключать текущий семестр автоматически;
-- [ ] не создавать осень 2026 без разрешения владельца;
-- [ ] Web Admin без service_role; привилегии только через RPC/Edge + RBAC.
+- [x] не связывать по отображаемому названию при наличии ID;
+- [x] не переключать текущий семестр автоматически;
+- [x] не создавать осень 2026 без разрешения владельца;
+- [x] Web Admin без service_role; привилегии только через RPC/Edge + RBAC.
+Codex **APPROVE_WITH_NOTES** 19 foundation (local commit on `feature/content-platform`; apply/deploy owner-gated).
 
 ---
 

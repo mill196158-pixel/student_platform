@@ -1134,3 +1134,87 @@ begin
 
   raise notice 'stage19 P1 rework assertions: PASS';
 end $$;
+
+-- ===========================================================================
+-- P1 HARDENING (Codex CHANGES_REQUESTED round 2)
+-- ===========================================================================
+
+-- 45. Applied batch_key replay must compare payload_hash.
+select p.proname
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'admin_import_studio_start_dry_run'
+  and p.prosrc like '%batch_key_payload_mismatch%'
+  and p.prosrc like '%payload_hash is distinct from v_hash%';
+
+-- 46. Apply must fail closed and persist failed after nested rollback.
+select p.proname
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'admin_import_studio_apply'
+  and p.prosrc like '%delegated_apply_failed_inner%'
+  and p.prosrc like '%delegated_apply_failed%'
+  and p.prosrc like '%delegated_result%'
+  and p.prosrc like '%status = ''failed''%';
+
+-- 47. Teacher mapped payload: teacher_id authoritative + public contacts.
+select p.proname
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'private'
+  and p.proname = 'import_studio_validate_row'
+  and p.prosrc like '%teacher_id%'
+  and p.prosrc like '%contacts_public%'
+  and p.prosrc like '%public_email%';
+
+-- 0c. HARD GATE for P1 hardening.
+do $$
+begin
+  if not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'public'::regnamespace
+      and p.proname = 'admin_import_studio_start_dry_run'
+      and p.prosrc like '%batch_key_payload_mismatch%'
+      and p.prosrc like '%payload_hash is distinct from v_hash%'
+  ) then
+    raise exception
+      'stage19 P1 hardening FAIL: dry-run missing payload_hash mismatch guard on applied replay';
+  end if;
+
+  if not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'public'::regnamespace
+      and p.proname = 'admin_import_studio_apply'
+      and p.prosrc like '%delegated_apply_failed_inner%'
+      and p.prosrc like '%delegated_apply_failed%'
+      and p.prosrc like '%status = ''failed''%'
+  ) then
+    raise exception
+      'stage19 P1 hardening FAIL: apply does not persist failed after nested rollback';
+  end if;
+
+  if not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'private'::regnamespace
+      and p.proname = 'import_studio_validate_row'
+      and p.prosrc like '%teacher_id%'
+      and p.prosrc like '%contacts_public%'
+  ) then
+    raise exception
+      'stage19 P1 hardening FAIL: teacher validate/map missing teacher_id/contacts_public';
+  end if;
+
+  if not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'private'::regnamespace
+      and p.proname = 'import_studio_template'
+      and p.prosrc like '%teacher_id%'
+  ) then
+    raise exception
+      'stage19 P1 hardening FAIL: teacher template omits teacher_id';
+  end if;
+
+  raise notice 'stage19 P1 hardening assertions: PASS';
+end $$;

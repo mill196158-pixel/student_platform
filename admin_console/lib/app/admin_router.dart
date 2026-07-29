@@ -15,6 +15,7 @@ import '../features/content/news/news_editor_screen.dart';
 import '../features/content/profile_feed/profile_feed_editor_screen.dart';
 import '../features/content/reference/reference_editor_screen.dart';
 import '../features/content/vacancies/vacancy_editor_screen.dart';
+import '../features/import_studio/import_studio_screen.dart';
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/moderation/moderation_screen.dart';
 import '../features/system/terms/terms_screen.dart';
@@ -76,6 +77,9 @@ GoRouter createAdminRouter(AdminSessionController session) {
         return '/no-access';
       }
       if (loc.startsWith('/academic') && !caps.canReadAcademic) {
+        return '/no-access';
+      }
+      if (loc.startsWith('/import-studio') && !caps.canReadAcademic) {
         return '/no-access';
       }
       if (loc.startsWith('/system/terms') && !caps.canManageTerms) {
@@ -145,6 +149,11 @@ GoRouter createAdminRouter(AdminSessionController session) {
             path: '/content/vacancies',
             builder: (context, state) =>
                 VacancyEditorScreen(session: session),
+          ),
+          GoRoute(
+            path: '/import-studio',
+            builder: (context, state) =>
+                ImportStudioScreen(session: session),
           ),
           GoRoute(
             path: '/academic/subjects',
