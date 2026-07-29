@@ -569,7 +569,7 @@ class _ImportSourceStepState extends State<_ImportSourceStep> {
   }
 
   Future<void> _pickXlsx() async {
-    final picked = await FilePicker.platform.pickFiles(
+    final picked = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: const ['xlsx'],
       withData: true,

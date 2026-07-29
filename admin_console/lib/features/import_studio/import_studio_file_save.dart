@@ -7,7 +7,7 @@ Future<bool> saveImportStudioTemplateBytes({
   required List<int> bytes,
   required String fileName,
 }) async {
-  final path = await FilePicker.platform.saveFile(
+  final path = await FilePicker.saveFile(
     dialogTitle: 'Сохранить шаблон Import Studio',
     fileName: fileName,
     type: FileType.custom,
