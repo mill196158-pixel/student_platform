@@ -1140,3 +1140,157 @@ begin
 
   raise notice 'stage18 P1 rework assertions: PASS';
 end $$;
+
+-- ===========================================================================
+-- P1 HARDENING ASSERTIONS (Codex round 2)
+-- ===========================================================================
+
+-- ---------------------------------------------------------------------------
+-- 37. Audit-writing list RPCs must be VOLATILE, not STABLE.
+--     Expect: zero rows.
+-- ---------------------------------------------------------------------------
+select p.proname, p.provolatile
+from pg_proc p
+where p.pronamespace = 'public'::regnamespace
+  and p.proname in (
+    'admin_list_student_points', 'admin_list_unified_moderation_queue'
+  )
+  and p.provolatile = 's';
+
+-- ---------------------------------------------------------------------------
+-- 38. Stage 18 contract: moderation_required must be ON after hardening.
+--     Expect: one row, enabled = true.
+-- ---------------------------------------------------------------------------
+select key, enabled
+from public.app_feature_flags
+where key = 'reviews.moderation_required';
+
+-- ---------------------------------------------------------------------------
+-- 39. Unified queue must expose moderator-only author fields in its JSON.
+--     Expect: one row, all three present in source.
+-- ---------------------------------------------------------------------------
+select
+  p.proname,
+  (p.prosrc like '%author_user_id%') as has_author_id,
+  (p.prosrc like '%author_label%') as has_author_label,
+  (p.prosrc like '%assignee_user_id%') as has_assignee
+from pg_proc p
+where p.pronamespace = 'public'::regnamespace
+  and p.proname = 'admin_list_unified_moderation_queue';
+
+-- ---------------------------------------------------------------------------
+-- 40. Mobile my-reviews RPC exists and is auth-gated.
+--     Expect: one row.
+-- ---------------------------------------------------------------------------
+select p.proname, pg_get_function_arguments(p.oid) as args
+from pg_proc p
+where p.pronamespace = 'public'::regnamespace
+  and p.proname = 'get_my_entity_reviews';
+
+-- ---------------------------------------------------------------------------
+-- 41. Review moderation history RPC exists (parity with vacancies).
+--     Expect: one row.
+-- ---------------------------------------------------------------------------
+select p.proname
+from pg_proc p
+where p.pronamespace = 'public'::regnamespace
+  and p.proname = 'admin_list_review_moderation_actions';
+
+-- ---------------------------------------------------------------------------
+-- 0c. HARD GATE for P1 hardening. Raises on any violation. Read-only.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_bad integer;
+begin
+  select count(*) into v_bad
+  from pg_proc p
+  where p.pronamespace = 'public'::regnamespace
+    and p.proname in (
+      'admin_list_student_points', 'admin_list_unified_moderation_queue'
+    )
+    and p.provolatile = 's';
+  if v_bad > 0 then
+    raise exception
+      'stage18 P1 hardening FAIL: % audit-writing list RPC(s) still STABLE', v_bad;
+  end if;
+
+  if not exists (
+    select 1 from public.app_feature_flags
+    where key = 'reviews.moderation_required' and enabled = true
+  ) then
+    raise exception
+      'stage18 P1 hardening FAIL: reviews.moderation_required is not enabled';
+  end if;
+
+  if not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'public'::regnamespace
+      and p.proname = 'admin_list_unified_moderation_queue'
+      and p.prosrc like '%author_label%'
+      and p.prosrc like '%assignee_user_id%'
+  ) then
+    raise exception
+      'stage18 P1 hardening FAIL: unified queue missing moderator author fields';
+  end if;
+
+  if not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'public'::regnamespace
+      and p.proname = 'get_my_entity_reviews'
+      and p.prosrc like '%moderation_reason%'
+  ) then
+    raise exception
+      'stage18 P1 hardening FAIL: get_my_entity_reviews omits moderation_reason';
+  end if;
+
+  if not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'public'::regnamespace
+      and p.proname = 'admin_list_review_moderation_actions'
+  ) then
+    raise exception
+      'stage18 P1 hardening FAIL: admin_list_review_moderation_actions missing';
+  end if;
+
+  if not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'public'::regnamespace
+      and p.proname = 'get_my_vacancy_submissions'
+      and p.prosrc like '%rejection_reason%'
+  ) then
+    raise exception
+      'stage18 P1 r4 FAIL: get_my_vacancy_submissions missing rejection_reason';
+  end if;
+
+  if not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'public'::regnamespace
+      and p.proname = 'update_my_vacancy_draft'
+      and p.prosrc like '%expected_version_required%'
+      and p.prosrc like '%is distinct from p_expected_row_version%'
+  ) or not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'public'::regnamespace
+      and p.proname = 'resubmit_my_vacancy'
+      and p.prosrc like '%expected_version_required%'
+      and p.prosrc like '%is distinct from p_expected_row_version%'
+  ) then
+    raise exception
+      'stage18 P1 r4 FAIL: author vacancy draft/resubmit missing NULL row_version guard';
+  end if;
+
+  if not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'public'::regnamespace
+      and p.proname = 'admin_moderate_vacancy'
+      and p.prosrc like '%request_clarification%'
+      and p.prosrc like
+        '%when v_action in (''reject'', ''request_clarification'') then v_reason%'
+  ) then
+    raise exception
+      'stage18 P1 r4 FAIL: clarification clears rejection_reason';
+  end if;
+
+  raise notice 'stage18 P1 hardening assertions: PASS';
+end $$;

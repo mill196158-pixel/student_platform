@@ -11,13 +11,14 @@ import 'package:student_platform/src/ui/chats/data/dm_api.dart';
 import 'package:student_platform/src/ui/home/home_dashboard_service.dart';
 import 'package:student_platform/src/ui/home/news_image_disk_cache.dart';
 import 'package:student_platform/src/ui/learning/state/team_cubit.dart';
-import 'package:student_platform/src/ui/info/content_media_service.dart';
 import 'package:student_platform/src/ui/info/subject_card_service.dart';
+import 'package:student_platform/src/ui/info/content_media_service.dart';
 import 'package:student_platform/src/ui/info/subject_media_service.dart';
 import 'package:student_platform/src/ui/info/reference_service.dart';
 import 'package:student_platform/src/ui/info/vacancy_service.dart';
 import 'package:student_platform/src/ui/info/vacancy_media_service.dart';
 import 'package:student_platform/src/ui/profile/profile_feed_service.dart';
+import 'package:student_platform/src/ui/profile/student_review_service.dart';
 
 class AuthService {
   static final _sb = Supabase.instance.client;
@@ -85,6 +86,9 @@ class AuthService {
       currentUserId: () => _sb.auth.currentUser?.id,
     ).clearAll();
     await VacancyMediaService(
+      currentUserId: () => _sb.auth.currentUser?.id,
+    ).clearAll();
+    await StudentReviewService(
       currentUserId: () => _sb.auth.currentUser?.id,
     ).clearAll();
     await NewsImageDiskCache().clear();

@@ -112,6 +112,70 @@ void main() {
     expect(rpc.calls, isEmpty);
   });
 
+  test('listMySubmissions parses get_my_vacancy_submissions', () async {
+    final rpc = _FakeSubmitRpc(
+      response: [
+        {
+          'id': 'vac-draft-1',
+          'title': 'Tutor',
+          'status': 'draft',
+          'row_version': 3,
+          'rejection_reason': 'Укажите контакты',
+          'company_name': 'Lab',
+          'summary': 'Help',
+          'description': 'Desc',
+          'contacts': {'email': 'a@b.c'},
+        },
+      ],
+    );
+    final service = VacancySubmissionService(
+      rpcClient: rpc,
+      currentUserId: () => 'user-a',
+    );
+
+    final items = await service.listMySubmissions();
+    expect(rpc.calls, ['get_my_vacancy_submissions']);
+    expect(items, hasLength(1));
+    expect(items.first.needsAuthorAction, isTrue);
+    expect(items.first.rejectionReason, 'Укажите контакты');
+  });
+
+  test('updateDraft then resubmit call author RPCs', () async {
+    final rpc = _FakeSubmitRpc(
+      response: {
+        'ok': true,
+        'id': 'vac-1',
+        'status': 'draft',
+        'row_version': 4,
+      },
+    );
+    final service = VacancySubmissionService(
+      rpcClient: rpc,
+      currentUserId: () => 'user-a',
+    );
+
+    final updated = await service.updateDraft(
+      id: 'vac-1',
+      draft: _sampleDraft(),
+      expectedRowVersion: 3,
+    );
+    expect(rpc.calls.last, 'update_my_vacancy_draft');
+    expect(updated.rowVersion, 4);
+
+    rpc.response = {
+      'ok': true,
+      'id': 'vac-1',
+      'status': 'submitted',
+      'row_version': 5,
+    };
+    final resubmitted = await service.resubmit(
+      id: 'vac-1',
+      expectedRowVersion: 4,
+    );
+    expect(rpc.calls.last, 'resubmit_my_vacancy');
+    expect(resubmitted.isSubmitted, isTrue);
+  });
+
   test('local submissions persist per user key', () async {
     SharedPreferences.setMockInitialValues({
       '${VacancySubmissionService.localSubmissionsKey}__user-b':

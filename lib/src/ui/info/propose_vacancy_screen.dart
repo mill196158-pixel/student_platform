@@ -3,17 +3,19 @@ import 'package:student_ui/student_ui.dart';
 
 import 'vacancy_submission_service.dart';
 
-/// Student form to propose a vacancy (Stage 17 user submission stub).
+/// Student form to propose or resubmit a vacancy after clarification.
 ///
-/// Calls `submit_vacancy` via [VacancySubmissionService]; status is always
-/// `submitted` — never auto-published.
+/// New submissions call `submit_vacancy` (status `submitted`).
+/// Clarified drafts use `update_my_vacancy_draft` + `resubmit_my_vacancy`.
 class ProposeVacancyScreen extends StatefulWidget {
   const ProposeVacancyScreen({
     super.key,
     this.submissionService,
+    this.existingSubmission,
   });
 
   final VacancySubmissionService? submissionService;
+  final MyVacancySubmissionItem? existingSubmission;
 
   @override
   State<ProposeVacancyScreen> createState() => _ProposeVacancyScreenState();
@@ -40,6 +42,35 @@ class _ProposeVacancyScreenState extends State<ProposeVacancyScreen> {
   bool _busy = false;
   String? _banner;
   bool _usedLocalFallback = false;
+  int? _rowVersion;
+  String? _clarificationReason;
+
+  bool get _isEditDraft =>
+      widget.existingSubmission != null &&
+      widget.existingSubmission!.status == 'draft';
+
+  @override
+  void initState() {
+    super.initState();
+    final existing = widget.existingSubmission;
+    if (existing != null) {
+      final draft = existing.toDraft();
+      _titleController.text = draft.title;
+      _companyController.text = draft.companyName;
+      _summaryController.text = draft.summary;
+      _descriptionController.text = draft.description;
+      _requirementsController.text = draft.requirements;
+      _locationController.text = draft.location ?? '';
+      _salaryController.text = draft.salaryText ?? '';
+      _urlController.text = draft.externalUrl ?? '';
+      _emailController.text = draft.contacts['email']?.toString() ?? '';
+      _phoneController.text = draft.contacts['phone']?.toString() ?? '';
+      _employmentType = draft.employmentType;
+      _workFormat = draft.workFormat;
+      _rowVersion = existing.rowVersion;
+      _clarificationReason = existing.rejectionReason;
+    }
+  }
 
   @override
   void dispose() {
@@ -94,7 +125,29 @@ class _ProposeVacancyScreenState extends State<ProposeVacancyScreen> {
     });
 
     try {
-      final result = await _service.submit(_draftFromFields());
+      final draft = _draftFromFields();
+      final VacancySubmissionResult result;
+      if (_isEditDraft) {
+        final existing = widget.existingSubmission!;
+        final expected = _rowVersion ?? existing.rowVersion;
+        final updated = await _service.updateDraft(
+          id: existing.id,
+          draft: draft,
+          expectedRowVersion: expected,
+        );
+        if (!updated.ok) {
+          if (!mounted) return;
+          setState(() => _banner = updated.errorMessage ?? 'Не удалось сохранить.');
+          return;
+        }
+        _rowVersion = updated.rowVersion ?? expected + 1;
+        result = await _service.resubmit(
+          id: existing.id,
+          expectedRowVersion: _rowVersion!,
+        );
+      } else {
+        result = await _service.submit(draft);
+      }
       if (!mounted) return;
       if (!result.ok) {
         setState(() => _banner = result.errorMessage ?? 'Не удалось отправить.');
@@ -105,13 +158,15 @@ class _ProposeVacancyScreenState extends State<ProposeVacancyScreen> {
       await showDialog<void>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Заявка отправлена'),
+          title: Text(_isEditDraft ? 'Заявка отправлена снова' : 'Заявка отправлена'),
           content: Text(
             result.isLocalFallback
                 ? 'Демо-режим: заявка сохранена локально со статусом '
                     '«отправлена». Публикация только после модерации.'
-                : 'Вакансия отправлена на модерацию (статус: отправлена). '
-                    'Публикация произойдёт только после одобрения.',
+                : _isEditDraft
+                    ? 'Исправленная вакансия снова в очереди модерации.'
+                    : 'Вакансия отправлена на модерацию (статус: отправлена). '
+                        'Публикация произойдёт только после одобрения.',
           ),
           actions: [
             FilledButton(
@@ -131,7 +186,7 @@ class _ProposeVacancyScreenState extends State<ProposeVacancyScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Предложить вакансию'),
+        title: Text(_isEditDraft ? 'Исправить вакансию' : 'Предложить вакансию'),
       ),
       body: Form(
         key: _formKey,
@@ -148,11 +203,33 @@ class _ProposeVacancyScreenState extends State<ProposeVacancyScreen> {
                 _usedLocalFallback
                     ? 'Демо: RPC submit_vacancy недоступен — заявка '
                         'сохраняется локально.'
-                    : 'Ваша заявка не публикуется сразу. Модератор проверит '
-                        'объявление перед публикацией.',
+                    : _isEditDraft
+                        ? 'Модератор запросил уточнение. Исправьте заявку и '
+                            'отправьте снова — публикация только после одобрения.'
+                        : 'Ваша заявка не публикуется сразу. Модератор проверит '
+                            'объявление перед публикацией.',
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
             ),
+            if (_clarificationReason != null &&
+                _clarificationReason!.trim().isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFFBEB),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFF59E0B)),
+                ),
+                child: Text(
+                  'Комментарий модератора: ${_clarificationReason!.trim()}',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: const Color(0xFF92400E),
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+              ),
+            ],
             if (_banner != null) ...[
               const SizedBox(height: 12),
               Text(
@@ -265,7 +342,11 @@ class _ProposeVacancyScreenState extends State<ProposeVacancyScreen> {
                       height: 22,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('Отправить на модерацию'),
+                  : Text(
+                      _isEditDraft
+                          ? 'Сохранить и отправить снова'
+                          : 'Отправить на модерацию',
+                    ),
             ),
           ],
         ),

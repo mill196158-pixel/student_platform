@@ -21,6 +21,7 @@ import 'src/ui/navigation/navigation_screen.dart';
 import 'src/ui/profile/profile_screen.dart';
 import 'src/ui/profile/edit_profile_screen.dart';
 import 'src/ui/profile/personal_diary_screen.dart';
+import 'src/ui/profile/my_reviews_screen.dart';
 import 'src/ui/exams/exams_screen.dart';
 import 'src/ui/schedule/subject_diary/subject_diary.dart';
 import 'src/ui/notifications/notification_settings_screen.dart';
@@ -74,6 +75,10 @@ final GoRouter appRouter = GoRouter(
     GoRoute(
       path: '/my-diary',
       builder: (_, __) => const PersonalDiaryScreen(),
+    ),
+    GoRoute(
+      path: '/my-reviews',
+      builder: (_, __) => const MyReviewsScreen(),
     ),
     GoRoute(
       path: '/notification-settings',

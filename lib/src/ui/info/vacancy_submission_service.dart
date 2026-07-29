@@ -68,6 +68,7 @@ class VacancySubmissionResult {
     required this.ok,
     this.id,
     this.status = 'submitted',
+    this.rowVersion,
     this.isLocalFallback = false,
     this.rpcUnavailable = false,
     this.errorMessage,
@@ -76,11 +77,121 @@ class VacancySubmissionResult {
   final bool ok;
   final String? id;
   final String status;
+  final int? rowVersion;
   final bool isLocalFallback;
   final bool rpcUnavailable;
   final String? errorMessage;
 
   bool get isSubmitted => ok && status == 'submitted';
+}
+
+/// Author-scoped row from `get_my_vacancy_submissions`.
+class MyVacancySubmissionItem {
+  const MyVacancySubmissionItem({
+    required this.id,
+    required this.title,
+    required this.status,
+    required this.rowVersion,
+    this.companyName = '',
+    this.summary = '',
+    this.description = '',
+    this.employmentType,
+    this.workFormat,
+    this.location,
+    this.salaryText,
+    this.externalUrl,
+    this.contacts = const {},
+    this.rejectionReason,
+    this.updatedAt,
+  });
+
+  final String id;
+  final String title;
+  final String status;
+  final int rowVersion;
+  final String companyName;
+  final String summary;
+  final String description;
+  final String? employmentType;
+  final String? workFormat;
+  final String? location;
+  final String? salaryText;
+  final String? externalUrl;
+  final Map<String, dynamic> contacts;
+  final String? rejectionReason;
+  final DateTime? updatedAt;
+
+  bool get needsAuthorAction =>
+      status == 'draft' &&
+      (rejectionReason != null && rejectionReason!.trim().isNotEmpty);
+
+  static MyVacancySubmissionItem? tryParse(Map<String, dynamic>? json) {
+    if (json == null) return null;
+    final id = json['id']?.toString().trim();
+    final title = json['title']?.toString().trim();
+    final status = json['status']?.toString().trim();
+    final rowVersionRaw = json['row_version'] ?? json['rowVersion'];
+    final rowVersion = rowVersionRaw is num
+        ? rowVersionRaw.toInt()
+        : int.tryParse('$rowVersionRaw');
+    if (id == null ||
+        id.isEmpty ||
+        title == null ||
+        title.isEmpty ||
+        status == null ||
+        status.isEmpty ||
+        rowVersion == null) {
+      return null;
+    }
+    final contactsRaw = json['contacts'];
+    return MyVacancySubmissionItem(
+      id: id,
+      title: title,
+      status: status,
+      rowVersion: rowVersion,
+      companyName: json['company_name']?.toString() ?? '',
+      summary: json['summary']?.toString() ?? '',
+      description: json['description']?.toString() ?? '',
+      employmentType: json['employment_type']?.toString(),
+      workFormat: json['work_format']?.toString(),
+      location: json['location']?.toString(),
+      salaryText: json['salary_text']?.toString(),
+      externalUrl: json['external_url']?.toString(),
+      contacts: contactsRaw is Map
+          ? Map<String, dynamic>.from(contactsRaw)
+          : const {},
+      rejectionReason: () {
+        final raw = json['rejection_reason'] ?? json['rejectionReason'];
+        final text = raw?.toString().trim();
+        return (text == null || text.isEmpty) ? null : text;
+      }(),
+      updatedAt: DateTime.tryParse('${json['updated_at'] ?? ''}'),
+    );
+  }
+
+  VacancySubmissionDraft toDraft() {
+    const marker = '\n\n---\nТребования:\n';
+    var description = this.description;
+    var requirements = '';
+    final idx = description.indexOf(marker);
+    if (idx >= 0) {
+      requirements = description.substring(idx + marker.length);
+      description = description.substring(0, idx);
+    }
+    return VacancySubmissionDraft(
+      title: title,
+      companyName: companyName,
+      summary: summary,
+      description: description,
+      requirements: requirements,
+      employmentType: VacancyEmploymentType.tryParse(employmentType),
+      workFormat: VacancyWorkFormat.tryParse(workFormat),
+      location: location,
+      salaryText: salaryText,
+      externalUrl: externalUrl,
+      contacts: contacts,
+    );
+  }
 }
 
 abstract class VacancySubmissionRpcClient {
@@ -175,6 +286,100 @@ class VacancySubmissionService {
     }
   }
 
+  Future<List<MyVacancySubmissionItem>> listMySubmissions({
+    int limit = 50,
+  }) async {
+    try {
+      final response = await _rpc.rpc(
+        'get_my_vacancy_submissions',
+        params: {'p_limit': limit},
+      );
+      return _parseSubmissionList(response);
+    } on PostgrestException catch (error) {
+      if (_isMissingRpcNamed(error, 'get_my_vacancy_submissions')) {
+        return _localSubmissionItems();
+      }
+      debugPrint('[vacancy_submit] list failed: ${error.message}');
+      return const [];
+    } catch (error) {
+      if (_isMissingRpcMessageNamed(
+        error.toString(),
+        'get_my_vacancy_submissions',
+      )) {
+        return _localSubmissionItems();
+      }
+      debugPrint('[vacancy_submit] list failed: $error');
+      return const [];
+    }
+  }
+
+  Future<VacancySubmissionResult> updateDraft({
+    required String id,
+    required VacancySubmissionDraft draft,
+    required int expectedRowVersion,
+  }) async {
+    final patch = draft.toSubmitPatch();
+    if ((patch['title']?.toString().trim().isEmpty ?? true)) {
+      return const VacancySubmissionResult(
+        ok: false,
+        errorMessage: 'Укажите название вакансии.',
+      );
+    }
+    try {
+      final response = await _rpc.rpc(
+        'update_my_vacancy_draft',
+        params: {
+          'p_id': id,
+          'p_patch': patch,
+          'p_expected_row_version': expectedRowVersion,
+        },
+      );
+      final map = _asMap(response);
+      final rowVersionRaw = map['row_version'];
+      return VacancySubmissionResult(
+        ok: map['ok'] == true || map['id'] != null,
+        id: map['id']?.toString() ?? id,
+        status: (map['status'] ?? 'draft').toString(),
+        rowVersion: rowVersionRaw is num
+            ? rowVersionRaw.toInt()
+            : int.tryParse('$rowVersionRaw'),
+      );
+    } on PostgrestException catch (error) {
+      return VacancySubmissionResult(ok: false, errorMessage: error.message);
+    } catch (error) {
+      return VacancySubmissionResult(ok: false, errorMessage: error.toString());
+    }
+  }
+
+  Future<VacancySubmissionResult> resubmit({
+    required String id,
+    required int expectedRowVersion,
+  }) async {
+    try {
+      final response = await _rpc.rpc(
+        'resubmit_my_vacancy',
+        params: {
+          'p_id': id,
+          'p_expected_row_version': expectedRowVersion,
+        },
+      );
+      final map = _asMap(response);
+      final rowVersionRaw = map['row_version'];
+      return VacancySubmissionResult(
+        ok: map['ok'] == true || map['id'] != null,
+        id: map['id']?.toString() ?? id,
+        status: (map['status'] ?? 'submitted').toString(),
+        rowVersion: rowVersionRaw is num
+            ? rowVersionRaw.toInt()
+            : int.tryParse('$rowVersionRaw'),
+      );
+    } on PostgrestException catch (error) {
+      return VacancySubmissionResult(ok: false, errorMessage: error.message);
+    } catch (error) {
+      return VacancySubmissionResult(ok: false, errorMessage: error.toString());
+    }
+  }
+
   Future<VacancySubmissionResult> _localSubmit(
     VacancySubmissionDraft draft,
   ) async {
@@ -227,15 +432,60 @@ class VacancySubmissionService {
     return const {};
   }
 
+  Future<List<MyVacancySubmissionItem>> _localSubmissionItems() async {
+    final rows = await listLocalSubmissions();
+    final items = <MyVacancySubmissionItem>[];
+    for (final row in rows) {
+      final item = MyVacancySubmissionItem.tryParse({
+        ...row,
+        'row_version': row['row_version'] ?? 1,
+        'status': row['status'] ?? 'submitted',
+      });
+      if (item != null) items.add(item);
+    }
+    return items;
+  }
+
+  List<MyVacancySubmissionItem> _parseSubmissionList(dynamic data) {
+    dynamic value = data;
+    if (value is String && value.isNotEmpty) {
+      try {
+        value = jsonDecode(value);
+      } catch (_) {
+        return const [];
+      }
+    }
+    if (value is! List) return const [];
+    final items = <MyVacancySubmissionItem>[];
+    for (final row in value) {
+      if (row is! Map) continue;
+      final item =
+          MyVacancySubmissionItem.tryParse(Map<String, dynamic>.from(row));
+      if (item != null) items.add(item);
+    }
+    return items;
+  }
+
   bool _isMissingRpc(PostgrestException error) {
-    final code = (error.code ?? '').toUpperCase();
-    if (code == 'PGRST202' || code == '42883') return true;
-    return _isMissingRpcMessage(error.message);
+    return _isMissingRpcNamed(error, 'submit_vacancy');
   }
 
   bool _isMissingRpcMessage(String raw) {
+    return _isMissingRpcMessageNamed(raw, 'submit_vacancy');
+  }
+
+  bool _isMissingRpcNamed(PostgrestException error, String functionName) {
+    final code = (error.code ?? '').toUpperCase();
+    if (code == 'PGRST202' || code == '42883') {
+      return _isMissingRpcMessageNamed(error.message, functionName) ||
+          error.message.toLowerCase().contains(functionName.toLowerCase());
+    }
+    return _isMissingRpcMessageNamed(error.message, functionName);
+  }
+
+  bool _isMissingRpcMessageNamed(String raw, String functionName) {
     final message = raw.toLowerCase();
-    final namesFunction = message.contains('submit_vacancy');
+    final namesFunction = message.contains(functionName.toLowerCase());
     final missingPhrase = message.contains('could not find the function') ||
         message.contains('does not exist') ||
         message.contains('undefined_function') ||

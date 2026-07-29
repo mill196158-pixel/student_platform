@@ -17,6 +17,7 @@ import 'subject_card_service.dart';
 import 'subject_difficulty.dart';
 import 'subject_hero_load.dart';
 import 'subject_media_service.dart';
+import 'entity_review_screen.dart';
 import 'teacher_profile_screen.dart';
 
 class SubjectInfoScreen extends StatefulWidget {
@@ -345,6 +346,7 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
                     MaterialPageRoute(
                       builder: (_) => TeacherProfileScreen(
                         teacherName: data.teacherName,
+                        teacherId: data.teacherId,
                         subjectTitle: data.displayTitle,
                         department: data.department,
                         semesterNumber: data.semesterNumber,
@@ -359,6 +361,21 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
               data.canVoteSubject ? () => _rateSubject(data) : null,
         ),
         const SizedBox(height: 10),
+        if (data.subjectId != null && data.subjectId!.trim().isNotEmpty)
+          _ReviewEntryTile(
+            title: data.displayTitle,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => EntityReviewScreen(
+                  entityType: ReviewEntityType.subject,
+                  entityId: data.subjectId!.trim(),
+                  entityLabel: data.displayTitle,
+                ),
+              ),
+            ),
+          ),
+        if (data.subjectId != null && data.subjectId!.trim().isNotEmpty)
+          const SizedBox(height: 10),
         _QuickActions(
           canOpenChat: data.canOpenChat,
           onChatTap:
@@ -551,6 +568,9 @@ class _SubjectInfoRepository {
           card.teachers.map((t) => t.displayName).join(', '),
         team?['teacher'],
       ]);
+      final teacherId = card != null && card.teachers.isNotEmpty
+          ? card.teachers.first.id
+          : await _resolveTeacherId(teacherName);
       final subjectRating = await _loadSubjectRating(subjectOfferingId);
       final teacherRating = await _loadTeacherRating(teacherName);
       return _SubjectInfoData(
@@ -567,6 +587,7 @@ class _SubjectInfoRepository {
         ]),
         controlForm: card?.controlForm ?? '',
         teacherName: teacherName,
+        teacherId: teacherId,
         department: card?.department ?? '',
         credits: card?.credits?.toString() ?? '',
         hoursTotal: card?.hoursTotal?.toString() ?? '',
@@ -645,6 +666,7 @@ class _SubjectInfoRepository {
     ]);
 
     final teacherName = _firstNonEmpty([team?['teacher']]);
+    final teacherId = await _resolveTeacherId(teacherName);
     final subjectRating = await _loadSubjectRating(subjectOfferingId);
     final teacherRating = await _loadTeacherRating(teacherName);
 
@@ -659,6 +681,7 @@ class _SubjectInfoRepository {
       description: _firstNonEmpty([subject?['description']]),
       controlForm: _firstNonEmpty([curriculum?['control_form']]),
       teacherName: teacherName,
+      teacherId: teacherId,
       department: _firstNonEmpty([curriculum?['department']]),
       credits: _firstNonEmpty([curriculum?['credits']]),
       hoursTotal: _firstNonEmpty([curriculum?['hours_total']]),
@@ -705,6 +728,24 @@ class _SubjectInfoRepository {
   }
 
   Future<double?> _loadTeacherRating(String teacherName) async {
+    final teacherId = await _resolveTeacherId(teacherName);
+    if (teacherId == null) return null;
+    try {
+      final summary = await _sb
+          .from('teacher_difficulty_summaries')
+          .select('vote_count,score_total')
+          .eq('teacher_id', teacherId)
+          .maybeSingle();
+      final voteCount = _asInt(summary?['vote_count']) ?? 0;
+      final scoreTotal = _asInt(summary?['score_total']) ?? 0;
+      if (voteCount <= 0) return null;
+      return scoreTotal / voteCount;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<String?> _resolveTeacherId(String teacherName) async {
     final normalized =
         teacherName.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
     if (normalized.isEmpty) return null;
@@ -715,16 +756,7 @@ class _SubjectInfoRepository {
           .eq('normalized_name', normalized)
           .maybeSingle();
       final teacherId = (target?['id'] ?? '').toString().trim();
-      if (teacherId.isEmpty) return null;
-      final summary = await _sb
-          .from('teacher_difficulty_summaries')
-          .select('vote_count,score_total')
-          .eq('teacher_id', teacherId)
-          .maybeSingle();
-      final voteCount = _asInt(summary?['vote_count']) ?? 0;
-      final scoreTotal = _asInt(summary?['score_total']) ?? 0;
-      if (voteCount <= 0) return null;
-      return scoreTotal / voteCount;
+      return teacherId.isEmpty ? null : teacherId;
     } catch (_) {
       return null;
     }
@@ -786,6 +818,7 @@ class _SubjectInfoData {
   final String description;
   final String controlForm;
   final String teacherName;
+  final String? teacherId;
   final String department;
   final String credits;
   final String hoursTotal;
@@ -809,6 +842,7 @@ class _SubjectInfoData {
     required this.description,
     required this.controlForm,
     required this.teacherName,
+    this.teacherId,
     required this.department,
     required this.credits,
     required this.hoursTotal,
@@ -968,6 +1002,7 @@ class _SubjectInfoData {
       teacherName: card.teachers.isEmpty
           ? ''
           : card.teachers.map((t) => t.displayName).join(', '),
+      teacherId: card.teachers.isEmpty ? null : card.teachers.first.id,
       department: card.department ?? '',
       credits: card.credits?.toString() ?? '',
       hoursTotal: card.hoursTotal?.toString() ?? '',
@@ -1252,6 +1287,29 @@ class _SummaryCard extends StatelessWidget {
             icon: Icons.star_border_rounded,
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ReviewEntryTile extends StatelessWidget {
+  const _ReviewEntryTile({
+    required this.title,
+    required this.onTap,
+  });
+
+  final String title;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        leading: const Icon(Icons.rate_review_outlined),
+        title: const Text('Оставить отзыв о предмете'),
+        subtitle: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        trailing: const Icon(Icons.chevron_right_rounded),
+        onTap: onTap,
       ),
     );
   }

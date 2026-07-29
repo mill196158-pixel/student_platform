@@ -20,6 +20,7 @@ import 'info_subjects_cache.dart';
 import 'subject_attachment_open.dart';
 import 'subject_difficulty.dart';
 import 'reference_service.dart';
+import 'my_vacancy_submissions_screen.dart';
 import 'propose_vacancy_screen.dart';
 import 'vacancy_media_service.dart';
 import 'vacancy_service.dart';
@@ -2828,6 +2829,20 @@ class _JobsHeroCard extends StatelessWidget {
               ),
             ),
           ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => _openMyVacancySubmissions(context),
+              icon: const Icon(Icons.inbox_outlined),
+              label: const Text('Мои заявки'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: const BorderSide(color: Colors.white70),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -2837,6 +2852,16 @@ class _JobsHeroCard extends StatelessWidget {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (context) => ProposeVacancyScreen(
+          submissionService: submissionService,
+        ),
+      ),
+    );
+  }
+
+  void _openMyVacancySubmissions(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => MyVacancySubmissionsScreen(
           submissionService: submissionService,
         ),
       ),

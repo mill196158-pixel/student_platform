@@ -2,8 +2,11 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:student_ui/student_ui.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'entity_review_screen.dart';
+import '../profile/student_review_service.dart';
 class TeacherProfileScreen extends StatefulWidget {
   final String teacherName;
   final String? teacherId;
@@ -225,12 +228,10 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
                           subjectDifficultyAvg: _subjectDifficultyAvg,
                         ),
                       ),
-                    if (subject != null) const SizedBox(height: 10),
-                    const _ProfileCard(
-                      icon: Icons.forum_outlined,
-                      title: 'Отзывы студентов',
-                      compact: true,
-                      child: _ReviewsPausedState(),
+                    const SizedBox(height: 10),
+                    _TeacherReviewEntry(
+                      teacherId: widget.teacherId ?? _rating?.teacherId,
+                      teacherName: name,
                     ),
                   ],
                 ),
@@ -1104,6 +1105,51 @@ class _TeacherRatingSheet extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _TeacherReviewEntry extends StatelessWidget {
+  const _TeacherReviewEntry({
+    required this.teacherId,
+    required this.teacherName,
+  });
+
+  final String? teacherId;
+  final String teacherName;
+
+  @override
+  Widget build(BuildContext context) {
+    final id = (teacherId ?? '').trim();
+    if (id.isEmpty) {
+      return const _ProfileCard(
+        icon: Icons.forum_outlined,
+        title: 'Отзывы студентов',
+        compact: true,
+        child: _ReviewsPausedState(),
+      );
+    }
+
+    return _ProfileCard(
+      icon: Icons.rate_review_outlined,
+      title: 'Отзыв о преподавателе',
+      compact: true,
+      child: ListTile(
+        contentPadding: EdgeInsets.zero,
+        title: const Text('Оставить или изменить отзыв'),
+        subtitle: const Text('После модерации начисляется 1 балл'),
+        trailing: const Icon(Icons.chevron_right_rounded),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => EntityReviewScreen(
+              entityType: ReviewEntityType.teacher,
+              entityId: id,
+              entityLabel: teacherName,
+              reviewService: StudentReviewService(),
+            ),
+          ),
+        ),
       ),
     );
   }
