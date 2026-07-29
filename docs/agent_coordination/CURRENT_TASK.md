@@ -1,39 +1,43 @@
 # CURRENT_TASK
 
-* Status: **STAGE_16_19_FOUNDATION_REWORK** / Codex partial: 17+18 APPROVE_WITH_NOTES; 16+19 pending re-review after P1 fixes
-* Branch: `feature/content-platform`
+* Status: **CONTENT_PLATFORM_LOCAL_CHAIN_PARKED** / awaiting owner apply/deploy/push
+* Branch: `feature/content-platform` (ahead of `origin/refactor/chat-tab`; also behind 1)
 * Worktree: `/Users/annasuvorova/student_platform_content`
 * Codex thread: `019fa373-81f2-7962-a8c9-81d86cb62311`
 * Remote: `gwdanmwluhrcfxbnplwd` (**no apply / no deploy / no push**)
 
-## Approved chain (local commits)
+## Codex verdicts (local)
 
-| Slice | Status | Commit |
+| Slice | Verdict | Commit |
 |---|---|---|
-| Docs gate | APPROVE | `9c8aba9` / `d1796ac` |
+| Docs gate | APPROVE | `d1796ac` / `9c8aba9` |
 | 14A SQL | APPROVE | `2588581` |
 | 14B models | APPROVE | `691f43e` / `74c779d` |
 | 15.1 Home promo | APPROVE | `183efc8` |
 | 15.2 News audience | APPROVE | `001e1f0` |
 | 15.3 Profile feed | APPROVE | `cebfcf5` |
+| 16 SQL foundation | APPROVE_WITH_NOTES (FOUNDATION DRAFT) | `3772b4a` |
+| 17 Vacancies SQL | APPROVE_WITH_NOTES (FOUNDATION DRAFT) | `5629da9` |
+| 18 Reviews/points SQL | APPROVE_WITH_NOTES (FOUNDATION DRAFT) | `5629da9` |
+| 19 Import Studio SQL | APPROVE_WITH_NOTES (FOUNDATION DRAFT) | `3772b4a` |
 | 20 AI spec | APPROVE | `e279c53` |
 | 21 RF roadmap | APPROVE | `e279c53` |
 
-## Active
+## Residuals / blockers
 
-Stage 16–19 SQL foundation drafts (local only):
+* Stage 16.1 **product UI** (Admin subject card editor + mobile wiring) — uncommitted WIP; compile/tests not green → **BLOCKED** for DONE
+* Full Docker chain apply + behavioral roleplay for 16–19 not run end-to-end in this worktree
+* Local Supabase CLI missing historically
+* Extended stage14/15.2 check SQL diffs remain uncommitted (whitespace/parallel edits)
+* Owner residuals from Stage 13: PHYSICAL OCR / two-device race / controlled push / REAL XLSX
 
-* **17 + 18**: Codex **APPROVE_WITH_NOTES** as FOUNDATION DRAFT — may commit labeled as draft
-* **16**: P1 rework — asset version race fixed (lock + unique current/version indexes); 16.1 UI/concurrency residuals remain
-* **19**: P1 rework — rollback returns structured refusal so audit survives
+## Hard bans (still)
 
-## Hard bans
+No remote migration apply · No Edge deploy · No GitHub push · No real import · No service_role in Web
 
-No remote apply / Edge deploy / push / real import / service_role in Web
+## Next (owner)
 
-## Next gate
-
-1. Codex re-review 16 + 19 after latest P1 patches
-2. Local commit 17+18 FOUNDATION DRAFT (and 16/19 if APPROVE)
-3. Overall chain review
-4. Owner: remote apply / deploy / push
+1. Review local commits on `feature/content-platform`
+2. Authorize remote apply of prepared migrations (ordered)
+3. Authorize Edge deploy for content/subject media if needed
+4. Authorize push

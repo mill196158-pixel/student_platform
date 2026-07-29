@@ -901,7 +901,7 @@ Remote migration: `20260728165633_stage13_12_group_action_cards_unified_details`
 
 ## Stage 14 — Managed Content Platform foundation
 
-Status: **PLANNED** / docs gate → implementation
+Status: **DONE (local)** / Codex **APPROVE** (`2588581`, `691f43e`, `74c779d`) — remote apply pending owner
 
 Понятия:
 
@@ -961,7 +961,7 @@ Placements v1:
 
 ## Stage 15 — Главная, новости и профиль
 
-Status: **PLANNED**
+Status: **DONE (local)** / Codex **APPROVE** (`183efc8`, `001e1f0`, `cebfcf5`) — remote apply pending owner
 
 ### 15.1 Управляемые блоки Главной
 
@@ -993,7 +993,7 @@ Status: **PLANNED**
 
 ## Stage 16 — Предметы и справочник
 
-Status: **PLANNED**
+Status: **FOUNDATION DRAFT (local)** / Codex **APPROVE_WITH_NOTES** (`3772b4a`) — UI/product incomplete; remote apply pending owner
 
 ### 16.1 Карточка предмета (Admin visual editor)
 
@@ -1022,7 +1022,7 @@ Status: **PLANNED**
 
 ## Stage 17 — Вакансии
 
-Status: **PLANNED**
+Status: **FOUNDATION DRAFT (local)** / Codex **APPROVE_WITH_NOTES** (`5629da9`) — remote apply pending owner
 
 - [ ] отдельная доменная модель (не generic content JSON);
 - [ ] создание админом; предложение пользователем через форму;
@@ -1037,7 +1037,7 @@ Status: **PLANNED**
 
 ## Stage 18 — Отзывы, баллы и единая модерация
 
-Status: **PLANNED** — расширять Stage 13.6, не создавать вторую систему отзывов
+Status: **FOUNDATION DRAFT (local)** / Codex **APPROVE_WITH_NOTES** (`5629da9`) — расширяет 13.6; remote apply pending owner
 
 - [ ] отзывы для предусмотренных сущностей (преподаватель, предмет; вакансия/работодатель — только после отдельного продуктового решения);
 - [ ] 1 одобренный отзыв → 1 внутренний балл (не деньги, не вывод);
@@ -1058,7 +1058,7 @@ Status: **PLANNED** — расширять Stage 13.6, не создавать �
 
 ## Stage 19 — Import Studio
 
-Status: **PLANNED**
+Status: **FOUNDATION DRAFT (local)** / Codex **APPROVE_WITH_NOTES** (`3772b4a`) — partial domains; remote apply pending owner
 
 Домены:
 
