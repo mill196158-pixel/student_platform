@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import '../../../core/auth/admin_backend_config.dart';
 import '../../../core/auth/admin_session_controller.dart';
 import '../teachers/teacher_import_service.dart';
+import '../teachers/teachers_repository.dart';
+import 'subject_card_editor_screen.dart';
 import 'subject_item.dart';
 import 'subjects_repository.dart';
 
@@ -50,209 +52,19 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
   }
 
   Future<void> _edit([SubjectItem? item]) async {
-    final name = TextEditingController(text: item?.canonicalName);
-    final department = TextEditingController(text: item?.department);
-    final control = TextEditingController(text: item?.controlForm);
-    final difficulty = TextEditingController(text: item?.difficultyLabel);
-    final description = TextEditingController(text: item?.description);
-    final shortDescription = TextEditingController(
-      text: item?.shortDescription,
-    );
-    final outcomes = TextEditingController(text: item?.learningOutcomes);
-    final requirements = TextEditingController(text: item?.requirements);
-    final expect = TextEditingController(text: item?.whatToExpect);
-    final howToPass = TextEditingController(text: item?.howToPass);
-    final materials = TextEditingController(text: item?.usefulMaterialsNote);
-    final links = TextEditingController(
-      text: (item?.usefulLinks ?? const [])
-          .map((link) {
-            if (link is Map) {
-              final title = '${link['title'] ?? ''}'.trim();
-              final url = '${link['url'] ?? ''}'.trim();
-              if (title.isEmpty) return url;
-              if (url.isEmpty) return title;
-              return '$title|$url';
-            }
-            return '$link';
-          })
-          .where((line) => line.trim().isNotEmpty)
-          .join('\n'),
-    );
-    final pitfalls = TextEditingController(text: item?.commonPitfalls);
-    var status = item?.status ?? SubjectStatus.draft;
-    final result = await showDialog<SubjectItem>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setLocal) => AlertDialog(
-          title: Text(item == null ? 'Новый предмет' : 'Карточка предмета'),
-          content: SizedBox(
-            width: 560,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: name,
-                    decoration: const InputDecoration(labelText: 'Название'),
-                    onChanged: (_) => setLocal(() {}),
-                  ),
-                  TextField(
-                    controller: department,
-                    decoration: const InputDecoration(labelText: 'Кафедра'),
-                  ),
-                  TextField(
-                    controller: control,
-                    decoration: const InputDecoration(
-                      labelText: 'Форма контроля',
-                    ),
-                  ),
-                  TextField(
-                    controller: difficulty,
-                    decoration: const InputDecoration(
-                      labelText: 'Сложность (лейбл, не голос)',
-                      helperText:
-                          'Пользовательское голосование сложности не затрагивается.',
-                    ),
-                  ),
-                  TextField(
-                    controller: shortDescription,
-                    maxLines: 2,
-                    decoration: const InputDecoration(
-                      labelText: 'Краткое описание',
-                    ),
-                    onChanged: (_) => setLocal(() {}),
-                  ),
-                  TextField(
-                    controller: description,
-                    maxLines: 2,
-                    decoration: const InputDecoration(
-                      labelText: 'Общее описание',
-                    ),
-                  ),
-                  TextField(
-                    controller: outcomes,
-                    maxLines: 2,
-                    decoration: const InputDecoration(
-                      labelText: 'Чему научится студент',
-                    ),
-                  ),
-                  TextField(
-                    controller: requirements,
-                    maxLines: 2,
-                    decoration: const InputDecoration(labelText: 'Требования'),
-                  ),
-                  TextField(
-                    controller: expect,
-                    maxLines: 2,
-                    decoration: const InputDecoration(
-                      labelText: 'Чего ожидать',
-                    ),
-                  ),
-                  TextField(
-                    controller: howToPass,
-                    maxLines: 2,
-                    decoration: const InputDecoration(labelText: 'Как сдать'),
-                  ),
-                  TextField(
-                    controller: materials,
-                    maxLines: 2,
-                    decoration: const InputDecoration(
-                      labelText: 'Заметка о материалах',
-                    ),
-                  ),
-                  TextField(
-                    controller: links,
-                    maxLines: 3,
-                    decoration: const InputDecoration(
-                      labelText: 'Полезные ссылки',
-                      helperText: 'По одной строке: URL или Название|URL',
-                    ),
-                  ),
-                  TextField(
-                    controller: pitfalls,
-                    maxLines: 2,
-                    decoration: const InputDecoration(
-                      labelText: 'Типичные ошибки',
-                    ),
-                  ),
-                  InputDecorator(
-                    decoration: const InputDecoration(
-                      labelText: 'Связанные преподаватели',
-                    ),
-                    child: Text(
-                      (item?.relatedTeachers.isNotEmpty ?? false)
-                          ? item!.relatedTeachers.join(', ')
-                          : 'Нет связей через offerings (read-only)',
-                    ),
-                  ),
-                  DropdownButtonFormField<SubjectStatus>(
-                    initialValue: status,
-                    items: SubjectStatus.values
-                        .map(
-                          (s) =>
-                              DropdownMenuItem(value: s, child: Text(s.name)),
-                        )
-                        .toList(),
-                    onChanged: (v) => setLocal(() => status = v ?? status),
-                    decoration: const InputDecoration(labelText: 'Статус'),
-                  ),
-                  const SizedBox(height: 12),
-                  _SubjectPhonePreview(
-                    title: name.text,
-                    controlForm: control.text,
-                    shortDescription: shortDescription.text,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            if (item != null)
-              TextButton(
-                onPressed: () async {
-                  Navigator.pop(context);
-                  await _showVersions(item);
-                },
-                child: const Text('Версии'),
-              ),
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Отмена'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(
-                context,
-                SubjectItem(
-                  id:
-                      item?.id ??
-                      'new-${DateTime.now().microsecondsSinceEpoch}',
-                  canonicalName: name.text.trim(),
-                  department: department.text.trim(),
-                  controlForm: control.text.trim(),
-                  difficultyLabel: difficulty.text.trim(),
-                  description: description.text.trim(),
-                  shortDescription: shortDescription.text.trim(),
-                  learningOutcomes: outcomes.text.trim(),
-                  requirements: requirements.text.trim(),
-                  whatToExpect: expect.text.trim(),
-                  howToPass: howToPass.text.trim(),
-                  usefulMaterialsNote: materials.text.trim(),
-                  commonPitfalls: pitfalls.text.trim(),
-                  status: status,
-                  relatedTeachers: item?.relatedTeachers ?? const [],
-                  usefulLinks: parseUsefulLinks(links.text),
-                ),
-              ),
-              child: const Text('Сохранить'),
-            ),
-          ],
+    final saved = await Navigator.of(context).push<SubjectItem>(
+      MaterialPageRoute(
+        builder: (_) => SubjectCardEditorScreen(
+          repository: _repository,
+          teachersRepository: AdminBackendConfig.isDemoMode
+              ? LocalTeachersRepository()
+              : SupabaseTeachersRepository(),
+          session: widget.session,
+          item: item,
         ),
       ),
     );
-    if (result != null) {
-      await _repository.save(result);
-      await _load();
-    }
+    if (saved != null) await _load();
   }
 
   Future<void> _showVersions(SubjectItem item) async {
@@ -277,7 +89,14 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
                             final number =
                                 int.tryParse('${version['version_number']}') ??
                                 0;
-                            await _repository.restoreVersion(item.id, number);
+                            await _repository.restoreVersion(
+                              item.id,
+                              number,
+                              expectedCatalogRowVersion:
+                                  item.catalogRowVersion,
+                              expectedProfileRowVersion:
+                                  item.profileRowVersion,
+                            );
                             if (context.mounted) Navigator.pop(context);
                             await _load();
                           },
@@ -585,12 +404,20 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
                               item.status.name,
                             ].join(' · '),
                           ),
-                          trailing: canWrite
-                              ? TextButton(
+                          trailing: Wrap(
+                            spacing: 4,
+                            children: [
+                              TextButton(
+                                onPressed: () => _showVersions(item),
+                                child: const Text('Версии'),
+                              ),
+                              if (canWrite)
+                                TextButton(
                                   onPressed: () => _edit(item),
                                   child: const Text('Открыть'),
-                                )
-                              : null,
+                                ),
+                            ],
+                          ),
                         ),
                     ],
                   ),
@@ -702,50 +529,3 @@ class _SubjectMappingDialogState extends State<_SubjectMappingDialog> {
   }
 }
 
-class _SubjectPhonePreview extends StatelessWidget {
-  const _SubjectPhonePreview({
-    required this.title,
-    required this.controlForm,
-    required this.shortDescription,
-  });
-  final String title;
-  final String controlForm;
-  final String shortDescription;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black12),
-        color: const Color(0xFFF7F8FB),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Превью мобильной карточки',
-            style: Theme.of(context).textTheme.labelMedium,
-          ),
-          const SizedBox(height: 6),
-          Text(
-            title.trim().isEmpty ? 'Название предмета' : title.trim(),
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-          ),
-          Text(
-            controlForm.trim().isEmpty ? 'Форма контроля' : controlForm.trim(),
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          if (shortDescription.trim().isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Text(shortDescription.trim()),
-          ],
-        ],
-      ),
-    );
-  }
-}

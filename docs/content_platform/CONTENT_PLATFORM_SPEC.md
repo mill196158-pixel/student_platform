@@ -379,7 +379,59 @@ Locked contracts (Codex plan):
 
 ### 16.1 Subject card editor
 
-Extend subject admin + `subject_student_profiles` / offering overrides; section order; teachers via IDs; shared mobile preview.
+Text/links/ordering foundation for the student-facing subject card. Binary images/files upload stays in **16.2** (no editable `image_asset_id` in 16.1; §Q image/file checkboxes stay open).
+
+#### Locked contracts (Codex plan)
+
+**Field ownership**
+
+| Aggregate | Owns |
+|---|---|
+| `subject_catalog` | name, full description, department, control form, requirements, learning outcomes, useful links, status |
+| `subject_student_profiles` | short description, what to expect, how to pass / prep tips, useful materials note, common pitfalls, relevance date, section order |
+| `subject_offering_student_profiles` | offering-specific notes only (`local_description`, `teacher_specific_note`, `assessment_note`, `workload_note`, `semester_tips`) |
+| `curriculum_subjects` (via offering) | `hours_total`, `credits` — **SoT**; never duplicated onto `subject_student_profiles` |
+| `offering_teachers` | teacher links by `(subject_offering_id, teacher_id)` only |
+
+**Merge (offering → effective card):** blank override strings normalize to `NULL`. `NULL` inherits catalog/profile. Same mapping in SQL `get_subject_card`, Dart model, Admin Preview, and Mobile renderer.
+
+| Offering field | Merge rule |
+|---|---|
+| `local_description` | Overrides effective `description` |
+| `semester_tips` | Overrides effective `how_to_pass` |
+| `teacher_specific_note` | Additive offering-only section (not an override) |
+| `assessment_note` | Additive offering-only section |
+| `workload_note` | Additive offering-only section |
+
+Lookups/writes use `subject_id` / `subject_catalog_id` / `subject_offering_id` — **name is never a key**.
+
+**Hours/credits:** resolved only through selected `subject_offering_id` → curriculum. Without offering → show unavailable; no invented catalog defaults. Editing hours/credits is a separate ID-bound curriculum operation, not the catalog profile setter.
+
+**Teachers:** editable only when an offering is explicitly selected; persist only via transactional RPC writing `offering_teachers`. No offering → picker disabled/read-only; never persist teacher names or synthesize catalog-level teacher links.
+
+**Section order:** fixed allowlist of keys (shared Dart + SQL). Reject unknown keys and duplicates. Omitted supported keys append in default order.
+
+Default allowlist (order):  
+`short_description`, `description`, `learning_outcomes`, `what_to_expect`, `how_to_pass`, `requirements`, `useful_materials_note`, `useful_links`, `common_pitfalls`, `teachers`, `hours_credits`, `relevance_date`, `teacher_specific_note`, `assessment_note`, `workload_note`.
+
+Additive offering-only keys appear only when the offering has a non-null value; if omitted from a stored order they append after `relevance_date` in the default relative order above.
+
+**Concurrency / versions / audit**
+
+- Every edited aggregate requires optimistic concurrency (`row_version` / expected version).
+- Catalog+profile update locks rows, updates atomically, increments version, writes one complete `subject_versions` snapshot including all 16.1 fields; restore is transactional and includes new fields.
+- Offering overrides have their own version/audit contract; not silently folded into catalog history.
+
+**RPC / access**
+
+- Admin Web writes only through `SECURITY DEFINER` RPCs gated by `subjects.write`; revoke `PUBLIC`/`anon`.
+- Mobile reads via one chatty-safe RPC e.g. `get_subject_card(p_subject_offering_id)` returning merged typed payload + teacher IDs; validates authenticated student access to that offering; must not leak another group’s override.
+
+**Shared UI**
+
+- Typed `SubjectCardPayload` + `StudentSubjectCardPreview` in `packages/student_ui` (fail-closed; no HTML/JS).
+- Admin visual editor (list + form + phone preview) reuses the same preview widget.
+- Links editable in 16.1; images/files deferred to 16.2.
 
 ### 16.2 Subject files
 

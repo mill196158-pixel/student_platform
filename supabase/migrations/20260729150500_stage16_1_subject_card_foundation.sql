@@ -427,55 +427,8 @@ grant execute on function public.admin_upsert_subject_card(
   text, text, text, text, text, date, jsonb
 ) to authenticated, service_role;
 
--- ---------------------------------------------------------------------------
--- Admin: set offering teachers by IDs (transactional replace)
--- ---------------------------------------------------------------------------
-create or replace function public.admin_set_offering_teachers(
-  p_subject_offering_id uuid,
-  p_teacher_ids uuid[]
-) returns jsonb
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  v_ids uuid[] := coalesce(p_teacher_ids, '{}');
-begin
-  if not private.stage13_4_can_write_subjects() then
-    raise exception 'forbidden' using errcode = '42501';
-  end if;
-  if p_subject_offering_id is null then
-    raise exception 'invalid_offering' using errcode = '22023';
-  end if;
-  if not exists (
-    select 1 from public.subject_offerings where id = p_subject_offering_id
-  ) then
-    raise exception 'not_found' using errcode = 'P0002';
-  end if;
-
-  delete from public.offering_teachers
-  where subject_offering_id = p_subject_offering_id;
-
-  insert into public.offering_teachers(subject_offering_id, teacher_id, role)
-  select p_subject_offering_id, t.id, 'lecturer'
-  from unnest(v_ids) as t(id)
-  where exists (select 1 from public.teachers x where x.id = t.id);
-
-  return jsonb_build_object(
-    'subject_offering_id', p_subject_offering_id,
-    'teacher_ids', coalesce(
-      (select jsonb_agg(ot.teacher_id) from public.offering_teachers ot
-       where ot.subject_offering_id = p_subject_offering_id),
-      '[]'::jsonb
-    )
-  );
-end;
-$$;
-
-revoke all on function public.admin_set_offering_teachers(uuid, uuid[])
-  from public, anon;
-grant execute on function public.admin_set_offering_teachers(uuid, uuid[])
-  to authenticated, service_role;
+-- Teachers / offering override RPCs live in
+-- 20260729150550_stage16_1_subject_card_hardening.sql (versioned + fail-loud).
 
 -- ---------------------------------------------------------------------------
 -- Card write lockdown.

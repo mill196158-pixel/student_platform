@@ -5,7 +5,10 @@ import '../learning/models/team.dart';
 import '../learning/team_details_screen.dart';
 import '../schedule/subject_diary/subject_diary.dart';
 import '../schedule/subject_diary_screen.dart';
+import 'package:student_ui/student_ui.dart';
+
 import 'info_subjects_cache.dart';
+import 'subject_card_service.dart';
 import 'subject_difficulty.dart';
 import 'teacher_profile_screen.dart';
 
@@ -32,11 +35,57 @@ class SubjectInfoScreen extends StatefulWidget {
 }
 
 class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
-  late Future<_SubjectInfoData> _future = _load();
+  _SubjectInfoData? _data;
+  var _loading = true;
   final _scrollController = ScrollController();
   final _filesKey = GlobalKey();
   final _repository = _SubjectInfoRepository();
   bool _voting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _bootstrap();
+  }
+
+  /// Cache-first: paint last-good card ASAP, then refresh from network.
+  Future<void> _bootstrap() async {
+    final cached = await SubjectCardService().loadCached(widget.subjectOfferingId);
+    if (cached != null && mounted) {
+      setState(() {
+        _data = _SubjectInfoData.fromManagedCard(
+          card: cached,
+          fallbackTitle: widget.title,
+          subjectOfferingId: widget.subjectOfferingId,
+          fallbackSubjectId: widget.subjectId,
+          fallbackGroupId: widget.groupId,
+          fallbackSemesterNumber: widget.semesterNumber,
+        );
+        _loading = false;
+      });
+    }
+    try {
+      final next = await _load();
+      if (!mounted) return;
+      setState(() {
+        _data = next;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      // Hard failure: do not silently keep stale cache as live.
+      setState(() {
+        _data = _SubjectInfoData.unavailable(
+          title: widget.title,
+          subjectOfferingId: widget.subjectOfferingId,
+          subjectId: widget.subjectId,
+          groupId: widget.groupId,
+          semesterNumber: widget.semesterNumber,
+        );
+        _loading = false;
+      });
+    }
+  }
 
   Future<_SubjectInfoData> _load() async {
     return _repository.load(
@@ -51,7 +100,10 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
   Future<_SubjectInfoData> _reload() async {
     final next = await _load();
     if (!mounted) return next;
-    setState(() => _future = Future<_SubjectInfoData>.value(next));
+    setState(() {
+      _data = next;
+      _loading = false;
+    });
     return next;
   }
 
@@ -160,90 +212,98 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
     super.dispose();
   }
 
+  Widget _buildBody(_SubjectInfoData data) {
+    return ListView(
+      controller: _scrollController,
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+      children: [
+        _HeroCard(data: data),
+        const SizedBox(height: 10),
+        _TeacherDifficultyGlance(
+          data: data,
+          ratingBusy: _voting,
+          onOpenTeacher: data.hasTeacher
+              ? () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => TeacherProfileScreen(
+                        teacherName: data.teacherName,
+                        subjectTitle: data.displayTitle,
+                        department: data.department,
+                        semesterNumber: data.semesterNumber,
+                        difficultyScore: data.teacherDifficultyAvg,
+                        subjectOfferingId: data.subjectOfferingId,
+                        subjectDifficultyAvg: data.subjectDifficultyAvg,
+                      ),
+                    ),
+                  )
+              : null,
+          onRateSubject:
+              data.canVoteSubject ? () => _rateSubject(data) : null,
+        ),
+        const SizedBox(height: 10),
+        _QuickActions(
+          canOpenChat: data.canOpenChat,
+          onChatTap:
+              data.canOpenChat ? () => _openChat(context, data) : null,
+          onDiaryTap: () => _openDiary(context, data),
+          onFilesTap: _scrollToFiles,
+        ),
+        const SizedBox(height: 10),
+        if (data.cardPayload != null) ...[
+          Center(
+            child: StudentSubjectCardPreview(
+              payload: data.cardPayload!,
+              width: MediaQuery.of(context).size.width - 48,
+              height: 420,
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+        _SummaryCard(data: data),
+        const SizedBox(height: 10),
+        _FilesCard(key: _filesKey),
+        const SizedBox(height: 10),
+        _LargeActionCard(
+          icon: Icons.chat_bubble_outline_rounded,
+          title: 'Чат предмета',
+          subtitle: data.canOpenChat
+              ? 'Обсуждения, вопросы и материалы группы'
+              : 'Чат пока не создан',
+          actionLabel: 'Открыть чат',
+          enabled: data.canOpenChat,
+          onTap: data.canOpenChat ? () => _openChat(context, data) : null,
+        ),
+        const SizedBox(height: 10),
+        _LargeActionCard(
+          icon: Icons.menu_book_outlined,
+          title: 'Дневник предмета',
+          subtitle: 'Заметки, фото конспектов и файлы по предмету',
+          actionLabel: 'Открыть дневник',
+          enabled: true,
+          onTap: () => _openDiary(context, data),
+        ),
+        const SizedBox(height: 10),
+        const _HelpCard(),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final data = _data;
     return Scaffold(
       backgroundColor: const Color(0xFFFBFAFF),
       appBar: AppBar(title: const Text('Информация о предмете')),
-      body: FutureBuilder<_SubjectInfoData>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          final data = snapshot.data ??
-              _SubjectInfoData.fallback(
-                title: widget.title,
-                subjectOfferingId: widget.subjectOfferingId,
-                semesterNumber: widget.semesterNumber,
-              );
-
-          return ListView(
-            controller: _scrollController,
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
-            children: [
-              _HeroCard(data: data),
-              const SizedBox(height: 10),
-              _TeacherDifficultyGlance(
-                data: data,
-                ratingBusy: _voting,
-                onOpenTeacher: data.hasTeacher
-                    ? () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => TeacherProfileScreen(
-                              teacherName: data.teacherName,
-                              subjectTitle: data.displayTitle,
-                              department: data.department,
-                              semesterNumber: data.semesterNumber,
-                              difficultyScore: data.teacherDifficultyAvg,
-                              subjectOfferingId: data.subjectOfferingId,
-                              subjectDifficultyAvg: data.subjectDifficultyAvg,
-                            ),
-                          ),
-                        )
-                    : null,
-                onRateSubject:
-                    data.canVoteSubject ? () => _rateSubject(data) : null,
-              ),
-              const SizedBox(height: 10),
-              _QuickActions(
-                canOpenChat: data.canOpenChat,
-                onChatTap:
-                    data.canOpenChat ? () => _openChat(context, data) : null,
-                onDiaryTap: () => _openDiary(context, data),
-                onFilesTap: _scrollToFiles,
-              ),
-              const SizedBox(height: 10),
-              _SummaryCard(data: data),
-              const SizedBox(height: 10),
-              _FilesCard(key: _filesKey),
-              const SizedBox(height: 10),
-              _LargeActionCard(
-                icon: Icons.chat_bubble_outline_rounded,
-                title: 'Чат предмета',
-                subtitle: data.canOpenChat
-                    ? 'Обсуждения, вопросы и материалы группы'
-                    : 'Чат пока не создан',
-                actionLabel: 'Открыть чат',
-                enabled: data.canOpenChat,
-                onTap: data.canOpenChat ? () => _openChat(context, data) : null,
-              ),
-              const SizedBox(height: 10),
-              _LargeActionCard(
-                icon: Icons.menu_book_outlined,
-                title: 'Дневник предмета',
-                subtitle: 'Заметки, фото конспектов и файлы по предмету',
-                actionLabel: 'Открыть дневник',
-                enabled: true,
-                onTap: () => _openDiary(context, data),
-              ),
-              const SizedBox(height: 10),
-              const _HelpCard(),
-            ],
-          );
-        },
-      ),
+      body: data == null && _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _buildBody(
+              data ??
+                  _SubjectInfoData.fallback(
+                    title: widget.title,
+                    subjectOfferingId: widget.subjectOfferingId,
+                    semesterNumber: widget.semesterNumber,
+                  ),
+            ),
     );
   }
 
@@ -308,6 +368,92 @@ class _SubjectInfoRepository {
     String? fallbackGroupId,
     int? fallbackSemesterNumber,
   }) async {
+    SubjectCardPayload? card;
+    var missingRpc = false;
+    var accessDenied = false;
+    try {
+      final result =
+          await SubjectCardService().loadForOffering(subjectOfferingId);
+      if (result.accessDenied) {
+        accessDenied = true;
+      } else {
+        card = result.card;
+      }
+    } on PostgrestException catch (error) {
+      if (!SubjectCardService.isMissingRpc(error)) rethrow;
+      missingRpc = true;
+    }
+    // Non-PostgREST exceptions from the service are rethrown (transient
+    // cache decisions happen inside SubjectCardService only).
+
+    // Access denial is fail-closed: no legacy table dual-read resurrection.
+    if (accessDenied) {
+      return _SubjectInfoData.unavailable(
+        title: fallbackTitle,
+        subjectOfferingId: subjectOfferingId,
+        subjectId: fallbackSubjectId,
+        groupId: fallbackGroupId,
+        semesterNumber: fallbackSemesterNumber,
+      );
+    }
+
+    // Managed RPC available: use card payload only (empty ≠ legacy fallback).
+    if (!missingRpc) {
+      final team = _asMap(await _sb
+          .from('teams')
+          .select('id,name,teacher,icon,group_name')
+          .eq('subject_offering_id', subjectOfferingId)
+          .limit(1)
+          .maybeSingle());
+      final teamId = _stringOrNull(team?['id']);
+      Map<String, dynamic>? chat;
+      if (teamId != null) {
+        chat = _asMap(await _sb
+            .from('chats')
+            .select('id,type')
+            .eq('team_id', teamId)
+            .eq('type', 'team_main')
+            .limit(1)
+            .maybeSingle());
+      }
+      final teacherName = _firstNonEmpty([
+        if (card != null && card.teachers.isNotEmpty)
+          card.teachers.map((t) => t.displayName).join(', '),
+        team?['teacher'],
+      ]);
+      final subjectRating = await _loadSubjectRating(subjectOfferingId);
+      final teacherRating = await _loadTeacherRating(teacherName);
+      return _SubjectInfoData(
+        title: _firstNonEmpty([card?.canonicalName, fallbackTitle]),
+        subjectOfferingId: subjectOfferingId,
+        subjectId: card?.subjectId.trim().isNotEmpty == true
+            ? card!.subjectId
+            : fallbackSubjectId,
+        groupId: fallbackGroupId,
+        semesterNumber: fallbackSemesterNumber,
+        description: _firstNonEmpty([
+          card?.description,
+          card?.shortDescription,
+        ]),
+        controlForm: card?.controlForm ?? '',
+        teacherName: teacherName,
+        department: card?.department ?? '',
+        credits: card?.credits?.toString() ?? '',
+        hoursTotal: card?.hoursTotal?.toString() ?? '',
+        teamId: teamId,
+        teamName: _firstNonEmpty([team?['name']]),
+        teamIcon: _firstNonEmpty([team?['icon']]),
+        teamGroupName: _firstNonEmpty([team?['group_name']]),
+        chatId: _stringOrNull(chat?['id']),
+        subjectDifficultyAvg: subjectRating.$1,
+        mySubjectScore: subjectRating.$2,
+        canVoteSubject: subjectRating.$3,
+        teacherDifficultyAvg: teacherRating,
+        cardPayload: card,
+      );
+    }
+
+    // Missing RPC only: legacy dual-read path.
     final offering = await _sb
         .from('subject_offerings')
         .select(
@@ -395,6 +541,7 @@ class _SubjectInfoRepository {
       mySubjectScore: subjectRating.$2,
       canVoteSubject: subjectRating.$3,
       teacherDifficultyAvg: teacherRating,
+      cardPayload: null,
     );
   }
 
@@ -521,6 +668,7 @@ class _SubjectInfoData {
   final int? mySubjectScore;
   final bool canVoteSubject;
   final double? teacherDifficultyAvg;
+  final SubjectCardPayload? cardPayload;
 
   const _SubjectInfoData({
     required this.title,
@@ -543,6 +691,7 @@ class _SubjectInfoData {
     this.mySubjectScore,
     this.canVoteSubject = false,
     this.teacherDifficultyAvg,
+    this.cardPayload,
   });
 
   bool get canOpenChat => teamId != null && chatId != null;
@@ -637,6 +786,65 @@ class _SubjectInfoData {
       mySubjectScore: null,
       canVoteSubject: false,
       teacherDifficultyAvg: null,
+    );
+  }
+
+  factory _SubjectInfoData.unavailable({
+    required String title,
+    required String subjectOfferingId,
+    String? subjectId,
+    String? groupId,
+    int? semesterNumber,
+  }) {
+    return _SubjectInfoData(
+      title: title,
+      subjectOfferingId: subjectOfferingId,
+      subjectId: subjectId,
+      groupId: groupId,
+      semesterNumber: semesterNumber,
+      description: '',
+      controlForm: '',
+      teacherName: '',
+      department: '',
+      credits: '',
+      hoursTotal: '',
+      teamName: '',
+      teamIcon: '',
+      teamGroupName: '',
+      cardPayload: null,
+    );
+  }
+
+  factory _SubjectInfoData.fromManagedCard({
+    required SubjectCardPayload card,
+    required String fallbackTitle,
+    required String subjectOfferingId,
+    String? fallbackSubjectId,
+    String? fallbackGroupId,
+    int? fallbackSemesterNumber,
+  }) {
+    return _SubjectInfoData(
+      title: card.canonicalName.trim().isEmpty
+          ? fallbackTitle
+          : card.canonicalName,
+      subjectOfferingId: subjectOfferingId,
+      subjectId: card.subjectId.trim().isEmpty
+          ? fallbackSubjectId
+          : card.subjectId,
+      groupId: fallbackGroupId,
+      semesterNumber: fallbackSemesterNumber,
+      description: card.description ?? card.shortDescription ?? '',
+      controlForm: card.controlForm ?? '',
+      teacherName: card.teachers.isEmpty
+          ? ''
+          : card.teachers.map((t) => t.displayName).join(', '),
+      department: card.department ?? '',
+      credits: card.credits?.toString() ?? '',
+      hoursTotal: card.hoursTotal?.toString() ?? '',
+      teamName: '',
+      teamIcon: '',
+      teamGroupName: '',
+      cardPayload: card,
     );
   }
 

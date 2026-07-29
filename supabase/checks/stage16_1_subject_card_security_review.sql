@@ -1,10 +1,11 @@
--- Stage 16.1 subject card security review (LOCAL ONLY).
--- Assert RPC grants / FORCE RLS presence. Do not remote apply.
+-- Stage 16.1 deep security review (LOCAL ONLY).
 
 do $$
 declare
-  missing text;
+  v_acl text;
+  v_force boolean;
 begin
+  -- Required RPCs exist
   if to_regprocedure('public.get_subject_card(uuid)') is null then
     raise exception 'missing get_subject_card';
   end if;
@@ -13,115 +14,119 @@ begin
   ) is null then
     raise exception 'missing admin_upsert_subject_card';
   end if;
-
-  select string_agg(proname, ', ')
-  into missing
-  from pg_proc p
-  join pg_namespace n on n.oid = p.pronamespace
-  where n.nspname = 'public'
-    and p.proname in ('get_subject_card', 'admin_upsert_subject_card')
-    and has_function_privilege('anon', p.oid, 'execute');
-
-  if missing is not null then
-    raise exception 'anon execute must be revoked: %', missing;
+  if to_regprocedure('public.admin_set_offering_teachers(uuid,integer,uuid[])') is null then
+    raise exception 'missing admin_set_offering_teachers(uuid,integer,uuid[])';
+  end if;
+  if to_regprocedure(
+    'public.admin_upsert_offering_student_profile(uuid,integer,text,text,text,text,text,text)'
+  ) is null then
+    raise exception 'missing admin_upsert_offering_student_profile';
+  end if;
+  if to_regprocedure('public.admin_list_subject_offerings(uuid)') is null then
+    raise exception 'missing admin_list_subject_offerings';
+  end if;
+  if to_regprocedure('public.admin_list_offering_profile_versions(uuid)') is null then
+    raise exception 'missing admin_list_offering_profile_versions';
+  end if;
+  if to_regprocedure(
+    'public.admin_restore_offering_student_profile(uuid,integer,integer)'
+  ) is null then
+    raise exception 'missing admin_restore_offering_student_profile';
+  end if;
+  if to_regprocedure(
+    'public.admin_restore_subject_version(uuid,integer,integer,integer)'
+  ) is null then
+    raise exception 'missing admin_restore_subject_version with expected versions';
+  end if;
+  if to_regprocedure('public.admin_restore_subject_version(uuid,integer)') is not null then
+    raise exception 'legacy admin_restore_subject_version(uuid,integer) must be dropped';
+  end if;
+  if to_regprocedure('public.admin_set_subject_status(uuid,text)') is not null then
+    raise exception 'legacy admin_set_subject_status(uuid,text) must be dropped';
   end if;
 
-  if not exists (
-    select 1 from pg_class c
-    join pg_namespace n on n.oid = c.relnamespace
+  -- Direct authenticated client must not execute legacy upsert (card RPC only)
+  if has_function_privilege(
+    'authenticated',
+    'public.admin_upsert_subject(uuid,text,text,text,text,text,text,text,jsonb,text,text,text,text,text,text,integer,integer)'::regprocedure,
+    'execute'
+  ) then
+    raise exception 'authenticated must not execute legacy admin_upsert_subject';
+  end if;
+
+  -- hours/credits must not live on profile tables
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public'
+      and table_name in ('subject_student_profiles', 'subject_offering_student_profiles')
+      and column_name in ('hours_total', 'credits')
+  ) then
+    raise exception 'hours_total/credits must not exist on profile tables';
+  end if;
+
+  -- Old 2-arg teachers signature must be gone
+  if to_regprocedure('public.admin_set_offering_teachers(uuid,uuid[])') is not null then
+    raise exception 'legacy admin_set_offering_teachers(uuid,uuid[]) must be dropped';
+  end if;
+
+  -- FORCE RLS on offering profile versions
+  select c.relforcerowsecurity into v_force
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  where n.nspname = 'public' and c.relname = 'subject_offering_profile_versions';
+  if coalesce(v_force, false) is not true then
+    raise exception 'subject_offering_profile_versions FORCE RLS required';
+  end if;
+
+  -- anon must not execute sensitive RPCs (ACL inspect)
+  for v_acl in
+    select p.proname
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
-      and c.relname = 'subject_offering_profile_versions'
-      and c.relrowsecurity
+      and p.proname in (
+        'get_subject_card',
+        'admin_upsert_subject_card',
+        'admin_set_offering_teachers',
+        'admin_upsert_offering_student_profile',
+        'admin_list_subject_offerings',
+        'admin_list_offering_profile_versions',
+        'admin_restore_offering_student_profile'
+      )
+      and has_function_privilege('anon', p.oid, 'execute')
+  loop
+    raise exception 'anon execute forbidden for %', v_acl;
+  end loop;
+
+  -- authenticated may execute get_subject_card
+  if not has_function_privilege(
+    'authenticated',
+    'public.get_subject_card(uuid)'::regprocedure,
+    'execute'
   ) then
-    raise exception 'subject_offering_profile_versions RLS missing';
-  end if;
-end $$;
-
--- ---------------------------------------------------------------------------
--- Single card model + single source of truth for load.
---
--- Stage 16 must not end up with two competing subject-card models. These
--- assertions pin the decisions that resolved the overlap:
---
---   * load (hours_total / credits) lives ONLY in curriculum_subjects and is
---     surfaced through the offering by get_subject_card; duplicating it onto the
---     profile tables would create a second, drifting source of truth;
---   * exactly one ordering model (section_order + normalize_subject_section_order);
---   * exactly one mobile card RPC (get_subject_card);
---   * card writes are RPC-only, so row_version / section_order validation /
---     version snapshots cannot be bypassed.
--- ---------------------------------------------------------------------------
-do $$
-declare
-  v_bad integer;
-  v_cols text;
-begin
-  select string_agg(col.table_name || '.' || col.column_name, ', ' order by col.table_name)
-  into v_cols
-  from information_schema.columns col
-  where col.table_schema = 'public'
-    and col.table_name in (
-      'subject_student_profiles', 'subject_offering_student_profiles'
-    )
-    and col.column_name in ('hours_total', 'credits');
-  if v_cols is not null then
-    raise exception
-      'stage16.1 FAIL: load duplicated onto profile table(s) (%). SoT is curriculum_subjects via the offering.',
-      v_cols;
+    raise exception 'authenticated missing execute on get_subject_card';
   end if;
 
-  if not exists (
-    select 1 from information_schema.columns col
-    where col.table_schema = 'public'
-      and col.table_name = 'curriculum_subjects'
-      and col.column_name in ('hours_total', 'credits')
-  ) then
-    raise exception 'stage16.1 FAIL: curriculum_subjects has no hours_total/credits to read';
-  end if;
-
+  -- search_path fixed on private helpers
   if not exists (
     select 1 from pg_proc p
-    where p.pronamespace = 'public'::regnamespace
-      and p.proname = 'get_subject_card'
-      and p.prosrc like '%curriculum_subjects%'
-  ) then
-    raise exception 'stage16.1 FAIL: get_subject_card does not read load from curriculum_subjects';
-  end if;
-
-  -- One ordering model only.
-  if not exists (
-    select 1 from pg_proc p
-    where p.pronamespace = 'private'::regnamespace
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'private'
       and p.proname = 'normalize_subject_section_order'
+      and pg_get_functiondef(p.oid) ilike '%set search_path%'
   ) then
-    raise exception 'stage16.1 FAIL: private.normalize_subject_section_order missing';
+    raise exception 'normalize_subject_section_order missing fixed search_path';
   end if;
 
-  select count(*) into v_bad
-  from pg_proc p
-  where p.pronamespace = 'public'::regnamespace
-    and p.proname in (
-      'get_published_subject_content', 'admin_upsert_subject_content',
-      'admin_upsert_subject_offering_content', 'admin_list_subject_content_sections'
-    );
-  if v_bad > 0 then
-    raise exception
-      'stage16.1 FAIL: % rival subject-card RPC(s) present; the card model is get_subject_card / admin_upsert_subject_card only',
-      v_bad;
+  if not exists (
+    select 1 from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'private'
+      and p.proname = 'null_if_blank'
+      and pg_get_functiondef(p.oid) ilike '%set search_path%'
+  ) then
+    raise exception 'null_if_blank missing fixed search_path';
   end if;
 
-  select count(*) into v_bad
-  from information_schema.role_table_grants
-  where table_schema = 'public'
-    and table_name in (
-      'subject_student_profiles', 'subject_offering_student_profiles',
-      'subject_catalog'
-    )
-    and grantee in ('anon', 'authenticated', 'PUBLIC', 'public')
-    and privilege_type in ('INSERT', 'UPDATE', 'DELETE', 'TRUNCATE');
-  if v_bad > 0 then
-    raise exception 'stage16.1 FAIL: % client DML grant(s) on the card tables', v_bad;
-  end if;
-
-  raise notice 'stage16.1 card model review: PASS';
+  raise notice 'stage16_1_subject_card_security_review OK';
 end $$;

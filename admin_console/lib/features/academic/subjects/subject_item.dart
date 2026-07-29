@@ -18,6 +18,10 @@ class SubjectItem {
     this.status = SubjectStatus.draft,
     this.relatedTeachers = const [],
     this.usefulLinks = const [],
+    this.relevanceDate,
+    this.sectionOrder = const [],
+    this.catalogRowVersion = 1,
+    this.profileRowVersion = 1,
   });
 
   final String id;
@@ -36,6 +40,10 @@ class SubjectItem {
   final SubjectStatus status;
   final List<String> relatedTeachers;
   final List<dynamic> usefulLinks;
+  final String? relevanceDate;
+  final List<String> sectionOrder;
+  final int catalogRowVersion;
+  final int profileRowVersion;
 
   factory SubjectItem.fromJson(Map<String, dynamic> json) => SubjectItem(
     id: '${json['id'] ?? ''}',
@@ -63,6 +71,16 @@ class SubjectItem {
           item.toString(),
     ],
     usefulLinks: List<dynamic>.from(json['useful_links'] as List? ?? const []),
+    relevanceDate: json['relevance_date']?.toString(),
+    sectionOrder: [
+      for (final item in (json['section_order'] as List? ?? const []))
+        item.toString(),
+    ],
+    catalogRowVersion:
+        int.tryParse('${json['catalog_row_version'] ?? json['row_version'] ?? 1}') ??
+            1,
+    profileRowVersion:
+        int.tryParse('${json['profile_row_version'] ?? 1}') ?? 1,
   );
 
   Map<String, dynamic> toJson() => {
@@ -81,6 +99,10 @@ class SubjectItem {
     'common_pitfalls': commonPitfalls,
     'status': status.name,
     'useful_links': usefulLinks,
+    'relevance_date': relevanceDate,
+    'section_order': sectionOrder,
+    'catalog_row_version': catalogRowVersion,
+    'profile_row_version': profileRowVersion,
   };
 
   SubjectItem copyWith({
@@ -97,6 +119,10 @@ class SubjectItem {
     String? usefulMaterialsNote,
     String? commonPitfalls,
     SubjectStatus? status,
+    String? relevanceDate,
+    List<String>? sectionOrder,
+    int? catalogRowVersion,
+    int? profileRowVersion,
   }) => SubjectItem(
     id: id,
     canonicalName: canonicalName ?? this.canonicalName,
@@ -114,5 +140,9 @@ class SubjectItem {
     status: status ?? this.status,
     relatedTeachers: relatedTeachers,
     usefulLinks: usefulLinks,
+    relevanceDate: relevanceDate ?? this.relevanceDate,
+    sectionOrder: sectionOrder ?? this.sectionOrder,
+    catalogRowVersion: catalogRowVersion ?? this.catalogRowVersion,
+    profileRowVersion: profileRowVersion ?? this.profileRowVersion,
   );
 }

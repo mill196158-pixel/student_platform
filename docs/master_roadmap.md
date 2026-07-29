@@ -993,16 +993,18 @@ Status: **DONE (local)** / Codex **APPROVE** (`183efc8`, `001e1f0`, `cebfcf5`) �
 
 ## Stage 16 — Предметы и справочник
 
-Status: **FOUNDATION DRAFT (local)** / Codex **APPROVE_WITH_NOTES** (`3772b4a`) — UI/product incomplete; remote apply pending owner
+Status: **16.1 DONE (local)** / Codex **APPROVE**; **16.2–16.3** next; remote apply pending owner
 
 ### 16.1 Карточка предмета (Admin visual editor)
 
-- [ ] название, краткое и подробное описание;
-- [ ] чему научится студент; форма контроля; часы / ЗЕ; требования; советы;
-- [ ] преподаватели; дата актуальности; изображения; файлы; ссылки; порядок секций;
-- [ ] preview настоящей мобильной карточки;
-- [ ] catalog-level + безопасный offering-level override;
-- [ ] связи только через `subject_id` / `subject_catalog_id` / `subject_offering_id` (не по названию).
+- [x] название, краткое и подробное описание;
+- [x] чему научится студент; форма контроля; часы / ЗЕ; требования; советы;
+- [x] преподаватели; дата актуальности; ссылки; порядок секций;
+- [ ] изображения; файлы — deferred to **16.2**;
+- [x] preview настоящей мобильной карточки;
+- [x] catalog-level + безопасный offering-level override;
+- [x] связи только через `subject_id` / `subject_catalog_id` / `subject_offering_id` (не по названию).
+- Codex **APPROVE** 16.1 (local commit on `feature/content-platform`).
 
 ### 16.2 Файлы предмета
 
