@@ -1063,12 +1063,12 @@ Codex **APPROVE** 18 (local commit on `feature/content-platform`; apply/deploy o
 
 ## Stage 19 — Import Studio
 
-Status: **FOUNDATION DONE (local)** / Codex **APPROVE_WITH_NOTES** — §Y foundation closed; apply domains teachers/subjects/students; validate-only groups/terms/curriculum; remaining domain expansions + rollback/warnings unchecked; remote apply pending owner
+Status: **DONE (local)** / Codex **APPROVE** — §X/§Y closed; all 9 domains apply; rollback-safe for terms/curriculum/offerings/teacher_links (create-only, drift-checked); remote apply pending owner
 
 Домены:
 
-- [x] преподаватели; предметы; студенты; группы; семестры; *(apply: teachers/subjects/students; validate-only: groups/terms/curriculum)*
-- [ ] учебные планы групп apply; offering; связи преподавателей; enrollment. *(curriculum validate-only only in foundation)*
+- [x] преподаватели; предметы; студенты; группы; семестры;
+- [x] учебные планы групп; offering; связи преподавателей; enrollment.
 
 Для каждого импорта:
 
@@ -1078,18 +1078,18 @@ Status: **FOUNDATION DONE (local)** / Codex **APPROVE_WITH_NOTES** — §Y found
 - [x] ошибки обычным языком;
 - [x] загрузка XLSX; определение листов; mapping колонок;
 - [x] dry-run; таблица валидных/ошибочных строк; diff до apply;
-- [ ] предупреждение о создаваемых предметах/командах/чатах;
+- [x] предупреждение о создаваемых предметах/командах/чатах;
 - [x] apply только после подтверждения; audit/import batch id;
-- [x] повторный запуск без дублей; *(safe rollback batch — foundation refuses; deferred)*
+- [x] повторный запуск без дублей; безопасный rollback batch где возможно *(refuse when unsafe / updates / drift)*.
 
 Цепочка учебного плана группы (существующая):
 
-- [ ] academic term → group → subject_catalog → curriculum → subject_offering → offering_teachers → enrollment → team/chat;
+- [x] academic term → group → subject_catalog → curriculum → subject_offering → offering_teachers → enrollment → team/chat;
 - [x] не связывать по отображаемому названию при наличии ID;
 - [x] не переключать текущий семестр автоматически;
 - [x] не создавать осень 2026 без разрешения владельца;
 - [x] Web Admin без service_role; привилегии только через RPC/Edge + RBAC.
-Codex **APPROVE_WITH_NOTES** 19 foundation (local commit on `feature/content-platform`; apply/deploy owner-gated).
+Codex **APPROVE** 19 completion (local commit on `feature/content-platform`; apply/deploy owner-gated).
 
 ---
 

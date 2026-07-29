@@ -312,8 +312,52 @@ class _ImportStudioScreenState extends State<ImportStudioScreen> {
       case ImportStudioWorkflowStep.applied:
         return _AppliedStep(
           batch: _batch!,
+          busy: _busy,
           onRestart: _resetToHub,
+          onRollback: _rollbackBatch,
         );
+    }
+  }
+
+  Future<void> _rollbackBatch() async {
+    final batch = _batch;
+    if (batch == null) return;
+
+    setState(() {
+      _busy = true;
+      _banner = null;
+    });
+    try {
+      final result = await _repository.rollbackBatch(
+        batchId: batch.batchId,
+        confirmBatchKey: batch.batchKey,
+      );
+      if (!mounted) return;
+      setState(() {
+        _banner = result.message;
+        if (result.ok) {
+          _batch = ImportStudioBatch(
+            batchId: batch.batchId,
+            domain: batch.domain,
+            status: ImportStudioBatchStatus.rolledBack,
+            batchKey: batch.batchKey,
+            fileName: batch.fileName,
+            rowCount: batch.rowCount,
+            errorCount: batch.errorCount,
+            summary: batch.summary,
+            domainState: batch.domainState,
+            supportsApply: batch.supportsApply,
+            alreadyApplied: batch.alreadyApplied,
+            idempotentReplay: batch.idempotentReplay,
+            rollbackSafe: batch.rollbackSafe,
+          );
+        }
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _banner = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 }
@@ -429,6 +473,12 @@ class _DomainHub extends StatelessWidget {
         return Icons.account_tree_outlined;
       case 'terms':
         return Icons.calendar_month_outlined;
+      case 'offerings':
+        return Icons.assignment_outlined;
+      case 'teacher_links':
+        return Icons.link_outlined;
+      case 'enrollments':
+        return Icons.how_to_reg_outlined;
       default:
         return Icons.upload_file_outlined;
     }
@@ -488,9 +538,13 @@ class _ImportSourceStepState extends State<_ImportSourceStep> {
       'teachers' => 'Иванов Иван,ivan@example.edu,ИТ,доцент,к.т.н.,',
       'subjects' => 'Математика,Описание,ИТ,экзамен,,',
       'students' => 'student01,Иван,Иванов,ИТ-101',
-      'groups' => 'ИТ-101',
-      'curriculum' => 'ИТ-101,Математика,1,4,144,экзамен,,',
-      'terms' => '2025/2026,Осенний,1,2025-09-01,2026-01-31',
+      'groups' => ',ИТ-101',
+      'curriculum' => ',ИТ-101,Математика,1,4,144,экзамен,,',
+      'terms' => ',2025/2026,Осенний,1,2025-09-01,2026-01-31',
+      'offerings' => ',ИТ-101,Математика,2025/2026,Осенний,1,,active',
+      'teacher_links' =>
+        ',,ИТ-101,Математика,2025/2026,Осенний,,Иванов Иван Иванович,lecturer',
+      'enrollments' => ',student01,ИТ-101,2026-02-01',
       _ => List.filled(columns.length, '').join(','),
     };
     return '$header\n$sample';
@@ -912,6 +966,36 @@ class _DiffStep extends StatelessWidget {
         const SizedBox(height: 8),
         SelectableText('batch_id: ${batch.batchId}'),
         SelectableText('batch_key: ${batch.batchKey}'),
+        if (summary.hasWarnings) ...[
+          const SizedBox(height: 12),
+          Card(
+            color: const Color(0xFFFFF3E0),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.warning_amber_rounded, size: 18, color: Colors.orange),
+                      SizedBox(width: 8),
+                      Text(
+                        'Предупреждения перед apply',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  for (final warning in summary.warnings)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text('• $warning'),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: 12),
         Expanded(
           child: diff == null || diff!.rows.isEmpty
@@ -997,6 +1081,14 @@ class _ConfirmStep extends StatelessWidget {
           'Введите batch_key для подтверждения. Текущий семестр не переключается; '
           'Осень 2026 не создаётся без владельца.',
         ),
+        if (batch.summary.hasWarnings) ...[
+          const SizedBox(height: 12),
+          for (final warning in batch.summary.warnings)
+            Text(
+              '⚠ $warning',
+              style: const TextStyle(color: Colors.deepOrange),
+            ),
+        ],
         const SizedBox(height: 16),
         SelectableText('batch_id: ${batch.batchId}'),
         const SizedBox(height: 12),
@@ -1031,14 +1123,23 @@ class _ConfirmStep extends StatelessWidget {
 }
 
 class _AppliedStep extends StatelessWidget {
-  const _AppliedStep({required this.batch, required this.onRestart});
+  const _AppliedStep({
+    required this.batch,
+    required this.busy,
+    required this.onRestart,
+    required this.onRollback,
+  });
 
   final ImportStudioBatch batch;
+  final bool busy;
   final VoidCallback onRestart;
+  final VoidCallback onRollback;
 
   @override
   Widget build(BuildContext context) {
     final isApplied = batch.status == ImportStudioBatchStatus.applied;
+    final isRolledBack = batch.status == ImportStudioBatchStatus.rolledBack;
+    final canRollback = isApplied && batch.rollbackSafe;
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 520),
@@ -1046,21 +1147,56 @@ class _AppliedStep extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
-              isApplied ? Icons.check_circle_outline : Icons.info_outline,
+              isRolledBack
+                  ? Icons.undo_rounded
+                  : isApplied
+                      ? Icons.check_circle_outline
+                      : Icons.info_outline,
               size: 64,
-              color: isApplied ? Colors.green : Colors.orange,
+              color: isRolledBack
+                  ? Colors.blueGrey
+                  : isApplied
+                      ? Colors.green
+                      : Colors.orange,
             ),
             const SizedBox(height: 16),
             Text(
-              isApplied ? 'Batch применён' : 'Dry-run завершён (validate-only)',
+              isRolledBack
+                  ? 'Batch откачен'
+                  : isApplied
+                      ? 'Batch применён'
+                      : 'Dry-run завершён (validate-only)',
               style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 12),
             SelectableText('batch_id: ${batch.batchId}'),
             SelectableText('batch_key: ${batch.batchKey}'),
             SelectableText('status: ${batch.status.wire}'),
+            if (isApplied) ...[
+              const SizedBox(height: 8),
+              Text(
+                batch.rollbackSafe
+                    ? 'Откат доступен: только новые записи, без обновлений.'
+                    : 'Откат недоступен для домена ${batch.domain}.',
+                style: TextStyle(
+                  color: batch.rollbackSafe ? Colors.black54 : Colors.deepOrange,
+                ),
+              ),
+            ],
             const SizedBox(height: 24),
-            FilledButton(onPressed: onRestart, child: const Text('К списку доменов')),
+            Wrap(
+              spacing: 12,
+              alignment: WrapAlignment.center,
+              children: [
+                if (canRollback)
+                  OutlinedButton.icon(
+                    onPressed: busy ? null : onRollback,
+                    icon: const Icon(Icons.undo_rounded),
+                    label: const Text('Откатить batch'),
+                  ),
+                FilledButton(onPressed: onRestart, child: const Text('К списку доменов')),
+              ],
+            ),
           ],
         ),
       ),

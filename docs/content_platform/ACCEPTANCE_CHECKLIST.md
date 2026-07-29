@@ -528,7 +528,7 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Домен преподаватели: diff
 - [x] Домен преподаватели: apply
 - [x] Домен преподаватели: idempotent replay
-- [ ] Домен преподаватели: safe rollback (где возможно)
+- [x] Домен преподаватели: safe rollback (где возможно)
 - [x] Домен предметы: template
 - [x] Домен предметы: mapping
 - [x] Домен предметы: validator
@@ -536,7 +536,7 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Домен предметы: diff
 - [x] Домен предметы: apply
 - [x] Домен предметы: idempotent replay
-- [ ] Домен предметы: safe rollback (где возможно)
+- [x] Домен предметы: safe rollback (где возможно)
 - [x] Домен студенты: template
 - [x] Домен студенты: mapping
 - [x] Домен студенты: validator
@@ -544,55 +544,55 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Домен студенты: diff
 - [x] Домен студенты: apply
 - [x] Домен студенты: idempotent replay
-- [ ] Домен студенты: safe rollback (где возможно)
+- [x] Домен студенты: safe rollback (где возможно)
 - [x] Домен группы: template
 - [x] Домен группы: mapping
 - [x] Домен группы: validator
 - [x] Домен группы: dry-run
 - [x] Домен группы: diff
-- [ ] Домен группы: apply
-- [ ] Домен группы: idempotent replay
-- [ ] Домен группы: safe rollback (где возможно)
+- [x] Домен группы: apply
+- [x] Домен группы: idempotent replay
+- [x] Домен группы: safe rollback (где возможно)
 - [x] Домен семестры: template
 - [x] Домен семестры: mapping
 - [x] Домен семестры: validator
 - [x] Домен семестры: dry-run
 - [x] Домен семестры: diff
-- [ ] Домен семестры: apply
-- [ ] Домен семестры: idempotent replay
-- [ ] Домен семестры: safe rollback (где возможно)
+- [x] Домен семестры: apply
+- [x] Домен семестры: idempotent replay
+- [x] Домен семестры: safe rollback (где возможно)
 - [x] Домен учебные планы групп: template
 - [x] Домен учебные планы групп: mapping
 - [x] Домен учебные планы групп: validator
 - [x] Домен учебные планы групп: dry-run
 - [x] Домен учебные планы групп: diff
-- [ ] Домен учебные планы групп: apply
-- [ ] Домен учебные планы групп: idempotent replay
-- [ ] Домен учебные планы групп: safe rollback (где возможно)
-- [ ] Домен offering: template
-- [ ] Домен offering: mapping
-- [ ] Домен offering: validator
-- [ ] Домен offering: dry-run
-- [ ] Домен offering: diff
-- [ ] Домен offering: apply
-- [ ] Домен offering: idempotent replay
-- [ ] Домен offering: safe rollback (где возможно)
-- [ ] Домен связи преподавателей: template
-- [ ] Домен связи преподавателей: mapping
-- [ ] Домен связи преподавателей: validator
-- [ ] Домен связи преподавателей: dry-run
-- [ ] Домен связи преподавателей: diff
-- [ ] Домен связи преподавателей: apply
-- [ ] Домен связи преподавателей: idempotent replay
-- [ ] Домен связи преподавателей: safe rollback (где возможно)
-- [ ] Домен enrollment: template
-- [ ] Домен enrollment: mapping
-- [ ] Домен enrollment: validator
-- [ ] Домен enrollment: dry-run
-- [ ] Домен enrollment: diff
-- [ ] Домен enrollment: apply
-- [ ] Домен enrollment: idempotent replay
-- [ ] Домен enrollment: safe rollback (где возможно)
+- [x] Домен учебные планы групп: apply
+- [x] Домен учебные планы групп: idempotent replay
+- [x] Домен учебные планы групп: safe rollback (где возможно)
+- [x] Домен offering: template
+- [x] Домен offering: mapping
+- [x] Домен offering: validator
+- [x] Домен offering: dry-run
+- [x] Домен offering: diff
+- [x] Домен offering: apply
+- [x] Домен offering: idempotent replay
+- [x] Домен offering: safe rollback (где возможно)
+- [x] Домен связи преподавателей: template
+- [x] Домен связи преподавателей: mapping
+- [x] Домен связи преподавателей: validator
+- [x] Домен связи преподавателей: dry-run
+- [x] Домен связи преподавателей: diff
+- [x] Домен связи преподавателей: apply
+- [x] Домен связи преподавателей: idempotent replay
+- [x] Домен связи преподавателей: safe rollback (где возможно)
+- [x] Домен enrollment: template
+- [x] Домен enrollment: mapping
+- [x] Домен enrollment: validator
+- [x] Домен enrollment: dry-run
+- [x] Домен enrollment: diff
+- [x] Домен enrollment: apply
+- [x] Домен enrollment: idempotent replay
+- [x] Домен enrollment: safe rollback (где возможно)
 
 ---
 
@@ -610,18 +610,18 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Таблица валидных строк
 - [x] Таблица ошибочных строк
 - [x] Diff до apply
-- [ ] Warning о создаваемых предметах
-- [ ] Warning о создаваемых командах/чатах
+- [x] Warning о создаваемых предметах
+- [x] Warning о создаваемых командах/чатах
 - [x] Apply только после подтверждения
 - [x] Audit / import batch id
-- [ ] Цепочка: academic term
-- [ ] Цепочка: group
-- [ ] Цепочка: subject_catalog
-- [ ] Цепочка: curriculum
-- [ ] Цепочка: subject_offering
-- [ ] Цепочка: offering_teachers
-- [ ] Цепочка: enrollment
-- [ ] Цепочка: team/chat creation
+- [x] Цепочка: academic term
+- [x] Цепочка: group
+- [x] Цепочка: subject_catalog
+- [x] Цепочка: curriculum
+- [x] Цепочка: subject_offering
+- [x] Цепочка: offering_teachers
+- [x] Цепочка: enrollment
+- [x] Цепочка: team/chat creation
 - [x] Нет связывания по названию при наличии ID
 - [x] Текущий семестр не переключается автоматически
 - [x] Осень 2026 не создаётся без владельца

@@ -41,6 +41,9 @@ class ImportStudioTemplateService {
       'groups' => 'Группы',
       'curriculum' => 'Учебный план',
       'terms' => 'Семестры',
+      'offerings' => 'Нагрузка',
+      'teacher_links' => 'Связи преподавателей',
+      'enrollments' => 'Зачисления',
       _ => domain,
     };
   }
@@ -102,5 +105,30 @@ const importStudioTemplateDisplayColumns = <String, List<ImportStudioTemplateCol
     ImportStudioTemplateColumn(header: 'Номер в году', sampleRow: '1'),
     ImportStudioTemplateColumn(header: 'Начало', sampleRow: '2025-09-01'),
     ImportStudioTemplateColumn(header: 'Окончание', sampleRow: '2026-01-31'),
+  ],
+  'offerings': [
+    ImportStudioTemplateColumn(header: 'Группа', sampleRow: 'ИТ-101'),
+    ImportStudioTemplateColumn(header: 'Предмет', sampleRow: 'Математика'),
+    ImportStudioTemplateColumn(header: 'Учебный год', sampleRow: '2025/2026'),
+    ImportStudioTemplateColumn(header: 'Семестр', sampleRow: 'Осенний'),
+    ImportStudioTemplateColumn(header: 'Номер семестра', sampleRow: '1'),
+    ImportStudioTemplateColumn(header: 'Название'),
+    ImportStudioTemplateColumn(header: 'Статус', sampleRow: 'active'),
+  ],
+  'teacher_links': [
+    ImportStudioTemplateColumn(header: 'Группа', sampleRow: 'ИТ-101'),
+    ImportStudioTemplateColumn(header: 'Предмет', sampleRow: 'Математика'),
+    ImportStudioTemplateColumn(header: 'Учебный год', sampleRow: '2025/2026'),
+    ImportStudioTemplateColumn(header: 'Семестр', sampleRow: 'Осенний'),
+    ImportStudioTemplateColumn(
+      header: 'ФИО преподавателя',
+      sampleRow: 'Иванов Иван Иванович',
+    ),
+    ImportStudioTemplateColumn(header: 'Роль', sampleRow: 'lecturer'),
+  ],
+  'enrollments': [
+    ImportStudioTemplateColumn(header: 'Логин', sampleRow: 'student01'),
+    ImportStudioTemplateColumn(header: 'Группа', sampleRow: 'ИТ-101'),
+    ImportStudioTemplateColumn(header: 'Дата начала', sampleRow: '2026-02-01'),
   ],
 };

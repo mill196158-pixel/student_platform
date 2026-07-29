@@ -1036,26 +1036,36 @@ begin
     left(v_json::text, 300)
   );
 
-  -- Honest matrix: an unimplemented domain must RAISE, not pretend to work.
+  -- SUPERSEDED by the Stage 19 completion migration
+  -- (20260729154000_stage19_import_studio_completion.sql), which promotes
+  -- offerings/teacher_links/enrollments (and groups/curriculum/terms) from
+  -- validate_only/not_implemented to apply. The foundation-era assertion
+  -- "offerings raises not_implemented_domain" is no longer true by design;
+  -- see supabase/checks/stage19_import_studio_roleplay.sql for the
+  -- completion-era behavioral coverage of those six domains. What still
+  -- holds unconditionally — a genuinely unknown domain name is refused, and
+  -- the hub still names every domain — is re-asserted below instead.
   perform pg_temp.rp_as_user(v_admin);
   perform pg_temp.rp_expect_exception(
-    '19.2 an unimplemented domain refuses a dry run',
+    '19.2 a genuinely unknown domain refuses a dry run',
     format(
       'select public.admin_import_studio_start_dry_run(%L, %L::jsonb, %L, %L)',
-      'offerings', v_rows::text, 'roleplay.csv', 'roleplay-offerings'
+      'no_such_domain', v_rows::text, 'roleplay.csv', 'roleplay-unknown-domain'
     ),
-    '0A000',
-    'not_implemented_domain'
+    '22023',
+    'unknown_domain'
   );
 
   perform pg_temp.rp_as_user(v_admin);
   v_json := public.admin_import_studio_list_domains();
   perform pg_temp.rp_pass(
-    '19.3 the hub advertises the unimplemented domains honestly',
-    v_json::text ilike '%not_implemented%'
-      and v_json::text ilike '%offerings%'
+    '19.3 the hub names every completion-era domain (all now apply)',
+    v_json::text ilike '%offerings%'
       and v_json::text ilike '%teacher_links%'
-      and v_json::text ilike '%enrollments%',
+      and v_json::text ilike '%enrollments%'
+      and v_json::text ilike '%groups%'
+      and v_json::text ilike '%curriculum%'
+      and v_json::text ilike '%terms%',
     left(v_json::text, 400)
   );
 

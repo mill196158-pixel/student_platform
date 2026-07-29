@@ -1,7 +1,5 @@
 import 'package:admin_import_mapping/admin_import_mapping.dart';
 
-import 'import_studio_item.dart';
-
 /// Suggested field → spreadsheet header for a domain.
 Map<String, String> suggestImportStudioHeaderMapping(
   String domain,
@@ -30,6 +28,28 @@ Map<String, String> suggestImportStudioHeaderMapping(
       'term_in_year': ['номер', 'term_in_year', 'semester number'],
       'starts_on': ['начало', 'starts', 'start'],
       'ends_on': ['окончание', 'ends', 'end'],
+    }),
+    'offerings' => _suggestSimpleMapping(headers, const {
+      'group_name': ['группа', 'group'],
+      'subject_name': ['предмет', 'subject', 'дисциплина'],
+      'academic_year_name': ['учебный год', 'academic year', 'year'],
+      'term_name': ['семестр', 'term'],
+      'semester_number': ['номер семестра', 'semester_number'],
+      'display_name': ['название', 'display_name'],
+      'status': ['статус', 'status'],
+    }),
+    'teacher_links' => _suggestSimpleMapping(headers, const {
+      'group_name': ['группа', 'group'],
+      'subject_name': ['предмет', 'subject', 'дисциплина'],
+      'academic_year_name': ['учебный год', 'academic year', 'year'],
+      'term_name': ['семестр', 'term'],
+      'teacher_full_name': ['преподаватель', 'фио преподавателя', 'teacher'],
+      'role': ['роль', 'role'],
+    }),
+    'enrollments' => _suggestSimpleMapping(headers, const {
+      'login': ['логин', 'login'],
+      'group_name': ['группа', 'group'],
+      'started_at': ['дата начала', 'started_at', 'start date'],
     }),
     _ => const {},
   };
@@ -120,8 +140,12 @@ Map<String, String> importStudioMappingFieldLabels(String domain) {
       'surname': 'Фамилия',
       'group_name': 'Группа',
     },
-    'groups' => const {'name': 'Название группы'},
+    'groups' => const {
+      'group_id': 'ID группы (для обновления)',
+      'name': 'Название группы',
+    },
     'curriculum' => const {
+      'curriculum_subject_id': 'ID записи плана (для обновления)',
       'group_name': 'Группа',
       'subject_name': 'Предмет',
       'semester_number': 'Семестр',
@@ -132,11 +156,39 @@ Map<String, String> importStudioMappingFieldLabels(String domain) {
       'subject_index': 'Индекс',
     },
     'terms' => const {
+      'term_id': 'ID семестра (для обновления)',
       'academic_year_name': 'Учебный год',
       'name': 'Название семестра',
       'term_in_year': 'Номер в году',
       'starts_on': 'Дата начала',
       'ends_on': 'Дата окончания',
+    },
+    'offerings' => const {
+      'offering_id': 'ID нагрузки (для обновления)',
+      'group_name': 'Группа',
+      'subject_name': 'Предмет',
+      'academic_year_name': 'Учебный год',
+      'term_name': 'Семестр',
+      'semester_number': 'Номер семестра',
+      'display_name': 'Название',
+      'status': 'Статус',
+    },
+    'teacher_links' => const {
+      'teacher_link_id': 'ID связи (для обновления)',
+      'offering_id': 'ID нагрузки',
+      'group_name': 'Группа',
+      'subject_name': 'Предмет',
+      'academic_year_name': 'Учебный год',
+      'term_name': 'Семестр',
+      'teacher_id': 'ID преподавателя',
+      'teacher_full_name': 'ФИО преподавателя',
+      'role': 'Роль',
+    },
+    'enrollments' => const {
+      'enrollment_id': 'ID зачисления (для повтора)',
+      'login': 'Логин студента',
+      'group_name': 'Группа',
+      'started_at': 'Дата начала',
     },
     _ => const {},
   };
@@ -151,6 +203,9 @@ String? importStudioRequiredMappingField(String domain) {
     'groups' => 'name',
     'curriculum' => 'group_name',
     'terms' => 'name',
+    'offerings' => 'group_name',
+    'teacher_links' => 'teacher_full_name',
+    'enrollments' => 'login',
     _ => null,
   };
 }

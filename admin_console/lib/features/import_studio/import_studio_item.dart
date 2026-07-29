@@ -38,7 +38,8 @@ enum ImportStudioBatchStatus {
   dryRun,
   applied,
   cancelled,
-  failed;
+  failed,
+  rolledBack;
 
   static ImportStudioBatchStatus? tryParse(String? raw) {
     switch (raw) {
@@ -50,6 +51,8 @@ enum ImportStudioBatchStatus {
         return ImportStudioBatchStatus.cancelled;
       case 'failed':
         return ImportStudioBatchStatus.failed;
+      case 'rolled_back':
+        return ImportStudioBatchStatus.rolledBack;
       default:
         return null;
     }
@@ -65,6 +68,8 @@ enum ImportStudioBatchStatus {
         return 'cancelled';
       case ImportStudioBatchStatus.failed:
         return 'failed';
+      case ImportStudioBatchStatus.rolledBack:
+        return 'rolled_back';
     }
   }
 }
@@ -168,6 +173,7 @@ class ImportStudioBatchSummary {
     this.updateCount = 0,
     this.duplicateCount = 0,
     this.errorCount = 0,
+    this.warnings = const [],
   });
 
   final int total;
@@ -176,7 +182,12 @@ class ImportStudioBatchSummary {
   final int duplicateCount;
   final int errorCount;
 
+  /// Side-effect warnings surfaced by `private.import_studio_batch_warnings`
+  /// (e.g. "creates group_space team/chat"), shown before confirm apply.
+  final List<String> warnings;
+
   bool get hasErrors => errorCount > 0;
+  bool get hasWarnings => warnings.isNotEmpty;
 
   factory ImportStudioBatchSummary.fromJson(Map<String, dynamic>? json) {
     if (json == null) return const ImportStudioBatchSummary();
@@ -186,6 +197,7 @@ class ImportStudioBatchSummary {
       updateCount: int.tryParse('${json['update'] ?? 0}') ?? 0,
       duplicateCount: int.tryParse('${json['duplicate'] ?? 0}') ?? 0,
       errorCount: int.tryParse('${json['error'] ?? 0}') ?? 0,
+      warnings: _stringList(json['warnings']),
     );
   }
 }
@@ -267,6 +279,7 @@ class ImportStudioBatch {
       'update': summary.updateCount,
       'duplicate': summary.duplicateCount,
       'error': summary.errorCount,
+      'warnings': summary.warnings,
     },
     'domain_state': domainState.wire,
     'supports_apply': supportsApply,
@@ -329,6 +342,8 @@ class ImportStudioRollbackResult {
     required this.rollbackSafe,
     required this.errorCode,
     required this.message,
+    this.deletedCount = 0,
+    this.updatesNotReverted = 0,
   });
 
   final bool ok;
@@ -339,6 +354,13 @@ class ImportStudioRollbackResult {
   final String errorCode;
   final String message;
 
+  /// Rows this rollback deleted (only ever `classification = new` rows).
+  final int deletedCount;
+
+  /// Rows classified `update` that were left untouched — rollback never had
+  /// a "before" snapshot to restore them to.
+  final int updatesNotReverted;
+
   factory ImportStudioRollbackResult.fromJson(Map<String, dynamic> json) {
     return ImportStudioRollbackResult(
       ok: json['ok'] == true,
@@ -348,6 +370,9 @@ class ImportStudioRollbackResult {
       rollbackSafe: json['rollback_safe'] == true,
       errorCode: (json['error_code'] ?? '').toString(),
       message: (json['message'] ?? '').toString(),
+      deletedCount: int.tryParse('${json['deleted_count'] ?? 0}') ?? 0,
+      updatesNotReverted:
+          int.tryParse('${json['updates_not_reverted'] ?? 0}') ?? 0,
     );
   }
 }
@@ -437,8 +462,9 @@ const importStudioTemplateColumns = <String, List<String>>{
     'common_pitfalls',
   ],
   'students': ['login', 'name', 'surname', 'group_name'],
-  'groups': ['name'],
+  'groups': ['group_id', 'name'],
   'curriculum': [
+    'curriculum_subject_id',
     'group_name',
     'subject_name',
     'semester_number',
@@ -449,12 +475,35 @@ const importStudioTemplateColumns = <String, List<String>>{
     'subject_index',
   ],
   'terms': [
+    'term_id',
     'academic_year_name',
     'name',
     'term_in_year',
     'starts_on',
     'ends_on',
   ],
+  'offerings': [
+    'offering_id',
+    'group_name',
+    'subject_name',
+    'academic_year_name',
+    'term_name',
+    'semester_number',
+    'display_name',
+    'status',
+  ],
+  'teacher_links': [
+    'teacher_link_id',
+    'offering_id',
+    'group_name',
+    'subject_name',
+    'academic_year_name',
+    'term_name',
+    'teacher_id',
+    'teacher_full_name',
+    'role',
+  ],
+  'enrollments': ['enrollment_id', 'login', 'group_name', 'started_at'],
 };
 
 const importStudioDomainPermissions = <String, String>{
@@ -469,36 +518,59 @@ const importStudioDomainPermissions = <String, String>{
   'enrollments': 'students.write',
 };
 
+/// Every Stage 19 domain now supports apply (Stage 19 completion migration
+/// `20260729154000_stage19_import_studio_completion.sql`). Kept as a
+/// function (not a constant) so call sites don't need updating if a future
+/// stage ever needs to pull a domain back to validate-only.
 ImportStudioDomainState importStudioDomainStateFor(String domain) {
   switch (domain) {
     case 'teachers':
     case 'subjects':
     case 'students':
-      return ImportStudioDomainState.apply;
     case 'groups':
     case 'curriculum':
     case 'terms':
-      return ImportStudioDomainState.validateOnly;
     case 'offerings':
     case 'teacher_links':
     case 'enrollments':
-      return ImportStudioDomainState.notImplemented;
+      return ImportStudioDomainState.apply;
     default:
       return ImportStudioDomainState.notImplemented;
   }
 }
 
+/// Domains with a reviewed, dependency-checked rollback (see
+/// `private.import_studio_*_blockers` in the completion migration). Never
+/// includes teachers/subjects/students/groups/enrollments: those may create
+/// auth users, group_space teams/chats, or versioned rows that could have
+/// been hand-edited after apply.
+const importStudioRollbackSafeDomains = <String>{
+  'terms',
+  'curriculum',
+  'offerings',
+  'teacher_links',
+};
+
 String importStudioDomainNotes(String domain) {
   switch (domain) {
-    case 'offerings':
-    case 'teacher_links':
-    case 'enrollments':
-      return 'NOT IMPLEMENTED в Stage 19 foundation. Словарь зафиксирован; вызовы вернут not_implemented_domain_*.';
     case 'terms':
-      return 'Validate-only. Импорт не переключает текущий семестр и не создаёт Осень 2026.';
+      return 'Apply включён. Текущий семестр не переключается и не создаётся Осень 2026. '
+          'Откат безопасен (только для новых, ещё не используемых семестров).';
     case 'groups':
+      return 'Apply включён. Для каждой новой группы автоматически создаётся group_space '
+          'team + chat — откат недоступен.';
     case 'curriculum':
-      return 'Validate-only в Stage 19: reviewed apply path ещё нет.';
+      return 'Apply включён. group_name используется только для проверки; запись идёт в '
+          'curriculum_subjects по (предмет, семестр). Откат безопасен для новых записей.';
+    case 'offerings':
+      return 'Apply включён. Дедупликация по (группа, предмет, семестр). Откат безопасен '
+          'для новых offerings без связанных команд/чатов/оценок.';
+    case 'teacher_links':
+      return 'Apply включён. offering_teachers — чистая связь без зависимостей, откат '
+          'всегда безопасен.';
+    case 'enrollments':
+      return 'Apply включён, но только для новых зачислений или точного повтора '
+          'существующего — переводы между группами не поддерживаются. Откат недоступен.';
     default:
       return 'Apply делегируется существующему domain import RPC.';
   }

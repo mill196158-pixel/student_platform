@@ -446,9 +446,14 @@ where n.nspname = 'public'
   and p.prosrc like '%import_studio_assert_term_safety%';
 
 -- ---------------------------------------------------------------------------
--- 20. The terms and curriculum domains must be validate-only, so a dry run
+-- 20. SUPERSEDED by section 60 below (Stage 19 completion migration
+--     20260729154000_stage19_import_studio_completion.sql promotes terms and
+--     curriculum to `apply`). Kept as a historical record of the foundation
+--     gate; do not treat its "Expect" comment as current. The corrected,
+--     current-state assertion is section 60 / hard gate 0d.
+--     The terms and curriculum domains must be validate-only, so a dry run
 --     can never be applied for them.
---     Expect: supports_apply = false for both.
+--     Expect (FOUNDATION ONLY, now false): supports_apply = false for both.
 -- ---------------------------------------------------------------------------
 select
   d.domain,
@@ -457,9 +462,10 @@ from (values ('terms'), ('curriculum')) as d(domain)
 order by d.domain;
 
 -- ---------------------------------------------------------------------------
--- 20b. Either domain claiming apply support is a failure. Expect: zero rows.
+-- 20b. SUPERSEDED by section 60b. Foundation-only expectation (now false):
+--      either domain claiming apply support is a failure.
 -- ---------------------------------------------------------------------------
-select d.domain as unexpectedly_appliable
+select d.domain as unexpectedly_appliable_FOUNDATION_ONLY_SEE_60B
 from (values ('terms'), ('curriculum')) as d(domain)
 where private.import_studio_supports_apply(d.domain);
 
@@ -717,13 +723,15 @@ begin
     raise exception 'stage19 FAIL: term-safety tripwire is defined but not wired into apply';
   end if;
 
-  -- Validate-only domains must not be appliable.
-  select count(*) into v_bad
-  from unnest(array['terms', 'curriculum']) as d(domain)
-  where private.import_studio_supports_apply(d.domain);
-  if v_bad > 0 then
-    raise exception 'stage19 FAIL: % validate-only domain(s) claim apply support', v_bad;
-  end if;
+  -- SUPERSEDED by hard gate 0d (section 60, below): the completion migration
+  -- 20260729154000_stage19_import_studio_completion.sql intentionally
+  -- promotes terms/curriculum (and offerings/teacher_links/groups/
+  -- enrollments) from validate_only to apply, so this foundation-era ban
+  -- would now always fail against the current schema — found while
+  -- verifying this file end to end against a completion-migration DB
+  -- (P1 fix session: "stale foundation gate always FAILs post-completion").
+  -- Left as a comment, not a live check, so this file stays a working
+  -- pass/fail gate for the CURRENT schema rather than a permanent failure.
 
   if exists (
     select 1 from pg_proc p
@@ -1058,18 +1066,26 @@ begin
       'stage19 P1 FAIL: the staged-row read gate does not require the domain permission';
   end if;
 
-  -- 4) Honest domain matrix.
+  -- 4) Honest domain matrix. SUPERSEDED by the Stage 19 completion migration
+  --    (20260729154000_stage19_import_studio_completion.sql), which promotes
+  --    every domain to `apply` — there are no more not_implemented/
+  --    validate_only domains to honestly flag here. The substance of this
+  --    check (domain_state still names offerings/teacher_links/enrollments,
+  --    so they cannot silently disappear from the matrix) is preserved; the
+  --    now-retired `not_implemented` literal requirement is dropped. See
+  --    hard gate 0d below for the completion-era honesty assertion
+  --    (all nine domains must report `apply`, none may report
+  --    not_implemented/validate_only).
   if not exists (
     select 1 from pg_proc p
     where p.pronamespace = 'private'::regnamespace
       and p.proname = 'import_studio_domain_state'
-      and p.prosrc like '%not_implemented%'
       and p.prosrc like '%offerings%'
       and p.prosrc like '%teacher_links%'
       and p.prosrc like '%enrollments%'
   ) then
     raise exception
-      'stage19 P1 FAIL: the domain matrix does not honestly declare the unimplemented domains';
+      'stage19 P1 FAIL: the domain matrix no longer names offerings/teacher_links/enrollments';
   end if;
 
   select count(*) into v_bad
@@ -1217,4 +1233,667 @@ begin
   end if;
 
   raise notice 'stage19 P1 hardening assertions: PASS';
+end $$;
+
+-- ===========================================================================
+-- STAGE 19 COMPLETION — 20260729154000_stage19_import_studio_completion.sql
+--
+-- Promotes groups, terms, curriculum, offerings, teacher_links and
+-- enrollments from validate_only/not_implemented to a real, owned apply +
+-- rollback path (teachers/subjects/students keep delegating to the existing
+-- Stage 13 RPCs, unchanged). Read-only.
+-- ===========================================================================
+
+-- ---------------------------------------------------------------------------
+-- 60. Every domain must now report domain_state = 'apply'. This intentionally
+--     replaces sections 20/20b and the "not_implemented" half of 43/0b, which
+--     encoded the foundation's honest gaps — those gaps are now closed.
+--     Expect: 9 rows, all domain_state = 'apply'.
+-- ---------------------------------------------------------------------------
+select
+  d.domain,
+  private.import_studio_domain_state(d.domain) as domain_state,
+  private.import_studio_supports_apply(d.domain) as supports_apply
+from (
+  values
+    ('teachers'), ('subjects'), ('students'), ('groups'), ('curriculum'),
+    ('terms'), ('offerings'), ('teacher_links'), ('enrollments')
+) as d(domain)
+order by d.domain;
+
+-- ---------------------------------------------------------------------------
+-- 60b. Any domain not reporting apply is a completion regression.
+--      Expect: zero rows.
+-- ---------------------------------------------------------------------------
+select d.domain as domain_not_promoted_to_apply
+from (
+  values
+    ('teachers'), ('subjects'), ('students'), ('groups'), ('curriculum'),
+    ('terms'), ('offerings'), ('teacher_links'), ('enrollments')
+) as d(domain)
+where coalesce(private.import_studio_domain_state(d.domain), '') <> 'apply';
+
+-- ---------------------------------------------------------------------------
+-- 61. Each of the six newly-owned domains has a dedicated Stage-19 apply
+--     helper: SECURITY DEFINER, search_path = '', service_role only.
+--     Expect: 6 rows, all three flags true.
+-- ---------------------------------------------------------------------------
+select
+  t.helper,
+  p.prosecdef as security_definer,
+  (
+    p.proconfig is not null
+    and exists (
+      select 1 from unnest(p.proconfig) as cfg
+      where replace(cfg, '"', '') = 'search_path='
+    )
+  ) as pins_search_path,
+  (
+    has_function_privilege('service_role', p.oid, 'EXECUTE')
+    and not has_function_privilege('anon', p.oid, 'EXECUTE')
+    and not has_function_privilege('authenticated', p.oid, 'EXECUTE')
+  ) as service_role_only
+from (
+  values
+    ('import_studio_apply_groups'), ('import_studio_apply_terms'),
+    ('import_studio_apply_curriculum'), ('import_studio_apply_offerings'),
+    ('import_studio_apply_teacher_links'), ('import_studio_apply_enrollments')
+) as t(helper)
+join pg_proc p on p.proname = t.helper
+join pg_namespace n on n.oid = p.pronamespace and n.nspname = 'private'
+order by t.helper;
+
+-- ---------------------------------------------------------------------------
+-- 61b. A missing, non-definer, unpinned or client-executable apply helper is
+--      a hard failure. Expect: zero rows.
+-- ---------------------------------------------------------------------------
+select t.helper as broken_apply_helper
+from (
+  values
+    ('import_studio_apply_groups'), ('import_studio_apply_terms'),
+    ('import_studio_apply_curriculum'), ('import_studio_apply_offerings'),
+    ('import_studio_apply_teacher_links'), ('import_studio_apply_enrollments')
+) as t(helper)
+left join pg_proc p
+  on p.proname = t.helper
+ and p.pronamespace = 'private'::regnamespace
+where p.oid is null
+   or not p.prosecdef
+   or p.proconfig is null
+   or not exists (
+     select 1 from unnest(p.proconfig) as cfg
+     where replace(cfg, '"', '') = 'search_path='
+   )
+   or has_function_privilege('anon', p.oid, 'EXECUTE')
+   or has_function_privilege('authenticated', p.oid, 'EXECUTE');
+
+-- ---------------------------------------------------------------------------
+-- 62. admin_import_studio_apply must dispatch to every one of the six new
+--     helpers by name, so a domain can never fall through to "nothing runs".
+--     Expect: 6 rows, all true.
+-- ---------------------------------------------------------------------------
+select
+  t.helper,
+  p.prosrc like ('%' || t.helper || '%') as is_dispatched
+from (
+  values
+    ('import_studio_apply_groups'), ('import_studio_apply_terms'),
+    ('import_studio_apply_curriculum'), ('import_studio_apply_offerings'),
+    ('import_studio_apply_teacher_links'), ('import_studio_apply_enrollments')
+) as t(helper)
+cross join (
+  select p.prosrc from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public' and p.proname = 'admin_import_studio_apply'
+) as p
+order by t.helper;
+
+-- ---------------------------------------------------------------------------
+-- 62b. Any of the six helpers not referenced from the dispatcher is a hard
+--      failure. Expect: zero rows.
+-- ---------------------------------------------------------------------------
+select t.helper as not_dispatched
+from (
+  values
+    ('import_studio_apply_groups'), ('import_studio_apply_terms'),
+    ('import_studio_apply_curriculum'), ('import_studio_apply_offerings'),
+    ('import_studio_apply_teacher_links'), ('import_studio_apply_enrollments')
+) as t(helper)
+where not exists (
+  select 1 from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and p.proname = 'admin_import_studio_apply'
+    and p.prosrc like '%' || t.helper || '%'
+);
+
+-- ---------------------------------------------------------------------------
+-- 63. ROLLBACK SAFETY is an EXPLICIT allow-list of exactly four domains
+--     (terms, curriculum, offerings, teacher_links). groups and enrollments
+--     are intentionally excluded (side effects: group_space team/chat,
+--     team-membership drift) and must never be set rollback_safe = true.
+--     Expect: one row naming exactly those four domains.
+-- ---------------------------------------------------------------------------
+select p.prosrc like
+  '%domain in (''terms'', ''curriculum'', ''offerings'', ''teacher_links'')%'
+  as rollback_safe_allowlist_matches
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'admin_import_studio_apply';
+
+-- ---------------------------------------------------------------------------
+-- 63b. Rollback-safe allow-list drifting from those exact four domains is a
+--      hard failure (either widened to an unsafe domain, or narrowed so a
+--      safe domain can no longer roll back). Expect: one row, matches = true.
+-- ---------------------------------------------------------------------------
+select p.proname, false as matches
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'admin_import_studio_apply'
+  and p.prosrc not like
+    '%domain in (''terms'', ''curriculum'', ''offerings'', ''teacher_links'')%';
+
+-- ---------------------------------------------------------------------------
+-- 64. Rollback must refuse a non-rollback-safe batch by its persisted flag,
+--     not by re-deriving domain rules at rollback time (so an applied batch's
+--     safety can never silently change after the fact).
+--     Expect: one row, refuses_by_flag = true.
+-- ---------------------------------------------------------------------------
+select
+  p.proname,
+  (p.prosrc like '%not v_batch.rollback_safe%') as refuses_by_flag
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'admin_import_studio_rollback_batch';
+
+-- ---------------------------------------------------------------------------
+-- 65. Rollback dependency checks are EXPLICIT existence checks
+--     (private.import_studio_*_blockers), not "delete and catch the FK
+--     violation" — several of the relevant FKs are ON DELETE SET NULL /
+--     CASCADE and would silently orphan or cascade-delete unrelated rows
+--     instead of raising. Expect: 3 rows, service_role only.
+-- ---------------------------------------------------------------------------
+select
+  t.blocker,
+  (
+    has_function_privilege('service_role', p.oid, 'EXECUTE')
+    and not has_function_privilege('anon', p.oid, 'EXECUTE')
+    and not has_function_privilege('authenticated', p.oid, 'EXECUTE')
+  ) as service_role_only
+from (
+  values
+    ('import_studio_term_blockers'),
+    ('import_studio_curriculum_blockers'),
+    ('import_studio_offering_blockers')
+) as t(blocker)
+join pg_proc p on p.proname = t.blocker
+join pg_namespace n on n.oid = p.pronamespace and n.nspname = 'private'
+order by t.blocker;
+
+-- ---------------------------------------------------------------------------
+-- 65b. A missing or client-executable blocker function is a hard failure.
+--      Expect: zero rows.
+-- ---------------------------------------------------------------------------
+select t.blocker as broken_blocker
+from (
+  values
+    ('import_studio_term_blockers'),
+    ('import_studio_curriculum_blockers'),
+    ('import_studio_offering_blockers')
+) as t(blocker)
+left join pg_proc p
+  on p.proname = t.blocker and p.pronamespace = 'private'::regnamespace
+where p.oid is null
+   or has_function_privilege('anon', p.oid, 'EXECUTE')
+   or has_function_privilege('authenticated', p.oid, 'EXECUTE');
+
+-- ---------------------------------------------------------------------------
+-- 66. admin_import_studio_rollback_batch must actually call the three
+--     blocker functions before deleting rows for their domains — a rollback
+--     that only checks the rollback_safe flag but skips the dependency check
+--     would silently destroy dependent data (e.g. deleting a term that
+--     already has offerings against it).
+--     Expect: one row, all three calls present + guarded by a raised
+--     exception on any blocker.
+-- ---------------------------------------------------------------------------
+select
+  p.proname,
+  (p.prosrc like '%import_studio_term_blockers%')       as calls_term_blockers,
+  (p.prosrc like '%import_studio_curriculum_blockers%')  as calls_curriculum_blockers,
+  (p.prosrc like '%import_studio_offering_blockers%')    as calls_offering_blockers,
+  (p.prosrc like '%rollback_blocked_by_dependency%')     as raises_on_blocker
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'admin_import_studio_rollback_batch';
+
+-- ---------------------------------------------------------------------------
+-- 66b. Any of those four signals missing is a hard failure. Expect: zero rows.
+-- ---------------------------------------------------------------------------
+select p.proname as rollback_missing_dependency_guard
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'admin_import_studio_rollback_batch'
+  and (
+    p.prosrc not like '%import_studio_term_blockers%'
+    or p.prosrc not like '%import_studio_curriculum_blockers%'
+    or p.prosrc not like '%import_studio_offering_blockers%'
+    or p.prosrc not like '%rollback_blocked_by_dependency%'
+  );
+
+-- ---------------------------------------------------------------------------
+-- 67. The completion migration extends the TYPED, non-polymorphic match
+--     invariant from sections 14/15 to the six new domains: five new typed
+--     FK columns, one per domain (groups already had matched_group_id).
+--     Expect: 5 rows, all real FKs.
+-- ---------------------------------------------------------------------------
+select
+  col.column_name,
+  exists (
+    select 1 from pg_constraint con
+    join pg_class c on c.oid = con.conrelid
+    where c.relname = 'import_studio_rows'
+      and con.contype = 'f'
+      and pg_get_constraintdef(con.oid) like '%' || col.column_name || '%'
+  ) as is_real_fk
+from (
+  values
+    ('matched_curriculum_subject_id'), ('matched_term_id'),
+    ('matched_offering_id'), ('matched_teacher_link_id'),
+    ('matched_enrollment_id')
+) as col(column_name)
+order by col.column_name;
+
+-- ---------------------------------------------------------------------------
+-- 67b. A missing or non-FK typed match column is a hard failure.
+--      Expect: zero rows.
+-- ---------------------------------------------------------------------------
+select col.column_name as missing_or_untyped_match_column
+from (
+  values
+    ('matched_curriculum_subject_id'), ('matched_term_id'),
+    ('matched_offering_id'), ('matched_teacher_link_id'),
+    ('matched_enrollment_id')
+) as col(column_name)
+where not exists (
+  select 1 from information_schema.columns c
+  where c.table_schema = 'public'
+    and c.table_name = 'import_studio_rows'
+    and c.column_name = col.column_name
+)
+or not exists (
+  select 1 from pg_constraint con
+  join pg_class c on c.oid = con.conrelid
+  where c.relname = 'import_studio_rows'
+    and con.contype = 'f'
+    and pg_get_constraintdef(con.oid) like '%' || col.column_name || '%'
+);
+
+-- ---------------------------------------------------------------------------
+-- 68. TERM SAFETY must keep holding for the newly-owned terms apply path: the
+--     new terms helper itself must never FLIP is_current (the ban is "never
+--     flip / never silently create Autumn 2026", enforced by validate_row +
+--     the apply-time fingerprint tripwire from section 19/19b/19d, which
+--     wraps ALL domains unconditionally — this pins that the new helper does
+--     not try to route around it).
+--
+--     This is NOT a ban on the literal string 'is_current': the helper
+--     legitimately writes `is_current = false` on every INSERT (new terms
+--     and years are never current), and a blanket substring match on
+--     'is_current' would false-positive on that (found: "security review
+--     is_current false positive"). What is actually forbidden is (a) any
+--     UPDATE statement whose SET clause touches is_current at all — an
+--     update to an existing term should never change its current-ness —
+--     and (b) is_current ever being set/compared to true anywhere in the
+--     function body. Setting is_current to false in an INSERT's values
+--     list remains allowed and expected.
+--     Expect: one row, flips_is_current = false.
+-- ---------------------------------------------------------------------------
+select
+  p.proname,
+  (
+    p.prosrc ~* 'update\s+public\.academic_(terms|years)\y[^;]*\yset\y[^;]*\yis_current\y'
+    or p.prosrc ~* '\yis_current\s*=\s*true\y'
+    or p.prosrc ~* '\yis_current\s*,\s*true\y'
+  ) as flips_is_current
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'private'
+  and p.proname = 'import_studio_apply_terms';
+
+-- ---------------------------------------------------------------------------
+-- 68b. The new terms helper flipping is_current (via UPDATE ... SET
+--      is_current, or setting/comparing it to true anywhere) would be a
+--      second, narrower path around the term-safety tripwire.
+--      Expect: zero rows.
+-- ---------------------------------------------------------------------------
+select p.proname as terms_helper_flips_is_current
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'private'
+  and p.proname = 'import_studio_apply_terms'
+  and (
+    p.prosrc ~* 'update\s+public\.academic_(terms|years)\y[^;]*\yset\y[^;]*\yis_current\y'
+    or p.prosrc ~* '\yis_current\s*=\s*true\y'
+    or p.prosrc ~* '\yis_current\s*,\s*true\y'
+  );
+
+-- ---------------------------------------------------------------------------
+-- 69. Dry-run warnings (group_space team/chat creation, non-reversible
+--     enrollment/teacher-transfer caveats) must reach the diff/confirm UI
+--     through a dedicated, service_role-only helper — not silently dropped.
+--     Expect: one row, service_role_only = true.
+-- ---------------------------------------------------------------------------
+select
+  p.proname,
+  (
+    has_function_privilege('service_role', p.oid, 'EXECUTE')
+    and not has_function_privilege('anon', p.oid, 'EXECUTE')
+    and not has_function_privilege('authenticated', p.oid, 'EXECUTE')
+  ) as service_role_only
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'private'
+  and p.proname = 'import_studio_batch_warnings';
+
+-- ---------------------------------------------------------------------------
+-- 69b. Missing or client-executable warnings helper is a hard failure.
+--      Expect: zero rows.
+-- ---------------------------------------------------------------------------
+select 'import_studio_batch_warnings' as broken_warnings_helper
+where not exists (
+  select 1 from pg_proc p
+  where p.pronamespace = 'private'::regnamespace
+    and p.proname = 'import_studio_batch_warnings'
+)
+or exists (
+  select 1 from pg_proc p
+  where p.pronamespace = 'private'::regnamespace
+    and p.proname = 'import_studio_batch_warnings'
+    and (
+      has_function_privilege('anon', p.oid, 'EXECUTE')
+      or has_function_privilege('authenticated', p.oid, 'EXECUTE')
+    )
+);
+
+-- ---------------------------------------------------------------------------
+-- 70. Excel templates for the six newly-owned domains must expose their ID
+--     column first, so a re-import matches existing rows by ID rather than
+--     creating silent duplicates by name-only matching.
+--     Expect: 6 rows, all id_column_present = true.
+-- ---------------------------------------------------------------------------
+select
+  t.domain,
+  t.id_column,
+  (
+    select coalesce(array_position(private.import_studio_template(t.domain), t.id_column), 0)
+  ) > 0 as id_column_present
+from (
+  values
+    ('groups', 'group_id'),
+    ('terms', 'term_id'),
+    ('curriculum', 'curriculum_subject_id'),
+    ('offerings', 'offering_id'),
+    ('teacher_links', 'teacher_link_id'),
+    ('enrollments', 'enrollment_id')
+) as t(domain, id_column)
+order by t.domain;
+
+-- ---------------------------------------------------------------------------
+-- 70b. Any domain whose template omits its ID column is a hard failure.
+--      Expect: zero rows.
+-- ---------------------------------------------------------------------------
+select t.domain as template_missing_id_column
+from (
+  values
+    ('groups', 'group_id'),
+    ('terms', 'term_id'),
+    ('curriculum', 'curriculum_subject_id'),
+    ('offerings', 'offering_id'),
+    ('teacher_links', 'teacher_link_id'),
+    ('enrollments', 'enrollment_id')
+) as t(domain, id_column)
+where coalesce(
+  array_position(private.import_studio_template(t.domain), t.id_column), 0
+) = 0;
+
+-- ---------------------------------------------------------------------------
+-- 0d. HARD GATE for Stage 19 completion. Raises on any violation. Read-only.
+--     Supersedes the "validate-only terms/curriculum" and "not_implemented"
+--     assumptions baked into hard gates 0 and 0b's domain-matrix checks,
+--     which section 60/0d now correct for the intentional promotion.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_bad integer;
+  v_all_domains text[] := array[
+    'teachers', 'subjects', 'students', 'groups', 'curriculum', 'terms',
+    'offerings', 'teacher_links', 'enrollments'
+  ];
+  v_new_helpers text[] := array[
+    'import_studio_apply_groups', 'import_studio_apply_terms',
+    'import_studio_apply_curriculum', 'import_studio_apply_offerings',
+    'import_studio_apply_teacher_links', 'import_studio_apply_enrollments'
+  ];
+  v_blockers text[] := array[
+    'import_studio_term_blockers', 'import_studio_curriculum_blockers',
+    'import_studio_offering_blockers'
+  ];
+  v_match_cols text[] := array[
+    'matched_curriculum_subject_id', 'matched_term_id', 'matched_offering_id',
+    'matched_teacher_link_id', 'matched_enrollment_id'
+  ];
+  v_terms_prosrc text;
+  v_terms_cols text;
+  v_years_cols text;
+begin
+  -- 1) All nine domains must be apply now.
+  select count(*) into v_bad
+  from unnest(v_all_domains) as d(domain)
+  where coalesce(private.import_studio_domain_state(d.domain), '') <> 'apply';
+  if v_bad > 0 then
+    raise exception 'stage19 completion FAIL: % domain(s) not promoted to apply', v_bad;
+  end if;
+
+  -- 2) Every new apply helper exists, is SECURITY DEFINER, pins search_path,
+  --    and is service_role only.
+  select count(*) into v_bad
+  from unnest(v_new_helpers) as h(name)
+  left join pg_proc p
+    on p.proname = h.name and p.pronamespace = 'private'::regnamespace
+  where p.oid is null
+     or not p.prosecdef
+     or p.proconfig is null
+     or not exists (
+       select 1 from unnest(p.proconfig) as cfg
+       where replace(cfg, '"', '') = 'search_path='
+     )
+     or has_function_privilege('anon', p.oid, 'EXECUTE')
+     or has_function_privilege('authenticated', p.oid, 'EXECUTE');
+  if v_bad > 0 then
+    raise exception 'stage19 completion FAIL: % apply helper(s) missing/misconfigured', v_bad;
+  end if;
+
+  -- 3) The dispatcher must reference every one of those helpers by name.
+  select count(*) into v_bad
+  from unnest(v_new_helpers) as h(name)
+  where not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'public'::regnamespace
+      and p.proname = 'admin_import_studio_apply'
+      and p.prosrc like '%' || h.name || '%'
+  );
+  if v_bad > 0 then
+    raise exception 'stage19 completion FAIL: % apply helper(s) not dispatched', v_bad;
+  end if;
+
+  -- 4) Rollback-safe allow-list must be exactly these four domains.
+  if not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'public'::regnamespace
+      and p.proname = 'admin_import_studio_apply'
+      and p.prosrc like
+        '%domain in (''terms'', ''curriculum'', ''offerings'', ''teacher_links'')%'
+  ) then
+    raise exception
+      'stage19 completion FAIL: rollback_safe allow-list is not exactly (terms, curriculum, offerings, teacher_links)';
+  end if;
+
+  -- 5) Rollback must gate on the persisted flag and call all three explicit
+  --    dependency-blocker checks before deleting anything.
+  if not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'public'::regnamespace
+      and p.proname = 'admin_import_studio_rollback_batch'
+      and p.prosrc like '%not v_batch.rollback_safe%'
+      and p.prosrc like '%import_studio_term_blockers%'
+      and p.prosrc like '%import_studio_curriculum_blockers%'
+      and p.prosrc like '%import_studio_offering_blockers%'
+      and p.prosrc like '%rollback_blocked_by_dependency%'
+  ) then
+    raise exception
+      'stage19 completion FAIL: rollback is missing the flag check or a dependency-blocker call';
+  end if;
+
+  -- 6) The three blocker functions must exist and stay service_role only.
+  select count(*) into v_bad
+  from unnest(v_blockers) as b(name)
+  left join pg_proc p
+    on p.proname = b.name and p.pronamespace = 'private'::regnamespace
+  where p.oid is null
+     or has_function_privilege('anon', p.oid, 'EXECUTE')
+     or has_function_privilege('authenticated', p.oid, 'EXECUTE');
+  if v_bad > 0 then
+    raise exception 'stage19 completion FAIL: % rollback blocker(s) missing/exposed', v_bad;
+  end if;
+
+  -- 7) Five new typed match FK columns, extending the anti-polymorphism
+  --    invariant to the completion domains.
+  select count(*) into v_bad
+  from unnest(v_match_cols) as col(name)
+  where not exists (
+    select 1 from information_schema.columns c
+    where c.table_schema = 'public'
+      and c.table_name = 'import_studio_rows'
+      and c.column_name = col.name
+  )
+  or not exists (
+    select 1 from pg_constraint con
+    join pg_class c on c.oid = con.conrelid
+    where c.relname = 'import_studio_rows'
+      and con.contype = 'f'
+      and pg_get_constraintdef(con.oid) like '%' || col.name || '%'
+  );
+  if v_bad > 0 then
+    raise exception 'stage19 completion FAIL: % new typed match column(s) missing or untyped', v_bad;
+  end if;
+
+  -- 8) The new terms apply helper must never FLIP is_current — term safety
+  --    is enforced once, centrally, by the fingerprint tripwire (section 19),
+  --    not re-implemented (and potentially bypassed) per helper. Not a ban
+  --    on the literal string 'is_current': the helper legitimately inserts
+  --    is_current = false for new terms/years (found: "security review
+  --    is_current false positive"). Forbidden: an UPDATE that touches
+  --    is_current at all, or is_current ever set/compared to true.
+  --
+  --    8a is the negative ban (unchanged). 8b/8c are a POSITIVE proof, not
+  --    just the absence of a bad pattern (found: "weak is_current INSERT
+  --    contract" — a ban-only check would also pass a helper that never
+  --    assigned is_current at all, silently relying on a column default
+  --    that could be flipped later without this check ever noticing).
+  --    Every INSERT this helper makes into academic_terms / academic_years
+  --    must (a) name is_current in its column list and (b) end its VALUES
+  --    list with the literal `false` immediately before that statement's
+  --    own terminator (`returning id into v_term_id` / `on conflict (name)`
+  --    respectively) — proving the helper writes false, not merely that it
+  --    avoids writing true.
+  select p.prosrc into v_terms_prosrc
+  from pg_proc p
+  where p.pronamespace = 'private'::regnamespace
+    and p.proname = 'import_studio_apply_terms';
+
+  if v_terms_prosrc is null then
+    raise exception 'stage19 completion FAIL: import_studio_apply_terms not found';
+  end if;
+
+  -- 8a. Negative ban: no UPDATE ever touches is_current, and it is never
+  --     set/compared to true.
+  -- NB: word-boundary matches in PostgreSQL ARE regexes use \y, not the
+  -- PCRE-style \b (found: "\b silently never matches in PG regex" — \b is
+  -- not a boundary escape here, so a \b-based ban would trivially always
+  -- pass regardless of content; verified live against this helper's prosrc).
+  if v_terms_prosrc ~* 'update\s+public\.academic_(terms|years)\y[^;]*\yset\y[^;]*\yis_current\y'
+    or v_terms_prosrc ~* '\yis_current\s*=\s*true\y'
+    or v_terms_prosrc ~* '\yis_current\s*,\s*true\y'
+  then
+    raise exception
+      'stage19 completion FAIL: the terms apply helper flips is_current (UPDATE touching it, or setting it true)';
+  end if;
+
+  -- 8b. Positive proof for the academic_terms INSERT: is_current named in
+  --     the column list, and `false` is the last value before `returning
+  --     id into v_term_id`. The column-list capture is safe with a
+  --     no-nested-parens character class because a plain column list (only
+  --     identifiers and commas) can never contain '(' or ')'; the VALUES
+  --     list is not captured the same way because it legitimately contains
+  --     nested parens (casts, ->>), so it is asserted positionally instead.
+  v_terms_cols := substring(
+    v_terms_prosrc from 'insert\s+into\s+public\.academic_terms\s*\(([^()]*)\)'
+  );
+  if v_terms_cols is null or v_terms_cols !~* '\yis_current\y' then
+    raise exception
+      'stage19 completion FAIL: academic_terms INSERT does not name is_current in its column list';
+  end if;
+  if v_terms_prosrc !~* ',\s*false\s*\)\s*returning\s+id\s+into\s+v_term_id' then
+    raise exception
+      'stage19 completion FAIL: academic_terms INSERT does not assign is_current = false as its last value';
+  end if;
+
+  -- 8c. Same positive proof for the academic_years INSERT this helper
+  --     performs when it also needs a brand-new academic year.
+  v_years_cols := substring(
+    v_terms_prosrc from 'insert\s+into\s+public\.academic_years\s*\(([^()]*)\)'
+  );
+  if v_years_cols is null or v_years_cols !~* '\yis_current\y' then
+    raise exception
+      'stage19 completion FAIL: academic_years INSERT does not name is_current in its column list';
+  end if;
+  if v_terms_prosrc !~* ',\s*false\s*\)\s*on\s+conflict\s*\(\s*name\s*\)' then
+    raise exception
+      'stage19 completion FAIL: academic_years INSERT does not assign is_current = false as its last value';
+  end if;
+
+  -- 9) Warnings helper must exist and stay service_role only.
+  if not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'private'::regnamespace
+      and p.proname = 'import_studio_batch_warnings'
+      and not has_function_privilege('anon', p.oid, 'EXECUTE')
+      and not has_function_privilege('authenticated', p.oid, 'EXECUTE')
+  ) then
+    raise exception
+      'stage19 completion FAIL: batch_warnings helper missing or client-executable';
+  end if;
+
+  -- 10) Every new domain's template must expose its ID column so re-import
+  --     matches by ID first and never silently duplicates by name.
+  select count(*) into v_bad
+  from (
+    values
+      ('groups', 'group_id'), ('terms', 'term_id'),
+      ('curriculum', 'curriculum_subject_id'), ('offerings', 'offering_id'),
+      ('teacher_links', 'teacher_link_id'), ('enrollments', 'enrollment_id')
+  ) as t(domain, id_column)
+  where coalesce(
+    array_position(private.import_studio_template(t.domain), t.id_column), 0
+  ) = 0;
+  if v_bad > 0 then
+    raise exception 'stage19 completion FAIL: % domain template(s) missing their ID column', v_bad;
+  end if;
+
+  raise notice 'stage19 completion assertions: PASS';
 end $$;
