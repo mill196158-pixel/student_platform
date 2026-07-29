@@ -5,7 +5,9 @@ Branch: `feature/content-platform` (base `origin/refactor/chat-tab`)
 Worktree: `/Users/annasuvorova/student_platform_content`  
 Related: `docs/master_roadmap.md` (Stage 21), `docs/content_platform/CONTENT_PLATFORM_SPEC.md` §9, `ACCEPTANCE_CHECKLIST.md` §AB.
 
-**Status: SPEC DRAFTED** — planning document only. **Do not execute migration now.** No VPS provisioning, no DNS cutover, no remote apply in this session. Codex APPROVE required before any execution phase.
+**Status: ROADMAP DONE** / Codex **APPROVE_WITH_NOTES** (2026-07-29 refresh) — planning document only.  
+Stages 14–19 are locally complete on `feature/content-platform` (remote apply still owner-gated).  
+**Do not execute migration now.** No VPS provisioning, no DNS cutover, no remote apply in this session.
 
 ---
 
@@ -33,7 +35,7 @@ This roadmap defines phases, preconditions, rollback, and honesty about **remain
 
 **Product stability first.** Do not start RF cutover until:
 
-1. Content Platform Stages **14–19** are production-stable on current Supabase (or owner accepts frozen scope).
+1. Content Platform Stages **14–19** are locally complete with Codex APPROVE on `feature/content-platform` and then production-stable on current Supabase after owner-gated apply (or owner accepts frozen scope).
 2. Stage 13 physical smokes completed or explicitly waived by owner for migration window.
 3. Full **logical + physical backup** of Supabase project verified restorable.
 4. Import Studio and moderation flows tested with real owner Excel (or migration accepts data freeze).
@@ -243,5 +245,6 @@ Checklist §AB items map to §3–§8. Mark checklist `[x]` only after this doc 
 - [ ] Realtime technology choice
 - [ ] Acceptable maintenance window length
 - [ ] Whether Supabase stays warm standby vs cold backup after cutover
+- [ ] Rollback RPO and reverse-sync/reconciliation for writes accepted by RF before Supabase is re-enabled (Codex P2 note on 2026-07-29 review)
 
 **Reminder:** Migration execution is **explicitly out of scope** until product stable and owner commands go-ahead.

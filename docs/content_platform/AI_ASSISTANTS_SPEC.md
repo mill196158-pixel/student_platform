@@ -5,7 +5,9 @@ Branch: `feature/content-platform` (base `origin/refactor/chat-tab`)
 Worktree: `/Users/annasuvorova/student_platform_content`  
 Related: `docs/master_roadmap.md` (Stage 20), `docs/content_platform/CONTENT_PLATFORM_SPEC.md` §8, `ACCEPTANCE_CHECKLIST.md` §AA.
 
-**Status: SPEC DRAFTED** — documentation only. No implementation, no paid AI integration, no remote deploy. Codex APPROVE required before any code.
+**Status: SPEC DONE** / Codex **APPROVE_WITH_NOTES** (2026-07-29 refresh) — documentation only.  
+Stages 14–19 are locally complete on `feature/content-platform`.  
+No implementation, no paid AI integration, no remote deploy.
 
 ---
 
