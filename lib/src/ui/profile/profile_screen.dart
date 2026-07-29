@@ -12,11 +12,14 @@ import 'package:collection/collection.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+import 'package:student_ui/student_ui.dart';
+
 import 'package:student_platform/src/core/auth_session.dart';
-import 'package:student_platform/src/services/push/push_notification_service.dart';
+import 'package:student_platform/src/services/auth_service.dart';
 import 'package:student_platform/src/ui/chats/my_chats_screen.dart';
 import 'package:student_platform/src/ui/friends/my_friends_screen.dart';
 import 'package:student_platform/src/ui/learning/data/supabase_learning_repository.dart';
+import 'package:student_platform/src/ui/profile/profile_feed_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   final ValueListenable<bool>? activeListenable;
@@ -35,6 +38,11 @@ class _ProfileScreenState extends State<ProfileScreen>
   // ----- deps -----
   final SupabaseClient _sb = Supabase.instance.client;
   final _repo = SupabaseLearningRepository();
+  final ProfileFeedService _feedService = ProfileFeedService();
+  ProfileFeedLoadResult _feed = const ProfileFeedLoadResult(isDemoFallback: true);
+  final Set<String> _recordedFeedImpressions = {};
+  int _feedLoadGeneration = 0;
+  bool _feedLoadInFlight = false;
 
   // ----- badges -----
   int _friendsCount = 0; // (сейчас не рисуем, но оставил)
@@ -72,7 +80,79 @@ class _ProfileScreenState extends State<ProfileScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       debugPrint('${_ts()} [Profile] initState -> postFrame boot()');
       _boot(); // без автозапуска таймера
+      unawaited(_loadFeed());
     });
+  }
+
+  Future<void> _loadFeed() async {
+    if (_feedLoadInFlight) return;
+    final generation = ++_feedLoadGeneration;
+    _feedLoadInFlight = true;
+    try {
+      final cached = await _feedService.loadCached();
+      if (!mounted || generation != _feedLoadGeneration) return;
+      if (cached.cards.isNotEmpty) {
+        setState(() => _feed = cached);
+      }
+      try {
+        final next = await _feedService.load();
+        if (!mounted || generation != _feedLoadGeneration) return;
+        setState(() => _feed = next);
+      } catch (error) {
+        debugPrint('[profile] feed load failed: $error');
+        if (!mounted || generation != _feedLoadGeneration) return;
+        if (_feed.cards.isNotEmpty) {
+          setState(
+            () => _feed = ProfileFeedLoadResult(
+              cards: _feed.cards,
+              loadError: true,
+            ),
+          );
+        } else {
+          setState(
+            () => _feed = const ProfileFeedLoadResult(loadError: true),
+          );
+        }
+      }
+    } finally {
+      if (generation == _feedLoadGeneration) {
+        _feedLoadInFlight = false;
+      }
+    }
+  }
+
+  void _recordVisibleFeedImpression(ManagedProfileFeedCard card) {
+    if (_feed.isDemoFallback || _feed.hideFeed || _feed.showLoadError) return;
+    if (card.showDemoBadge || card.id.startsWith('demo-')) return;
+    if (!_recordedFeedImpressions.add(card.id)) return;
+    unawaited(_feedService.recordEvent(card.id, 'impression'));
+  }
+
+  Future<void> _onManagedFeedTap(ManagedProfileFeedCard card) async {
+    if (!card.showDemoBadge && !card.id.startsWith('demo-')) {
+      await _feedService.recordEvent(card.id, 'click');
+    }
+    final payload = card.payload;
+    final route = payload.ctaRoute?.trim();
+    if (route != null && route.isNotEmpty) {
+      if (!mounted) return;
+      context.push(route);
+      return;
+    }
+    final url = payload.ctaUrl?.trim();
+    if (url != null && url.isNotEmpty) {
+      final uri = Uri.tryParse(url);
+      if (uri != null &&
+          (uri.scheme == 'https' || uri.scheme == 'http') &&
+          await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        return;
+      }
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(payload.title)),
+    );
   }
 
   @override
@@ -131,6 +211,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         _startPolling();
         // ignore: discarded_futures
         _pollOnce();
+        unawaited(_loadFeed());
       } else {
         debugPrint(
             '${_ts()} [Profile] lifecycle resumed but hidden -> keep stopped');
@@ -167,6 +248,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       _startPolling();
       // ignore: discarded_futures
       _pollOnce();
+      unawaited(_loadFeed());
     } else {
       debugPrint('${_ts()} [Profile] active=false -> stop polling');
       _stopPolling();
@@ -454,6 +536,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       }
 
       await _pollOnce(); // подтянуть бейджи сразу
+      await _loadFeed();
     } catch (e) {
       debugPrint('[Profile] refreshFromServer error: $e');
     }
@@ -462,13 +545,12 @@ class _ProfileScreenState extends State<ProfileScreen>
   // ===== logout =====
   Future<void> _logout() async {
     try {
-      await PushNotificationService.instance.onLogout();
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('loggedIn');
       await prefs.remove('user');
-      await _sb.auth.signOut();
+      // Centralized path clears news + profile-feed caches (Stage 15.2/15.3).
       if (!mounted) return;
-      context.go('/login');
+      await AuthService.signOut(context);
     } catch (_) {}
   }
 
@@ -592,13 +674,31 @@ class _ProfileScreenState extends State<ProfileScreen>
 
               const SizedBox(height: 20),
 
-              const _SectionTitle('Лента'),
-              const SizedBox(height: 10),
-              _FeedCarousel(
-                items: _demoFeed,
-                onTapItem: (it) => _openFeedItem(context, it),
-              ),
-              const SizedBox(height: 20),
+              if (_feed.showLoadError) ...[
+                const _SectionTitle('Лента'),
+                const SizedBox(height: 10),
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.error_outline),
+                    title: const Text('Не удалось загрузить ленту'),
+                    subtitle: const Text('Проверьте соединение и попробуйте снова.'),
+                    trailing: TextButton(
+                      onPressed: () => unawaited(_loadFeed()),
+                      child: const Text('Повторить'),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+              ] else if (!_feed.hideFeed) ...[
+                const _SectionTitle('Лента'),
+                const SizedBox(height: 10),
+                StudentProfileFeedCarousel(
+                  cards: _feed.displayCards,
+                  onTap: _onManagedFeedTap,
+                  onVisibleCard: _recordVisibleFeedImpression,
+                ),
+                const SizedBox(height: 20),
+              ],
 
               ProfileStudySection(
                 onDiaryTap: () => context.push('/my-diary'),

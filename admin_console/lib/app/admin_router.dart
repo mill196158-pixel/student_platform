@@ -12,6 +12,7 @@ import '../features/academic/subjects/subjects_screen.dart';
 import '../features/academic/teachers/teachers_screen.dart';
 import '../features/content/home_promo/home_promo_editor_screen.dart';
 import '../features/content/news/news_editor_screen.dart';
+import '../features/content/profile_feed/profile_feed_editor_screen.dart';
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/moderation/moderation_screen.dart';
 import '../features/system/terms/terms_screen.dart';
@@ -127,6 +128,11 @@ GoRouter createAdminRouter(AdminSessionController session) {
             path: '/content/home-promo',
             builder: (context, state) =>
                 HomePromoEditorScreen(session: session),
+          ),
+          GoRoute(
+            path: '/content/profile-feed',
+            builder: (context, state) =>
+                ProfileFeedEditorScreen(session: session),
           ),
           GoRoute(
             path: '/academic/subjects',

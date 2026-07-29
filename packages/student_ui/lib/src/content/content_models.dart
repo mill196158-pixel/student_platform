@@ -341,6 +341,161 @@ class ManagedContentCard {
   }
 }
 
+/// Typed payload for template `profile_feed_card_v1`.
+@immutable
+class ProfileFeedPayload {
+  const ProfileFeedPayload({
+    required this.title,
+    required this.subtitle,
+    required this.ctaLabel,
+    this.imageAssetId,
+    this.ctaRoute,
+    this.ctaUrl,
+  });
+
+  final String title;
+  final String subtitle;
+  final String ctaLabel;
+  final String? imageAssetId;
+  final String? ctaRoute;
+  final String? ctaUrl;
+
+  static const List<ProfileFeedPayload> demoFeed = [
+    ProfileFeedPayload(
+      title: 'О нас',
+      subtitle: 'Команда Студент Платформ',
+      ctaLabel: 'Открыть',
+      ctaUrl: 'https://example.com/about',
+    ),
+    ProfileFeedPayload(
+      title: 'Расписание занятий',
+      subtitle: 'Твое расписание всегда под рукой',
+      ctaLabel: 'К расписанию',
+      ctaRoute: '/schedule',
+    ),
+    ProfileFeedPayload(
+      title: 'Скидки для студентов',
+      subtitle: 'Обновляем лучшие предложения',
+      ctaLabel: 'Смотреть',
+      ctaUrl: 'https://example.com/discounts',
+    ),
+  ];
+
+  static ProfileFeedPayload? tryParse(Map<String, dynamic>? json) {
+    if (json == null) return null;
+    try {
+      final title = _readString(json, const ['title']);
+      final subtitle = _readString(json, const ['subtitle']);
+      final ctaLabel = _readString(json, const ['ctaLabel', 'cta_label']);
+      if (title == null || subtitle == null || ctaLabel == null) return null;
+      return ProfileFeedPayload(
+        title: title,
+        subtitle: subtitle,
+        ctaLabel: ctaLabel,
+        imageAssetId:
+            _readString(json, const ['imageAssetId', 'image_asset_id']),
+        ctaRoute: _readString(json, const ['ctaRoute', 'cta_route']),
+        ctaUrl: _readString(json, const ['ctaUrl', 'cta_url']),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Map<String, dynamic> toWireJson() => {
+        'title': title,
+        'subtitle': subtitle,
+        'cta_label': ctaLabel,
+        if (imageAssetId != null) 'image_asset_id': imageAssetId,
+        if (ctaRoute != null) 'cta_route': ctaRoute,
+        if (ctaUrl != null) 'cta_url': ctaUrl,
+      };
+
+  ProfileFeedPayload copyWith({
+    String? title,
+    String? subtitle,
+    String? ctaLabel,
+    String? imageAssetId,
+    String? ctaRoute,
+    String? ctaUrl,
+    bool clearImageAssetId = false,
+    bool clearCtaRoute = false,
+    bool clearCtaUrl = false,
+  }) {
+    return ProfileFeedPayload(
+      title: title ?? this.title,
+      subtitle: subtitle ?? this.subtitle,
+      ctaLabel: ctaLabel ?? this.ctaLabel,
+      imageAssetId:
+          clearImageAssetId ? null : (imageAssetId ?? this.imageAssetId),
+      ctaRoute: clearCtaRoute ? null : (ctaRoute ?? this.ctaRoute),
+      ctaUrl: clearCtaUrl ? null : (ctaUrl ?? this.ctaUrl),
+    );
+  }
+}
+
+@immutable
+class ManagedProfileFeedCard {
+  const ManagedProfileFeedCard({
+    required this.id,
+    required this.origin,
+    required this.sortOrder,
+    required this.priority,
+    required this.payload,
+    this.showDemoBadge = false,
+  });
+
+  final String id;
+  final ContentOrigin origin;
+  final int sortOrder;
+  final int priority;
+  final ProfileFeedPayload payload;
+  final bool showDemoBadge;
+
+  static ManagedProfileFeedCard? tryParse(Map<String, dynamic> json) {
+    try {
+      final id = _readString(json, const ['id']);
+      if (id == null) return null;
+      final templateKey = _readString(json, const [
+        'template_key',
+        'templateKey',
+      ]);
+      if (templateKey != 'profile_feed_card_v1') return null;
+      final schemaVersion = _readInt(json, const [
+        'schema_version',
+        'schemaVersion',
+      ]);
+      if (schemaVersion != 1) return null;
+      if (json.containsKey('placement') || json.containsKey('placements')) {
+        final placementRaw = json['placement'];
+        if (placementRaw != null &&
+            ContentPlacement.tryParse(placementRaw) !=
+                ContentPlacement.profileFeed) {
+          return null;
+        }
+      }
+      final origin = ContentOrigin.tryParse(json['origin']);
+      if (origin == null) return null;
+      final payloadRaw = json['payload'];
+      if (payloadRaw is! Map) return null;
+      final payload = ProfileFeedPayload.tryParse(
+        Map<String, dynamic>.from(payloadRaw),
+      );
+      if (payload == null) return null;
+      return ManagedProfileFeedCard(
+        id: id,
+        origin: origin,
+        sortOrder: _readInt(json, const ['sort_order', 'sortOrder']) ?? 0,
+        priority: _readInt(json, const ['priority']) ?? 0,
+        payload: payload,
+        showDemoBadge: origin == ContentOrigin.demo,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
 IconData contentIconForKey(String key) {
   switch (key) {
     case 'psychology':

@@ -40,6 +40,13 @@ class DashboardScreen extends StatelessWidget {
                 onTap: () => context.go('/content/home-promo'),
               ),
               _DashboardCard(
+                title: 'Лента профиля',
+                subtitle: 'Карточки placement profile_feed',
+                icon: Icons.view_carousel_outlined,
+                color: const Color(0xFF8B6BB8),
+                onTap: () => context.go('/content/profile-feed'),
+              ),
+              _DashboardCard(
                 title: 'Предметы',
                 subtitle: 'Справочник и готовность материалов',
                 icon: Icons.menu_book_outlined,

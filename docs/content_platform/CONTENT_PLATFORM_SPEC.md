@@ -361,7 +361,17 @@ Hidden/archived/unpublished never leak via RPC/cache/signed URL.
 
 ### 15.3 Profile feed
 
-Placement `profile_feed` only by explicit admin choice; no auto-copy from news.
+Placement `profile_feed` only by explicit admin choice; **no auto-copy from news**.
+
+Locked contracts (Codex plan):
+
+- Feed is a **list**: parse/cache all valid `profile_feed_card_v1` rows in server order; one malformed row must not hide siblings; no per-card N+1.
+- Cache scoped by authenticated user; clear on logout/account switch.
+- Dual-read: missing RPC → labeled demo; successful empty → hide feed (no demo resurrection); hard error → last-good cache or error (never demo-as-live).
+- Managed `impression` once per visible card + `click` before CTA; never for demo.
+- Admin create/list require `template_key=profile_feed_card_v1` **and** placement `profile_feed` via explicit action only.
+- `image_asset_id` edit disabled until signed asset path; preserve existing ids; no raw paths / broken images.
+- No new SQL if Stage 14 seed already present.
 
 ---
 
