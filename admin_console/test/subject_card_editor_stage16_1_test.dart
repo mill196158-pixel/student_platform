@@ -25,6 +25,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('16.1: текст'), findsOneWidget);
+    expect(find.textContaining('subject-media Edge'), findsOneWidget);
     expect(find.byType(StudentSubjectCardPreview), findsOneWidget);
     expect(find.text('Preview'), findsOneWidget);
     expect(find.text('Не выбран'), findsOneWidget);
@@ -68,6 +69,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Не выбран'), findsOneWidget);
+    final leftScrollable = find.byType(Scrollable).first;
+    await tester.scrollUntilVisible(
+      find.textContaining('Выберите offering, чтобы редактировать'),
+      400,
+      scrollable: leftScrollable,
+    );
     expect(
       find.textContaining('Выберите offering, чтобы редактировать'),
       findsOneWidget,

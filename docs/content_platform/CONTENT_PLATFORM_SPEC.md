@@ -435,7 +435,44 @@ Additive offering-only keys appear only when the offering has a non-null value; 
 
 ### 16.2 Subject files
 
-Private signed media; MIME/size whitelist; versioning; cleanup queue; no Base64.
+Private signed subject media for card images/files. No Base64 in DB. Local Edge may be authored; **deploy remains owner-gated**.
+
+**Status:** local implementation Codex **APPROVE_WITH_NOTES** (no open P0/P1). Residuals: Storage finalize e2e on apply stack; Edge deploy owner-gated (`verify_jwt=false` for cleanup-secret path).
+
+#### Locked contracts (Codex plan)
+
+**Signed-media boundary (not Postgres-minted URLs)**
+
+| Step | Actor | Contract |
+|---|---|---|
+| request upload | Admin Edge | Re-auth `subjects.write`; reserve upload intent + path; return short-lived signed upload URL |
+| finalize upload | Admin Edge + RPC | Verify actual `storage.objects` row (bucket/path/MIME/size) before registering metadata; client-supplied size/MIME/checksum are not authoritative |
+| request download | Student/Admin Edge | Re-auth every read; return short-lived signed URL; bind asset↔catalog/offering access |
+| cleanup worker | Local Edge/worker | Claim/retry/complete queue; idempotent; never expose paths to clients |
+
+**Asset model**
+
+- Owner XOR: `subject_catalog_id` XOR `subject_offering_id` (real FKs).
+- `asset_kind`: at least `hero_image` | `attachment`.
+- Version chain keyed by stable `logical_asset_id` (one current version per logical asset).
+- Hero: at most one current hero per owner; image MIME only.
+- Attachments: multiple independent chains; approved image/document MIME.
+- MIME/size whitelist server-side; max 20 MiB (aligned with draft).
+- Descriptors in `get_subject_card`: ids + presentation metadata only — never bucket/path/checksum/signed URLs.
+
+**Concurrency / cleanup / delete**
+
+- First insert locks owning `subject_catalog` / `subject_offerings` row (not only empty asset set).
+- Owner FKs: prefer `ON DELETE RESTRICT` + audited safe-delete (mandatory cleanup enqueue in the same transaction before metadata removal).
+- **Safe-delete rule:** a **current** asset may be deleted directly **only when** its effective catalog/offering presentation is unpublished; deletion enqueues cleanup and removes metadata in one transaction. If the effective presentation is published, require supersede or unpublish first. Historical unreferenced versions remain deletable with cleanup enqueue.
+- Download/list auth reuses Stage 16.1 offering access/publication helpers (no drifted reimplementation).
+- Permissions: Admin write=`subjects.write`; Admin list/download=`subjects.read` or write; students=authenticated offering access only; revoke `PUBLIC`/`anon`; no direct client Storage DML.
+
+**Card payload / cache**
+
+- `get_subject_card` returns current asset descriptors (hero + attachments) in the same response — not a separate Mobile round-trip.
+- Upload intents: short-lived, actor/owner-bound, single-use, finalize-idempotent.
+- Signed-URL client cache: store `expiresAt`, user-scoped, refresh before expiry, clear on logout/access denial; never treat expired URL as offline content.
 
 ### 16.3 Reference
 

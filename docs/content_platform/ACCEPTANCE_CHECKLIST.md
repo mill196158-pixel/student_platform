@@ -357,8 +357,8 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Советы по подготовке
 - [x] Преподаватели
 - [x] Дата актуальности
-- [ ] Изображения
-- [ ] Файлы
+- [x] Изображения
+- [x] Файлы
 - [x] Ссылки
 - [x] Порядок секций
 - [x] Preview мобильной карточки
@@ -372,15 +372,15 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 
 ## R. Stage 16 — Subject files
 
-- [ ] Private Storage
-- [ ] Signed upload
-- [ ] Signed download
-- [ ] MIME whitelist
-- [ ] Size whitelist
-- [ ] Versioning
-- [ ] Cleanup после безопасного удаления
-- [ ] Нет Base64 в БД
-- [ ] Codex APPROVE 16.2
+- [x] Private Storage
+- [x] Signed upload
+- [x] Signed download
+- [x] MIME whitelist
+- [x] Size whitelist
+- [x] Versioning
+- [x] Cleanup после безопасного удаления
+- [x] Нет Base64 в БД
+- [x] Codex APPROVE 16.2
 
 ---
 

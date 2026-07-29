@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:student_ui/student_ui.dart';
 
@@ -6,17 +7,19 @@ import '../../../core/auth/admin_session_controller.dart';
 import '../teachers/teacher_item.dart';
 import '../teachers/teachers_repository.dart';
 import 'subject_item.dart';
+import 'subject_media_store.dart';
 import 'subjects_repository.dart';
 
-/// Visual subject card editor (Stage 16.1 text/links/ordering foundation).
+/// Visual subject card editor (Stage 16.1 text/links + Stage 16.2 media).
 ///
-/// Images/files deferred to 16.2. Hours/credits shown only with offering.
-/// Teachers editable only when an offering is **explicitly** selected.
+/// Images/files require local `subject-media` Edge. Hours/credits shown only
+/// with offering. Teachers editable only when an offering is selected.
 class SubjectCardEditorScreen extends StatefulWidget {
   const SubjectCardEditorScreen({
     super.key,
     required this.repository,
     this.teachersRepository,
+    this.mediaStore,
     this.session,
     this.item,
     this.selectedOfferingId,
@@ -26,6 +29,7 @@ class SubjectCardEditorScreen extends StatefulWidget {
 
   final SubjectsRepository repository;
   final TeachersRepository? teachersRepository;
+  final SubjectMediaStore? mediaStore;
   final AdminSessionController? session;
   final SubjectItem? item;
   final String? selectedOfferingId;
@@ -72,6 +76,15 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
       (AdminBackendConfig.isDemoMode
           ? LocalTeachersRepository()
           : SupabaseTeachersRepository());
+  late final SubjectMediaStore _mediaStore = widget.mediaStore ??
+      (AdminBackendConfig.isDemoMode
+          ? FakeSubjectMediaStore()
+          : SupabaseSubjectMediaStore());
+
+  List<SubjectMediaAssetRow> _catalogAssets = const [];
+  List<SubjectMediaAssetRow> _offeringAssets = const [];
+  bool _uploadToOffering = false;
+  bool _mediaBusy = false;
 
   bool get _canWrite =>
       widget.session == null ||
@@ -106,6 +119,37 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
     _sectionOrder = normalizeSubjectCardSectionOrder(item?.sectionOrder);
     _selectedOfferingId = widget.selectedOfferingId;
     _loadOfferings();
+    _loadAssets();
+  }
+
+  Future<void> _loadAssets() async {
+    final id = widget.item?.id;
+    if (id == null ||
+        id.isEmpty ||
+        id.startsWith('local-') ||
+        id.startsWith('new-') ||
+        id == 'new') {
+      return;
+    }
+    try {
+      final catalog = await _mediaStore.listAssets(subjectCatalogId: id);
+      var offering = const <SubjectMediaAssetRow>[];
+      if (_selectedOfferingId != null) {
+        offering = await _mediaStore.listAssets(
+          subjectOfferingId: _selectedOfferingId,
+        );
+      }
+      if (!mounted) return;
+      setState(() {
+        _catalogAssets = catalog;
+        _offeringAssets = offering;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(
+        () => _banner = 'Медиа: $error (нужен локальный subject-media Edge).',
+      );
+    }
   }
 
   Future<void> _loadOfferings() async {
@@ -128,6 +172,7 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
         }
       });
       _bindOffering(_selectedOffering);
+      await _loadAssets();
     } catch (error) {
       if (!mounted) return;
       setState(() => _banner = 'Offering list: $error');
@@ -243,6 +288,39 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
     return out;
   }
 
+  SubjectCardAssets _previewAssets() {
+    SubjectCardAsset? catalogHero;
+    SubjectCardAsset? offeringHero;
+    final catalogAttachments = <SubjectCardAsset>[];
+    final offeringAttachments = <SubjectCardAsset>[];
+    for (final row in _catalogAssets) {
+      final d = row.toDescriptor();
+      if (row.kind == SubjectCardAssetKind.heroImage && catalogHero == null) {
+        catalogHero = d;
+      } else if (row.kind == SubjectCardAssetKind.attachment) {
+        catalogAttachments.add(d);
+      }
+    }
+    for (final row in _offeringAssets) {
+      final d = row.toDescriptor();
+      if (row.kind == SubjectCardAssetKind.heroImage && offeringHero == null) {
+        offeringHero = d;
+      } else if (row.kind == SubjectCardAssetKind.attachment) {
+        offeringAttachments.add(d);
+      }
+    }
+    return SubjectCardAssets(
+      catalog: SubjectCardAssetsScope(
+        heroImage: catalogHero,
+        attachments: catalogAttachments,
+      ),
+      offering: SubjectCardAssetsScope(
+        heroImage: offeringHero,
+        attachments: offeringAttachments,
+      ),
+    );
+  }
+
   SubjectCardPayload _previewPayload() {
     final links = <SubjectCardLink>[
       for (final row in _parseLinks())
@@ -292,6 +370,128 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
       teacherSpecificNote: _teacherNote.text.trim().ifEmptyAsNull,
       assessmentNote: _assessmentNote.text.trim().ifEmptyAsNull,
       workloadNote: _workloadNote.text.trim().ifEmptyAsNull,
+      assets: _previewAssets(),
+    );
+  }
+
+  Future<void> _pickAndUpload({required SubjectCardAssetKind kind}) async {
+    if (!_canWrite || _mediaBusy) return;
+    final subjectId = widget.item?.id;
+    if (subjectId == null ||
+        subjectId.startsWith('local-') ||
+        subjectId.startsWith('new-')) {
+      setState(() => _banner = 'Сначала сохраните карточку предмета.');
+      return;
+    }
+    final useOffering = _uploadToOffering && _selectedOfferingId != null;
+    final allowedExt = kind == SubjectCardAssetKind.heroImage
+        ? const ['jpg', 'jpeg', 'png', 'webp']
+        : const ['jpg', 'jpeg', 'png', 'webp', 'pdf'];
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: allowedExt,
+      withData: true,
+      allowMultiple: false,
+    );
+    if (result == null || result.files.isEmpty) return;
+    final file = result.files.single;
+    final bytes = file.bytes;
+    if (bytes == null || bytes.isEmpty) {
+      setState(() => _banner = 'Не удалось прочитать файл.');
+      return;
+    }
+    if (bytes.length > 20 * 1024 * 1024) {
+      setState(() => _banner = 'Файл больше 20 МБ.');
+      return;
+    }
+    final mime = _guessMime(file.name, file.extension, kind);
+    setState(() {
+      _mediaBusy = true;
+      _banner = null;
+    });
+    try {
+      SubjectMediaAssetRow? currentHero;
+      for (final row in useOffering ? _offeringAssets : _catalogAssets) {
+        if (row.kind == SubjectCardAssetKind.heroImage) {
+          currentHero = row;
+          break;
+        }
+      }
+      await _mediaStore.uploadBytes(
+        bytes: bytes,
+        mimeType: mime,
+        fileName: file.name,
+        kind: kind,
+        subjectCatalogId: useOffering ? null : subjectId,
+        subjectOfferingId: useOffering ? _selectedOfferingId : null,
+        supersedesAssetId:
+            kind == SubjectCardAssetKind.heroImage ? currentHero?.id : null,
+        title: file.name,
+      );
+      await _loadAssets();
+      if (!mounted) return;
+      setState(() => _banner = 'Файл загружен (${kind.wireValue}).');
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _banner = '$error');
+    } finally {
+      if (mounted) setState(() => _mediaBusy = false);
+    }
+  }
+
+  Future<void> _deleteAsset(SubjectMediaAssetRow row) async {
+    if (!_canWrite || _mediaBusy) return;
+    setState(() => _mediaBusy = true);
+    try {
+      await _mediaStore.deleteAsset(row.id);
+      await _loadAssets();
+      if (!mounted) return;
+      setState(() => _banner = 'Файл удалён.');
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _banner = error.toString());
+    } finally {
+      if (mounted) setState(() => _mediaBusy = false);
+    }
+  }
+
+  static String _guessMime(
+    String name,
+    String? extension,
+    SubjectCardAssetKind kind,
+  ) {
+    final ext = (extension ?? name.split('.').last).toLowerCase();
+    return switch (ext) {
+      'jpg' || 'jpeg' => 'image/jpeg',
+      'png' => 'image/png',
+      'webp' => 'image/webp',
+      'pdf' => 'application/pdf',
+      _ => kind == SubjectCardAssetKind.heroImage
+          ? 'image/jpeg'
+          : 'application/octet-stream',
+    };
+  }
+
+  Widget _assetListTile(SubjectMediaAssetRow row) {
+    return ListTile(
+      dense: true,
+      leading: Icon(
+        row.kind == SubjectCardAssetKind.heroImage
+            ? Icons.image_outlined
+            : (row.mimeType == 'application/pdf'
+                ? Icons.picture_as_pdf_outlined
+                : Icons.attach_file),
+      ),
+      title: Text(row.title.isNotEmpty ? row.title : row.mimeType),
+      subtitle: Text(
+        '${row.kind.wireValue} · ${row.mimeType} · v${row.versionNumber}',
+      ),
+      trailing: _canWrite
+          ? IconButton(
+              icon: const Icon(Icons.delete_outline),
+              onPressed: _mediaBusy ? null : () => _deleteAsset(row),
+            )
+          : null,
     );
   }
 
@@ -489,10 +689,65 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
               children: [
                 if (_banner != null) Text(_banner!),
                 const Text(
-                  '16.1: текст / ссылки / порядок секций. '
-                  'Изображения и файлы — Stage 16.2.',
+                  '16.1: текст / ссылки / порядок. '
+                  '16.2: hero + вложения через subject-media Edge (локально).',
                 ),
                 const SizedBox(height: 12),
+                Text(
+                  'Медиа карточки',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const Text(
+                  'Загрузка требует локальный Edge `subject-media`. '
+                  'По умолчанию файлы привязаны к catalog; при выбранном offering '
+                  'можно загружать offering-scoped вложения.',
+                ),
+                if (_selectedOfferingId != null)
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Загружать в offering (не catalog)'),
+                    value: _uploadToOffering,
+                    onChanged: !_canWrite
+                        ? null
+                        : (value) => setState(() => _uploadToOffering = value),
+                  ),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: !_canWrite || _mediaBusy
+                          ? null
+                          : () => _pickAndUpload(
+                                kind: SubjectCardAssetKind.heroImage,
+                              ),
+                      icon: const Icon(Icons.image_outlined),
+                      label: const Text('Hero image'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: !_canWrite || _mediaBusy
+                          ? null
+                          : () => _pickAndUpload(
+                                kind: SubjectCardAssetKind.attachment,
+                              ),
+                      icon: const Icon(Icons.attach_file),
+                      label: const Text('Вложение'),
+                    ),
+                  ],
+                ),
+                if (_catalogAssets.isNotEmpty) ...[
+                  const Text('Catalog assets', style: TextStyle(fontWeight: FontWeight.w700)),
+                  for (final row in _catalogAssets) _assetListTile(row),
+                ],
+                if (_offeringAssets.isNotEmpty) ...[
+                  const Text('Offering assets', style: TextStyle(fontWeight: FontWeight.w700)),
+                  for (final row in _offeringAssets) _assetListTile(row),
+                ],
+                if (_catalogAssets.isEmpty && _offeringAssets.isEmpty)
+                  const Text('Нет загруженных файлов.'),
+                const SizedBox(height: 16),
                 TextField(
                   controller: _name,
                   decoration: const InputDecoration(
@@ -567,8 +822,10 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
                   onChanged: (value) {
                     setState(() {
                       _selectedOfferingId = value;
+                      _uploadToOffering = value != null;
                       _bindOffering(_selectedOffering);
                     });
+                    _loadAssets();
                   },
                 ),
                 InputDecorator(

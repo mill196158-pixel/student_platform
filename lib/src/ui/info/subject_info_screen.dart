@@ -1,3 +1,7 @@
+import 'dart:async';
+import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -8,8 +12,11 @@ import '../schedule/subject_diary_screen.dart';
 import 'package:student_ui/student_ui.dart';
 
 import 'info_subjects_cache.dart';
+import 'subject_attachment_open.dart';
 import 'subject_card_service.dart';
 import 'subject_difficulty.dart';
+import 'subject_hero_load.dart';
+import 'subject_media_service.dart';
 import 'teacher_profile_screen.dart';
 
 class SubjectInfoScreen extends StatefulWidget {
@@ -40,7 +47,12 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
   final _scrollController = ScrollController();
   final _filesKey = GlobalKey();
   final _repository = _SubjectInfoRepository();
+  final _mediaService = SubjectMediaService();
   bool _voting = false;
+  Uint8List? _heroBytes;
+  bool _heroLoading = false;
+  String? _mediaError;
+  int _heroLoadGeneration = 0;
 
   @override
   void initState() {
@@ -52,17 +64,19 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
   Future<void> _bootstrap() async {
     final cached = await SubjectCardService().loadCached(widget.subjectOfferingId);
     if (cached != null && mounted) {
+      final cachedData = _SubjectInfoData.fromManagedCard(
+        card: cached,
+        fallbackTitle: widget.title,
+        subjectOfferingId: widget.subjectOfferingId,
+        fallbackSubjectId: widget.subjectId,
+        fallbackGroupId: widget.groupId,
+        fallbackSemesterNumber: widget.semesterNumber,
+      );
       setState(() {
-        _data = _SubjectInfoData.fromManagedCard(
-          card: cached,
-          fallbackTitle: widget.title,
-          subjectOfferingId: widget.subjectOfferingId,
-          fallbackSubjectId: widget.subjectId,
-          fallbackGroupId: widget.groupId,
-          fallbackSemesterNumber: widget.semesterNumber,
-        );
+        _data = cachedData;
         _loading = false;
       });
+      unawaited(_loadHeroImage(cachedData));
     }
     try {
       final next = await _load();
@@ -71,6 +85,7 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
         _data = next;
         _loading = false;
       });
+      await _loadHeroImage(next);
     } catch (_) {
       if (!mounted) return;
       // Hard failure: do not silently keep stale cache as live.
@@ -104,7 +119,110 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
       _data = next;
       _loading = false;
     });
+    await _loadHeroImage(next);
     return next;
+  }
+
+  Future<void> _loadHeroImage(_SubjectInfoData data) async {
+    final gen = ++_heroLoadGeneration;
+    final hero = data.cardPayload?.displayAssets.heroImage;
+    if (hero == null || !hero.isImage) {
+      if (!mounted ||
+          !subjectHeroLoadIsCurrent(
+            startedGeneration: gen,
+            currentGeneration: _heroLoadGeneration,
+          )) {
+        return;
+      }
+      setState(() {
+        _heroBytes = null;
+        _heroLoading = false;
+      });
+      return;
+    }
+    if (mounted &&
+        subjectHeroLoadIsCurrent(
+          startedGeneration: gen,
+          currentGeneration: _heroLoadGeneration,
+        )) {
+      setState(() {
+        _heroLoading = true;
+        _mediaError = null;
+      });
+    }
+    final bytes = await _mediaService.fetchAssetBytes(
+      asset: hero,
+      subjectOfferingId: data.subjectOfferingId,
+    );
+    if (!mounted ||
+        !subjectHeroLoadIsCurrent(
+          startedGeneration: gen,
+          currentGeneration: _heroLoadGeneration,
+        )) {
+      return;
+    }
+    setState(() {
+      _heroBytes = bytes;
+      _heroLoading = false;
+      if (bytes == null) {
+        _mediaError = 'Не удалось загрузить обложку предмета.';
+      }
+    });
+  }
+
+  Future<void> _openAttachment(SubjectCardAsset asset) async {
+    final offeringId = _data?.subjectOfferingId ?? widget.subjectOfferingId;
+    setState(() => _mediaError = null);
+    try {
+      final download = await _mediaService.resolveDownload(
+        assetId: asset.id,
+        subjectOfferingId: offeringId,
+      );
+      if (!mounted) return;
+      if (download == null) {
+        setState(() => _mediaError = 'Файл недоступен.');
+        return;
+      }
+
+      final ext = asset.isPdf
+          ? 'pdf'
+          : asset.mimeType.contains('png')
+              ? 'png'
+              : asset.mimeType.contains('webp')
+                  ? 'webp'
+                  : 'jpg';
+      final fileName =
+          'subject_${asset.id.replaceAll('-', '').substring(0, 8)}.$ext';
+
+      if (kIsWeb) {
+        await openSubjectAttachmentBytes(
+          bytes: Uint8List(0),
+          fileName: fileName,
+          mimeType: asset.mimeType,
+          signedUrl: download.signedUrl,
+        );
+        return;
+      }
+
+      final bytes = await _mediaService.fetchAssetBytes(
+        asset: asset,
+        subjectOfferingId: offeringId,
+      );
+      if (!mounted) return;
+      if (bytes == null) {
+        setState(() => _mediaError = 'Файл недоступен.');
+        return;
+      }
+      await openSubjectAttachmentBytes(
+        bytes: bytes,
+        fileName: fileName,
+        mimeType: asset.mimeType,
+        signedUrl: download.signedUrl,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _mediaError = 'Не удалось открыть файл.');
+    }
   }
 
   Future<void> _rateSubject(_SubjectInfoData data) async {
@@ -217,7 +335,7 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
       controller: _scrollController,
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
       children: [
-        _HeroCard(data: data),
+        _HeroCard(data: data, heroBytes: _heroBytes, heroLoading: _heroLoading),
         const SizedBox(height: 10),
         _TeacherDifficultyGlance(
           data: data,
@@ -261,7 +379,19 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
         ],
         _SummaryCard(data: data),
         const SizedBox(height: 10),
-        _FilesCard(key: _filesKey),
+        if (_mediaError != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            _mediaError!,
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+        ],
+        const SizedBox(height: 10),
+        _SubjectAssetsCard(
+          key: _filesKey,
+          data: data,
+          onOpenAttachment: _openAttachment,
+        ),
         const SizedBox(height: 10),
         _LargeActionCard(
           icon: Icons.chat_bubble_outline_rounded,
@@ -863,8 +993,14 @@ class _SubjectInfoData {
 
 class _HeroCard extends StatelessWidget {
   final _SubjectInfoData data;
+  final Uint8List? heroBytes;
+  final bool heroLoading;
 
-  const _HeroCard({required this.data});
+  const _HeroCard({
+    required this.data,
+    this.heroBytes,
+    this.heroLoading = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -898,7 +1034,26 @@ class _HeroCard extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _SubjectIcon(title: title, size: 46),
+          if (heroBytes != null && heroBytes!.isNotEmpty)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: Image.memory(
+                heroBytes!,
+                width: 64,
+                height: 64,
+                fit: BoxFit.cover,
+              ),
+            )
+          else if (heroLoading)
+            const SizedBox(
+              width: 64,
+              height: 64,
+              child: Center(
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            )
+          else
+            _SubjectIcon(title: title, size: 46),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -1323,22 +1478,58 @@ class _CompactRatingCircles extends StatelessWidget {
   }
 }
 
-class _FilesCard extends StatelessWidget {
-  const _FilesCard({super.key});
+class _SubjectAssetsCard extends StatelessWidget {
+  const _SubjectAssetsCard({
+    super.key,
+    required this.data,
+    required this.onOpenAttachment,
+  });
+
+  final _SubjectInfoData data;
+  final Future<void> Function(SubjectCardAsset asset) onOpenAttachment;
 
   @override
   Widget build(BuildContext context) {
-    return const _ContentCard(
+    final attachments = data.cardPayload?.displayAssets.attachments ?? const [];
+    if (attachments.isEmpty) {
+      return const _ContentCard(
+        icon: Icons.folder_outlined,
+        title: 'Полезные файлы',
+        child: Column(
+          children: [
+            _EmptyContentCallout(
+              icon: Icons.folder_open_outlined,
+              title: 'Материалы пока не загружены',
+              subtitle:
+                  'Шаблоны, примеры работ, методички и загруженные файлы появятся здесь позже.',
+            ),
+          ],
+        ),
+      );
+    }
+
+    return _ContentCard(
       icon: Icons.folder_outlined,
       title: 'Полезные файлы',
       child: Column(
         children: [
-          _EmptyContentCallout(
-            icon: Icons.folder_open_outlined,
-            title: 'Материалы пока не загружены',
-            subtitle:
-                'Шаблоны, примеры работ, методички и загруженные файлы появятся здесь позже.',
-          ),
+          for (final file in attachments)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                file.isPdf
+                    ? Icons.picture_as_pdf_outlined
+                    : Icons.attach_file_outlined,
+              ),
+              title: Text(
+                file.title.isNotEmpty ? file.title : file.mimeType,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: Text(file.mimeType),
+              trailing: const Icon(Icons.open_in_new),
+              onTap: () => onOpenAttachment(file),
+            ),
         ],
       ),
     );

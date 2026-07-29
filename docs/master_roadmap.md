@@ -993,14 +993,14 @@ Status: **DONE (local)** / Codex **APPROVE** (`183efc8`, `001e1f0`, `cebfcf5`) �
 
 ## Stage 16 — Предметы и справочник
 
-Status: **16.1 DONE (local)** / Codex **APPROVE**; **16.2–16.3** next; remote apply pending owner
+Status: **16.2 DONE (local)** / Codex **APPROVE_WITH_NOTES**; **16.3** next; remote apply / Edge deploy pending owner
 
 ### 16.1 Карточка предмета (Admin visual editor)
 
 - [x] название, краткое и подробное описание;
 - [x] чему научится студент; форма контроля; часы / ЗЕ; требования; советы;
 - [x] преподаватели; дата актуальности; ссылки; порядок секций;
-- [ ] изображения; файлы — deferred to **16.2**;
+- [x] изображения; файлы — **16.2**;
 - [x] preview настоящей мобильной карточки;
 - [x] catalog-level + безопасный offering-level override;
 - [x] связи только через `subject_id` / `subject_catalog_id` / `subject_offering_id` (не по названию).
@@ -1008,9 +1008,10 @@ Status: **16.1 DONE (local)** / Codex **APPROVE**; **16.2–16.3** next; remote 
 
 ### 16.2 Файлы предмета
 
-- [ ] private Storage; signed upload/download;
-- [ ] whitelist MIME/размера; versioning; cleanup после безопасного удаления;
-- [ ] без Base64 в БД.
+- [x] private Storage; signed upload/download;
+- [x] whitelist MIME/размера; versioning; cleanup после безопасного удаления;
+- [x] без Base64 в БД.
+- Codex **APPROVE_WITH_NOTES** 16.2 (local commit on `feature/content-platform`; deploy owner-gated).
 
 ### 16.3 Справочный раздел
 

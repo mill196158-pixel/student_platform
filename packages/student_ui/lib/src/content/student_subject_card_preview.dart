@@ -72,6 +72,7 @@ class StudentSubjectCardPreview extends StatelessWidget {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(14, 12, 14, 18),
                 children: [
+                  ..._assetWidgets(context),
                   for (final key in payload.sectionOrder)
                     ..._sectionWidgets(context, key),
                 ],
@@ -81,6 +82,108 @@ class StudentSubjectCardPreview extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  List<Widget> _assetWidgets(BuildContext context) {
+    final assets = payload.displayAssets;
+    final out = <Widget>[];
+    final hero = assets.heroImage;
+    if (hero != null) {
+      out.add(
+        _Section(
+          title: 'Обложка',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                height: 96,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE0E7FF),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFC7D2FE)),
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  hero.isPdf ? Icons.picture_as_pdf : Icons.image_outlined,
+                  size: 36,
+                  color: const Color(0xFF4338CA),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                hero.title.isNotEmpty ? hero.title : hero.mimeType,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              Text(
+                '${_formatBytes(hero.byteSize)} · v${hero.versionNumber}',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Color(0xFF6B7280),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    if (assets.attachments.isNotEmpty) {
+      out.add(
+        _Section(
+          title: 'Файлы',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final file in assets.attachments)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        file.isPdf
+                            ? Icons.picture_as_pdf_outlined
+                            : Icons.attach_file,
+                        size: 18,
+                        color: const Color(0xFF4338CA),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              file.title.isNotEmpty ? file.title : file.mimeType,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              '${file.mimeType} · ${_formatBytes(file.byteSize)}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Color(0xFF6B7280),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+    return out;
+  }
+
+  static String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) {
+      return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    }
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 
   List<Widget> _sectionWidgets(BuildContext context, String key) {

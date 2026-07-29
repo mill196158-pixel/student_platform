@@ -73,6 +73,185 @@ num? _readNum(Map<String, dynamic> json, List<String> keys) {
   return null;
 }
 
+/// Subject file descriptor (Stage 16.2). Never includes storage paths/URLs.
+enum SubjectCardAssetKind {
+  heroImage,
+  attachment;
+
+  static SubjectCardAssetKind? tryParse(Object? raw) {
+    final value = raw?.toString().trim();
+    return switch (value) {
+      'hero_image' => SubjectCardAssetKind.heroImage,
+      'attachment' => SubjectCardAssetKind.attachment,
+      _ => null,
+    };
+  }
+
+  String get wireValue => switch (this) {
+        SubjectCardAssetKind.heroImage => 'hero_image',
+        SubjectCardAssetKind.attachment => 'attachment',
+      };
+}
+
+class SubjectCardAsset {
+  const SubjectCardAsset({
+    required this.id,
+    required this.title,
+    required this.mimeType,
+    required this.byteSize,
+    required this.versionNumber,
+    required this.kind,
+    required this.logicalAssetId,
+  });
+
+  final String id;
+  final String title;
+  final String mimeType;
+  final int byteSize;
+  final int versionNumber;
+  final SubjectCardAssetKind kind;
+  final String logicalAssetId;
+
+  bool get isImage => mimeType.startsWith('image/');
+  bool get isPdf => mimeType == 'application/pdf';
+
+  static SubjectCardAsset? tryParse(Map<String, dynamic>? json) {
+    if (json == null) return null;
+    try {
+      final id = _readString(json, const ['id']);
+      final mime = _readString(json, const ['mime_type', 'mimeType']);
+      final logical = _readString(json, const [
+        'logical_asset_id',
+        'logicalAssetId',
+      ]);
+      final kind = SubjectCardAssetKind.tryParse(
+        json['asset_kind'] ?? json['assetKind'],
+      );
+      if (id == null || mime == null || logical == null || kind == null) {
+        return null;
+      }
+      final byteSize = _readInt(json, const ['byte_size', 'byteSize']);
+      final version = _readInt(json, const ['version_number', 'versionNumber']);
+      if (byteSize == null || byteSize < 0 || version == null || version < 1) {
+        return null;
+      }
+      return SubjectCardAsset(
+        id: id,
+        title: _readString(json, const ['title']) ?? '',
+        mimeType: mime,
+        byteSize: byteSize,
+        versionNumber: version,
+        kind: kind,
+        logicalAssetId: logical,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+int? _readInt(Map<String, dynamic> json, List<String> keys) {
+  for (final key in keys) {
+    final value = json[key];
+    if (value == null) continue;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value.toString());
+  }
+  return null;
+}
+
+/// Asset descriptors for one owner scope (catalog or offering).
+class SubjectCardAssetsScope {
+  const SubjectCardAssetsScope({
+    this.heroImage,
+    this.attachments = const [],
+  });
+
+  const SubjectCardAssetsScope.empty()
+      : heroImage = null,
+        attachments = const [];
+
+  final SubjectCardAsset? heroImage;
+  final List<SubjectCardAsset> attachments;
+
+  static SubjectCardAssetsScope? tryParse(Map<String, dynamic>? json) {
+    if (json == null) return null;
+    SubjectCardAsset? hero;
+    final heroRaw = json['hero_image'] ?? json['heroImage'];
+    if (heroRaw is Map) {
+      hero = SubjectCardAsset.tryParse(Map<String, dynamic>.from(heroRaw));
+    } else if (heroRaw != null) {
+      return null;
+    }
+    final attachments = <SubjectCardAsset>[];
+    final listRaw = json['attachments'];
+    if (listRaw is List) {
+      for (final row in listRaw.whereType<Map>()) {
+        final asset = SubjectCardAsset.tryParse(
+          Map<String, dynamic>.from(row),
+        );
+        if (asset == null) return null;
+        attachments.add(asset);
+      }
+    } else if (listRaw != null) {
+      return null;
+    }
+    return SubjectCardAssetsScope(heroImage: hero, attachments: attachments);
+  }
+}
+
+/// Catalog + offering asset bundle from [get_subject_card].
+class SubjectCardAssets {
+  const SubjectCardAssets({
+    this.catalog = const SubjectCardAssetsScope.empty(),
+    this.offering = const SubjectCardAssetsScope.empty(),
+  });
+
+  final SubjectCardAssetsScope catalog;
+  final SubjectCardAssetsScope offering;
+
+  /// Effective student-facing descriptors (offering hero overrides catalog).
+  SubjectCardAssetsScope get mergedForDisplay {
+    return SubjectCardAssetsScope(
+      heroImage: offering.heroImage ?? catalog.heroImage,
+      attachments: [
+        ...catalog.attachments,
+        ...offering.attachments,
+      ],
+    );
+  }
+
+  static SubjectCardAssets? tryParse(Object? raw) {
+    if (raw == null) return const SubjectCardAssets();
+    if (raw is! Map) return null;
+    final json = Map<String, dynamic>.from(raw);
+    final catalogRaw = json['catalog'];
+    final offeringRaw = json['offering'];
+    if (catalogRaw == null && offeringRaw == null) {
+      final flat = SubjectCardAssetsScope.tryParse(json);
+      if (flat == null) return null;
+      return SubjectCardAssets(catalog: flat);
+    }
+    final catalog = catalogRaw is Map
+        ? SubjectCardAssetsScope.tryParse(
+            Map<String, dynamic>.from(catalogRaw),
+          )
+        : const SubjectCardAssetsScope.empty();
+    if (catalogRaw is Map && catalog == null) return null;
+    final offering = offeringRaw is Map
+        ? SubjectCardAssetsScope.tryParse(
+            Map<String, dynamic>.from(offeringRaw),
+          )
+        : const SubjectCardAssetsScope.empty();
+    if (offeringRaw is Map && offering == null) return null;
+    return SubjectCardAssets(
+      catalog: catalog ?? const SubjectCardAssetsScope.empty(),
+      offering: offering ?? const SubjectCardAssetsScope.empty(),
+    );
+  }
+}
+
 /// Merged student-facing subject card payload.
 class SubjectCardPayload {
   const SubjectCardPayload({
@@ -99,6 +278,7 @@ class SubjectCardPayload {
     this.teacherSpecificNote,
     this.assessmentNote,
     this.workloadNote,
+    this.assets = const SubjectCardAssets(),
   });
 
   final String subjectId;
@@ -124,6 +304,10 @@ class SubjectCardPayload {
   final String? teacherSpecificNote;
   final String? assessmentNote;
   final String? workloadNote;
+  final SubjectCardAssets assets;
+
+  /// Convenience: merged hero + attachments for UI (metadata only).
+  SubjectCardAssetsScope get displayAssets => assets.mergedForDisplay;
 
   /// Fail-closed: requires subject_id + non-empty canonical_name.
   static SubjectCardPayload? tryParse(Map<String, dynamic>? json) {
@@ -180,6 +364,9 @@ class SubjectCardPayload {
       );
       if (sectionOrder == null) return null;
 
+      final assetsParsed = SubjectCardAssets.tryParse(json['assets']);
+      if (json['assets'] != null && assetsParsed == null) return null;
+
       return SubjectCardPayload(
         subjectId: subjectId,
         subjectOfferingId: _readString(json, const [
@@ -234,6 +421,7 @@ class SubjectCardPayload {
           'workload_note',
           'workloadNote',
         ]),
+        assets: assetsParsed ?? const SubjectCardAssets(),
       );
     } catch (_) {
       return null;
