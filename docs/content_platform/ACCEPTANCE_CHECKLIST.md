@@ -1,7 +1,7 @@
 # Content Platform — Acceptance Checklist
 
 Status: **ACTIVE**
-Updated: **2026-07-29** (restored atomic after Codex CHANGES_REQUESTED)
+Updated: **2026-07-29** (Stage 14–21 acceptance audit; 14.1/Z residual open)
 Rule: mark `[x]` only with **code + tests + Codex APPROVE** for that item.
 Docs-only items: Codex APPROVE on the docs package.
 Do **not** merge requirements into vague “готово”.
@@ -21,12 +21,12 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Создан `.cursor/rules/content-platform.mdc` (`alwaysApply: true`)
 - [x] Docs gate отправлен в Codex thread `019fa373-81f2-7962-a8c9-81d86cb62311`
 - [x] Docs gate получил Codex **APPROVE**
-- [ ] Перед каждым code-подэтапом архитектура + схема отправлены в Codex
-- [ ] После каждого code-подэтапа полный diff + тесты отправлены в Codex
-- [ ] P0/P1 исправлены до APPROVE подэтапа
-- [ ] Подэтап не отмечен DONE без Codex APPROVE
-- [ ] После APPROVE выполнен переход к следующему локальному подэтапу
-- [ ] В конце цепочки запрошен общий Codex review
+- [x] Перед каждым code-подэтапом архитектура + схема отправлены в Codex
+- [x] После каждого code-подэтапа полный diff + тесты отправлены в Codex
+- [x] P0/P1 исправлены до APPROVE подэтапа
+- [x] Подэтап не отмечен DONE без Codex APPROVE
+- [x] После APPROVE выполнен переход к следующему локальному подэтапу
+- [x] В конце цепочки запрошен общий Codex review
 - [x] Remote migrations не применялись без владельца
 - [x] Edge Functions не деплоились без владельца
 - [x] GitHub push не выполнялся без владельца
@@ -42,240 +42,240 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 ## B. Read-only audit evidence
 
 - [x] Evidence-файл аудита создан (дата, локальный HEAD, remote migration tail, проверенные объекты; без секретов/ПДн)
-- [ ] Изучен news backend
-- [ ] Изучен news editor (Admin)
-- [ ] Изучен `packages/student_ui`
-- [ ] Изучена Главная и «Застрял с заданием?»
-- [ ] Изучена лента профиля
-- [ ] Изучены карточка и экран предмета
-- [ ] Изучен справочный раздел
-- [ ] Изучены Admin teachers / subjects / students
-- [ ] Изучен Stage 13.6 reviews / moderation
-- [ ] Изучены vacancies (если есть / hardcoded)
-- [ ] Изучены файлы и Storage-паттерны
-- [ ] Изучен академический импорт и `scripts/import_academic_batch.js`
-- [ ] Прочитаны реальные таблицы Supabase (read-only)
-- [ ] Прочитаны RLS / RPC / grants (read-only)
-- [ ] Зафиксировано: какие таблицы расширяем vs создаём (с обоснованием)
-- [ ] Новые таблицы не созданы без доказательства, что расширение небезопасно
+- [x] Изучен news backend
+- [x] Изучен news editor (Admin)
+- [x] Изучен `packages/student_ui`
+- [x] Изучена Главная и «Застрял с заданием?»
+- [x] Изучена лента профиля
+- [x] Изучены карточка и экран предмета
+- [x] Изучен справочный раздел
+- [x] Изучены Admin teachers / subjects / students
+- [x] Изучен Stage 13.6 reviews / moderation
+- [x] Изучены vacancies (если есть / hardcoded)
+- [x] Изучены файлы и Storage-паттерны
+- [x] Изучен академический импорт и `scripts/import_academic_batch.js`
+- [x] Прочитаны реальные таблицы Supabase (read-only)
+- [x] Прочитаны RLS / RPC / grants (read-only)
+- [x] Зафиксировано: какие таблицы расширяем vs создаём (с обоснованием)
+- [x] Новые таблицы не созданы без доказательства, что расширение небезопасно
 
 ---
 
 ## C. Stage 14 — entities & schema
 
-- [ ] Таблица / сущность `content_templates`
-- [ ] PK/UNIQUE templates = `(key, schema_version)`
-- [ ] Запрет мутации опубликованной schema; новая версия = новый `schema_version`
-- [ ] Таблица / сущность `content_items`
-- [ ] Таблица / сущность `content_item_versions`
-- [ ] Таблица / сущность `content_item_placements`
-- [ ] Таблица / сущность `content_item_audience_groups`
-- [ ] Таблица / сущность `content_item_audience_users`
-- [ ] Таблица / сущность `content_assets`
-- [ ] Таблица / сущность `content_media_cleanup_queue`
-- [ ] Таблица / сущность `content_item_dismissals`
-- [ ] Таблица / сущность `content_item_events`
-- [ ] Таблица / сущность `content_audit_log`
-- [ ] ENABLE RLS на каждой новой таблице
-- [ ] FORCE RLS на каждой новой таблице
-- [ ] REVOKE ALL от PUBLIC/anon/authenticated на table DML
-- [ ] Grants table DML только service_role
-- [ ] Authenticated только минимальный EXECUTE на RPC
+- [x] Таблица / сущность `content_templates`
+- [x] PK/UNIQUE templates = `(key, schema_version)`
+- [x] Запрет мутации опубликованной schema; новая версия = новый `schema_version`
+- [x] Таблица / сущность `content_items`
+- [x] Таблица / сущность `content_item_versions`
+- [x] Таблица / сущность `content_item_placements`
+- [x] Таблица / сущность `content_item_audience_groups`
+- [x] Таблица / сущность `content_item_audience_users`
+- [x] Таблица / сущность `content_assets`
+- [x] Таблица / сущность `content_media_cleanup_queue`
+- [x] Таблица / сущность `content_item_dismissals`
+- [x] Таблица / сущность `content_item_events`
+- [x] Таблица / сущность `content_audit_log`
+- [x] ENABLE RLS на каждой новой таблице
+- [x] FORCE RLS на каждой новой таблице
+- [x] REVOKE ALL от PUBLIC/anon/authenticated на table DML
+- [x] Grants table DML только service_role
+- [x] Authenticated только минимальный EXECUTE на RPC
 
 ---
 
 ## D. Stage 14 — concepts & fields
 
-- [ ] Content item
-- [ ] Approved template
-- [ ] Placement
-- [ ] Audience
-- [ ] Asset
-- [ ] Version
-- [ ] Status draft
-- [ ] Status published
-- [ ] Status archived
-- [ ] Publication schedule (`starts_at` / `ends_at`)
-- [ ] Priority
-- [ ] Sort order
-- [ ] Origin `demo`
-- [ ] Origin `admin`
-- [ ] Origin `import`
-- [ ] Origin `user_submission`
-- [ ] Audit действий
-- [ ] Impressions (минимальные)
-- [ ] Clicks (минимальные)
+- [x] Content item
+- [x] Approved template
+- [x] Placement
+- [x] Audience
+- [x] Asset
+- [x] Version
+- [x] Status draft
+- [x] Status published
+- [x] Status archived
+- [x] Publication schedule (`starts_at` / `ends_at`)
+- [x] Priority
+- [x] Sort order
+- [x] Origin `demo`
+- [x] Origin `admin`
+- [x] Origin `import`
+- [x] Origin `user_submission`
+- [x] Audit действий
+- [x] Impressions (минимальные)
+- [x] Clicks (минимальные)
 
 ---
 
 ## E. Stage 14 — templates & payload validation
 
-- [ ] Нет свободного конструктора страниц
-- [ ] Seed template `home_promo_v1`
-- [ ] Seed template `profile_feed_card_v1`
-- [ ] Seed template `reference_article_v1`
-- [ ] Серверная валидация payload
-- [ ] Серверная валидация `schema_version`
-- [ ] Зафиксирован versioned PL/pgSQL validator contract для каждого template
-- [ ] Runtime validation не зависит от `pg_jsonschema`
-- [ ] `schema_doc` не используется как runtime schema engine
-- [ ] Для каждого `(template_key, schema_version)` задан allowlist ключей, типов, лимитов и enum
-- [ ] Fail-closed на unknown template/schema_version/payload field
-- [ ] Fail-closed на неверный тип, длину, enum или CTA
-- [ ] Fail-closed на inactive/unknown template
-- [ ] Publish path повторно валидирует payload
-- [ ] Guard trigger/security assertion: referenced `(key, schema_version)` immutable (`schema_doc`, `allowed_placements`, validator semantics)
-- [ ] Эволюция шаблона только через новый `schema_version`
-- [ ] Publish: каждый asset id в payload существует
-- [ ] Publish: каждый asset id принадлежит тому же `content_item_id`
-- [ ] Publish: каждый asset id проходит MIME/type rule шаблона
-- [ ] Restore enforce тот же asset invariant
+- [x] Нет свободного конструктора страниц
+- [x] Seed template `home_promo_v1`
+- [x] Seed template `profile_feed_card_v1`
+- [x] Seed template `reference_article_v1`
+- [x] Серверная валидация payload
+- [x] Серверная валидация `schema_version`
+- [x] Зафиксирован versioned PL/pgSQL validator contract для каждого template
+- [x] Runtime validation не зависит от `pg_jsonschema`
+- [x] `schema_doc` не используется как runtime schema engine
+- [x] Для каждого `(template_key, schema_version)` задан allowlist ключей, типов, лимитов и enum
+- [x] Fail-closed на unknown template/schema_version/payload field
+- [x] Fail-closed на неверный тип, длину, enum или CTA
+- [x] Fail-closed на inactive/unknown template
+- [x] Publish path повторно валидирует payload
+- [x] Guard trigger/security assertion: referenced `(key, schema_version)` immutable (`schema_doc`, `allowed_placements`, validator semantics)
+- [x] Эволюция шаблона только через новый `schema_version`
+- [x] Publish: каждый asset id в payload существует
+- [x] Publish: каждый asset id принадлежит тому же `content_item_id`
+- [x] Publish: каждый asset id проходит MIME/type rule шаблона
+- [x] Restore enforce тот же asset invariant
 
 ---
 
 ## F. Stage 14 — placements
 
-- [ ] Placement `home_promo`
-- [ ] Placement `profile_feed`
-- [ ] Placement `reference`
-- [ ] Расширение news targeting без rewrite news backend
+- [x] Placement `home_promo`
+- [x] Placement `profile_feed`
+- [x] Placement `reference`
+- [x] Расширение news targeting без rewrite news backend
 
 ---
 
 ## G. Stage 14 — audience semantics
 
-- [ ] Аудитория all
-- [ ] Аудитория одна группа
-- [ ] Аудитория несколько групп
-- [ ] Аудитория явный набор пользователей
-- [ ] Режим groups_and_users
-- [ ] Union + dedupe смешанной аудитории
-- [ ] Только active users считаются
-- [ ] Только active enrollment/membership считаются
-- [ ] Unknown/blocked/transferred исключены
-- [ ] Один и тот же resolver для preview и mobile visibility
-- [ ] UUID не хранятся в небезопасном клиентском payload
-- [ ] Нормализованные junction-таблицы
-- [ ] Audience вычисляется сервером
-- [ ] Client audience payload не доверяется для authz
-- [ ] Publish с пустой targeted-аудиторией запрещён
+- [x] Аудитория all
+- [x] Аудитория одна группа
+- [x] Аудитория несколько групп
+- [x] Аудитория явный набор пользователей
+- [x] Режим groups_and_users
+- [x] Union + dedupe смешанной аудитории
+- [x] Только active users считаются
+- [x] Только active enrollment/membership считаются
+- [x] Unknown/blocked/transferred исключены
+- [x] Один и тот же resolver для preview и mobile visibility
+- [x] UUID не хранятся в небезопасном клиентском payload
+- [x] Нормализованные junction-таблицы
+- [x] Audience вычисляется сервером
+- [x] Client audience payload не доверяется для authz
+- [x] Publish с пустой targeted-аудиторией запрещён
 
 ---
 
 ## H. Stage 14 — Admin RPCs (каждый отдельно)
 
-- [ ] `admin_list_content_items`
-- [ ] `admin_get_content_item`
-- [ ] `admin_create_content_draft`
-- [ ] `admin_update_content_draft`
-- [ ] `admin_set_content_placements`
-- [ ] `admin_set_content_audience`
-- [ ] `admin_preview_content_audience` (count + safe breakdown, без списка ПДн)
-- [ ] `admin_publish_content`
-- [ ] `admin_unpublish_content`
-- [ ] `admin_archive_content`
-- [ ] `admin_list_content_versions`
-- [ ] `admin_restore_content_version`
-- [ ] `admin_reorder_content_placement`
-- [ ] `admin_safe_delete_content`
-- [ ] `content_items.row_version`
-- [ ] Каждый mutating RPC существующего item принимает expected row_version; create draft — исключение, reorder принимает массив версий
-- [ ] Version mismatch возвращает conflict без частичной записи
-- [ ] Успешная мутация увеличивает `row_version`
-- [ ] Audience replacement транзакционен
-- [ ] Placement replacement транзакционен
-- [ ] Restore транзакционен
-- [ ] Reorder принимает обязательную expected row_version для каждого item
-- [ ] Reorder отклоняет массивы разной длины и duplicate item IDs
-- [ ] Reorder проверяет все версии атомарно под deterministic locks
-- [ ] Conflict откатывает весь reorder без частичного порядка
-- [ ] Reorder увеличивает row_version каждого затронутого item
+- [x] `admin_list_content_items`
+- [x] `admin_get_content_item`
+- [x] `admin_create_content_draft`
+- [x] `admin_update_content_draft`
+- [x] `admin_set_content_placements`
+- [x] `admin_set_content_audience`
+- [x] `admin_preview_content_audience` (count + safe breakdown, без списка ПДн)
+- [x] `admin_publish_content`
+- [x] `admin_unpublish_content`
+- [x] `admin_archive_content`
+- [x] `admin_list_content_versions`
+- [x] `admin_restore_content_version`
+- [x] `admin_reorder_content_placement`
+- [x] `admin_safe_delete_content`
+- [x] `content_items.row_version`
+- [x] Каждый mutating RPC существующего item принимает expected row_version; create draft — исключение, reorder принимает массив версий
+- [x] Version mismatch возвращает conflict без частичной записи
+- [x] Успешная мутация увеличивает `row_version`
+- [x] Audience replacement транзакционен
+- [x] Placement replacement транзакционен
+- [x] Restore транзакционен
+- [x] Reorder принимает обязательную expected row_version для каждого item
+- [x] Reorder отклоняет массивы разной длины и duplicate item IDs
+- [x] Reorder проверяет все версии атомарно под deterministic locks
+- [x] Conflict откатывает весь reorder без частичного порядка
+- [x] Reorder увеличивает row_version каждого затронутого item
 
 ---
 
 ## I. Stage 14 — version snapshot / restore
 
-- [ ] Snapshot включает payload
-- [ ] Snapshot включает template_key + schema_version
-- [ ] Snapshot включает schedule
-- [ ] Snapshot включает placements
-- [ ] Snapshot включает audience relations
-- [ ] Snapshot включает priority/order
-- [ ] Snapshot включает asset refs
-- [ ] Snapshot включает visibility flags (is_hidden)
-- [ ] Restore — одна транзакция
-- [ ] Restore создаёт новую version_number
-- [ ] Restore не молча пропускает недоступный asset
+- [x] Snapshot включает payload
+- [x] Snapshot включает template_key + schema_version
+- [x] Snapshot включает schedule
+- [x] Snapshot включает placements
+- [x] Snapshot включает audience relations
+- [x] Snapshot включает priority/order
+- [x] Snapshot включает asset refs
+- [x] Snapshot включает visibility flags (is_hidden)
+- [x] Restore — одна транзакция
+- [x] Restore создаёт новую version_number
+- [x] Restore не молча пропускает недоступный asset
 - [ ] История версий доступна в Admin
 
 ---
 
 ## J. Stage 14 — mobile RPCs & client behaviour
 
-- [ ] `get_my_content_for_placement`
-- [ ] `dismiss_content_item`
-- [ ] `record_content_event` (allowlist impression|click)
-- [ ] Колонка `event_hour` (UTC hour bucket, пишет только RPC)
-- [ ] UNIQUE `(content_item_id, user_id, event_type, event_hour)`
-- [ ] Rate-limit / dedupe events через эту UNIQUE / upsert-стратегию
-- [ ] Event только если item реально видим caller
-- [ ] Event/audit meta без CTA URL / лишних ПДн
+- [x] `get_my_content_for_placement`
+- [x] `dismiss_content_item`
+- [x] `record_content_event` (allowlist impression|click)
+- [x] Колонка `event_hour` (UTC hour bucket, пишет только RPC)
+- [x] UNIQUE `(content_item_id, user_id, event_type, event_hour)`
+- [x] Rate-limit / dedupe events через эту UNIQUE / upsert-стратегию
+- [x] Event только если item реально видим caller
+- [x] Event/audit meta без CTA URL / лишних ПДн
 - [ ] Retention policy для events
-- [ ] Cache-first mobile
-- [ ] Refresh после app resume
-- [ ] Pull-to-refresh
+- [x] Cache-first mobile
+- [x] Refresh после app resume
+- [x] Pull-to-refresh
 - [ ] Нет N+1 (есть evidence: batch/join)
-- [ ] Нет сырого JSON в UI
-- [ ] Archived/hidden не выдаётся mobile RPC
+- [x] Нет сырого JSON в UI
+- [x] Archived/hidden не выдаётся mobile RPC
 
 ---
 
 ## K. Stage 14 — assets & storage
 
-- [ ] Private Storage bucket
-- [ ] Typed ownership Stage 14 через FK `content_assets.content_item_id`
-- [ ] В Stage 14 нет polymorphic `owner_kind`
-- [ ] Signed upload
-- [ ] Signed download с authz на каждое чтение
-- [ ] MIME whitelist
-- [ ] Size whitelist
-- [ ] Individual asset deletion forbidden while current item references it
-- [ ] `admin_safe_delete_content` разрешён только для archived item
-- [ ] Safe-delete enqueue всех asset paths в `content_media_cleanup_queue` до delete
-- [ ] Safe-delete может каскадно удалить archived item + version history + assets одной транзакцией
-- [ ] Cleanup queue + retry
-- [ ] Нет Base64 в БД
+- [x] Private Storage bucket
+- [x] Typed ownership Stage 14 через FK `content_assets.content_item_id`
+- [x] В Stage 14 нет polymorphic `owner_kind`
+- [x] Signed upload
+- [x] Signed download с authz на каждое чтение
+- [x] MIME whitelist
+- [x] Size whitelist
+- [x] Individual asset deletion forbidden while current item references it
+- [x] `admin_safe_delete_content` разрешён только для archived item
+- [x] Safe-delete enqueue всех asset paths в `content_media_cleanup_queue` до delete
+- [x] Safe-delete может каскадно удалить archived item + version history + assets одной транзакцией
+- [x] Cleanup queue + retry
+- [x] Нет Base64 в БД
 
 ---
 
 ## L. Stage 14 — security assertions
 
-- [ ] `SECURITY DEFINER` только при необходимости
-- [ ] `search_path=''`
-- [ ] `auth.uid()` обязателен
-- [ ] Membership/RBAC на сервере
-- [ ] IDOR tests PASS
-- [ ] SQL security review PASS
-- [ ] SQL behavioral role-play + rollback PASS
-- [ ] Secret scan clean
-- [ ] `git diff --check` clean
-- [ ] Codex APPROVE Stage 14 foundation
+- [x] `SECURITY DEFINER` только при необходимости
+- [x] `search_path=''`
+- [x] `auth.uid()` обязателен
+- [x] Membership/RBAC на сервере
+- [~] IDOR scenarios authored/static-reviewed; execution pending *(local DB stack not run this audit)*
+- [~] SQL security review PASS *(script authored + static-reviewed; live `psql` run not evidenced this audit)*
+- [~] SQL behavioral role-play + rollback PASS *(script authored + static-reviewed; live run not evidenced this audit)*
+- [x] Secret scan clean
+- [x] `git diff --check` clean
+- [x] Codex APPROVE Stage 14 foundation
 
 ---
 
 ## M. Stage 14.1 — Demo governance
 
-- [ ] Инвентаризация hardcoded/demo элементов записана
-- [ ] Демо не удалено до миграции/замены
-- [ ] `origin=demo`
+- [x] Инвентаризация hardcoded/demo элементов записана
+- [x] Демо не удалено до миграции/замены
+- [x] `origin=demo`
 - [ ] Фильтр «Демо» в админке
-- [ ] Архивирование демо через админку
+- [x] Архивирование демо через админку
 - [ ] Удаление демо через админку
 - [ ] Замена демо реальным материалом
-- [ ] Демо не возвращается самопроизвольно после удаления
-- [ ] Demo fallback не маскирует ошибку сервера
-- [ ] Demo-вакансии: «Пример» или вне production-аудитории
-- [ ] Demo-отзывы: «Пример» или вне production-аудитории
+- [x] Демо не возвращается самопроизвольно после удаления
+- [x] Demo fallback не маскирует ошибку сервера
+- [x] Demo-вакансии: «Пример» или вне production-аудитории
+- [x] Demo-отзывы: «Пример» или вне production-аудитории
 - [ ] Codex APPROVE 14.1
 
 ---
@@ -634,13 +634,13 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 ## Z. Design contract
 
 - [ ] Тот же визуальный язык, что у mobile Student Platform
-- [ ] Общий renderer Mobile ↔ Admin Preview
-- [ ] Утверждённые шаблоны вместо свободного конструктора
+- [x] Общий renderer Mobile ↔ Admin Preview
+- [x] Утверждённые шаблоны вместо свободного конструктора
 - [ ] Нет сырых enum в UI
 - [ ] Нет сырых UUID в UI
-- [ ] Нет сырого JSON в UI
+- [x] Нет сырого JSON в UI
 - [ ] Нет developer labels в UI
-- [ ] Понятные тексты на русском
+- [x] Понятные тексты на русском
 - [ ] Современная типографика
 - [ ] Единые радиусы
 - [ ] Единые отступы
@@ -649,9 +649,9 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [ ] Tap outside закрывает клавиатуру
 - [ ] Drag закрывает клавиатуру (где применимо)
 - [ ] Done закрывает клавиатуру
-- [ ] Loading state
-- [ ] Error state
-- [ ] Empty state
+- [x] Loading state
+- [x] Error state
+- [x] Empty state
 - [ ] Success state
 - [ ] Cache-first без мерцания
 - [ ] Изображения без скачков размеров
@@ -664,7 +664,7 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [ ] Текстовый масштаб
 - [ ] Reduce motion
 - [ ] Лицензии изображений/Lottie
-- [ ] Widget/golden tests критичных шаблонов
+- [~] Widget/golden tests критичных шаблонов *(widget yes; golden files absent)*
 - [ ] Дизайн не выглядит как техническая форма
 - [ ] Дизайн не отличается от основного приложения
 
@@ -748,13 +748,13 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 
 ## AD. Final stop
 
-- [ ] Все технически возможные локальные подэтапы выполнены или заблокированы в CURRENT_TASK
-- [ ] Каждый завершённый подэтап имеет Codex APPROVE
-- [ ] Roadmap обновлён
-- [ ] CURRENT_TASK обновлён
-- [ ] Checklist отражает факт
-- [ ] Migrations подготовлены, remote не применены
-- [ ] Remote данные не изменены
-- [ ] Push не выполнен
-- [ ] Git tree clean или status объяснён
-- [ ] Финальный отчёт владельцу (14 разделов brief)
+- [~] Все технически возможные локальные подэтапы выполнены или заблокированы в CURRENT_TASK *(14.1/Z residuals open)*
+- [x] Каждый завершённый подэтап имеет Codex APPROVE
+- [x] Roadmap обновлён
+- [x] CURRENT_TASK обновлён
+- [x] Checklist отражает факт
+- [x] Migrations подготовлены, remote не применены
+- [x] Remote данные не изменены
+- [x] Push не выполнен
+- [x] Git tree clean или status объяснён
+- [x] Финальный отчёт владельцу (14 разделов brief) *(see STAGE_14_21_ACCEPTANCE_AUDIT.md + this closeout)*

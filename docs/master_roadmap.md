@@ -15,7 +15,7 @@
 - Codex thread: `019fa373-81f2-7962-a8c9-81d86cb62311`
 - Remote project: `gwdanmwluhrcfxbnplwd`
 - Статус карты: **ACTIVE**
-- Следующий рекомендуемый этап: **Stage 14 — Managed Content Platform** (после Codex APPROVE на docs gate)
+- Content Platform Stages **14–21 локально закрыты** на `feature/content-platform` (remote apply / Edge deploy / Stage 14.1 residuals — owner-gated)
 - Owner residuals Stage 13 (не блокируют 14–19): PHYSICAL OCR / two-device topic race / controlled push / REAL XLSX
 - Контрольные документы: `docs/content_platform/CONTENT_PLATFORM_SPEC.md`, `docs/content_platform/ACCEPTANCE_CHECKLIST.md`, `docs/agent_coordination/CURRENT_TASK.md`
 
@@ -905,45 +905,45 @@ Status: **DONE (local)** / Codex **APPROVE** (`2588581`, `691f43e`, `74c779d`) �
 
 Понятия:
 
-- [ ] content item;
-- [ ] approved template;
-- [ ] placement;
-- [ ] audience (нормализованные связи, не UUID-список в клиентском payload);
-- [ ] asset;
-- [ ] version + restore;
-- [ ] draft / published / archived;
-- [ ] publication schedule;
-- [ ] priority / order;
-- [ ] origin: demo / admin / import / user_submission;
-- [ ] audit;
-- [ ] impressions / clicks без лишнего слежения.
+- [x] content item;
+- [x] approved template;
+- [x] placement;
+- [x] audience (нормализованные связи, не UUID-список в клиентском payload);
+- [x] asset;
+- [x] version + restore; *(Admin version-history UI residual)*
+- [x] draft / published / archived;
+- [x] publication schedule;
+- [x] priority / order;
+- [x] origin: demo / admin / import / user_submission;
+- [x] audit;
+- [x] impressions / clicks без лишнего слежения.
 
 Аудитории:
 
-- [ ] все пользователи;
-- [ ] одна или несколько групп;
-- [ ] явный набор пользователей;
-- [ ] комбинации только по серверным правилам.
+- [x] все пользователи;
+- [x] одна или несколько групп;
+- [x] явный набор пользователей;
+- [x] комбинации только по серверным правилам.
 
 Placements v1:
 
-- [ ] `home_promo`;
-- [ ] `profile_feed`;
-- [ ] `reference`;
-- [ ] расширение существующего news targeting (не rewrite news backend).
+- [x] `home_promo`;
+- [x] `profile_feed`;
+- [x] `reference`;
+- [x] расширение существующего news targeting (не rewrite news backend).
 
 Обязательно:
 
-- [ ] preview аудитории до публикации (число получателей без лишних ПДн);
-- [ ] история версий и восстановление;
-- [ ] расписание показа;
-- [ ] скрытие / архив / безопасное удаление;
-- [ ] cache-first mobile + refresh после resume / pull-to-refresh;
-- [ ] отсутствие N+1;
-- [ ] отсутствие сырого JSON в UI;
-- [ ] только утверждённые шаблоны + серверная валидация payload/schema_version;
-- [ ] RLS / RPC / grants / security review;
-- [ ] не создавать новые таблицы, пока нельзя безопасно расширить существующие.
+- [x] preview аудитории до публикации (число получателей без лишних ПДн);
+- [~] история версий и восстановление; *(SQL yes; Admin UI residual)*
+- [x] расписание показа;
+- [~] скрытие / архив / безопасное удаление; *(archive yes; Admin safe-delete UI residual)*
+- [x] cache-first mobile + refresh после resume / pull-to-refresh;
+- [ ] отсутствие N+1; *(formal evidence residual)*
+- [x] отсутствие сырого JSON в UI;
+- [x] только утверждённые шаблоны + серверная валидация payload/schema_version;
+- [~] RLS / RPC / grants / security review; *(authored/static-reviewed; live psql not run this audit)*
+- [x] не создавать новые таблицы, пока нельзя безопасно расширить существующие.
 
 ### Stage 14.1 — Demo content governance
 
