@@ -8,6 +8,8 @@ import 'package:student_platform/src/services/push/push_notification_service.dar
 import 'package:student_platform/src/ui/authentication/screens/change_password_screen.dart';
 import 'package:student_platform/src/ui/chats/core/chat_message_cache_store.dart';
 import 'package:student_platform/src/ui/chats/data/dm_api.dart';
+import 'package:student_platform/src/ui/home/home_dashboard_service.dart';
+import 'package:student_platform/src/ui/home/news_image_disk_cache.dart';
 import 'package:student_platform/src/ui/learning/state/team_cubit.dart';
 
 class AuthService {
@@ -53,6 +55,11 @@ class AuthService {
     await DmApi.clearSessionState();
     await TeamCubit.clearSessionCaches();
     await ChatMessageCacheStore.clearOnLogout();
+    // Stage 15.2: never leave user A's news JSON/images for user B.
+    await PublishedNewsCache(
+      currentUserId: () => _sb.auth.currentUser?.id,
+    ).clearAll();
+    await NewsImageDiskCache().clear();
     await _sb.auth.signOut();
     AppSession.clear();
     if (context.mounted) context.go('/login');

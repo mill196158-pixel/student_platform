@@ -1,8 +1,8 @@
 # CURRENT_TASK
 
-* Status: **STAGE_15_2_NEWS_AUDIENCE** / Stage 15.1 Codex **APPROVE**
+* Status: **STAGE_15_3_PROFILE_FEED** / Stage 15.2 Codex **APPROVE**
 * Active Stage: **15 — Home / News / Profile**
-* Exact substage: **15.2** news audience extension (junctions + locked semantics)
+* Exact substage: **15.3** profile feed placement
 * Branch: `feature/content-platform`
 * Worktree: `/Users/annasuvorova/student_platform_content`
 * Codex thread: `019fa373-81f2-7962-a8c9-81d86cb62311`
@@ -10,45 +10,28 @@
 
 ## Done
 
-* Docs gate Codex APPROVE
-* Stage 14A SQL foundation Codex APPROVE
-* Stage 14B + hotfix Codex APPROVE
-* Stage 15.1 Home promo vertical slice Codex **APPROVE**
-  * Dual-read Mobile + Admin editor + shared renderer
-  * Residual: image_asset_id presentation deferred until media path
+* Stage 15.1 APPROVE + commit `183efc8`
+* Stage 15.2 news audience extension Codex **APPROVE** (pending local commit)
 
-## Remaining (15.2)
+## Remaining
 
-* Extend news audience with `news_audience_groups` / `news_audience_users`
-* Locked matching semantics (SPEC §15.2)
-* Preview recipients + backward compatibility
-* Tests + Codex plan → implement → full diff → APPROVE
+* Local commit 15.2
+* Stage 15.3 profile_feed (no auto-copy from news)
+* Then Stage 16+
 
 ## Migrations
 
-* `20260729133000_stage14_managed_content_foundation.sql` — local only
-* 15.2 will add a new local migration (not remote-applied)
+* `20260729140000_stage15_2_news_audience_extension.sql` — local only
 
 ## Tests
 
-* 15.1 suite green locally
-* Local Supabase CLI still BLOCKED (`supabase-go` missing)
+* news audience Dart tests + cache scope test green
+* Local Supabase CLI still BLOCKED
 
 ## Codex verdict
 
-* 15.1: **APPROVE**
-* 15.2: pending plan audit
-
-## Next step
-
-1. Codex plan audit for 15.2
-2. Implement news audience junctions locally
-3. Tests → full diff → fix P0/P1 → APPROVE → local commit
+* 15.2: **APPROVE**
 
 ## Hard bans
 
-* No remote Supabase apply
-* No Edge Function deploy
-* No GitHub push
-* No real data import
-* No `service_role` in Flutter / Admin Web
+* No remote apply / Edge deploy / push / real import

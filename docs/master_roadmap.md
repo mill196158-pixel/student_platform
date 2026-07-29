@@ -1089,7 +1089,7 @@ Status: **PLANNED**
 
 ## Stage 20 — AI-функции (только спецификация)
 
-Status: **SPEC ONLY** — не внедрять платный AI автоматически
+Status: **SPEC DRAFTED** — не DONE; Codex ещё не APPROVE; платный AI не внедрять
 
 Варианты для документа:
 
@@ -1114,7 +1114,7 @@ Status: **SPEC ONLY** — не внедрять платный AI автомат
 
 ## Stage 21 — Перенос инфраструктуры в РФ (только roadmap)
 
-Status: **ROADMAP ONLY** — перенос сейчас не выполнять
+Status: **SPEC DRAFTED** — не DONE; Codex ещё не APPROVE; перенос сейчас не выполнять
 
 План:
 

@@ -314,19 +314,50 @@ Managed `home_promo` + `home_promo_v1`; shared `StudentHomePromoCard` in `packag
 
 ### 15.2 News audience (locked semantics)
 
-Add `news_audience_groups`, `news_audience_users`.
+Add `news_audience_groups`, `news_audience_users` (composite PKs, lookup indexes, FORCE RLS, no client DML). Do **not** rewrite the news backend.
 
-Single helper for preview + `get_my_published_news`:
+**Legacy column projection** (enum stays `all|group` for compatibility):
 
-1. `audience_type='all'` **and** both junctions empty → all students (legacy).
+- Junctions empty → existing legacy semantics (`all` / single `group` + `audience_group_id`).
+- Any junction exists → `audience_type` projected as `'group'` (never `'all'` with junctions).
+- Groups / mixed → `audience_group_id` = first deduplicated group id (old clients).
+- Users-only → `audience_group_id = NULL` with `audience_type='group'` (legacy readers see no single-group match; new resolver uses junctions).
+- Cross-table invariants via deferred constraint triggers (CHECK cannot inspect junctions).
+
+**Shared resolver** `private.news_audience_matches_user(post_id, user_id)` used by:
+
+- `get_my_published_news`
+- `mark_news_seen`
+- admin recipient preview (counts only, no PII list)
+- any visibility gate used before signed media for news
+
+Match rules:
+
+1. `audience_type='all'` **and** both junctions empty → all **eligible** students.
 2. `audience_type='group'` + `audience_group_id` set **and** junctions empty → that group (legacy).
 3. If **any** junction row exists → junctions are the **sole** match source (legacy columns ignored for matching). Match = group membership OR explicit user.
-4. Transactional `admin_set_news_audience`:
-   - `all` → clear junctions; `audience_type='all'`; `audience_group_id=null`;
-   - `groups` → require ≥1 group; clear users; set `audience_group_id` to first group for old clients; full junction list for new predicate; `audience_type='group'`;
-   - `users` / `groups_and_users` → require non-empty junctions; never leave `audience_type='all'` with non-empty junctions.
-5. Invariant: forbid `audience_type='all'` while junctions non-empty.
-6. Hidden/archived/unpublished never leak via RPC/cache/signed URL.
+4. Eligibility uniform everywhere: active user + active non-ended enrollment. Blocked / transferred / unknown / unenrolled never match.
+
+**Transactional `admin_set_news_audience`** (`content.write`, draft-only, locks row + `expected_version`):
+
+- `all` → clear junctions; `audience_type='all'`; `audience_group_id=null`
+- `groups` → ≥1 group; clear users; project first group + full group junctions; `audience_type='group'`
+- `users` / `groups_and_users` → non-empty junctions; never leave `audience_type='all'` with junctions
+- Audit meta: mode + counts only (not user-id arrays)
+
+**Lifecycle coverage** (not only the setter):
+
+- `admin_update_news_draft` rejects direct audience-field patches (use setter only).
+- Snapshots include normalized audience ids/mode; restore + duplicate copy junctions transactionally.
+- Publish rejects invalid/empty targeted audiences.
+- Published posts: unpublish → edit audience → publish.
+
+**Client dual-read (fail-closed writes):**
+
+- Missing new RPCs: legacy all/single-group editing remains; multi-group/user controls disabled with explicit compatibility state; never silent collapse into legacy fields.
+- Cache/image bytes user-scoped; evict/replace on logout, account switch, audience revocation, archive/unpublish, successful refresh. Test A→B same device + revoked-audience stale cache.
+
+Hidden/archived/unpublished never leak via RPC/cache/signed URL.
 
 ### 15.3 Profile feed
 
