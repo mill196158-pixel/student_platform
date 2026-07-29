@@ -12,30 +12,30 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 
 ## A. Process & control system
 
-- [ ] `docs/master_roadmap.md` содержит Stages 14–21
-- [ ] Исторические §14–§16 roadmap помечены как Appendix A–C
-- [ ] Создан `docs/content_platform/CONTENT_PLATFORM_SPEC.md`
-- [ ] Создан этот `ACCEPTANCE_CHECKLIST.md` с атомарными пунктами
-- [ ] Обновлён `docs/agent_coordination/CURRENT_TASK.md`
-- [ ] Обновлён `AGENTS.md` (Content Platform read/gate rules)
-- [ ] Создан `.cursor/rules/content-platform.mdc` (`alwaysApply: true`)
-- [ ] Docs gate отправлен в Codex thread `019fa373-81f2-7962-a8c9-81d86cb62311`
-- [ ] Docs gate получил Codex **APPROVE**
+- [x] `docs/master_roadmap.md` содержит Stages 14–21
+- [x] Исторические §14–§16 roadmap помечены как Appendix A–C
+- [x] Создан `docs/content_platform/CONTENT_PLATFORM_SPEC.md`
+- [x] Создан этот `ACCEPTANCE_CHECKLIST.md` с атомарными пунктами
+- [x] Обновлён `docs/agent_coordination/CURRENT_TASK.md`
+- [x] Обновлён `AGENTS.md` (Content Platform read/gate rules)
+- [x] Создан `.cursor/rules/content-platform.mdc` (`alwaysApply: true`)
+- [x] Docs gate отправлен в Codex thread `019fa373-81f2-7962-a8c9-81d86cb62311`
+- [x] Docs gate получил Codex **APPROVE**
 - [ ] Перед каждым code-подэтапом архитектура + схема отправлены в Codex
 - [ ] После каждого code-подэтапа полный diff + тесты отправлены в Codex
 - [ ] P0/P1 исправлены до APPROVE подэтапа
 - [ ] Подэтап не отмечен DONE без Codex APPROVE
 - [ ] После APPROVE выполнен переход к следующему локальному подэтапу
 - [ ] В конце цепочки запрошен общий Codex review
-- [ ] Remote migrations не применялись без владельца
-- [ ] Edge Functions не деплоились без владельца
-- [ ] GitHub push не выполнялся без владельца
-- [ ] Force push не использовался
-- [ ] Реальные данные не импортировались без владельца
-- [ ] `service_role` не хранится во Flutter Web / Admin Web
-- [ ] Существующие данные не удалялись
-- [ ] Уже применённые миграции не редактировались
-- [ ] Дублирующий roadmap не создавался
+- [x] Remote migrations не применялись без владельца
+- [x] Edge Functions не деплоились без владельца
+- [x] GitHub push не выполнялся без владельца
+- [x] Force push не использовался
+- [x] Реальные данные не импортировались без владельца
+- [x] `service_role` не хранится во Flutter Web / Admin Web
+- [x] Существующие данные не удалялись
+- [x] Уже применённые миграции не редактировались
+- [x] Дублирующий roadmap не создавался
 
 ---
 
@@ -179,12 +179,17 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [ ] `admin_reorder_content_placement`
 - [ ] `admin_safe_delete_content`
 - [ ] `content_items.row_version`
-- [ ] Каждый mutating Admin RPC принимает `p_expected_row_version`
+- [ ] Каждый mutating RPC существующего item принимает expected row_version; create draft — исключение, reorder принимает массив версий
 - [ ] Version mismatch возвращает conflict без частичной записи
 - [ ] Успешная мутация увеличивает `row_version`
 - [ ] Audience replacement транзакционен
 - [ ] Placement replacement транзакционен
 - [ ] Restore транзакционен
+- [ ] Reorder принимает обязательную expected row_version для каждого item
+- [ ] Reorder отклоняет массивы разной длины и duplicate item IDs
+- [ ] Reorder проверяет все версии атомарно под deterministic locks
+- [ ] Conflict откатывает весь reorder без частичного порядка
+- [ ] Reorder увеличивает row_version каждого затронутого item
 
 ---
 

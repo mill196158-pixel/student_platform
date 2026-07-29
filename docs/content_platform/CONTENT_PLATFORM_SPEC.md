@@ -195,7 +195,17 @@ Mobile/admin lists for a placement sort by:
 2. `content_items.priority` DESC  
 3. `published_at` DESC NULLS LAST  
 
-`admin_reorder_content_placement(p_placement, p_ordered_ids[], p_row_versions?)` updates only placement rows.
+`admin_reorder_content_placement(
+  p_placement text,
+  p_ordered_ids uuid[],
+  p_expected_row_versions int[]
+)` requires equal-length arrays, rejects duplicate IDs, locks affected
+`content_items` in deterministic UUID order, validates every expected
+`row_version`, updates only placement `sort_order`, and increments
+`content_items.row_version` for every affected item. Any mismatch rolls back
+the whole reorder.
+
+Sort order is stored only on placement rows; item `row_version` changes only as a concurrency token.
 
 ### 2.5 Audience mode consistency
 
@@ -212,8 +222,9 @@ Single helper `private.content_item_visible_to_user(item_id, user_id)` shared by
 
 ### 2.6 Optimistic concurrency
 
-Mutating admin RPCs take `p_expected_row_version int`. Mismatch → conflict error. Success increments `row_version`.  
-Applies to: update draft, set placements, set audience, publish, unpublish, archive, restore version, reorder.
+Mutating admin RPCs that touch an existing item take `p_expected_row_version int` (single-item) or `p_expected_row_versions int[]` (reorder). Mismatch → conflict error and full rollback. Success increments `row_version`.  
+Applies to: update draft, set placements, set audience, publish, unpublish, archive, restore version, reorder.  
+Exception: `admin_create_content_draft` has no prior row_version.
 
 ### 2.7 Payload validation (fail-closed; no pg_jsonschema)
 
