@@ -1,8 +1,10 @@
 library;
 
 export 'src/content/content_models.dart';
+export 'src/content/reference_article_models.dart';
 export 'src/content/student_home_promo_card.dart';
 export 'src/content/student_profile_feed_card.dart';
+export 'src/content/student_reference_article_card.dart';
 export 'src/content/subject_card_models.dart';
 export 'src/content/student_subject_card_preview.dart';
 export 'src/home/home_preview_models.dart';

@@ -256,7 +256,8 @@ CTA rules v1:
 |---|---|---|---|
 | `home_promo_v1` | 1 | `{home_promo}` | title, subtitle, icon_key, gradient_colors[2..4], image_asset_id?, cta_label, cta_route?, cta_url?, dismissible, reshow_after_hours? |
 | `profile_feed_card_v1` | 1 | `{profile_feed}` | title, subtitle, image_asset_id?, cta_label, cta_route?, cta_url? |
-| `reference_article_v1` | 1 | `{reference}` | category, icon_key, short_text, blocks[] (`text\|image\|file\|link\|cta` only), cta? |
+| `reference_article_v1` | 1 | `{reference}` | **Legacy/compat:** requires `category` (string), `icon_key`, `short_text`, blocks[] (`text\|image\|file\|link\|cta`), optional `cta`. Category string is **not** identity SoT once categories table exists. |
+| `reference_article_v1` | 2 | `{reference}` | **Canonical for new Admin writes:** `icon_key`, `short_text`, blocks[] (`text\|image\|file\|link\|cta`), optional top-level `cta`. **No** client-controlled `category` field — category SoT is `reference_categories` FK. Server may denormalize category title into read models only. |
 
 Placement must be ∈ `allowed_placements`.
 
@@ -476,7 +477,26 @@ Private signed subject media for card images/files. No Base64 in DB. Local Edge 
 
 ### 16.3 Reference
 
-Content items with `reference_article_v1`; report-error → moderation entity `content_correction`; no HTML/JS.
+Managed reference section on the Info tab. No arbitrary HTML/JS.
+
+#### Locked contracts (Codex plan)
+
+1. **Articles** reuse Stage 14 `content_items` with `template_key=reference_article_v1` and placement `reference` only — no separate article table.
+2. **Categories SoT:** `reference_categories` (`id`, stable `key`, `title`, `icon_key`, `status`, `sort_order`, `row_version`). Article↔category via FK join table (one category per article).
+3. **Schema versions:** new Admin writes use **`schema_version=2`** (no client `category` in payload). Stage 14 **`schema_version=1`** remains readable/valid for compatibility; its `category` string is never identity. Server may denormalize published category title into Mobile/Admin read models.
+4. **Publish gates:** published category + placement `reference` + valid payload (v1 or v2) + valid linked assets.
+5. **Ordering:** article order = `content_item_placements.sort_order`; category order = concurrency-safe category reorder RPC (expected `row_version`).
+6. **Payload:** typed `icon_key`, `short_text`, allowlisted blocks `text|image|file|link|cta` only; optional top-level CTA; no HTML/JS.
+7. **Admin auth:** draft save = `content.write` + expected versions; publish/archive/restore = `content.publish`; audience/preview via Stage 14 resolver.
+8. **Version/restore:** snapshots include `reference_category_id`. Restore recreates association transactionally with payload/audience/placement, creates a **new** content version, fails loudly if category UUID is missing. Restore-to-draft may keep an archived category; **publish** still requires a **published** category.
+9. **Media:** `content_assets` + local **content-media** signed Edge boundary (upload intent → finalize from Storage metadata → authorized download → leased cleanup). Do **not** reuse subject-media ownership/paths; never return storage paths to clients.
+10. **Mobile read:** one batched RPC returns visible categories + articles (no N+1; no signed URLs in card payload).
+11. **Cache:** user-scoped, cache-first; access denial clears cache; successful empty does **not** resurrect demo; missing RPC may show only explicitly labeled legacy/demo fallback.
+12. **Corrections:** `submit_content_correction` only for deliverable **reference** articles (`reference_article_v1` + placement `reference`); concurrency-safe anti-spam (advisory/row lock per reporter); reporter PII never returned to Admin list clients.
+13. **Correction lifecycle (exact):** `content_corrections.content_item_id` becomes **nullable** `ON DELETE SET NULL` with **immutable snapshots** (`item_title`, `template_key`, `schema_version` captured at submit). `admin_safe_delete_content` **rejects** while any **open** correction exists for the item. After all corrections are closed, delete may proceed and journal rows remain (with null `content_item_id` + snapshots).
+14. **Resolve:** reject requires reason; all resolve/lifecycle actions audited.
+
+**Status:** contracts Codex plan **APPROVE**; local implementation in progress (hardening migration + Admin/Mobile/student_ui). Remote apply / Edge deploy / push forbidden. Content-media Edge provides signed download locally; full signed-upload intent/finalize for `content_assets` remains a local follow-up residual if not covered in the same commit.
 
 ---
 

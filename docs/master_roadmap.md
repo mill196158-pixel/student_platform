@@ -993,7 +993,7 @@ Status: **DONE (local)** / Codex **APPROVE** (`183efc8`, `001e1f0`, `cebfcf5`) �
 
 ## Stage 16 — Предметы и справочник
 
-Status: **16.2 DONE (local)** / Codex **APPROVE_WITH_NOTES**; **16.3** next; remote apply / Edge deploy pending owner
+Status: **16.2 DONE (local)** / Codex **APPROVE_WITH_NOTES**; **16.3 DONE (local)** / Codex **APPROVE** — §S closed; remote apply / Edge deploy pending owner
 
 ### 16.1 Карточка предмета (Admin visual editor)
 
@@ -1015,21 +1015,22 @@ Status: **16.2 DONE (local)** / Codex **APPROVE_WITH_NOTES**; **16.3** next; rem
 
 ### 16.3 Справочный раздел
 
-- [ ] категории, иконка, заголовок, короткий/полный текст, изображения, файлы, ссылки, CTA;
-- [ ] порядок, аудитория, draft/publish/archive;
-- [ ] Admin Preview + mobile cache-first renderer;
-- [ ] «Сообщить об ошибке»;
-- [ ] без произвольного HTML/JS.
+- [x] категории, иконка, заголовок, короткий/полный текст, изображения, файлы, ссылки, CTA;
+- [x] порядок, аудитория, draft/publish/archive;
+- [x] Admin Preview + mobile cache-first renderer;
+- [x] «Сообщить об ошибке»;
+- [x] без произвольного HTML/JS.
+- Codex **APPROVE** 16.3 (local commit on `feature/content-platform`; apply/deploy owner-gated).
 
 ---
 
 ## Stage 17 — Вакансии
 
-Status: **FOUNDATION DRAFT (local)** / Codex **APPROVE_WITH_NOTES** (`5629da9`) — remote apply pending owner
+Status: **UI SCAFFOLD (local, uncommitted)** / SQL foundation Codex **APPROVE_WITH_NOTES** (`5629da9`) — product UI not APPROVE; remote apply pending owner; checklist §T unchecked
 
 - [ ] отдельная доменная модель (не generic content JSON);
-- [ ] создание админом; предложение пользователем через форму;
-- [ ] user submission никогда не публикуется сразу;
+- [ ] создание админом; предложение пользователем через форму; *(local Admin editor + ProposeVacancyScreen scaffold)*
+- [ ] user submission никогда не публикуется сразу; *(enforced in VacancySubmissionService + migration)*
 - [ ] поля: название, организация, описание, формат, локация/удалённо, зарплата, требования, контакты, ссылка, срок, аудитория, медиа, автор, источник, дата проверки;
 - [ ] процесс: `draft/submitted → moderation → approved/published → expired/archived/rejected`;
 - [ ] предпросмотр, срок окончания, жалоба, защита контактов, проверка ссылок, причина отклонения, журнал модерации;
@@ -1040,7 +1041,7 @@ Status: **FOUNDATION DRAFT (local)** / Codex **APPROVE_WITH_NOTES** (`5629da9`) 
 
 ## Stage 18 — Отзывы, баллы и единая модерация
 
-Status: **FOUNDATION DRAFT (local)** / Codex **APPROVE_WITH_NOTES** (`5629da9`) — расширяет 13.6; remote apply pending owner
+Status: **UI SCAFFOLD (local, uncommitted)** / SQL foundation Codex **APPROVE_WITH_NOTES** (`5629da9`) — расширяет 13.6; product UI not APPROVE; remote apply pending owner; checklist §U–§W unchecked
 
 - [ ] отзывы для предусмотренных сущностей (преподаватель, предмет; вакансия/работодатель — только после отдельного продуктового решения);
 - [ ] 1 одобренный отзыв → 1 внутренний балл (не деньги, не вывод);
@@ -1061,7 +1062,7 @@ Status: **FOUNDATION DRAFT (local)** / Codex **APPROVE_WITH_NOTES** (`5629da9`) 
 
 ## Stage 19 — Import Studio
 
-Status: **FOUNDATION DRAFT (local)** / Codex **APPROVE_WITH_NOTES** (`3772b4a`) — partial domains; remote apply pending owner
+Status: **UI SCAFFOLD (local, uncommitted)** / SQL foundation Codex **APPROVE_WITH_NOTES** (`3772b4a`) — Admin hub dry-run state machine local; product not APPROVE; remote apply pending owner; checklist §X/§Y unchecked
 
 Домены:
 

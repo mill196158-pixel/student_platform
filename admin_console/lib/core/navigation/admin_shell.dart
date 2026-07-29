@@ -47,6 +47,13 @@ class AdminShell extends StatelessWidget {
         isVisible: local || caps.canReadContent,
       ),
       _AdminDestination(
+        label: 'Справочник',
+        icon: Icons.library_books_outlined,
+        path: '/content/reference',
+        section: 'Контент',
+        isVisible: local || caps.canReadContent,
+      ),
+      _AdminDestination(
         label: 'Предметы',
         icon: Icons.menu_book_outlined,
         path: '/academic/subjects',

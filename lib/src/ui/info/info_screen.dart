@@ -1,16 +1,25 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import 'package:student_ui/student_ui.dart';
 
 import '../../core/auth_session.dart';
 import '../../data/academic_context_service.dart';
 import '../../services/auth_service.dart';
+import 'content_media_service.dart';
 import 'info_subjects_cache.dart';
+import 'subject_attachment_open.dart';
 import 'subject_difficulty.dart';
+import 'reference_service.dart';
 import 'subject_info_screen.dart';
 import 'useful_subject.dart';
 import 'useful_subjects_repository.dart';
@@ -30,6 +39,8 @@ class InfoScreen extends StatefulWidget {
     this.academicContextService,
     this.planLoader,
     this.debugUserId,
+    this.referenceService,
+    this.initialSectionName,
   });
 
   /// Optional DI for tests; production uses [UsefulSubjectsRepository].
@@ -43,6 +54,16 @@ class InfoScreen extends StatefulWidget {
 
   /// Optional auth user id override for cache-key tests without Supabase auth.
   final String? debugUserId;
+
+
+
+  /// Optional DI for tests; production uses [ReferenceService].
+  final ReferenceService? referenceService;
+
+  /// Opens a non-default Info tab section without navigating the section sheet.
+  /// Allowed values: `subjects`, `help`, `jobs`.
+  @visibleForTesting
+  final String? initialSectionName;
 
   @visibleForTesting
   static void debugClearMemoryCache() => _InfoScreenState.clearMemoryCache();
@@ -69,6 +90,11 @@ class _InfoScreenState extends State<InfoScreen> {
   _UsefulSection _section = _UsefulSection.subjects;
   bool _controlGroupsTouched = false;
   final Set<String> _collapsedControlGroups = {};
+  late final ReferenceService _referenceService;
+  ReferenceLoadResult _reference =
+      const ReferenceLoadResult(isDemoFallback: true);
+  int _referenceLoadGeneration = 0;
+  bool _referenceLoadInFlight = false;
 
   UsefulSubjectsRepository get _subjectsRepository =>
       widget.subjectsRepository ?? UsefulSubjectsRepository();
@@ -81,6 +107,17 @@ class _InfoScreenState extends State<InfoScreen> {
   @override
   void initState() {
     super.initState();
+    _referenceService = widget.referenceService ??
+        ReferenceService(
+          currentUserId: () =>
+              widget.debugUserId ??
+              Supabase.instance.client.auth.currentUser?.id,
+        );
+    if (widget.initialSectionName == 'help') {
+      _section = _UsefulSection.help;
+    } else if (widget.initialSectionName == 'jobs') {
+      _section = _UsefulSection.jobs;
+    }
     InfoSubjectsCache.attachMemoryClear(clearMemoryCache);
     InfoSubjectsCache.revision.addListener(_onSubjectsCacheInvalidated);
     // Instant RAM cache: show already-loaded subjects on the first frame and
@@ -92,6 +129,44 @@ class _InfoScreenState extends State<InfoScreen> {
       _refreshSilently();
     } else {
       _future = _loadWithCache();
+    }
+    unawaited(_loadReference());
+  }
+
+
+  Future<void> _loadReference() async {
+    if (_referenceLoadInFlight) return;
+    final generation = ++_referenceLoadGeneration;
+    _referenceLoadInFlight = true;
+    try {
+      final cached = await _referenceService.loadCached();
+      if (!mounted || generation != _referenceLoadGeneration) return;
+      if (cached.bundle != null && cached.bundle!.articles.isNotEmpty) {
+        setState(() => _reference = cached);
+      }
+      try {
+        final next = await _referenceService.load();
+        if (!mounted || generation != _referenceLoadGeneration) return;
+        setState(() => _reference = next);
+      } catch (error) {
+        debugPrint('[info] reference load failed: $error');
+        if (!mounted || generation != _referenceLoadGeneration) return;
+        if (_reference.bundle != null &&
+            _reference.bundle!.articles.isNotEmpty) {
+          setState(
+            () => _reference = ReferenceLoadResult(
+              bundle: _reference.bundle,
+              loadError: true,
+            ),
+          );
+        } else {
+          setState(
+            () => _reference = const ReferenceLoadResult(loadError: true),
+          );
+        }
+      }
+    } finally {
+      _referenceLoadInFlight = false;
     }
   }
 
@@ -446,7 +521,12 @@ class _InfoScreenState extends State<InfoScreen> {
         key: const ValueKey('help-search'),
         hintText: 'Найти в справочнике…',
         builder: (context, query) => [
-          _HelpSection(query: query),
+          _HelpSection(
+            query: query,
+            reference: _reference,
+            referenceService: _referenceService,
+            onRefresh: _loadReference,
+          ),
         ],
       );
     }
@@ -638,6 +718,10 @@ class _InfoScreenState extends State<InfoScreen> {
     );
     if (!mounted || selected == null || selected == _section) return;
     setState(() => _section = selected);
+    if (selected == _UsefulSection.help) {
+      unawaited(_loadReference());
+    } else if (selected == _UsefulSection.jobs) {
+      }
   }
 
   void _showInfoSheet(BuildContext context) {
@@ -2091,7 +2175,9 @@ class _FancySearchPanel extends StatelessWidget {
 }
 
 class _HelpSummaryCard extends StatelessWidget {
-  const _HelpSummaryCard();
+  final bool showLegacyDemoBadge;
+
+  const _HelpSummaryCard({this.showLegacyDemoBadge = false});
 
   @override
   Widget build(BuildContext context) {
@@ -2142,7 +2228,9 @@ class _HelpSummaryCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Доступы, документы, программы, карта и частые вопросы',
+                  showLegacyDemoBadge
+                      ? 'Пример — managed RPC ещё не применён'
+                      : 'Доступы, документы, программы, карта и частые вопросы',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: Colors.white.withValues(alpha: 0.88),
                       ),
@@ -2233,85 +2321,66 @@ class _ChoiceSheetTile extends StatelessWidget {
   }
 }
 
-class _HelpItem {
-  final String group;
-  final IconData icon;
-  final String title;
-  final String subtitle;
-
-  const _HelpItem({
-    required this.group,
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-  });
-
-  bool matches(String query) {
-    if (query.isEmpty) return true;
-    final q = query.toLowerCase();
-    return group.toLowerCase().contains(q) ||
-        title.toLowerCase().contains(q) ||
-        subtitle.toLowerCase().contains(q);
-  }
-}
-
-const _helpItems = <_HelpItem>[
-  _HelpItem(
-    group: 'Доступы',
-    icon: Icons.login_rounded,
-    title: 'Как зайти в личный кабинет',
-    subtitle: 'Краткая инструкция по входу и восстановлению доступа.',
-  ),
-  _HelpItem(
-    group: 'Доступы',
-    icon: Icons.download_rounded,
-    title: 'Как скачать нужные материалы',
-    subtitle: 'Где искать файлы, методички и шаблоны.',
-  ),
-  _HelpItem(
-    group: 'Документы',
-    icon: Icons.description_outlined,
-    title: 'Как заказать справку',
-    subtitle: 'Основные действия для получения справки в университете.',
-  ),
-  _HelpItem(
-    group: 'Программы',
-    icon: Icons.computer_rounded,
-    title: 'Как установить нужные программы',
-    subtitle: 'AutoCAD, Revit, офисные программы и другое ПО.',
-  ),
-  _HelpItem(
-    group: 'Карта и аудитории',
-    icon: Icons.map_outlined,
-    title: 'Карта и аудитории',
-    subtitle: 'Как найти корпус, кабинет или аудиторию.',
-  ),
-  _HelpItem(
-    group: 'Частые вопросы',
-    icon: Icons.help_outline_rounded,
-    title: 'Частые вопросы',
-    subtitle: 'Ответы на бытовые вопросы по учёбе.',
-  ),
-];
-
 class _HelpSection extends StatelessWidget {
   final String query;
+  final ReferenceLoadResult reference;
+  final ReferenceService referenceService;
+  final Future<void> Function() onRefresh;
+  final ContentMediaService _mediaService;
 
-  const _HelpSection({this.query = ''});
+  _HelpSection({
+    this.query = '',
+    required this.reference,
+    required this.referenceService,
+    required this.onRefresh,
+    ContentMediaService? mediaService,
+  }) : _mediaService = mediaService ?? ContentMediaService();
 
   @override
   Widget build(BuildContext context) {
-    final filtered = _helpItems.where((item) => item.matches(query)).toList();
-    final groups = <String, List<_HelpItem>>{};
-    for (final item in filtered) {
-      groups.putIfAbsent(item.group, () => []).add(item);
+    if (reference.hideReference) {
+      return Column(
+        children: [
+          const _HelpSummaryCard(),
+          const SizedBox(height: 12),
+          const _EmptyState(
+            text: 'Справочник пока пуст',
+            compact: true,
+          ),
+        ],
+      );
     }
+
+    if (reference.showLoadError) {
+      return Column(
+        children: [
+          const _HelpSummaryCard(),
+          const SizedBox(height: 12),
+          _EmptyState(
+            text: 'Не удалось обновить справочник',
+            compact: true,
+            actionLabel: 'Повторить',
+            onAction: () => unawaited(onRefresh()),
+          ),
+        ],
+      );
+    }
+
+    final articles = reference.displayArticles
+        .where((article) => article.matchesQuery(query))
+        .toList();
+    final groups = <String, List<ManagedReferenceArticle>>{};
+    for (final article in articles) {
+      groups.putIfAbsent(article.categoryTitle, () => []).add(article);
+    }
+
+    final showRpcBadge = reference.rpcUnavailable && reference.isDemoFallback;
 
     return Column(
       children: [
-        const _HelpSummaryCard(),
+        _HelpSummaryCard(showLegacyDemoBadge: showRpcBadge),
         const SizedBox(height: 12),
-        if (filtered.isEmpty)
+        if (articles.isEmpty)
           const _EmptyState(
             text: 'По запросу ничего не найдено',
             compact: true,
@@ -2321,16 +2390,186 @@ class _HelpSection extends StatelessWidget {
             _HelpGroupSection(
               title: entry.key,
               cards: [
-                for (final item in entry.value)
-                  _HelpCard(
-                    icon: item.icon,
-                    title: item.title,
-                    subtitle: item.subtitle,
+                for (final article in entry.value)
+                  StudentReferenceArticleCard(
+                    article: article,
+                    showDemoBadge: reference.isDemoFallback ||
+                        article.showDemoBadge,
+                    onTap: () => _openArticle(context, article),
                   ),
               ],
             ),
       ],
     );
+  }
+
+  void _openArticle(BuildContext context, ManagedReferenceArticle article) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      constraints: _fullWidthSheetConstraints(context),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.72,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        builder: (context, scrollController) => SingleChildScrollView(
+          controller: scrollController,
+          child: StudentReferenceArticleDetail(
+            article: article,
+            showDemoBadge:
+                reference.isDemoFallback || article.showDemoBadge,
+            onReportError: article.isManaged
+                ? () => _reportError(context, article)
+                : null,
+            onOpenAsset: article.isManaged
+                ? (assetId) => _openAsset(context, assetId)
+                : null,
+            onOpenUrl: (url) => _openExternalUrl(context, url),
+            onOpenCta: (cta) => _openCta(context, cta),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openAsset(BuildContext context, String assetId) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final download = await _mediaService.resolveDownload(assetId);
+      if (!context.mounted) return;
+      if (download == null) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Файл недоступен')),
+        );
+        return;
+      }
+      final mime = (download.mimeType ?? 'application/octet-stream').trim();
+      final ext = mime.contains('png')
+          ? 'png'
+          : mime.contains('webp')
+              ? 'webp'
+              : mime.contains('pdf')
+                  ? 'pdf'
+                  : mime.contains('jpeg') || mime.contains('jpg')
+                      ? 'jpg'
+                      : 'bin';
+      final fileName =
+          'content_${assetId.replaceAll('-', '').substring(0, 8)}.$ext';
+      if (kIsWeb) {
+        await openSubjectAttachmentBytes(
+          bytes: Uint8List(0),
+          fileName: fileName,
+          mimeType: mime,
+          signedUrl: download.signedUrl,
+        );
+        return;
+      }
+      final bytes = await _mediaService.fetchBytes(assetId);
+      if (!context.mounted) return;
+      if (bytes == null) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Файл недоступен')),
+        );
+        return;
+      }
+      await openSubjectAttachmentBytes(
+        bytes: bytes,
+        fileName: fileName,
+        mimeType: mime,
+        signedUrl: download.signedUrl,
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text('Не удалось открыть файл: $error')),
+      );
+    }
+  }
+
+  Future<void> _openExternalUrl(BuildContext context, String url) async {
+    final uri = Uri.tryParse(url.trim());
+    if (uri == null || !(uri.isScheme('https') || uri.isScheme('http'))) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ссылка недоступна')),
+      );
+      return;
+    }
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось открыть ссылку')),
+      );
+    }
+  }
+
+  Future<void> _openCta(BuildContext context, ReferenceArticleCta cta) async {
+    final route = (cta.route ?? '').trim();
+    if (route.startsWith('/')) {
+      context.push(route);
+      return;
+    }
+    final url = (cta.url ?? '').trim();
+    if (url.isNotEmpty) {
+      await _openExternalUrl(context, url);
+    }
+  }
+
+  Future<void> _reportError(
+    BuildContext context,
+    ManagedReferenceArticle article,
+  ) async {
+    final note = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        final controller = TextEditingController();
+        return AlertDialog(
+          title: const Text('Сообщить об ошибке'),
+          content: TextField(
+            controller: controller,
+            maxLines: 4,
+            maxLength: 1000,
+            decoration: const InputDecoration(
+              hintText: 'Опишите, что не так в этой статье',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(context, controller.text.trim());
+              },
+              child: const Text('Отправить'),
+            ),
+          ],
+        );
+      },
+    );
+    if (note == null || note.isEmpty || !context.mounted) return;
+    try {
+      await referenceService.submitCorrection(
+        contentItemId: article.id,
+        note: note,
+      );
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Сообщение отправлено модераторам')),
+      );
+      Navigator.of(context).pop();
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось отправить: $error')),
+      );
+    }
   }
 }
 

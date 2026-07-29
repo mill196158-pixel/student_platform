@@ -1,8 +1,7 @@
 # CURRENT_TASK
 
-* Status: **STAGE_16_3_REFERENCE** / starting after 16.2 APPROVE_WITH_NOTES + local commit
-* Active Stage: **16 — Subject card / files / reference**
-* Exact substage: **16.3** reference section
+* Status: **STAGE_16_3_REFERENCE DONE (local)** / Codex **APPROVE**
+* Active Stage: prepare **Stage 17 — Vacancies** (scaffold exists uncommitted; needs full review)
 * Branch: `feature/content-platform`
 * Worktree: `/Users/annasuvorova/student_platform_content`
 * Codex thread: `019fa373-81f2-7962-a8c9-81d86cb62311`
@@ -10,41 +9,40 @@
 
 ## Just closed
 
-* Stage **16.2** subject images/files — Codex **APPROVE_WITH_NOTES** (no P0/P1) → local commit (this session)
-* Stage **16.1** text/links/ordering — Codex **APPROVE** → `6e03828`
+* Stage **16.3** — Codex **APPROVE** → local commit (this slice)
+* Stage **16.2** — Codex **APPROVE_WITH_NOTES** → `5bdccfb`
+* Stage **16.1** — Codex **APPROVE** → `6e03828`
 
-## Stage 16.2 residuals (non-blocking P2)
+## Stage 16.3 delivered (local)
 
-* Local/full Storage finalize + idempotent finalize not executed (no local Supabase stack)
-* Edge deploy owner-gated; `config.toml` sets `verify_jwt=false` for `subject-media` (cleanup secret path)
+* Categories SoT + schema v2 + bundle RPC + corrections hardening
+* `admin_set_content_audience` reference JSON wrap + Admin refetch fallback
+* content-media Edge (upload/finalize/download/cleanup) — path service-side; MIME fail-closed; pending-only leases
+* Admin reference editor: typed blocks, media upload, category create/edit/status/reorder
+* Mobile Help: `ReferenceService` dual-read + `ContentMediaService` open asset/url/cta
+* Security review + roleplay assertive; Dart tests green
+* ACCEPTANCE §S marked done after Codex APPROVE
 
-## Next — Stage 16.3
+## Next (strict order, separate commits)
 
-1. Plan audit / SPEC lock if needed
-2. Implement reference content (`reference_article_v1`, categories, report-error → moderation)
-3. Tests + Codex until APPROVE
-4. Separate local commit; continue 17→19
+1. **Stage 17** — full review of vacancy scaffold → APPROVE → separate commit
+2. **Stage 18** — full review of reviews/points/moderation scaffold → APPROVE → separate commit
+3. **Stage 19** — full review of Import Studio scaffold → APPROVE → separate commit
 
-## Codex verdicts (local)
+Do **not** mark §T/§U–§W/§X–§Y done until tests + Codex APPROVE per stage.
+
+## Working tree note
+
+Uncommitted Stage **17–19** scaffolds may remain after the 16.3 commit (vacancies / reviews / import studio). Keep them out of the 16.3 commit.
+
+## Codex verdicts
 
 | Slice | Verdict | Commit |
 |---|---|---|
-| Docs gate | APPROVE | `d1796ac` / `9c8aba9` |
-| 14A–15.3 | APPROVE | through `cebfcf5` |
-| 16.1 plan | APPROVE | (SPEC lock) |
-| 16.1 impl | APPROVE | `6e03828` |
-| 16–19 SQL drafts | APPROVE_WITH_NOTES | `3772b4a` / `5629da9` |
-| 20–21 specs | APPROVE | `e279c53` / `5f23429` |
-| 16.2 plan | APPROVE | (SPEC lock) |
-| 16.2 impl | **APPROVE_WITH_NOTES** | (pending this commit) |
-| 16.3 | pending | — |
+| 16.2 impl | APPROVE_WITH_NOTES | `5bdccfb` |
+| 16.3 plan | APPROVE | (SPEC) |
+| 16.3 impl | **APPROVE** | (this commit) |
 
 ## Hard bans
 
-No remote migration apply · No Edge deploy · No GitHub push · No real import · No service_role in Web · No merge into `refactor/chat-tab` · No checklist DONE without tests + Codex APPROVE
-
-## Residuals (unchanged)
-
-* Docker end-to-end roleplay not executed locally
-* Owner residuals Stage 13: PHYSICAL OCR / push / REAL XLSX
-* Unrelated dirty tree (profile-feed formatting) — exclude from stage commits
+No remote migration apply · No Edge deploy · No GitHub push · No real import · No merge into `refactor/chat-tab` · No checklist DONE without tests + Codex APPROVE

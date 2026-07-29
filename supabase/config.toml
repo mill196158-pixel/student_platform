@@ -20,3 +20,9 @@ entrypoint = "./functions/cleanup-chat-files/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/subject-media/index.ts"
+
+# Stage 16.3: managed content-media (local only; deploy owner-gated).
+[functions.content-media]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/content-media/index.ts"
