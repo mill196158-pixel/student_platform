@@ -9,6 +9,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../learning/assignment_details_screen.dart';
 import '../learning/models/team.dart';
 import '../learning/state/team_cubit.dart';
+import '../../data/personal_diary_service.dart';
+import '../learning/tabs/chat/data/chat_action_cards_cache.dart';
 import '../learning/tabs/chat/data/chat_group_actions_repository.dart';
 import '../learning/tabs/chat/navigation/group_action_deeplink.dart';
 import 'models/lesson.dart';
@@ -1056,6 +1058,13 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         kind: kind,
         entityId: event.entityId,
       );
+      ChatActionCardsCache.instance.markTombstone(
+        event.isTopic
+            ? ChatActionCardKind.topicSelection
+            : ChatActionCardKind.groupCollection,
+        event.entityId,
+      );
+      await PersonalDiaryService.clearCachesAfterGroupActionDelete();
       if (!mounted) return;
       setState(() {
         _groupActions =

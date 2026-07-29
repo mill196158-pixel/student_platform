@@ -376,7 +376,7 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
         teamId: action.teamId,
       ),
     );
-    if (mounted) _refresh();
+    // Stay on the already-loaded diary — no full reload flash.
   }
 
   bool _assignmentDone(PersonalDiaryAssignment assignment) {

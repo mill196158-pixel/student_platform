@@ -16,6 +16,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../../data/personal_diary_service.dart';
 import '../../assignment_details_screen.dart';
 import '../../state/team_cubit.dart';
 import '../../../group_space/data/group_space_repository.dart';
@@ -243,6 +244,11 @@ class _UnifiedTaskDetailsScreenState extends State<UnifiedTaskDetailsScreen> {
     try {
       final rows =
           await _repo.listCollectionContributionProgress(widget.entityId);
+      final userIds = rows
+          .map((r) => (r['user_id'] ?? '').toString())
+          .where((id) => id.isNotEmpty)
+          .toList();
+      final names = await _repo.resolveUserDisplayNames(userIds);
       final enriched = <Map<String, dynamic>>[];
       for (final row in rows) {
         final userId = (row['user_id'] ?? '').toString();
@@ -257,11 +263,14 @@ class _UnifiedTaskDetailsScreenState extends State<UnifiedTaskDetailsScreen> {
             );
           } catch (_) {}
         }
+        final serverName = (row['display_name'] ?? '').toString().trim();
         enriched.add({
           ...row,
           'proof_file_url': proof?['file_url'],
           'proof_file_name': proof?['file_name'],
-          'display_name': _shortUserLabel(userId),
+          'display_name': serverName.isNotEmpty
+              ? serverName
+              : (names[userId] ?? 'Участник'),
         });
       }
       if (!mounted) return;
@@ -270,11 +279,6 @@ class _UnifiedTaskDetailsScreenState extends State<UnifiedTaskDetailsScreen> {
       if (!mounted) return;
       setState(() => _contributions = const []);
     }
-  }
-
-  String _shortUserLabel(String userId) {
-    if (userId.length <= 8) return userId;
-    return '${userId.substring(0, 8)}…';
   }
 
   Future<void> _pickProof() async {
@@ -374,6 +378,8 @@ class _UnifiedTaskDetailsScreenState extends State<UnifiedTaskDetailsScreen> {
                       'capacity': o.capacity,
                       'taken': o.taken,
                       'my_pick': o.myPick,
+                      'picker_names': o.pickerNames,
+                      'picker_user_ids': o.pickerUserIds,
                     })
                 .toList(),
           };
@@ -492,6 +498,131 @@ class _UnifiedTaskDetailsScreenState extends State<UnifiedTaskDetailsScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Не удалось выбрать тему')),
+      );
+    } finally {
+      if (mounted) setState(() => _acting = false);
+    }
+  }
+
+  List<String> _stringList(dynamic raw) {
+    if (raw is! List) return const [];
+    return raw
+        .map((e) => e?.toString().trim() ?? '')
+        .where((e) => e.isNotEmpty)
+        .toList();
+  }
+
+  Future<void> _showReleaseSheet(Map<String, dynamic> option) async {
+    final canManage = _details?['can_manage'] == true;
+    if (!canManage || _acting) return;
+    final names = _stringList(option['picker_names']);
+    final ids = _stringList(option['picker_user_ids']);
+    if (names.isEmpty || ids.isEmpty || names.length != ids.length) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Не удалось определить участников. Обновите экран и попробуйте снова.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (names.length == 1) {
+      await _releaseForUser(
+        userId: ids.first,
+        userLabel: names.first,
+        optionTitle: (option['title'] ?? '').toString(),
+      );
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(
+                'Кто освободить от «${option['title'] ?? ''}»?',
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+            for (var i = 0; i < names.length; i++)
+              ListTile(
+                leading: const Icon(Icons.person_outline),
+                title: Text(names[i]),
+                trailing: const Text('Освободить'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _releaseForUser(
+                    userId: ids[i],
+                    userLabel: names[i],
+                    optionTitle: (option['title'] ?? '').toString(),
+                  );
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _releaseForUser({
+    required String userId,
+    required String userLabel,
+    required String optionTitle,
+  }) async {
+    final canManage = _details?['can_manage'] == true;
+    if (!canManage || _acting) return;
+    final uid = userId.trim();
+    if (uid.isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Освободить тему?'),
+        content: Text(
+          optionTitle.trim().isEmpty
+              ? 'Снять выбор у $userLabel?'
+              : 'Снять выбор «$optionTitle» у $userLabel?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Освободить'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _acting = true);
+    try {
+      await _repo.releaseTopicPick(
+        selectionId: widget.entityId,
+        userId: uid,
+      );
+      await _cache.refreshEntity(
+        widget.chatId,
+        kind: ChatActionCardKind.topicSelection,
+        entityId: widget.entityId,
+        cardMessageId: _resolvedCardMessageId(),
+      );
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Тема освобождена у $userLabel')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось освободить тему')),
       );
     } finally {
       if (mounted) setState(() => _acting = false);
@@ -676,6 +807,7 @@ class _UnifiedTaskDetailsScreenState extends State<UnifiedTaskDetailsScreen> {
     try {
       await _repo.deleteGroupAction(kind: kind, entityId: widget.entityId);
       _cache.markTombstone(_kind, widget.entityId);
+      await PersonalDiaryService.clearCachesAfterGroupActionDelete();
       if (!mounted) return;
       Navigator.of(context).pop();
     } catch (_) {
@@ -771,8 +903,7 @@ class _UnifiedTaskDetailsScreenState extends State<UnifiedTaskDetailsScreen> {
     await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
-  /// Date+time picker that preserves the existing clock time when only the
-  /// calendar day changes (avoids silently resetting timezone/time).
+  /// Chip + calendar deadline picker (same pattern as create collection).
   Future<void> _rescheduleDeadline({
     required String kind,
     DateTime? current,
@@ -781,31 +912,13 @@ class _UnifiedTaskDetailsScreenState extends State<UnifiedTaskDetailsScreen> {
     if (_acting) return;
     final now = DateTime.now();
     final base = (current ?? now.add(const Duration(days: 7))).toLocal();
-    final pickedDate = await showDatePicker(
+    final next = await showModalBottomSheet<DateTime>(
       context: context,
-      initialDate: base,
-      firstDate: DateTime(now.year - 1),
-      lastDate: DateTime(now.year + 5),
-      helpText: 'Новый срок',
-      cancelText: 'Отмена',
-      confirmText: 'Далее',
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) => _DeadlineRescheduleSheet(initial: base),
     );
-    if (pickedDate == null || !mounted) return;
-    final pickedTime = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(base),
-      helpText: 'Время',
-      cancelText: 'Отмена',
-      confirmText: 'Сохранить',
-    );
-    if (pickedTime == null || !mounted) return;
-    final next = DateTime(
-      pickedDate.year,
-      pickedDate.month,
-      pickedDate.day,
-      pickedTime.hour,
-      pickedTime.minute,
-    );
+    if (next == null || !mounted) return;
     setState(() => _acting = true);
     try {
       if (kind == 'topic_selection') {
@@ -844,12 +957,6 @@ class _UnifiedTaskDetailsScreenState extends State<UnifiedTaskDetailsScreen> {
     } finally {
       if (mounted) setState(() => _acting = false);
     }
-  }
-
-  Map<String, dynamic> _asMap(dynamic raw) {
-    if (raw is Map<String, dynamic>) return raw;
-    if (raw is Map) return Map<String, dynamic>.from(raw);
-    return const {};
   }
 
   String _fmt(DateTime dt) {
@@ -1090,7 +1197,12 @@ class _UnifiedTaskDetailsScreenState extends State<UnifiedTaskDetailsScreen> {
       const SizedBox(height: 8),
       for (final o in options)
         _TopicOptionRow(
-            option: o, onTap: () => _toggleOption(o), enabled: !_acting),
+          option: o,
+          onTap: () => _toggleOption(o),
+          enabled: !_acting,
+          canManage: canManage,
+          onRelease: canManage ? () => _showReleaseSheet(o) : null,
+        ),
       if (options.isEmpty)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 12),
@@ -1233,8 +1345,7 @@ class _UnifiedTaskDetailsScreenState extends State<UnifiedTaskDetailsScreen> {
             final payment = (row['payment_status'] ?? 'unmarked').toString();
             final proofUrl = (row['proof_file_url'] ?? '').toString();
             final hasProof = proofUrl.isNotEmpty || row['has_proof'] == true;
-            final name = (row['display_name'] ?? _shortUserLabel(userId))
-                .toString();
+            final name = (row['display_name'] ?? 'Участник').toString();
             return ListTile(
               contentPadding: EdgeInsets.zero,
               title: Text(name),
@@ -1464,11 +1575,15 @@ class _TopicOptionRow extends StatelessWidget {
     required this.option,
     required this.onTap,
     required this.enabled,
+    this.canManage = false,
+    this.onRelease,
   });
 
   final Map<String, dynamic> option;
   final VoidCallback onTap;
   final bool enabled;
+  final bool canManage;
+  final VoidCallback? onRelease;
 
   @override
   Widget build(BuildContext context) {
@@ -1479,6 +1594,36 @@ class _TopicOptionRow extends StatelessWidget {
     final taken = _asInt(option['taken']);
     final myPick = option['my_pick'] == true;
     final full = capacity > 0 && taken >= capacity && !myPick;
+    final pickerNames = <String>[];
+    final rawNames = option['picker_names'];
+    if (rawNames is List) {
+      for (final item in rawNames) {
+        final text = item?.toString().trim() ?? '';
+        if (text.isNotEmpty) pickerNames.add(text);
+      }
+    }
+    final namesLabel = pickerNames.join(', ');
+    final occupiedLabel = pickerNames.isNotEmpty
+        ? 'Занято · $namesLabel'
+        : 'Занято';
+    final freeLabel = capacity > 0
+        ? (pickerNames.isNotEmpty
+            ? 'Свободно ${capacity - taken} из $capacity · $namesLabel'
+            : 'Свободно ${capacity - taken} из $capacity')
+        : (pickerNames.isNotEmpty ? namesLabel : 'Свободна');
+    final pickerIds = <String>[];
+    final rawIds = option['picker_user_ids'];
+    if (rawIds is List) {
+      for (final item in rawIds) {
+        final text = item?.toString().trim() ?? '';
+        if (text.isNotEmpty) pickerIds.add(text);
+      }
+    }
+    final showRelease = canManage &&
+        onRelease != null &&
+        pickerNames.isNotEmpty &&
+        pickerIds.isNotEmpty &&
+        pickerNames.length == pickerIds.length;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -1523,16 +1668,20 @@ class _TopicOptionRow extends StatelessWidget {
                         myPick
                             ? 'Ваш выбор · нажмите, чтобы снять'
                             : full
-                                ? 'Занято'
-                                : capacity > 0
-                                    ? 'Свободно ${capacity - taken} из $capacity'
-                                    : 'Свободна',
+                                ? occupiedLabel
+                                : freeLabel,
                         style: theme.textTheme.bodySmall
                             ?.copyWith(color: cs.onSurfaceVariant),
                       ),
                     ],
                   ),
                 ),
+                if (showRelease)
+                  IconButton(
+                    tooltip: 'Освободить тему',
+                    onPressed: enabled ? onRelease : null,
+                    icon: const Icon(Icons.manage_accounts),
+                  ),
               ],
             ),
           ),
@@ -1558,4 +1707,173 @@ enum _OverflowAction {
   const _OverflowAction(this.label, {this.destructive = false});
   final String label;
   final bool destructive;
+}
+
+/// Chip + calendar deadline picker (create-collection style).
+class _DeadlineRescheduleSheet extends StatefulWidget {
+  const _DeadlineRescheduleSheet({required this.initial});
+
+  final DateTime initial;
+
+  @override
+  State<_DeadlineRescheduleSheet> createState() =>
+      _DeadlineRescheduleSheetState();
+}
+
+class _DeadlineRescheduleSheetState extends State<_DeadlineRescheduleSheet> {
+  late DateTime _deadline;
+
+  @override
+  void initState() {
+    super.initState();
+    _deadline = widget.initial;
+  }
+
+  bool _isInDays(int days) {
+    final target = DateTime.now().add(Duration(days: days));
+    return _deadline.year == target.year &&
+        _deadline.month == target.month &&
+        _deadline.day == target.day;
+  }
+
+  void _setQuick(int days) {
+    final now = DateTime.now();
+    final base = now.add(Duration(days: days));
+    setState(() {
+      _deadline = DateTime(base.year, base.month, base.day, 23, 59);
+    });
+  }
+
+  Future<void> _pickCalendar() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 730)),
+      initialDate: _deadline.isBefore(now) ? now : _deadline,
+      helpText: 'Новый срок',
+      cancelText: 'Отмена',
+      confirmText: 'Выбрать',
+    );
+    if (picked == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_deadline),
+      helpText: 'Время',
+      cancelText: 'Отмена',
+      confirmText: 'Готово',
+    );
+    if (time == null || !mounted) return;
+    setState(() {
+      _deadline = DateTime(
+        picked.year,
+        picked.month,
+        picked.day,
+        time.hour,
+        time.minute,
+      );
+    });
+  }
+
+  String _fmt(DateTime dt) {
+    return '${dt.day.toString().padLeft(2, '0')}.'
+        '${dt.month.toString().padLeft(2, '0')}.'
+        '${dt.year} '
+        '${dt.hour.toString().padLeft(2, '0')}:'
+        '${dt.minute.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Перенести срок',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'До ${_fmt(_deadline)}',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _DeadlineChip(
+                  label: 'Завтра',
+                  selected: _isInDays(1),
+                  onTap: () => _setQuick(1),
+                ),
+                _DeadlineChip(
+                  label: '+3 дня',
+                  selected: _isInDays(3),
+                  onTap: () => _setQuick(3),
+                ),
+                _DeadlineChip(
+                  label: 'Через неделю',
+                  selected: _isInDays(7),
+                  onTap: () => _setQuick(7),
+                ),
+                _DeadlineChip(
+                  label: 'Календарь',
+                  icon: Icons.calendar_month_rounded,
+                  selected: !_isInDays(1) && !_isInDays(3) && !_isInDays(7),
+                  onTap: _pickCalendar,
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, _deadline),
+              child: const Text('Сохранить'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DeadlineChip extends StatelessWidget {
+  const _DeadlineChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.icon,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return FilterChip(
+      selected: selected,
+      showCheckmark: false,
+      avatar: icon == null ? null : Icon(icon, size: 16),
+      label: Text(label),
+      onSelected: (_) => onTap(),
+      selectedColor: cs.primary.withValues(alpha: 0.16),
+      labelStyle: TextStyle(
+        fontWeight: FontWeight.w700,
+        color: selected ? cs.primary : cs.onSurface,
+      ),
+    );
+  }
 }

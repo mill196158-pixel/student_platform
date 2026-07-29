@@ -8,6 +8,8 @@ List<ScheduleGroupActionEvent> mapScheduleGroupActionEvents(
   final seen = <String>{};
   final out = <ScheduleGroupActionEvent>[];
   for (final item in raw) {
+    final status = (item.status ?? 'open').trim().toLowerCase();
+    if (status.isNotEmpty && status != 'open') continue;
     final key =
         '${item.eventType}|${item.entityId}|${item.occursAt.toUtc().millisecondsSinceEpoch}';
     if (!seen.add(key)) continue;

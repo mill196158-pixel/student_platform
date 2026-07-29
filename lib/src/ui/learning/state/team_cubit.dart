@@ -522,6 +522,23 @@ class TeamCubit extends Cubit<TeamState> {
     final uid = sb.auth.currentUser?.id;
     if (uid == null || uid.isEmpty) return false;
     try {
+      // Server SoT: group-wide organizer on any subject/group-space team.
+      try {
+        final res = await sb.rpc(
+          'get_my_team_organizer_state',
+          params: {'p_team_id': teamId},
+        );
+        if (res is Map && res['is_organizer'] == true) return true;
+        if (res is Map && res['is_organizer'] == false) return false;
+      } on PostgrestException catch (e) {
+        final msg = '${e.message} ${e.code} ${e.details}'.toLowerCase();
+        final missing = msg.contains('could not find the function') ||
+            msg.contains('pgrst202') ||
+            msg.contains('404');
+        if (!missing) rethrow;
+      }
+
+      // Legacy fallback when RPC is not deployed yet.
       final row = await sb
           .from('team_members')
           .select('role')
@@ -534,38 +551,10 @@ class TeamCubit extends Cubit<TeamState> {
           return true;
         }
       }
-      // Group-space organizers may be granted without a privileged team_members
-      // role until cache sync; check grants by team.group_id.
-      final team = state.team;
-      if (team.isGroupSpaceChat || team.kind == 'group_space') {
-        final groupId = await _resolveGroupIdForTeam(teamId);
-        if (groupId == null || groupId.isEmpty) return false;
-        final grant = await sb
-            .from('group_space_organizer_grants')
-            .select('user_id')
-            .eq('group_id', groupId)
-            .eq('user_id', uid)
-            .maybeSingle();
-        return grant != null;
-      }
       return false;
     } catch (_) {
       // Keep last-known role on transient network errors.
       return state.isStarosta;
-    }
-  }
-
-  Future<String?> _resolveGroupIdForTeam(String teamId) async {
-    try {
-      final row = await Supabase.instance.client
-          .from('teams')
-          .select('group_id')
-          .eq('id', teamId)
-          .maybeSingle();
-      final id = row?['group_id']?.toString().trim() ?? '';
-      return id.isEmpty ? null : id;
-    } catch (_) {
-      return null;
     }
   }
 

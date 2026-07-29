@@ -585,6 +585,10 @@ class _CollectionDetailScreenState extends State<_CollectionDetailScreen> {
             else
               ..._contributions.map((row) {
                 final userId = row['user_id']?.toString() ?? '';
+                final displayName = (row['display_name']?.toString() ?? '')
+                    .trim();
+                final titleLabel =
+                    displayName.isNotEmpty ? displayName : 'Участник';
                 final payment = row['payment_status']?.toString() ?? 'unmarked';
                 final proofUrl = row['proof_file_url']?.toString() ?? '';
                 final hasProof = proofUrl.isNotEmpty ||
@@ -592,7 +596,7 @@ class _CollectionDetailScreenState extends State<_CollectionDetailScreen> {
                 final canReview = payment != 'confirmed';
                 return ListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: Text(userId),
+                  title: Text(titleLabel),
                   subtitle: Text(
                     '${_paymentStatusLabel(payment)}'
                     '${hasProof ? ' · есть подтверждение' : ''}',

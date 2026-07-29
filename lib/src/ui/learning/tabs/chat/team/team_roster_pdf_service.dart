@@ -205,7 +205,8 @@ class TeamRosterPdfService {
     if (preferred != null) {
       return pw.Font.ttf(preferred);
     }
-    final data = await rootBundle.load('assets/fonts/Lato-Regular.ttf');
+    // Last resort — Lato has no Cyrillic; prefer never reaching here on device.
+    final data = await rootBundle.load('assets/fonts/NotoSans-Regular.ttf');
     return pw.Font.ttf(data);
   }
 }

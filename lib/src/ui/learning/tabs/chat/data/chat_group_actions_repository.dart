@@ -163,6 +163,52 @@ class ChatGroupActionsRepository {
     );
   }
 
+  /// Organizer releases another member's topic pick.
+  Future<void> releaseTopicPick({
+    required String selectionId,
+    required String userId,
+  }) {
+    return _client.rpc(
+      'release_topic_pick',
+      params: {
+        'p_selection_id': selectionId,
+        'p_user_id': userId,
+      },
+    );
+  }
+
+  /// Best-effort display names for collection/topic participant rows.
+  Future<Map<String, String>> resolveUserDisplayNames(
+    Iterable<String> userIds,
+  ) async {
+    final ids = userIds
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toSet()
+        .toList();
+    if (ids.isEmpty) return const {};
+    try {
+      final res = await _client
+          .from('users')
+          .select('id, name, surname')
+          .inFilter('id', ids);
+      final out = <String, String>{};
+      for (final row in res) {
+        final map = Map<String, dynamic>.from(row as Map);
+        final id = (map['id'] ?? '').toString();
+        if (id.isEmpty) continue;
+        final name = [
+          (map['name'] ?? '').toString().trim(),
+          (map['surname'] ?? '').toString().trim(),
+        ].where((e) => e.isNotEmpty).join(' ');
+        if (name.isNotEmpty) out[id] = name;
+      }
+      return out;
+    } catch (_) {
+      return const {};
+    }
+  }
+
   Future<void> cancelTopicPick(String selectionId) async {
     await _client.rpc(
       'cancel_topic_pick',
@@ -298,14 +344,29 @@ class ChatGroupActionsRepository {
   Future<void> deleteGroupAction({
     required String kind,
     required String entityId,
-  }) {
-    return _client.rpc(
+  }) async {
+    await _client.rpc(
       'delete_group_action',
       params: {
         'p_kind': kind,
         'p_entity_id': entityId,
       },
     );
+    // Drop stale Home/Diary/Schedule deadline projections immediately.
+    await invalidateDeadlinesCache();
+  }
+
+  /// Clears all cached deadline projections so deleted collections/topics
+  /// cannot linger on Home / Diary / Schedule after a successful cancel.
+  Future<void> invalidateDeadlinesCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final prefix = '$_deadlinesCachePrefix${_userId ?? 'anon'}';
+      final keys = prefs.getKeys().where((k) => k.startsWith(prefix)).toList();
+      for (final key in keys) {
+        await prefs.remove(key);
+      }
+    } catch (_) {}
   }
 
   /// Server SoT for whether the current user may cancel this entity.
@@ -492,7 +553,16 @@ class ChatGroupActionsRepository {
         'p_to': to?.toIso8601String(),
       },
     );
-    return _asList(res).map(GroupActionDeadline.fromJson).toList();
+    // Belt-and-suspenders: never surface cancelled/closed after delete.
+    return _asList(res)
+        .map(GroupActionDeadline.fromJson)
+        .where(_isActiveDeadline)
+        .toList();
+  }
+
+  static bool _isActiveDeadline(GroupActionDeadline e) {
+    final status = (e.status ?? 'open').trim().toLowerCase();
+    return status.isEmpty || status == 'open';
   }
 
   String _deadlinesCacheKey(DateTime? from, DateTime? to) {
@@ -529,6 +599,7 @@ class ChatGroupActionsRepository {
           .whereType<Map>()
           .map(
               (e) => GroupActionDeadline.fromJson(Map<String, dynamic>.from(e)))
+          .where(_isActiveDeadline)
           .toList();
     } catch (_) {
       return const [];

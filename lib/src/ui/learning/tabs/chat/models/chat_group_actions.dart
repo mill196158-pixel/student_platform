@@ -75,6 +75,7 @@ class ChatTopicOption {
     required this.sortOrder,
     this.myPick = false,
     this.pickerNames = const [],
+    this.pickerUserIds = const [],
   });
 
   final String id;
@@ -85,6 +86,9 @@ class ChatTopicOption {
   final int sortOrder;
   final bool myPick;
   final List<String> pickerNames;
+
+  /// Parallel to [pickerNames] when server returns `picker_user_ids`.
+  final List<String> pickerUserIds;
 
   int get freeSlots => (capacity - taken).clamp(0, capacity);
   bool get isFull => freeSlots <= 0;
@@ -98,6 +102,14 @@ class ChatTopicOption {
         if (text.isNotEmpty) names.add(text);
       }
     }
+    final idsRaw = json['picker_user_ids'];
+    final ids = <String>[];
+    if (idsRaw is List) {
+      for (final item in idsRaw) {
+        final text = item?.toString().trim() ?? '';
+        if (text.isNotEmpty) ids.add(text);
+      }
+    }
     return ChatTopicOption(
       id: json['id'].toString(),
       selectionId: json['selection_id'].toString(),
@@ -107,6 +119,7 @@ class ChatTopicOption {
       sortOrder: int.tryParse(json['sort_order']?.toString() ?? '0') ?? 0,
       myPick: json['my_pick'] == true,
       pickerNames: names,
+      pickerUserIds: ids,
     );
   }
 }

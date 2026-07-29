@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../../../data/personal_diary_service.dart';
 import '../../../../common/keyboard_dismiss_scope.dart';
+import '../data/chat_action_cards_cache.dart';
 import '../data/chat_group_actions_repository.dart';
 import '../models/chat_group_actions.dart';
 
@@ -282,16 +284,109 @@ class _TopicSelectionDetailScreenState
     }
   }
 
-  Future<void> _releaseForUser(String userLabel, ChatTopicOption option) async {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Тема «${option.title}» занята ($userLabel). '
-          'Освобождение — через переназначение организатором.',
+  Future<void> _showReleaseSheet(ChatTopicOption option) async {
+    final names = option.pickerNames;
+    final ids = option.pickerUserIds;
+    if (names.isEmpty || ids.isEmpty || names.length != ids.length) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Не удалось определить участников. Обновите экран и попробуйте снова.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (names.length == 1) {
+      await _releaseForUser(
+        userId: ids.first,
+        userLabel: names.first,
+        option: option,
+      );
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(
+                'Кто освободить от «${option.title}»?',
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+            for (var i = 0; i < names.length; i++)
+              ListTile(
+                leading: const Icon(Icons.person_outline),
+                title: Text(names[i]),
+                trailing: const Text('Освободить'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _releaseForUser(
+                    userId: ids[i],
+                    userLabel: names[i],
+                    option: option,
+                  );
+                },
+              ),
+          ],
         ),
       ),
     );
+  }
+
+  Future<void> _releaseForUser({
+    required String userId,
+    required String userLabel,
+    required ChatTopicOption option,
+  }) async {
+    if (!widget.canManage || _acting) return;
+    final uid = userId.trim();
+    if (uid.isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Освободить тему?'),
+        content: Text(
+          'Снять выбор «${option.title}» у $userLabel?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Освободить'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _acting = true);
+    try {
+      await _repo.releaseTopicPick(
+        selectionId: widget.selection.id,
+        userId: uid,
+      );
+      await _load(silent: true);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Тема освобождена у $userLabel')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось освободить тему')),
+      );
+    } finally {
+      if (mounted) setState(() => _acting = false);
+    }
   }
 
   Future<void> _editBeforeActivity() async {
@@ -422,6 +517,11 @@ class _TopicSelectionDetailScreenState
         kind: 'topic',
         entityId: selection.id,
       );
+      ChatActionCardsCache.instance.markTombstone(
+        ChatActionCardKind.topicSelection,
+        selection.id,
+      );
+      await PersonalDiaryService.clearCachesAfterGroupActionDelete();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Выбор темы удалён')),
@@ -829,14 +929,14 @@ class _TopicSelectionDetailScreenState
                                                 fontWeight: FontWeight.w600,
                                               ),
                                             ),
-                                            if (names.isNotEmpty &&
-                                                selection.showResultsToAll) ...[
+                                            if (names.isNotEmpty) ...[
                                               const SizedBox(height: 4),
                                               Text(
                                                 names.join(', '),
                                                 style: theme.textTheme.bodySmall
                                                     ?.copyWith(
                                                   color: Colors.black45,
+                                                  fontWeight: FontWeight.w600,
                                                 ),
                                               ),
                                             ],
@@ -859,12 +959,11 @@ class _TopicSelectionDetailScreenState
                                               .withValues(alpha: 0.40),
                                         ),
                                       if (widget.canManage &&
-                                          names.isNotEmpty &&
-                                          o.isFull)
+                                          names.isNotEmpty)
                                         IconButton(
-                                          tooltip: 'Действия организатора',
+                                          tooltip: 'Освободить тему',
                                           onPressed: () =>
-                                              _releaseForUser(names.first, o),
+                                              _showReleaseSheet(o),
                                           icon:
                                               const Icon(Icons.manage_accounts),
                                         ),

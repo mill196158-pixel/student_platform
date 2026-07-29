@@ -278,6 +278,22 @@ class PersonalDiaryService {
   // loading spinner. The SharedPreferences layer keeps data across restarts.
   static final Map<String, PersonalDiaryData> _memoryCache = {};
 
+  /// Drop session + disk diary caches after a group action is deleted so it
+  /// cannot linger in «Ближайшие дела».
+  static Future<void> clearCachesAfterGroupActionDelete() async {
+    _memoryCache.clear();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final keys = prefs
+          .getKeys()
+          .where((k) => k.startsWith('personal_diary_data_cache_v3_'))
+          .toList();
+      for (final key in keys) {
+        await prefs.remove(key);
+      }
+    } catch (_) {}
+  }
+
   /// Synchronous peek into the RAM cache. Returns instantly (no await), so the
   /// UI can render cached data on the very first frame.
   PersonalDiaryData? peekCached({int? semesterNumber}) {
@@ -642,6 +658,8 @@ class PersonalDiaryService {
       final seen = <String>{};
       final out = <PersonalDiaryGroupAction>[];
       for (final item in items) {
+        final status = (item.status ?? 'open').trim().toLowerCase();
+        if (status.isNotEmpty && status != 'open') continue;
         final key = '${item.eventType}|${item.entityId}';
         if (!seen.add(key)) continue;
         out.add(PersonalDiaryGroupAction.fromDeadline(item));

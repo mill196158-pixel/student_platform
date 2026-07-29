@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../../../data/personal_diary_service.dart';
 import '../../../models/message.dart';
 import '../../../state/team_cubit.dart';
 import '../data/chat_action_cards_cache.dart';
@@ -186,6 +187,7 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
       await (widget.repository ?? ChatGroupActionsRepository())
           .deleteGroupAction(kind: 'topic_selection', entityId: id);
       _cache.markTombstone(ChatActionCardKind.topicSelection, id);
+      await PersonalDiaryService.clearCachesAfterGroupActionDelete();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Список тем удалён')),
@@ -224,7 +226,14 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
     );
     final title =
         (entry?.title.isNotEmpty ?? false) ? entry!.title : fallbackTitle;
-    final unavailable = entry != null && !entry.available;
+    final removed = entry != null &&
+        (entry.tombstoned ||
+            !entry.available ||
+            entry.status == 'cancelled' ||
+            entry.status == 'unavailable');
+    if (removed) {
+      return const SizedBox.shrink(key: ValueKey('topic_removed'));
+    }
     final closed = entry != null && entry.available && entry.isClosed;
     final progress = (entry != null && entry.totalCapacity > 0)
         ? 'Занято ${entry.takenSlots} из ${entry.totalCapacity}'
@@ -296,16 +305,7 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
                       ),
                     ),
                   ],
-                  if (unavailable) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'Недоступно',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: cs.error,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ] else if (closed) ...[
+                  if (closed) ...[
                     const SizedBox(height: 8),
                     _ClosedCompactRow(
                         title: title, label: kTopicClosedLabel),
@@ -516,6 +516,7 @@ class _CollectionCardState extends State<CollectionCard> {
       final repo = widget.repository ?? ChatGroupActionsRepository();
       await repo.deleteGroupAction(kind: 'collection', entityId: id);
       _cache.markTombstone(ChatActionCardKind.groupCollection, id);
+      await PersonalDiaryService.clearCachesAfterGroupActionDelete();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Сбор удалён')),
@@ -553,7 +554,14 @@ class _CollectionCardState extends State<CollectionCard> {
         .trim();
     final title =
         (entry?.title.isNotEmpty ?? false) ? entry!.title : fallbackTitle;
-    final unavailable = entry != null && !entry.available;
+    final removed = entry != null &&
+        (entry.tombstoned ||
+            !entry.available ||
+            entry.status == 'cancelled' ||
+            entry.status == 'unavailable');
+    if (removed) {
+      return const SizedBox.shrink(key: ValueKey('collection_removed'));
+    }
     final closed = entry != null && entry.available && entry.isClosed;
 
     final done = collectionParticipantIsDone(entry?.myStatus);
@@ -632,16 +640,7 @@ class _CollectionCardState extends State<CollectionCard> {
                       ),
                     ),
                   ],
-                  if (unavailable) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'Недоступно',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: cs.error,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ] else if (closed) ...[
+                  if (closed) ...[
                     const SizedBox(height: 8),
                     _ClosedCompactRow(
                         title: title, label: kCollectionClosedLabel),

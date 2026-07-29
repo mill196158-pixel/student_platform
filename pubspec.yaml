@@ -1,7 +1,7 @@
 name: student_platform
 description: MVP в стиле Cloudmate (Flutter)
 publish_to: "none"
-version: 1.0.0+12
+version: 1.0.0+13
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -85,6 +85,9 @@ flutter:
     - family: Lato
       fonts:
         - asset: assets/fonts/Lato-Regular.ttf
+    - family: NotoSans
+      fonts:
+        - asset: assets/fonts/NotoSans-Regular.ttf
     - family: Allison
       fonts:
         - asset: assets/fonts/Allison-Regular.ttf

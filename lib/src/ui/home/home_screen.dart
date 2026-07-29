@@ -9,7 +9,6 @@ import 'package:student_platform/src/services/push/app_notifications_api.dart';
 import 'package:student_platform/src/services/push/in_app_notification_bus.dart';
 import 'package:student_platform/src/ui/home/home_dashboard_service.dart';
 import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
-import 'package:student_platform/src/ui/learning/tabs/chat/data/chat_group_actions_repository.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/models/group_action_labels.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/navigation/group_action_deeplink.dart';
 import 'package:student_platform/src/ui/navigation/main_tab_scope.dart';
@@ -180,7 +179,6 @@ class _HomeScreenState extends State<HomeScreen> {
               MainTab.schedule,
             ),
             onGroupActionTap: _openGroupAction,
-            onGroupActionDelete: _deleteGroupAction,
             onAssignmentsOpen: () => context.push('/my-diary'),
             onAssignmentTap: (item) {
               final source = _findAssignment(item.id);
@@ -212,52 +210,6 @@ class _HomeScreenState extends State<HomeScreen> {
         teamId: source.teamId,
       ),
     );
-  }
-
-  Future<void> _deleteGroupAction(StudentHomeGroupAction action) async {
-    final source = _findGroupAction(action.id);
-    if (source == null || !source.canDelete) return;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(source.isTopic ? 'Удалить список тем?' : 'Удалить сбор?'),
-        content: const Text('Действие будет отменено для всех участников.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Отмена'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Удалить'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    try {
-      await ChatGroupActionsRepository().deleteGroupAction(
-        kind: source.isTopic ? 'topic_selection' : 'group_collection',
-        entityId: source.entityId,
-      );
-      if (!mounted) return;
-      await _load();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(source.isTopic ? 'Список тем удалён' : 'Сбор удалён'),
-        ),
-      );
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Не удалось удалить. Возможно, уже есть отметки участников.',
-          ),
-        ),
-      );
-    }
   }
 
   HomeGroupActionPreview? _findGroupAction(String id) {
@@ -324,7 +276,8 @@ class _HomeScreenState extends State<HomeScreen> {
             isPendingReview: false,
             isCompleted: action.isCollection &&
                 collectionMyPickIsDoneForParticipant(action.myPickText),
-            canDelete: action.canDelete,
+            // Delete is available in chat/schedule details, not on Home cards.
+            canDelete: false,
           ),
       ],
       totalLessonsToday: data.totalLessonsToday,

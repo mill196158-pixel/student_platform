@@ -141,12 +141,16 @@ class ChatActionCardEntry {
     );
     final entityId = (row['entity_id'] ?? '').toString();
     if (kind.isEmpty || entityId.isEmpty) return null;
+    final status = (row['status'] ?? 'unavailable').toString();
+    final cancelled = status == 'cancelled';
     return ChatActionCardEntry(
       kind: kind,
       entityId: entityId,
       cardMessageId: _nullableId(row['card_message_id']),
-      available: row['available'] == true,
-      status: (row['status'] ?? 'unavailable').toString(),
+      // Cancelled (= deleted) must not appear as a live card anywhere.
+      available: row['available'] == true && !cancelled,
+      status: status,
+      tombstoned: cancelled,
       title: (row['title'] ?? '').toString(),
       description: (row['description'] ?? '').toString(),
       purpose: (row['purpose'] ?? '').toString(),
@@ -180,12 +184,14 @@ class ChatActionCardEntry {
   }
 
   static ChatActionCardEntry fromTopicSelection(ChatTopicSelection s) {
+    final cancelled = s.status == 'cancelled';
     return ChatActionCardEntry(
       kind: ChatActionCardKind.topicSelection,
       entityId: s.id,
       cardMessageId: s.cardMessageId,
-      available: true,
+      available: !cancelled,
       status: s.status,
+      tombstoned: cancelled,
       title: s.title,
       description: s.description,
       rowVersion: null,
@@ -203,6 +209,7 @@ class ChatActionCardEntry {
   ) {
     final entityId = (map['id'] ?? '').toString();
     final status = (map['status'] ?? 'open').toString();
+    final cancelled = status == 'cancelled';
     final confirmed = _asInt(map['confirmed_count']);
     final paidLegacy = _asInt(map['paid_count']);
     final total = map['member_count'] != null
@@ -212,8 +219,9 @@ class ChatActionCardEntry {
       kind: ChatActionCardKind.groupCollection,
       entityId: entityId,
       cardMessageId: _nullableId(map['card_message_id']),
-      available: entityId.isNotEmpty,
+      available: entityId.isNotEmpty && !cancelled,
       status: status,
+      tombstoned: cancelled,
       title: (map['title'] ?? '').toString(),
       description: (map['description'] ?? '').toString(),
       purpose: (map['purpose'] ?? '').toString(),
@@ -268,12 +276,15 @@ class ChatActionCardEntry {
     );
     final entityId = (map['entity_id'] ?? '').toString();
     if (kind.isEmpty || entityId.isEmpty) return null;
+    final status = (map['status'] ?? 'unavailable').toString();
+    final cancelled = status == 'cancelled' || map['tombstoned'] == true;
     return ChatActionCardEntry(
       kind: kind,
       entityId: entityId,
       cardMessageId: _nullableId(map['card_message_id']),
-      available: map['available'] == true,
-      status: (map['status'] ?? 'unavailable').toString(),
+      available: map['available'] == true && !cancelled,
+      status: status,
+      tombstoned: cancelled,
       title: (map['title'] ?? '').toString(),
       description: (map['description'] ?? '').toString(),
       purpose: (map['purpose'] ?? '').toString(),
@@ -303,7 +314,6 @@ class ChatActionCardEntry {
               .map((e) => Map<String, dynamic>.from(e))
               .toList()
           : null,
-      tombstoned: map['tombstoned'] == true,
     );
   }
 
