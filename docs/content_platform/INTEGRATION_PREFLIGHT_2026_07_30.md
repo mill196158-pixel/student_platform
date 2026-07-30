@@ -108,16 +108,25 @@ Local Docker DB `supabase_db_student_platform` (live-shaped Stage 13 schema):
 * Push of `refactor/chat-tab` does **not** auto-apply Supabase migrations or Edge Functions.
 * Safe order: **DB migrations → Edge deploy → then client/admin usage**. Clients dual-read / missing-RPC fallbacks remain until backend is live.
 
-## 9. DB backup / PITR evidence
+## 9. DB backup evidence (free logical dump — no PITR / no paid add-ons)
+
+Owner decision: **do not enable PITR or any paid Supabase add-ons**. Path B recoverability gate = verified manual logical backup.
 
 | Evidence | Status |
 |---|---|
 | Git backup tag | `backup/pre-content-platform-20260730` @ `c31f572` |
 | Git backup branch | `backup/refactor-chat-tab-pre-content-20260730` (pushed) |
 | Project status (MCP `get_project`) | **ACTIVE_HEALTHY**, region `eu-central-1`, Postgres 17.4.1 |
-| PITR / daily restore point + retention | **NOT VERIFIED via API** — no `SUPABASE_ACCESS_TOKEN` / `supabase login` in this environment; confirm in Dashboard → Database → Backups before remote apply |
+| Logical backup dir (outside Git/worktree) | `/Users/annasuvorova/student_platform_backups/pre_content_platform_20260730_133051/` |
+| CLI | Supabase CLI **2.109.1** — `supabase db dump` (`--data-only`, `--role-only`, default schema) |
+| `01_schema.sql` | 820 887 bytes · SHA-256 `b9bd58147d7c5c31ca9501850c10caabc71f1f1f0b7ad8b18fec247f6d4d4d31` |
+| `02_data.sql` | 1 871 113 bytes · SHA-256 `22c8759a133266a471f5d1cbee1c261009407a7bfaf09b5157767cebd2ec9234` · 128 `COPY` · schemas `auth`/`public`/`storage` · dump complete marker present |
+| `03_roles.sql` | 297 bytes · SHA-256 `25873cec56a2cc6514e204f420231777f85c03da818caa7090cdcdfa89776ecd` · managed-role timeout ALTERs only (expected) |
+| Structural verify | Disposable local `psql -f 01_schema.sql` → **rc=0**, **0 ERROR lines**, 1620 successish statements; schema has 99 tables / 331 functions |
+| Restore runbook | `RESTORE_RUNBOOK.md` in backup dir (circular FK note for data load) |
+| Git status | backup path **not** present in either worktree `git status` |
 
-Git backup ≠ database backup. Apply one migration at a time; stop on first failure.
+Secrets (DB password, tokens, connection strings, service_role) are **not** stored in the backup folder or this doc. Apply one migration at a time; stop on first failure.
 
 ## 10. Dashboard copy fix
 
