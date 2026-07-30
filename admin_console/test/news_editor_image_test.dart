@@ -144,6 +144,7 @@ void main() {
                   subtitle: 'При смене варианта',
                   variant: StudentHomeNewsVariant.imageOverlay,
                   colors: const [Color(0xFF246B8E), Color(0xFF54B7AD)],
+                  status: NewsStatus.published,
                   imageId: stored.id,
                 ),
               ],
@@ -195,6 +196,7 @@ void main() {
                   subtitle: 'Пока пусто',
                   variant: StudentHomeNewsVariant.imageWithText,
                   colors: [Color(0xFFF3A95F), Color(0xFFE66E75)],
+                  status: NewsStatus.draft,
                 ),
               ],
             ),
@@ -204,6 +206,12 @@ void main() {
         ),
       ),
     );
+    await tester.pumpAndSettle();
+
+    // Editor defaults to Published tab; draft seed lives under Drafts.
+    await tester.tap(find.byTooltip('Черновики'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Без картинки').first);
     await tester.pumpAndSettle();
 
     expect(find.text('Выберите изображение'), findsOneWidget);
