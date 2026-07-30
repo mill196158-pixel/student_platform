@@ -733,16 +733,29 @@ begin
     raise exception 'stage18 FAIL: no unique index guarding one credit per review_id';
   end if;
 
+  -- Public admin_moderate_review(_v2) are thin wrappers around
+  -- private.review_moderate_apply, which must call entity_review_assert_not_own.
+  if not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'private'::regnamespace
+      and p.proname = 'review_moderate_apply'
+      and p.prosrc like '%entity_review_assert_not_own%'
+  ) then
+    raise exception 'stage18 FAIL: private.review_moderate_apply missing self-moderation guard';
+  end if;
   select count(*) into v_bad
   from unnest(array['admin_moderate_review_v2', 'admin_moderate_review']) as t(proname)
   where not exists (
     select 1 from pg_proc p
     where p.pronamespace = 'public'::regnamespace
       and p.proname = t.proname
-      and p.prosrc like '%entity_review_assert_not_own%'
+      and (
+        p.prosrc like '%entity_review_assert_not_own%'
+        or p.prosrc like '%review_moderate_apply%'
+      )
   );
   if v_bad > 0 then
-    raise exception 'stage18 FAIL: % review moderation RPC(s) missing the self-moderation guard', v_bad;
+    raise exception 'stage18 FAIL: % review moderation RPC(s) missing self-moderation path', v_bad;
   end if;
 
   if not exists (
@@ -792,10 +805,19 @@ begin
         p.prosrc like '%admin_write_audit%'
         or p.prosrc like '%vacancy_record_action%'
         or p.prosrc like '%content_write_domain_audit%'
+        or p.prosrc like '%review_moderate_apply%'
       )
   );
   if v_bad > 0 then
     raise exception 'stage18 FAIL: % moderation handler(s) without an audit write', v_bad;
+  end if;
+  if not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'private'::regnamespace
+      and p.proname = 'review_moderate_apply'
+      and p.prosrc like '%admin_write_audit%'
+  ) then
+    raise exception 'stage18 FAIL: private.review_moderate_apply missing admin_write_audit';
   end if;
 
   select count(*) into v_bad

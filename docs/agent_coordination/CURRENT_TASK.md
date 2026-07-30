@@ -1,33 +1,30 @@
 # CURRENT_TASK
 
-* Status: **INTEGRATION BLOCKED — Codex 403** (cannot get APPROVE for push/merge/apply)
-* Active Stage: production integration Stages 14–21 — paused before dangerous actions
-* Branch: `feature/content-platform` @ `1392981` (ahead of `origin/refactor/chat-tab`, behind 0)
+* Status: **INTEGRATION IN PROGRESS** — Codex path A GO; path B pending green checks + PITR + Edge runbook re-APPROVE
+* Active Stage: production integration Stages 14–21
+* Branch: `feature/content-platform` (pushed)
 * Worktree: `/Users/annasuvorova/student_platform_content`
 * Codex thread: `019fa373-81f2-7962-a8c9-81d86cb62311`
-* Remote: `gwdanmwluhrcfxbnplwd` (**no apply / no deploy / no push yet**)
+* Remote: `gwdanmwluhrcfxbnplwd` (**no apply / no Edge deploy yet**)
 
-## Ready locally (P1 gates closed pending Codex re-APPROVE)
+## Done
 
-* Preflight: `docs/content_platform/INTEGRATION_PREFLIGHT_2026_07_30.md`
-* Admin suite **157/157 PASS**
-* Local disposable DB: all 22 Stage 14–19 migrations applied; Stage 14 roleplay PASS; 15.2/17/19 security PASS
-* Remote read-only: tip `stage13_12_11`; before-counts recorded; none of 22 applied
-* Android debug + iOS simulator builds PASS
-* Dashboard production copy fixed; news cache test fixed
+* Preflight: `docs/content_platform/INTEGRATION_PREFLIGHT_2026_07_30.md` (Edge smoke runbook §11)
+* Admin suite **157/157 PASS**; Android/iOS builds PASS
+* Local disposable DB: all 22 Stage 14–19 migrations applied
+* Security reviews Stage 14–19 **PASS** after aligning checks with `private.*` helpers
+* Pushed `origin/feature/content-platform`
+* Backup tag `backup/pre-content-platform-20260730` @ `c31f572`
+* Backup branch `backup/refactor-chat-tab-pre-content-20260730` pushed
 
-## Blocker
+## Next
 
-Codex CLI returns **HTTP 403** from OpenAI (`Unable to load site` / Ray IDs in HEL). Per rules: do **not** push, merge, remote-apply, or Edge-deploy without Codex APPROVE after CHANGES_REQUESTED.
+1. Codex re-review after check + preflight updates → APPROVE for B (or confirm A still GO)
+2. Merge `feature/content-platform` → `refactor/chat-tab` (main worktree) → retest → push
+3. Confirm Dashboard PITR / retention for `gwdanmwluhrcfxbnplwd`
+4. Remote apply 22 migrations one-by-one + Edge deploy 3 functions + smoke §11
+5. Web Admin + Mobile verify; update acceptance docs; clean trees
 
-## Next (when Codex reachable)
+## Hard bans until B APPROVE + PITR confirmed
 
-1. Resume Codex integration re-review → APPROVE
-2. Push `feature/content-platform`
-3. Backup tag on `refactor/chat-tab`
-4. Merge into main worktree → tests → push
-5. Remote apply 22 migrations one-by-one + Edge deploy 3 functions + smoke
-
-## Hard bans until APPROVE
-
-No remote migration apply · No Edge deploy · No GitHub push · No merge · No real import
+No remote migration apply · No Edge deploy · No real import · No force-push

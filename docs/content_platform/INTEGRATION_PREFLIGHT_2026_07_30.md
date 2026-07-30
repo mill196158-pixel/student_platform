@@ -10,7 +10,7 @@ Remote project: `gwdanmwluhrcfxbnplwd`
 
 | Worktree | Branch | Status | Notes |
 |---|---|---|---|
-| content | `feature/content-platform` | clean after pending commit | **ahead of origin/refactor/chat-tab**; behind **0** (merged `c31f572`) |
+| content | `feature/content-platform` | pushed to origin | ahead of `origin/refactor/chat-tab` (~29 commits); behind **0** |
 | main | `refactor/chat-tab` | clean | equals `origin/refactor/chat-tab` @ `c31f572` |
 
 ## 2. Commits (feature vs origin/refactor/chat-tab)
@@ -79,8 +79,11 @@ Local Docker DB `supabase_db_student_platform` (live-shaped Stage 13 schema):
 
 * Backfilled missing predecessor `subject_offering_student_profiles` (present on remote, absent locally).
 * Applied all **22** Stage 14–19 migrations successfully.
-* Security reviews: Stage 15.2 / 17 / 19 **PASS**; Stage 14 review completed without error.
+* Security reviews **PASS** after check alignment with thin public wrappers:
+  * Stage 14 / 15.2 / 16.1 / 16.2 / 16.3 (corrections + hardening) / 17 / 18 / 19
+  * Stage 16.2 / 18 checks previously looked for guard strings on public `admin_*` stubs; guards live in `private.register_subject_asset` / `private.review_moderate_apply` (and audit via that helper). Checks updated accordingly.
 * Stage 14 behavioral roleplay: **ASSERTED_SCENARIOS PASS**.
+* Stage 16.1 / 16.2 / 16.3 roleplays: **SKIP** when `admin_roleplay` / `student_roleplay` fixtures absent (no hard FAIL).
 * Post-apply counts: `content_items=0`, `vacancies=0`, `import_studio_batches=0` (no demo seed).
 
 ## 7. Remote before-counts (read-only, production)
@@ -105,10 +108,35 @@ Local Docker DB `supabase_db_student_platform` (live-shaped Stage 13 schema):
 * Push of `refactor/chat-tab` does **not** auto-apply Supabase migrations or Edge Functions.
 * Safe order: **DB migrations → Edge deploy → then client/admin usage**. Clients dual-read / missing-RPC fallbacks remain until backend is live.
 
-## 9. DB backup note
+## 9. DB backup / PITR evidence
 
-Git backup tag ≠ database backup. Before production apply: confirm Supabase dashboard PITR / daily backups for `gwdanmwluhrcfxbnplwd` (project ACTIVE_HEALTHY, region eu-central-1). Apply one migration at a time; stop on first failure.
+| Evidence | Status |
+|---|---|
+| Git backup tag | `backup/pre-content-platform-20260730` @ `c31f572` |
+| Git backup branch | `backup/refactor-chat-tab-pre-content-20260730` (pushed) |
+| Project status (MCP `get_project`) | **ACTIVE_HEALTHY**, region `eu-central-1`, Postgres 17.4.1 |
+| PITR / daily restore point + retention | **NOT VERIFIED via API** — no `SUPABASE_ACCESS_TOKEN` / `supabase login` in this environment; confirm in Dashboard → Database → Backups before remote apply |
+
+Git backup ≠ database backup. Apply one migration at a time; stop on first failure.
 
 ## 10. Dashboard copy fix
 
 `DashboardScreen` subtitle is now conditional: demo → local-session warning; production → “RPC + RBAC (без service_role)”.
+
+## 11. Edge smoke runbook (post-deploy, locked)
+
+Target: `content-media`, `subject-media`, `vacancy-media` only. No mass push, no real XLSX, no demo publish.
+
+Base URL: `https://gwdanmwluhrcfxbnplwd.supabase.co/functions/v1/<fn>`
+
+| # | Case | How | Expected |
+|---|---|---|---|
+| 1 | Unauth | `POST` with no `Authorization` / empty body `{ "action": "createUploadIntent", ... }` | **401** |
+| 2 | Authz upload | Valid student/admin JWT + allowed MIME/size for createUploadIntent → finalize from Storage metadata | **200**; asset row owned by actor |
+| 3 | Authz download | Owner (or authorized reader) JWT + `authorize*Download` path | **200** signed URL; **no** raw storage path in client payload |
+| 4 | Cross-user deny | User B JWT on User A asset id | **403** / not authorized |
+| 5 | Ordinary-user cleanup deny | User JWT `action=processCleanup` | **401/403** (cleanup requires `CLEANUP_DISPATCH_SECRET` or service_role bearer) |
+| 6 | Trusted cleanup success | Bearer = cleanup secret (or service_role) + leased claim | **200**; claim processed |
+| 7 | Fixture cleanup | Delete any smoke-created storage objects + DB asset/intent rows | counts unchanged vs before-smoke |
+
+Stop deploy promotion on any unexpected 2xx for cases 1/4/5.

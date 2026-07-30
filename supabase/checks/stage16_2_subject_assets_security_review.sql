@@ -558,10 +558,12 @@ begin
     raise exception 'stage16.2 FAIL: legacy one-current-per-owner indexes still present';
   end if;
 
+  -- Guard lives in private.register_subject_asset; public admin_* is a thin
+  -- service_role wrapper after Stage 16.2 hardening / upload-intent path.
   if not exists (
     select 1 from pg_proc p
-    where p.pronamespace = 'public'::regnamespace
-      and p.proname = 'admin_register_subject_asset'
+    where p.pronamespace = 'private'::regnamespace
+      and p.proname = 'register_subject_asset'
       and p.prosrc like '%asset_foreign_owner%'
   ) then
     raise exception 'stage16.2 FAIL: supersede path does not refuse a foreign owner';
