@@ -57,6 +57,43 @@ String vacancyStatusWire(VacancyStatus status) {
   }
 }
 
+class VacancyAssetRef {
+  const VacancyAssetRef({
+    required this.id,
+    required this.role,
+    this.title = '',
+    this.mimeType = '',
+    this.isDraftAsset = false,
+  });
+
+  final String id;
+  final String role;
+  final String title;
+  final String mimeType;
+  final bool isDraftAsset;
+
+  static List<VacancyAssetRef> parseList(Object? raw) {
+    if (raw is! List) return const [];
+    final out = <VacancyAssetRef>[];
+    for (final entry in raw) {
+      if (entry is! Map) continue;
+      final map = Map<String, dynamic>.from(entry);
+      final id = map['id']?.toString() ?? '';
+      if (id.isEmpty) continue;
+      out.add(
+        VacancyAssetRef(
+          id: id,
+          role: (map['role'] ?? 'attachment').toString(),
+          title: (map['title'] ?? '').toString(),
+          mimeType: (map['mime_type'] ?? '').toString(),
+          isDraftAsset: map['is_draft_asset'] == true,
+        ),
+      );
+    }
+    return out;
+  }
+}
+
 class VacancyItem {
   const VacancyItem({
     required this.id,
@@ -84,6 +121,8 @@ class VacancyItem {
     this.audienceGroupIds = const [],
     this.audienceUserIds = const [],
     this.assetIds = const [],
+    this.assets = const [],
+    this.clearedVisualRoles = const [],
     this.legacyKey,
     this.hasWorkingDraft = false,
     this.workingDraftRowVersion,
@@ -115,6 +154,12 @@ class VacancyItem {
   final List<String> audienceUserIds;
   final List<String> assetIds;
 
+  /// Typed media rows (`id` + `role`) when admin JSON exposes them.
+  final List<VacancyAssetRef> assets;
+
+  /// Working-draft clear intents for visual roles (applied only on publish).
+  final List<String> clearedVisualRoles;
+
   /// Stable Stage 14.1 bootstrap identity, retained after demo promotion.
   final String? legacyKey;
 
@@ -125,6 +170,32 @@ class VacancyItem {
   final int? workingDraftRowVersion;
 
   bool get isPublished => status == VacancyStatus.published;
+
+  bool isVisualRoleCleared(String role) => clearedVisualRoles.contains(role);
+
+  /// Prefers draft-bound visual assets while a working draft is open.
+  String? assetIdForRole(String role, {bool preferDraft = true}) {
+    if (isVisualRoleCleared(role) && preferDraft) {
+      // Clear intent hides canonical until publish; draft replacement still wins.
+      VacancyAssetRef? draft;
+      for (final asset in assets) {
+        if (asset.role == role && asset.isDraftAsset) draft = asset;
+      }
+      return draft?.id;
+    }
+    VacancyAssetRef? draft;
+    VacancyAssetRef? canonical;
+    for (final asset in assets) {
+      if (asset.role != role) continue;
+      if (asset.isDraftAsset) {
+        draft = asset;
+      } else {
+        canonical = asset;
+      }
+    }
+    if (preferDraft) return draft?.id ?? canonical?.id;
+    return canonical?.id ?? draft?.id;
+  }
 
   VacancyCardPayload get previewPayload {
     final split = splitVacancyDescription(description);
@@ -178,6 +249,8 @@ class VacancyItem {
       audienceGroupIds: _asIdList(json['audience_group_ids']),
       audienceUserIds: _asIdList(json['audience_user_ids']),
       assetIds: _asIdList(json['asset_ids']),
+      assets: VacancyAssetRef.parseList(json['assets']),
+      clearedVisualRoles: _asIdList(json['cleared_visual_roles']),
       legacyKey: _nullableString(json['legacy_key']),
       hasWorkingDraft: parseHasWorkingDraft(json),
       workingDraftRowVersion: parseWorkingDraftRowVersion(
@@ -268,6 +341,8 @@ class VacancyItem {
     List<String>? audienceGroupIds,
     List<String>? audienceUserIds,
     List<String>? assetIds,
+    List<VacancyAssetRef>? assets,
+    List<String>? clearedVisualRoles,
     String? legacyKey,
     bool clearEmploymentType = false,
     bool clearWorkFormat = false,
@@ -309,6 +384,8 @@ class VacancyItem {
       audienceGroupIds: audienceGroupIds ?? this.audienceGroupIds,
       audienceUserIds: audienceUserIds ?? this.audienceUserIds,
       assetIds: assetIds ?? this.assetIds,
+      assets: assets ?? this.assets,
+      clearedVisualRoles: clearedVisualRoles ?? this.clearedVisualRoles,
       legacyKey: legacyKey ?? this.legacyKey,
       hasWorkingDraft: hasWorkingDraft ?? this.hasWorkingDraft,
       workingDraftRowVersion: clearWorkingDraftRowVersion

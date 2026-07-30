@@ -188,6 +188,15 @@ abstract class VacancyRepository {
     required List<int> bytes,
     required String contentType,
     String title = '',
+    String role = 'attachment',
+  });
+
+  Future<void> setAssetRole({required String assetId, required String role});
+
+  /// Clears a visual role. With a working draft, canonical assets stay until publish.
+  Future<VacancyItem> clearVisualRole({
+    required String vacancyId,
+    required String role,
   });
 
   Future<void> deleteAsset(String assetId);
@@ -671,12 +680,15 @@ class LocalVacancyRepository implements VacancyRepository {
     );
   }
 
+  final Map<String, String> _assetRoles = {};
+
   @override
   Future<String> registerAsset({
     required String vacancyId,
     required List<int> bytes,
     required String contentType,
     String title = '',
+    String role = 'attachment',
   }) async {
     final item = await get(vacancyId);
     final hasDraft = _workingDrafts.containsKey(vacancyId);
@@ -688,25 +700,148 @@ class LocalVacancyRepository implements VacancyRepository {
     }
     final assetId = 'local-asset-${_seq++}';
     _assetsByVacancy.putIfAbsent(vacancyId, () => []).add(assetId);
+    final isDraftAsset = hasDraft;
     final idx = _items.indexWhere((e) => e.id == vacancyId);
     if (idx >= 0) {
       final current = _items[idx];
+      final nextAssets = [
+        ...current.assets,
+        VacancyAssetRef(
+          id: assetId,
+          role: 'attachment',
+          title: title,
+          mimeType: contentType,
+          isDraftAsset: isDraftAsset,
+        ),
+      ];
+      final cleared = [...current.clearedVisualRoles]..remove(role);
       _items = [..._items]
         ..[idx] = current.copyWith(
           assetIds: [...current.assetIds, assetId],
+          assets: nextAssets,
+          clearedVisualRoles: cleared,
           rowVersion: hasDraft ? current.rowVersion : current.rowVersion + 1,
         );
     }
     if (hasDraft) {
       _workingDrafts[vacancyId]?.draftAssetIds.add(assetId);
     }
+    _assetRoles[assetId] = 'attachment';
+    await setAssetRole(assetId: assetId, role: role);
     return assetId;
   }
 
   @override
+  Future<void> setAssetRole({
+    required String assetId,
+    required String role,
+  }) async {
+    if (!const {'attachment', 'logo', 'cover', 'background'}.contains(role)) {
+      throw const VacancyRepositoryException('Недопустимая роль вложения.');
+    }
+    String? vacancyId;
+    for (final entry in _assetsByVacancy.entries) {
+      if (entry.value.contains(assetId)) {
+        vacancyId = entry.key;
+        break;
+      }
+    }
+    _assetRoles[assetId] = role;
+    if (vacancyId == null) return;
+    final idx = _items.indexWhere((e) => e.id == vacancyId);
+    if (idx < 0) return;
+    final current = _items[idx];
+    final target = current.assets.cast<VacancyAssetRef?>().firstWhere(
+      (a) => a?.id == assetId,
+      orElse: () => null,
+    );
+    final targetIsDraft =
+        target?.isDraftAsset ?? _workingDrafts.containsKey(vacancyId);
+    final nextAssets = current.assets.map((asset) {
+      if (asset.id == assetId) {
+        return VacancyAssetRef(
+          id: asset.id,
+          role: role,
+          title: asset.title,
+          mimeType: asset.mimeType,
+          isDraftAsset: asset.isDraftAsset,
+        );
+      }
+      if (asset.role == role &&
+          asset.id != assetId &&
+          asset.isDraftAsset == targetIsDraft &&
+          (role == 'logo' || role == 'cover' || role == 'background')) {
+        _assetRoles[asset.id] = 'attachment';
+        return VacancyAssetRef(
+          id: asset.id,
+          role: 'attachment',
+          title: asset.title,
+          mimeType: asset.mimeType,
+          isDraftAsset: asset.isDraftAsset,
+        );
+      }
+      return asset;
+    }).toList();
+    if (!nextAssets.any((a) => a.id == assetId)) {
+      nextAssets.add(
+        VacancyAssetRef(id: assetId, role: role, isDraftAsset: targetIsDraft),
+      );
+    }
+    final cleared = [...current.clearedVisualRoles]..remove(role);
+    _items = [..._items]
+      ..[idx] = current.copyWith(
+        assets: nextAssets,
+        clearedVisualRoles: cleared,
+      );
+  }
+
+  String? assetRole(String assetId) => _assetRoles[assetId];
+
+  @override
+  Future<VacancyItem> clearVisualRole({
+    required String vacancyId,
+    required String role,
+  }) async {
+    if (!const {'logo', 'cover', 'background'}.contains(role)) {
+      throw const VacancyRepositoryException('Недопустимая роль вложения.');
+    }
+    final idx = _items.indexWhere((e) => e.id == vacancyId);
+    if (idx < 0) throw const VacancyRepositoryException('Вакансия не найдена.');
+    final current = _items[idx];
+    final hasDraft = _workingDrafts.containsKey(vacancyId);
+    final toDelete = current.assets
+        .where(
+          (a) =>
+              a.role == role && (hasDraft ? a.isDraftAsset : !a.isDraftAsset),
+        )
+        .map((a) => a.id)
+        .toList();
+    for (final assetId in toDelete) {
+      await deleteAsset(assetId);
+    }
+    final refreshed = await get(vacancyId);
+    if (hasDraft) {
+      final cleared = {...refreshed.clearedVisualRoles, role}.toList();
+      final next = refreshed.copyWith(clearedVisualRoles: cleared);
+      final nextIdx = _items.indexWhere((e) => e.id == vacancyId);
+      _items = [..._items]..[nextIdx] = next;
+      return next;
+    }
+    return refreshed;
+  }
+
+  @override
   Future<void> deleteAsset(String assetId) async {
+    _assetRoles.remove(assetId);
     for (final entry in _assetsByVacancy.entries) {
       entry.value.remove(assetId);
+    }
+    for (var i = 0; i < _items.length; i++) {
+      final item = _items[i];
+      if (!item.assetIds.contains(assetId)) continue;
+      final kept = item.assetIds.where((id) => id != assetId).toList();
+      final assets = item.assets.where((a) => a.id != assetId).toList();
+      _items = [..._items]..[i] = item.copyWith(assetIds: kept, assets: assets);
     }
   }
 
@@ -790,7 +925,41 @@ class LocalVacancyRepository implements VacancyRepository {
     if (draft.rowVersion != expectedDraftRowVersion) {
       throw const VacancyRepositoryException('Черновик изменился. Обновите.');
     }
-    final next = current.copyWith(
+    // Reconcile visual roles: remove superseded/cleared canonical assets,
+    // then promote draft assets to canonical.
+    final rolesToReplace = <String>{
+      ...current.clearedVisualRoles,
+      for (final asset in current.assets)
+        if (asset.isDraftAsset &&
+            (asset.role == 'logo' ||
+                asset.role == 'cover' ||
+                asset.role == 'background'))
+          asset.role,
+    };
+    final removedCanonicalIds = <String>{};
+    for (final role in rolesToReplace) {
+      for (final asset in current.assets) {
+        if (!asset.isDraftAsset && asset.role == role) {
+          removedCanonicalIds.add(asset.id);
+        }
+      }
+    }
+    for (final assetId in removedCanonicalIds) {
+      await deleteAsset(assetId);
+    }
+    final afterDelete = await get(id);
+    final promotedAssets = afterDelete.assets
+        .map(
+          (a) => VacancyAssetRef(
+            id: a.id,
+            role: a.role,
+            title: a.title,
+            mimeType: a.mimeType,
+            isDraftAsset: false,
+          ),
+        )
+        .toList();
+    final next = afterDelete.copyWith(
       title: draft.title,
       companyName: draft.companyName,
       summary: draft.summary,
@@ -809,11 +978,14 @@ class LocalVacancyRepository implements VacancyRepository {
       isHidden: draft.isHidden,
       audienceGroupIds: draft.audienceGroupIds,
       audienceUserIds: draft.audienceUserIds,
-      rowVersion: current.rowVersion + 1,
+      assets: promotedAssets,
+      clearedVisualRoles: const [],
+      rowVersion: afterDelete.rowVersion + 1,
       hasWorkingDraft: false,
       clearWorkingDraftRowVersion: true,
     );
-    _items = [..._items]..[idx] = next;
+    final nextIdx = _items.indexWhere((e) => e.id == id);
+    _items = [..._items]..[nextIdx] = next;
     _workingDrafts.remove(id);
     return next;
   }
@@ -829,16 +1001,25 @@ class LocalVacancyRepository implements VacancyRepository {
       final kept = current.assetIds
           .where((assetId) => !orphanIds.contains(assetId))
           .toList();
+      final keptAssets = current.assets
+          .where((asset) => !orphanIds.contains(asset.id))
+          .toList();
       _assetsByVacancy[id]?.removeWhere(orphanIds.contains);
+      for (final orphanId in orphanIds) {
+        _assetRoles.remove(orphanId);
+      }
       _items = [..._items]
         ..[idx] = current.copyWith(
           assetIds: kept,
+          assets: keptAssets,
+          clearedVisualRoles: const [],
           hasWorkingDraft: false,
           clearWorkingDraftRowVersion: true,
         );
       return _items[idx];
     }
     return current.copyWith(
+      clearedVisualRoles: const [],
       hasWorkingDraft: false,
       clearWorkingDraftRowVersion: true,
     );

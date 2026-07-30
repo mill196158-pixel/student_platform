@@ -5,6 +5,8 @@ import 'package:student_platform_admin/features/content/home_promo/home_promo_it
 import 'package:student_platform_admin/features/content/home_promo/home_promo_repository.dart';
 import 'package:student_platform_admin/features/content/news/news_repository.dart';
 import 'package:student_platform_admin/features/content/shared/content_action_model.dart';
+import 'package:student_platform_admin/features/content/shared/content_preview_binder.dart';
+import 'package:student_platform_admin/features/content/shared/content_preview_mode.dart';
 import 'package:student_platform_admin/features/content/shared/visual_editor_list_panel.dart';
 import 'package:student_platform_admin/features/content/shared/visual_editor_shell.dart';
 import 'package:student_ui/student_ui.dart';
@@ -187,30 +189,6 @@ void main() {
     expect(payload['action'], isNotNull);
   });
 
-  testWidgets('home preview loads published news when news repo injected', (
-    tester,
-  ) async {
-    await tester.binding.setSurfaceSize(const Size(1400, 900));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-
-    AdminBackendConfig.debugDemoModeOverride = true;
-    addTearDown(() => AdminBackendConfig.debugDemoModeOverride = null);
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: HomePromoEditorScreen(
-            repository: LocalHomePromoRepository(),
-            newsRepository: LocalNewsRepository(),
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('Добро пожаловать в новый семестр'), findsOneWidget);
-  });
-
   testWidgets('changing home slot marks draft dirty', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1400, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -235,5 +213,65 @@ void main() {
     await tester.pump();
 
     expect(find.text('Есть правки'), findsOneWidget);
+  });
+
+  testWidgets('preview mode toggle switches between draft labels', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: HomePromoEditorScreen(repository: LocalHomePromoRepository()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('С текущими правками'), findsOneWidget);
+    expect(find.text('Как опубликовано'), findsOneWidget);
+
+    await tester.tap(find.text('Как опубликовано'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Застрял с заданием?'), findsWidgets);
+  });
+
+  test('preview binder overlays when editing working draft', () {
+    expect(
+      shouldOverlayLiveDraft(
+        isDraft: false,
+        editingWorkingDraft: true,
+        dirty: false,
+        mode: ContentPreviewMode.effectiveDraft,
+      ),
+      isTrue,
+    );
+  });
+
+  testWidgets('home preview loads published news when news repo injected', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    AdminBackendConfig.debugDemoModeOverride = true;
+    addTearDown(() => AdminBackendConfig.debugDemoModeOverride = null);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: HomePromoEditorScreen(
+            repository: LocalHomePromoRepository(),
+            newsRepository: LocalNewsRepository(),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Добро пожаловать в новый семестр'), findsOneWidget);
   });
 }

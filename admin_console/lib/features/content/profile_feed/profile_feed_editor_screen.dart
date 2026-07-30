@@ -14,6 +14,9 @@ import '../shared/content_card_variant_picker.dart';
 import '../shared/content_color_field.dart';
 import '../shared/content_color_utils.dart';
 import '../shared/content_icon_picker.dart';
+import '../shared/content_preview_binder.dart';
+import '../shared/content_preview_mode.dart';
+import '../shared/content_media_intent.dart';
 import '../shared/content_technical_panel.dart';
 import '../shared/phone_preview_frame.dart';
 import '../shared/visual_editor_list_panel.dart';
@@ -88,6 +91,10 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
   String _ctaAction = 'route';
   int _gradientDirection = 45;
   ContentCardVariant _cardVariant = ContentCardVariant.gradientText;
+  ContentPreviewMode _previewMode = ContentPreviewMode.effectiveDraft;
+
+  final Map<String, ContentMediaIntentState> _imageIntent = {};
+  ProfileFeedItem? _boundItem;
 
   ProfileFeedAdminListPartitions get _partitions =>
       partitionAdminProfileFeed(_items);
@@ -249,6 +256,26 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
     _startsAt = selected?.startsAt;
     _endsAt = selected?.endsAt;
     _audiencePreview = null;
+    _boundItem = selected?.copyWith();
+    if (selected != null) {
+      _imageIntent.putIfAbsent(
+        selected.id,
+        () => ContentMediaIntentState(assetId: selected.payload.imageAssetId),
+      );
+    }
+  }
+
+  void _discardLocalChanges() {
+    final bound = _boundItem;
+    if (bound == null) return;
+    setState(() {
+      _replaceItem(bound);
+      _dirty = false;
+      _imageIntent[bound.id] = ContentMediaIntentState(
+        assetId: bound.payload.imageAssetId,
+      );
+    });
+    _syncControllers();
   }
 
   void _replaceItem(ProfileFeedItem item) {
@@ -489,9 +516,36 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
         'Проверьте поля карточки (заголовок, подзаголовок, CTA).',
       );
     }
+    var nextPayload = payload;
+    final intent =
+        _imageIntent[selected.id] ?? ContentMediaIntentState.untouched;
+    final store = _mediaStore;
+    if (intent.hasLocalPick && store != null) {
+      setState(() => _imageUploading = true);
+      try {
+        final bytes = intent.localBytes;
+        if (bytes == null || bytes.isEmpty) {
+          throw const ProfileFeedRepositoryException(
+            'Локальное изображение не найдено.',
+          );
+        }
+        final assetId = await store.uploadBytes(
+          contentItemId: selected.id,
+          bytes: bytes,
+          contentType: 'image/png',
+          title: payload.title,
+        );
+        nextPayload = payload.copyWith(imageAssetId: assetId);
+      } finally {
+        if (mounted) setState(() => _imageUploading = false);
+      }
+    } else if (intent.shouldOmitAssetOnSave) {
+      nextPayload = payload.copyWith(clearImageAssetId: true);
+    }
+
     var next = selected.copyWith(
-      title: payload.title,
-      payload: payload,
+      title: nextPayload.title,
+      payload: nextPayload,
       priority:
           int.tryParse(_priorityController.text.trim()) ?? selected.priority,
       startsAt: _startsAt,
@@ -520,6 +574,9 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
         _replaceItem(next);
         _dirty = false;
         _audiencePreview = null;
+        _imageIntent[next.id] = ContentMediaIntentState(
+          assetId: next.payload.imageAssetId,
+        );
       });
       _syncControllers();
       return next;
@@ -545,6 +602,9 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
       _replaceItem(next);
       _dirty = false;
       _audiencePreview = null;
+      _imageIntent[next.id] = ContentMediaIntentState(
+        assetId: next.payload.imageAssetId,
+      );
     });
     _syncControllers();
     return next;
@@ -793,10 +853,9 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
 
   Future<void> _pickImage() async {
     final selected = _selected;
-    if (selected == null || !selected.isDraft) return;
-    final store = _mediaStore;
-    if (store == null) {
-      _showBanner('Загрузка изображений недоступна в локальном режиме.');
+    if (selected == null ||
+        !(selected.isDraft || _editingWorkingDraft) ||
+        !_canWrite) {
       return;
     }
     final picked = await FilePicker.pickFiles(
@@ -806,36 +865,23 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
     final file = picked?.files.single;
     final bytes = file?.bytes;
     if (bytes == null || bytes.isEmpty) return;
-    final name = (file?.name ?? '').toLowerCase();
-    final contentType = name.endsWith('.png')
-        ? 'image/png'
-        : name.endsWith('.webp')
-        ? 'image/webp'
-        : 'image/jpeg';
-    setState(() => _imageUploading = true);
-    try {
-      final assetId = await store.uploadBytes(
-        contentItemId: selected.id,
-        bytes: bytes,
-        contentType: contentType,
-        title: file?.name ?? '',
-      );
-      if (!mounted) return;
-      _updateSelected(
-        (item) => item.copyWith(
-          payload: item.payload.copyWith(imageAssetId: assetId),
-        ),
-      );
-      _snack('Изображение загружено');
-    } catch (error) {
-      if (!mounted) return;
-      _showBanner('Не удалось загрузить изображение: $error');
-    } finally {
-      if (mounted) setState(() => _imageUploading = false);
-    }
+    setState(() {
+      _imageIntent[selected.id] =
+          (_imageIntent[selected.id] ?? ContentMediaIntentState.untouched)
+              .pickLocal(bytes);
+      _dirty = true;
+    });
   }
 
   Future<void> _clearImage() async {
+    final selected = _selected;
+    if (selected == null) return;
+    setState(() {
+      _imageIntent[selected.id] =
+          (_imageIntent[selected.id] ?? ContentMediaIntentState.untouched)
+              .markRemoved();
+      _dirty = true;
+    });
     _updateSelected(
       (item) => item.copyWith(
         payload: item.payload.copyWith(clearImageAssetId: true),
@@ -920,13 +966,33 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
         item.toManagedCard(showDemoBadge: false),
     ];
     final selected = _selected;
-    if (selected == null || (!selected.isDraft && !_editingWorkingDraft)) {
+    if (selected == null) return cards;
+
+    if (_previewMode == ContentPreviewMode.publishedCanonical) {
       return cards;
     }
 
-    final overlay = selected.toManagedCard(
-      showDemoBadge: selected.origin == ContentOrigin.demo,
-    );
+    if (!shouldOverlayLiveDraft(
+      isDraft: selected.isDraft,
+      editingWorkingDraft: _editingWorkingDraft,
+      dirty: _dirty,
+      mode: _previewMode,
+    )) {
+      return cards;
+    }
+
+    final payload = _draftPayload();
+    if (payload == null) return cards;
+
+    final intent =
+        _imageIntent[selected.id] ?? ContentMediaIntentState.untouched;
+    final overlay = selected
+        .copyWith(title: payload.title, payload: payload)
+        .toManagedCard(showDemoBadge: selected.origin == ContentOrigin.demo)
+        .copyWith(
+          imageBytes: intent.bytesForPreview,
+          imageLoading: intent.phase == ContentMediaPhase.uploading,
+        );
     final index = cards.indexWhere((card) => card.id == selected.id);
     if (index >= 0) {
       cards = [...cards]..[index] = overlay;
@@ -1029,6 +1095,7 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
       onDiscardWorkingDraft: _editingWorkingDraft && _canWrite
           ? _discardWorkingDraft
           : null,
+      onDiscardLocalChanges: _dirty && _canWrite ? _discardLocalChanges : null,
       listBuilder: (context) => VisualEditorListPanel(
         panelTitle: 'Карточки ленты',
         tab: _listTab,
@@ -1069,17 +1136,27 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
         showDemoOnly: _showDemoOnly,
         onDemoFilterChanged: (value) => setState(() => _showDemoOnly = value),
       ),
-      previewBuilder: (context) => _ProfileFeedPhonePreview(
-        cards: previewCards,
-        selectedId: _selectedId,
-        onCardTap: (card) => _select(card.id),
-        onVisibleCard: (card) {
-          // Preview shows published cards only; don't steal selection from
-          // drafts/archive (e.g. after «Создать черновик»).
-          if (_listTab != VisualEditorListTab.published) return;
-          if (_editingWorkingDraft) return;
-          if (_selectedId != card.id) _select(card.id);
-        },
+      previewBuilder: (context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ContentPreviewModeToggle(
+            mode: _previewMode,
+            onChanged: (mode) => setState(() => _previewMode = mode),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: _ProfileFeedPhonePreview(
+              cards: previewCards,
+              selectedId: _selectedId,
+              onCardTap: (card) => _select(card.id),
+              onVisibleCard: (card) {
+                if (_listTab != VisualEditorListTab.published) return;
+                if (_editingWorkingDraft) return;
+                if (_selectedId != card.id) _select(card.id);
+              },
+            ),
+          ),
+        ],
       ),
       propertiesBuilder: (context) => selected == null
           ? VisualEditorEmptyState(
@@ -1661,9 +1738,7 @@ class _PropertiesPanel extends StatelessWidget {
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: _enabled && mediaAvailable && !imageUploading
-                      ? onPickImage
-                      : null,
+                  onPressed: _enabled && !imageUploading ? onPickImage : null,
                   icon: imageUploading
                       ? const SizedBox(
                           width: 16,

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -10,6 +11,9 @@ import '../../../core/auth/admin_session_controller.dart';
 import '../../academic/students/students_repository.dart';
 import '../profile_feed/content_audience_selectors.dart';
 import '../shared/admin_content_backend.dart';
+import '../shared/content_media_intent.dart';
+import '../shared/content_preview_binder.dart';
+import '../shared/content_preview_mode.dart';
 import '../shared/content_technical_panel.dart';
 import '../shared/phone_preview_frame.dart';
 import '../shared/visual_editor_list_panel.dart';
@@ -71,6 +75,9 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
   String? _loadError;
   late final StudentsRepository _studentsRepository = _defaultStudentsRepo();
   _EditorSnapshot? _boundSnapshot;
+  ContentPreviewMode _previewMode = ContentPreviewMode.effectiveDraft;
+  ContentMediaIntentState _logoMedia = ContentMediaIntentState.untouched;
+  ContentMediaIntentState _coverMedia = ContentMediaIntentState.untouched;
 
   VacancyAdminListPartitions get _partitions => partitionAdminVacancy(_items);
 
@@ -327,6 +334,8 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
     _audiencePreview = null;
     _versions = const [];
     _moderationJournal = const [];
+    _logoMedia = _mediaIntentForRole(item, 'logo');
+    _coverMedia = _mediaIntentForRole(item, 'cover');
     _boundSnapshot = _captureSnapshot();
     setState(() {
       _dirty = false;
@@ -679,7 +688,7 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
     });
   }
 
-  Future<void> _uploadAsset() async {
+  Future<void> _uploadAsset({String role = 'attachment'}) async {
     final selected = _selected;
     if (selected == null) return;
     final picked = await FilePicker.pickFiles(
@@ -691,6 +700,10 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
     final file = picked.files.first;
     final bytes = file.bytes;
     if (bytes == null || bytes.isEmpty) return;
+    if (bytes.length > 5 * 1024 * 1024) {
+      setState(() => _banner = 'Файл больше 5 МБ.');
+      return;
+    }
     final ext = (file.extension ?? '').toLowerCase();
     final mime = switch (ext) {
       'png' => 'image/png',
@@ -698,16 +711,128 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
       'pdf' => 'application/pdf',
       _ => 'image/jpeg',
     };
+    final isImage = mime.startsWith('image/');
+    if (isImage && role == 'logo') {
+      setState(() {
+        _logoMedia = _logoMedia.pickLocal(Uint8List.fromList(bytes));
+        _dirty = true;
+      });
+    } else if (isImage && role == 'cover') {
+      setState(() {
+        _coverMedia = _coverMedia.pickLocal(Uint8List.fromList(bytes));
+        _dirty = true;
+      });
+    }
     await _run(() async {
-      final assetId = await _repository.registerAsset(
-        vacancyId: selected.id,
-        bytes: bytes,
-        contentType: mime,
-        title: file.name,
-      );
-      await _reload();
-      if (!mounted) return;
-      setState(() => _banner = 'Вложение добавлено: $assetId');
+      if (isImage && role == 'logo') {
+        setState(() => _logoMedia = _logoMedia.markUploading());
+      } else if (isImage && role == 'cover') {
+        setState(() => _coverMedia = _coverMedia.markUploading());
+      }
+      try {
+        final previousId = role == 'logo'
+            ? _logoMedia.assetId
+            : role == 'cover'
+            ? _coverMedia.assetId
+            : null;
+        final previousIsDraft = previousId == null
+            ? false
+            : selected.assets.any((a) => a.id == previousId && a.isDraftAsset);
+        final assetId = await _repository.registerAsset(
+          vacancyId: selected.id,
+          bytes: bytes,
+          contentType: mime,
+          title: file.name,
+          role: role,
+        );
+        // Only delete a prior draft-cohort asset. Canonical replacement
+        // is deferred until working-draft publish.
+        if (previousIsDraft &&
+            previousId != null &&
+            previousId.isNotEmpty &&
+            previousId != assetId &&
+            (role == 'logo' || role == 'cover')) {
+          try {
+            await _repository.deleteAsset(previousId);
+          } catch (_) {
+            // Draft demotion already keeps one primary; delete is best-effort.
+          }
+        }
+        await _reload();
+        if (!mounted) return;
+        setState(() {
+          if (isImage && role == 'logo') {
+            _logoMedia = _logoMedia.markUploaded(assetId);
+          } else if (isImage && role == 'cover') {
+            _coverMedia = _coverMedia.markUploaded(assetId);
+          }
+          _banner = null;
+          _successBanner = role == 'logo'
+              ? 'Логотип обновлён'
+              : role == 'cover'
+              ? 'Обложка обновлена'
+              : 'Вложение добавлено';
+        });
+      } catch (error) {
+        if (!mounted) return;
+        setState(() {
+          if (isImage && role == 'logo') {
+            _logoMedia = _logoMedia.markFailed(error.toString());
+          } else if (isImage && role == 'cover') {
+            _coverMedia = _coverMedia.markFailed(error.toString());
+          }
+          _banner = 'Не удалось загрузить файл.';
+        });
+      }
+    });
+  }
+
+  ContentMediaIntentState _mediaIntentForRole(VacancyItem item, String role) {
+    if (item.isVisualRoleCleared(role) && item.assetIdForRole(role) == null) {
+      return const ContentMediaIntentState(phase: ContentMediaPhase.removed);
+    }
+    final assetId = item.assetIdForRole(role);
+    if (assetId == null) return ContentMediaIntentState.untouched;
+    return ContentMediaIntentState(
+      phase: ContentMediaPhase.uploaded,
+      assetId: assetId,
+    );
+  }
+
+  Future<void> _clearVisualAsset(String role) async {
+    final selected = _selected;
+    if (selected == null) return;
+    setState(() {
+      if (role == 'logo') {
+        _logoMedia = _logoMedia.markRemoved();
+      } else {
+        _coverMedia = _coverMedia.markRemoved();
+      }
+      _dirty = true;
+    });
+    await _run(() async {
+      try {
+        final updated = await _repository.clearVisualRole(
+          vacancyId: selected.id,
+          role: role,
+        );
+        await _reload();
+        if (!mounted) return;
+        setState(() {
+          _selectedId = updated.id;
+          if (role == 'logo') {
+            _logoMedia = _mediaIntentForRole(updated, 'logo');
+          } else {
+            _coverMedia = _mediaIntentForRole(updated, 'cover');
+          }
+          _successBanner = role == 'logo'
+              ? 'Логотип убран из черновика'
+              : 'Обложка убрана из черновика';
+        });
+      } catch (_) {
+        if (!mounted) return;
+        setState(() => _banner = 'Не удалось удалить изображение.');
+      }
     });
   }
 
@@ -866,17 +991,62 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
     final cards = published.map((item) => item.toManagedCard()).toList();
     if (selected == null) return cards;
 
-    final selectedPublished =
-        selected.status == VacancyStatus.published &&
-        published.any((e) => e.id == selected.id);
-    if (selectedPublished) return cards;
+    if (_previewMode == ContentPreviewMode.publishedCanonical) {
+      return cards;
+    }
+
+    if (!shouldOverlayLiveDraft(
+      isDraft: selected.status != VacancyStatus.published,
+      editingWorkingDraft: _editingWorkingDraft,
+      dirty: _dirty,
+      mode: _previewMode,
+    )) {
+      return cards;
+    }
 
     final draft = _draftFromFields(base: selected);
     if (draft == null) return cards;
-    return [
-      draft.toManagedCard(showDemoBadge: selected.origin == ContentOrigin.demo),
-      ...cards,
-    ];
+
+    final overlay = ManagedVacancyCard(
+      id: draft.id.isEmpty ? 'preview' : draft.id,
+      origin: draft.origin,
+      payload: draft.previewPayload,
+      showDemoBadge: selected.origin == ContentOrigin.demo,
+      hasContacts: draft.contacts.isNotEmpty,
+      expiresAt: draft.expiresAt,
+      logoBytes: _logoMedia.bytesForPreview,
+      coverBytes: _coverMedia.bytesForPreview,
+    );
+    final index = cards.indexWhere((c) => c.id == selected.id);
+    if (index >= 0) {
+      return [...cards]..[index] = overlay;
+    }
+    return [overlay, ...cards];
+  }
+
+  void _discardLocalChanges() {
+    final snapshot = _boundSnapshot;
+    if (snapshot == null) return;
+    _titleController.text = snapshot.title;
+    _companyController.text = snapshot.company;
+    _summaryController.text = snapshot.summary;
+    _descriptionController.text = snapshot.description;
+    _locationController.text = snapshot.location;
+    _salaryController.text = snapshot.salary;
+    _urlController.text = snapshot.url;
+    _requirementsController.text = snapshot.requirements;
+    _contactEmailController.text = snapshot.contactEmail;
+    _contactPhoneController.text = snapshot.contactPhone;
+    _contactTelegramController.text = snapshot.contactTelegram;
+    _audienceMode = snapshot.audienceMode;
+    _groupIds = [...snapshot.groupIds];
+    _userIds = [...snapshot.userIds];
+    _employmentType = snapshot.employmentType;
+    _workFormat = snapshot.workFormat;
+    _expiresAt = snapshot.expiresAt;
+    _logoMedia = ContentMediaIntentState.untouched;
+    _coverMedia = ContentMediaIntentState.untouched;
+    setState(() => _dirty = false);
   }
 
   String? get _headerBanner => _banner;
@@ -970,6 +1140,9 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
         onDiscardWorkingDraft: _editingWorkingDraft && _canWrite
             ? _discardWorkingDraft
             : null,
+        onDiscardLocalChanges: _dirty && _canWrite
+            ? _discardLocalChanges
+            : null,
         listBuilder: (_) => Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -1014,10 +1187,22 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
             ],
           ],
         ),
-        previewBuilder: (_) => _VacancyPhonePreview(
-          cards: previewCards,
-          selectedId: selected?.id,
-          onCardTap: _openVacancyDetail,
+        previewBuilder: (_) => Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ContentPreviewModeToggle(
+              mode: _previewMode,
+              onChanged: (mode) => setState(() => _previewMode = mode),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: _VacancyPhonePreview(
+                cards: previewCards,
+                selectedId: selected?.id,
+                onCardTap: _openVacancyDetail,
+              ),
+            ),
+          ],
         ),
         propertiesBuilder: (_) => selected == null
             ? VisualEditorEmptyState(
@@ -1101,7 +1286,11 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
                     ? _beginEdit
                     : null,
                 onSafeDelete: _safeDelete,
-                onUploadAsset: _uploadAsset,
+                onUploadAsset: () => _uploadAsset(),
+                onUploadLogo: () => _uploadAsset(role: 'logo'),
+                onUploadCover: () => _uploadAsset(role: 'cover'),
+                onClearLogo: () => _clearVisualAsset('logo'),
+                onClearCover: () => _clearVisualAsset('cover'),
                 onResolveReport: _resolveReport,
               ),
       ),
@@ -1321,6 +1510,12 @@ class _VacancyPhonePreviewState extends State<_VacancyPhonePreview> {
                         payload: card.payload,
                         showDemoBadge: card.showDemoBadge,
                         expiresLabel: vacancyExpiresLabel(card.expiresAt),
+                        logoBytes: card.logoBytes == null
+                            ? null
+                            : Uint8List.fromList(card.logoBytes!),
+                        coverBytes: card.coverBytes == null
+                            ? null
+                            : Uint8List.fromList(card.coverBytes!),
                         onTap: () => _openDetail(card),
                       ),
                     ),
@@ -1382,6 +1577,10 @@ class _VacancyPropertiesPanel extends StatelessWidget {
     this.onBeginEdit,
     required this.onSafeDelete,
     required this.onUploadAsset,
+    required this.onUploadLogo,
+    required this.onUploadCover,
+    required this.onClearLogo,
+    required this.onClearCover,
     required this.onResolveReport,
   });
 
@@ -1436,10 +1635,14 @@ class _VacancyPropertiesPanel extends StatelessWidget {
   final VoidCallback? onBeginEdit;
   final Future<void> Function() onSafeDelete;
   final Future<void> Function() onUploadAsset;
+  final Future<void> Function() onUploadLogo;
+  final Future<void> Function() onUploadCover;
+  final VoidCallback onClearLogo;
+  final VoidCallback onClearCover;
   final Future<void> Function(VacancyReportEntry report, String action)
   onResolveReport;
 
-  bool get _editable => canWrite && draftOnly;
+  bool get _editable => canWrite && (draftOnly || editingWorkingDraft);
 
   @override
   Widget build(BuildContext context) {
@@ -1727,12 +1930,31 @@ class _VacancyPropertiesPanel extends StatelessWidget {
                   icon: const Icon(Icons.upgrade_outlined),
                   label: const Text('Сделать обычной'),
                 ),
-              if (canWrite && draftOnly)
+              if (canWrite && (draftOnly || editingWorkingDraft)) ...[
+                OutlinedButton.icon(
+                  onPressed: busy ? null : onUploadLogo,
+                  icon: const Icon(Icons.apartment_outlined),
+                  label: const Text('Логотип'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: busy ? null : onUploadCover,
+                  icon: const Icon(Icons.image_outlined),
+                  label: const Text('Обложка'),
+                ),
+                TextButton(
+                  onPressed: busy ? null : onClearLogo,
+                  child: const Text('Убрать логотип'),
+                ),
+                TextButton(
+                  onPressed: busy ? null : onClearCover,
+                  child: const Text('Убрать обложку'),
+                ),
                 OutlinedButton.icon(
                   onPressed: busy ? null : onUploadAsset,
                   icon: const Icon(Icons.upload_file_outlined),
                   label: const Text('Загрузить вложение'),
                 ),
+              ],
             ],
           ),
           if (selected.assetIds.isNotEmpty) ...[

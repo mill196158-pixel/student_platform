@@ -5,6 +5,8 @@ import 'package:student_platform_admin/features/content/shared/content_action_pi
 import 'package:student_platform_admin/features/content/shared/content_color_utils.dart';
 import 'package:student_platform_admin/features/content/shared/content_icon_catalog.dart';
 import 'package:student_platform_admin/features/content/shared/content_card_variant_picker.dart';
+import 'package:student_platform_admin/features/content/shared/content_preview_binder.dart';
+import 'package:student_platform_admin/features/content/shared/content_preview_mode.dart';
 import 'package:student_platform_admin/features/content/shared/content_placement_slot_picker.dart';
 
 void main() {
@@ -204,6 +206,32 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('Вариант карточки'), findsOneWidget);
+    });
+  });
+
+  group('preview binder', () {
+    test('shouldOverlayLiveDraft when effectiveDraft and dirty', () {
+      expect(
+        shouldOverlayLiveDraft(
+          isDraft: false,
+          editingWorkingDraft: false,
+          dirty: true,
+          mode: ContentPreviewMode.effectiveDraft,
+        ),
+        isTrue,
+      );
+    });
+
+    test('publishedCanonical never overlays', () {
+      expect(
+        shouldOverlayLiveDraft(
+          isDraft: true,
+          editingWorkingDraft: true,
+          dirty: true,
+          mode: ContentPreviewMode.publishedCanonical,
+        ),
+        isFalse,
+      );
     });
   });
 }

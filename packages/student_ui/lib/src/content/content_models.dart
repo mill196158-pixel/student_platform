@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 /// Approved content placements (server enum). Never show raw values in UI.
@@ -636,6 +638,8 @@ class ManagedProfileFeedCard {
     required this.priority,
     required this.payload,
     this.showDemoBadge = false,
+    this.imageBytes,
+    this.imageLoading = false,
   });
 
   final String id;
@@ -644,6 +648,31 @@ class ManagedProfileFeedCard {
   final int priority;
   final ProfileFeedPayload payload;
   final bool showDemoBadge;
+  final Uint8List? imageBytes;
+  final bool imageLoading;
+
+  ManagedProfileFeedCard copyWith({
+    String? id,
+    ContentOrigin? origin,
+    int? sortOrder,
+    int? priority,
+    ProfileFeedPayload? payload,
+    bool? showDemoBadge,
+    Uint8List? imageBytes,
+    bool? imageLoading,
+    bool clearImageBytes = false,
+  }) {
+    return ManagedProfileFeedCard(
+      id: id ?? this.id,
+      origin: origin ?? this.origin,
+      sortOrder: sortOrder ?? this.sortOrder,
+      priority: priority ?? this.priority,
+      payload: payload ?? this.payload,
+      showDemoBadge: showDemoBadge ?? this.showDemoBadge,
+      imageBytes: clearImageBytes ? null : (imageBytes ?? this.imageBytes),
+      imageLoading: imageLoading ?? this.imageLoading,
+    );
+  }
 
   static ManagedProfileFeedCard? tryParse(Map<String, dynamic> json) {
     try {

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import 'vacancy_models.dart';
@@ -13,6 +15,8 @@ class StudentVacancyCard extends StatelessWidget {
     this.expiresLabel,
     this.hasContacts = false,
     this.onTap,
+    this.logoBytes,
+    this.coverBytes,
   });
 
   final VacancyCardPayload payload;
@@ -20,6 +24,8 @@ class StudentVacancyCard extends StatelessWidget {
   final String? expiresLabel;
   final bool hasContacts;
   final VoidCallback? onTap;
+  final Uint8List? logoBytes;
+  final Uint8List? coverBytes;
 
   @override
   Widget build(BuildContext context) {
@@ -61,6 +67,18 @@ class StudentVacancyCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        if (coverBytes != null && coverBytes!.isNotEmpty) ...[
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Image.memory(
+                              coverBytes!,
+                              height: 88,
+                              width: double.infinity,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                        ],
                         if (showDemoBadge)
                           Padding(
                             padding: const EdgeInsets.only(bottom: 6),
@@ -72,14 +90,40 @@ class StudentVacancyCard extends StatelessWidget {
                               ),
                             ),
                           ),
-                        Text(
-                          payload.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w800,
+                        if (logoBytes != null && logoBytes!.isNotEmpty) ...[
+                          Row(
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(10),
+                                child: Image.memory(
+                                  logoBytes!,
+                                  width: 40,
+                                  height: 40,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  payload.title,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                        ),
+                        ] else
+                          Text(
+                            payload.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
                         if (payload.companyName.isNotEmpty) ...[
                           const SizedBox(height: 4),
                           Text(

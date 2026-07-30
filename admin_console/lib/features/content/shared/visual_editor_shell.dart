@@ -62,6 +62,7 @@ class VisualEditorShell extends StatelessWidget {
     this.onPopDirtyConfirm,
     this.editingWorkingDraft = false,
     this.onDiscardWorkingDraft,
+    this.onDiscardLocalChanges,
     this.isPublished,
     this.isArchived,
     super.key,
@@ -92,6 +93,7 @@ class VisualEditorShell extends StatelessWidget {
   final Future<void> Function()? onPopDirtyConfirm;
   final bool editingWorkingDraft;
   final VoidCallback? onDiscardWorkingDraft;
+  final VoidCallback? onDiscardLocalChanges;
 
   /// Typed lifecycle state for domains whose statuses are not generic content.
   final bool? isPublished;
@@ -161,6 +163,7 @@ class VisualEditorShell extends StatelessWidget {
             onVersions: onVersions,
             editingWorkingDraft: editingWorkingDraft,
             onDiscardWorkingDraft: onDiscardWorkingDraft,
+            onDiscardLocalChanges: onDiscardLocalChanges,
           ),
           const SizedBox(height: 14),
           Expanded(
@@ -198,6 +201,7 @@ class _VisualEditorHeader extends StatelessWidget {
     required this.onVersions,
     required this.editingWorkingDraft,
     required this.onDiscardWorkingDraft,
+    required this.onDiscardLocalChanges,
   });
 
   final String title;
@@ -220,6 +224,7 @@ class _VisualEditorHeader extends StatelessWidget {
   final VoidCallback? onVersions;
   final bool editingWorkingDraft;
   final VoidCallback? onDiscardWorkingDraft;
+  final VoidCallback? onDiscardLocalChanges;
 
   @override
   Widget build(BuildContext context) {
@@ -276,6 +281,12 @@ class _VisualEditorHeader extends StatelessWidget {
                 icon: const Icon(Icons.history_rounded),
                 label: const Text('История версий'),
               ),
+            if (onDiscardLocalChanges != null)
+              OutlinedButton.icon(
+                onPressed: busy || !canWrite ? null : onDiscardLocalChanges,
+                icon: const Icon(Icons.restart_alt_rounded),
+                label: const Text('Отменить правки'),
+              ),
             if (editingWorkingDraft) ...[
               if (onPublish != null)
                 FilledButton.icon(
@@ -289,7 +300,7 @@ class _VisualEditorHeader extends StatelessWidget {
                 OutlinedButton.icon(
                   onPressed: busy || !canWrite ? null : onDiscardWorkingDraft,
                   icon: const Icon(Icons.undo_rounded),
-                  label: const Text('Отменить изменения'),
+                  label: const Text('Сбросить черновик на сервере'),
                 ),
             ] else ...[
               if (isPublished && onUnpublish != null)

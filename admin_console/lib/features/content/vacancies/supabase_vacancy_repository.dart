@@ -314,14 +314,42 @@ class SupabaseVacancyRepository implements VacancyRepository {
     required List<int> bytes,
     required String contentType,
     String title = '',
+    String role = 'attachment',
   }) async {
     final store = _mediaStore ?? VacancyMediaStore();
-    return store.uploadBytes(
+    final assetId = await store.uploadBytes(
       vacancyId: vacancyId,
       bytes: Uint8List.fromList(bytes),
       contentType: contentType,
       title: title,
     );
+    if (role != 'attachment') {
+      await setAssetRole(assetId: assetId, role: role);
+    }
+    return assetId;
+  }
+
+  @override
+  Future<void> setAssetRole({
+    required String assetId,
+    required String role,
+  }) async {
+    await _call('admin_set_vacancy_asset_role', {
+      'p_asset_id': assetId,
+      'p_role': role,
+    });
+  }
+
+  @override
+  Future<VacancyItem> clearVisualRole({
+    required String vacancyId,
+    required String role,
+  }) async {
+    final data = await _call('admin_clear_vacancy_visual_role', {
+      'p_vacancy_id': vacancyId,
+      'p_role': role,
+    });
+    return _parseRequired(data);
   }
 
   @override

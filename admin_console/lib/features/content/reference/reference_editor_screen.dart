@@ -11,6 +11,8 @@ import '../shared/admin_content_backend.dart';
 import '../shared/content_action_model.dart';
 import '../shared/content_action_picker.dart';
 import '../shared/content_icon_picker.dart';
+import '../shared/content_preview_binder.dart';
+import '../shared/content_preview_mode.dart';
 import '../shared/content_technical_panel.dart';
 import '../shared/phone_preview_frame.dart';
 import '../shared/visual_editor_list_panel.dart';
@@ -66,6 +68,7 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
   String? _successBanner;
   String? _loadError;
   _EditorSnapshot? _boundSnapshot;
+  ContentPreviewMode _previewMode = ContentPreviewMode.effectiveDraft;
   late final StudentsRepository _studentsRepository = _defaultStudentsRepo();
 
   ReferenceAdminListPartitions get _partitions =>
@@ -1105,16 +1108,30 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
 
     if (selected == null) return cards;
 
-    final selectedPublished =
-        selected.status == ReferenceArticleStatus.published &&
-        published.any((item) => item.id == selected.id);
-    if (selectedPublished) return cards;
+    if (_previewMode == ContentPreviewMode.publishedCanonical) {
+      return cards;
+    }
+
+    if (!shouldOverlayLiveDraft(
+      isDraft: selected.isDraft,
+      editingWorkingDraft: _editingWorkingDraft,
+      dirty: _dirty,
+      mode: _previewMode,
+    )) {
+      return cards;
+    }
 
     final draft = _previewArticle();
     if (draft == null) return cards;
     cards.removeWhere((item) => item.id == draft.id);
     cards.insert(0, draft);
     return cards;
+  }
+
+  void _discardLocalChanges() {
+    if (_boundSnapshot == null) return;
+    _bindSelected();
+    setState(() => _dirty = false);
   }
 
   String? get _headerBanner => _banner;
@@ -1258,6 +1275,9 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
         onDiscardWorkingDraft: _editingWorkingDraft && _canWrite
             ? _discardWorkingDraft
             : null,
+        onDiscardLocalChanges: _dirty && _canWrite
+            ? _discardLocalChanges
+            : null,
         listBuilder: (_) => Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -1340,21 +1360,41 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
             ),
           ],
         ),
-        previewBuilder: (_) => _ReferencePhonePreview(
-          categories: [
-            for (final c in _categories)
-              ReferenceCategory(
-                id: c.id,
-                key: c.key ?? c.id,
-                title: c.title,
-                iconKey: c.iconKey,
-                sortOrder: c.sortOrder,
+        previewBuilder: (_) => Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ContentPreviewModeToggle(
+              mode: _previewMode,
+              onChanged: (mode) => setState(() => _previewMode = mode),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: _ReferencePhonePreview(
+                categories: [
+                  for (final c in _categories)
+                    ReferenceCategory(
+                      id: c.id,
+                      key: c.key ?? c.id,
+                      title: c.title,
+                      iconKey: c.iconKey,
+                      sortOrder: c.sortOrder,
+                    ),
+                ],
+                articles: previewArticles,
+                selectedId: selected?.id,
+                liveDraft:
+                    shouldOverlayLiveDraft(
+                      isDraft: selected?.isDraft ?? false,
+                      editingWorkingDraft: _editingWorkingDraft,
+                      dirty: _dirty,
+                      mode: _previewMode,
+                    )
+                    ? _previewArticle()
+                    : null,
+                onArticleSelected: (article) => _select(article.id),
               ),
+            ),
           ],
-          articles: previewArticles,
-          selectedId: selected?.id,
-          liveDraft: _previewArticle(),
-          onArticleSelected: (article) => _select(article.id),
         ),
         propertiesBuilder: (_) => selected == null
             ? VisualEditorEmptyState(

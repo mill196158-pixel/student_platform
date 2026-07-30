@@ -303,4 +303,21 @@ void main() {
     expect(find.byType(ContentIconPickerField), findsOneWidget);
     expect(find.byType(ContentCardVariantPicker), findsOneWidget);
   });
+
+  testWidgets('draft title overlays carousel preview', (tester) async {
+    final repo = LocalProfileFeedRepository();
+    await pumpEditor(tester, repo);
+
+    await tester.tap(find.byTooltip('Создать черновик'));
+    await tester.pumpAndSettle();
+
+    final titleField = find.byWidgetPredicate(
+      (widget) =>
+          widget is TextField && widget.decoration?.labelText == 'Заголовок',
+    );
+    await tester.enterText(titleField, 'Overlay');
+    await tester.pump();
+
+    expect(find.text('Overlay'), findsWidgets);
+  });
 }

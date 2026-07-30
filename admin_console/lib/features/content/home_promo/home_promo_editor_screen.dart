@@ -21,6 +21,8 @@ import '../shared/content_color_field.dart';
 import '../shared/content_card_variant_picker.dart';
 import '../shared/content_icon_picker.dart';
 import '../shared/content_placement_slot_picker.dart';
+import '../shared/content_media_intent.dart';
+import '../shared/content_preview_mode.dart';
 import '../shared/content_technical_panel.dart';
 import '../shared/phone_preview_frame.dart';
 import '../shared/visual_editor_list_panel.dart';
@@ -30,8 +32,6 @@ import 'home_promo_item.dart';
 import 'home_promo_preview.dart';
 import 'home_promo_repository.dart';
 import 'supabase_home_promo_repository.dart';
-
-enum _ImageIntent { untouched, pendingLocal, removed }
 
 class HomePromoEditorScreen extends StatefulWidget {
   const HomePromoEditorScreen({
@@ -94,6 +94,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
   int _gradientDirection = 45;
   ContentHomeSlot _homeSlot = ContentHomeSlot.afterAssignments;
   ContentCardVariant _cardVariant = ContentCardVariant.gradientText;
+  ContentPreviewMode _previewMode = ContentPreviewMode.effectiveDraft;
   DateTime? _startsAt;
   DateTime? _endsAt;
   List<String> _groupIds = const [];
@@ -106,8 +107,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
   String? _imageError;
   bool _imageUploading = false;
 
-  final Map<String, _ImageIntent> _imageIntent = {};
-  final Map<String, Uint8List> _localImageBytes = {};
+  final Map<String, ContentMediaIntentState> _imageIntent = {};
   final Map<String, Uint8List> _resolvedAssetBytes = {};
   final Set<String> _resolvingAssetIds = {};
 
@@ -311,7 +311,10 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
         onCtaUrlChanged: (value) => _ctaUrlController.text = value,
       );
     }
-    _imageIntent.putIfAbsent(selected.id, () => _ImageIntent.untouched);
+    _imageIntent.putIfAbsent(
+      selected.id,
+      () => ContentMediaIntentState(assetId: p.imageAssetId),
+    );
     _boundSnapshot = _captureSnapshot();
     setState(() {
       _dirty = false;
@@ -341,17 +344,16 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
       endsAt: _endsAt,
       ctaAction: _ctaAction,
       imageIntent: _intentForSelected(),
-      imageAssetId: _selected?.payload.imageAssetId,
       homeSlot: _homeSlot,
       cardVariant: _cardVariant,
       gradientDirection: _gradientDirection,
     );
   }
 
-  _ImageIntent _intentForSelected() {
+  ContentMediaIntentState _intentForSelected() {
     final id = _selectedId;
-    if (id == null) return _ImageIntent.untouched;
-    return _imageIntent[id] ?? _ImageIntent.untouched;
+    if (id == null) return ContentMediaIntentState.untouched;
+    return _imageIntent[id] ?? ContentMediaIntentState.untouched;
   }
 
   void _markDirty() {
@@ -394,11 +396,13 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     };
 
     final intent = _intentForSelected();
-    if (intent == _ImageIntent.removed) {
+    if (intent.shouldOmitAssetOnSave) {
       // omit image_asset_id
     } else if (imageAssetIdOverride != null &&
         imageAssetIdOverride.isNotEmpty) {
       map['image_asset_id'] = imageAssetIdOverride;
+    } else if (intent.assetId != null && intent.assetId!.isNotEmpty) {
+      map['image_asset_id'] = intent.assetId;
     } else {
       final existing = _selected?.payload.imageAssetId;
       if (existing != null && existing.isNotEmpty) {
@@ -407,6 +411,62 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     }
 
     return HomePromoPayload.tryParse(map);
+  }
+
+  void _discardLocalChanges() {
+    final snapshot = _boundSnapshot;
+    if (snapshot == null) return;
+    _titleController.text = snapshot.title;
+    _subtitleController.text = snapshot.subtitle;
+    _ctaLabelController.text = snapshot.ctaLabel;
+    _ctaRouteController.text = snapshot.ctaRoute;
+    _ctaUrlController.text = snapshot.ctaUrl;
+    _iconController.text = snapshot.iconKey;
+    _gradientAController.text = snapshot.gradientA;
+    _gradientBController.text = snapshot.gradientB;
+    _reshowController.text = snapshot.reshow;
+    _dismissible = snapshot.dismissible;
+    _isHidden = snapshot.isHidden;
+    _audienceMode = snapshot.audienceMode;
+    _groupIds = [...snapshot.groupIds];
+    _userIds = [...snapshot.userIds];
+    _startsAt = snapshot.startsAt;
+    _endsAt = snapshot.endsAt;
+    _ctaAction = snapshot.ctaAction;
+    _homeSlot = snapshot.homeSlot;
+    _cardVariant = snapshot.cardVariant;
+    _gradientDirection = snapshot.gradientDirection;
+    final id = _selectedId;
+    if (id != null) {
+      _imageIntent[id] = snapshot.imageIntent;
+    }
+    setState(() {
+      _dirty = false;
+      _imageError = null;
+    });
+  }
+
+  HomePromoPayload? _previewPayloadForPhone() {
+    final selected = _selected;
+    if (selected == null) return null;
+
+    if (_previewMode == ContentPreviewMode.publishedCanonical) {
+      if (selected.isDraft && !selected.isPublished) return null;
+      return selected.payload;
+    }
+
+    return _draftPayload() ?? selected.payload;
+  }
+
+  bool get _hidePromoPreview {
+    final selected = _selected;
+    if (selected == null) return true;
+    if (_previewMode == ContentPreviewMode.publishedCanonical &&
+        selected.isDraft &&
+        !selected.isPublished) {
+      return true;
+    }
+    return false;
   }
 
   Future<void> _run(Future<void> Function() action) async {
@@ -537,9 +597,9 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
 
     final intent = _intentForSelected();
     final media = _mediaStore;
-    if (intent == _ImageIntent.pendingLocal && media != null) {
+    if (intent.hasLocalPick && media != null) {
       setState(() => _imageUploading = true);
-      final bytes = _localImageBytes[selected.id];
+      final bytes = intent.localBytes;
       if (bytes == null) {
         setState(() {
           _imageUploading = false;
@@ -568,7 +628,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
       } finally {
         if (mounted) setState(() => _imageUploading = false);
       }
-    } else if (intent == _ImageIntent.removed) {
+    } else if (intent.shouldOmitAssetOnSave) {
       final cleared = _draftPayload(imageAssetIdOverride: '');
       if (cleared != null) next = next.copyWith(payload: cleared);
     }
@@ -588,12 +648,14 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
         final idx = _items.indexWhere((e) => e.id == next.id);
         if (idx >= 0) _items = [..._items]..[idx] = next;
         _selectedId = next.id;
-        _imageIntent[next.id] = _ImageIntent.untouched;
+        _imageIntent[next.id] = ContentMediaIntentState(
+          assetId: next.payload.imageAssetId,
+        );
         _dirty = false;
         _boundSnapshot = _captureSnapshot();
       });
-      if (intent == _ImageIntent.pendingLocal) {
-        _localImageBytes.remove(next.id);
+      if (intent.hasLocalPick) {
+        // local bytes cleared after upload
       }
       unawaited(_resolveAssetFor(next.id));
       return next;
@@ -613,13 +675,12 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
       final idx = _items.indexWhere((e) => e.id == next.id);
       if (idx >= 0) _items = [..._items]..[idx] = next;
       _selectedId = next.id;
-      _imageIntent[next.id] = _ImageIntent.untouched;
+      _imageIntent[next.id] = ContentMediaIntentState(
+        assetId: next.payload.imageAssetId,
+      );
       _dirty = false;
       _boundSnapshot = _captureSnapshot();
     });
-    if (intent == _ImageIntent.pendingLocal) {
-      _localImageBytes.remove(next.id);
-    }
     unawaited(_resolveAssetFor(next.id));
     return next;
   }
@@ -642,7 +703,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     if (selected == null) return;
     await _run(() async {
       var current = selected;
-      if (_dirty || _intentForSelected() != _ImageIntent.untouched) {
+      if (_dirty || _intentForSelected() != ContentMediaIntentState.untouched) {
         final saved = await _saveSelected();
         if (saved == null) return;
         current = saved;
@@ -829,8 +890,9 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
       final picked = await _imagePicker.pickImage();
       if (picked == null) return;
       setState(() {
-        _localImageBytes[selected.id] = picked.bytes;
-        _imageIntent[selected.id] = _ImageIntent.pendingLocal;
+        _imageIntent[selected.id] =
+            (_imageIntent[selected.id] ?? ContentMediaIntentState.untouched)
+                .pickLocal(picked.bytes);
         _imageError = null;
       });
       _markDirty();
@@ -843,9 +905,8 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     final selected = _selected;
     if (selected == null || !_canWrite || selected.isArchived) return;
     setState(() {
-      _localImageBytes.remove(selected.id);
       _resolvedAssetBytes.remove(selected.id);
-      _imageIntent[selected.id] = _ImageIntent.removed;
+      _imageIntent[selected.id] = _intentFor(selected.id).markRemoved();
       _imageError = null;
     });
     _markDirty();
@@ -864,8 +925,9 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
   Future<void> _resolveAssetFor(String itemId) async {
     final media = _mediaStore;
     if (media == null) return;
-    if (_localImageBytes.containsKey(itemId)) return;
-    if (_intentFor(itemId) == _ImageIntent.removed) return;
+    final intent = _intentFor(itemId);
+    if (intent.hasLocalPick) return;
+    if (intent.shouldOmitAssetOnSave) return;
     if (_resolvingAssetIds.contains(itemId)) return;
 
     HomePromoItem? item;
@@ -878,10 +940,25 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     final assetId = item?.payload.imageAssetId;
     if (assetId == null || assetId.isEmpty) return;
 
+    // Generation token: ignore stale completions after switch/remove/replace.
+    final generation = Object.hash(itemId, assetId, intent.phase);
     _resolvingAssetIds.add(itemId);
     try {
       final bytes = await media.downloadBytes(assetId: assetId);
       if (!mounted || bytes == null) return;
+      final latest = _intentFor(itemId);
+      if (latest.hasLocalPick || latest.shouldOmitAssetOnSave) return;
+      HomePromoItem? latestItem;
+      for (final candidate in _items) {
+        if (candidate.id == itemId) {
+          latestItem = candidate;
+          break;
+        }
+      }
+      final latestAssetId = latestItem?.payload.imageAssetId;
+      if (latestAssetId != assetId) return;
+      final latestGeneration = Object.hash(itemId, latestAssetId, latest.phase);
+      if (latestGeneration != generation) return;
       setState(() => _resolvedAssetBytes[itemId] = bytes);
     } catch (_) {
       // Preview falls back to skeleton.
@@ -890,24 +967,25 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     }
   }
 
-  _ImageIntent _intentFor(String itemId) =>
-      _imageIntent[itemId] ?? _ImageIntent.untouched;
+  ContentMediaIntentState _intentFor(String itemId) =>
+      _imageIntent[itemId] ?? ContentMediaIntentState.untouched;
 
   Uint8List? _previewImageBytes() {
     final selected = _selected;
     if (selected == null) return null;
-    if (_localImageBytes.containsKey(selected.id)) {
-      return _localImageBytes[selected.id];
-    }
-    if (_intentFor(selected.id) == _ImageIntent.removed) return null;
+    final intent = _intentFor(selected.id);
+    final local = intent.bytesForPreview;
+    if (local != null) return local;
+    if (intent.shouldOmitAssetOnSave) return null;
     return _resolvedAssetBytes[selected.id];
   }
 
   bool _assetLoading() {
     final selected = _selected;
     if (selected == null) return false;
-    if (_localImageBytes.containsKey(selected.id)) return false;
-    if (_intentFor(selected.id) == _ImageIntent.removed) return false;
+    final intent = _intentFor(selected.id);
+    if (intent.hasLocalPick) return false;
+    if (intent.shouldOmitAssetOnSave) return false;
     final assetId = selected.payload.imageAssetId;
     if (assetId == null || assetId.isEmpty) return false;
     return !_resolvedAssetBytes.containsKey(selected.id) &&
@@ -1011,12 +1089,11 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     }
 
     final selected = _selected;
-    final previewPayload =
-        _draftPayload() ?? HomePromoPayload.demoStuckWithAssignment;
+    final previewPayload = _previewPayloadForPhone();
     final parts = _partitions;
-    final v2PublishBlocked = contentWireUsesV2PublishFeatures(
-      previewPayload.toWireJson(),
-    );
+    final v2PublishBlocked =
+        previewPayload != null &&
+        contentWireUsesV2PublishFeatures(previewPayload.toWireJson());
 
     return Padding(
       padding: const EdgeInsets.all(20),
@@ -1059,6 +1136,9 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
         onDiscardWorkingDraft: _editingWorkingDraft && _canWrite
             ? _discardWorkingDraft
             : null,
+        onDiscardLocalChanges: _dirty && _canWrite
+            ? _discardLocalChanges
+            : null,
         listBuilder: (_) => VisualEditorListPanel(
           panelTitle: 'Promo-карточки',
           tab: _listTab,
@@ -1090,17 +1170,41 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
           showDemoOnly: _showDemoOnly,
           onDemoFilterChanged: (value) => setState(() => _showDemoOnly = value),
         ),
-        previewBuilder: (_) => PhonePreviewFrame(
-          child: Theme(
-            data: studentPlatformLightTheme(),
-            child: _HomePromoPhonePreview(
-              previewPayload: previewPayload,
-              showDemoBadge: selected?.isDemo ?? false,
-              hidePromo: selected == null,
-              news: _previewNews,
-              homeSlot: _homeSlot.key,
+        previewBuilder: (_) => Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ContentPreviewModeToggle(
+              mode: _previewMode,
+              onChanged: (mode) => setState(() => _previewMode = mode),
             ),
-          ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: PhonePreviewFrame(
+                child: Theme(
+                  data: studentPlatformLightTheme(),
+                  child: _hidePromoPreview || previewPayload == null
+                      ? const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(24),
+                            child: Text(
+                              'Нет опубликованной версии для предпросмотра',
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        )
+                      : _HomePromoPhonePreview(
+                          previewPayload: previewPayload,
+                          showDemoBadge: selected?.isDemo ?? false,
+                          hidePromo: false,
+                          news: _previewNews,
+                          homeSlot: _homeSlot.key,
+                          imageBytes: _previewImageBytes(),
+                          imageLoading: _assetLoading(),
+                        ),
+                ),
+              ),
+            ),
+          ],
         ),
         propertiesBuilder: (_) => selected == null
             ? VisualEditorEmptyState(
@@ -1233,7 +1337,6 @@ class _EditorSnapshot {
     required this.endsAt,
     required this.ctaAction,
     required this.imageIntent,
-    required this.imageAssetId,
     required this.homeSlot,
     required this.cardVariant,
     required this.gradientDirection,
@@ -1256,8 +1359,7 @@ class _EditorSnapshot {
   final DateTime? startsAt;
   final DateTime? endsAt;
   final String ctaAction;
-  final _ImageIntent imageIntent;
-  final String? imageAssetId;
+  final ContentMediaIntentState imageIntent;
   final ContentHomeSlot homeSlot;
   final ContentCardVariant cardVariant;
   final int gradientDirection;
@@ -1283,7 +1385,6 @@ class _EditorSnapshot {
         other.endsAt == endsAt &&
         other.ctaAction == ctaAction &&
         other.imageIntent == imageIntent &&
-        other.imageAssetId == imageAssetId &&
         other.homeSlot == homeSlot &&
         other.cardVariant == cardVariant &&
         other.gradientDirection == gradientDirection;
@@ -1309,7 +1410,6 @@ class _EditorSnapshot {
     endsAt,
     ctaAction,
     imageIntent,
-    imageAssetId,
     homeSlot,
     cardVariant,
     gradientDirection,
@@ -1331,6 +1431,8 @@ class _HomePromoPhonePreview extends StatelessWidget {
     required this.hidePromo,
     required this.news,
     required this.homeSlot,
+    this.imageBytes,
+    this.imageLoading = false,
   });
 
   final HomePromoPayload previewPayload;
@@ -1338,6 +1440,8 @@ class _HomePromoPhonePreview extends StatelessWidget {
   final bool hidePromo;
   final List<StudentHomeNews> news;
   final String homeSlot;
+  final Uint8List? imageBytes;
+  final bool imageLoading;
 
   @override
   Widget build(BuildContext context) {
@@ -1392,6 +1496,8 @@ class _HomePromoPhonePreview extends StatelessWidget {
                 payload: previewPayload,
                 slot: homeSlot,
                 showDemoBadge: showDemoBadge,
+                imageBytes: imageBytes,
+                imageLoading: imageLoading,
               ),
             ],
       bottomNavigationBar: StudentBottomNav(

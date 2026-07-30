@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import '../content/content_models.dart';
@@ -14,6 +16,8 @@ class StudentHomePromoPlacement {
     this.showDemoBadge = false,
     this.onTap,
     this.onDismiss,
+    this.imageBytes,
+    this.imageLoading = false,
   });
 
   final HomePromoPayload payload;
@@ -21,6 +25,8 @@ class StudentHomePromoPlacement {
   final bool showDemoBadge;
   final VoidCallback? onTap;
   final VoidCallback? onDismiss;
+  final Uint8List? imageBytes;
+  final bool imageLoading;
 }
 
 class StudentHomeView extends StatelessWidget {
@@ -114,6 +120,8 @@ class StudentHomeView extends StatelessWidget {
               onTap: cards[i].onTap ?? onHelpTap,
               onDismiss: cards[i].onDismiss ?? onHomePromoDismiss,
               showDemoBadge: cards[i].showDemoBadge,
+              imageBytes: cards[i].imageBytes,
+              imageLoading: cards[i].imageLoading,
             ),
           ),
         ),

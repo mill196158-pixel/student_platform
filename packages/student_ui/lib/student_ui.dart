@@ -1,5 +1,6 @@
 library;
 
+export 'src/content/content_icon_resolver.dart';
 export 'src/content/content_models.dart';
 export 'src/content/reference_article_models.dart';
 export 'src/content/review_models.dart';

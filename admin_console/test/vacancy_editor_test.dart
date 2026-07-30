@@ -247,4 +247,171 @@ void main() {
     final description = VacancyItem.buildDescription('Описание', 'Требования');
     expect(description, contains('Требования'));
   });
+
+  testWidgets('draft title edit updates phone preview card', (tester) async {
+    final repo = LocalVacancyRepository();
+    await pumpEditor(tester, repo);
+
+    await tester.tap(find.byTooltip('Создать черновик'));
+    await tester.pumpAndSettle();
+
+    final titleField = find.byWidgetPredicate(
+      (widget) =>
+          widget is TextField && widget.decoration?.labelText == 'Название',
+    );
+    await tester.enterText(titleField, 'Draft vacancy title');
+    await tester.pump();
+
+    expect(find.text('Draft vacancy title'), findsWidgets);
+  });
+
+  test(
+    'registerAsset persists logo/cover roles; clear deletes asset',
+    () async {
+      final repo = LocalVacancyRepository();
+      final draft = await repo.createDraft(
+        draft: const VacancyItem(
+          id: 'tmp',
+          status: VacancyStatus.draft,
+          origin: ContentOrigin.admin,
+          title: 'Role media vacancy',
+          companyName: 'Org',
+          summary: 'Summary',
+          description: 'Body',
+          rowVersion: 1,
+          priority: 0,
+          audienceMode: 'all',
+        ),
+      );
+
+      final logoId = await repo.registerAsset(
+        vacancyId: draft.id,
+        bytes: const [1, 2, 3],
+        contentType: 'image/png',
+        title: 'logo.png',
+        role: 'logo',
+      );
+      final coverId = await repo.registerAsset(
+        vacancyId: draft.id,
+        bytes: const [4, 5, 6],
+        contentType: 'image/jpeg',
+        title: 'cover.jpg',
+        role: 'cover',
+      );
+
+      var item = await repo.get(draft.id);
+      expect(item.assetIdForRole('logo'), logoId);
+      expect(item.assetIdForRole('cover'), coverId);
+      expect(repo.assetRole(logoId), 'logo');
+      expect(repo.assetRole(coverId), 'cover');
+
+      final logo2 = await repo.registerAsset(
+        vacancyId: draft.id,
+        bytes: const [7, 8],
+        contentType: 'image/png',
+        title: 'logo2.png',
+        role: 'logo',
+      );
+      item = await repo.get(draft.id);
+      expect(item.assetIdForRole('logo'), logo2);
+      expect(repo.assetRole(logoId), 'attachment');
+
+      await repo.deleteAsset(logo2);
+      item = await repo.get(draft.id);
+      expect(item.assetIdForRole('logo'), isNull);
+      expect(item.assetIds.contains(logo2), isFalse);
+    },
+  );
+
+  test(
+    'working draft logo replace keeps canonical until publish; discard restores',
+    () async {
+      final repo = LocalVacancyRepository();
+      var item = await repo.createDraft(
+        draft: const VacancyItem(
+          id: 'tmp',
+          status: VacancyStatus.draft,
+          origin: ContentOrigin.admin,
+          title: 'Published visual vacancy',
+          companyName: 'Org',
+          summary: 'Summary',
+          description: 'Body',
+          rowVersion: 1,
+          priority: 0,
+          audienceMode: 'all',
+        ),
+      );
+      final canonicalLogo = await repo.registerAsset(
+        vacancyId: item.id,
+        bytes: const [1],
+        contentType: 'image/png',
+        title: 'canon.png',
+        role: 'logo',
+      );
+      item = await repo.get(item.id);
+      // Local publish requires approved; walk the moderation path.
+      item = await repo.moderate(
+        id: item.id,
+        action: 'take_in_moderation',
+        expectedRowVersion: item.rowVersion,
+      );
+      item = await repo.moderate(
+        id: item.id,
+        action: 'approve',
+        expectedRowVersion: item.rowVersion,
+      );
+      item = await repo.publish(item.id, item.rowVersion);
+      expect(item.status, VacancyStatus.published);
+      expect(item.assetIdForRole('logo'), canonicalLogo);
+
+      item = await repo.beginEdit(item.id);
+      expect(item.hasWorkingDraft, isTrue);
+
+      final draftLogo = await repo.registerAsset(
+        vacancyId: item.id,
+        bytes: const [2],
+        contentType: 'image/png',
+        title: 'draft.png',
+        role: 'logo',
+      );
+      item = await repo.get(item.id);
+      expect(item.assetIdForRole('logo'), draftLogo);
+      expect(
+        item.assets.any((a) => a.id == canonicalLogo && a.role == 'logo'),
+        isTrue,
+        reason: 'canonical logo role must stay until publish',
+      );
+
+      await repo.clearVisualRole(vacancyId: item.id, role: 'logo');
+      item = await repo.get(item.id);
+      expect(item.isVisualRoleCleared('logo'), isTrue);
+      expect(item.assetIdForRole('logo'), isNull);
+      expect(
+        item.assets.any((a) => a.id == canonicalLogo && a.role == 'logo'),
+        isTrue,
+        reason: 'clear during WD must not demote/delete canonical',
+      );
+
+      item = await repo.discardWorkingDraft(item.id);
+      expect(item.hasWorkingDraft, isFalse);
+      expect(item.isVisualRoleCleared('logo'), isFalse);
+      expect(item.assetIdForRole('logo'), canonicalLogo);
+
+      item = await repo.beginEdit(item.id);
+      final draftRv = item.workingDraftRowVersion ?? 1;
+      final replacement = await repo.registerAsset(
+        vacancyId: item.id,
+        bytes: const [3],
+        contentType: 'image/png',
+        title: 'next.png',
+        role: 'logo',
+      );
+      final published = await repo.publishWorkingDraft(
+        item.id,
+        expectedDraftRowVersion: draftRv,
+      );
+      expect(published.assetIdForRole('logo'), replacement);
+      expect(published.assets.any((a) => a.id == canonicalLogo), isFalse);
+    },
+  );
 }

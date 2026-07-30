@@ -1,7 +1,7 @@
 # Content Platform — Acceptance Checklist
 
 Status: **ACTIVE**
-Updated: **2026-07-31** (Stage 14.1.2 Visual Content Studio — DONE / Codex APPROVE_WITH_NOTES)
+Updated: **2026-07-31** (Stage 14.1.3 Visual Editor Fidelity — IN PROGRESS)
 Rule: mark `[x]` only with **code + tests + Codex APPROVE** for that item.
 Docs-only items: Codex APPROVE on the docs package.
 Do **not** merge requirements into vague “готово”.
@@ -324,6 +324,28 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Codex APPROVE_WITH_NOTES 14.1.2
 - [x] Migrations applied: `20260730190415`, `20260730220218`
 - [x] Commit + normal push `origin/refactor/chat-tab`
+
+---
+
+## M4. Stage 14.1.3 — Visual Editor Fidelity & Media Pipeline
+
+- [x] Unified preview precedence: local → WD → published → eligible demo
+- [x] PreviewMode: «С текущими правками» / «Как опубликовано»
+- [x] Local discard restores saved snapshot (not server WD discard RPC)
+- [x] student_ui cardVariant layouts for promo + profile feed
+- [x] ContentIconResolver (builtIn / custom / none / unknown)
+- [x] Media intent states + local bytes in phone preview
+- [x] Home promo imageBytes reach StudentHomeView placements
+- [x] Profile WD image pick + carousel overlay
+- [x] Reference published list overlays liveDraft
+- [x] Vacancy published WD overlay + logo/cover preview bytes
+- [x] Publish gate OFF does not block local preview
+- [x] Vacancy asset role RPC + WD isolation + clear/publish reconcile
+- [x] Stale media resolve generation-safe
+- [x] Tests: variant/media/WD overlay/discard (Codex final package)
+- [x] Builds: Admin/Main Web, Android, iOS
+- [x] Codex APPROVE 14.1.3
+- [ ] Commit + normal push `origin/refactor/chat-tab`
 
 ---
 

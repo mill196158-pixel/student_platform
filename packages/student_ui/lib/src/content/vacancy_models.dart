@@ -573,6 +573,8 @@ class ManagedVacancyCard {
     this.assets = const [],
     this.expiresAt,
     this.publishedAt,
+    this.logoBytes,
+    this.coverBytes,
   });
 
   final String id;
@@ -590,6 +592,12 @@ class ManagedVacancyCard {
   final DateTime? expiresAt;
 
   final DateTime? publishedAt;
+
+  /// Admin/Mobile preview logo bytes (not persisted).
+  final List<int>? logoBytes;
+
+  /// Admin/Mobile preview cover bytes (not persisted).
+  final List<int>? coverBytes;
 
   bool get hasAssets => assets.isNotEmpty;
 

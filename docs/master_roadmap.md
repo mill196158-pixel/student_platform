@@ -6,7 +6,7 @@
 ## Статус документа
 
 - Дата аудита: **27 июля 2026**
-- Обновлено: **30 июля 2026** (Stage 14.1.2 Visual Content Studio — pickers + gated schema v2)
+- Обновлено: **31 июля 2026** (Stage 14.1.3 Visual Editor Fidelity & Media Pipeline)
 - Проверенная основная ветка: `refactor/chat-tab` (база)
 - Рабочая ветка контента: `feature/content-platform`
 - Проверенная административная ветка: `feature/admin-console`
@@ -15,7 +15,7 @@
 - Codex thread: `019fa373-81f2-7962-a8c9-81d86cb62311`
 - Remote project: `gwdanmwluhrcfxbnplwd`
 - Статус карты: **ACTIVE**
-- Content Platform Stages **14–21** + **14.1/14.1.1/14.1.2** на `refactor/chat-tab` (Visual Content Studio pickers + schema v2 drafts; publish gate OFF until Mobile release; Edge/media smoke JWT — owner-gated residuals)
+- Content Platform Stages **14–21** + **14.1/14.1.1/14.1.2/14.1.3** на `refactor/chat-tab` (Visual Editor Fidelity + media pipeline; publish gate OFF until Mobile release; Edge/media smoke JWT — owner-gated residuals)
 - Owner residuals Stage 13 (не блокируют 14–19): PHYSICAL OCR / two-device topic race / controlled push / REAL XLSX
 - Контрольные документы: `docs/content_platform/CONTENT_PLATFORM_SPEC.md`, `docs/content_platform/ACCEPTANCE_CHECKLIST.md`, `docs/agent_coordination/CURRENT_TASK.md`
 
@@ -988,7 +988,17 @@ Status: **DONE** / Codex **APPROVE_WITH_NOTES** — migrations `20260730190415` 
 - [x] vacancy_assets.role; reference category description/color/is_hidden; audience lens RPC (UI residual NOTE);
 - [x] Import Studio: docs-only note for next stage (multi-format curriculum audit) — no rewrite in 14.1.2.
 
-### Next after 14.1.2 — Import Studio (separate stage)
+### Stage 14.1.3 — Visual Editor Fidelity & Media Pipeline
+
+Status: **DONE** / Codex **APPROVE** — corrective fidelity (14.1.2 history unchanged); gate OFF
+
+- [x] student_ui renders all card variants + ContentIconResolver + imageBytes;
+- [x] PreviewMode effectiveDraft | publishedCanonical; local discard ≠ server WD discard;
+- [x] Home/Profile/Reference/Vacancy overlay live draft; media intent states;
+- [x] Vacancy visual-role WD isolation + snapshot-after-reconcile migration;
+- [x] Codex final-diff APPROVE + commit/push.
+
+### Next after 14.1.3 — Import Studio (separate stage)
 
 - [ ] audit several real curriculum file formats (do not force one schema early);
 - [ ] upload sample workbooks; analyze sheets/headers/merged cells;
