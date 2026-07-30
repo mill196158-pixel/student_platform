@@ -128,7 +128,20 @@ Owner decision: **do not enable PITR or any paid Supabase add-ons**. Path B reco
 | Git status | backup path **not** present in either worktree `git status` |
 | PITR / paid add-ons | **not used** (owner ban) |
 
-Secrets (DB password, tokens, connection strings, service_role) are **not** stored in the backup folder or this doc. Apply one migration at a time; stop on first failure.
+Secrets (DB password, tokens, connection strings, service_role) are **not** stored in the backup folder or this doc.
+
+## 12. Path B execution result (2026-07-30)
+
+| Step | Result |
+|---|---|
+| Codex #8 | **APPROVE** — Path B GO with logical backup (no PITR) |
+| Apply 22 migrations | **OK** — all versions `20260729133000`…`20260729154000` present |
+| After-counts | `users=34`, `enrollments=29`, `messages=261`, `news_posts=3`, `offerings=60`, `catalog=33`; `content_items=0`, `vacancies=0`, `import_batches=0` |
+| Security reviews (remote) | Stage 14–19 **PASS** |
+| Edge deploy | `content-media` / `subject-media` / `vacancy-media` **ACTIVE v1**, `verify_jwt=false` |
+| Smoke §11 (automated) | unauth 401 + bad bearer 401 + anon cleanup 403 × 3 functions = **9/9 PASS** |
+| Not run here | authenticated upload/download/cross-user + trusted cleanup (needs owner JWT / cleanup secret fixtures) |
+| Paid add-ons | **not enabled** |
 
 ## 10. Dashboard copy fix
 
