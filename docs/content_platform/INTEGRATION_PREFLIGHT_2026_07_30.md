@@ -117,14 +117,16 @@ Owner decision: **do not enable PITR or any paid Supabase add-ons**. Path B reco
 | Git backup tag | `backup/pre-content-platform-20260730` @ `c31f572` |
 | Git backup branch | `backup/refactor-chat-tab-pre-content-20260730` (pushed) |
 | Project status (MCP `get_project`) | **ACTIVE_HEALTHY**, region `eu-central-1`, Postgres 17.4.1 |
-| Logical backup dir (outside Git/worktree) | `/Users/annasuvorova/student_platform_backups/pre_content_platform_20260730_133051/` |
-| CLI | Supabase CLI **2.109.1** — `supabase db dump` (`--data-only`, `--role-only`, default schema) |
+| Logical backup dir (outside Git/worktree) | `/Users/annasuvorova/student_platform_backups/pre_content_platform_20260730_133051/` (`0700` / files `0600`) |
+| CLI | Supabase CLI **2.109.1** — `supabase db dump` (schema, `--data-only --use-copy`, `--role-only`, plus `-s auth,storage,graphql,extensions`) |
 | `01_schema.sql` | 820 887 bytes · SHA-256 `b9bd58147d7c5c31ca9501850c10caabc71f1f1f0b7ad8b18fec247f6d4d4d31` |
-| `02_data.sql` | 1 871 113 bytes · SHA-256 `22c8759a133266a471f5d1cbee1c261009407a7bfaf09b5157767cebd2ec9234` · 128 `COPY` · schemas `auth`/`public`/`storage` · dump complete marker present |
-| `03_roles.sql` | 297 bytes · SHA-256 `25873cec56a2cc6514e204f420231777f85c03da818caa7090cdcdfa89776ecd` · managed-role timeout ALTERs only (expected) |
-| Structural verify | Disposable local `psql -f 01_schema.sql` → **rc=0**, **0 ERROR lines**, 1620 successish statements; schema has 99 tables / 331 functions |
-| Restore runbook | `RESTORE_RUNBOOK.md` in backup dir (circular FK note for data load) |
+| `01b_schemas_platform.sql` | auth/storage/graphql/extensions from live · SHA-256 `ef6974396d077cf0724f44def6728bf679ba5539ad728046415d0b6727104f20` |
+| `02_data.sql` | 1 871 113 bytes · SHA-256 `22c8759a133266a471f5d1cbee1c261009407a7bfaf09b5157767cebd2ec9234` · 128 `COPY` · `auth`/`public`/`storage` |
+| `03_roles.sql` | 297 bytes · SHA-256 `25873cec56a2cc6514e204f420231777f85c03da818caa7090cdcdfa89776ecd` |
+| Full disposable restore | **PASS** — roles→platform→app→data all rc=0 / error_count=0; counts match live (`users=34`, `enrollments=29`, `messages=261`, `news_posts=3`, `offerings=60`, `catalog=33`, `terms=4`); FK orphans=0; `session_replication_role` reset |
+| Restore runbook | `RESTORE_RUNBOOK.md` + `VERIFY_SUMMARY.txt` in backup dir |
 | Git status | backup path **not** present in either worktree `git status` |
+| PITR / paid add-ons | **not used** (owner ban) |
 
 Secrets (DB password, tokens, connection strings, service_role) are **not** stored in the backup folder or this doc. Apply one migration at a time; stop on first failure.
 
