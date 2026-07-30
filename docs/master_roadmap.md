@@ -6,7 +6,7 @@
 ## Статус документа
 
 - Дата аудита: **27 июля 2026**
-- Обновлено: **30 июля 2026** (Stage 14.1 + Design Z: visual editors + demo bootstrap applied on remote)
+- Обновлено: **30 июля 2026** (Stage 14.1.1 Visual Editor news-parity + working drafts applied on remote)
 - Проверенная основная ветка: `refactor/chat-tab` (база)
 - Рабочая ветка контента: `feature/content-platform`
 - Проверенная административная ветка: `feature/admin-console`
@@ -15,7 +15,7 @@
 - Codex thread: `019fa373-81f2-7962-a8c9-81d86cb62311`
 - Remote project: `gwdanmwluhrcfxbnplwd`
 - Статус карты: **ACTIVE**
-- Content Platform Stages **14–21** + **14.1/Design Z** на `refactor/chat-tab` (remote migration+bootstrap applied; Edge deploy / media smoke JWT — owner-gated residuals)
+- Content Platform Stages **14–21** + **14.1/14.1.1** на `refactor/chat-tab` (working drafts + vacancy draft-asset visibility applied; Edge deploy / media smoke JWT — owner-gated residuals)
 - Owner residuals Stage 13 (не блокируют 14–19): PHYSICAL OCR / two-device topic race / controlled push / REAL XLSX
 - Контрольные документы: `docs/content_platform/CONTENT_PLATFORM_SPEC.md`, `docs/content_platform/ACCEPTANCE_CHECKLIST.md`, `docs/agent_coordination/CURRENT_TASK.md`
 
@@ -959,6 +959,21 @@ Status: **DONE** / Codex **APPROVE_WITH_NOTES** (2026-07-30) — migration `2026
 - [x] demo-вакансии/отзывы явно «Пример» или вне production-аудитории;
 - [x] текущие демо не удалять до готовой миграции/замены;
 - [~] authenticated media smoke *(runtime JWT residual)*.
+
+### Stage 14.1.1 — Visual Editor news-parity + working drafts
+
+Status: **DONE** / Codex **APPROVE** (2026-07-30) — migrations `20260730155714`, `20260730160328`, `20260730161522` on `gwdanmwluhrcfxbnplwd`
+
+- [x] visual editors: list / real phone preview / properties (news shell parity);
+- [x] responsive list ≥320–360px; status tabs no wrap; adaptive panes at 1280/1440/1920;
+- [x] Home preview = real `StudentHomeView`; Reference = `StudentReferenceBrowseView` (list + article);
+- [x] demo/legacy «Редактировать» → working draft; live published until publish; no identity loss;
+- [x] archive / restore / safe delete + tombstone; no legacy fallback resurrection;
+- [x] reference server parse / last-good on transient errors; corrections gated by `moderation.read`;
+- [x] vacancy draft assets server-bound (`working_draft_id`); student serializers exclude until publish;
+- [x] Admin v3 reference blocks feature-gated (`ADMIN_REFERENCE_V3_BLOCKS`, default false);
+- [x] tests + Admin/Main Web + Android debug + iOS simulator builds;
+- [x] no Edge deploy required for this substage.
 
 ---
 

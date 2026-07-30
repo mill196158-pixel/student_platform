@@ -115,38 +115,50 @@ class VisualEditorListPanel extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 8),
-            SegmentedButton<VisualEditorListTab>(
-              showSelectedIcon: false,
-              segments: [
-                ButtonSegment(
-                  value: VisualEditorListTab.published,
-                  label: Text(
-                    '${VisualEditorListTab.published.labelRu} (${tabCounts.published})',
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: SegmentedButton<VisualEditorListTab>(
+                showSelectedIcon: false,
+                segments: [
+                  ButtonSegment(
+                    value: VisualEditorListTab.published,
+                    label: Text(
+                      '${VisualEditorListTab.published.labelRu} (${tabCounts.published})',
+                      softWrap: false,
+                      overflow: TextOverflow.visible,
+                    ),
+                    icon: const Icon(Icons.public_rounded, size: 16),
                   ),
-                  icon: const Icon(Icons.public_rounded, size: 16),
-                ),
-                ButtonSegment(
-                  value: VisualEditorListTab.drafts,
-                  label: Text(
-                    '${VisualEditorListTab.drafts.labelRu} (${tabCounts.drafts})',
+                  ButtonSegment(
+                    value: VisualEditorListTab.drafts,
+                    label: Text(
+                      '${VisualEditorListTab.drafts.labelRu} (${tabCounts.drafts})',
+                      softWrap: false,
+                      overflow: TextOverflow.visible,
+                    ),
+                    icon: const Icon(Icons.edit_note_rounded, size: 16),
                   ),
-                  icon: const Icon(Icons.edit_note_rounded, size: 16),
-                ),
-                ButtonSegment(
-                  value: VisualEditorListTab.archived,
-                  label: Text(
-                    '${VisualEditorListTab.archived.labelRu} (${tabCounts.archived})',
+                  ButtonSegment(
+                    value: VisualEditorListTab.archived,
+                    label: Text(
+                      '${VisualEditorListTab.archived.labelRu} (${tabCounts.archived})',
+                      softWrap: false,
+                      overflow: TextOverflow.visible,
+                    ),
+                    icon: const Icon(Icons.inventory_2_outlined, size: 16),
                   ),
-                  icon: const Icon(Icons.inventory_2_outlined, size: 16),
+                ],
+                selected: {tab},
+                onSelectionChanged: (value) {
+                  if (value.isNotEmpty) onTabChanged(value.first);
+                },
+                style: const ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: WidgetStatePropertyAll(
+                    EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  ),
                 ),
-              ],
-              selected: {tab},
-              onSelectionChanged: (value) {
-                if (value.isNotEmpty) onTabChanged(value.first);
-              },
-              style: const ButtonStyle(
-                visualDensity: VisualDensity.compact,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
             ),
             if (onDemoFilterChanged != null) ...[

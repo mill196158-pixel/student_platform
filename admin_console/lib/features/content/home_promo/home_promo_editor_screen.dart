@@ -71,6 +71,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
   bool _loading = true;
   bool _busy = false;
   bool _dirty = false;
+  bool _editingWorkingDraft = false;
   bool _dismissible = true;
   bool _isHidden = false;
   String _audienceMode = 'all';
@@ -375,9 +376,43 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
 
   void _select(String id) {
     if (id == _selectedId) return;
-    setState(() => _selectedId = id);
+    setState(() {
+      _selectedId = id;
+      _editingWorkingDraft = false;
+    });
     _bindSelected();
     unawaited(_resolveAssetFor(id));
+  }
+
+  Future<void> _beginEdit() async {
+    final selected = _selected;
+    if (selected == null || !_canWrite) return;
+    await _run(() async {
+      final item = await _repository.beginEdit(selected.id);
+      if (!mounted) return;
+      setState(() {
+        final idx = _items.indexWhere((e) => e.id == item.id);
+        if (idx >= 0) _items = [..._items]..[idx] = item;
+        _editingWorkingDraft = true;
+      });
+      _bindSelected();
+    });
+  }
+
+  Future<void> _discardWorkingDraft() async {
+    final selected = _selected;
+    if (selected == null || !_canWrite) return;
+    await _run(() async {
+      final item = await _repository.discardWorkingDraft(selected.id);
+      if (!mounted) return;
+      setState(() {
+        _editingWorkingDraft = false;
+        final idx = _items.indexWhere((e) => e.id == item.id);
+        if (idx >= 0) _items = [..._items]..[idx] = item;
+      });
+      _bindSelected();
+      setState(() => _successBanner = 'Изменения отменены.');
+    });
   }
 
   Future<void> _create() async {
@@ -460,6 +495,32 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
       if (cleared != null) next = next.copyWith(payload: cleared);
     }
 
+    if (_editingWorkingDraft) {
+      final draftVersion = selected.workingDraftRowVersion;
+      if (draftVersion == null) {
+        setState(() => _banner = 'Черновик изменений не найден.');
+        return null;
+      }
+      next = await _repository.saveWorkingDraft(
+        next,
+        expectedDraftRowVersion: draftVersion,
+      );
+      if (!mounted) return next;
+      setState(() {
+        final idx = _items.indexWhere((e) => e.id == next.id);
+        if (idx >= 0) _items = [..._items]..[idx] = next;
+        _selectedId = next.id;
+        _imageIntent[next.id] = _ImageIntent.untouched;
+        _dirty = false;
+        _boundSnapshot = _captureSnapshot();
+      });
+      if (intent == _ImageIntent.pendingLocal) {
+        _localImageBytes.remove(next.id);
+      }
+      unawaited(_resolveAssetFor(next.id));
+      return next;
+    }
+
     next = await _repository.updateDraft(next);
     next = await _repository.setAudience(
       id: next.id,
@@ -507,6 +568,25 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
         final saved = await _saveSelected();
         if (saved == null) return;
         current = saved;
+      }
+      if (_editingWorkingDraft) {
+        final draftVersion = current.workingDraftRowVersion;
+        if (draftVersion == null) {
+          setState(() => _banner = 'Черновик изменений не найден.');
+          return;
+        }
+        final published = await _repository.publishWorkingDraft(
+          current.id,
+          expectedDraftRowVersion: draftVersion,
+        );
+        if (!mounted) return;
+        setState(() {
+          _editingWorkingDraft = false;
+          _listTab = VisualEditorListTab.published;
+        });
+        await _reload(selectId: published.id);
+        setState(() => _successBanner = 'Изменения опубликованы.');
+        return;
       }
       final published = await _repository.publish(
         current.id,
@@ -878,16 +958,24 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
         onTabChanged: (tab) {
           setState(() {
             _listTab = tab;
+            _editingWorkingDraft = false;
             _ensureSelectionForTab();
           });
           _bindSelected();
         },
         onCreate: _canWrite ? _create : null,
-        onSaveDraft: _canWrite ? _saveDraft : null,
+        onSaveDraft:
+            _canWrite && (selected?.isDraft == true || _editingWorkingDraft)
+            ? _saveDraft
+            : null,
         onPublish: _canPublish ? _publish : null,
         onUnpublish: _canUnpublish ? _unpublish : null,
         onVersions: _showVersions,
         onPopDirtyConfirm: _handlePopDirtyConfirm,
+        editingWorkingDraft: _editingWorkingDraft,
+        onDiscardWorkingDraft: _editingWorkingDraft && _canWrite
+            ? _discardWorkingDraft
+            : null,
         listBuilder: (_) => VisualEditorListPanel(
           panelTitle: 'Promo-карточки',
           tab: _listTab,
@@ -906,6 +994,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
           onTabChanged: (tab) {
             setState(() {
               _listTab = tab;
+              _editingWorkingDraft = false;
               _ensureSelectionForTab();
             });
             _bindSelected();
@@ -919,11 +1008,13 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
           onDemoFilterChanged: (value) => setState(() => _showDemoOnly = value),
         ),
         previewBuilder: (_) => PhonePreviewFrame(
-          child: _HomePromoPhonePreview(
-            previewPayload: previewPayload,
-            showDemoBadge: selected?.isDemo ?? false,
-            imageBytes: _previewImageBytes(),
-            imageLoading: _assetLoading(),
+          child: Theme(
+            data: studentPlatformLightTheme(),
+            child: _HomePromoPhonePreview(
+              previewPayload: previewPayload,
+              showDemoBadge: selected?.isDemo ?? false,
+              hidePromo: selected == null,
+            ),
           ),
         ),
         propertiesBuilder: (_) => selected == null
@@ -938,6 +1029,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
                 selected: selected,
                 canWrite: _canWrite,
                 canPublish: _canPublish,
+                editingWorkingDraft: _editingWorkingDraft,
                 busy: _busy,
                 titleController: _titleController,
                 subtitleController: _subtitleController,
@@ -1005,6 +1097,9 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
                     : null,
                 onSafeDelete: selected.isArchived ? _safeDelete : null,
                 onPromoteDemo: selected.isDemo ? _promoteDemo : null,
+                onBeginEdit: !selected.isDraft && !selected.isArchived
+                    ? _beginEdit
+                    : null,
                 publishedCount: parts.published.length,
               ),
       ),
@@ -1115,115 +1210,65 @@ class _HomePromoPhonePreview extends StatelessWidget {
   const _HomePromoPhonePreview({
     required this.previewPayload,
     required this.showDemoBadge,
-    required this.imageBytes,
-    required this.imageLoading,
+    required this.hidePromo,
   });
 
   final HomePromoPayload previewPayload;
   final bool showDemoBadge;
-  final Uint8List? imageBytes;
-  final bool imageLoading;
+  final bool hidePromo;
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFFFAF8FC), Color(0xFFF7FBFA)],
+    final now = DateTime.now();
+    final previewData = StudentHomeData(
+      profile: const StudentHomeProfile(name: 'Минь', groupName: '1-См(ВВ)-2'),
+      currentDate: now,
+      lessons: const [
+        StudentHomeLesson(
+          subject: 'Базы данных',
+          start: TimeOfDay(hour: 10, minute: 0),
+          pairNumber: 2,
+          room: '203',
+          teacher: 'М. С. Лебедев',
         ),
-      ),
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(0, 8, 0, 24),
-        children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(20, 12, 20, 8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Привет, Анна',
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w900,
-                    color: Color(0xFF111827),
-                  ),
-                ),
-                SizedBox(height: 4),
-                Text(
-                  'Группа · сегодня',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF64748B),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: _PreviewStub(label: 'Новости'),
-          ),
-          const SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: _PreviewStub(label: 'Сводка дня', height: 72),
-          ),
-          const SizedBox(height: 12),
-          if (imageLoading)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: _ImageSkeleton(),
-            ),
-          if (imageBytes != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(16),
-                child: Image.memory(
-                  imageBytes!,
-                  height: 120,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                ),
-              ),
-            ),
-          StudentHomePromoCard(
-            payload: previewPayload,
-            showDemoBadge: showDemoBadge,
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            onTap: () {},
-          ),
-        ],
-      ),
+        StudentHomeLesson(
+          subject: 'Информационная безопасность',
+          start: TimeOfDay(hour: 12, minute: 0),
+          pairNumber: 3,
+          room: '410',
+          teacher: 'О. А. Морозова',
+        ),
+      ],
+      assignments: const [
+        StudentHomeAssignment(
+          id: 'preview-assignment-1',
+          title: 'Подготовить отчёт по лабораторной работе',
+          subject: 'Базы данных',
+          deadline: '23 июл.',
+        ),
+        StudentHomeAssignment(
+          id: 'preview-assignment-2',
+          title: 'Повторить материалы к семинару',
+          subject: 'Информационная безопасность',
+          deadline: '25 июл.',
+          status: StudentHomeAssignmentStatus.inProgress,
+        ),
+      ],
+      news: const [],
+      totalLessonsToday: 2,
+      assignmentsCount: 2,
     );
-  }
-}
 
-class _PreviewStub extends StatelessWidget {
-  const _PreviewStub({required this.label, this.height = 56});
-
-  final String label;
-  final double height;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: height,
-      alignment: Alignment.centerLeft,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(
-        color: const Color(0xFFE9EAF1),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          color: Color(0xFF5C6370),
-          fontWeight: FontWeight.w700,
-        ),
+    return StudentHomeView(
+      data: previewData,
+      notificationCount: 3,
+      homePromo: hidePromo ? null : previewPayload,
+      homePromoIsDemo: showDemoBadge,
+      hideHomePromo: hidePromo,
+      bottomNavigationBar: StudentBottomNav(
+        currentIndex: 0,
+        items: studentBottomNavItems,
+        onTap: (_) {},
       ),
     );
   }
@@ -1254,6 +1299,7 @@ class _PropertiesPanel extends StatelessWidget {
     required this.selected,
     required this.canWrite,
     required this.canPublish,
+    required this.editingWorkingDraft,
     required this.busy,
     required this.titleController,
     required this.subtitleController,
@@ -1294,12 +1340,14 @@ class _PropertiesPanel extends StatelessWidget {
     required this.onRestoreArchived,
     required this.onSafeDelete,
     required this.onPromoteDemo,
+    this.onBeginEdit,
     required this.publishedCount,
   });
 
   final HomePromoItem selected;
   final bool canWrite;
   final bool canPublish;
+  final bool editingWorkingDraft;
   final bool busy;
   final TextEditingController titleController;
   final TextEditingController subtitleController;
@@ -1344,9 +1392,10 @@ class _PropertiesPanel extends StatelessWidget {
   final VoidCallback? onRestoreArchived;
   final VoidCallback? onSafeDelete;
   final VoidCallback? onPromoteDemo;
+  final VoidCallback? onBeginEdit;
   final int publishedCount;
 
-  bool get _editable => canWrite && selected.isDraft;
+  bool get _editable => canWrite && (selected.isDraft || editingWorkingDraft);
 
   @override
   Widget build(BuildContext context) {
@@ -1549,6 +1598,15 @@ class _PropertiesPanel extends StatelessWidget {
             ],
           ),
           const Divider(height: 24),
+          if (onBeginEdit != null && !editingWorkingDraft)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: FilledButton.icon(
+                onPressed: busy ? null : onBeginEdit,
+                icon: const Icon(Icons.edit_outlined),
+                label: const Text('Редактировать'),
+              ),
+            ),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -1562,7 +1620,7 @@ class _PropertiesPanel extends StatelessWidget {
                 OutlinedButton.icon(
                   onPressed: busy ? null : onPromoteDemo,
                   icon: const Icon(Icons.upgrade_rounded),
-                  label: const Text('Сделать управляемой'),
+                  label: const Text('Сделать обычной'),
                 ),
               if (onArchive != null)
                 OutlinedButton.icon(

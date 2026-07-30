@@ -155,6 +155,40 @@ sealed class ReferenceBlock {
         final cta = ReferenceArticleCta.tryParse(json);
         if (cta == null) return null;
         return ReferenceCtaBlock(cta: cta);
+      case 'heading':
+        final text = _readString(json, const ['text']);
+        if (text == null) return null;
+        final levelRaw = json['level'];
+        final level = levelRaw == null
+            ? 1
+            : (levelRaw is int
+                ? levelRaw
+                : (levelRaw is num ? levelRaw.toInt() : null));
+        if (level == null || level < 1 || level > 3) return null;
+        return ReferenceHeadingBlock(text: text, level: level);
+      case 'info':
+        final text = _readString(json, const ['text']);
+        if (text == null) return null;
+        return ReferenceInfoBlock(text: text);
+      case 'warning':
+        final text = _readString(json, const ['text']);
+        if (text == null) return null;
+        return ReferenceWarningBlock(text: text);
+      case 'list':
+        final style = _readString(json, const ['style']);
+        if (style == null || (style != 'bullet' && style != 'numbered')) {
+          return null;
+        }
+        final itemsRaw = json['items'];
+        if (itemsRaw is! List || itemsRaw.isEmpty) return null;
+        final items = <String>[];
+        for (final item in itemsRaw) {
+          if (item is! String) return null;
+          final trimmed = item.trim();
+          if (trimmed.isEmpty) return null;
+          items.add(trimmed);
+        }
+        return ReferenceListBlock(style: style, items: items);
       default:
         return null;
     }
@@ -249,6 +283,71 @@ class ReferenceCtaBlock extends ReferenceBlock {
   Map<String, dynamic> toWireJson() => {'type': type, ...cta.toWireJson()};
 }
 
+/// Heading block (schema v3+). [level] is 1..3.
+class ReferenceHeadingBlock extends ReferenceBlock {
+  const ReferenceHeadingBlock({required this.text, this.level = 1});
+
+  final String text;
+  final int level;
+
+  @override
+  String get type => 'heading';
+
+  @override
+  Map<String, dynamic> toWireJson() => {
+        'type': type,
+        'text': text,
+        'level': level,
+      };
+}
+
+/// Callout info block (schema v3+).
+class ReferenceInfoBlock extends ReferenceBlock {
+  const ReferenceInfoBlock({required this.text});
+
+  final String text;
+
+  @override
+  String get type => 'info';
+
+  @override
+  Map<String, dynamic> toWireJson() => {'type': type, 'text': text};
+}
+
+/// Callout warning block (schema v3+).
+class ReferenceWarningBlock extends ReferenceBlock {
+  const ReferenceWarningBlock({required this.text});
+
+  final String text;
+
+  @override
+  String get type => 'warning';
+
+  @override
+  Map<String, dynamic> toWireJson() => {'type': type, 'text': text};
+}
+
+/// Bullet or numbered list block (schema v3+).
+class ReferenceListBlock extends ReferenceBlock {
+  const ReferenceListBlock({required this.style, required this.items});
+
+  /// `'bullet'` or `'numbered'`.
+  final String style;
+  final List<String> items;
+
+  bool get isNumbered => style == 'numbered';
+
+  @override
+  String get type => 'list';
+
+  @override
+  Map<String, dynamic> toWireJson() => {
+        'type': type,
+        'style': style,
+        'items': items,
+      };
+}
+
 /// Payload for template `reference_article_v1` (schema v1 legacy + v2 canonical).
 @immutable
 class ReferenceArticlePayload {
@@ -288,6 +387,14 @@ class ReferenceArticlePayload {
     return _tryParseCore(json);
   }
 
+  /// Fail-closed parser for schema v3 (same category rules as v2; new blocks).
+  ///
+  /// New block types (`heading`/`info`/`warning`/`list`) are accepted via
+  /// [ReferenceBlock.tryParse]. Unknown types still fail closed.
+  static ReferenceArticlePayload? tryParseV3(Map<String, dynamic>? json) {
+    return tryParseV2(json);
+  }
+
   static ReferenceArticlePayload? tryParseForSchema(
     int schemaVersion,
     Map<String, dynamic>? json,
@@ -295,6 +402,7 @@ class ReferenceArticlePayload {
     return switch (schemaVersion) {
       1 => tryParseV1(json),
       2 => tryParseV2(json),
+      3 => tryParseV3(json),
       _ => null,
     };
   }
@@ -426,7 +534,8 @@ class ManagedReferenceArticle {
         'schema_version',
         'schemaVersion',
       ]);
-      if (schemaVersion == null || (schemaVersion != 1 && schemaVersion != 2)) {
+      if (schemaVersion == null ||
+          (schemaVersion != 1 && schemaVersion != 2 && schemaVersion != 3)) {
         return null;
       }
 
@@ -480,6 +589,13 @@ class ManagedReferenceArticle {
         payload.blocks.any((block) {
           return switch (block) {
             ReferenceTextBlock(:final text) => text.toLowerCase().contains(q),
+            ReferenceHeadingBlock(:final text) =>
+              text.toLowerCase().contains(q),
+            ReferenceInfoBlock(:final text) => text.toLowerCase().contains(q),
+            ReferenceWarningBlock(:final text) =>
+              text.toLowerCase().contains(q),
+            ReferenceListBlock(:final items) =>
+              items.any((item) => item.toLowerCase().contains(q)),
             ReferenceLinkBlock(:final label) => label.toLowerCase().contains(q),
             ReferenceFileBlock(:final title) =>
               title?.toLowerCase().contains(q) ?? false,

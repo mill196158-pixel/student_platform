@@ -53,6 +53,7 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
   bool _loading = true;
   bool _busy = false;
   bool _dirty = false;
+  bool _editingWorkingDraft = false;
   String _audienceMode = 'all';
   String _origin = 'admin';
   VacancyEmploymentType? _employmentType;
@@ -222,10 +223,40 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
 
   void _select(String id) {
     if (id == _selectedId) return;
-    setState(() => _selectedId = id);
+    setState(() {
+      _selectedId = id;
+      _editingWorkingDraft = false;
+    });
     _bindSelected();
     final selected = _selected;
     if (selected != null) unawaited(_loadJournal(selected));
+  }
+
+  Future<void> _beginEdit() async {
+    final selected = _selected;
+    if (selected == null || !_canWrite) return;
+    await _run(() async {
+      final item = await _repository.beginEdit(selected.id);
+      await _reload(selectId: item.id);
+      if (!mounted) return;
+      setState(() => _editingWorkingDraft = true);
+      _bindSelected();
+    });
+  }
+
+  Future<void> _discardWorkingDraft() async {
+    final selected = _selected;
+    if (selected == null || !_canWrite) return;
+    await _run(() async {
+      final item = await _repository.discardWorkingDraft(selected.id);
+      await _reload(selectId: item.id);
+      if (!mounted) return;
+      setState(() {
+        _editingWorkingDraft = false;
+        _successBanner = 'Изменения отменены.';
+      });
+      _bindSelected();
+    });
   }
 
   _EditorSnapshot _captureSnapshot() {
@@ -529,6 +560,26 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
       return;
     }
     await _run(() async {
+      if (_editingWorkingDraft) {
+        final draftVersion = selected.workingDraftRowVersion;
+        if (draftVersion == null) {
+          setState(() => _banner = 'Черновик изменений не найден.');
+          return;
+        }
+        final next = await _repository.saveWorkingDraft(
+          draft,
+          expectedDraftRowVersion: draftVersion,
+        );
+        await _reload(selectId: next.id);
+        if (!mounted) return;
+        setState(() {
+          _successBanner = 'Изменения сохранены.';
+          _audiencePreview = null;
+          _dirty = false;
+          _boundSnapshot = _captureSnapshot();
+        });
+        return;
+      }
       var next = await _repository.updateDraft(draft);
       next = await _repository.setAudience(
         id: next.id,
@@ -562,6 +613,31 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
     final selected = _selected;
     if (selected == null) return;
     await _run(() async {
+      if (_dirty) {
+        await _save();
+        if (_dirty) return;
+      }
+      if (_editingWorkingDraft) {
+        final current = _selected;
+        if (current == null) return;
+        final draftVersion = current.workingDraftRowVersion;
+        if (draftVersion == null) {
+          setState(() => _banner = 'Черновик изменений не найден.');
+          return;
+        }
+        final published = await _repository.publishWorkingDraft(
+          current.id,
+          expectedDraftRowVersion: draftVersion,
+        );
+        await _reload(selectId: published.id);
+        if (!mounted) return;
+        setState(() {
+          _editingWorkingDraft = false;
+          _listTab = VisualEditorListTab.published;
+          _successBanner = 'Изменения опубликованы.';
+        });
+        return;
+      }
       final published = await _repository.publish(
         selected.id,
         selected.rowVersion,
@@ -835,9 +911,18 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
   bool get _draftOnly {
     final selected = _selected;
     if (selected == null) return true;
+    if (_editingWorkingDraft) return true;
     return selected.status == VacancyStatus.draft ||
         selected.status == VacancyStatus.submitted ||
         selected.status == VacancyStatus.rejected;
+  }
+
+  bool get _canPublishSelected {
+    final selected = _selected;
+    if (selected == null || !_canPublish) return false;
+    if (_editingWorkingDraft) return true;
+    return selected.status == VacancyStatus.approved ||
+        selected.status == VacancyStatus.draft;
   }
 
   @override
@@ -883,10 +968,7 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
             'Отдельная доменная модель Stage 17. '
                 'User submission не публикуется автоматически.',
         canWrite: _canWrite,
-        canPublish:
-            _canPublish &&
-            selected != null &&
-            selected.status == VacancyStatus.approved,
+        canPublish: _canPublishSelected && selected != null && !isArchived,
         canUnpublish: _canPublish,
         isPublished: selected?.status == VacancyStatus.published,
         isArchived: isArchived,
@@ -895,16 +977,21 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
         onTabChanged: (tab) {
           setState(() {
             _listTab = tab;
+            _editingWorkingDraft = false;
             _ensureSelectionForTab();
           });
           _bindSelected();
         },
         onCreate: _canWrite ? _create : null,
-        onSaveDraft: _canWrite ? _saveDraft : null,
-        onPublish: _canPublish ? _publish : null,
+        onSaveDraft: _canWrite && _draftOnly ? _saveDraft : null,
+        onPublish: _canPublishSelected ? _publish : null,
         onUnpublish: _canPublish ? _unpublish : null,
         onVersions: _showVersions,
         onPopDirtyConfirm: _handlePopDirtyConfirm,
+        editingWorkingDraft: _editingWorkingDraft,
+        onDiscardWorkingDraft: _editingWorkingDraft && _canWrite
+            ? _discardWorkingDraft
+            : null,
         listBuilder: (_) => Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -927,6 +1014,7 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
                 onTabChanged: (tab) {
                   setState(() {
                     _listTab = tab;
+                    _editingWorkingDraft = false;
                     _ensureSelectionForTab();
                   });
                   _bindSelected();
@@ -971,6 +1059,7 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
                 canModerate: _canModerate,
                 busy: _busy,
                 draftOnly: _draftOnly,
+                editingWorkingDraft: _editingWorkingDraft,
                 titleController: _titleController,
                 companyController: _companyController,
                 summaryController: _summaryController,
@@ -1033,6 +1122,9 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
                 onModerate: _moderate,
                 onLifecycle: _lifecycle,
                 onPromoteDemo: _promoteDemo,
+                onBeginEdit: selected.isPublished && !isArchived
+                    ? _beginEdit
+                    : null,
                 onSafeDelete: _safeDelete,
                 onUploadAsset: _uploadAsset,
                 onResolveReport: _resolveReport,
@@ -1214,6 +1306,7 @@ class _VacancyPropertiesPanel extends StatelessWidget {
     required this.canModerate,
     required this.busy,
     required this.draftOnly,
+    required this.editingWorkingDraft,
     required this.titleController,
     required this.companyController,
     required this.summaryController,
@@ -1251,6 +1344,7 @@ class _VacancyPropertiesPanel extends StatelessWidget {
     required this.onModerate,
     required this.onLifecycle,
     required this.onPromoteDemo,
+    this.onBeginEdit,
     required this.onSafeDelete,
     required this.onUploadAsset,
     required this.onResolveReport,
@@ -1262,6 +1356,7 @@ class _VacancyPropertiesPanel extends StatelessWidget {
   final bool canModerate;
   final bool busy;
   final bool draftOnly;
+  final bool editingWorkingDraft;
   final TextEditingController titleController;
   final TextEditingController companyController;
   final TextEditingController summaryController;
@@ -1303,6 +1398,7 @@ class _VacancyPropertiesPanel extends StatelessWidget {
   final Future<void> Function(String action) onModerate;
   final Future<void> Function(String action) onLifecycle;
   final Future<void> Function() onPromoteDemo;
+  final VoidCallback? onBeginEdit;
   final Future<void> Function() onSafeDelete;
   final Future<void> Function() onUploadAsset;
   final Future<void> Function(VacancyReportEntry report, String action)
@@ -1547,6 +1643,15 @@ class _VacancyPropertiesPanel extends StatelessWidget {
             ),
           ],
           const SizedBox(height: 16),
+          if (onBeginEdit != null && !editingWorkingDraft)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: FilledButton.icon(
+                onPressed: busy ? null : onBeginEdit,
+                icon: const Icon(Icons.edit_outlined),
+                label: const Text('Редактировать'),
+              ),
+            ),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -1600,7 +1705,7 @@ class _VacancyPropertiesPanel extends StatelessWidget {
                 OutlinedButton.icon(
                   onPressed: busy ? null : onPromoteDemo,
                   icon: const Icon(Icons.upgrade_outlined),
-                  label: const Text('Перевести из демо'),
+                  label: const Text('Сделать обычной'),
                 ),
               if (canWrite && draftOnly)
                 OutlinedButton.icon(

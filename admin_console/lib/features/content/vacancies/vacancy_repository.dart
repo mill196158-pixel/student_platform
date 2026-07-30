@@ -1,6 +1,7 @@
 import 'package:student_ui/student_ui.dart';
 
 import 'vacancy_item.dart';
+import '../shared/local_content_working_draft.dart';
 
 class VacancyAudiencePreview {
   const VacancyAudiencePreview({
@@ -190,6 +191,20 @@ abstract class VacancyRepository {
   });
 
   Future<void> deleteAsset(String assetId);
+
+  Future<VacancyItem> beginEdit(String id);
+
+  Future<VacancyItem> saveWorkingDraft(
+    VacancyItem item, {
+    required int expectedDraftRowVersion,
+  });
+
+  Future<VacancyItem> publishWorkingDraft(
+    String id, {
+    required int expectedDraftRowVersion,
+  });
+
+  Future<VacancyItem> discardWorkingDraft(String id);
 }
 
 class VacancyRepositoryException implements Exception {
@@ -280,6 +295,43 @@ class LocalVacancyRepository implements VacancyRepository {
   final Map<String, List<VacancyModerationEntry>> _moderationJournal = {};
   final List<VacancyReportEntry> _reports = [];
   final Map<String, List<String>> _assetsByVacancy = {};
+  final Map<String, _VacancyWorkingDraft> _workingDrafts = {};
+
+  VacancyItem _withWorkingDraftFlag(VacancyItem item) {
+    if (!_workingDrafts.containsKey(item.id)) return item;
+    return item.copyWith(hasWorkingDraft: true);
+  }
+
+  VacancyItem _withWorkingDraftOverlay(VacancyItem item) {
+    final draft = _workingDrafts[item.id];
+    if (draft == null) return item;
+    return item.copyWith(
+      title: draft.title,
+      companyName: draft.companyName,
+      summary: draft.summary,
+      description: draft.description,
+      priority: draft.priority,
+      audienceMode: draft.audienceMode,
+      employmentType: draft.employmentType,
+      workFormat: draft.workFormat,
+      location: draft.location,
+      salaryText: draft.salaryText,
+      externalUrl: draft.externalUrl,
+      contacts: draft.contacts,
+      startsAt: draft.startsAt,
+      endsAt: draft.endsAt,
+      expiresAt: draft.expiresAt,
+      isHidden: draft.isHidden,
+      audienceGroupIds: draft.audienceGroupIds,
+      audienceUserIds: draft.audienceUserIds,
+      hasWorkingDraft: true,
+      workingDraftRowVersion: draft.rowVersion,
+    );
+  }
+
+  void _assertNoWorkingDraft(String id) {
+    assertNoLocalWorkingDraft(_workingDrafts, id);
+  }
 
   @override
   Future<List<VacancyItem>> list({String? status, String? origin}) async {
@@ -294,7 +346,7 @@ class LocalVacancyRepository implements VacancyRepository {
           .where((e) => _originWire(e.origin) == origin)
           .toList();
     }
-    final copy = [...filtered]
+    final copy = [...filtered.map(_withWorkingDraftFlag)]
       ..sort((a, b) => b.priority.compareTo(a.priority));
     return copy;
   }
@@ -302,7 +354,9 @@ class LocalVacancyRepository implements VacancyRepository {
   @override
   Future<VacancyItem> get(String id) async {
     for (final item in _items) {
-      if (item.id == id) return item;
+      if (item.id == id) {
+        return _withWorkingDraftFlag(item);
+      }
     }
     throw const VacancyRepositoryException('Вакансия не найдена.');
   }
@@ -467,6 +521,7 @@ class LocalVacancyRepository implements VacancyRepository {
 
   @override
   Future<void> safeDelete(String id, int expectedRowVersion) async {
+    _assertNoWorkingDraft(id);
     final idx = _items.indexWhere((e) => e.id == id);
     if (idx < 0) throw const VacancyRepositoryException('Вакансия не найдена.');
     final current = _items[idx];
@@ -539,6 +594,7 @@ class LocalVacancyRepository implements VacancyRepository {
     required int expectedRowVersion,
     String? reason,
   }) async {
+    _assertNoWorkingDraft(id);
     final idx = _items.indexWhere((e) => e.id == id);
     if (idx < 0) {
       throw const VacancyRepositoryException('Вакансия не найдена.');
@@ -623,9 +679,11 @@ class LocalVacancyRepository implements VacancyRepository {
     String title = '',
   }) async {
     final item = await get(vacancyId);
-    if (!_isEditable(item.status)) {
+    final hasDraft = _workingDrafts.containsKey(vacancyId);
+    if (!_isEditable(item.status) && !hasDraft) {
       throw const VacancyRepositoryException(
-        'Вложения можно добавлять только в draft|submitted|rejected.',
+        'Вложения можно добавлять в draft|submitted|rejected '
+        'или во время редактирования опубликованной вакансии.',
       );
     }
     final assetId = 'local-asset-${_seq++}';
@@ -636,8 +694,11 @@ class LocalVacancyRepository implements VacancyRepository {
       _items = [..._items]
         ..[idx] = current.copyWith(
           assetIds: [...current.assetIds, assetId],
-          rowVersion: current.rowVersion + 1,
+          rowVersion: hasDraft ? current.rowVersion : current.rowVersion + 1,
         );
+    }
+    if (hasDraft) {
+      _workingDrafts[vacancyId]?.draftAssetIds.add(assetId);
     }
     return assetId;
   }
@@ -675,6 +736,114 @@ class LocalVacancyRepository implements VacancyRepository {
         status == VacancyStatus.rejected;
   }
 
+  @override
+  Future<VacancyItem> beginEdit(String id) async {
+    final idx = _items.indexWhere((e) => e.id == id);
+    if (idx < 0) throw const VacancyRepositoryException('Вакансия не найдена.');
+    final current = _items[idx];
+    if (_isEditable(current.status)) {
+      throw const VacancyRepositoryException(
+        'Черновик редактируется напрямую.',
+      );
+    }
+    if (current.status == VacancyStatus.archived) {
+      throw const VacancyRepositoryException(
+        'Архивную вакансию нельзя редактировать.',
+      );
+    }
+    if (!_workingDrafts.containsKey(id)) {
+      _workingDrafts[id] = _VacancyWorkingDraft.fromItem(current);
+    }
+    return _withWorkingDraftOverlay(current);
+  }
+
+  @override
+  Future<VacancyItem> saveWorkingDraft(
+    VacancyItem item, {
+    required int expectedDraftRowVersion,
+  }) async {
+    final current = _items[_items.indexWhere((e) => e.id == item.id)];
+    final draft = _workingDrafts[item.id];
+    if (draft == null) {
+      throw const VacancyRepositoryException('Черновик изменений не найден.');
+    }
+    if (draft.rowVersion != expectedDraftRowVersion) {
+      throw const VacancyRepositoryException('Черновик изменился. Обновите.');
+    }
+    draft.apply(item);
+    draft.rowVersion += 1;
+    return _withWorkingDraftOverlay(current);
+  }
+
+  @override
+  Future<VacancyItem> publishWorkingDraft(
+    String id, {
+    required int expectedDraftRowVersion,
+  }) async {
+    final idx = _items.indexWhere((e) => e.id == id);
+    if (idx < 0) throw const VacancyRepositoryException('Вакансия не найдена.');
+    final current = _items[idx];
+    final draft = _workingDrafts[id];
+    if (draft == null) {
+      throw const VacancyRepositoryException('Черновик изменений не найден.');
+    }
+    if (draft.rowVersion != expectedDraftRowVersion) {
+      throw const VacancyRepositoryException('Черновик изменился. Обновите.');
+    }
+    final next = current.copyWith(
+      title: draft.title,
+      companyName: draft.companyName,
+      summary: draft.summary,
+      description: draft.description,
+      priority: draft.priority,
+      audienceMode: draft.audienceMode,
+      employmentType: draft.employmentType,
+      workFormat: draft.workFormat,
+      location: draft.location,
+      salaryText: draft.salaryText,
+      externalUrl: draft.externalUrl,
+      contacts: draft.contacts,
+      startsAt: draft.startsAt,
+      endsAt: draft.endsAt,
+      expiresAt: draft.expiresAt,
+      isHidden: draft.isHidden,
+      audienceGroupIds: draft.audienceGroupIds,
+      audienceUserIds: draft.audienceUserIds,
+      rowVersion: current.rowVersion + 1,
+      hasWorkingDraft: false,
+      clearWorkingDraftRowVersion: true,
+    );
+    _items = [..._items]..[idx] = next;
+    _workingDrafts.remove(id);
+    return next;
+  }
+
+  @override
+  Future<VacancyItem> discardWorkingDraft(String id) async {
+    final idx = _items.indexWhere((e) => e.id == id);
+    if (idx < 0) throw const VacancyRepositoryException('Вакансия не найдена.');
+    final current = _items[idx];
+    final draft = _workingDrafts.remove(id);
+    final orphanIds = draft?.draftAssetIds ?? const <String>[];
+    if (orphanIds.isNotEmpty) {
+      final kept = current.assetIds
+          .where((assetId) => !orphanIds.contains(assetId))
+          .toList();
+      _assetsByVacancy[id]?.removeWhere(orphanIds.contains);
+      _items = [..._items]
+        ..[idx] = current.copyWith(
+          assetIds: kept,
+          hasWorkingDraft: false,
+          clearWorkingDraftRowVersion: true,
+        );
+      return _items[idx];
+    }
+    return current.copyWith(
+      hasWorkingDraft: false,
+      clearWorkingDraftRowVersion: true,
+    );
+  }
+
   String _originWire(ContentOrigin origin) {
     switch (origin) {
       case ContentOrigin.demo:
@@ -686,5 +855,95 @@ class LocalVacancyRepository implements VacancyRepository {
       case ContentOrigin.userSubmission:
         return 'user_submission';
     }
+  }
+}
+
+class _VacancyWorkingDraft {
+  _VacancyWorkingDraft({
+    required this.rowVersion,
+    required this.title,
+    required this.companyName,
+    required this.summary,
+    required this.description,
+    required this.priority,
+    required this.audienceMode,
+    required this.contacts,
+    required this.isHidden,
+    required this.audienceGroupIds,
+    required this.audienceUserIds,
+    this.employmentType,
+    this.workFormat,
+    this.location,
+    this.salaryText,
+    this.externalUrl,
+    this.startsAt,
+    this.endsAt,
+    this.expiresAt,
+  });
+
+  factory _VacancyWorkingDraft.fromItem(VacancyItem item) {
+    return _VacancyWorkingDraft(
+      rowVersion: 1,
+      title: item.title,
+      companyName: item.companyName,
+      summary: item.summary,
+      description: item.description,
+      priority: item.priority,
+      audienceMode: item.audienceMode,
+      employmentType: item.employmentType,
+      workFormat: item.workFormat,
+      location: item.location,
+      salaryText: item.salaryText,
+      externalUrl: item.externalUrl,
+      contacts: Map<String, dynamic>.from(item.contacts),
+      startsAt: item.startsAt,
+      endsAt: item.endsAt,
+      expiresAt: item.expiresAt,
+      isHidden: item.isHidden,
+      audienceGroupIds: List<String>.from(item.audienceGroupIds),
+      audienceUserIds: List<String>.from(item.audienceUserIds),
+    );
+  }
+
+  int rowVersion;
+  String title;
+  String companyName;
+  String summary;
+  String description;
+  int priority;
+  String audienceMode;
+  VacancyEmploymentType? employmentType;
+  VacancyWorkFormat? workFormat;
+  String? location;
+  String? salaryText;
+  String? externalUrl;
+  Map<String, dynamic> contacts;
+  DateTime? startsAt;
+  DateTime? endsAt;
+  DateTime? expiresAt;
+  bool isHidden;
+  List<String> audienceGroupIds;
+  List<String> audienceUserIds;
+  final List<String> draftAssetIds = [];
+
+  void apply(VacancyItem item) {
+    title = item.title;
+    companyName = item.companyName;
+    summary = item.summary;
+    description = item.description;
+    priority = item.priority;
+    audienceMode = item.audienceMode;
+    employmentType = item.employmentType;
+    workFormat = item.workFormat;
+    location = item.location;
+    salaryText = item.salaryText;
+    externalUrl = item.externalUrl;
+    contacts = Map<String, dynamic>.from(item.contacts);
+    startsAt = item.startsAt;
+    endsAt = item.endsAt;
+    expiresAt = item.expiresAt;
+    isHidden = item.isHidden;
+    audienceGroupIds = List<String>.from(item.audienceGroupIds);
+    audienceUserIds = List<String>.from(item.audienceUserIds);
   }
 }

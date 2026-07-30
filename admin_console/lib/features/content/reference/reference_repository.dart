@@ -1,6 +1,7 @@
 import 'package:student_ui/student_ui.dart';
 
 import 'reference_item.dart';
+import '../shared/local_content_working_draft.dart';
 
 class ReferenceAudiencePreview {
   const ReferenceAudiencePreview({
@@ -94,6 +95,20 @@ abstract class ReferenceRepository {
     required String action,
     String reason = '',
   });
+
+  Future<ReferenceArticleItem> beginEdit(String id);
+
+  Future<ReferenceArticleItem> saveWorkingDraft(
+    ReferenceArticleItem item, {
+    required int expectedDraftRowVersion,
+  });
+
+  Future<ReferenceArticleItem> publishWorkingDraft(
+    String id, {
+    required int expectedDraftRowVersion,
+  });
+
+  Future<ReferenceArticleItem> discardWorkingDraft(String id);
 }
 
 class ReferenceVersionInfo {
@@ -168,12 +183,38 @@ class LocalReferenceRepository implements ReferenceRepository {
   late List<ReferenceArticleItem> _articles;
   final List<ReferenceCorrectionItem> _corrections = [];
   int _seq = 1;
+  final Map<String, _ReferenceWorkingDraft> _workingDrafts = {};
 
   @override
   Future<List<ReferenceCategoryItem>> listCategories() async {
     final copy = [..._categories]
       ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
     return copy;
+  }
+
+  ReferenceArticleItem _withWorkingDraftFlag(ReferenceArticleItem item) {
+    if (!_workingDrafts.containsKey(item.id)) return item;
+    return item.copyWith(hasWorkingDraft: true);
+  }
+
+  ReferenceArticleItem _withWorkingDraftOverlay(ReferenceArticleItem item) {
+    final draft = _workingDrafts[item.id];
+    if (draft == null) return item;
+    return item.copyWith(
+      title: draft.title,
+      payload: draft.payload,
+      categoryId: draft.categoryId,
+      sortOrder: draft.sortOrder,
+      audienceMode: draft.audienceMode,
+      audienceGroupIds: draft.audienceGroupIds,
+      audienceUserIds: draft.audienceUserIds,
+      hasWorkingDraft: true,
+      workingDraftRowVersion: draft.rowVersion,
+    );
+  }
+
+  void _assertNoWorkingDraft(String id) {
+    assertNoLocalWorkingDraft(_workingDrafts, id);
   }
 
   @override
@@ -183,7 +224,7 @@ class LocalReferenceRepository implements ReferenceRepository {
         : _articles
               .where((e) => referenceArticleStatusWire(e.status) == status)
               .toList();
-    final copy = [...filtered]
+    final copy = [...filtered.map(_withWorkingDraftFlag)]
       ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
     return copy;
   }
@@ -372,20 +413,25 @@ class LocalReferenceRepository implements ReferenceRepository {
   }
 
   @override
-  Future<ReferenceArticleItem> unpublish(String id, int expectedRowVersion) =>
-      _transition(id, expectedRowVersion, ReferenceArticleStatus.draft);
+  Future<ReferenceArticleItem> unpublish(String id, int expectedRowVersion) {
+    _assertNoWorkingDraft(id);
+    return _transition(id, expectedRowVersion, ReferenceArticleStatus.draft);
+  }
 
   @override
   Future<ReferenceArticleItem> archive(
     String id,
     int expectedRowVersion,
   ) async {
+    _assertNoWorkingDraft(id);
     return _transition(id, expectedRowVersion, ReferenceArticleStatus.archived);
   }
 
   @override
-  Future<ReferenceArticleItem> unarchive(String id, int expectedRowVersion) =>
-      _transition(id, expectedRowVersion, ReferenceArticleStatus.draft);
+  Future<ReferenceArticleItem> unarchive(String id, int expectedRowVersion) {
+    _assertNoWorkingDraft(id);
+    return _transition(id, expectedRowVersion, ReferenceArticleStatus.draft);
+  }
 
   Future<ReferenceArticleItem> _transition(
     String id,
@@ -412,6 +458,7 @@ class LocalReferenceRepository implements ReferenceRepository {
 
   @override
   Future<void> safeDelete(String id, int expectedRowVersion) async {
+    _assertNoWorkingDraft(id);
     final idx = _articles.indexWhere((e) => e.id == id);
     if (idx < 0) throw const ReferenceRepositoryException('Статья не найдена.');
     final item = _articles[idx];
@@ -516,6 +563,134 @@ class LocalReferenceRepository implements ReferenceRepository {
       resolutionNote: reason.isEmpty ? null : reason,
       createdAt: current.createdAt,
     );
+  }
+
+  @override
+  Future<ReferenceArticleItem> beginEdit(String id) async {
+    final idx = _articles.indexWhere((e) => e.id == id);
+    if (idx < 0) throw const ReferenceRepositoryException('Статья не найдена.');
+    final current = _articles[idx];
+    if (current.isDraft) {
+      throw const ReferenceRepositoryException(
+        'Черновик редактируется напрямую.',
+      );
+    }
+    if (current.isArchived) {
+      throw const ReferenceRepositoryException(
+        'Архивную статью нельзя редактировать.',
+      );
+    }
+    if (!_workingDrafts.containsKey(id)) {
+      _workingDrafts[id] = _ReferenceWorkingDraft.fromItem(current);
+    }
+    return _withWorkingDraftOverlay(current);
+  }
+
+  @override
+  Future<ReferenceArticleItem> saveWorkingDraft(
+    ReferenceArticleItem item, {
+    required int expectedDraftRowVersion,
+  }) async {
+    final current = _articles[_articles.indexWhere((e) => e.id == item.id)];
+    final draft = _workingDrafts[item.id];
+    if (draft == null) {
+      throw const ReferenceRepositoryException('Черновик изменений не найден.');
+    }
+    if (draft.rowVersion != expectedDraftRowVersion) {
+      throw const ReferenceRepositoryException('Черновик изменился. Обновите.');
+    }
+    draft.apply(item);
+    draft.rowVersion += 1;
+    return _withWorkingDraftOverlay(current);
+  }
+
+  @override
+  Future<ReferenceArticleItem> publishWorkingDraft(
+    String id, {
+    required int expectedDraftRowVersion,
+  }) async {
+    final idx = _articles.indexWhere((e) => e.id == id);
+    if (idx < 0) throw const ReferenceRepositoryException('Статья не найдена.');
+    final current = _articles[idx];
+    final draft = _workingDrafts[id];
+    if (draft == null) {
+      throw const ReferenceRepositoryException('Черновик изменений не найден.');
+    }
+    if (draft.rowVersion != expectedDraftRowVersion) {
+      throw const ReferenceRepositoryException('Черновик изменился. Обновите.');
+    }
+    final next = current.copyWith(
+      title: draft.title,
+      payload: draft.payload,
+      categoryId: draft.categoryId,
+      sortOrder: draft.sortOrder,
+      audienceMode: draft.audienceMode,
+      audienceGroupIds: draft.audienceGroupIds,
+      audienceUserIds: draft.audienceUserIds,
+      rowVersion: current.rowVersion + 1,
+      hasWorkingDraft: false,
+      clearWorkingDraftRowVersion: true,
+    );
+    _articles = [..._articles]..[idx] = next;
+    _workingDrafts.remove(id);
+    return next;
+  }
+
+  @override
+  Future<ReferenceArticleItem> discardWorkingDraft(String id) async {
+    final idx = _articles.indexWhere((e) => e.id == id);
+    if (idx < 0) throw const ReferenceRepositoryException('Статья не найдена.');
+    final current = _articles[idx];
+    _workingDrafts.remove(id);
+    return current.copyWith(
+      hasWorkingDraft: false,
+      clearWorkingDraftRowVersion: true,
+    );
+  }
+}
+
+class _ReferenceWorkingDraft {
+  _ReferenceWorkingDraft({
+    required this.rowVersion,
+    required this.title,
+    required this.payload,
+    required this.categoryId,
+    required this.sortOrder,
+    required this.audienceMode,
+    required this.audienceGroupIds,
+    required this.audienceUserIds,
+  });
+
+  factory _ReferenceWorkingDraft.fromItem(ReferenceArticleItem item) {
+    return _ReferenceWorkingDraft(
+      rowVersion: 1,
+      title: item.title,
+      payload: item.payload,
+      categoryId: item.categoryId,
+      sortOrder: item.sortOrder,
+      audienceMode: item.audienceMode,
+      audienceGroupIds: List<String>.from(item.audienceGroupIds),
+      audienceUserIds: List<String>.from(item.audienceUserIds),
+    );
+  }
+
+  int rowVersion;
+  String title;
+  ReferenceArticlePayload payload;
+  String categoryId;
+  int sortOrder;
+  String audienceMode;
+  List<String> audienceGroupIds;
+  List<String> audienceUserIds;
+
+  void apply(ReferenceArticleItem item) {
+    title = item.title;
+    payload = item.payload;
+    categoryId = item.categoryId;
+    sortOrder = item.sortOrder;
+    audienceMode = item.audienceMode;
+    audienceGroupIds = List<String>.from(item.audienceGroupIds);
+    audienceUserIds = List<String>.from(item.audienceUserIds);
   }
 }
 

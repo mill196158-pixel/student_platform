@@ -1,5 +1,7 @@
 import 'package:student_ui/student_ui.dart';
 
+import '../shared/content_working_draft.dart';
+
 enum VacancyStatus {
   draft,
   submitted,
@@ -83,6 +85,8 @@ class VacancyItem {
     this.audienceUserIds = const [],
     this.assetIds = const [],
     this.legacyKey,
+    this.hasWorkingDraft = false,
+    this.workingDraftRowVersion,
   });
 
   final String id;
@@ -113,6 +117,14 @@ class VacancyItem {
 
   /// Stable Stage 14.1 bootstrap identity, retained after demo promotion.
   final String? legacyKey;
+
+  /// True when a server/local working draft exists for this published item.
+  final bool hasWorkingDraft;
+
+  /// Present on begin/save responses; used for optimistic concurrency.
+  final int? workingDraftRowVersion;
+
+  bool get isPublished => status == VacancyStatus.published;
 
   VacancyCardPayload get previewPayload {
     final split = splitVacancyDescription(description);
@@ -167,6 +179,67 @@ class VacancyItem {
       audienceUserIds: _asIdList(json['audience_user_ids']),
       assetIds: _asIdList(json['asset_ids']),
       legacyKey: _nullableString(json['legacy_key']),
+      hasWorkingDraft: parseHasWorkingDraft(json),
+      workingDraftRowVersion: parseWorkingDraftRowVersion(
+        parseWorkingDraftMap(json),
+      ),
+    );
+  }
+
+  static VacancyItem? tryParseWithWorkingDraftOverlay(
+    Map<String, dynamic> json,
+  ) {
+    final base = tryParse(json);
+    if (base == null) return null;
+    final draft = parseWorkingDraftMap(json);
+    if (draft == null) {
+      return base.copyWith(hasWorkingDraft: parseHasWorkingDraft(json));
+    }
+    return base.copyWith(
+      title: (draft['title'] ?? base.title).toString(),
+      companyName: (draft['company_name'] ?? base.companyName).toString(),
+      summary: (draft['summary'] ?? base.summary).toString(),
+      description: (draft['description'] ?? base.description).toString(),
+      priority: _asInt(draft['priority']) ?? base.priority,
+      audienceMode: (draft['audience_mode'] ?? base.audienceMode).toString(),
+      employmentType: draft.containsKey('employment_type')
+          ? VacancyEmploymentType.tryParse(draft['employment_type'])
+          : base.employmentType,
+      workFormat: draft.containsKey('work_format')
+          ? VacancyWorkFormat.tryParse(draft['work_format'])
+          : base.workFormat,
+      location: draft.containsKey('location')
+          ? _nullableString(draft['location'])
+          : base.location,
+      salaryText: draft.containsKey('salary_text')
+          ? _nullableString(draft['salary_text'])
+          : base.salaryText,
+      externalUrl: draft.containsKey('external_url')
+          ? _nullableString(draft['external_url'])
+          : base.externalUrl,
+      contacts: draft['contacts'] is Map
+          ? Map<String, dynamic>.from(draft['contacts'] as Map)
+          : base.contacts,
+      startsAt: draft.containsKey('starts_at')
+          ? _asDate(draft['starts_at'])
+          : base.startsAt,
+      endsAt: draft.containsKey('ends_at')
+          ? _asDate(draft['ends_at'])
+          : base.endsAt,
+      expiresAt: draft.containsKey('expires_at')
+          ? _asDate(draft['expires_at'])
+          : base.expiresAt,
+      isHidden: draft['is_hidden'] is bool
+          ? draft['is_hidden'] as bool
+          : base.isHidden,
+      audienceGroupIds: draft['audience_group_ids'] != null
+          ? _asIdList(draft['audience_group_ids'])
+          : base.audienceGroupIds,
+      audienceUserIds: draft['audience_user_ids'] != null
+          ? _asIdList(draft['audience_user_ids'])
+          : base.audienceUserIds,
+      hasWorkingDraft: true,
+      workingDraftRowVersion: parseWorkingDraftRowVersion(draft),
     );
   }
 
@@ -204,6 +277,9 @@ class VacancyItem {
     bool clearStartsAt = false,
     bool clearEndsAt = false,
     bool clearExpiresAt = false,
+    bool? hasWorkingDraft,
+    int? workingDraftRowVersion,
+    bool clearWorkingDraftRowVersion = false,
   }) {
     return VacancyItem(
       id: id,
@@ -234,7 +310,23 @@ class VacancyItem {
       audienceUserIds: audienceUserIds ?? this.audienceUserIds,
       assetIds: assetIds ?? this.assetIds,
       legacyKey: legacyKey ?? this.legacyKey,
+      hasWorkingDraft: hasWorkingDraft ?? this.hasWorkingDraft,
+      workingDraftRowVersion: clearWorkingDraftRowVersion
+          ? null
+          : (workingDraftRowVersion ?? this.workingDraftRowVersion),
     );
+  }
+
+  Map<String, dynamic> toWorkingDraftPatch() {
+    // Draft media visibility is server-owned via vacancy_assets.working_draft_id.
+    // Do not send all assetIds as draft_asset_ids (would hide published attachments).
+    return {
+      ...toDraftPatch(),
+      'is_hidden': isHidden,
+      'audience_mode': audienceMode,
+      'audience_group_ids': audienceGroupIds,
+      'audience_user_ids': audienceUserIds,
+    };
   }
 
   /// Marker separating main description from requirements in [description].

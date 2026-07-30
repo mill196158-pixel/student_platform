@@ -1,6 +1,7 @@
 import 'package:student_ui/student_ui.dart';
 
 import 'home_promo_item.dart';
+import '../shared/local_content_working_draft.dart';
 
 abstract class HomePromoRepository {
   Future<List<HomePromoItem>> list({String? status});
@@ -51,6 +52,20 @@ abstract class HomePromoRepository {
   Future<HomePromoItem> restoreVersion(String id, int versionNumber);
 
   Future<void> reorder(List<String> orderedIds, List<int> expectedRowVersions);
+
+  Future<HomePromoItem> beginEdit(String id);
+
+  Future<HomePromoItem> saveWorkingDraft(
+    HomePromoItem item, {
+    required int expectedDraftRowVersion,
+  });
+
+  Future<HomePromoItem> publishWorkingDraft(
+    String id, {
+    required int expectedDraftRowVersion,
+  });
+
+  Future<HomePromoItem> discardWorkingDraft(String id);
 }
 
 class HomePromoRepositoryException implements Exception {
@@ -85,6 +100,7 @@ class LocalHomePromoRepository implements HomePromoRepository {
   late List<HomePromoItem> _items;
   int _seq = 1;
   final Map<String, List<HomePromoItem>> _versions = {};
+  final Map<String, _HomePromoWorkingDraft> _workingDrafts = {};
 
   void _recordVersion(HomePromoItem item) {
     final list = _versions.putIfAbsent(item.id, () => []);
@@ -107,12 +123,40 @@ class LocalHomePromoRepository implements HomePromoRepository {
     );
   }
 
+  HomePromoItem _withWorkingDraftFlag(HomePromoItem item) {
+    if (!_workingDrafts.containsKey(item.id)) return item;
+    return item.copyWith(hasWorkingDraft: true);
+  }
+
+  HomePromoItem _withWorkingDraftOverlay(HomePromoItem item) {
+    final draft = _workingDrafts[item.id];
+    if (draft == null) return item;
+    return item.copyWith(
+      title: draft.title,
+      payload: draft.payload,
+      priority: draft.priority,
+      sortOrder: draft.sortOrder,
+      audienceMode: draft.audienceMode,
+      isHidden: draft.isHidden,
+      startsAt: draft.startsAt,
+      endsAt: draft.endsAt,
+      audienceGroupIds: draft.audienceGroupIds,
+      audienceUserIds: draft.audienceUserIds,
+      hasWorkingDraft: true,
+      workingDraftRowVersion: draft.rowVersion,
+    );
+  }
+
+  void _assertNoWorkingDraft(String id) {
+    assertNoLocalWorkingDraft(_workingDrafts, id);
+  }
+
   @override
   Future<List<HomePromoItem>> list({String? status}) async {
     final filtered = status == null
         ? _items
         : _items.where((e) => homePromoStatusWire(e.status) == status).toList();
-    final copy = [...filtered]
+    final copy = [...filtered.map(_withWorkingDraftFlag)]
       ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
     return copy;
   }
@@ -256,6 +300,7 @@ class LocalHomePromoRepository implements HomePromoRepository {
 
   @override
   Future<HomePromoItem> unpublish(String id, int expectedRowVersion) async {
+    _assertNoWorkingDraft(id);
     final idx = _indexOf(id);
     final current = _items[idx];
     if (current.rowVersion != expectedRowVersion) {
@@ -271,6 +316,7 @@ class LocalHomePromoRepository implements HomePromoRepository {
 
   @override
   Future<HomePromoItem> archive(String id, int expectedRowVersion) async {
+    _assertNoWorkingDraft(id);
     final idx = _indexOf(id);
     final current = _items[idx];
     if (current.rowVersion != expectedRowVersion) {
@@ -289,6 +335,7 @@ class LocalHomePromoRepository implements HomePromoRepository {
     String id,
     int expectedRowVersion,
   ) async {
+    _assertNoWorkingDraft(id);
     final idx = _indexOf(id);
     final current = _items[idx];
     if (current.rowVersion != expectedRowVersion) {
@@ -312,6 +359,7 @@ class LocalHomePromoRepository implements HomePromoRepository {
     String id,
     int expectedRowVersion,
   ) async {
+    _assertNoWorkingDraft(id);
     final idx = _indexOf(id);
     final current = _items[idx];
     if (current.rowVersion != expectedRowVersion) {
@@ -431,5 +479,148 @@ class LocalHomePromoRepository implements HomePromoRepository {
         expectedRowVersion: expectedRowVersions[i],
       );
     }
+  }
+
+  @override
+  Future<HomePromoItem> beginEdit(String id) async {
+    final idx = _indexOf(id);
+    final current = _items[idx];
+    if (current.isDraft) {
+      throw const HomePromoRepositoryException(
+        'Черновик редактируется напрямую.',
+      );
+    }
+    if (current.isArchived) {
+      throw const HomePromoRepositoryException(
+        'Архивную карточку нельзя редактировать.',
+      );
+    }
+    final existing = _workingDrafts[id];
+    if (existing == null) {
+      _workingDrafts[id] = _HomePromoWorkingDraft.fromItem(current);
+    }
+    return _withWorkingDraftOverlay(current);
+  }
+
+  @override
+  Future<HomePromoItem> saveWorkingDraft(
+    HomePromoItem item, {
+    required int expectedDraftRowVersion,
+  }) async {
+    final idx = _indexOf(item.id);
+    final current = _items[idx];
+    final draft = _workingDrafts[item.id];
+    if (draft == null) {
+      throw const HomePromoRepositoryException('Черновик изменений не найден.');
+    }
+    if (draft.rowVersion != expectedDraftRowVersion) {
+      throw const HomePromoRepositoryException('Черновик изменился. Обновите.');
+    }
+    draft.apply(item);
+    draft.rowVersion += 1;
+    return _withWorkingDraftOverlay(current);
+  }
+
+  @override
+  Future<HomePromoItem> publishWorkingDraft(
+    String id, {
+    required int expectedDraftRowVersion,
+  }) async {
+    final idx = _indexOf(id);
+    final current = _items[idx];
+    final draft = _workingDrafts[id];
+    if (draft == null) {
+      throw const HomePromoRepositoryException('Черновик изменений не найден.');
+    }
+    if (draft.rowVersion != expectedDraftRowVersion) {
+      throw const HomePromoRepositoryException('Черновик изменился. Обновите.');
+    }
+    final next = _bump(
+      current.copyWith(
+        title: draft.title,
+        payload: draft.payload,
+        priority: draft.priority,
+        sortOrder: draft.sortOrder,
+        audienceMode: draft.audienceMode,
+        isHidden: draft.isHidden,
+        startsAt: draft.startsAt,
+        endsAt: draft.endsAt,
+        audienceGroupIds: draft.audienceGroupIds,
+        audienceUserIds: draft.audienceUserIds,
+        hasWorkingDraft: false,
+        clearWorkingDraftRowVersion: true,
+      ),
+    );
+    _items = [..._items]..[idx] = next;
+    _workingDrafts.remove(id);
+    _recordVersion(next);
+    return next;
+  }
+
+  @override
+  Future<HomePromoItem> discardWorkingDraft(String id) async {
+    final current = _items[_indexOf(id)];
+    _workingDrafts.remove(id);
+    return current.copyWith(
+      hasWorkingDraft: false,
+      clearWorkingDraftRowVersion: true,
+    );
+  }
+}
+
+class _HomePromoWorkingDraft {
+  _HomePromoWorkingDraft({
+    required this.rowVersion,
+    required this.title,
+    required this.payload,
+    required this.priority,
+    required this.sortOrder,
+    required this.audienceMode,
+    required this.isHidden,
+    required this.audienceGroupIds,
+    required this.audienceUserIds,
+    this.startsAt,
+    this.endsAt,
+  });
+
+  factory _HomePromoWorkingDraft.fromItem(HomePromoItem item) {
+    return _HomePromoWorkingDraft(
+      rowVersion: 1,
+      title: item.title,
+      payload: item.payload,
+      priority: item.priority,
+      sortOrder: item.sortOrder,
+      audienceMode: item.audienceMode,
+      isHidden: item.isHidden,
+      startsAt: item.startsAt,
+      endsAt: item.endsAt,
+      audienceGroupIds: List<String>.from(item.audienceGroupIds),
+      audienceUserIds: List<String>.from(item.audienceUserIds),
+    );
+  }
+
+  int rowVersion;
+  String title;
+  HomePromoPayload payload;
+  int priority;
+  int sortOrder;
+  String audienceMode;
+  bool isHidden;
+  DateTime? startsAt;
+  DateTime? endsAt;
+  List<String> audienceGroupIds;
+  List<String> audienceUserIds;
+
+  void apply(HomePromoItem item) {
+    title = item.title;
+    payload = item.payload;
+    priority = item.priority;
+    sortOrder = item.sortOrder;
+    audienceMode = item.audienceMode;
+    isHidden = item.isHidden;
+    startsAt = item.startsAt;
+    endsAt = item.endsAt;
+    audienceGroupIds = List<String>.from(item.audienceGroupIds);
+    audienceUserIds = List<String>.from(item.audienceUserIds);
   }
 }

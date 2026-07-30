@@ -95,6 +95,15 @@ class SupabaseProfileFeedRepository implements ProfileFeedRepository {
     return item;
   }
 
+  ProfileFeedItem _parseWorkingDraftResponse(dynamic data) {
+    final map = _asMap(data);
+    final item = ProfileFeedItem.tryParseWithWorkingDraftOverlay(map);
+    if (item == null) {
+      throw const ProfileFeedRepositoryException('Некорректный ответ сервера.');
+    }
+    return item;
+  }
+
   List<Map<String, dynamic>> _asList(dynamic data) {
     dynamic value = data;
     if (value is String && value.isNotEmpty) {
@@ -321,5 +330,44 @@ class SupabaseProfileFeedRepository implements ProfileFeedRepository {
       'p_ordered_ids': orderedIds,
       'p_expected_row_versions': expectedRowVersions,
     });
+  }
+
+  @override
+  Future<ProfileFeedItem> beginEdit(String id) async {
+    final data = await _call('admin_begin_content_edit', {'p_id': id});
+    return _parseWorkingDraftResponse(data);
+  }
+
+  @override
+  Future<ProfileFeedItem> saveWorkingDraft(
+    ProfileFeedItem item, {
+    required int expectedDraftRowVersion,
+  }) async {
+    final data = await _call('admin_save_content_working_draft', {
+      'p_id': item.id,
+      'p_expected_draft_row_version': expectedDraftRowVersion,
+      'p_patch': item.toWorkingDraftPatch(),
+    });
+    return _parseWorkingDraftResponse(data);
+  }
+
+  @override
+  Future<ProfileFeedItem> publishWorkingDraft(
+    String id, {
+    required int expectedDraftRowVersion,
+  }) async {
+    final data = await _call('admin_publish_content_working_draft', {
+      'p_id': id,
+      'p_expected_draft_row_version': expectedDraftRowVersion,
+    });
+    return _parseWorkingDraftResponse(data);
+  }
+
+  @override
+  Future<ProfileFeedItem> discardWorkingDraft(String id) async {
+    final data = await _call('admin_discard_content_working_draft', {
+      'p_id': id,
+    });
+    return _parseWorkingDraftResponse(data);
   }
 }

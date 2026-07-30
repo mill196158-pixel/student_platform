@@ -111,4 +111,39 @@ void main() {
       findsWidgets,
     );
   });
+
+  test('local working draft begin save publish flow', () async {
+    final repo = LocalHomePromoRepository();
+    final published = (await repo.list()).first;
+    expect(published.isPublished, isTrue);
+
+    final editing = await repo.beginEdit(published.id);
+    expect(editing.hasWorkingDraft, isTrue);
+
+    final saved = await repo.saveWorkingDraft(
+      editing.copyWith(title: 'Новый promo заголовок'),
+      expectedDraftRowVersion: editing.workingDraftRowVersion!,
+    );
+    expect(saved.title, 'Новый promo заголовок');
+
+    final applied = await repo.publishWorkingDraft(
+      published.id,
+      expectedDraftRowVersion: saved.workingDraftRowVersion!,
+    );
+    expect(applied.title, 'Новый promo заголовок');
+    expect(applied.hasWorkingDraft, isFalse);
+  });
+
+  test('local working draft discard clears overlay', () async {
+    final repo = LocalHomePromoRepository();
+    final published = (await repo.list()).first;
+    final editing = await repo.beginEdit(published.id);
+    await repo.saveWorkingDraft(
+      editing.copyWith(title: 'Черновик promo'),
+      expectedDraftRowVersion: editing.workingDraftRowVersion!,
+    );
+    final restored = await repo.discardWorkingDraft(published.id);
+    expect(restored.title, published.title);
+    expect(restored.hasWorkingDraft, isFalse);
+  });
 }

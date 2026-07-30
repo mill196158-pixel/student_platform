@@ -61,8 +61,7 @@ void main() {
     await pumpEditor(tester, repo);
 
     await tester.tap(find.byTooltip('Создать черновик'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
 
     final items = await repo.list();
     expect(items.any((e) => e.status == ProfileFeedStatus.draft), isTrue);
@@ -120,5 +119,31 @@ void main() {
       archived.rowVersion,
     );
     expect(restored.status, ProfileFeedStatus.draft);
+  });
+
+  test('working draft patch tracks profile feed image asset id', () {
+    final item = ProfileFeedItem(
+      id: 'pf-1',
+      status: ProfileFeedStatus.published,
+      origin: ContentOrigin.admin,
+      title: 'Card',
+      payload: const ProfileFeedPayload(
+        title: 'Card',
+        subtitle: 'Sub',
+        ctaLabel: 'Go',
+        imageAssetId: 'asset-image-42',
+      ),
+      rowVersion: 3,
+      priority: 1,
+      sortOrder: 0,
+      audienceMode: 'all',
+      versionNumber: 2,
+      hasWorkingDraft: true,
+      workingDraftRowVersion: 1,
+    );
+
+    final patch = item.toWorkingDraftPatch();
+    expect(patch['draft_asset_ids'], ['asset-image-42']);
+    expect((patch['payload'] as Map)['image_asset_id'], 'asset-image-42');
   });
 }

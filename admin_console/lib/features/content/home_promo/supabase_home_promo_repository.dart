@@ -93,6 +93,15 @@ class SupabaseHomePromoRepository implements HomePromoRepository {
     return item;
   }
 
+  HomePromoItem _parseWorkingDraftResponse(dynamic data) {
+    final map = _asMap(data);
+    final item = HomePromoItem.tryParseWithWorkingDraftOverlay(map);
+    if (item == null) {
+      throw const HomePromoRepositoryException('Некорректный ответ сервера.');
+    }
+    return item;
+  }
+
   List<Map<String, dynamic>> _asList(dynamic data) {
     dynamic value = data;
     if (value is String && value.isNotEmpty) {
@@ -314,5 +323,58 @@ class SupabaseHomePromoRepository implements HomePromoRepository {
       'p_ordered_ids': orderedIds,
       'p_expected_row_versions': expectedRowVersions,
     });
+  }
+
+  @override
+  Future<HomePromoItem> beginEdit(String id) async {
+    final data = await _call('admin_begin_content_edit', {'p_id': id});
+    return _parseWorkingDraftResponse(data);
+  }
+
+  @override
+  Future<HomePromoItem> saveWorkingDraft(
+    HomePromoItem item, {
+    required int expectedDraftRowVersion,
+  }) async {
+    final data = await _call('admin_save_content_working_draft', {
+      'p_id': item.id,
+      'p_expected_draft_row_version': expectedDraftRowVersion,
+      'p_patch': {
+        'title': item.title,
+        'payload': item.payload.toWireJson(),
+        'priority': item.priority,
+        'starts_at': item.startsAt?.toUtc().toIso8601String(),
+        'ends_at': item.endsAt?.toUtc().toIso8601String(),
+        'is_hidden': item.isHidden,
+        'audience_mode': item.audienceMode,
+        'audience_group_ids': item.audienceGroupIds,
+        'audience_user_ids': item.audienceUserIds,
+        'sort_order': item.sortOrder,
+        if (item.payload.imageAssetId != null &&
+            item.payload.imageAssetId!.trim().isNotEmpty)
+          'draft_asset_ids': [item.payload.imageAssetId!.trim()],
+      },
+    });
+    return _parseWorkingDraftResponse(data);
+  }
+
+  @override
+  Future<HomePromoItem> publishWorkingDraft(
+    String id, {
+    required int expectedDraftRowVersion,
+  }) async {
+    final data = await _call('admin_publish_content_working_draft', {
+      'p_id': id,
+      'p_expected_draft_row_version': expectedDraftRowVersion,
+    });
+    return _parseWorkingDraftResponse(data);
+  }
+
+  @override
+  Future<HomePromoItem> discardWorkingDraft(String id) async {
+    final data = await _call('admin_discard_content_working_draft', {
+      'p_id': id,
+    });
+    return _parseWorkingDraftResponse(data);
   }
 }

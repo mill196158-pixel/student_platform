@@ -71,7 +71,7 @@ extension ReferenceArticleItemPreview on ReferenceArticleItem {
     return ManagedReferenceArticle(
       id: id.isEmpty ? 'preview' : id,
       title: title,
-      schemaVersion: 2,
+      schemaVersion: schemaVersion,
       origin: origin,
       sortOrder: sortOrder,
       categoryId: categoryId,

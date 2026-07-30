@@ -60,6 +60,8 @@ class VisualEditorShell extends StatelessWidget {
     this.onUnpublish,
     this.onVersions,
     this.onPopDirtyConfirm,
+    this.editingWorkingDraft = false,
+    this.onDiscardWorkingDraft,
     this.isPublished,
     this.isArchived,
     super.key,
@@ -88,6 +90,8 @@ class VisualEditorShell extends StatelessWidget {
   final VoidCallback? onUnpublish;
   final VoidCallback? onVersions;
   final Future<void> Function()? onPopDirtyConfirm;
+  final bool editingWorkingDraft;
+  final VoidCallback? onDiscardWorkingDraft;
 
   /// Typed lifecycle state for domains whose statuses are not generic content.
   final bool? isPublished;
@@ -155,6 +159,8 @@ class VisualEditorShell extends StatelessWidget {
             onPublish: onPublish,
             onUnpublish: onUnpublish,
             onVersions: onVersions,
+            editingWorkingDraft: editingWorkingDraft,
+            onDiscardWorkingDraft: onDiscardWorkingDraft,
           ),
           const SizedBox(height: 14),
           Expanded(
@@ -190,6 +196,8 @@ class _VisualEditorHeader extends StatelessWidget {
     required this.onPublish,
     required this.onUnpublish,
     required this.onVersions,
+    required this.editingWorkingDraft,
+    required this.onDiscardWorkingDraft,
   });
 
   final String title;
@@ -210,6 +218,8 @@ class _VisualEditorHeader extends StatelessWidget {
   final VoidCallback? onPublish;
   final VoidCallback? onUnpublish;
   final VoidCallback? onVersions;
+  final bool editingWorkingDraft;
+  final VoidCallback? onDiscardWorkingDraft;
 
   @override
   Widget build(BuildContext context) {
@@ -229,6 +239,7 @@ class _VisualEditorHeader extends StatelessWidget {
             ),
             if (statusChip != null) PublicationStatusBadge(status: statusChip!),
             if (originDemoBadge) const _HeaderDemoBadge(),
+            if (editingWorkingDraft) const _WorkingDraftChip(),
             if (dirty) const _DirtyIndicator(),
             if (busy)
               const SizedBox(
@@ -265,14 +276,29 @@ class _VisualEditorHeader extends StatelessWidget {
                 icon: const Icon(Icons.history_rounded),
                 label: const Text('История версий'),
               ),
-            if (isPublished)
-              if (onUnpublish != null)
+            if (editingWorkingDraft) ...[
+              if (onPublish != null)
+                FilledButton.icon(
+                  onPressed: busy || !canPublish || isArchived || !hasSelection
+                      ? null
+                      : onPublish,
+                  icon: const Icon(Icons.publish_outlined),
+                  label: const Text('Опубликовать изменения'),
+                ),
+              if (onDiscardWorkingDraft != null)
+                OutlinedButton.icon(
+                  onPressed: busy || !canWrite ? null : onDiscardWorkingDraft,
+                  icon: const Icon(Icons.undo_rounded),
+                  label: const Text('Отменить изменения'),
+                ),
+            ] else ...[
+              if (isPublished && onUnpublish != null)
                 FilledButton.tonalIcon(
                   onPressed: busy || !canUnpublish ? null : onUnpublish,
                   icon: const Icon(Icons.unpublished_outlined),
                   label: const Text('Снять с публикации'),
-                )
-              else if (onPublish != null)
+                ),
+              if (!isPublished && onPublish != null)
                 FilledButton.icon(
                   onPressed: busy || !canPublish || isArchived || !hasSelection
                       ? null
@@ -280,6 +306,7 @@ class _VisualEditorHeader extends StatelessWidget {
                   icon: const Icon(Icons.publish_outlined),
                   label: const Text('Опубликовать'),
                 ),
+            ],
           ],
         ),
         const SizedBox(height: 10),
@@ -311,7 +338,8 @@ class _VisualEditorBody extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final wide = constraints.maxWidth >= 1180;
+        // 3-pane from 1280; between 860–1279 keep phone+props with list below.
+        final wide = constraints.maxWidth >= 1280;
         final medium = constraints.maxWidth >= 860;
 
         final list = listBuilder(context);
@@ -322,11 +350,17 @@ class _VisualEditorBody extends StatelessWidget {
           return Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              SizedBox(width: 280, child: list),
+              SizedBox(
+                width: constraints.maxWidth >= 1440 ? 360 : 340,
+                child: list,
+              ),
               const SizedBox(width: 14),
               Expanded(flex: 5, child: phone),
               const SizedBox(width: 14),
-              SizedBox(width: 340, child: props),
+              SizedBox(
+                width: constraints.maxWidth >= 1440 ? 380 : 360,
+                child: props,
+              ),
             ],
           );
         }
@@ -340,12 +374,12 @@ class _VisualEditorBody extends StatelessWidget {
                   children: [
                     Expanded(flex: 5, child: phone),
                     const SizedBox(height: 12),
-                    SizedBox(height: 220, child: list),
+                    SizedBox(height: 260, child: list),
                   ],
                 ),
               ),
               const SizedBox(width: 14),
-              SizedBox(width: 340, child: props),
+              SizedBox(width: 360, child: props),
             ],
           );
         }
@@ -380,6 +414,32 @@ class _HeaderDemoBadge extends StatelessWidget {
           'Демо',
           style: TextStyle(
             color: Color(0xFF4A3FA8),
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _WorkingDraftChip extends StatelessWidget {
+  const _WorkingDraftChip();
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0x1F1565C0),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0xFF1565C0), width: 1.2),
+      ),
+      child: const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Text(
+          'Черновик изменений',
+          style: TextStyle(
+            color: Color(0xFF0D47A1),
             fontSize: 12,
             fontWeight: FontWeight.w800,
           ),

@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:student_platform_admin/features/content/reference/reference_editor_screen.dart';
@@ -113,6 +116,60 @@ void main() {
       (await repo.listArticles()).any((item) => item.id == demo.id),
       isFalse,
     );
+  });
+
+  test('tryParse succeeds on admin_list_reference_articles fixture', () {
+    final raw = File(
+      'test/fixtures/admin_list_reference_articles_sample.json',
+    ).readAsStringSync();
+    final json = jsonDecode(raw) as Map<String, dynamic>;
+    final parsed = ReferenceArticleItem.tryParse(json);
+    expect(parsed, isNotNull);
+    expect(parsed!.id, json['id']);
+    expect(parsed.categoryId, 'cat-materials-001');
+    expect(parsed.payload.iconKey, 'download');
+    expect(parsed.hasWorkingDraft, isFalse);
+  });
+
+  test('local working draft begin save publish flow', () async {
+    final repo = LocalReferenceRepository();
+    final published = (await repo.listArticles()).firstWhere(
+      (item) => item.status == ReferenceArticleStatus.published,
+    );
+    final editing = await repo.beginEdit(published.id);
+    expect(editing.hasWorkingDraft, isTrue);
+    expect(editing.workingDraftRowVersion, 1);
+
+    final saved = await repo.saveWorkingDraft(
+      editing.copyWith(title: 'Обновлённый заголовок'),
+      expectedDraftRowVersion: editing.workingDraftRowVersion!,
+    );
+    expect(saved.title, 'Обновлённый заголовок');
+    expect(saved.workingDraftRowVersion, 2);
+
+    final applied = await repo.publishWorkingDraft(
+      published.id,
+      expectedDraftRowVersion: saved.workingDraftRowVersion!,
+    );
+    expect(applied.title, 'Обновлённый заголовок');
+    expect(applied.hasWorkingDraft, isFalse);
+    expect(applied.workingDraftRowVersion, isNull);
+  });
+
+  test('local working draft discard restores canonical', () async {
+    final repo = LocalReferenceRepository();
+    final published = (await repo.listArticles()).firstWhere(
+      (item) => item.status == ReferenceArticleStatus.published,
+    );
+    final originalTitle = published.title;
+    final editing = await repo.beginEdit(published.id);
+    await repo.saveWorkingDraft(
+      editing.copyWith(title: 'Временный заголовок'),
+      expectedDraftRowVersion: editing.workingDraftRowVersion!,
+    );
+    final restored = await repo.discardWorkingDraft(published.id);
+    expect(restored.title, originalTitle);
+    expect(restored.hasWorkingDraft, isFalse);
   });
 
   test('tryParse rejects Stage 14 audience JSON without category_id', () {

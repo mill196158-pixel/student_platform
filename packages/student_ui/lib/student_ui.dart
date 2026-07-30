@@ -6,6 +6,7 @@ export 'src/content/review_models.dart';
 export 'src/content/student_home_promo_card.dart';
 export 'src/content/student_profile_feed_card.dart';
 export 'src/content/student_reference_article_card.dart';
+export 'src/content/student_reference_browse_view.dart';
 export 'src/content/student_review_card.dart';
 export 'src/content/subject_card_models.dart';
 export 'src/content/student_subject_card_preview.dart';

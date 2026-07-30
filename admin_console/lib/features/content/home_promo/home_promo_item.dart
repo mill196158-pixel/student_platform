@@ -1,5 +1,7 @@
 import 'package:student_ui/student_ui.dart';
 
+import '../shared/content_working_draft.dart';
+
 enum HomePromoStatus { draft, published, archived }
 
 HomePromoStatus? parseHomePromoStatus(Object? raw) {
@@ -151,6 +153,8 @@ class HomePromoItem {
     this.endsAt,
     this.audienceGroupIds = const [],
     this.audienceUserIds = const [],
+    this.hasWorkingDraft = false,
+    this.workingDraftRowVersion,
   });
 
   final String id;
@@ -171,6 +175,12 @@ class HomePromoItem {
   final DateTime? endsAt;
   final List<String> audienceGroupIds;
   final List<String> audienceUserIds;
+
+  /// True when a server/local working draft exists for this published item.
+  final bool hasWorkingDraft;
+
+  /// Present on begin/save responses; used for optimistic concurrency.
+  final int? workingDraftRowVersion;
 
   bool get isDraft => status == HomePromoStatus.draft;
   bool get isPublished => status == HomePromoStatus.published;
@@ -229,6 +239,55 @@ class HomePromoItem {
       endsAt: _homePromoAsDate(json['ends_at']),
       audienceGroupIds: _asIdList(json['audience_group_ids']),
       audienceUserIds: _asIdList(json['audience_user_ids']),
+      hasWorkingDraft: parseHasWorkingDraft(json),
+      workingDraftRowVersion: parseWorkingDraftRowVersion(
+        parseWorkingDraftMap(json),
+      ),
+    );
+  }
+
+  static HomePromoItem? tryParseWithWorkingDraftOverlay(
+    Map<String, dynamic> json,
+  ) {
+    final base = tryParse(json);
+    if (base == null) return null;
+    final draft = parseWorkingDraftMap(json);
+    if (draft == null) {
+      return base.copyWith(hasWorkingDraft: parseHasWorkingDraft(json));
+    }
+    final payloadRaw = draft['payload'];
+    HomePromoPayload? payload;
+    if (payloadRaw is Map) {
+      payload = HomePromoPayload.tryParse(
+        Map<String, dynamic>.from(payloadRaw),
+      );
+    }
+    return base.copyWith(
+      title: (draft['title'] ?? base.title).toString(),
+      payload: payload ?? base.payload,
+      priority: _homePromoAsInt(draft['priority']) ?? base.priority,
+      sortOrder: _homePromoAsInt(draft['sort_order']) ?? base.sortOrder,
+      audienceMode: (draft['audience_mode'] ?? base.audienceMode).toString(),
+      isHidden: draft['is_hidden'] is bool
+          ? draft['is_hidden'] as bool
+          : base.isHidden,
+      startsAt: draft.containsKey('starts_at')
+          ? _homePromoAsDate(draft['starts_at'])
+          : base.startsAt,
+      endsAt: draft.containsKey('ends_at')
+          ? _homePromoAsDate(draft['ends_at'])
+          : base.endsAt,
+      clearStartsAt:
+          draft.containsKey('starts_at') && draft['starts_at'] == null,
+      clearEndsAt: draft.containsKey('ends_at') && draft['ends_at'] == null,
+      audienceGroupIds: draft['audience_group_ids'] != null
+          ? _asIdList(draft['audience_group_ids'])
+          : base.audienceGroupIds,
+      audienceUserIds: draft['audience_user_ids'] != null
+          ? _asIdList(draft['audience_user_ids'])
+          : base.audienceUserIds,
+      hasWorkingDraft: true,
+      workingDraftRowVersion: parseWorkingDraftRowVersion(draft),
     );
   }
 
@@ -254,6 +313,9 @@ class HomePromoItem {
     List<String>? audienceUserIds,
     bool clearStartsAt = false,
     bool clearEndsAt = false,
+    bool? hasWorkingDraft,
+    int? workingDraftRowVersion,
+    bool clearWorkingDraftRowVersion = false,
   }) {
     return HomePromoItem(
       id: id ?? this.id,
@@ -274,6 +336,10 @@ class HomePromoItem {
       endsAt: clearEndsAt ? null : (endsAt ?? this.endsAt),
       audienceGroupIds: audienceGroupIds ?? this.audienceGroupIds,
       audienceUserIds: audienceUserIds ?? this.audienceUserIds,
+      hasWorkingDraft: hasWorkingDraft ?? this.hasWorkingDraft,
+      workingDraftRowVersion: clearWorkingDraftRowVersion
+          ? null
+          : (workingDraftRowVersion ?? this.workingDraftRowVersion),
     );
   }
 

@@ -64,6 +64,8 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
   bool _busy = false;
   bool _deleting = false;
   bool _dirty = false;
+  bool _editingWorkingDraft = false;
+  bool _suppressTabCallback = false;
   bool _imageUploading = false;
   String _audienceMode = 'all';
   List<String> _groupIds = const [];
@@ -231,6 +233,7 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
     }
     setState(() {
       _selectedId = id;
+      _editingWorkingDraft = false;
       if (item != null) {
         _listTab = switch (item.status) {
           ProfileFeedStatus.published => VisualEditorListTab.published,
@@ -240,6 +243,35 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
       }
     });
     _syncControllers();
+  }
+
+  Future<void> _beginEdit() async {
+    final selected = _selected;
+    if (selected == null || !_canWrite) return;
+    await _runGuarded(() async {
+      final item = await _repository.beginEdit(selected.id);
+      if (!mounted) return;
+      setState(() {
+        _replaceItem(item);
+        _editingWorkingDraft = true;
+      });
+      _syncControllers();
+    });
+  }
+
+  Future<void> _discardWorkingDraft() async {
+    final selected = _selected;
+    if (selected == null || !_canWrite) return;
+    await _runGuarded(() async {
+      final item = await _repository.discardWorkingDraft(selected.id);
+      if (!mounted) return;
+      setState(() {
+        _editingWorkingDraft = false;
+        _replaceItem(item);
+      });
+      _syncControllers();
+      _snack('Изменения отменены');
+    });
   }
 
   void _selectNextAfterRemoval(String removedId, List<ProfileFeedItem> before) {
@@ -318,14 +350,29 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
     await _runGuarded(() async {
       final created = await _repository.createDraft();
       if (!mounted) return;
+      _suppressTabCallback = true;
       setState(() {
         _items = [..._items, created];
         _listTab = VisualEditorListTab.drafts;
         _selectedId = created.id;
         _dirty = false;
+        _editingWorkingDraft = false;
       });
       _syncControllers();
       _snack('Черновик создан');
+      // SegmentedButton can emit a stale published selection when tab counts
+      // change; re-assert draft selection after that callback settles.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          setState(() {
+            _listTab = VisualEditorListTab.drafts;
+            _selectedId = created.id;
+            _suppressTabCallback = false;
+          });
+          _syncControllers();
+        });
+      });
     });
   }
 
@@ -364,7 +411,32 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
       endsAt: _endsAt,
       clearStartsAt: _startsAt == null,
       clearEndsAt: _endsAt == null,
+      sortOrder:
+          int.tryParse(_sortOrderController.text.trim()) ?? selected.sortOrder,
+      audienceMode: _audienceMode,
+      audienceGroupIds: _groupIds,
+      audienceUserIds: _userIds,
     );
+    if (_editingWorkingDraft) {
+      final draftVersion = selected.workingDraftRowVersion;
+      if (draftVersion == null) {
+        throw const ProfileFeedRepositoryException(
+          'Черновик изменений не найден.',
+        );
+      }
+      next = await _repository.saveWorkingDraft(
+        next,
+        expectedDraftRowVersion: draftVersion,
+      );
+      if (!mounted) return next;
+      setState(() {
+        _replaceItem(next);
+        _dirty = false;
+        _audiencePreview = null;
+      });
+      _syncControllers();
+      return next;
+    }
     next = await _repository.updateDraft(next);
     next = await _repository.setPlacements(
       id: next.id,
@@ -423,6 +495,25 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
         final saved = await _saveSelected();
         if (saved == null) return;
         current = saved;
+      }
+      if (_editingWorkingDraft) {
+        final draftVersion = current.workingDraftRowVersion;
+        if (draftVersion == null) {
+          _showBanner('Черновик изменений не найден.');
+          return;
+        }
+        final published = await _repository.publishWorkingDraft(
+          current.id,
+          expectedDraftRowVersion: draftVersion,
+        );
+        if (!mounted) return;
+        setState(() {
+          _editingWorkingDraft = false;
+          _replaceItem(published);
+        });
+        _syncControllers();
+        _snack('Изменения опубликованы');
+        return;
       }
       final published = await _repository.publish(
         current.id,
@@ -843,18 +934,27 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
       listTab: _listTab,
       tabCounts: _tabCounts,
       onTabChanged: (tab) {
+        if (_busy || _suppressTabCallback || tab == _listTab) return;
         setState(() {
           _listTab = tab;
+          _editingWorkingDraft = false;
           _ensureSelectionForTab();
         });
         _syncControllers();
       },
       onCreate: _canWrite ? _create : null,
-      onSaveDraft: _saveDraft,
+      onSaveDraft:
+          _canWrite && (selected?.isDraft == true || _editingWorkingDraft)
+          ? _saveDraft
+          : null,
       onPublish: _publish,
       onUnpublish: _unpublish,
       onVersions: _showVersions,
       onPopDirtyConfirm: _confirmDiscard,
+      editingWorkingDraft: _editingWorkingDraft,
+      onDiscardWorkingDraft: _editingWorkingDraft && _canWrite
+          ? _discardWorkingDraft
+          : null,
       listBuilder: (context) => VisualEditorListPanel(
         panelTitle: 'Карточки ленты',
         tab: _listTab,
@@ -881,8 +981,10 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
         ],
         selectedId: _selectedId,
         onTabChanged: (tab) {
+          if (_busy || _suppressTabCallback || tab == _listTab) return;
           setState(() {
             _listTab = tab;
+            _editingWorkingDraft = false;
             _ensureSelectionForTab();
           });
           _syncControllers();
@@ -906,6 +1008,10 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
           _openCardDetail(card);
         },
         onVisibleCard: (card) {
+          // Preview shows published cards only; don't steal selection from
+          // drafts/archive (e.g. after «Создать черновик»).
+          if (_listTab != VisualEditorListTab.published) return;
+          if (_editingWorkingDraft) return;
           if (_selectedId != card.id) _select(card.id);
         },
       ),
@@ -921,6 +1027,7 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
               selected: selected,
               canWrite: _canWrite,
               canPublish: _canPublish,
+              editingWorkingDraft: _editingWorkingDraft,
               busy: _busy,
               deleting: _deleting,
               imageUploading: _imageUploading,
@@ -1000,6 +1107,9 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
               onRestoreArchived: _restoreArchived,
               onSafeDelete: _safeDelete,
               onPromoteDemo: _promoteDemo,
+              onBeginEdit: !selected.isDraft && !selected.isArchived
+                  ? _beginEdit
+                  : null,
               onPreviewAudience: _previewAudience,
             ),
     );
@@ -1119,6 +1229,7 @@ class _PropertiesPanel extends StatelessWidget {
     required this.selected,
     required this.canWrite,
     required this.canPublish,
+    required this.editingWorkingDraft,
     required this.busy,
     required this.deleting,
     required this.imageUploading,
@@ -1156,12 +1267,14 @@ class _PropertiesPanel extends StatelessWidget {
     required this.onRestoreArchived,
     required this.onSafeDelete,
     required this.onPromoteDemo,
+    this.onBeginEdit,
     required this.onPreviewAudience,
   });
 
   final ProfileFeedItem selected;
   final bool canWrite;
   final bool canPublish;
+  final bool editingWorkingDraft;
   final bool busy;
   final bool deleting;
   final bool imageUploading;
@@ -1203,9 +1316,10 @@ class _PropertiesPanel extends StatelessWidget {
   final VoidCallback onRestoreArchived;
   final VoidCallback onSafeDelete;
   final VoidCallback onPromoteDemo;
+  final VoidCallback? onBeginEdit;
   final VoidCallback onPreviewAudience;
 
-  bool get _enabled => canWrite && selected.isDraft;
+  bool get _enabled => canWrite && (selected.isDraft || editingWorkingDraft);
 
   @override
   Widget build(BuildContext context) {
@@ -1378,11 +1492,20 @@ class _PropertiesPanel extends StatelessWidget {
               label: Text(deleting ? 'Удаление…' : 'Удалить окончательно'),
             ),
           ] else ...[
+            if (onBeginEdit != null && !editingWorkingDraft)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: FilledButton.icon(
+                  onPressed: busy ? null : onBeginEdit,
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('Редактировать'),
+                ),
+              ),
             if (selected.origin == ContentOrigin.demo)
-              FilledButton.tonalIcon(
+              OutlinedButton.icon(
                 onPressed: canWrite && !busy ? onPromoteDemo : null,
                 icon: const Icon(Icons.upgrade_outlined),
-                label: const Text('Перевести из демо'),
+                label: const Text('Сделать обычной'),
               ),
             if (selected.origin == ContentOrigin.demo)
               const SizedBox(height: 10),

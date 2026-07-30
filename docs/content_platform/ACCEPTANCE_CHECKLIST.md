@@ -1,7 +1,7 @@
 # Content Platform — Acceptance Checklist
 
 Status: **ACTIVE**
-Updated: **2026-07-30** (Stage 14.1 + Design Z closed with Codex APPROVE_WITH_NOTES; media smoke residual)
+Updated: **2026-07-30** (Stage 14.1.1 Visual Editor news-parity + working drafts closed)
 Rule: mark `[x]` only with **code + tests + Codex APPROVE** for that item.
 Docs-only items: Codex APPROVE on the docs package.
 Do **not** merge requirements into vague “готово”.
@@ -277,6 +277,28 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Demo-вакансии: «Пример» или вне production-аудитории
 - [x] Demo-отзывы: «Пример» или вне production-аудитории
 - [x] Codex APPROVE 14.1 *(APPROVE_WITH_NOTES; media smoke residual)*
+
+---
+
+## M2. Stage 14.1.1 — Visual Editor news-parity + working drafts
+
+- [x] Visual shell: list / real phone / properties (news parity)
+- [x] Responsive list 320–360px; status tabs no wrap; 1280/1440/1920
+- [x] Home preview uses real `StudentHomeView`
+- [x] Reference preview: menu + open article + in-phone navigation
+- [x] Shared mobile screens via `student_ui` (no admin mock copies)
+- [x] Demo/legacy «Редактировать» creates working draft; live stays until publish
+- [x] Publish replaces without duplicate; legacy_key retained
+- [x] Archive / restore / safe delete + tombstone; no fallback resurrection
+- [x] Reference RPC parse + last-good on transient errors
+- [x] Draft media tracking (`draft_asset_ids`) for home/profile/reference
+- [x] Vacancy draft assets server-bound (`working_draft_id`); student-hidden until publish
+- [x] Reference v3 blocks gated (`ADMIN_REFERENCE_V3_BLOCKS` default false)
+- [x] Tests: layout, editors, student_ui, parse fixtures, working-draft flows
+- [x] Builds: Admin Web release, Main Web, Android debug, iOS simulator
+- [x] SQL security review + controlled smoke (counts restored)
+- [x] Codex APPROVE 14.1.1
+- [x] Migrations applied: `20260730155714`, `20260730160328`, `20260730161522`
 
 ---
 

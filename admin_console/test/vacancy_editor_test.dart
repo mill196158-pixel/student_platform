@@ -188,10 +188,12 @@ void main() {
     final repo = LocalVacancyRepository();
     await pumpEditor(tester, repo);
 
-    final listScrollable = find.descendant(
-      of: find.byType(VisualEditorListPanel),
-      matching: find.byType(Scrollable),
-    );
+    final listScrollable = find
+        .descendant(
+          of: find.byType(VisualEditorListPanel),
+          matching: find.byType(Scrollable),
+        )
+        .first;
     await tester.scrollUntilVisible(
       find.text('Быстрые деньги без опыта'),
       100,
@@ -200,10 +202,12 @@ void main() {
     await tester.tap(find.text('Быстрые деньги без опыта'));
     await tester.pumpAndSettle();
 
-    final scrollable = find.ancestor(
-      of: find.text('Свойства вакансии'),
-      matching: find.byType(Scrollable),
-    );
+    final scrollable = find
+        .ancestor(
+          of: find.text('Свойства вакансии'),
+          matching: find.byType(Scrollable),
+        )
+        .first;
     await tester.scrollUntilVisible(
       find.textContaining('Причина отклонения'),
       200,

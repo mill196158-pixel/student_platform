@@ -106,6 +106,15 @@ class SupabaseVacancyRepository implements VacancyRepository {
     return item;
   }
 
+  VacancyItem _parseWorkingDraftResponse(dynamic data) {
+    final map = _asMap(data);
+    final item = VacancyItem.tryParseWithWorkingDraftOverlay(map);
+    if (item == null) {
+      throw const VacancyRepositoryException('Некорректный ответ сервера.');
+    }
+    return item;
+  }
+
   List<Map<String, dynamic>> _asList(dynamic data) {
     dynamic value = data;
     if (value is String && value.isNotEmpty) {
@@ -318,5 +327,44 @@ class SupabaseVacancyRepository implements VacancyRepository {
   @override
   Future<void> deleteAsset(String assetId) async {
     await _call('admin_delete_vacancy_asset', {'p_asset_id': assetId});
+  }
+
+  @override
+  Future<VacancyItem> beginEdit(String id) async {
+    final data = await _call('admin_begin_vacancy_edit', {'p_id': id});
+    return _parseWorkingDraftResponse(data);
+  }
+
+  @override
+  Future<VacancyItem> saveWorkingDraft(
+    VacancyItem item, {
+    required int expectedDraftRowVersion,
+  }) async {
+    final data = await _call('admin_save_vacancy_working_draft', {
+      'p_id': item.id,
+      'p_expected_draft_row_version': expectedDraftRowVersion,
+      'p_patch': item.toWorkingDraftPatch(),
+    });
+    return _parseWorkingDraftResponse(data);
+  }
+
+  @override
+  Future<VacancyItem> publishWorkingDraft(
+    String id, {
+    required int expectedDraftRowVersion,
+  }) async {
+    final data = await _call('admin_publish_vacancy_working_draft', {
+      'p_id': id,
+      'p_expected_draft_row_version': expectedDraftRowVersion,
+    });
+    return _parseWorkingDraftResponse(data);
+  }
+
+  @override
+  Future<VacancyItem> discardWorkingDraft(String id) async {
+    final data = await _call('admin_discard_vacancy_working_draft', {
+      'p_id': id,
+    });
+    return _parseWorkingDraftResponse(data);
   }
 }

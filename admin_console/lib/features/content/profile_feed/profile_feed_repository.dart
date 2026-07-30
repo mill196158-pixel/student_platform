@@ -1,6 +1,7 @@
 import 'package:student_ui/student_ui.dart';
 
 import 'profile_feed_item.dart';
+import '../shared/local_content_working_draft.dart';
 
 class ProfileFeedAudiencePreview {
   const ProfileFeedAudiencePreview({
@@ -88,6 +89,20 @@ abstract class ProfileFeedRepository {
     int versionNumber,
     int expectedRowVersion,
   );
+
+  Future<ProfileFeedItem> beginEdit(String id);
+
+  Future<ProfileFeedItem> saveWorkingDraft(
+    ProfileFeedItem item, {
+    required int expectedDraftRowVersion,
+  });
+
+  Future<ProfileFeedItem> publishWorkingDraft(
+    String id, {
+    required int expectedDraftRowVersion,
+  });
+
+  Future<ProfileFeedItem> discardWorkingDraft(String id);
 }
 
 class ProfileFeedRepositoryException implements Exception {
@@ -135,6 +150,7 @@ class LocalProfileFeedRepository implements ProfileFeedRepository {
   late List<ProfileFeedItem> _items;
   int _seq = 1;
   final Map<String, List<ProfileFeedItem>> _versions = {};
+  final Map<String, _ProfileFeedWorkingDraft> _workingDrafts = {};
 
   void _recordVersion(ProfileFeedItem item) {
     final list = _versions.putIfAbsent(item.id, () => []);
@@ -156,6 +172,33 @@ class LocalProfileFeedRepository implements ProfileFeedRepository {
     );
   }
 
+  ProfileFeedItem _withWorkingDraftFlag(ProfileFeedItem item) {
+    if (!_workingDrafts.containsKey(item.id)) return item;
+    return item.copyWith(hasWorkingDraft: true);
+  }
+
+  ProfileFeedItem _withWorkingDraftOverlay(ProfileFeedItem item) {
+    final draft = _workingDrafts[item.id];
+    if (draft == null) return item;
+    return item.copyWith(
+      title: draft.title,
+      payload: draft.payload,
+      priority: draft.priority,
+      sortOrder: draft.sortOrder,
+      audienceMode: draft.audienceMode,
+      startsAt: draft.startsAt,
+      endsAt: draft.endsAt,
+      audienceGroupIds: draft.audienceGroupIds,
+      audienceUserIds: draft.audienceUserIds,
+      hasWorkingDraft: true,
+      workingDraftRowVersion: draft.rowVersion,
+    );
+  }
+
+  void _assertNoWorkingDraft(String id) {
+    assertNoLocalWorkingDraft(_workingDrafts, id);
+  }
+
   @override
   Future<List<ProfileFeedItem>> list({String? status}) async {
     final filtered = status == null
@@ -163,7 +206,7 @@ class LocalProfileFeedRepository implements ProfileFeedRepository {
         : _items
               .where((e) => profileFeedStatusWire(e.status) == status)
               .toList();
-    final copy = [...filtered]
+    final copy = [...filtered.map(_withWorkingDraftFlag)]
       ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
     return copy;
   }
@@ -315,6 +358,7 @@ class LocalProfileFeedRepository implements ProfileFeedRepository {
 
   @override
   Future<ProfileFeedItem> unpublish(String id, int expectedRowVersion) async {
+    _assertNoWorkingDraft(id);
     return _transition(id, expectedRowVersion, (item) {
       if (item.isArchived) {
         throw const ProfileFeedRepositoryException(
@@ -327,6 +371,7 @@ class LocalProfileFeedRepository implements ProfileFeedRepository {
 
   @override
   Future<ProfileFeedItem> archive(String id, int expectedRowVersion) async {
+    _assertNoWorkingDraft(id);
     return _transition(
       id,
       expectedRowVersion,
@@ -339,6 +384,7 @@ class LocalProfileFeedRepository implements ProfileFeedRepository {
     String id,
     int expectedRowVersion,
   ) async {
+    _assertNoWorkingDraft(id);
     return _transition(id, expectedRowVersion, (item) {
       if (!item.isArchived) {
         throw const ProfileFeedRepositoryException(
@@ -354,6 +400,7 @@ class LocalProfileFeedRepository implements ProfileFeedRepository {
     String id,
     int expectedRowVersion,
   ) async {
+    _assertNoWorkingDraft(id);
     final idx = _indexOf(id);
     final item = _items[idx];
     if (!item.isArchived) {
@@ -472,5 +519,149 @@ class LocalProfileFeedRepository implements ProfileFeedRepository {
     _items = [..._items]..[idx] = restored;
     _recordVersion(restored);
     return restored;
+  }
+
+  @override
+  Future<ProfileFeedItem> beginEdit(String id) async {
+    final idx = _indexOf(id);
+    final current = _items[idx];
+    if (current.isDraft) {
+      throw const ProfileFeedRepositoryException(
+        'Черновик редактируется напрямую.',
+      );
+    }
+    if (current.isArchived) {
+      throw const ProfileFeedRepositoryException(
+        'Архивную карточку нельзя редактировать.',
+      );
+    }
+    if (!_workingDrafts.containsKey(id)) {
+      _workingDrafts[id] = _ProfileFeedWorkingDraft.fromItem(current);
+    }
+    return _withWorkingDraftOverlay(current);
+  }
+
+  @override
+  Future<ProfileFeedItem> saveWorkingDraft(
+    ProfileFeedItem item, {
+    required int expectedDraftRowVersion,
+  }) async {
+    final current = _items[_indexOf(item.id)];
+    final draft = _workingDrafts[item.id];
+    if (draft == null) {
+      throw const ProfileFeedRepositoryException(
+        'Черновик изменений не найден.',
+      );
+    }
+    if (draft.rowVersion != expectedDraftRowVersion) {
+      throw const ProfileFeedRepositoryException(
+        'Черновик изменился. Обновите.',
+      );
+    }
+    draft.apply(item);
+    draft.rowVersion += 1;
+    return _withWorkingDraftOverlay(current);
+  }
+
+  @override
+  Future<ProfileFeedItem> publishWorkingDraft(
+    String id, {
+    required int expectedDraftRowVersion,
+  }) async {
+    final idx = _indexOf(id);
+    final current = _items[idx];
+    final draft = _workingDrafts[id];
+    if (draft == null) {
+      throw const ProfileFeedRepositoryException(
+        'Черновик изменений не найден.',
+      );
+    }
+    if (draft.rowVersion != expectedDraftRowVersion) {
+      throw const ProfileFeedRepositoryException(
+        'Черновик изменился. Обновите.',
+      );
+    }
+    final next = _bump(
+      current.copyWith(
+        title: draft.title,
+        payload: draft.payload,
+        priority: draft.priority,
+        sortOrder: draft.sortOrder,
+        audienceMode: draft.audienceMode,
+        startsAt: draft.startsAt,
+        endsAt: draft.endsAt,
+        audienceGroupIds: draft.audienceGroupIds,
+        audienceUserIds: draft.audienceUserIds,
+        hasWorkingDraft: false,
+        clearWorkingDraftRowVersion: true,
+      ),
+    );
+    _items = [..._items]..[idx] = next;
+    _workingDrafts.remove(id);
+    _recordVersion(next);
+    return next;
+  }
+
+  @override
+  Future<ProfileFeedItem> discardWorkingDraft(String id) async {
+    final current = _items[_indexOf(id)];
+    _workingDrafts.remove(id);
+    return current.copyWith(
+      hasWorkingDraft: false,
+      clearWorkingDraftRowVersion: true,
+    );
+  }
+}
+
+class _ProfileFeedWorkingDraft {
+  _ProfileFeedWorkingDraft({
+    required this.rowVersion,
+    required this.title,
+    required this.payload,
+    required this.priority,
+    required this.sortOrder,
+    required this.audienceMode,
+    required this.audienceGroupIds,
+    required this.audienceUserIds,
+    this.startsAt,
+    this.endsAt,
+  });
+
+  factory _ProfileFeedWorkingDraft.fromItem(ProfileFeedItem item) {
+    return _ProfileFeedWorkingDraft(
+      rowVersion: 1,
+      title: item.title,
+      payload: item.payload,
+      priority: item.priority,
+      sortOrder: item.sortOrder,
+      audienceMode: item.audienceMode,
+      startsAt: item.startsAt,
+      endsAt: item.endsAt,
+      audienceGroupIds: List<String>.from(item.audienceGroupIds),
+      audienceUserIds: List<String>.from(item.audienceUserIds),
+    );
+  }
+
+  int rowVersion;
+  String title;
+  ProfileFeedPayload payload;
+  int priority;
+  int sortOrder;
+  String audienceMode;
+  DateTime? startsAt;
+  DateTime? endsAt;
+  List<String> audienceGroupIds;
+  List<String> audienceUserIds;
+
+  void apply(ProfileFeedItem item) {
+    title = item.title;
+    payload = item.payload;
+    priority = item.priority;
+    sortOrder = item.sortOrder;
+    audienceMode = item.audienceMode;
+    startsAt = item.startsAt;
+    endsAt = item.endsAt;
+    audienceGroupIds = List<String>.from(item.audienceGroupIds);
+    audienceUserIds = List<String>.from(item.audienceUserIds);
   }
 }

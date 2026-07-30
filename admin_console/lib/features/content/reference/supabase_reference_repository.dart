@@ -128,7 +128,22 @@ class SupabaseReferenceRepository implements ReferenceRepository {
   }
 
   ReferenceArticleItem _parseArticleRequired(dynamic data) {
-    final item = ReferenceArticleItem.tryParse(_asMap(data));
+    try {
+      return ReferenceArticleItem.parseOrThrow(_asMap(data));
+    } on FormatException catch (error) {
+      throw ReferenceRepositoryException(error.message);
+    }
+  }
+
+  ReferenceArticleItem _parseWorkingDraftResponse(dynamic data) {
+    final map = _asMap(data);
+    try {
+      // Validate hard fields, then overlay working_draft when present.
+      ReferenceArticleItem.parseOrThrow(map);
+    } on FormatException catch (error) {
+      throw ReferenceRepositoryException(error.message);
+    }
+    final item = ReferenceArticleItem.tryParseWithWorkingDraftOverlay(map);
     if (item == null) {
       throw const ReferenceRepositoryException('Некорректный ответ сервера.');
     }
@@ -207,7 +222,9 @@ class SupabaseReferenceRepository implements ReferenceRepository {
         'reference_category_id': categoryId,
         'template_key': 'reference_article_v1',
         'schema_version': 2,
-        'payload': payload.toWireJson(schemaVersion: 2),
+        'payload': payload.toWireJson(
+          schemaVersion: 2,
+        ), // create path default v2
         'sort_order': 0,
       },
     });
@@ -225,7 +242,9 @@ class SupabaseReferenceRepository implements ReferenceRepository {
         'title': item.title,
         'origin': _originWire(item.origin),
         'reference_category_id': item.categoryId,
-        'payload': item.payload.toWireJson(schemaVersion: 2),
+        'payload': item.payload.toWireJson(
+          schemaVersion: item.effectiveSchemaVersion,
+        ),
         'sort_order': item.sortOrder,
       },
     });
@@ -392,5 +411,44 @@ class SupabaseReferenceRepository implements ReferenceRepository {
       'p_action': action,
       'p_reason': reason,
     });
+  }
+
+  @override
+  Future<ReferenceArticleItem> beginEdit(String id) async {
+    final data = await _call('admin_begin_content_edit', {'p_id': id});
+    return _parseWorkingDraftResponse(data);
+  }
+
+  @override
+  Future<ReferenceArticleItem> saveWorkingDraft(
+    ReferenceArticleItem item, {
+    required int expectedDraftRowVersion,
+  }) async {
+    final data = await _call('admin_save_content_working_draft', {
+      'p_id': item.id,
+      'p_expected_draft_row_version': expectedDraftRowVersion,
+      'p_patch': item.toWorkingDraftPatch(),
+    });
+    return _parseWorkingDraftResponse(data);
+  }
+
+  @override
+  Future<ReferenceArticleItem> publishWorkingDraft(
+    String id, {
+    required int expectedDraftRowVersion,
+  }) async {
+    final data = await _call('admin_publish_content_working_draft', {
+      'p_id': id,
+      'p_expected_draft_row_version': expectedDraftRowVersion,
+    });
+    return _parseWorkingDraftResponse(data);
+  }
+
+  @override
+  Future<ReferenceArticleItem> discardWorkingDraft(String id) async {
+    final data = await _call('admin_discard_content_working_draft', {
+      'p_id': id,
+    });
+    return _parseWorkingDraftResponse(data);
   }
 }

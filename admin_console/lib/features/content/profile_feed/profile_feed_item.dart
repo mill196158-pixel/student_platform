@@ -1,5 +1,7 @@
 import 'package:student_ui/student_ui.dart';
 
+import '../shared/content_working_draft.dart';
+
 enum ProfileFeedStatus { draft, published, archived }
 
 extension ProfileFeedStatusLabels on ProfileFeedStatus {
@@ -111,6 +113,8 @@ class ProfileFeedItem {
     this.endsAt,
     this.audienceGroupIds = const [],
     this.audienceUserIds = const [],
+    this.hasWorkingDraft = false,
+    this.workingDraftRowVersion,
   });
 
   final String id;
@@ -128,6 +132,12 @@ class ProfileFeedItem {
   final DateTime? endsAt;
   final List<String> audienceGroupIds;
   final List<String> audienceUserIds;
+
+  /// True when a server/local working draft exists for this published item.
+  final bool hasWorkingDraft;
+
+  /// Present on begin/save responses; used for optimistic concurrency.
+  final int? workingDraftRowVersion;
 
   static ProfileFeedItem? tryParse(Map<String, dynamic> json) {
     final id = json['id']?.toString();
@@ -183,7 +193,71 @@ class ProfileFeedItem {
       endsAt: _asDate(json['ends_at']),
       audienceGroupIds: _asIdList(json['audience_group_ids']),
       audienceUserIds: _asIdList(json['audience_user_ids']),
+      hasWorkingDraft: parseHasWorkingDraft(json),
+      workingDraftRowVersion: parseWorkingDraftRowVersion(
+        parseWorkingDraftMap(json),
+      ),
     );
+  }
+
+  static ProfileFeedItem? tryParseWithWorkingDraftOverlay(
+    Map<String, dynamic> json,
+  ) {
+    final base = tryParse(json);
+    if (base == null) return null;
+    final draft = parseWorkingDraftMap(json);
+    if (draft == null) {
+      return base.copyWith(hasWorkingDraft: parseHasWorkingDraft(json));
+    }
+    final payloadRaw = draft['payload'];
+    ProfileFeedPayload? payload;
+    if (payloadRaw is Map) {
+      payload = ProfileFeedPayload.tryParse(
+        Map<String, dynamic>.from(payloadRaw),
+      );
+    }
+    return base.copyWith(
+      title: (draft['title'] ?? base.title).toString(),
+      payload: payload ?? base.payload,
+      priority: _asInt(draft['priority']) ?? base.priority,
+      sortOrder: _asInt(draft['sort_order']) ?? base.sortOrder,
+      audienceMode: (draft['audience_mode'] ?? base.audienceMode).toString(),
+      startsAt: draft.containsKey('starts_at')
+          ? _asDate(draft['starts_at'])
+          : base.startsAt,
+      endsAt: draft.containsKey('ends_at')
+          ? _asDate(draft['ends_at'])
+          : base.endsAt,
+      clearStartsAt:
+          draft.containsKey('starts_at') && draft['starts_at'] == null,
+      clearEndsAt: draft.containsKey('ends_at') && draft['ends_at'] == null,
+      audienceGroupIds: draft['audience_group_ids'] != null
+          ? _asIdList(draft['audience_group_ids'])
+          : base.audienceGroupIds,
+      audienceUserIds: draft['audience_user_ids'] != null
+          ? _asIdList(draft['audience_user_ids'])
+          : base.audienceUserIds,
+      hasWorkingDraft: true,
+      workingDraftRowVersion: parseWorkingDraftRowVersion(draft),
+    );
+  }
+
+  Map<String, dynamic> toWorkingDraftPatch({bool includeIsHidden = false}) {
+    final imageAssetId = payload.imageAssetId?.trim();
+    return {
+      'title': title,
+      'payload': payload.toWireJson(),
+      'priority': priority,
+      'starts_at': startsAt?.toUtc().toIso8601String(),
+      'ends_at': endsAt?.toUtc().toIso8601String(),
+      if (includeIsHidden) 'is_hidden': false,
+      'audience_mode': audienceMode,
+      'audience_group_ids': audienceGroupIds,
+      'audience_user_ids': audienceUserIds,
+      'sort_order': sortOrder,
+      if (imageAssetId != null && imageAssetId.isNotEmpty)
+        'draft_asset_ids': [imageAssetId],
+    };
   }
 
   ManagedProfileFeedCard toManagedCard({bool? showDemoBadge}) {
@@ -216,6 +290,9 @@ class ProfileFeedItem {
     bool clearStartsAt = false,
     bool clearEndsAt = false,
     bool clearLegacyKey = false,
+    bool? hasWorkingDraft,
+    int? workingDraftRowVersion,
+    bool clearWorkingDraftRowVersion = false,
   }) {
     return ProfileFeedItem(
       id: id ?? this.id,
@@ -233,6 +310,10 @@ class ProfileFeedItem {
       endsAt: clearEndsAt ? null : (endsAt ?? this.endsAt),
       audienceGroupIds: audienceGroupIds ?? this.audienceGroupIds,
       audienceUserIds: audienceUserIds ?? this.audienceUserIds,
+      hasWorkingDraft: hasWorkingDraft ?? this.hasWorkingDraft,
+      workingDraftRowVersion: clearWorkingDraftRowVersion
+          ? null
+          : (workingDraftRowVersion ?? this.workingDraftRowVersion),
     );
   }
 
