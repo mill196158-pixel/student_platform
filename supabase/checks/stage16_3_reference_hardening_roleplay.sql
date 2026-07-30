@@ -35,6 +35,11 @@ begin
 
   perform set_config('request.jwt.claim.sub', v_admin::text, true);
   perform set_config('request.jwt.claim.role', 'authenticated', true);
+  perform set_config(
+    'request.jwt.claims',
+    json_build_object('sub', v_admin::text, 'role', 'authenticated')::text,
+    true
+  );
 
   -- Create draft category then publish (publish permission required for status change).
   v_cat := public.admin_upsert_reference_category(
@@ -124,8 +129,14 @@ begin
   end;
 
   -- Seed disposable Storage fixture via service_role path resolver.
+  -- auth.jwt() reads request.jwt.claims JSON (not claim.role alone).
   perform set_config('request.jwt.claim.role', 'service_role', true);
   perform set_config('request.jwt.claim.sub', '', true);
+  perform set_config(
+    'request.jwt.claims',
+    json_build_object('role', 'service_role')::text,
+    true
+  );
   v_path := (
     public.service_content_upload_intent_storage_path(
       (v_intent->>'intent_id')::uuid
@@ -145,6 +156,11 @@ begin
 
   perform set_config('request.jwt.claim.role', 'authenticated', true);
   perform set_config('request.jwt.claim.sub', v_admin::text, true);
+  perform set_config(
+    'request.jwt.claims',
+    json_build_object('sub', v_admin::text, 'role', 'authenticated')::text,
+    true
+  );
 
   v_asset := public.admin_finalize_content_asset_upload(
     (v_intent->>'intent_id')::uuid, 'Campus map'
@@ -180,6 +196,12 @@ begin
 
   -- Student may download referenced asset.
   perform set_config('request.jwt.claim.sub', v_student::text, true);
+  perform set_config('request.jwt.claim.role', 'authenticated', true);
+  perform set_config(
+    'request.jwt.claims',
+    json_build_object('sub', v_student::text, 'role', 'authenticated')::text,
+    true
+  );
   v_auth := public.authorize_content_asset_download(v_asset_id);
   if coalesce((v_auth->>'authorized')::boolean, false) is not true then
     raise exception 'student download of referenced asset denied';
@@ -210,6 +232,11 @@ begin
   -- Cleanup claim/complete/fail + processed-row exclusion (service_role).
   perform set_config('request.jwt.claim.role', 'service_role', true);
   perform set_config('request.jwt.claim.sub', '', true);
+  perform set_config(
+    'request.jwt.claims',
+    json_build_object('role', 'service_role')::text,
+    true
+  );
 
   insert into public.content_media_cleanup_queue (
     storage_bucket, storage_path, source_content_item_id, source_title, processed_at
@@ -275,6 +302,11 @@ begin
   -- Back to admin for remaining article/correction asserts.
   perform set_config('request.jwt.claim.role', 'authenticated', true);
   perform set_config('request.jwt.claim.sub', v_admin::text, true);
+  perform set_config(
+    'request.jwt.claims',
+    json_build_object('sub', v_admin::text, 'role', 'authenticated')::text,
+    true
+  );
 
   -- published edit denial
   begin
@@ -290,6 +322,12 @@ begin
   end;
 
   perform set_config('request.jwt.claim.sub', v_student::text, true);
+  perform set_config('request.jwt.claim.role', 'authenticated', true);
+  perform set_config(
+    'request.jwt.claims',
+    json_build_object('sub', v_student::text, 'role', 'authenticated')::text,
+    true
+  );
   v_bundle := public.get_my_reference_bundle();
   if jsonb_array_length(v_bundle->'articles') < 1 then
     raise exception 'bundle missing article';
@@ -301,6 +339,12 @@ begin
   end if;
 
   perform set_config('request.jwt.claim.sub', v_admin::text, true);
+  perform set_config('request.jwt.claim.role', 'authenticated', true);
+  perform set_config(
+    'request.jwt.claims',
+    json_build_object('sub', v_admin::text, 'role', 'authenticated')::text,
+    true
+  );
 
   -- reject requires reason
   begin

@@ -83,7 +83,7 @@ Local Docker DB `supabase_db_student_platform` (live-shaped Stage 13 schema):
   * Stage 14 / 15.2 / 16.1 / 16.2 / 16.3 (corrections + hardening) / 17 / 18 / 19
   * Stage 16.2 / 18 checks previously looked for guard strings on public `admin_*` stubs; guards live in `private.register_subject_asset` / `private.review_moderate_apply` (and audit via that helper). Checks updated accordingly.
 * Stage 14 behavioral roleplay: **ASSERTED_SCENARIOS PASS**.
-* Stage 16.1 / 16.2 / 16.3 roleplays: **SKIP** when `admin_roleplay` / `student_roleplay` fixtures absent (no hard FAIL).
+* Stage 16.1 / 16.2 / 16.3 roleplays: **OK** after seeding disposable logins (`admin_roleplay` / `student_roleplay` / `student_other_roleplay` on existing Stage 13 fixtures) and setting `request.jwt.claims` JSON for `service_role` paths (`auth.jwt()` does not read `claim.role` alone).
 * Post-apply counts: `content_items=0`, `vacancies=0`, `import_studio_batches=0` (no demo seed).
 
 ## 7. Remote before-counts (read-only, production)

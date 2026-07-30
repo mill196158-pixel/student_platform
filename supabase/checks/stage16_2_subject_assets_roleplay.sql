@@ -35,6 +35,11 @@ begin
 
   perform set_config('request.jwt.claim.sub', v_admin::text, true);
   perform set_config('request.jwt.claim.role', 'authenticated', true);
+  perform set_config(
+    'request.jwt.claims',
+    json_build_object('sub', v_admin::text, 'role', 'authenticated')::text,
+    true
+  );
 
   select (public.admin_upsert_subject_card(
     null, 0, 0,
@@ -95,8 +100,14 @@ begin
   end;
 
   -- service_role register with NULL auth.uid (no zero-UUID FK break)
+  -- auth.jwt() reads request.jwt.claims JSON (not claim.role alone).
   perform set_config('request.jwt.claim.role', 'service_role', true);
   perform set_config('request.jwt.claim.sub', '', true);
+  perform set_config(
+    'request.jwt.claims',
+    json_build_object('role', 'service_role')::text,
+    true
+  );
 
   v_asset := public.admin_register_subject_asset(
     v_subject, null,
@@ -124,11 +135,21 @@ begin
 
   perform set_config('request.jwt.claim.role', 'authenticated', true);
   perform set_config('request.jwt.claim.sub', v_admin::text, true);
+  perform set_config(
+    'request.jwt.claims',
+    json_build_object('sub', v_admin::text, 'role', 'authenticated')::text,
+    true
+  );
 
   perform public.admin_delete_subject_asset((v_asset->>'id')::uuid);
 
   -- Supersede chain via service_role register
   perform set_config('request.jwt.claim.role', 'service_role', true);
+  perform set_config(
+    'request.jwt.claims',
+    json_build_object('role', 'service_role')::text,
+    true
+  );
 
   v_asset := public.admin_register_subject_asset(
     v_subject, null,
@@ -152,6 +173,11 @@ begin
   -- Publish then deny delete of current hero
   perform set_config('request.jwt.claim.role', 'authenticated', true);
   perform set_config('request.jwt.claim.sub', v_admin::text, true);
+  perform set_config(
+    'request.jwt.claims',
+    json_build_object('sub', v_admin::text, 'role', 'authenticated')::text,
+    true
+  );
 
   select sc.row_version, p.row_version into v_cat_ver, v_prof_ver
   from public.subject_catalog sc
@@ -180,6 +206,11 @@ begin
 
   -- Cleanup lease: enqueue historical row path, claim + complete with token
   perform set_config('request.jwt.claim.role', 'service_role', true);
+  perform set_config(
+    'request.jwt.claims',
+    json_build_object('role', 'service_role')::text,
+    true
+  );
 
   insert into public.subject_media_cleanup_queue (
     storage_bucket, storage_path, source_subject_catalog_id, source_title

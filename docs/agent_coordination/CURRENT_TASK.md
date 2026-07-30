@@ -1,30 +1,28 @@
 # CURRENT_TASK
 
-* Status: **INTEGRATION IN PROGRESS** — Codex path A GO; path B pending green checks + PITR + Edge runbook re-APPROVE
+* Status: **PATH A DONE** — merge+push complete; **PATH B WAITING** owner PITR confirm + Codex B GO
 * Active Stage: production integration Stages 14–21
-* Branch: `feature/content-platform` (pushed)
-* Worktree: `/Users/annasuvorova/student_platform_content`
+* Branch: `refactor/chat-tab` @ merge `0d879c5` (+ pending roleplay JWT claims fix)
+* Content worktree: `/Users/annasuvorova/student_platform_content` @ `feature/content-platform`
 * Codex thread: `019fa373-81f2-7962-a8c9-81d86cb62311`
 * Remote: `gwdanmwluhrcfxbnplwd` (**no apply / no Edge deploy yet**)
 
-## Done
+## Done (Path A)
 
-* Preflight: `docs/content_platform/INTEGRATION_PREFLIGHT_2026_07_30.md` (Edge smoke runbook §11)
-* Admin suite **157/157 PASS**; Android/iOS builds PASS
-* Local disposable DB: all 22 Stage 14–19 migrations applied
-* Security reviews Stage 14–19 **PASS** after aligning checks with `private.*` helpers
 * Pushed `origin/feature/content-platform`
-* Backup tag `backup/pre-content-platform-20260730` @ `c31f572`
-* Backup branch `backup/refactor-chat-tab-pre-content-20260730` pushed
+* Backup tag/branch @ `c31f572`
+* Merged into `refactor/chat-tab` and pushed (`0d879c5`)
+* Admin suite **157/157 PASS** post-merge
+* Local Stage 16.1 / 16.2 / 16.3 roleplays **OK** (fixtures + `request.jwt.claims` fix)
+* Security reviews Stage 14–19 PASS; Edge smoke runbook §11 locked
 
-## Next
+## Remaining for Path B
 
-1. Codex re-review after check + preflight updates → APPROVE for B (or confirm A still GO)
-2. Merge `feature/content-platform` → `refactor/chat-tab` (main worktree) → retest → push
-3. Confirm Dashboard PITR / retention for `gwdanmwluhrcfxbnplwd`
-4. Remote apply 22 migrations one-by-one + Edge deploy 3 functions + smoke §11
-5. Web Admin + Mobile verify; update acceptance docs; clean trees
+1. Owner confirms Dashboard → Database → Backups: restore point + retention for `gwdanmwluhrcfxbnplwd` (record in preflight §9)
+2. Codex re-APPROVE Path B
+3. Remote apply 22 migrations one-by-one + Edge deploy 3 + smoke §11
+4. Web Admin + Mobile verify; acceptance docs; clean trees
 
-## Hard bans until B APPROVE + PITR confirmed
+## Hard bans until B APPROVE + PITR recorded
 
 No remote migration apply · No Edge deploy · No real import · No force-push
