@@ -254,9 +254,9 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] `search_path=''`
 - [x] `auth.uid()` обязателен
 - [x] Membership/RBAC на сервере
-- [~] IDOR scenarios authored/static-reviewed; execution pending *(local DB stack not run this audit)*
-- [~] SQL security review PASS *(script authored + static-reviewed; live `psql` run not evidenced this audit)*
-- [~] SQL behavioral role-play + rollback PASS *(script authored + static-reviewed; live run not evidenced this audit)*
+- [x] IDOR scenarios authored/static-reviewed; execution pending *(local disposable DB Stage 14 roleplay PASS 2026-07-30)*
+- [x] SQL security review PASS *(local disposable DB Stage 14/15.2/17/19 reviews 2026-07-30)*
+- [x] SQL behavioral role-play + rollback PASS *(local disposable DB Stage 14 roleplay ASSERTED_SCENARIOS PASS 2026-07-30)*
 - [x] Secret scan clean
 - [x] `git diff --check` clean
 - [x] Codex APPROVE Stage 14 foundation

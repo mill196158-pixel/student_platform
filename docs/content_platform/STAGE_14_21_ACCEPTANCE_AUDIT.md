@@ -65,13 +65,15 @@ Rule: map each `ACCEPTANCE_CHECKLIST.md` section to evidence. Do **not** mark un
 | Main app content tests (promo/feed/vacancy) | **24/24 PASS** |
 | Admin Import Studio tests | **22/22 PASS** |
 | Admin content editors (promo/feed/reference/vacancy) | **PASS** |
-| Full `admin_console` suite | **FAIL** — legacy `news_editor_image_test` / `admin_auth_session_test` / `widget_test` (pre-existing vs Content Platform slices; not Stage 19 regressions) |
+| Full `admin_console` suite | **157/157 PASS** (2026-07-30; news image tests aligned to Published/Drafts tabs) |
 | `dart analyze` Import Studio | **no errors** after FilePicker 11 API fix |
 | `student_ui` analyze | warning unused `_Pill`; info dangling doc |
 | Admin Web release build | **PASS** (`flutter build web --release`) |
+| Android debug / iOS simulator | **PASS** (2026-07-30 integration preflight) |
+| Local disposable DB Stage 14–19 apply + Stage 14 roleplay | **PASS** (2026-07-30; see INTEGRATION_PREFLIGHT) |
 | `git diff --check` on Content Platform range | trailing WS noise from CRLF in vacancy test → normalized LF |
 | Secret scan | No hardcoded keys; `SUPABASE_SERVICE_ROLE_KEY` only via `Deno.env` / script env (expected) |
-| Push / remote apply / Edge deploy / real import | **not performed** |
+| Push / remote apply / Edge deploy / real import | **not performed until Codex integration APPROVE** |
 
 ## Owner next (blocked on permission)
 

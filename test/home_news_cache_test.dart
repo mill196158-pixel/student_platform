@@ -61,10 +61,20 @@ void main() {
 
   test('empty stored value yields an empty list', () async {
     SharedPreferences.setMockInitialValues({
-      PublishedNewsCache.key: '',
+      // User-scoped cache keys (anon when no session).
+      '${PublishedNewsCache.keyPrefix}__anon': '',
     });
     final cache = PublishedNewsCache();
     expect(await cache.read(), isEmpty);
+  });
+
+  test('cache keys are user-scoped', () async {
+    SharedPreferences.setMockInitialValues({});
+    final a = PublishedNewsCache(currentUserId: () => 'user-a');
+    final b = PublishedNewsCache(currentUserId: () => 'user-b');
+    await a.write([row(id: 'only-a')]);
+    expect((await a.read()).map((e) => e.id), ['only-a']);
+    expect(await b.read(), isEmpty);
   });
 
   test('published RPC row with image_path maps into HomeNewsItem', () {

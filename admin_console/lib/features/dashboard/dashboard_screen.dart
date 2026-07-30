@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:student_platform_admin/core/auth/admin_backend_config.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final subtitle = AdminBackendConfig.isDemoMode
+        ? 'Локальный прототип: изменения остаются только в текущей сессии.'
+        : 'Изменения сохраняются в Supabase через RPC и RBAC (без service_role).';
+
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -17,9 +22,7 @@ class DashboardScreen extends StatelessWidget {
             ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 8),
-          const Text(
-            'Локальный прототип: изменения остаются только в текущей сессии.',
-          ),
+          Text(subtitle),
           const SizedBox(height: 24),
           Wrap(
             spacing: 18,
@@ -60,12 +63,21 @@ class DashboardScreen extends StatelessWidget {
                 color: const Color(0xFFB85C76),
                 onTap: () => context.go('/academic/teachers'),
               ),
-              const _DashboardCard(
-                title: 'Безопасное подключение',
-                subtitle: 'Будет доступно после этапа RBAC/RLS',
-                icon: Icons.lock_outline,
-                color: Color(0xFF7A7E8B),
-              ),
+              if (AdminBackendConfig.isDemoMode)
+                const _DashboardCard(
+                  title: 'Безопасное подключение',
+                  subtitle: 'В demo-режиме backend не подключён',
+                  icon: Icons.lock_outline,
+                  color: Color(0xFF7A7E8B),
+                )
+              else
+                _DashboardCard(
+                  title: 'Модерация',
+                  subtitle: 'Очереди отзывов, вакансий и жалоб',
+                  icon: Icons.gavel_outlined,
+                  color: const Color(0xFF7A7E8B),
+                  onTap: () => context.go('/moderation'),
+                ),
             ],
           ),
         ],
