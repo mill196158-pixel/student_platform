@@ -323,7 +323,7 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] SQL security review + remote smoke (gate OFF; no mass publish)
 - [x] Codex APPROVE_WITH_NOTES 14.1.2
 - [x] Migrations applied: `20260730190415`, `20260730220218`
-- [ ] Commit + normal push `origin/refactor/chat-tab` *(in progress)*
+- [x] Commit + normal push `origin/refactor/chat-tab`
 
 ---
 
