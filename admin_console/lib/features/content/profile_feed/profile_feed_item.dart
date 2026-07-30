@@ -244,9 +244,15 @@ class ProfileFeedItem {
 
   Map<String, dynamic> toWorkingDraftPatch({bool includeIsHidden = false}) {
     final imageAssetId = payload.imageAssetId?.trim();
+    final iconAssetId = payload.iconAssetId?.trim();
+    final assetIds = <String>{
+      if (imageAssetId != null && imageAssetId.isNotEmpty) imageAssetId,
+      if (iconAssetId != null && iconAssetId.isNotEmpty) iconAssetId,
+    };
     return {
       'title': title,
       'payload': payload.toWireJson(),
+      'target_schema_version': 2,
       'priority': priority,
       'starts_at': startsAt?.toUtc().toIso8601String(),
       'ends_at': endsAt?.toUtc().toIso8601String(),
@@ -255,8 +261,7 @@ class ProfileFeedItem {
       'audience_group_ids': audienceGroupIds,
       'audience_user_ids': audienceUserIds,
       'sort_order': sortOrder,
-      if (imageAssetId != null && imageAssetId.isNotEmpty)
-        'draft_asset_ids': [imageAssetId],
+      if (assetIds.isNotEmpty) 'draft_asset_ids': assetIds.toList(),
     };
   }
 

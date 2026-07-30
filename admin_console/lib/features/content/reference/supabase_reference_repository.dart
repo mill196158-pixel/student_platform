@@ -198,6 +198,22 @@ class SupabaseReferenceRepository implements ReferenceRepository {
   }
 
   @override
+  Future<void> safeDeleteCategory({
+    required String id,
+    required int expectedRowVersion,
+    required String mode,
+    String? reassignToId,
+  }) async {
+    await _call('admin_safe_delete_reference_category', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+      'p_mode': mode,
+      if (reassignToId != null && reassignToId.isNotEmpty)
+        'p_reassign_to': reassignToId,
+    });
+  }
+
+  @override
   Future<void> reorderCategories(
     List<String> orderedIds,
     List<int> expectedRowVersions,

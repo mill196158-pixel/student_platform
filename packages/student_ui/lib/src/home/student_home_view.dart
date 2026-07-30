@@ -5,6 +5,24 @@ import '../content/student_home_promo_card.dart';
 import 'home_preview_models.dart';
 import 'widgets/student_home_news_card.dart';
 
+/// One managed promo placed into a safe home slot (Stage 14.1.2).
+@immutable
+class StudentHomePromoPlacement {
+  const StudentHomePromoPlacement({
+    required this.payload,
+    this.slot = 'after_assignments',
+    this.showDemoBadge = false,
+    this.onTap,
+    this.onDismiss,
+  });
+
+  final HomePromoPayload payload;
+  final String slot;
+  final bool showDemoBadge;
+  final VoidCallback? onTap;
+  final VoidCallback? onDismiss;
+}
+
 class StudentHomeView extends StatelessWidget {
   const StudentHomeView({
     required this.data,
@@ -23,6 +41,7 @@ class StudentHomeView extends StatelessWidget {
     this.homePromo,
     this.homePromoIsDemo = false,
     this.hideHomePromo = false,
+    this.homePromoPlacements = const [],
     this.hiddenAssignmentIds = const {},
     this.markingDoneAssignmentIds = const {},
     this.selectedNewsId,
@@ -53,11 +72,53 @@ class StudentHomeView extends StatelessWidget {
 
   /// Successful empty server list — do not resurrect demo (Stage 14.1).
   final bool hideHomePromo;
+
+  /// Multi-slot promos (Stage 14.1.2). When non-empty, overrides single [homePromo].
+  final List<StudentHomePromoPlacement> homePromoPlacements;
   final Set<String> hiddenAssignmentIds;
   final Set<String> markingDoneAssignmentIds;
   final String? selectedNewsId;
   final Color? adminNewsHighlightColor;
   final Widget? bottomNavigationBar;
+
+  List<StudentHomePromoPlacement> _resolvedPlacements() {
+    if (homePromoPlacements.isNotEmpty) return homePromoPlacements;
+    if (hideHomePromo) return const [];
+    return [
+      StudentHomePromoPlacement(
+        payload: homePromo ?? HomePromoPayload.demoStuckWithAssignment,
+        slot: (homePromo?.effectiveHomeSlot) ?? 'after_assignments',
+        showDemoBadge: homePromoIsDemo || (homePromo == null && !hideHomePromo),
+        onTap: onHelpTap,
+        onDismiss: onHomePromoDismiss,
+      ),
+    ];
+  }
+
+  List<Widget> _promoSliversFor(
+    String slot, {
+    required Duration delay,
+  }) {
+    final cards = _resolvedPlacements()
+        .where((p) =>
+            p.slot == slot || (p.slot.isEmpty && slot == 'after_assignments'))
+        .toList();
+    if (cards.isEmpty) return const [];
+    return [
+      for (var i = 0; i < cards.length; i++)
+        SliverToBoxAdapter(
+          child: _AnimatedEntry(
+            delay: delay + Duration(milliseconds: i * 20),
+            child: StudentHomePromoCard(
+              payload: cards[i].payload,
+              onTap: cards[i].onTap ?? onHelpTap,
+              onDismiss: cards[i].onDismiss ?? onHomePromoDismiss,
+              showDemoBadge: cards[i].showDemoBadge,
+            ),
+          ),
+        ),
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -73,6 +134,7 @@ class StudentHomeView extends StatelessWidget {
             onNotificationsTap: onNotificationsTap,
           ),
         ),
+        // System block: news (immovable).
         SliverToBoxAdapter(
           child: _AnimatedEntry(
             delay: const Duration(milliseconds: 20),
@@ -84,12 +146,22 @@ class StudentHomeView extends StatelessWidget {
             ),
           ),
         ),
+        ..._promoSliversFor(
+          'after_news',
+          delay: const Duration(milliseconds: 40),
+        ),
+        // System block: day summary (immovable).
         SliverToBoxAdapter(
           child: _AnimatedEntry(
             delay: const Duration(milliseconds: 70),
             child: _TodaySummaryCard(data: data, onTap: onSummaryTap),
           ),
         ),
+        ..._promoSliversFor(
+          'after_day_summary',
+          delay: const Duration(milliseconds: 90),
+        ),
+        // System block: assignments (immovable).
         SliverToBoxAdapter(
           child: _AnimatedEntry(
             delay: const Duration(milliseconds: 120),
@@ -105,19 +177,18 @@ class StudentHomeView extends StatelessWidget {
             ),
           ),
         ),
-        if (!hideHomePromo)
-          SliverToBoxAdapter(
-            child: _AnimatedEntry(
-              delay: const Duration(milliseconds: 170),
-              child: StudentHomePromoCard(
-                payload: homePromo ?? HomePromoPayload.demoStuckWithAssignment,
-                onTap: onHelpTap,
-                onDismiss: onHomePromoDismiss,
-                showDemoBadge:
-                    homePromoIsDemo || (homePromo == null && !hideHomePromo),
-              ),
-            ),
-          ),
+        ..._promoSliversFor(
+          'after_assignments',
+          delay: const Duration(milliseconds: 170),
+        ),
+        ..._promoSliversFor(
+          'before_bottom_info',
+          delay: const Duration(milliseconds: 190),
+        ),
+        ..._promoSliversFor(
+          'end_of_page',
+          delay: const Duration(milliseconds: 210),
+        ),
         const SliverToBoxAdapter(child: SizedBox(height: 96)),
       ],
     );
@@ -1011,45 +1082,6 @@ class _DoneCheckButton extends StatelessWidget {
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _Pill extends StatelessWidget {
-  const _Pill({required this.icon, required this.text, required this.color});
-
-  final IconData icon;
-  final String text;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 220),
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 13, color: color),
-          const SizedBox(width: 5),
-          Flexible(
-            child: Text(
-              text,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: color,
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }

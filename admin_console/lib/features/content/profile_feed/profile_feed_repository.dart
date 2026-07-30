@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:student_ui/student_ui.dart';
 
 import 'profile_feed_item.dart';
@@ -219,10 +220,15 @@ class LocalProfileFeedRepository implements ProfileFeedRepository {
   }) async {
     final basePayload =
         payload ??
-        const ProfileFeedPayload(
+        ProfileFeedPayload(
           title: 'Новая карточка',
           subtitle: 'Краткое описание',
           ctaLabel: 'Открыть',
+          iconKey: 'info',
+          gradientColors: const [Color(0xFFDCD0FA), Color(0xFFC9B8F3)],
+          cardVariant: 'gradient_text',
+          gradientAngle: 45,
+          ctaRoute: '/profile',
         );
     final item = ProfileFeedItem(
       id: 'local-profile-feed-${_seq++}',

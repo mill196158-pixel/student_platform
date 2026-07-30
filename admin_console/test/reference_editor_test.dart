@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:student_platform_admin/features/content/reference/reference_editor_screen.dart';
 import 'package:student_platform_admin/features/content/reference/reference_item.dart';
 import 'package:student_platform_admin/features/content/reference/reference_repository.dart';
+import 'package:student_platform_admin/features/content/shared/content_icon_picker.dart';
 import 'package:student_platform_admin/features/content/shared/visual_editor_list_panel.dart';
 import 'package:student_platform_admin/features/content/shared/visual_editor_shell.dart';
 import 'package:student_ui/student_ui.dart';
@@ -38,6 +39,7 @@ void main() {
       expect(find.text('Как зайти в личный кабинет'), findsWidgets);
       expect(find.byType(StudentReferenceArticleCard), findsWidgets);
       expect(find.text('Управление категориями'), findsOneWidget);
+      expect(find.byType(ContentIconPickerField), findsWidgets);
       expect(find.textContaining('Опубликовано'), findsWidgets);
       expect(find.textContaining('Черновики'), findsWidgets);
       expect(find.textContaining('Архив'), findsWidgets);
@@ -251,4 +253,20 @@ void main() {
     final after = await repo.listCategories();
     expect(after.first.id, reversed.first.id);
   });
+
+  test(
+    'local safeDeleteCategory removes category on archive_articles',
+    () async {
+      final repo = LocalReferenceRepository();
+      final categories = await repo.listCategories();
+      final target = categories.first;
+      await repo.safeDeleteCategory(
+        id: target.id,
+        expectedRowVersion: target.rowVersion,
+        mode: 'archive_articles',
+      );
+      final after = await repo.listCategories();
+      expect(after.any((c) => c.id == target.id), isFalse);
+    },
+  );
 }

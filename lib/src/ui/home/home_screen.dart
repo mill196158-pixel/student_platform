@@ -644,8 +644,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final payload = _promo.payload;
     final route = payload.ctaRoute?.trim();
     if (route != null && route.isNotEmpty) {
-      if (route == '/help' || route == '/my-diary') {
-        if (route == '/my-diary') {
+      if (route == '/help' ||
+          route == '/info' ||
+          route == '/my-diary' ||
+          route == '/diary') {
+        if (route == '/my-diary' || route == '/diary') {
           context.push('/my-diary');
           return;
         }

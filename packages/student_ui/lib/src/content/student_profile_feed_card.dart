@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'content_models.dart';
@@ -103,6 +105,7 @@ class StudentProfileFeedCarousel extends StatefulWidget {
     required this.cards,
     required this.onTap,
     this.onVisibleCard,
+    this.selectedId,
   });
 
   final List<ManagedProfileFeedCard> cards;
@@ -111,6 +114,9 @@ class StudentProfileFeedCarousel extends StatefulWidget {
   /// Fired when a page becomes the primary visible card (incl. first page).
   final ValueChanged<ManagedProfileFeedCard>? onVisibleCard;
 
+  /// When set, animates (or jumps) to the card with this stable [ManagedProfileFeedCard.id].
+  final String? selectedId;
+
   @override
   State<StudentProfileFeedCarousel> createState() =>
       _StudentProfileFeedCarouselState();
@@ -118,10 +124,10 @@ class StudentProfileFeedCarousel extends StatefulWidget {
 
 class _StudentProfileFeedCarouselState
     extends State<StudentProfileFeedCarousel> {
-  late final PageController _controller =
-      PageController(viewportFraction: 0.92);
+  late final PageController _controller;
   int _pageIndex = 0;
   String? _lastVisibleId;
+  bool _suppressNextVisibleNotify = false;
 
   static const _gradients = <List<Color>>[
     [Color(0xFFDCD0FA), Color(0xFFC9B8F3)],
@@ -129,7 +135,85 @@ class _StudentProfileFeedCarouselState
     [Color(0xFFFFE5B9), Color(0xFFDCD0FA)],
   ];
 
+  int _indexForId(String id) =>
+      widget.cards.indexWhere((card) => card.id == id);
+
+  int _initialPageIndex() {
+    if (widget.cards.isEmpty) return 0;
+    final selectedId = widget.selectedId;
+    if (selectedId != null) {
+      final index = _indexForId(selectedId);
+      if (index >= 0) return index;
+    }
+    return 0;
+  }
+
+  String? get _currentCardId {
+    if (widget.cards.isEmpty) return null;
+    final index = _pageIndex.clamp(0, widget.cards.length - 1);
+    return widget.cards[index].id;
+  }
+
+  void _clampPage({bool suppressNotify = false}) {
+    if (widget.cards.isEmpty) {
+      _pageIndex = 0;
+      _lastVisibleId = null;
+      return;
+    }
+    if (_pageIndex >= widget.cards.length) {
+      _pageIndex = widget.cards.length - 1;
+      if (suppressNotify) _suppressNextVisibleNotify = true;
+      if (_controller.hasClients) {
+        _controller.jumpToPage(_pageIndex);
+      }
+    }
+  }
+
+  void _goToIndex(int index, {required bool animate}) {
+    if (index < 0 || index >= widget.cards.length) return;
+    if (index == _pageIndex && widget.cards[index].id == _currentCardId) {
+      return;
+    }
+    _suppressNextVisibleNotify = true;
+    _pageIndex = index;
+    _lastVisibleId = widget.cards[index].id;
+    if (!_controller.hasClients) return;
+    if (animate) {
+      unawaited(
+        _controller.animateToPage(
+          index,
+          duration: const Duration(milliseconds: 280),
+          curve: Curves.easeOutCubic,
+        ),
+      );
+    } else {
+      _controller.jumpToPage(index);
+    }
+  }
+
+  void _syncToSelectedId(String? selectedId, {required bool animate}) {
+    if (selectedId == null) {
+      _clampPage(suppressNotify: true);
+      return;
+    }
+    final index = _indexForId(selectedId);
+    if (index < 0) {
+      _clampPage(suppressNotify: true);
+      return;
+    }
+    if (selectedId == _currentCardId) return;
+    _goToIndex(index, animate: animate);
+  }
+
   void _notifyVisible({bool force = false}) {
+    if (_suppressNextVisibleNotify) {
+      _suppressNextVisibleNotify = false;
+      if (widget.cards.isNotEmpty) {
+        final index = _pageIndex.clamp(0, widget.cards.length - 1);
+        _lastVisibleId = widget.cards[index].id;
+      }
+      return;
+    }
     if (widget.cards.isEmpty) {
       _lastVisibleId = null;
       return;
@@ -145,6 +229,11 @@ class _StudentProfileFeedCarouselState
   @override
   void initState() {
     super.initState();
+    _pageIndex = _initialPageIndex();
+    _controller = PageController(
+      viewportFraction: 0.92,
+      initialPage: _pageIndex,
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _notifyVisible(force: true);
@@ -158,18 +247,31 @@ class _StudentProfileFeedCarouselState
       _lastVisibleId = null;
       return;
     }
-    if (_pageIndex >= widget.cards.length) {
-      _pageIndex = widget.cards.length - 1;
-      if (_controller.hasClients) {
-        _controller.jumpToPage(_pageIndex);
-      }
+
+    final selectedChanged = widget.selectedId != oldWidget.selectedId;
+    if (selectedChanged ||
+        (widget.selectedId != null &&
+            widget.selectedId != _currentCardId &&
+            _indexForId(widget.selectedId!) >= 0)) {
+      _syncToSelectedId(
+        widget.selectedId,
+        animate: _controller.hasClients && selectedChanged,
+      );
+    } else if (widget.selectedId != null &&
+        _indexForId(widget.selectedId!) < 0) {
+      _clampPage(suppressNotify: true);
+    } else if (_pageIndex >= widget.cards.length) {
+      _clampPage(suppressNotify: true);
     }
-    final nextId = widget.cards[_pageIndex].id;
+
+    final nextId =
+        widget.cards[_pageIndex.clamp(0, widget.cards.length - 1)].id;
     final oldId =
         oldWidget.cards.isEmpty || _pageIndex >= oldWidget.cards.length
             ? null
             : oldWidget.cards[_pageIndex].id;
-    if (nextId != oldId || nextId != _lastVisibleId) {
+    if (!_suppressNextVisibleNotify &&
+        (nextId != oldId || nextId != _lastVisibleId)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         _notifyVisible(force: true);

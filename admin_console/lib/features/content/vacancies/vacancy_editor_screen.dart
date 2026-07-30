@@ -10,6 +10,7 @@ import '../../../core/auth/admin_session_controller.dart';
 import '../../academic/students/students_repository.dart';
 import '../profile_feed/content_audience_selectors.dart';
 import '../shared/admin_content_backend.dart';
+import '../shared/content_technical_panel.dart';
 import '../shared/phone_preview_frame.dart';
 import '../shared/visual_editor_list_panel.dart';
 import '../shared/visual_editor_shell.dart';
@@ -856,30 +857,7 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
   }
 
   void _openVacancyDetail(ManagedVacancyCard card) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (sheetContext) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.75,
-        minChildSize: 0.4,
-        maxChildSize: 0.95,
-        builder: (context, scrollController) => SingleChildScrollView(
-          controller: scrollController,
-          child: Theme(
-            data: studentPlatformLightTheme(),
-            child: StudentVacancyDetailSheet(
-              card: card,
-              showDemoBadge: card.showDemoBadge,
-            ),
-          ),
-        ),
-      ),
-    );
+    _select(card.id);
   }
 
   List<ManagedVacancyCard> _previewCards() {
@@ -1039,10 +1017,7 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
         previewBuilder: (_) => _VacancyPhonePreview(
           cards: previewCards,
           selectedId: selected?.id,
-          onCardTap: (card) {
-            _select(card.id);
-            _openVacancyDetail(card);
-          },
+          onCardTap: _openVacancyDetail,
         ),
         propertiesBuilder: (_) => selected == null
             ? VisualEditorEmptyState(
@@ -1229,7 +1204,7 @@ bool _listEq(List<String> a, List<String> b) {
   return true;
 }
 
-class _VacancyPhonePreview extends StatelessWidget {
+class _VacancyPhonePreview extends StatefulWidget {
   const _VacancyPhonePreview({
     required this.cards,
     required this.selectedId,
@@ -1241,7 +1216,67 @@ class _VacancyPhonePreview extends StatelessWidget {
   final ValueChanged<ManagedVacancyCard> onCardTap;
 
   @override
+  State<_VacancyPhonePreview> createState() => _VacancyPhonePreviewState();
+}
+
+class _VacancyPhonePreviewState extends State<_VacancyPhonePreview> {
+  ManagedVacancyCard? _detailCard;
+
+  void _openDetail(ManagedVacancyCard card) {
+    widget.onCardTap(card);
+    setState(() => _detailCard = card);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (_detailCard != null) {
+      return PhonePreviewFrame(
+        child: Theme(
+          data: studentPlatformLightTheme(),
+          child: ColoredBox(
+            color: const Color(0xFFFAF8FC),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Material(
+                  color: const Color(0xFFF0F1F6),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 40, 8, 8),
+                    child: Row(
+                      children: [
+                        IconButton(
+                          tooltip: 'Назад',
+                          onPressed: () => setState(() => _detailCard = null),
+                          icon: const Icon(Icons.arrow_back_rounded),
+                        ),
+                        Expanded(
+                          child: Text(
+                            _detailCard!.payload.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleSmall
+                                ?.copyWith(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: SingleChildScrollView(
+                    child: StudentVacancyDetailSheet(
+                      card: _detailCard!,
+                      showDemoBadge: _detailCard!.showDemoBadge,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     return PhonePreviewFrame(
       child: Theme(
         data: studentPlatformLightTheme(),
@@ -1259,7 +1294,7 @@ class _VacancyPhonePreview extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 12),
-              if (cards.isEmpty)
+              if (widget.cards.isEmpty)
                 const Card(
                   child: Padding(
                     padding: EdgeInsets.all(16),
@@ -1269,13 +1304,13 @@ class _VacancyPhonePreview extends StatelessWidget {
                   ),
                 )
               else
-                for (final card in cards)
+                for (final card in widget.cards)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: DecoratedBox(
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(20),
-                        border: card.id == selectedId
+                        border: card.id == widget.selectedId
                             ? Border.all(
                                 color: const Color(0xFF6656D9),
                                 width: 2,
@@ -1286,7 +1321,7 @@ class _VacancyPhonePreview extends StatelessWidget {
                         payload: card.payload,
                         showDemoBadge: card.showDemoBadge,
                         expiresLabel: vacancyExpiresLabel(card.expiresAt),
-                        onTap: () => onCardTap(card),
+                        onTap: () => _openDetail(card),
                       ),
                     ),
                   ),
@@ -1584,21 +1619,6 @@ class _VacancyPropertiesPanel extends StatelessWidget {
             InputDecorator(
               decoration: const InputDecoration(labelText: 'Источник'),
               child: Text(selected.origin.labelRu),
-            )
-          else
-            DropdownButtonFormField<String>(
-              key: ValueKey('origin-$origin'),
-              initialValue: origin,
-              decoration: const InputDecoration(labelText: 'Источник'),
-              items: const [
-                DropdownMenuItem(value: 'admin', child: Text('Админ')),
-                DropdownMenuItem(value: 'demo', child: Text('Demo')),
-              ],
-              onChanged: !_editable
-                  ? null
-                  : (value) {
-                      if (value != null) onOriginChanged(value);
-                    },
             ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
@@ -1792,6 +1812,39 @@ class _VacancyPropertiesPanel extends StatelessWidget {
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
+          ContentTechnicalPanel(
+            children: [
+              if (selected.origin != ContentOrigin.userSubmission &&
+                  selected.origin != ContentOrigin.importSource)
+                DropdownButtonFormField<String>(
+                  key: ValueKey('origin-$origin'),
+                  initialValue: origin,
+                  decoration: const InputDecoration(labelText: 'origin'),
+                  items: const [
+                    DropdownMenuItem(value: 'admin', child: Text('admin')),
+                    DropdownMenuItem(value: 'demo', child: Text('demo')),
+                  ],
+                  onChanged: !_editable
+                      ? null
+                      : (value) {
+                          if (value != null) onOriginChanged(value);
+                        },
+                ),
+              ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                title: const Text('row_version'),
+                subtitle: Text('${selected.rowVersion}'),
+              ),
+              if (selected.legacyKey != null)
+                ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('legacy_key'),
+                  subtitle: Text(selected.legacyKey!),
+                ),
+            ],
+          ),
         ],
       ),
     );

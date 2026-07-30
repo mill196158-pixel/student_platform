@@ -100,4 +100,88 @@ void main() {
     await tester.pump();
     expect(visible, ['demo-0', 'managed-0']);
   });
+
+  testWidgets('selectedId moves carousel to matching card', (tester) async {
+    final visible = <String>[];
+    final cards = [
+      for (var i = 0; i < ProfileFeedPayload.demoFeed.length; i++)
+        ManagedProfileFeedCard(
+          id: 'c$i',
+          origin: ContentOrigin.demo,
+          sortOrder: i,
+          priority: 0,
+          payload: ProfileFeedPayload.demoFeed[i],
+          showDemoBadge: true,
+        ),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StudentProfileFeedCarousel(
+            cards: cards,
+            selectedId: 'c1',
+            onTap: (_) {},
+            onVisibleCard: (card) => visible.add(card.id),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(visible, ['c1']);
+    expect(find.text('Расписание занятий'), findsOneWidget);
+  });
+
+  testWidgets('swipe notifies onVisibleCard with visible card id',
+      (tester) async {
+    final visible = <String>[];
+    final cards = [
+      for (var i = 0; i < ProfileFeedPayload.demoFeed.length; i++)
+        ManagedProfileFeedCard(
+          id: 'c$i',
+          origin: ContentOrigin.demo,
+          sortOrder: i,
+          priority: 0,
+          payload: ProfileFeedPayload.demoFeed[i],
+          showDemoBadge: true,
+        ),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 400,
+            child: StudentProfileFeedCarousel(
+              cards: cards,
+              onTap: (_) {},
+              onVisibleCard: (card) => visible.add(card.id),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(visible, ['c0']);
+
+    await tester.drag(find.byType(PageView), const Offset(-250, 0));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+
+    expect(visible, ['c0', 'c1']);
+  });
+
+  test('ProfileFeedPayload round-trips optional gradient colors', () {
+    const payload = ProfileFeedPayload(
+      title: 'T',
+      subtitle: 'S',
+      ctaLabel: 'C',
+      gradientColors: [Color(0xFFDCD0FA), Color(0xFFC9B8F3)],
+      gradientAngle: 135,
+    );
+    final parsed = ProfileFeedPayload.tryParse(payload.toWireJson());
+    expect(parsed?.gradientColors, hasLength(2));
+    expect(parsed?.gradientAngle, 135);
+  });
 }

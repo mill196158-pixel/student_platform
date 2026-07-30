@@ -1,7 +1,7 @@
 # Content Platform — Acceptance Checklist
 
 Status: **ACTIVE**
-Updated: **2026-07-30** (Stage 14.1.1 Visual Editor news-parity + working drafts closed)
+Updated: **2026-07-31** (Stage 14.1.2 Visual Content Studio — DONE / Codex APPROVE_WITH_NOTES)
 Rule: mark `[x]` only with **code + tests + Codex APPROVE** for that item.
 Docs-only items: Codex APPROVE on the docs package.
 Do **not** merge requirements into vague “готово”.
@@ -299,6 +299,31 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] SQL security review + controlled smoke (counts restored)
 - [x] Codex APPROVE 14.1.1
 - [x] Migrations applied: `20260730155714`, `20260730160328`, `20260730161522`
+
+---
+
+## M3. Stage 14.1.2 — Visual Content Studio
+
+- [x] Shared IconPicker (RU search, categories, clear) — no raw Material key in main UI
+- [x] Color/gradient picker + contrast hint; HEX only in «Дополнительно»
+- [x] ActionPicker allowlist (no chat; HTTPS external; no raw `/help` in main UI)
+- [x] Card variant picker (surface-allowed variants); switch keeps text/image/CTA
+- [x] Home placement slot picker (human labels + miniatures); `home_slot` in payload
+- [x] Home phone = real `StudentHomeView` with real published news + multi-slot promos
+- [x] Profile carousel: list selection ↔ PageController; draft overlay; in-phone detail/back
+- [x] Reference categories: IconPicker, hide/archive, safe-delete (reassign|archive|cancel)
+- [x] Reference articles: real menu→category→article→back; blocks/CTA visual path
+- [x] Vacancies: real list→detail→back; visual fields; no raw enums in main UI
+- [x] Schema v2 draft/save (`target_schema_version=2`); **publish gate default OFF**
+- [x] Publish-blocked UX message when server rejects v2
+- [x] Live preview from local draft (no per-keystroke save); dirty leave dialog
+- [x] Import Studio: docs-only next-stage note (no rewrite)
+- [x] Tests: pickers, carousel sync, home news preview, slot/variant payload, category safety, vacancy nav, tombstone
+- [x] Builds: Admin Web release, Main Web, Android debug, iOS simulator
+- [x] SQL security review + remote smoke (gate OFF; no mass publish)
+- [x] Codex APPROVE_WITH_NOTES 14.1.2
+- [x] Migrations applied: `20260730190415`, `20260730220218`
+- [ ] Commit + normal push `origin/refactor/chat-tab` *(in progress)*
 
 ---
 

@@ -63,6 +63,14 @@ extension ReferenceArticleStatusRu on ReferenceArticleStatus {
   };
 }
 
+extension ReferenceCategoryStatusRu on ReferenceCategoryStatus {
+  String get russianLabel => switch (this) {
+    ReferenceCategoryStatus.draft => 'Черновик',
+    ReferenceCategoryStatus.published => 'Опубликовано',
+    ReferenceCategoryStatus.archived => 'Архив',
+  };
+}
+
 extension ReferenceArticleItemPreview on ReferenceArticleItem {
   ManagedReferenceArticle toManagedArticle({
     String? categoryTitleOverride,

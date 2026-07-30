@@ -184,6 +184,23 @@ void main() {
     );
   });
 
+  testWidgets('vacancy card tap opens in-phone detail with back', (
+    tester,
+  ) async {
+    await pumpEditor(tester, LocalVacancyRepository());
+
+    await tester.tap(find.byType(StudentVacancyCard).first);
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.arrow_back_rounded), findsOneWidget);
+    expect(find.byType(StudentVacancyDetailSheet), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.arrow_back_rounded));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(StudentVacancyCard), findsWidgets);
+  });
+
   testWidgets('shows rejection reason for rejected vacancy', (tester) async {
     final repo = LocalVacancyRepository();
     await pumpEditor(tester, repo);

@@ -8,6 +8,13 @@ import '../../../core/auth/admin_session_controller.dart';
 import '../../academic/students/students_repository.dart';
 import '../reference/content_media_store.dart';
 import '../shared/admin_content_backend.dart';
+import '../shared/content_action_model.dart';
+import '../shared/content_action_picker.dart';
+import '../shared/content_card_variant_picker.dart';
+import '../shared/content_color_field.dart';
+import '../shared/content_color_utils.dart';
+import '../shared/content_icon_picker.dart';
+import '../shared/content_technical_panel.dart';
 import '../shared/phone_preview_frame.dart';
 import '../shared/visual_editor_list_panel.dart';
 import '../shared/visual_editor_shell.dart';
@@ -55,6 +62,9 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
   final _ctaUrlController = TextEditingController();
   final _sortOrderController = TextEditingController(text: '0');
   final _priorityController = TextEditingController(text: '0');
+  final _iconController = TextEditingController(text: 'info');
+  final _gradientAController = TextEditingController(text: '#DCD0FA');
+  final _gradientBController = TextEditingController(text: '#C9B8F3');
 
   List<ProfileFeedItem> _items = [];
   String? _selectedId;
@@ -75,6 +85,9 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
   ProfileFeedAudiencePreview? _audiencePreview;
   String? _banner;
   String? _loadError;
+  String _ctaAction = 'route';
+  int _gradientDirection = 45;
+  ContentCardVariant _cardVariant = ContentCardVariant.gradientText;
 
   ProfileFeedAdminListPartitions get _partitions =>
       partitionAdminProfileFeed(_items);
@@ -150,6 +163,9 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
     _ctaUrlController.dispose();
     _sortOrderController.dispose();
     _priorityController.dispose();
+    _iconController.dispose();
+    _gradientAController.dispose();
+    _gradientBController.dispose();
     super.dispose();
   }
 
@@ -198,6 +214,35 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
     _ctaUrlController.text = selected?.payload.ctaUrl ?? '';
     _sortOrderController.text = '${selected?.sortOrder ?? 0}';
     _priorityController.text = '${selected?.priority ?? 0}';
+    final payload = selected?.payload;
+    _iconController.text = payload?.iconKey ?? 'info';
+    final gradient = payload?.gradientColors;
+    _gradientAController.text = formatContentHexColor(
+      gradient?.first ?? const Color(0xFFDCD0FA),
+    );
+    _gradientBController.text = formatContentHexColor(
+      gradient != null && gradient.length > 1
+          ? gradient[1]
+          : (gradient?.first ?? const Color(0xFFC9B8F3)),
+    );
+    _gradientDirection = payload?.gradientAngle ?? 45;
+    _cardVariant =
+        ContentCardVariant.fromKey(payload?.cardVariant) ??
+        ContentCardVariant.gradientText;
+    _ctaAction =
+        (selected?.payload.ctaUrl != null &&
+            selected!.payload.ctaUrl!.isNotEmpty)
+        ? 'url'
+        : 'route';
+    if (selected?.payload.action != null) {
+      final fromWire = contentActionFromWire(selected!.payload.action);
+      applyContentActionToLegacy(
+        action: fromWire,
+        onCtaActionChanged: (value) => _ctaAction = value,
+        onCtaRouteChanged: (value) => _ctaRouteController.text = value,
+        onCtaUrlChanged: (value) => _ctaUrlController.text = value,
+      );
+    }
     _audienceMode = selected?.audienceMode ?? 'all';
     _groupIds = selected?.audienceGroupIds ?? const [];
     _userIds = selected?.audienceUserIds ?? const [];
@@ -289,20 +334,46 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
   }
 
   ProfileFeedPayload? _draftPayload() {
+    final actionSelection = contentActionFromLegacy(
+      ctaAction: _ctaAction,
+      ctaRoute: _ctaRouteController.text,
+      ctaUrl: _ctaUrlController.text,
+    );
     final map = <String, dynamic>{
       'title': _titleController.text.trim(),
       'subtitle': _subtitleController.text.trim(),
       'cta_label': _ctaLabelController.text.trim(),
-      if (_ctaRouteController.text.trim().isNotEmpty)
+      'icon_key': _iconController.text.trim(),
+      'gradient_colors': [
+        _gradientAController.text.trim(),
+        _gradientBController.text.trim(),
+      ],
+      'card_variant': _cardVariant.key,
+      'gradient_angle': _gradientDirection,
+      'action': contentActionToWire(actionSelection),
+      if (_ctaAction == 'route' && _ctaRouteController.text.trim().isNotEmpty)
         'cta_route': _ctaRouteController.text.trim(),
-      if (_ctaUrlController.text.trim().isNotEmpty)
+      if (_ctaAction == 'url' && _ctaUrlController.text.trim().isNotEmpty)
         'cta_url': _ctaUrlController.text.trim(),
     };
     final parsed = ProfileFeedPayload.tryParse(map);
     if (parsed == null) return null;
-    final existingImage = _selected?.payload.imageAssetId;
-    if (existingImage == null || existingImage.isEmpty) return parsed;
-    return parsed.copyWith(imageAssetId: existingImage);
+    final existing = _selected?.payload;
+    return parsed.copyWith(
+      imageAssetId: existing?.imageAssetId,
+      iconAssetId: existing?.iconAssetId,
+      bgMode: existing?.bgMode,
+      bgColor: existing?.bgColor,
+      overlayOpacity: existing?.overlayOpacity,
+    );
+  }
+
+  void _syncPayloadFromEditors() {
+    final payload = _draftPayload();
+    if (payload == null) return;
+    _updateSelected(
+      (item) => item.copyWith(title: payload.title, payload: payload),
+    );
   }
 
   void _updateSelected(ProfileFeedItem Function(ProfileFeedItem item) update) {
@@ -348,7 +419,23 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
       return;
     }
     await _runGuarded(() async {
-      final created = await _repository.createDraft();
+      final defaultPayload = ProfileFeedPayload.tryParse({
+        'title': 'Новая карточка',
+        'subtitle': 'Краткое описание',
+        'cta_label': 'Открыть',
+        'icon_key': 'info',
+        'gradient_colors': ['#DCD0FA', '#C9B8F3'],
+        'card_variant': ContentCardVariant.gradientText.key,
+        'gradient_angle': 45,
+        'cta_route': '/profile',
+        'action': contentActionToWire(
+          const ContentActionSelection(
+            kind: ContentActionKind.appScreen,
+            screenKey: 'profile',
+          ),
+        ),
+      });
+      final created = await _repository.createDraft(payload: defaultPayload);
       if (!mounted) return;
       _suppressTabCallback = true;
       setState(() {
@@ -827,53 +914,32 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
     });
   }
 
-  void _openCardDetail(ManagedProfileFeedCard card) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-      ),
-      builder: (_) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              'Предпросмотр карточки',
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 180,
-              child: StudentProfileFeedCard(
-                payload: card.payload,
-                showDemoBadge: card.showDemoBadge,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              card.payload.subtitle,
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            if (card.payload.ctaRoute != null || card.payload.ctaUrl != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  card.payload.ctaRoute ?? card.payload.ctaUrl ?? '',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: const Color(0xFF6B7280),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
+  List<ManagedProfileFeedCard> _previewCarouselCards() {
+    var cards = [
+      for (final item in _partitions.publishedPreviewItems)
+        item.toManagedCard(showDemoBadge: false),
+    ];
+    final selected = _selected;
+    if (selected == null || (!selected.isDraft && !_editingWorkingDraft)) {
+      return cards;
+    }
+
+    final overlay = selected.toManagedCard(
+      showDemoBadge: selected.origin == ContentOrigin.demo,
     );
+    final index = cards.indexWhere((card) => card.id == selected.id);
+    if (index >= 0) {
+      cards = [...cards]..[index] = overlay;
+      return cards;
+    }
+
+    cards = [...cards, overlay];
+    cards.sort((a, b) {
+      final byOrder = a.sortOrder.compareTo(b.sortOrder);
+      if (byOrder != 0) return byOrder;
+      return b.priority.compareTo(a.priority);
+    });
+    return cards;
   }
 
   Future<void> _confirmDiscard() async {
@@ -915,7 +981,14 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
     }
 
     final selected = _selected;
-    final previewItems = _partitions.publishedPreviewItems;
+    final previewCards = _previewCarouselCards();
+    final previewPayload =
+        _draftPayload() ??
+        selected?.payload ??
+        ProfileFeedPayload.demoFeed.first;
+    final v2PublishBlocked = contentWireUsesV2PublishFeatures(
+      previewPayload.toWireJson(),
+    );
 
     return VisualEditorShell(
       title: 'Визуальный редактор ленты профиля',
@@ -925,9 +998,10 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
       dirty: _dirty,
       busy: _busy || _imageUploading,
       banner: _banner,
-      defaultInfoMessage:
-          'Размещение profile_feed / шаблон profile_feed_card_v1. '
-          'Новости сюда не копируются.',
+      defaultInfoMessage: v2PublishBlocked
+          ? kVisualStudioV2PublishBlockedMessageRu
+          : 'Размещение profile_feed / шаблон profile_feed_card_v1. '
+                'Новости сюда не копируются.',
       canWrite: _canWrite,
       canPublish: _canPublish && selected != null && !selected.isArchived,
       canUnpublish: _canPublish,
@@ -996,17 +1070,9 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
         onDemoFilterChanged: (value) => setState(() => _showDemoOnly = value),
       ),
       previewBuilder: (context) => _ProfileFeedPhonePreview(
-        cards: [
-          for (final item in previewItems)
-            item.toManagedCard(showDemoBadge: false),
-        ],
-        selectedId: previewItems.any((e) => e.id == _selectedId)
-            ? _selectedId
-            : null,
-        onCardTap: (card) {
-          _select(card.id);
-          _openCardDetail(card);
-        },
+        cards: previewCards,
+        selectedId: _selectedId,
+        onCardTap: (card) => _select(card.id),
         onVisibleCard: (card) {
           // Preview shows published cards only; don't steal selection from
           // drafts/archive (e.g. after «Создать черновик»).
@@ -1037,6 +1103,12 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
               ctaLabelController: _ctaLabelController,
               ctaRouteController: _ctaRouteController,
               ctaUrlController: _ctaUrlController,
+              ctaAction: _ctaAction,
+              iconController: _iconController,
+              gradientAController: _gradientAController,
+              gradientBController: _gradientBController,
+              gradientDirection: _gradientDirection,
+              cardVariant: _cardVariant,
               sortOrderController: _sortOrderController,
               priorityController: _priorityController,
               audienceMode: _audienceMode,
@@ -1062,6 +1134,58 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
                   payload: item.payload.copyWith(ctaLabel: value),
                 ),
               ),
+              onIconChanged: (key) {
+                _iconController.text = key ?? '';
+                _syncPayloadFromEditors();
+              },
+              onGradientColorAChanged: (value) {
+                _gradientAController.text = value;
+                _syncPayloadFromEditors();
+              },
+              onGradientColorBChanged: (value) {
+                _gradientBController.text = value;
+                _syncPayloadFromEditors();
+              },
+              onGradientDirectionChanged: (value) {
+                setState(() => _gradientDirection = value);
+                _syncPayloadFromEditors();
+              },
+              onCardVariantChanged: (value) {
+                setState(() => _cardVariant = value);
+                _syncPayloadFromEditors();
+              },
+              onActionSelectionChanged: (action) {
+                applyContentActionToLegacy(
+                  action: action,
+                  onCtaActionChanged: (value) => _ctaAction = value,
+                  onCtaRouteChanged: (value) {
+                    _ctaRouteController.text = value;
+                    _updateSelected(
+                      (item) => item.copyWith(
+                        payload: item.payload.copyWith(
+                          ctaRoute: value.trim().isEmpty ? null : value.trim(),
+                          clearCtaRoute: value.trim().isEmpty,
+                          clearCtaUrl: true,
+                          action: contentActionToWire(action),
+                        ),
+                      ),
+                    );
+                  },
+                  onCtaUrlChanged: (value) {
+                    _ctaUrlController.text = value;
+                    _updateSelected(
+                      (item) => item.copyWith(
+                        payload: item.payload.copyWith(
+                          ctaUrl: value.trim().isEmpty ? null : value.trim(),
+                          clearCtaUrl: value.trim().isEmpty,
+                          clearCtaRoute: true,
+                          action: contentActionToWire(action),
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
               onCtaRouteChanged: (value) => _updateSelected(
                 (item) => item.copyWith(
                   payload: item.payload.copyWith(
@@ -1116,7 +1240,7 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
   }
 }
 
-class _ProfileFeedPhonePreview extends StatelessWidget {
+class _ProfileFeedPhonePreview extends StatefulWidget {
   const _ProfileFeedPhonePreview({
     required this.cards,
     required this.selectedId,
@@ -1130,7 +1254,32 @@ class _ProfileFeedPhonePreview extends StatelessWidget {
   final ValueChanged<ManagedProfileFeedCard> onVisibleCard;
 
   @override
+  State<_ProfileFeedPhonePreview> createState() =>
+      _ProfileFeedPhonePreviewState();
+}
+
+class _ProfileFeedPhonePreviewState extends State<_ProfileFeedPhonePreview> {
+  ManagedProfileFeedCard? _detailCard;
+
+  void _openDetail(ManagedProfileFeedCard card) {
+    widget.onCardTap(card);
+    setState(() => _detailCard = card);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (_detailCard != null) {
+      return PhonePreviewFrame(
+        child: Theme(
+          data: studentPlatformLightTheme(),
+          child: _ProfileFeedCardDetailView(
+            card: _detailCard!,
+            onBack: () => setState(() => _detailCard = null),
+          ),
+        ),
+      );
+    }
+
     return PhonePreviewFrame(
       child: Theme(
         data: studentPlatformLightTheme(),
@@ -1150,7 +1299,7 @@ class _ProfileFeedPhonePreview extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 10),
-              if (cards.isEmpty)
+              if (widget.cards.isEmpty)
                 const Card(
                   child: Padding(
                     padding: EdgeInsets.all(16),
@@ -1160,11 +1309,11 @@ class _ProfileFeedPhonePreview extends StatelessWidget {
                   ),
                 )
               else
-                selectedId == null
+                widget.selectedId == null
                     ? StudentProfileFeedCarousel(
-                        cards: cards,
-                        onTap: onCardTap,
-                        onVisibleCard: onVisibleCard,
+                        cards: widget.cards,
+                        onTap: _openDetail,
+                        onVisibleCard: widget.onVisibleCard,
                       )
                     : DecoratedBox(
                         decoration: BoxDecoration(
@@ -1175,14 +1324,95 @@ class _ProfileFeedPhonePreview extends StatelessWidget {
                           ),
                         ),
                         child: StudentProfileFeedCarousel(
-                          cards: cards,
-                          onTap: onCardTap,
-                          onVisibleCard: onVisibleCard,
+                          cards: widget.cards,
+                          selectedId: widget.selectedId,
+                          onTap: _openDetail,
+                          onVisibleCard: widget.onVisibleCard,
                         ),
                       ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _ProfileFeedCardDetailView extends StatelessWidget {
+  const _ProfileFeedCardDetailView({required this.card, required this.onBack});
+
+  final ManagedProfileFeedCard card;
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    final actionLabel = card.payload.ctaRoute ?? card.payload.ctaUrl;
+    return ColoredBox(
+      color: const Color(0xFFFAF8FC),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Material(
+            color: const Color(0xFFF0F1F6),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(4, 40, 8, 8),
+              child: Row(
+                children: [
+                  IconButton(
+                    tooltip: 'Назад',
+                    onPressed: onBack,
+                    icon: const Icon(Icons.arrow_back_rounded),
+                  ),
+                  Expanded(
+                    child: Text(
+                      card.payload.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+              children: [
+                SizedBox(
+                  height: 180,
+                  child: StudentProfileFeedCard(
+                    payload: card.payload,
+                    showDemoBadge: card.showDemoBadge,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  card.payload.subtitle,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                if (card.payload.ctaLabel.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  FilledButton(
+                    onPressed: () {},
+                    child: Text(card.payload.ctaLabel),
+                  ),
+                ],
+                if (actionLabel != null && actionLabel.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    actionLabel,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFF6B7280),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1239,6 +1469,12 @@ class _PropertiesPanel extends StatelessWidget {
     required this.ctaLabelController,
     required this.ctaRouteController,
     required this.ctaUrlController,
+    required this.ctaAction,
+    required this.iconController,
+    required this.gradientAController,
+    required this.gradientBController,
+    required this.gradientDirection,
+    required this.cardVariant,
     required this.sortOrderController,
     required this.priorityController,
     required this.audienceMode,
@@ -1251,6 +1487,12 @@ class _PropertiesPanel extends StatelessWidget {
     required this.onTitleChanged,
     required this.onSubtitleChanged,
     required this.onCtaLabelChanged,
+    required this.onIconChanged,
+    required this.onGradientColorAChanged,
+    required this.onGradientColorBChanged,
+    required this.onGradientDirectionChanged,
+    required this.onCardVariantChanged,
+    required this.onActionSelectionChanged,
     required this.onCtaRouteChanged,
     required this.onCtaUrlChanged,
     required this.onSortOrderChanged,
@@ -1284,6 +1526,12 @@ class _PropertiesPanel extends StatelessWidget {
   final TextEditingController ctaLabelController;
   final TextEditingController ctaRouteController;
   final TextEditingController ctaUrlController;
+  final String ctaAction;
+  final TextEditingController iconController;
+  final TextEditingController gradientAController;
+  final TextEditingController gradientBController;
+  final int gradientDirection;
+  final ContentCardVariant cardVariant;
   final TextEditingController sortOrderController;
   final TextEditingController priorityController;
   final String audienceMode;
@@ -1296,6 +1544,12 @@ class _PropertiesPanel extends StatelessWidget {
   final ValueChanged<String> onTitleChanged;
   final ValueChanged<String> onSubtitleChanged;
   final ValueChanged<String> onCtaLabelChanged;
+  final ValueChanged<String?> onIconChanged;
+  final ValueChanged<String> onGradientColorAChanged;
+  final ValueChanged<String> onGradientColorBChanged;
+  final ValueChanged<int> onGradientDirectionChanged;
+  final ValueChanged<ContentCardVariant> onCardVariantChanged;
+  final ValueChanged<ContentActionSelection> onActionSelectionChanged;
   final ValueChanged<String> onCtaRouteChanged;
   final ValueChanged<String> onCtaUrlChanged;
   final ValueChanged<String> onSortOrderChanged;
@@ -1350,11 +1604,57 @@ class _PropertiesPanel extends StatelessWidget {
             decoration: const InputDecoration(labelText: 'Подзаголовок'),
           ),
           const SizedBox(height: 12),
+          ContentIconPickerField(
+            selectedKey: iconController.text.trim().isEmpty
+                ? null
+                : iconController.text.trim(),
+            enabled: _enabled,
+            onChanged: onIconChanged,
+          ),
+          const SizedBox(height: 12),
+          ContentGradientField(
+            colorA: gradientAController.text,
+            colorB: gradientBController.text,
+            directionDegrees: gradientDirection,
+            enabled: _enabled,
+            onColorAChanged: onGradientColorAChanged,
+            onColorBChanged: onGradientColorBChanged,
+            onDirectionChanged: onGradientDirectionChanged,
+          ),
+          const SizedBox(height: 12),
+          ContentCardVariantPicker(
+            selected: cardVariant,
+            enabled: _enabled,
+            onChanged: onCardVariantChanged,
+          ),
+          const Padding(
+            padding: EdgeInsets.only(top: 8, bottom: 12),
+            child: Text(
+              'Schema v2: иконка, градиент и вариант сохраняются в черновик. '
+              'Публикация v2 заблокирована на сервере до релиза Mobile.',
+              style: TextStyle(color: Color(0xFF5C6370), fontSize: 12),
+            ),
+          ),
           TextField(
             controller: ctaLabelController,
             enabled: _enabled,
             onChanged: onCtaLabelChanged,
             decoration: const InputDecoration(labelText: 'Текст кнопки'),
+          ),
+          const SizedBox(height: 12),
+          ContentActionPicker(
+            selection: contentActionFromLegacy(
+              ctaAction: ctaAction,
+              ctaRoute: ctaRouteController.text,
+              ctaUrl: ctaUrlController.text,
+            ),
+            enabled: _enabled,
+            allowedKinds: const [
+              ContentActionKind.appScreen,
+              ContentActionKind.externalUrl,
+              ContentActionKind.none,
+            ],
+            onChanged: onActionSelectionChanged,
           ),
           const SizedBox(height: 16),
           Row(
@@ -1525,11 +1825,7 @@ class _PropertiesPanel extends StatelessWidget {
             ),
           ],
           const SizedBox(height: 16),
-          ExpansionTile(
-            title: const Text(
-              'Дополнительно',
-              style: TextStyle(fontWeight: FontWeight.w700),
-            ),
+          ContentTechnicalPanel(
             children: [
               _ReadOnlyField(label: 'ID', value: selected.id),
               _ReadOnlyField(

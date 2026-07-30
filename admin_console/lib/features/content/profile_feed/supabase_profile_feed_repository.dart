@@ -1,10 +1,12 @@
 import 'dart:convert';
 
+import 'package:flutter/material.dart';
 import 'package:student_ui/student_ui.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'profile_feed_item.dart';
 import 'profile_feed_repository.dart';
+import '../shared/content_action_model.dart';
 
 abstract class ProfileFeedAdminRpcClient {
   Future<dynamic> rpc(String function, {Map<String, dynamic>? params});
@@ -61,6 +63,11 @@ class SupabaseProfileFeedRepository implements ProfileFeedRepository {
     if (message.contains('row_version') || message.contains('conflict')) {
       return const ProfileFeedRepositoryException(
         'Карточка изменилась. Обновите список.',
+      );
+    }
+    if (message.contains('visual_studio_v2_publish_disabled')) {
+      return const ProfileFeedRepositoryException(
+        kVisualStudioV2PublishBlockedMessageRu,
       );
     }
     if (message.contains('could not find the function') || code == 'PGRST202') {
@@ -157,14 +164,19 @@ class SupabaseProfileFeedRepository implements ProfileFeedRepository {
   }) async {
     final basePayload =
         payload ??
-        const ProfileFeedPayload(
+        ProfileFeedPayload(
           title: 'Новая карточка',
           subtitle: 'Краткое описание',
           ctaLabel: 'Открыть',
+          iconKey: 'info',
+          gradientColors: const [Color(0xFFDCD0FA), Color(0xFFC9B8F3)],
+          cardVariant: 'gradient_text',
+          gradientAngle: 45,
+          ctaRoute: '/profile',
         );
     final data = await _call('admin_create_content_draft', {
       'p_template_key': 'profile_feed_card_v1',
-      'p_schema_version': 1,
+      'p_schema_version': 2,
       'p_title': title ?? basePayload.title,
       'p_payload': basePayload.toWireJson(),
       'p_origin': _originWire(origin),

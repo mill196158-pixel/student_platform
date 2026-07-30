@@ -6,7 +6,7 @@
 ## Статус документа
 
 - Дата аудита: **27 июля 2026**
-- Обновлено: **30 июля 2026** (Stage 14.1.1 Visual Editor news-parity + working drafts applied on remote)
+- Обновлено: **30 июля 2026** (Stage 14.1.2 Visual Content Studio — pickers + gated schema v2)
 - Проверенная основная ветка: `refactor/chat-tab` (база)
 - Рабочая ветка контента: `feature/content-platform`
 - Проверенная административная ветка: `feature/admin-console`
@@ -15,7 +15,7 @@
 - Codex thread: `019fa373-81f2-7962-a8c9-81d86cb62311`
 - Remote project: `gwdanmwluhrcfxbnplwd`
 - Статус карты: **ACTIVE**
-- Content Platform Stages **14–21** + **14.1/14.1.1** на `refactor/chat-tab` (working drafts + vacancy draft-asset visibility applied; Edge deploy / media smoke JWT — owner-gated residuals)
+- Content Platform Stages **14–21** + **14.1/14.1.1/14.1.2** на `refactor/chat-tab` (Visual Content Studio pickers + schema v2 drafts; publish gate OFF until Mobile release; Edge/media smoke JWT — owner-gated residuals)
 - Owner residuals Stage 13 (не блокируют 14–19): PHYSICAL OCR / two-device topic race / controlled push / REAL XLSX
 - Контрольные документы: `docs/content_platform/CONTENT_PLATFORM_SPEC.md`, `docs/content_platform/ACCEPTANCE_CHECKLIST.md`, `docs/agent_coordination/CURRENT_TASK.md`
 
@@ -974,6 +974,25 @@ Status: **DONE** / Codex **APPROVE** (2026-07-30) — migrations `20260730155714
 - [x] Admin v3 reference blocks feature-gated (`ADMIN_REFERENCE_V3_BLOCKS`, default false);
 - [x] tests + Admin/Main Web + Android debug + iOS simulator builds;
 - [x] no Edge deploy required for this substage.
+
+### Stage 14.1.2 — Visual Content Studio
+
+Status: **DONE** / Codex **APPROVE_WITH_NOTES** — migrations `20260730190415` + `20260730220218` on `gwdanmwluhrcfxbnplwd`
+
+- [x] shared IconPicker / Color+Gradient / ActionPicker / Variant / Slot pickers (no raw psychology/HEX/`/help` in main UI);
+- [x] Home preview injects real published news into `StudentHomeView`; multi-slot promo layout in shared UI;
+- [x] Profile carousel `selectedId` sync + draft overlay + in-phone detail;
+- [x] Reference/Vacancy in-phone navigation; category RU labels + IconPicker + safe-delete;
+- [x] schema v2 templates + structured CTA + `home_slot` in payload; **server publish gate default OFF**;
+- [x] Admin/SQL/Mobile legacy CTA routes aligned (`/home`, `/my-diary`, `/help`); category tombstone by `legacy_key`;
+- [x] vacancy_assets.role; reference category description/color/is_hidden; audience lens RPC (UI residual NOTE);
+- [x] Import Studio: docs-only note for next stage (multi-format curriculum audit) — no rewrite in 14.1.2.
+
+### Next after 14.1.2 — Import Studio (separate stage)
+
+- [ ] audit several real curriculum file formats (do not force one schema early);
+- [ ] upload sample workbooks; analyze sheets/headers/merged cells;
+- [ ] mapping studio + preview + dry-run + validation + apply + rollback.
 
 ---
 

@@ -8,6 +8,10 @@ import '../../../core/auth/admin_session_controller.dart';
 import '../../academic/students/students_repository.dart';
 import '../profile_feed/content_audience_selectors.dart';
 import '../shared/admin_content_backend.dart';
+import '../shared/content_action_model.dart';
+import '../shared/content_action_picker.dart';
+import '../shared/content_icon_picker.dart';
+import '../shared/content_technical_panel.dart';
 import '../shared/phone_preview_frame.dart';
 import '../shared/visual_editor_list_panel.dart';
 import '../shared/visual_editor_shell.dart';
@@ -249,7 +253,7 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
 
   Future<void> _manageCategories() async {
     final titleController = TextEditingController();
-    final iconController = TextEditingController(text: 'help');
+    var newCategoryIconKey = 'help';
     final keyController = TextEditingController();
     var working = List<ReferenceCategoryItem>.from(_categories);
 
@@ -259,7 +263,7 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
     ) async {
       final current = working[index];
       final editTitle = TextEditingController(text: current.title);
-      final editIcon = TextEditingController(text: current.iconKey);
+      var editIconKey = current.iconKey;
       var status = current.status;
       final ok = await showDialog<bool>(
         context: context,
@@ -281,18 +285,24 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
                           labelText: 'Название',
                         ),
                       ),
-                      TextField(
-                        controller: editIcon,
-                        decoration: const InputDecoration(
-                          labelText: 'icon_key',
-                        ),
+                      const SizedBox(height: 8),
+                      ContentIconPickerField(
+                        selectedKey: editIconKey,
+                        onChanged: (value) {
+                          if (value != null) {
+                            setEditState(() => editIconKey = value);
+                          }
+                        },
                       ),
                       DropdownButtonFormField<ReferenceCategoryStatus>(
                         value: status,
                         decoration: const InputDecoration(labelText: 'Статус'),
                         items: [
                           for (final s in ReferenceCategoryStatus.values)
-                            DropdownMenuItem(value: s, child: Text(s.name)),
+                            DropdownMenuItem(
+                              value: s,
+                              child: Text(s.russianLabel),
+                            ),
                         ],
                         onChanged: (value) {
                           if (value == null) return;
@@ -318,18 +328,139 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
         },
       );
       final nextTitle = editTitle.text.trim();
-      final nextIcon = editIcon.text.trim();
       editTitle.dispose();
-      editIcon.dispose();
-      if (ok != true || nextTitle.isEmpty || nextIcon.isEmpty) return;
+      if (ok != true || nextTitle.isEmpty || editIconKey.isEmpty) return;
       setDialogState(() {
         working = [...working];
         working[index] = current.copyWith(
           title: nextTitle,
-          iconKey: nextIcon,
+          iconKey: editIconKey,
           status: status,
         );
       });
+    }
+
+    Future<void> deleteCategory(
+      void Function(void Function()) setDialogState,
+      int index,
+    ) async {
+      final current = working[index];
+      if (current.id.isEmpty) {
+        setDialogState(() {
+          working = [...working]..removeAt(index);
+        });
+        return;
+      }
+      final others = [
+        for (var j = 0; j < working.length; j++)
+          if (j != index && working[j].id.isNotEmpty) working[j],
+      ];
+      String mode = 'archive_articles';
+      String? reassignToId;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) {
+          return StatefulBuilder(
+            builder: (context, setDeleteState) {
+              return AlertDialog(
+                title: Text('Удалить «${current.title}»?'),
+                content: SizedBox(
+                  width: 420,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if ((current.articleCount ?? 0) > 0)
+                        Text(
+                          'В категории ${current.articleCount} стат.'
+                          '${(current.articleCount ?? 0) == 1 ? 'ья' : 'ей'}.',
+                        ),
+                      const SizedBox(height: 12),
+                      RadioListTile<String>(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        title: const Text(
+                          'Перенести статьи в другую категорию',
+                        ),
+                        value: 'reassign',
+                        groupValue: mode,
+                        onChanged: others.isEmpty
+                            ? null
+                            : (value) {
+                                if (value == null) return;
+                                setDeleteState(() => mode = value);
+                              },
+                      ),
+                      if (mode == 'reassign' && others.isNotEmpty)
+                        DropdownButtonFormField<String>(
+                          isExpanded: true,
+                          initialValue: reassignToId ?? others.first.id,
+                          decoration: const InputDecoration(
+                            labelText: 'Целевая категория',
+                          ),
+                          items: [
+                            for (final cat in others)
+                              DropdownMenuItem(
+                                value: cat.id,
+                                child: Text(cat.title),
+                              ),
+                          ],
+                          onChanged: (value) =>
+                              setDeleteState(() => reassignToId = value),
+                        ),
+                      RadioListTile<String>(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        title: const Text(
+                          'Архивировать статьи и удалить категорию',
+                        ),
+                        value: 'archive_articles',
+                        groupValue: mode,
+                        onChanged: (value) {
+                          if (value == null) return;
+                          setDeleteState(() => mode = value);
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext, false),
+                    child: const Text('Отмена'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(dialogContext, true),
+                    child: const Text('Удалить'),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+      if (confirmed != true) return;
+      if (mode == 'reassign' &&
+          (reassignToId == null || reassignToId!.isEmpty)) {
+        if (others.isEmpty) return;
+        reassignToId = others.first.id;
+      }
+      try {
+        await _repository.safeDeleteCategory(
+          id: current.id,
+          expectedRowVersion: current.rowVersion,
+          mode: mode,
+          reassignToId: reassignToId,
+        );
+        setDialogState(() {
+          working = [...working]..removeAt(index);
+        });
+      } on ReferenceRepositoryException catch (error) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.message)));
+      }
     }
 
     final saved = await showDialog<bool>(
@@ -349,7 +480,8 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
                         dense: true,
                         title: Text(working[i].title),
                         subtitle: Text(
-                          '${working[i].iconKey} · ${working[i].status.name}',
+                          '${working[i].iconKey} · ${working[i].status.russianLabel}'
+                          '${working[i].articleCount != null ? ' · ${working[i].articleCount} стат.' : ''}',
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -371,7 +503,10 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
                               },
                               itemBuilder: (context) => [
                                 for (final s in ReferenceCategoryStatus.values)
-                                  PopupMenuItem(value: s, child: Text(s.name)),
+                                  PopupMenuItem(
+                                    value: s,
+                                    child: Text(s.russianLabel),
+                                  ),
                               ],
                               child: const Icon(Icons.flag_outlined),
                             ),
@@ -399,6 +534,12 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
                                     },
                               icon: const Icon(Icons.arrow_downward),
                             ),
+                            IconButton(
+                              tooltip: 'Удалить',
+                              onPressed: () =>
+                                  deleteCategory(setDialogState, i),
+                              icon: const Icon(Icons.delete_outline),
+                            ),
                           ],
                         ),
                       ),
@@ -415,17 +556,22 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
                         labelText: 'key (optional)',
                       ),
                     ),
-                    TextField(
-                      controller: iconController,
-                      decoration: const InputDecoration(labelText: 'icon_key'),
+                    ContentIconPickerField(
+                      selectedKey: newCategoryIconKey,
+                      onChanged: (value) {
+                        if (value != null) {
+                          setDialogState(() => newCategoryIconKey = value);
+                        }
+                      },
                     ),
                     Align(
                       alignment: Alignment.centerRight,
                       child: TextButton(
                         onPressed: () {
                           final title = titleController.text.trim();
-                          final icon = iconController.text.trim();
-                          if (title.isEmpty || icon.isEmpty) return;
+                          if (title.isEmpty || newCategoryIconKey.isEmpty) {
+                            return;
+                          }
                           setDialogState(() {
                             working = [
                               ...working,
@@ -435,7 +581,7 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
                                     ? null
                                     : keyController.text.trim(),
                                 title: title,
-                                iconKey: icon,
+                                iconKey: newCategoryIconKey,
                                 sortOrder: working.length,
                                 rowVersion: 0,
                                 status: ReferenceCategoryStatus.draft,
@@ -443,7 +589,7 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
                             ];
                             titleController.clear();
                             keyController.clear();
-                            iconController.text = 'help';
+                            newCategoryIconKey = 'help';
                           });
                         },
                         child: const Text('Добавить в список'),
@@ -469,7 +615,6 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
     );
 
     titleController.dispose();
-    iconController.dispose();
     keyController.dispose();
     if (saved != true || !mounted) return;
 
@@ -1547,7 +1692,19 @@ class _ReferencePropertiesPanel extends StatelessWidget {
             onChanged: _editable ? onCategoryChanged : null,
           ),
           const SizedBox(height: 10),
-          _textField(iconKeyController, 'Иконка'),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: ContentIconPickerField(
+              selectedKey: iconKeyController.text.trim().isEmpty
+                  ? null
+                  : iconKeyController.text.trim(),
+              enabled: _editable,
+              onChanged: (key) {
+                iconKeyController.text = key ?? '';
+                onChanged();
+              },
+            ),
+          ),
           _textField(shortTextController, 'Краткое описание', maxLines: 3),
           _textField(sortOrderController, 'Порядок сортировки'),
           const SizedBox(height: 12),
@@ -1679,20 +1836,23 @@ class _ReferencePropertiesPanel extends StatelessWidget {
                   ),
             ],
           ),
-          ExpansionTile(
-            title: const Text('Дополнительно'),
+          ContentTechnicalPanel(
             children: [
               ListTile(
                 dense: true,
+                contentPadding: EdgeInsets.zero,
                 title: const Text('Версия строки'),
                 subtitle: Text('${selected.rowVersion}'),
               ),
               if (selected.legacyKey != null)
                 ListTile(
                   dense: true,
+                  contentPadding: EdgeInsets.zero,
                   title: const Text('Legacy key'),
                   subtitle: Text(selected.legacyKey!),
                 ),
+              _textField(iconKeyController, 'icon_key'),
+              _textField(sortOrderController, 'sort_order'),
             ],
           ),
         ],
@@ -2070,20 +2230,18 @@ class _ReferenceBlockTileState extends State<_ReferenceBlockTile> {
                     widget.onUpdate(ReferenceTextBlock(text: value)),
               ),
               ReferenceImageBlock() => Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  TextField(
-                    enabled: widget.enabled,
-                    controller: _primary,
-                    decoration: const InputDecoration(labelText: 'ID файла'),
-                    onChanged: (value) => widget.onUpdate(
-                      ReferenceImageBlock(
-                        assetId: value,
-                        caption: _secondary.text.trim().isEmpty
-                            ? null
-                            : _secondary.text.trim(),
+                  if (_primary.text.trim().isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        'Файл загружен',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF5C6370),
+                        ),
                       ),
                     ),
-                  ),
                   TextField(
                     enabled: widget.enabled,
                     controller: _secondary,
@@ -2101,38 +2259,61 @@ class _ReferenceBlockTileState extends State<_ReferenceBlockTile> {
                     Align(
                       alignment: Alignment.centerLeft,
                       child: TextButton.icon(
-                        onPressed: () => _uploadMedia(
-                          image: true,
-                          onAsset: (id) => widget.onUpdate(
-                            ReferenceImageBlock(
-                              assetId: id,
-                              caption: _secondary.text.trim().isEmpty
-                                  ? null
-                                  : _secondary.text.trim(),
-                            ),
-                          ),
+                        onPressed: _uploading
+                            ? null
+                            : () => _uploadMedia(
+                                image: true,
+                                onAsset: (id) => widget.onUpdate(
+                                  ReferenceImageBlock(
+                                    assetId: id,
+                                    caption: _secondary.text.trim().isEmpty
+                                        ? null
+                                        : _secondary.text.trim(),
+                                  ),
+                                ),
+                              ),
+                        icon: _uploading
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.upload_file),
+                        label: Text(
+                          _primary.text.trim().isEmpty
+                              ? 'Загрузить изображение'
+                              : 'Заменить изображение',
                         ),
-                        icon: const Icon(Icons.upload_file),
-                        label: const Text('Загрузить изображение'),
                       ),
+                    ),
+                  if (_primary.text.trim().isNotEmpty)
+                    ContentTechnicalPanel(
+                      children: [
+                        ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('ID файла'),
+                          subtitle: Text(_primary.text),
+                        ),
+                      ],
                     ),
                 ],
               ),
               ReferenceFileBlock() => Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  TextField(
-                    enabled: widget.enabled,
-                    controller: _primary,
-                    decoration: const InputDecoration(labelText: 'ID файла'),
-                    onChanged: (value) => widget.onUpdate(
-                      ReferenceFileBlock(
-                        assetId: value,
-                        title: _secondary.text.trim().isEmpty
-                            ? null
-                            : _secondary.text.trim(),
+                  if (_primary.text.trim().isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        'Файл загружен',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF5C6370),
+                        ),
                       ),
                     ),
-                  ),
                   TextField(
                     enabled: widget.enabled,
                     controller: _secondary,
@@ -2150,20 +2331,45 @@ class _ReferenceBlockTileState extends State<_ReferenceBlockTile> {
                     Align(
                       alignment: Alignment.centerLeft,
                       child: TextButton.icon(
-                        onPressed: () => _uploadMedia(
-                          image: false,
-                          onAsset: (id) => widget.onUpdate(
-                            ReferenceFileBlock(
-                              assetId: id,
-                              title: _secondary.text.trim().isEmpty
-                                  ? null
-                                  : _secondary.text.trim(),
-                            ),
-                          ),
+                        onPressed: _uploading
+                            ? null
+                            : () => _uploadMedia(
+                                image: false,
+                                onAsset: (id) => widget.onUpdate(
+                                  ReferenceFileBlock(
+                                    assetId: id,
+                                    title: _secondary.text.trim().isEmpty
+                                        ? null
+                                        : _secondary.text.trim(),
+                                  ),
+                                ),
+                              ),
+                        icon: _uploading
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.upload_file),
+                        label: Text(
+                          _primary.text.trim().isEmpty
+                              ? 'Загрузить файл'
+                              : 'Заменить файл',
                         ),
-                        icon: const Icon(Icons.upload_file),
-                        label: const Text('Загрузить файл'),
                       ),
+                    ),
+                  if (_primary.text.trim().isNotEmpty)
+                    ContentTechnicalPanel(
+                      children: [
+                        ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('ID файла'),
+                          subtitle: Text(_primary.text),
+                        ),
+                      ],
                     ),
                 ],
               ),
@@ -2187,7 +2393,8 @@ class _ReferenceBlockTileState extends State<_ReferenceBlockTile> {
                   ),
                 ],
               ),
-              ReferenceCtaBlock() => Column(
+              ReferenceCtaBlock(:final cta) => Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   TextField(
                     enabled: widget.enabled,
@@ -2207,39 +2414,53 @@ class _ReferenceBlockTileState extends State<_ReferenceBlockTile> {
                       ),
                     ),
                   ),
-                  TextField(
+                  const SizedBox(height: 8),
+                  ContentActionPicker(
+                    selection: contentActionFromLegacy(
+                      ctaAction: (cta.url != null && cta.url!.isNotEmpty)
+                          ? 'url'
+                          : 'route',
+                      ctaRoute: _secondary.text,
+                      ctaUrl: _tertiary.text,
+                    ),
                     enabled: widget.enabled,
-                    controller: _secondary,
-                    decoration: const InputDecoration(
-                      labelText: 'Маршрут (опц.)',
-                    ),
-                    onChanged: (value) => widget.onUpdate(
-                      ReferenceCtaBlock(
-                        cta: ReferenceArticleCta(
-                          label: _primary.text,
-                          route: value.trim().isEmpty ? null : value.trim(),
-                          url: _tertiary.text.trim().isEmpty
-                              ? null
-                              : _tertiary.text.trim(),
-                        ),
-                      ),
-                    ),
-                  ),
-                  TextField(
-                    enabled: widget.enabled,
-                    controller: _tertiary,
-                    decoration: const InputDecoration(labelText: 'URL (опц.)'),
-                    onChanged: (value) => widget.onUpdate(
-                      ReferenceCtaBlock(
-                        cta: ReferenceArticleCta(
-                          label: _primary.text,
-                          route: _secondary.text.trim().isEmpty
-                              ? null
-                              : _secondary.text.trim(),
-                          url: value.trim().isEmpty ? null : value.trim(),
-                        ),
-                      ),
-                    ),
+                    allowedKinds: const [
+                      ContentActionKind.appScreen,
+                      ContentActionKind.externalUrl,
+                      ContentActionKind.none,
+                    ],
+                    onChanged: (action) {
+                      applyContentActionToLegacy(
+                        action: action,
+                        onCtaActionChanged: (_) {},
+                        onCtaRouteChanged: (value) {
+                          _secondary.text = value;
+                          _tertiary.text = '';
+                          widget.onUpdate(
+                            ReferenceCtaBlock(
+                              cta: ReferenceArticleCta(
+                                label: _primary.text,
+                                route: value.trim().isEmpty
+                                    ? null
+                                    : value.trim(),
+                              ),
+                            ),
+                          );
+                        },
+                        onCtaUrlChanged: (value) {
+                          _tertiary.text = value;
+                          _secondary.text = '';
+                          widget.onUpdate(
+                            ReferenceCtaBlock(
+                              cta: ReferenceArticleCta(
+                                label: _primary.text,
+                                url: value.trim().isEmpty ? null : value.trim(),
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    },
                   ),
                 ],
               ),

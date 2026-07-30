@@ -52,6 +52,7 @@ class ReferenceCategoryItem {
     required this.rowVersion,
     this.key,
     this.status = ReferenceCategoryStatus.published,
+    this.articleCount,
   });
 
   final String id;
@@ -61,6 +62,7 @@ class ReferenceCategoryItem {
   final int sortOrder;
   final int rowVersion;
   final ReferenceCategoryStatus status;
+  final int? articleCount;
 
   static ReferenceCategoryItem? tryParse(Map<String, dynamic>? json) {
     if (json == null) return null;
@@ -80,6 +82,7 @@ class ReferenceCategoryItem {
       status:
           parseReferenceCategoryStatus(json['status']) ??
           ReferenceCategoryStatus.published,
+      articleCount: _asInt(json['article_count']),
     );
   }
 
@@ -89,6 +92,7 @@ class ReferenceCategoryItem {
     int? sortOrder,
     int? rowVersion,
     ReferenceCategoryStatus? status,
+    int? articleCount,
   }) {
     return ReferenceCategoryItem(
       id: id,
@@ -98,6 +102,7 @@ class ReferenceCategoryItem {
       sortOrder: sortOrder ?? this.sortOrder,
       rowVersion: rowVersion ?? this.rowVersion,
       status: status ?? this.status,
+      articleCount: articleCount ?? this.articleCount,
     );
   }
 

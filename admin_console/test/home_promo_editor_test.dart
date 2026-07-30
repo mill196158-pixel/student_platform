@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:student_platform_admin/features/content/home_promo/home_promo_editor_screen.dart';
+import 'package:student_platform_admin/features/content/home_promo/home_promo_item.dart';
 import 'package:student_platform_admin/features/content/home_promo/home_promo_repository.dart';
+import 'package:student_platform_admin/features/content/news/news_repository.dart';
+import 'package:student_platform_admin/features/content/shared/content_action_model.dart';
 import 'package:student_platform_admin/features/content/shared/visual_editor_list_panel.dart';
 import 'package:student_platform_admin/features/content/shared/visual_editor_shell.dart';
 import 'package:student_ui/student_ui.dart';
+import 'package:student_platform_admin/core/auth/admin_backend_config.dart';
 
 Finder get _createButton => find.byTooltip('Создать черновик');
 
@@ -26,6 +30,7 @@ void main() {
 
       expect(find.byType(VisualEditorShell), findsOneWidget);
       expect(find.byType(VisualEditorListPanel), findsOneWidget);
+      expect(find.byType(StudentHomeView), findsOneWidget);
       expect(find.byType(StudentHomePromoCard), findsOneWidget);
       expect(find.text('Застрял с заданием?'), findsWidgets);
       expect(find.text('Promo-карточки'), findsOneWidget);
@@ -145,5 +150,90 @@ void main() {
     final restored = await repo.discardWorkingDraft(published.id);
     expect(restored.title, published.title);
     expect(restored.hasWorkingDraft, isFalse);
+  });
+
+  test('working draft patch persists home_slot and schema v2 target', () {
+    final item = HomePromoItem(
+      id: 'hp-1',
+      status: HomePromoStatus.draft,
+      origin: ContentOrigin.admin,
+      title: 'Promo',
+      payload: HomePromoPayload.tryParse({
+        'title': 'Promo',
+        'subtitle': 'Sub',
+        'icon_key': 'psychology',
+        'gradient_colors': ['#FFFBFF', '#F3EEF9'],
+        'cta_label': 'Go',
+        'dismissible': true,
+        'home_slot': 'after_news',
+        'card_variant': 'gradient_text',
+        'action': contentActionToWire(
+          const ContentActionSelection(
+            kind: ContentActionKind.appScreen,
+            screenKey: 'info',
+          ),
+        ),
+      })!,
+      rowVersion: 1,
+      priority: 0,
+      sortOrder: 0,
+      audienceMode: 'all',
+    );
+
+    final patch = item.toWorkingDraftPatch();
+    expect(patch['target_schema_version'], 2);
+    final payload = patch['payload'] as Map<String, dynamic>;
+    expect(payload['home_slot'], 'after_news');
+    expect(payload['action'], isNotNull);
+  });
+
+  testWidgets('home preview loads published news when news repo injected', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    AdminBackendConfig.debugDemoModeOverride = true;
+    addTearDown(() => AdminBackendConfig.debugDemoModeOverride = null);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: HomePromoEditorScreen(
+            repository: LocalHomePromoRepository(),
+            newsRepository: LocalNewsRepository(),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Добро пожаловать в новый семестр'), findsOneWidget);
+  });
+
+  testWidgets('changing home slot marks draft dirty', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: HomePromoEditorScreen(repository: LocalHomePromoRepository()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(_createButton);
+    await tester.pumpAndSettle();
+
+    final titleField = find.byWidgetPredicate(
+      (widget) =>
+          widget is TextField && widget.decoration?.labelText == 'Заголовок',
+    );
+    await tester.enterText(titleField, 'Slot test');
+    await tester.pump();
+
+    expect(find.text('Есть правки'), findsOneWidget);
   });
 }

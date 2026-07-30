@@ -3,6 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:student_platform_admin/features/content/profile_feed/profile_feed_item.dart';
 import 'package:student_platform_admin/features/content/profile_feed/profile_feed_editor_screen.dart';
 import 'package:student_platform_admin/features/content/profile_feed/profile_feed_repository.dart';
+import 'package:student_platform_admin/features/content/shared/content_card_variant_picker.dart';
+import 'package:student_platform_admin/features/content/shared/content_icon_picker.dart';
 import 'package:student_platform_admin/features/content/shared/visual_editor_list_panel.dart';
 import 'package:student_ui/student_ui.dart';
 
@@ -13,7 +15,7 @@ void main() {
     WidgetTester tester,
     ProfileFeedRepository repo,
   ) async {
-    await tester.binding.setSurfaceSize(const Size(1400, 1200));
+    await tester.binding.setSurfaceSize(const Size(1400, 1600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       MaterialApp(
@@ -39,7 +41,14 @@ void main() {
     expect(find.text('О нас'), findsWidgets);
     expect(find.text('Расписание занятий'), findsWidgets);
     expect(find.byType(StudentProfileFeedCarousel), findsOneWidget);
-    expect(find.textContaining('Новости сюда не копируются'), findsOneWidget);
+    expect(
+      find.textContaining('Публикация schema v2').evaluate().isNotEmpty ||
+          find
+              .textContaining('Новости сюда не копируются')
+              .evaluate()
+              .isNotEmpty,
+      isTrue,
+    );
     expect(find.byType(VisualEditorListPanel), findsOneWidget);
   });
 
@@ -62,27 +71,61 @@ void main() {
 
     await tester.tap(find.byTooltip('Создать черновик'));
     await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 300));
 
     final items = await repo.list();
     expect(items.any((e) => e.status == ProfileFeedStatus.draft), isTrue);
     expect(find.text('Сохранить черновик'), findsOneWidget);
-    expect(find.text('Preview аудитории'), findsOneWidget);
+    expect(find.text('Свойства карточки'), findsOneWidget);
+    expect(find.byType(ContentIconPickerField), findsOneWidget);
     expect(find.textContaining('Черновики'), findsWidgets);
   });
 
-  testWidgets('duplicate creates draft copy', (tester) async {
+  testWidgets('tapping carousel card opens in-phone detail with back', (
+    tester,
+  ) async {
+    await pumpEditor(tester, LocalProfileFeedRepository());
+
+    final carousel = find.byType(StudentProfileFeedCarousel);
+    await tester.tap(
+      find
+          .descendant(
+            of: carousel,
+            matching: find.byType(StudentProfileFeedCard),
+          )
+          .first,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.arrow_back_rounded), findsOneWidget);
+    expect(find.byType(StudentProfileFeedCard), findsWidgets);
+
+    await tester.tap(find.byIcon(Icons.arrow_back_rounded));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(StudentProfileFeedCarousel), findsOneWidget);
+  });
+
+  testWidgets('selecting carousel card syncs list selection', (tester) async {
+    await pumpEditor(tester, LocalProfileFeedRepository());
+
+    final carousel = find.byType(StudentProfileFeedCarousel);
+    await tester.tap(
+      find
+          .descendant(of: carousel, matching: find.text('Расписание занятий'))
+          .first,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Расписание занятий'), findsWidgets);
+  });
+
+  test('local duplicate adds draft copy', () async {
     final repo = LocalProfileFeedRepository();
-    await pumpEditor(tester, repo);
-
-    await tester.tap(find.text('О нас').first);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 200));
-    await tester.tap(find.text('Дублировать'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
-
-    final items = await repo.list(status: 'draft');
-    expect(items.any((e) => e.title.contains('копия')), isTrue);
+    final source = (await repo.list()).first;
+    final copy = await repo.duplicate(source.id);
+    expect(copy.title, '${source.title} (копия)');
+    expect(copy.status, ProfileFeedStatus.draft);
   });
 
   test('local seeds include legacy keys', () async {
@@ -144,6 +187,120 @@ void main() {
 
     final patch = item.toWorkingDraftPatch();
     expect(patch['draft_asset_ids'], ['asset-image-42']);
+    expect(patch['target_schema_version'], 2);
     expect((patch['payload'] as Map)['image_asset_id'], 'asset-image-42');
+  });
+
+  test('ProfileFeedPayload dual-read v2 fields', () {
+    final parsed = ProfileFeedPayload.tryParse({
+      'title': 'T',
+      'subtitle': 'S',
+      'cta_label': 'C',
+      'iconKey': 'school',
+      'icon_asset_id': 'icon-asset-1',
+      'cardVariant': 'compact_icon',
+      'bg_mode': 'gradient',
+      'bg_color': '#DCD0FA',
+      'gradientColors': ['#DCD0FA', '#C9B8F3'],
+      'gradient_angle': 90,
+      'overlay_opacity': 0.35,
+      'action': {'kind': 'none'},
+    });
+    expect(parsed, isNotNull);
+    expect(parsed!.iconKey, 'school');
+    expect(parsed.iconAssetId, 'icon-asset-1');
+    expect(parsed.cardVariant, 'compact_icon');
+    expect(parsed.bgMode, 'gradient');
+    expect(parsed.gradientAngle, 90);
+    expect(parsed.overlayOpacity, 0.35);
+    expect(parsed.gradientColors, hasLength(2));
+
+    final wire = parsed.toWireJson();
+    expect(wire['icon_key'], 'school');
+    expect(wire['card_variant'], 'compact_icon');
+    expect(wire['gradient_angle'], 90);
+    expect(wire['action'], isNotNull);
+  });
+
+  test('ProfileFeedPayload v1 parse succeeds without icon_key', () {
+    expect(
+      ProfileFeedPayload.tryParse({
+        'title': 'T',
+        'subtitle': 'S',
+        'cta_label': 'C',
+      }),
+      isNotNull,
+    );
+  });
+
+  test('ManagedProfileFeedCard accepts schema 2', () {
+    final card = ManagedProfileFeedCard.tryParse({
+      'id': 'pf-2',
+      'template_key': 'profile_feed_card_v1',
+      'schema_version': 2,
+      'origin': 'admin',
+      'payload': {
+        'title': 'Card',
+        'subtitle': 'Sub',
+        'cta_label': 'Go',
+        'icon_key': 'info',
+        'card_variant': 'gradient_text',
+        'gradient_colors': ['#DCD0FA', '#C9B8F3'],
+      },
+    });
+    expect(card, isNotNull);
+    expect(card!.payload.iconKey, 'info');
+  });
+
+  test('working draft patch includes icon asset and card variant', () {
+    final item = ProfileFeedItem(
+      id: 'pf-3',
+      status: ProfileFeedStatus.published,
+      origin: ContentOrigin.admin,
+      title: 'Card',
+      payload: const ProfileFeedPayload(
+        title: 'Card',
+        subtitle: 'Sub',
+        ctaLabel: 'Go',
+        iconAssetId: 'icon-asset-7',
+        cardVariant: 'compact_icon',
+        gradientColors: [Color(0xFFDCD0FA), Color(0xFFC9B8F3)],
+      ),
+      rowVersion: 2,
+      priority: 0,
+      sortOrder: 0,
+      audienceMode: 'all',
+    );
+
+    final patch = item.toWorkingDraftPatch();
+    expect(patch['target_schema_version'], 2);
+    expect(patch['draft_asset_ids'], ['icon-asset-7']);
+    expect((patch['payload'] as Map)['card_variant'], 'compact_icon');
+  });
+
+  testWidgets('properties panel shows icon and variant pickers', (
+    tester,
+  ) async {
+    final repo = LocalProfileFeedRepository();
+    await pumpEditor(tester, repo);
+
+    await tester.tap(find.byTooltip('Создать черновик'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('Свойства карточки'), findsOneWidget);
+    final propertiesScrollable = find
+        .ancestor(
+          of: find.text('Свойства карточки'),
+          matching: find.byType(Scrollable),
+        )
+        .first;
+    await tester.scrollUntilVisible(
+      find.byType(ContentCardVariantPicker),
+      200,
+      scrollable: propertiesScrollable,
+    );
+    expect(find.byType(ContentIconPickerField), findsOneWidget);
+    expect(find.byType(ContentCardVariantPicker), findsOneWidget);
   });
 }

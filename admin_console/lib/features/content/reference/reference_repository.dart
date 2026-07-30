@@ -34,6 +34,14 @@ abstract class ReferenceRepository {
 
   Future<ReferenceCategoryItem> upsertCategory(ReferenceCategoryItem item);
 
+  /// Safe delete with reassign or archive_articles (`cancel` aborts via RPC).
+  Future<void> safeDeleteCategory({
+    required String id,
+    required int expectedRowVersion,
+    required String mode,
+    String? reassignToId,
+  });
+
   Future<void> reorderCategories(
     List<String> orderedIds,
     List<int> expectedRowVersions,
@@ -252,6 +260,36 @@ class LocalReferenceRepository implements ReferenceRepository {
         : item;
     _categories = [..._categories, created];
     return created;
+  }
+
+  @override
+  Future<void> safeDeleteCategory({
+    required String id,
+    required int expectedRowVersion,
+    required String mode,
+    String? reassignToId,
+  }) async {
+    final idx = _categories.indexWhere((e) => e.id == id);
+    if (idx < 0) {
+      throw const ReferenceRepositoryException('Категория не найдена.');
+    }
+    final current = _categories[idx];
+    if (current.rowVersion != expectedRowVersion) {
+      throw const ReferenceRepositoryException(
+        'Категория изменилась. Обновите список.',
+      );
+    }
+    if (mode == 'cancel') {
+      throw const ReferenceRepositoryException('Удаление отменено.');
+    }
+    if (mode == 'reassign') {
+      if (reassignToId == null || reassignToId.isEmpty) {
+        throw const ReferenceRepositoryException(
+          'Выберите категорию для переноса.',
+        );
+      }
+    }
+    _categories = [..._categories]..removeAt(idx);
   }
 
   @override

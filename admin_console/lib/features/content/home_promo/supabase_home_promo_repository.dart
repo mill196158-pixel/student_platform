@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'home_promo_item.dart';
 import 'home_promo_repository.dart';
+import '../shared/content_action_model.dart';
 
 abstract class HomePromoRpcClient {
   Future<dynamic> rpc(String function, {Map<String, dynamic>? params});
@@ -59,6 +60,11 @@ class SupabaseHomePromoRepository implements HomePromoRepository {
     if (message.contains('row_version') || message.contains('conflict')) {
       return const HomePromoRepositoryException(
         'Карточка изменилась. Обновите список.',
+      );
+    }
+    if (message.contains('visual_studio_v2_publish_disabled')) {
+      return const HomePromoRepositoryException(
+        kVisualStudioV2PublishBlockedMessageRu,
       );
     }
     if (message.contains('could not find the function') || code == 'PGRST202') {
@@ -153,7 +159,7 @@ class SupabaseHomePromoRepository implements HomePromoRepository {
   }) async {
     final data = await _call('admin_create_content_draft', {
       'p_template_key': 'home_promo_v1',
-      'p_schema_version': 1,
+      'p_schema_version': 2,
       'p_title': title ?? payload.title,
       'p_payload': payload.toWireJson(),
       'p_origin': _originWire(origin),
@@ -339,21 +345,7 @@ class SupabaseHomePromoRepository implements HomePromoRepository {
     final data = await _call('admin_save_content_working_draft', {
       'p_id': item.id,
       'p_expected_draft_row_version': expectedDraftRowVersion,
-      'p_patch': {
-        'title': item.title,
-        'payload': item.payload.toWireJson(),
-        'priority': item.priority,
-        'starts_at': item.startsAt?.toUtc().toIso8601String(),
-        'ends_at': item.endsAt?.toUtc().toIso8601String(),
-        'is_hidden': item.isHidden,
-        'audience_mode': item.audienceMode,
-        'audience_group_ids': item.audienceGroupIds,
-        'audience_user_ids': item.audienceUserIds,
-        'sort_order': item.sortOrder,
-        if (item.payload.imageAssetId != null &&
-            item.payload.imageAssetId!.trim().isNotEmpty)
-          'draft_asset_ids': [item.payload.imageAssetId!.trim()],
-      },
+      'p_patch': item.toWorkingDraftPatch(),
     });
     return _parseWorkingDraftResponse(data);
   }

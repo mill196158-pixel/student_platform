@@ -9,9 +9,19 @@ import '../../../core/auth/admin_backend_config.dart';
 import '../../../core/auth/admin_session_controller.dart';
 import '../../academic/students/students_repository.dart';
 import '../news/admin_image_picker.dart';
+import '../news/news_preview.dart';
+import '../news/news_repository.dart';
+import '../news/supabase_news_repository.dart';
 import '../profile_feed/content_audience_selectors.dart';
 import '../reference/content_media_store.dart';
 import '../shared/admin_content_backend.dart';
+import '../shared/content_action_model.dart';
+import '../shared/content_action_picker.dart';
+import '../shared/content_color_field.dart';
+import '../shared/content_card_variant_picker.dart';
+import '../shared/content_icon_picker.dart';
+import '../shared/content_placement_slot_picker.dart';
+import '../shared/content_technical_panel.dart';
 import '../shared/phone_preview_frame.dart';
 import '../shared/visual_editor_list_panel.dart';
 import '../shared/visual_editor_shell.dart';
@@ -27,6 +37,7 @@ class HomePromoEditorScreen extends StatefulWidget {
   const HomePromoEditorScreen({
     super.key,
     this.repository,
+    this.newsRepository,
     this.mediaStore,
     this.imagePicker,
     this.studentsRepository,
@@ -34,6 +45,7 @@ class HomePromoEditorScreen extends StatefulWidget {
   });
 
   final HomePromoRepository? repository;
+  final NewsRepository? newsRepository;
   final ContentMediaStore? mediaStore;
   final AdminImagePicker? imagePicker;
   final StudentsRepository? studentsRepository;
@@ -46,6 +58,8 @@ class HomePromoEditorScreen extends StatefulWidget {
 class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
   late final HomePromoRepository _repository =
       widget.repository ?? _defaultRepo();
+  late final NewsRepository _newsRepository =
+      widget.newsRepository ?? _defaultNewsRepo();
   late final ContentMediaStore? _mediaStore =
       widget.mediaStore ?? _defaultMedia();
   late final AdminImagePicker _imagePicker =
@@ -64,6 +78,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
   final _reshowController = TextEditingController();
 
   List<HomePromoItem> _items = [];
+  List<StudentHomeNews> _previewNews = const [];
   String? _selectedId;
   VisualEditorListTab _listTab = VisualEditorListTab.published;
   bool _showDemoOnly = false;
@@ -76,6 +91,9 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
   bool _isHidden = false;
   String _audienceMode = 'all';
   String _ctaAction = 'route';
+  int _gradientDirection = 45;
+  ContentHomeSlot _homeSlot = ContentHomeSlot.afterAssignments;
+  ContentCardVariant _cardVariant = ContentCardVariant.gradientText;
   DateTime? _startsAt;
   DateTime? _endsAt;
   List<String> _groupIds = const [];
@@ -146,6 +164,15 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     );
   }
 
+  NewsRepository _defaultNewsRepo() {
+    return AdminContentBackend.resolveRepository<NewsRepository>(
+      isDemoMode: AdminBackendConfig.isDemoMode,
+      client: _tryClient(),
+      localFactory: LocalNewsRepository.new,
+      supabaseFactory: (client) => SupabaseNewsRepository(client: client),
+    );
+  }
+
   ContentMediaStore? _defaultMedia() {
     if (AdminBackendConfig.isDemoMode) return null;
     final client = _tryClient();
@@ -186,10 +213,13 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
 
   Future<void> _bootstrap() async {
     try {
-      final items = await _repository.list();
+      final results = await Future.wait([
+        _repository.list(),
+        _loadPublishedPreviewNews(),
+      ]);
       if (!mounted) return;
       setState(() {
-        _items = items;
+        _items = results[0] as List<HomePromoItem>;
         _loading = false;
         _loadError = null;
         _ensureSelectionForTab();
@@ -206,6 +236,19 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
             ? AdminContentBackend.realUnavailableMessage
             : 'Не удалось загрузить promo-карточки. Попробуйте обновить страницу.';
       });
+    }
+  }
+
+  Future<void> _loadPublishedPreviewNews() async {
+    try {
+      final items = await _newsRepository.listNews();
+      if (!mounted) return;
+      final previewItems = partitionAdminNews(items).publishedPreviewItems;
+      setState(() {
+        _previewNews = [for (final item in previewItems) item.toPresentation()];
+      });
+    } catch (_) {
+      // Preserve last-good preview news on transient reload failure.
     }
   }
 
@@ -254,6 +297,20 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     _startsAt = selected.startsAt;
     _endsAt = selected.endsAt;
     _ctaAction = (p.ctaUrl != null && p.ctaUrl!.isNotEmpty) ? 'url' : 'route';
+    _homeSlot = ContentHomeSlot.fromKey(p.homeSlot);
+    _cardVariant =
+        ContentCardVariant.fromKey(p.cardVariant) ??
+        ContentCardVariant.gradientText;
+    _gradientDirection = p.gradientAngle ?? 45;
+    if (p.action != null) {
+      final fromWire = contentActionFromWire(p.action);
+      applyContentActionToLegacy(
+        action: fromWire,
+        onCtaActionChanged: (value) => _ctaAction = value,
+        onCtaRouteChanged: (value) => _ctaRouteController.text = value,
+        onCtaUrlChanged: (value) => _ctaUrlController.text = value,
+      );
+    }
     _imageIntent.putIfAbsent(selected.id, () => _ImageIntent.untouched);
     _boundSnapshot = _captureSnapshot();
     setState(() {
@@ -285,6 +342,9 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
       ctaAction: _ctaAction,
       imageIntent: _intentForSelected(),
       imageAssetId: _selected?.payload.imageAssetId,
+      homeSlot: _homeSlot,
+      cardVariant: _cardVariant,
+      gradientDirection: _gradientDirection,
     );
   }
 
@@ -307,6 +367,11 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
 
   HomePromoPayload? _draftPayload({String? imageAssetIdOverride}) {
     final reshowRaw = _reshowController.text.trim();
+    final actionSelection = contentActionFromLegacy(
+      ctaAction: _ctaAction,
+      ctaRoute: _ctaRouteController.text,
+      ctaUrl: _ctaUrlController.text,
+    );
     final map = <String, dynamic>{
       'title': _titleController.text.trim(),
       'subtitle': _subtitleController.text.trim(),
@@ -317,6 +382,10 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
       ],
       'cta_label': _ctaLabelController.text.trim(),
       'dismissible': _dismissible,
+      'home_slot': _homeSlot.key,
+      'card_variant': _cardVariant.key,
+      'gradient_angle': _gradientDirection,
+      'action': contentActionToWire(actionSelection),
       if (_ctaAction == 'route' && _ctaRouteController.text.trim().isNotEmpty)
         'cta_route': _ctaRouteController.text.trim(),
       if (_ctaAction == 'url' && _ctaUrlController.text.trim().isNotEmpty)
@@ -425,6 +494,15 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
         'cta_label': 'Подробнее',
         'dismissible': true,
         'cta_route': '/help',
+        'home_slot': ContentHomeSlot.afterAssignments.key,
+        'card_variant': ContentCardVariant.gradientText.key,
+        'gradient_angle': 45,
+        'action': contentActionToWire(
+          const ContentActionSelection(
+            kind: ContentActionKind.appScreen,
+            screenKey: 'info',
+          ),
+        ),
       });
       if (payload == null) {
         setState(() => _banner = 'Не удалось создать черновик.');
@@ -936,6 +1014,9 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     final previewPayload =
         _draftPayload() ?? HomePromoPayload.demoStuckWithAssignment;
     final parts = _partitions;
+    final v2PublishBlocked = contentWireUsesV2PublishFeatures(
+      previewPayload.toWireJson(),
+    );
 
     return Padding(
       padding: const EdgeInsets.all(20),
@@ -949,7 +1030,9 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
         banner: _headerBanner,
         defaultInfoMessage:
             _infoBanner ??
-            'Изменения сохраняются на сервере. Публикация видна студентам сразу.',
+            (v2PublishBlocked
+                ? kVisualStudioV2PublishBlockedMessageRu
+                : 'Изменения сохраняются на сервере. Публикация видна студентам сразу.'),
         canWrite: _canWrite,
         canPublish: _canPublish && selected != null && !selected.isArchived,
         canUnpublish: _canUnpublish,
@@ -1014,6 +1097,8 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
               previewPayload: previewPayload,
               showDemoBadge: selected?.isDemo ?? false,
               hidePromo: selected == null,
+              news: _previewNews,
+              homeSlot: _homeSlot.key,
             ),
           ),
         ),
@@ -1047,6 +1132,31 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
                 userIds: _userIds,
                 audiencePreview: _audiencePreview,
                 ctaAction: _ctaAction,
+                gradientDirection: _gradientDirection,
+                homeSlot: _homeSlot,
+                cardVariant: _cardVariant,
+                onHomeSlotChanged: (value) {
+                  setState(() => _homeSlot = value);
+                  _markDirty();
+                },
+                onCardVariantChanged: (value) {
+                  setState(() => _cardVariant = value);
+                  _markDirty();
+                },
+                onGradientDirectionChanged: (value) {
+                  setState(() => _gradientDirection = value);
+                  _markDirty();
+                },
+                onActionSelectionChanged: (action) {
+                  applyContentActionToLegacy(
+                    action: action,
+                    onCtaActionChanged: (value) => _ctaAction = value,
+                    onCtaRouteChanged: (value) =>
+                        _ctaRouteController.text = value,
+                    onCtaUrlChanged: (value) => _ctaUrlController.text = value,
+                  );
+                  _markDirty();
+                },
                 startsAt: _startsAt,
                 endsAt: _endsAt,
                 imageBytes: _previewImageBytes(),
@@ -1074,10 +1184,6 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
                       });
                       _markDirty();
                     },
-                onCtaActionChanged: (value) {
-                  setState(() => _ctaAction = value);
-                  _markDirty();
-                },
                 onPickImage: _pickImage,
                 onClearImage: _clearImage,
                 onPreviewAudience: _previewAudience,
@@ -1128,6 +1234,9 @@ class _EditorSnapshot {
     required this.ctaAction,
     required this.imageIntent,
     required this.imageAssetId,
+    required this.homeSlot,
+    required this.cardVariant,
+    required this.gradientDirection,
   });
 
   final String title;
@@ -1149,6 +1258,9 @@ class _EditorSnapshot {
   final String ctaAction;
   final _ImageIntent imageIntent;
   final String? imageAssetId;
+  final ContentHomeSlot homeSlot;
+  final ContentCardVariant cardVariant;
+  final int gradientDirection;
 
   @override
   bool operator ==(Object other) {
@@ -1171,11 +1283,14 @@ class _EditorSnapshot {
         other.endsAt == endsAt &&
         other.ctaAction == ctaAction &&
         other.imageIntent == imageIntent &&
-        other.imageAssetId == imageAssetId;
+        other.imageAssetId == imageAssetId &&
+        other.homeSlot == homeSlot &&
+        other.cardVariant == cardVariant &&
+        other.gradientDirection == gradientDirection;
   }
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     title,
     subtitle,
     ctaLabel,
@@ -1195,7 +1310,10 @@ class _EditorSnapshot {
     ctaAction,
     imageIntent,
     imageAssetId,
-  );
+    homeSlot,
+    cardVariant,
+    gradientDirection,
+  ]);
 }
 
 bool _listEq(List<String> a, List<String> b) {
@@ -1211,11 +1329,15 @@ class _HomePromoPhonePreview extends StatelessWidget {
     required this.previewPayload,
     required this.showDemoBadge,
     required this.hidePromo,
+    required this.news,
+    required this.homeSlot,
   });
 
   final HomePromoPayload previewPayload;
   final bool showDemoBadge;
   final bool hidePromo;
+  final List<StudentHomeNews> news;
+  final String homeSlot;
 
   @override
   Widget build(BuildContext context) {
@@ -1254,7 +1376,7 @@ class _HomePromoPhonePreview extends StatelessWidget {
           status: StudentHomeAssignmentStatus.inProgress,
         ),
       ],
-      news: const [],
+      news: news,
       totalLessonsToday: 2,
       assignmentsCount: 2,
     );
@@ -1262,9 +1384,16 @@ class _HomePromoPhonePreview extends StatelessWidget {
     return StudentHomeView(
       data: previewData,
       notificationCount: 3,
-      homePromo: hidePromo ? null : previewPayload,
-      homePromoIsDemo: showDemoBadge,
       hideHomePromo: hidePromo,
+      homePromoPlacements: hidePromo
+          ? const []
+          : [
+              StudentHomePromoPlacement(
+                payload: previewPayload,
+                slot: homeSlot,
+                showDemoBadge: showDemoBadge,
+              ),
+            ],
       bottomNavigationBar: StudentBottomNav(
         currentIndex: 0,
         items: studentBottomNavItems,
@@ -1317,6 +1446,13 @@ class _PropertiesPanel extends StatelessWidget {
     required this.userIds,
     required this.audiencePreview,
     required this.ctaAction,
+    required this.gradientDirection,
+    required this.homeSlot,
+    required this.cardVariant,
+    required this.onHomeSlotChanged,
+    required this.onCardVariantChanged,
+    required this.onGradientDirectionChanged,
+    required this.onActionSelectionChanged,
     required this.startsAt,
     required this.endsAt,
     required this.imageBytes,
@@ -1328,7 +1464,6 @@ class _PropertiesPanel extends StatelessWidget {
     required this.onHiddenChanged,
     required this.onAudienceModeChanged,
     required this.onAudienceSelectionChanged,
-    required this.onCtaActionChanged,
     required this.onPickImage,
     required this.onClearImage,
     required this.onPreviewAudience,
@@ -1365,6 +1500,13 @@ class _PropertiesPanel extends StatelessWidget {
   final List<String> userIds;
   final HomePromoAudiencePreview? audiencePreview;
   final String ctaAction;
+  final int gradientDirection;
+  final ContentHomeSlot homeSlot;
+  final ContentCardVariant cardVariant;
+  final ValueChanged<ContentHomeSlot> onHomeSlotChanged;
+  final ValueChanged<ContentCardVariant> onCardVariantChanged;
+  final ValueChanged<int> onGradientDirectionChanged;
+  final ValueChanged<ContentActionSelection> onActionSelectionChanged;
   final DateTime? startsAt;
   final DateTime? endsAt;
   final Uint8List? imageBytes;
@@ -1380,7 +1522,6 @@ class _PropertiesPanel extends StatelessWidget {
     required List<String> userIds,
   })
   onAudienceSelectionChanged;
-  final ValueChanged<String> onCtaActionChanged;
   final VoidCallback onPickImage;
   final VoidCallback onClearImage;
   final VoidCallback onPreviewAudience;
@@ -1406,9 +1547,61 @@ class _PropertiesPanel extends StatelessWidget {
         children: [
           _textField(titleController, 'Заголовок'),
           _textField(subtitleController, 'Подзаголовок', maxLines: 3),
-          _textField(iconController, 'Иконка'),
-          _textField(gradientAController, 'Градиент · цвет 1'),
-          _textField(gradientBController, 'Градиент · цвет 2'),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: ContentIconPickerField(
+              selectedKey: iconController.text.trim().isEmpty
+                  ? null
+                  : iconController.text.trim(),
+              enabled: _editable,
+              onChanged: (key) {
+                iconController.text = key ?? '';
+                onChanged();
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: ContentGradientField(
+              colorA: gradientAController.text,
+              colorB: gradientBController.text,
+              directionDegrees: gradientDirection,
+              enabled: _editable,
+              onColorAChanged: (value) {
+                gradientAController.text = value;
+                onChanged();
+              },
+              onColorBChanged: (value) {
+                gradientBController.text = value;
+                onChanged();
+              },
+              onDirectionChanged: onGradientDirectionChanged,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: ContentPlacementSlotPicker(
+              selected: homeSlot,
+              enabled: _editable,
+              onChanged: onHomeSlotChanged,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: ContentCardVariantPicker(
+              selected: cardVariant,
+              enabled: _editable,
+              onChanged: onCardVariantChanged,
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.only(bottom: 10),
+            child: Text(
+              'Schema v2: слот и вариант сохраняются в черновик. '
+              'Публикация v2 заблокирована на сервере до релиза Mobile.',
+              style: TextStyle(color: Color(0xFF5C6370), fontSize: 12),
+            ),
+          ),
           const SizedBox(height: 8),
           Text('Иллюстрация', style: Theme.of(context).textTheme.labelLarge),
           const SizedBox(height: 8),
@@ -1452,25 +1645,23 @@ class _PropertiesPanel extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           _textField(ctaLabelController, 'Текст кнопки'),
-          DropdownButtonFormField<String>(
-            isExpanded: true,
-            initialValue: ctaAction,
-            decoration: const InputDecoration(labelText: 'Действие кнопки'),
-            items: const [
-              DropdownMenuItem(
-                value: 'route',
-                child: Text('Внутренний маршрут'),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: ContentActionPicker(
+              selection: contentActionFromLegacy(
+                ctaAction: ctaAction,
+                ctaRoute: ctaRouteController.text,
+                ctaUrl: ctaUrlController.text,
               ),
-              DropdownMenuItem(value: 'url', child: Text('Внешняя ссылка')),
-            ],
-            onChanged: !_editable
-                ? null
-                : (value) => onCtaActionChanged(value ?? 'route'),
+              enabled: _editable,
+              allowedKinds: const [
+                ContentActionKind.appScreen,
+                ContentActionKind.externalUrl,
+                ContentActionKind.none,
+              ],
+              onChanged: onActionSelectionChanged,
+            ),
           ),
-          if (ctaAction == 'route')
-            _textField(ctaRouteController, 'Маршрут приложения')
-          else
-            _textField(ctaUrlController, 'URL (http/https)'),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Можно закрыть'),
@@ -1531,6 +1722,8 @@ class _PropertiesPanel extends StatelessWidget {
                   : 'Охват: ${audiencePreview!.recipientCount}',
             ),
           ),
+          // Masked per-user lens RPC (`admin_preview_content_audience_lens`) exists
+          // in stage14_1_2 migration; full lens UI deferred to a follow-up substage.
           const Divider(height: 24),
           Text(
             'Расписание',
@@ -1576,22 +1769,31 @@ class _PropertiesPanel extends StatelessWidget {
               ],
             ),
           ),
-          ExpansionTile(
-            title: const Text('Дополнительно'),
+          ContentTechnicalPanel(
             children: [
+              _textField(iconController, 'icon_key'),
+              _textField(gradientAController, 'gradient · HEX 1'),
+              _textField(gradientBController, 'gradient · HEX 2'),
+              if (ctaAction == 'route')
+                _textField(ctaRouteController, 'cta_route')
+              else
+                _textField(ctaUrlController, 'cta_url'),
               ListTile(
                 dense: true,
+                contentPadding: EdgeInsets.zero,
                 title: const Text('Версия строки'),
                 subtitle: Text('${selected.rowVersion}'),
               ),
               ListTile(
                 dense: true,
+                contentPadding: EdgeInsets.zero,
                 title: const Text('Шаблон'),
                 subtitle: Text(selected.templateKey),
               ),
               if (selected.legacyKey != null)
                 ListTile(
                   dense: true,
+                  contentPadding: EdgeInsets.zero,
                   title: const Text('Legacy key'),
                   subtitle: Text(selected.legacyKey!),
                 ),
