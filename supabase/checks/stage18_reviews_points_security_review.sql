@@ -648,7 +648,8 @@ begin
     raise exception 'stage18 FAIL: % private points/review helper(s) client-executable', v_bad;
   end if;
 
-  -- No second reviews system: only the Stage 13.6 tables may exist.
+  -- No second reviews system: only Stage 13.6 / Stage 18 review tables
+  -- (plus pre-existing academic alias review queue) may exist.
   select count(*) into v_bad
   from pg_class c
   where c.relnamespace = 'public'::regnamespace
@@ -656,7 +657,8 @@ begin
     and c.relname like '%review%'
     and c.relname not in (
       'entity_reviews', 'review_reports',
-      'review_moderation_actions', 'review_tags'
+      'review_moderation_actions', 'review_tags',
+      'subject_alias_review_queue'
     );
   if v_bad > 0 then
     raise exception 'stage18 FAIL: % unexpected reviews table(s) created', v_bad;
