@@ -9,6 +9,36 @@ enum NewsStatus { draft, published, archived }
 
 enum NewsAudienceType { all, group }
 
+/// Normalized Stage 15.2 audience mode (derived; not the legacy enum).
+enum NewsAudienceMode { all, groups, users, groupsAndUsers }
+
+NewsAudienceMode newsAudienceModeFromString(String? raw) {
+  switch (raw) {
+    case 'groups':
+      return NewsAudienceMode.groups;
+    case 'users':
+      return NewsAudienceMode.users;
+    case 'groups_and_users':
+      return NewsAudienceMode.groupsAndUsers;
+    case 'all':
+    default:
+      return NewsAudienceMode.all;
+  }
+}
+
+String newsAudienceModeWire(NewsAudienceMode mode) {
+  switch (mode) {
+    case NewsAudienceMode.all:
+      return 'all';
+    case NewsAudienceMode.groups:
+      return 'groups';
+    case NewsAudienceMode.users:
+      return 'users';
+    case NewsAudienceMode.groupsAndUsers:
+      return 'groups_and_users';
+  }
+}
+
 /// How [NewsItem.toPatchJson] should treat `image_path`.
 enum NewsImagePathPatch {
   /// Leave the server value unchanged (omit the key).
@@ -41,6 +71,9 @@ class NewsItem {
     this.endsAt,
     this.audienceType = NewsAudienceType.all,
     this.audienceGroupId,
+    this.audienceMode = NewsAudienceMode.all,
+    this.audienceGroupIds = const [],
+    this.audienceUserIds = const [],
     this.isHidden = false,
     this.imageId,
     this.imagePath,
@@ -65,7 +98,13 @@ class NewsItem {
   final DateTime? endsAt;
   final NewsAudienceType audienceType;
   final String? audienceGroupId;
+  final NewsAudienceMode audienceMode;
+  final List<String> audienceGroupIds;
+  final List<String> audienceUserIds;
   final bool isHidden;
+
+  bool get usesNormalizedAudience =>
+      audienceGroupIds.isNotEmpty || audienceUserIds.isNotEmpty;
 
   /// Reference into [AdminImageStore]. Bytes are never persisted to disk/Git.
   final String? imageId;
@@ -105,6 +144,9 @@ class NewsItem {
     NewsAudienceType? audienceType,
     String? audienceGroupId,
     bool clearAudienceGroupId = false,
+    NewsAudienceMode? audienceMode,
+    List<String>? audienceGroupIds,
+    List<String>? audienceUserIds,
     bool? isHidden,
     String? imageId,
     bool clearImageId = false,
@@ -133,6 +175,9 @@ class NewsItem {
       audienceGroupId: clearAudienceGroupId
           ? null
           : (audienceGroupId ?? this.audienceGroupId),
+      audienceMode: audienceMode ?? this.audienceMode,
+      audienceGroupIds: audienceGroupIds ?? this.audienceGroupIds,
+      audienceUserIds: audienceUserIds ?? this.audienceUserIds,
       isHidden: isHidden ?? this.isHidden,
       imageId: clearImageId ? null : (imageId ?? this.imageId),
       imagePath: clearImagePath ? null : (imagePath ?? this.imagePath),
@@ -204,6 +249,9 @@ class NewsItem {
       endsAt: _asDate(json['ends_at']),
       audienceType: _audienceFromString(json['audience_type']?.toString()),
       audienceGroupId: _asNullableString(json['audience_group_id']),
+      audienceMode: _inferAudienceMode(json),
+      audienceGroupIds: _inferAudienceGroupIds(json),
+      audienceUserIds: _asIdList(json['audience_user_ids']),
       isHidden: json['is_hidden'] == true,
       imagePath: _asNullableString(json['image_path']),
       imageFocus: Alignment(
@@ -238,8 +286,7 @@ class NewsItem {
       'priority': priority,
       'starts_at': startsAt?.toUtc().toIso8601String() ?? '',
       'ends_at': endsAt?.toUtc().toIso8601String() ?? '',
-      'audience_type': audienceType.name,
-      'audience_group_id': audienceGroupId ?? '',
+      // Audience is owned by admin_set_news_audience — never patch here.
       'sort_order': sortOrder,
     };
     switch (imagePathPatch) {
@@ -394,6 +441,42 @@ DateTime? _asDate(dynamic value) {
   final text = value.toString().trim();
   if (text.isEmpty) return null;
   return DateTime.tryParse(text);
+}
+
+List<String> _asIdList(dynamic raw) {
+  if (raw is! List) return const [];
+  return raw
+      .map((e) => e?.toString().trim() ?? '')
+      .where((e) => e.isNotEmpty)
+      .toList(growable: false);
+}
+
+NewsAudienceMode _inferAudienceMode(Map<String, dynamic> json) {
+  final rawMode = json['audience_mode']?.toString();
+  if (rawMode != null && rawMode.trim().isNotEmpty) {
+    return newsAudienceModeFromString(rawMode);
+  }
+  final groups = _asIdList(json['audience_group_ids']);
+  final users = _asIdList(json['audience_user_ids']);
+  if (groups.isNotEmpty && users.isNotEmpty) {
+    return NewsAudienceMode.groupsAndUsers;
+  }
+  if (users.isNotEmpty) return NewsAudienceMode.users;
+  if (groups.isNotEmpty) return NewsAudienceMode.groups;
+  final legacyType = _audienceFromString(json['audience_type']?.toString());
+  final legacyGroup = _asNullableString(json['audience_group_id']);
+  if (legacyType == NewsAudienceType.group && legacyGroup != null) {
+    return NewsAudienceMode.groups;
+  }
+  return NewsAudienceMode.all;
+}
+
+List<String> _inferAudienceGroupIds(Map<String, dynamic> json) {
+  final groups = _asIdList(json['audience_group_ids']);
+  if (groups.isNotEmpty) return groups;
+  final legacyGroup = _asNullableString(json['audience_group_id']);
+  if (legacyGroup == null) return const [];
+  return [legacyGroup];
 }
 
 String? _asNullableString(dynamic value) {

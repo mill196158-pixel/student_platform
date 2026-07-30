@@ -1,3 +1,7 @@
+import 'dart:async';
+import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -5,8 +9,15 @@ import '../learning/models/team.dart';
 import '../learning/team_details_screen.dart';
 import '../schedule/subject_diary/subject_diary.dart';
 import '../schedule/subject_diary_screen.dart';
+import 'package:student_ui/student_ui.dart';
+
 import 'info_subjects_cache.dart';
+import 'subject_attachment_open.dart';
+import 'subject_card_service.dart';
 import 'subject_difficulty.dart';
+import 'subject_hero_load.dart';
+import 'subject_media_service.dart';
+import 'entity_review_screen.dart';
 import 'teacher_profile_screen.dart';
 
 class SubjectInfoScreen extends StatefulWidget {
@@ -32,11 +43,65 @@ class SubjectInfoScreen extends StatefulWidget {
 }
 
 class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
-  late Future<_SubjectInfoData> _future = _load();
+  _SubjectInfoData? _data;
+  var _loading = true;
   final _scrollController = ScrollController();
   final _filesKey = GlobalKey();
   final _repository = _SubjectInfoRepository();
+  final _mediaService = SubjectMediaService();
   bool _voting = false;
+  Uint8List? _heroBytes;
+  bool _heroLoading = false;
+  String? _mediaError;
+  int _heroLoadGeneration = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _bootstrap();
+  }
+
+  /// Cache-first: paint last-good card ASAP, then refresh from network.
+  Future<void> _bootstrap() async {
+    final cached = await SubjectCardService().loadCached(widget.subjectOfferingId);
+    if (cached != null && mounted) {
+      final cachedData = _SubjectInfoData.fromManagedCard(
+        card: cached,
+        fallbackTitle: widget.title,
+        subjectOfferingId: widget.subjectOfferingId,
+        fallbackSubjectId: widget.subjectId,
+        fallbackGroupId: widget.groupId,
+        fallbackSemesterNumber: widget.semesterNumber,
+      );
+      setState(() {
+        _data = cachedData;
+        _loading = false;
+      });
+      unawaited(_loadHeroImage(cachedData));
+    }
+    try {
+      final next = await _load();
+      if (!mounted) return;
+      setState(() {
+        _data = next;
+        _loading = false;
+      });
+      await _loadHeroImage(next);
+    } catch (_) {
+      if (!mounted) return;
+      // Hard failure: do not silently keep stale cache as live.
+      setState(() {
+        _data = _SubjectInfoData.unavailable(
+          title: widget.title,
+          subjectOfferingId: widget.subjectOfferingId,
+          subjectId: widget.subjectId,
+          groupId: widget.groupId,
+          semesterNumber: widget.semesterNumber,
+        );
+        _loading = false;
+      });
+    }
+  }
 
   Future<_SubjectInfoData> _load() async {
     return _repository.load(
@@ -51,8 +116,114 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
   Future<_SubjectInfoData> _reload() async {
     final next = await _load();
     if (!mounted) return next;
-    setState(() => _future = Future<_SubjectInfoData>.value(next));
+    setState(() {
+      _data = next;
+      _loading = false;
+    });
+    await _loadHeroImage(next);
     return next;
+  }
+
+  Future<void> _loadHeroImage(_SubjectInfoData data) async {
+    final gen = ++_heroLoadGeneration;
+    final hero = data.cardPayload?.displayAssets.heroImage;
+    if (hero == null || !hero.isImage) {
+      if (!mounted ||
+          !subjectHeroLoadIsCurrent(
+            startedGeneration: gen,
+            currentGeneration: _heroLoadGeneration,
+          )) {
+        return;
+      }
+      setState(() {
+        _heroBytes = null;
+        _heroLoading = false;
+      });
+      return;
+    }
+    if (mounted &&
+        subjectHeroLoadIsCurrent(
+          startedGeneration: gen,
+          currentGeneration: _heroLoadGeneration,
+        )) {
+      setState(() {
+        _heroLoading = true;
+        _mediaError = null;
+      });
+    }
+    final bytes = await _mediaService.fetchAssetBytes(
+      asset: hero,
+      subjectOfferingId: data.subjectOfferingId,
+    );
+    if (!mounted ||
+        !subjectHeroLoadIsCurrent(
+          startedGeneration: gen,
+          currentGeneration: _heroLoadGeneration,
+        )) {
+      return;
+    }
+    setState(() {
+      _heroBytes = bytes;
+      _heroLoading = false;
+      if (bytes == null) {
+        _mediaError = 'Не удалось загрузить обложку предмета.';
+      }
+    });
+  }
+
+  Future<void> _openAttachment(SubjectCardAsset asset) async {
+    final offeringId = _data?.subjectOfferingId ?? widget.subjectOfferingId;
+    setState(() => _mediaError = null);
+    try {
+      final download = await _mediaService.resolveDownload(
+        assetId: asset.id,
+        subjectOfferingId: offeringId,
+      );
+      if (!mounted) return;
+      if (download == null) {
+        setState(() => _mediaError = 'Файл недоступен.');
+        return;
+      }
+
+      final ext = asset.isPdf
+          ? 'pdf'
+          : asset.mimeType.contains('png')
+              ? 'png'
+              : asset.mimeType.contains('webp')
+                  ? 'webp'
+                  : 'jpg';
+      final fileName =
+          'subject_${asset.id.replaceAll('-', '').substring(0, 8)}.$ext';
+
+      if (kIsWeb) {
+        await openSubjectAttachmentBytes(
+          bytes: Uint8List(0),
+          fileName: fileName,
+          mimeType: asset.mimeType,
+          signedUrl: download.signedUrl,
+        );
+        return;
+      }
+
+      final bytes = await _mediaService.fetchAssetBytes(
+        asset: asset,
+        subjectOfferingId: offeringId,
+      );
+      if (!mounted) return;
+      if (bytes == null) {
+        setState(() => _mediaError = 'Файл недоступен.');
+        return;
+      }
+      await openSubjectAttachmentBytes(
+        bytes: bytes,
+        fileName: fileName,
+        mimeType: asset.mimeType,
+        signedUrl: download.signedUrl,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _mediaError = 'Не удалось открыть файл.');
+    }
   }
 
   Future<void> _rateSubject(_SubjectInfoData data) async {
@@ -160,90 +331,126 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
     super.dispose();
   }
 
+  Widget _buildBody(_SubjectInfoData data) {
+    return ListView(
+      controller: _scrollController,
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+      children: [
+        _HeroCard(data: data, heroBytes: _heroBytes, heroLoading: _heroLoading),
+        const SizedBox(height: 10),
+        _TeacherDifficultyGlance(
+          data: data,
+          ratingBusy: _voting,
+          onOpenTeacher: data.hasTeacher
+              ? () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => TeacherProfileScreen(
+                        teacherName: data.teacherName,
+                        teacherId: data.teacherId,
+                        subjectTitle: data.displayTitle,
+                        department: data.department,
+                        semesterNumber: data.semesterNumber,
+                        difficultyScore: data.teacherDifficultyAvg,
+                        subjectOfferingId: data.subjectOfferingId,
+                        subjectDifficultyAvg: data.subjectDifficultyAvg,
+                      ),
+                    ),
+                  )
+              : null,
+          onRateSubject:
+              data.canVoteSubject ? () => _rateSubject(data) : null,
+        ),
+        const SizedBox(height: 10),
+        if (data.subjectId != null && data.subjectId!.trim().isNotEmpty)
+          _ReviewEntryTile(
+            title: data.displayTitle,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => EntityReviewScreen(
+                  entityType: ReviewEntityType.subject,
+                  entityId: data.subjectId!.trim(),
+                  entityLabel: data.displayTitle,
+                ),
+              ),
+            ),
+          ),
+        if (data.subjectId != null && data.subjectId!.trim().isNotEmpty)
+          const SizedBox(height: 10),
+        _QuickActions(
+          canOpenChat: data.canOpenChat,
+          onChatTap:
+              data.canOpenChat ? () => _openChat(context, data) : null,
+          onDiaryTap: () => _openDiary(context, data),
+          onFilesTap: _scrollToFiles,
+        ),
+        const SizedBox(height: 10),
+        if (data.cardPayload != null) ...[
+          Center(
+            child: StudentSubjectCardPreview(
+              payload: data.cardPayload!,
+              width: MediaQuery.of(context).size.width - 48,
+              height: 420,
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+        _SummaryCard(data: data),
+        const SizedBox(height: 10),
+        if (_mediaError != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            _mediaError!,
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+        ],
+        const SizedBox(height: 10),
+        _SubjectAssetsCard(
+          key: _filesKey,
+          data: data,
+          onOpenAttachment: _openAttachment,
+        ),
+        const SizedBox(height: 10),
+        _LargeActionCard(
+          icon: Icons.chat_bubble_outline_rounded,
+          title: 'Чат предмета',
+          subtitle: data.canOpenChat
+              ? 'Обсуждения, вопросы и материалы группы'
+              : 'Чат пока не создан',
+          actionLabel: 'Открыть чат',
+          enabled: data.canOpenChat,
+          onTap: data.canOpenChat ? () => _openChat(context, data) : null,
+        ),
+        const SizedBox(height: 10),
+        _LargeActionCard(
+          icon: Icons.menu_book_outlined,
+          title: 'Дневник предмета',
+          subtitle: 'Заметки, фото конспектов и файлы по предмету',
+          actionLabel: 'Открыть дневник',
+          enabled: true,
+          onTap: () => _openDiary(context, data),
+        ),
+        const SizedBox(height: 10),
+        const _HelpCard(),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final data = _data;
     return Scaffold(
       backgroundColor: const Color(0xFFFBFAFF),
       appBar: AppBar(title: const Text('Информация о предмете')),
-      body: FutureBuilder<_SubjectInfoData>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          final data = snapshot.data ??
-              _SubjectInfoData.fallback(
-                title: widget.title,
-                subjectOfferingId: widget.subjectOfferingId,
-                semesterNumber: widget.semesterNumber,
-              );
-
-          return ListView(
-            controller: _scrollController,
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
-            children: [
-              _HeroCard(data: data),
-              const SizedBox(height: 10),
-              _TeacherDifficultyGlance(
-                data: data,
-                ratingBusy: _voting,
-                onOpenTeacher: data.hasTeacher
-                    ? () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => TeacherProfileScreen(
-                              teacherName: data.teacherName,
-                              subjectTitle: data.displayTitle,
-                              department: data.department,
-                              semesterNumber: data.semesterNumber,
-                              difficultyScore: data.teacherDifficultyAvg,
-                              subjectOfferingId: data.subjectOfferingId,
-                              subjectDifficultyAvg: data.subjectDifficultyAvg,
-                            ),
-                          ),
-                        )
-                    : null,
-                onRateSubject:
-                    data.canVoteSubject ? () => _rateSubject(data) : null,
-              ),
-              const SizedBox(height: 10),
-              _QuickActions(
-                canOpenChat: data.canOpenChat,
-                onChatTap:
-                    data.canOpenChat ? () => _openChat(context, data) : null,
-                onDiaryTap: () => _openDiary(context, data),
-                onFilesTap: _scrollToFiles,
-              ),
-              const SizedBox(height: 10),
-              _SummaryCard(data: data),
-              const SizedBox(height: 10),
-              _FilesCard(key: _filesKey),
-              const SizedBox(height: 10),
-              _LargeActionCard(
-                icon: Icons.chat_bubble_outline_rounded,
-                title: 'Чат предмета',
-                subtitle: data.canOpenChat
-                    ? 'Обсуждения, вопросы и материалы группы'
-                    : 'Чат пока не создан',
-                actionLabel: 'Открыть чат',
-                enabled: data.canOpenChat,
-                onTap: data.canOpenChat ? () => _openChat(context, data) : null,
-              ),
-              const SizedBox(height: 10),
-              _LargeActionCard(
-                icon: Icons.menu_book_outlined,
-                title: 'Дневник предмета',
-                subtitle: 'Заметки, фото конспектов и файлы по предмету',
-                actionLabel: 'Открыть дневник',
-                enabled: true,
-                onTap: () => _openDiary(context, data),
-              ),
-              const SizedBox(height: 10),
-              const _HelpCard(),
-            ],
-          );
-        },
-      ),
+      body: data == null && _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _buildBody(
+              data ??
+                  _SubjectInfoData.fallback(
+                    title: widget.title,
+                    subjectOfferingId: widget.subjectOfferingId,
+                    semesterNumber: widget.semesterNumber,
+                  ),
+            ),
     );
   }
 
@@ -308,6 +515,96 @@ class _SubjectInfoRepository {
     String? fallbackGroupId,
     int? fallbackSemesterNumber,
   }) async {
+    SubjectCardPayload? card;
+    var missingRpc = false;
+    var accessDenied = false;
+    try {
+      final result =
+          await SubjectCardService().loadForOffering(subjectOfferingId);
+      if (result.accessDenied) {
+        accessDenied = true;
+      } else {
+        card = result.card;
+      }
+    } on PostgrestException catch (error) {
+      if (!SubjectCardService.isMissingRpc(error)) rethrow;
+      missingRpc = true;
+    }
+    // Non-PostgREST exceptions from the service are rethrown (transient
+    // cache decisions happen inside SubjectCardService only).
+
+    // Access denial is fail-closed: no legacy table dual-read resurrection.
+    if (accessDenied) {
+      return _SubjectInfoData.unavailable(
+        title: fallbackTitle,
+        subjectOfferingId: subjectOfferingId,
+        subjectId: fallbackSubjectId,
+        groupId: fallbackGroupId,
+        semesterNumber: fallbackSemesterNumber,
+      );
+    }
+
+    // Managed RPC available: use card payload only (empty ≠ legacy fallback).
+    if (!missingRpc) {
+      final team = _asMap(await _sb
+          .from('teams')
+          .select('id,name,teacher,icon,group_name')
+          .eq('subject_offering_id', subjectOfferingId)
+          .limit(1)
+          .maybeSingle());
+      final teamId = _stringOrNull(team?['id']);
+      Map<String, dynamic>? chat;
+      if (teamId != null) {
+        chat = _asMap(await _sb
+            .from('chats')
+            .select('id,type')
+            .eq('team_id', teamId)
+            .eq('type', 'team_main')
+            .limit(1)
+            .maybeSingle());
+      }
+      final teacherName = _firstNonEmpty([
+        if (card != null && card.teachers.isNotEmpty)
+          card.teachers.map((t) => t.displayName).join(', '),
+        team?['teacher'],
+      ]);
+      final teacherId = card != null && card.teachers.isNotEmpty
+          ? card.teachers.first.id
+          : await _resolveTeacherId(teacherName);
+      final subjectRating = await _loadSubjectRating(subjectOfferingId);
+      final teacherRating = await _loadTeacherRating(teacherName);
+      return _SubjectInfoData(
+        title: _firstNonEmpty([card?.canonicalName, fallbackTitle]),
+        subjectOfferingId: subjectOfferingId,
+        subjectId: card?.subjectId.trim().isNotEmpty == true
+            ? card!.subjectId
+            : fallbackSubjectId,
+        groupId: fallbackGroupId,
+        semesterNumber: fallbackSemesterNumber,
+        description: _firstNonEmpty([
+          card?.description,
+          card?.shortDescription,
+        ]),
+        controlForm: card?.controlForm ?? '',
+        teacherName: teacherName,
+        teacherId: teacherId,
+        department: card?.department ?? '',
+        credits: card?.credits?.toString() ?? '',
+        hoursTotal: card?.hoursTotal?.toString() ?? '',
+        teamId: teamId,
+        teamName: _firstNonEmpty([team?['name']]),
+        teamIcon: _firstNonEmpty([team?['icon']]),
+        teamGroupName: _firstNonEmpty([team?['group_name']]),
+        chatId: _stringOrNull(chat?['id']),
+        subjectDifficultyAvg: subjectRating.$1,
+        mySubjectScore: subjectRating.$2,
+        canVoteSubject: subjectRating.$3,
+        teacherDifficultyAvg: teacherRating,
+        cardPayload: card,
+      );
+    }
+
+    // Missing RPC only: legacy dual-read path.
     final offering = await _sb
         .from('subject_offerings')
         .select(
@@ -369,6 +666,7 @@ class _SubjectInfoRepository {
     ]);
 
     final teacherName = _firstNonEmpty([team?['teacher']]);
+    final teacherId = await _resolveTeacherId(teacherName);
     final subjectRating = await _loadSubjectRating(subjectOfferingId);
     final teacherRating = await _loadTeacherRating(teacherName);
 
@@ -383,6 +681,7 @@ class _SubjectInfoRepository {
       description: _firstNonEmpty([subject?['description']]),
       controlForm: _firstNonEmpty([curriculum?['control_form']]),
       teacherName: teacherName,
+      teacherId: teacherId,
       department: _firstNonEmpty([curriculum?['department']]),
       credits: _firstNonEmpty([curriculum?['credits']]),
       hoursTotal: _firstNonEmpty([curriculum?['hours_total']]),
@@ -395,6 +694,7 @@ class _SubjectInfoRepository {
       mySubjectScore: subjectRating.$2,
       canVoteSubject: subjectRating.$3,
       teacherDifficultyAvg: teacherRating,
+      cardPayload: null,
     );
   }
 
@@ -428,6 +728,24 @@ class _SubjectInfoRepository {
   }
 
   Future<double?> _loadTeacherRating(String teacherName) async {
+    final teacherId = await _resolveTeacherId(teacherName);
+    if (teacherId == null) return null;
+    try {
+      final summary = await _sb
+          .from('teacher_difficulty_summaries')
+          .select('vote_count,score_total')
+          .eq('teacher_id', teacherId)
+          .maybeSingle();
+      final voteCount = _asInt(summary?['vote_count']) ?? 0;
+      final scoreTotal = _asInt(summary?['score_total']) ?? 0;
+      if (voteCount <= 0) return null;
+      return scoreTotal / voteCount;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<String?> _resolveTeacherId(String teacherName) async {
     final normalized =
         teacherName.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
     if (normalized.isEmpty) return null;
@@ -438,16 +756,7 @@ class _SubjectInfoRepository {
           .eq('normalized_name', normalized)
           .maybeSingle();
       final teacherId = (target?['id'] ?? '').toString().trim();
-      if (teacherId.isEmpty) return null;
-      final summary = await _sb
-          .from('teacher_difficulty_summaries')
-          .select('vote_count,score_total')
-          .eq('teacher_id', teacherId)
-          .maybeSingle();
-      final voteCount = _asInt(summary?['vote_count']) ?? 0;
-      final scoreTotal = _asInt(summary?['score_total']) ?? 0;
-      if (voteCount <= 0) return null;
-      return scoreTotal / voteCount;
+      return teacherId.isEmpty ? null : teacherId;
     } catch (_) {
       return null;
     }
@@ -509,6 +818,7 @@ class _SubjectInfoData {
   final String description;
   final String controlForm;
   final String teacherName;
+  final String? teacherId;
   final String department;
   final String credits;
   final String hoursTotal;
@@ -521,6 +831,7 @@ class _SubjectInfoData {
   final int? mySubjectScore;
   final bool canVoteSubject;
   final double? teacherDifficultyAvg;
+  final SubjectCardPayload? cardPayload;
 
   const _SubjectInfoData({
     required this.title,
@@ -531,6 +842,7 @@ class _SubjectInfoData {
     required this.description,
     required this.controlForm,
     required this.teacherName,
+    this.teacherId,
     required this.department,
     required this.credits,
     required this.hoursTotal,
@@ -543,6 +855,7 @@ class _SubjectInfoData {
     this.mySubjectScore,
     this.canVoteSubject = false,
     this.teacherDifficultyAvg,
+    this.cardPayload,
   });
 
   bool get canOpenChat => teamId != null && chatId != null;
@@ -640,6 +953,66 @@ class _SubjectInfoData {
     );
   }
 
+  factory _SubjectInfoData.unavailable({
+    required String title,
+    required String subjectOfferingId,
+    String? subjectId,
+    String? groupId,
+    int? semesterNumber,
+  }) {
+    return _SubjectInfoData(
+      title: title,
+      subjectOfferingId: subjectOfferingId,
+      subjectId: subjectId,
+      groupId: groupId,
+      semesterNumber: semesterNumber,
+      description: '',
+      controlForm: '',
+      teacherName: '',
+      department: '',
+      credits: '',
+      hoursTotal: '',
+      teamName: '',
+      teamIcon: '',
+      teamGroupName: '',
+      cardPayload: null,
+    );
+  }
+
+  factory _SubjectInfoData.fromManagedCard({
+    required SubjectCardPayload card,
+    required String fallbackTitle,
+    required String subjectOfferingId,
+    String? fallbackSubjectId,
+    String? fallbackGroupId,
+    int? fallbackSemesterNumber,
+  }) {
+    return _SubjectInfoData(
+      title: card.canonicalName.trim().isEmpty
+          ? fallbackTitle
+          : card.canonicalName,
+      subjectOfferingId: subjectOfferingId,
+      subjectId: card.subjectId.trim().isEmpty
+          ? fallbackSubjectId
+          : card.subjectId,
+      groupId: fallbackGroupId,
+      semesterNumber: fallbackSemesterNumber,
+      description: card.description ?? card.shortDescription ?? '',
+      controlForm: card.controlForm ?? '',
+      teacherName: card.teachers.isEmpty
+          ? ''
+          : card.teachers.map((t) => t.displayName).join(', '),
+      teacherId: card.teachers.isEmpty ? null : card.teachers.first.id,
+      department: card.department ?? '',
+      credits: card.credits?.toString() ?? '',
+      hoursTotal: card.hoursTotal?.toString() ?? '',
+      teamName: '',
+      teamIcon: '',
+      teamGroupName: '',
+      cardPayload: card,
+    );
+  }
+
   String get subjectDifficultyLabel {
     final value = subjectDifficultyAvg;
     if (value == null || value <= 0) return 'нет оценок';
@@ -655,8 +1028,14 @@ class _SubjectInfoData {
 
 class _HeroCard extends StatelessWidget {
   final _SubjectInfoData data;
+  final Uint8List? heroBytes;
+  final bool heroLoading;
 
-  const _HeroCard({required this.data});
+  const _HeroCard({
+    required this.data,
+    this.heroBytes,
+    this.heroLoading = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -690,7 +1069,26 @@ class _HeroCard extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _SubjectIcon(title: title, size: 46),
+          if (heroBytes != null && heroBytes!.isNotEmpty)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: Image.memory(
+                heroBytes!,
+                width: 64,
+                height: 64,
+                fit: BoxFit.cover,
+              ),
+            )
+          else if (heroLoading)
+            const SizedBox(
+              width: 64,
+              height: 64,
+              child: Center(
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            )
+          else
+            _SubjectIcon(title: title, size: 46),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -889,6 +1287,29 @@ class _SummaryCard extends StatelessWidget {
             icon: Icons.star_border_rounded,
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ReviewEntryTile extends StatelessWidget {
+  const _ReviewEntryTile({
+    required this.title,
+    required this.onTap,
+  });
+
+  final String title;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        leading: const Icon(Icons.rate_review_outlined),
+        title: const Text('Оставить отзыв о предмете'),
+        subtitle: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        trailing: const Icon(Icons.chevron_right_rounded),
+        onTap: onTap,
       ),
     );
   }
@@ -1115,22 +1536,58 @@ class _CompactRatingCircles extends StatelessWidget {
   }
 }
 
-class _FilesCard extends StatelessWidget {
-  const _FilesCard({super.key});
+class _SubjectAssetsCard extends StatelessWidget {
+  const _SubjectAssetsCard({
+    super.key,
+    required this.data,
+    required this.onOpenAttachment,
+  });
+
+  final _SubjectInfoData data;
+  final Future<void> Function(SubjectCardAsset asset) onOpenAttachment;
 
   @override
   Widget build(BuildContext context) {
-    return const _ContentCard(
+    final attachments = data.cardPayload?.displayAssets.attachments ?? const [];
+    if (attachments.isEmpty) {
+      return const _ContentCard(
+        icon: Icons.folder_outlined,
+        title: 'Полезные файлы',
+        child: Column(
+          children: [
+            _EmptyContentCallout(
+              icon: Icons.folder_open_outlined,
+              title: 'Материалы пока не загружены',
+              subtitle:
+                  'Шаблоны, примеры работ, методички и загруженные файлы появятся здесь позже.',
+            ),
+          ],
+        ),
+      );
+    }
+
+    return _ContentCard(
       icon: Icons.folder_outlined,
       title: 'Полезные файлы',
       child: Column(
         children: [
-          _EmptyContentCallout(
-            icon: Icons.folder_open_outlined,
-            title: 'Материалы пока не загружены',
-            subtitle:
-                'Шаблоны, примеры работ, методички и загруженные файлы появятся здесь позже.',
-          ),
+          for (final file in attachments)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                file.isPdf
+                    ? Icons.picture_as_pdf_outlined
+                    : Icons.attach_file_outlined,
+              ),
+              title: Text(
+                file.title.isNotEmpty ? file.title : file.mimeType,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: Text(file.mimeType),
+              trailing: const Icon(Icons.open_in_new),
+              onTap: () => onOpenAttachment(file),
+            ),
         ],
       ),
     );

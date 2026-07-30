@@ -25,6 +25,18 @@ abstract class NewsRepository {
     NewsImagePathPatch imagePathPatch = NewsImagePathPatch.omit,
   });
 
+  /// Stage 15.2 normalized audience setter. Draft-only on server.
+  Future<NewsItem> setAudience({
+    required String id,
+    required NewsAudienceMode mode,
+    List<String> groupIds = const [],
+    List<String> userIds = const [],
+    required int expectedVersion,
+  });
+
+  /// Recipient count preview (no student PII).
+  Future<NewsAudiencePreview> previewAudience(String id);
+
   Future<NewsItem> publish(String id);
 
   Future<NewsItem> unpublish(String id);
@@ -55,6 +67,40 @@ abstract class NewsRepository {
 
   /// Convenience alias used by the editor bootstrap and demo batches.
   Future<List<NewsItem>> loadDraft() => listNews();
+}
+
+class NewsAudiencePreview {
+  const NewsAudiencePreview({
+    required this.recipientCount,
+    required this.mode,
+    this.groupCount = 0,
+    this.explicitUserCount = 0,
+  });
+
+  final int recipientCount;
+  final NewsAudienceMode mode;
+  final int groupCount;
+  final int explicitUserCount;
+
+  factory NewsAudiencePreview.fromJson(Map<String, dynamic> json) {
+    final breakdown = json['breakdown'];
+    final breakdownMap =
+        breakdown is Map ? Map<String, dynamic>.from(breakdown) : const {};
+    final groups = breakdownMap['groups'];
+    final groupCount = groups is List
+        ? groups.length
+        : int.tryParse('${json['group_count'] ?? 0}') ?? 0;
+    final explicit = int.tryParse(
+          '${breakdownMap['explicit_users_count'] ?? json['explicit_users_count'] ?? 0}',
+        ) ??
+        0;
+    return NewsAudiencePreview(
+      recipientCount: int.tryParse('${json['recipient_count'] ?? 0}') ?? 0,
+      mode: newsAudienceModeFromString(json['audience_mode']?.toString()),
+      groupCount: groupCount,
+      explicitUserCount: explicit,
+    );
+  }
 }
 
 /// Result of [NewsRepository.deleteArchived].
@@ -245,6 +291,75 @@ class LocalNewsRepository implements NewsRepository {
     _items[index] = updated;
     _recordVersion(updated);
     return updated;
+  }
+
+  @override
+  Future<NewsItem> setAudience({
+    required String id,
+    required NewsAudienceMode mode,
+    List<String> groupIds = const [],
+    List<String> userIds = const [],
+    required int expectedVersion,
+  }) async {
+    final index = _indexOf(id);
+    final current = _items[index];
+    if (!current.isDraft) {
+      throw const NewsRepositoryException(
+        'Аудиторию можно менять только у черновика.',
+      );
+    }
+    if (current.versionNumber != expectedVersion) {
+      throw const NewsRepositoryException('Новость изменилась. Обновите.');
+    }
+    final groups = [...{...groupIds.where((e) => e.trim().isNotEmpty)}];
+    final users = [...{...userIds.where((e) => e.trim().isNotEmpty)}];
+    if (mode == NewsAudienceMode.groups && groups.isEmpty) {
+      throw const NewsRepositoryException('Нужна хотя бы одна группа.');
+    }
+    if (mode == NewsAudienceMode.users && users.isEmpty) {
+      throw const NewsRepositoryException('Нужен хотя бы один пользователь.');
+    }
+    if (mode == NewsAudienceMode.groupsAndUsers &&
+        (groups.isEmpty || users.isEmpty)) {
+      throw const NewsRepositoryException('Нужны и группы, и пользователи.');
+    }
+    if (mode == NewsAudienceMode.all) {
+      groups.clear();
+      users.clear();
+    }
+    final updated = current.copyWith(
+      audienceMode: mode,
+      audienceGroupIds: mode == NewsAudienceMode.all ? const [] : groups,
+      audienceUserIds: mode == NewsAudienceMode.all ? const [] : users,
+      audienceType: mode == NewsAudienceMode.all
+          ? NewsAudienceType.all
+          : NewsAudienceType.group,
+      audienceGroupId: groups.isEmpty ? null : groups.first,
+      clearAudienceGroupId: groups.isEmpty,
+      versionNumber: current.versionNumber + 1,
+      updatedAt: DateTime.now(),
+    );
+    _items[index] = updated;
+    _recordVersion(updated);
+    return updated;
+  }
+
+  @override
+  Future<NewsAudiencePreview> previewAudience(String id) async {
+    final item = _items[_indexOf(id)];
+    final count = switch (item.audienceMode) {
+      NewsAudienceMode.all => 100,
+      NewsAudienceMode.groups => item.audienceGroupIds.length * 10,
+      NewsAudienceMode.users => item.audienceUserIds.length,
+      NewsAudienceMode.groupsAndUsers =>
+        item.audienceGroupIds.length * 10 + item.audienceUserIds.length,
+    };
+    return NewsAudiencePreview(
+      recipientCount: count,
+      mode: item.audienceMode,
+      groupCount: item.audienceGroupIds.length,
+      explicitUserCount: item.audienceUserIds.length,
+    );
   }
 
   Future<NewsItem> _transition(

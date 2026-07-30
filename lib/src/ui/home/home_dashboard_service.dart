@@ -30,7 +30,11 @@ class HomeDashboardService {
         _scheduleRepository = scheduleRepository ?? ScheduleRepository(),
         _learningRepository =
             learningRepository ?? SupabaseLearningRepository(),
-        _newsCache = newsCache ?? PublishedNewsCache(),
+        _newsCache = newsCache ??
+            PublishedNewsCache(
+              currentUserId: () =>
+                  (client ?? Supabase.instance.client).auth.currentUser?.id,
+            ),
         _imageCache = imageCache ?? NewsImageDiskCache(),
         _http = httpClient ?? http.Client();
 
@@ -516,17 +520,28 @@ class HomeDashboardService {
 /// Only the JSON returned by `get_my_published_news` is stored (never image
 /// bytes). Cache is never cleared on network error.
 class PublishedNewsCache {
-  PublishedNewsCache({Future<SharedPreferences> Function()? prefs})
-      : _prefs = prefs ?? SharedPreferences.getInstance;
+  PublishedNewsCache({
+    Future<SharedPreferences> Function()? prefs,
+    String? Function()? currentUserId,
+  })  : _prefs = prefs ?? SharedPreferences.getInstance,
+        _currentUserId = currentUserId;
 
   final Future<SharedPreferences> Function() _prefs;
+  final String? Function()? _currentUserId;
 
-  static const String key = 'home_published_news_v1';
+  static const String keyPrefix = 'home_published_news_v1';
+
+  String _keyFor(String? userId) {
+    final id = (userId ?? '').trim();
+    if (id.isEmpty) return '${keyPrefix}__anon';
+    return '${keyPrefix}__$id';
+  }
 
   Future<List<HomeNewsItem>> read() async {
     try {
       final prefs = await _prefs();
-      final raw = prefs.getString(key);
+      final userId = _currentUserId?.call();
+      final raw = prefs.getString(_keyFor(userId));
       if (raw == null || raw.isEmpty) return const [];
       final decoded = jsonDecode(raw);
       if (decoded is List) {
@@ -544,9 +559,23 @@ class PublishedNewsCache {
   Future<void> write(List<Map<String, dynamic>> rows) async {
     try {
       final prefs = await _prefs();
-      await prefs.setString(key, jsonEncode(rows));
+      final userId = _currentUserId?.call();
+      await prefs.setString(_keyFor(userId), jsonEncode(rows));
     } catch (e) {
       debugPrint('[home] news cache write failed: $e');
+    }
+  }
+
+  /// Drop cached feeds for every user on this device (logout / account switch).
+  Future<void> clearAll() async {
+    try {
+      final prefs = await _prefs();
+      final keys = prefs.getKeys().where((k) => k.startsWith(keyPrefix));
+      for (final key in keys) {
+        await prefs.remove(key);
+      }
+    } catch (e) {
+      debugPrint('[home] news cache clear failed: $e');
     }
   }
 }

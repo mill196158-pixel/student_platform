@@ -12,11 +12,16 @@ import 'package:collection/collection.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+import 'package:student_ui/student_ui.dart';
+
 import 'package:student_platform/src/core/auth_session.dart';
-import 'package:student_platform/src/services/push/push_notification_service.dart';
+import 'package:student_platform/src/services/auth_service.dart';
 import 'package:student_platform/src/ui/chats/my_chats_screen.dart';
 import 'package:student_platform/src/ui/friends/my_friends_screen.dart';
 import 'package:student_platform/src/ui/learning/data/supabase_learning_repository.dart';
+import 'package:student_platform/src/ui/profile/profile_feed_service.dart';
+import 'package:student_platform/src/ui/profile/student_points_service.dart';
+import 'package:student_platform/src/ui/profile/my_reviews_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final ValueListenable<bool>? activeListenable;
@@ -35,6 +40,17 @@ class _ProfileScreenState extends State<ProfileScreen>
   // ----- deps -----
   final SupabaseClient _sb = Supabase.instance.client;
   final _repo = SupabaseLearningRepository();
+  final ProfileFeedService _feedService = ProfileFeedService();
+  ProfileFeedLoadResult _feed =
+      const ProfileFeedLoadResult(isDemoFallback: true);
+  final StudentPointsService _pointsService = StudentPointsService();
+  StudentPointsLoadResult _points =
+      const StudentPointsLoadResult(isDemoFallback: true);
+  int _pointsLoadGeneration = 0;
+  bool _pointsLoadInFlight = false;
+  final Set<String> _recordedFeedImpressions = {};
+  int _feedLoadGeneration = 0;
+  bool _feedLoadInFlight = false;
 
   // ----- badges -----
   int _friendsCount = 0; // (сейчас не рисуем, но оставил)
@@ -72,7 +88,101 @@ class _ProfileScreenState extends State<ProfileScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       debugPrint('${_ts()} [Profile] initState -> postFrame boot()');
       _boot(); // без автозапуска таймера
+      unawaited(_loadFeed());
+      unawaited(_loadPoints());
     });
+  }
+
+  Future<void> _loadPoints() async {
+    if (_pointsLoadInFlight) return;
+    final generation = ++_pointsLoadGeneration;
+    _pointsLoadInFlight = true;
+    try {
+      final next = await _pointsService.load();
+      if (!mounted || generation != _pointsLoadGeneration) return;
+      setState(() => _points = next);
+    } catch (error) {
+      debugPrint('[profile] points load failed: $error');
+      if (!mounted || generation != _pointsLoadGeneration) return;
+      setState(
+        () => _points = const StudentPointsLoadResult(loadError: true),
+      );
+    } finally {
+      if (generation == _pointsLoadGeneration) {
+        _pointsLoadInFlight = false;
+      }
+    }
+  }
+
+  Future<void> _loadFeed() async {
+    if (_feedLoadInFlight) return;
+    final generation = ++_feedLoadGeneration;
+    _feedLoadInFlight = true;
+    try {
+      final cached = await _feedService.loadCached();
+      if (!mounted || generation != _feedLoadGeneration) return;
+      if (cached.cards.isNotEmpty) {
+        setState(() => _feed = cached);
+      }
+      try {
+        final next = await _feedService.load();
+        if (!mounted || generation != _feedLoadGeneration) return;
+        setState(() => _feed = next);
+      } catch (error) {
+        debugPrint('[profile] feed load failed: $error');
+        if (!mounted || generation != _feedLoadGeneration) return;
+        if (_feed.cards.isNotEmpty) {
+          setState(
+            () => _feed = ProfileFeedLoadResult(
+              cards: _feed.cards,
+              loadError: true,
+            ),
+          );
+        } else {
+          setState(
+            () => _feed = const ProfileFeedLoadResult(loadError: true),
+          );
+        }
+      }
+    } finally {
+      if (generation == _feedLoadGeneration) {
+        _feedLoadInFlight = false;
+      }
+    }
+  }
+
+  void _recordVisibleFeedImpression(ManagedProfileFeedCard card) {
+    if (_feed.isDemoFallback || _feed.hideFeed || _feed.showLoadError) return;
+    if (card.showDemoBadge || card.id.startsWith('demo-')) return;
+    if (!_recordedFeedImpressions.add(card.id)) return;
+    unawaited(_feedService.recordEvent(card.id, 'impression'));
+  }
+
+  Future<void> _onManagedFeedTap(ManagedProfileFeedCard card) async {
+    if (!card.showDemoBadge && !card.id.startsWith('demo-')) {
+      await _feedService.recordEvent(card.id, 'click');
+    }
+    final payload = card.payload;
+    final route = payload.ctaRoute?.trim();
+    if (route != null && route.isNotEmpty) {
+      if (!mounted) return;
+      context.push(route);
+      return;
+    }
+    final url = payload.ctaUrl?.trim();
+    if (url != null && url.isNotEmpty) {
+      final uri = Uri.tryParse(url);
+      if (uri != null &&
+          (uri.scheme == 'https' || uri.scheme == 'http') &&
+          await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        return;
+      }
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(payload.title)),
+    );
   }
 
   @override
@@ -131,6 +241,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         _startPolling();
         // ignore: discarded_futures
         _pollOnce();
+        unawaited(_loadFeed());
       } else {
         debugPrint(
             '${_ts()} [Profile] lifecycle resumed but hidden -> keep stopped');
@@ -167,6 +278,8 @@ class _ProfileScreenState extends State<ProfileScreen>
       _startPolling();
       // ignore: discarded_futures
       _pollOnce();
+      unawaited(_loadFeed());
+      unawaited(_loadPoints());
     } else {
       debugPrint('${_ts()} [Profile] active=false -> stop polling');
       _stopPolling();
@@ -454,6 +567,8 @@ class _ProfileScreenState extends State<ProfileScreen>
       }
 
       await _pollOnce(); // подтянуть бейджи сразу
+      await _loadFeed();
+      await _loadPoints();
     } catch (e) {
       debugPrint('[Profile] refreshFromServer error: $e');
     }
@@ -462,13 +577,12 @@ class _ProfileScreenState extends State<ProfileScreen>
   // ===== logout =====
   Future<void> _logout() async {
     try {
-      await PushNotificationService.instance.onLogout();
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('loggedIn');
       await prefs.remove('user');
-      await _sb.auth.signOut();
+      // Centralized path clears news + profile-feed caches (Stage 15.2/15.3).
       if (!mounted) return;
-      context.go('/login');
+      await AuthService.signOut(context);
     } catch (_) {}
   }
 
@@ -566,6 +680,40 @@ class _ProfileScreenState extends State<ProfileScreen>
                 status: status,
                 avatarUrl: avatar,
               ),
+              if (!_points.hidePoints || _points.showLoadError) ...[
+                const SizedBox(height: 12),
+                if (_points.showLoadError)
+                  Text(
+                    'Баллы временно недоступны',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF6B7280),
+                        ),
+                    textAlign: TextAlign.center,
+                  )
+                else ...[
+                  Center(
+                    child: StudentPointsSummaryChip(
+                      summary: _points.displaySummary,
+                      showDemoBadge:
+                          _points.isDemoFallback && _points.rpcUnavailable,
+                    ),
+                  ),
+                  if (_points.displaySummary.entries.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Center(
+                      child: Text(
+                        _formatLatestPointsEntry(
+                          _points.displaySummary.entries.first,
+                        ),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: const Color(0xFF6B7280),
+                            ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ],
+                ],
+              ],
               const SizedBox(height: 16),
 
               // Две кнопки: Сообщения / Друзья
@@ -592,13 +740,32 @@ class _ProfileScreenState extends State<ProfileScreen>
 
               const SizedBox(height: 20),
 
-              const _SectionTitle('Лента'),
-              const SizedBox(height: 10),
-              _FeedCarousel(
-                items: _demoFeed,
-                onTapItem: (it) => _openFeedItem(context, it),
-              ),
-              const SizedBox(height: 20),
+              if (_feed.showLoadError) ...[
+                const _SectionTitle('Лента'),
+                const SizedBox(height: 10),
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.error_outline),
+                    title: const Text('Не удалось загрузить ленту'),
+                    subtitle:
+                        const Text('Проверьте соединение и попробуйте снова.'),
+                    trailing: TextButton(
+                      onPressed: () => unawaited(_loadFeed()),
+                      child: const Text('Повторить'),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+              ] else if (!_feed.hideFeed) ...[
+                const _SectionTitle('Лента'),
+                const SizedBox(height: 10),
+                StudentProfileFeedCarousel(
+                  cards: _feed.displayCards,
+                  onTap: _onManagedFeedTap,
+                  onVisibleCard: _recordVisibleFeedImpression,
+                ),
+                const SizedBox(height: 20),
+              ],
 
               ProfileStudySection(
                 onDiaryTap: () => context.push('/my-diary'),
@@ -608,6 +775,16 @@ class _ProfileScreenState extends State<ProfileScreen>
                     builder: (_) => const MapSpbgasuScreen(),
                   ),
                 ),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const MyReviewsScreen()),
+                  );
+                },
+                icon: const Icon(Icons.rate_review_outlined),
+                label: const Text('Мои отзывы'),
               ),
             ],
           ),
@@ -636,6 +813,11 @@ class _ProfileScreenState extends State<ProfileScreen>
         SnackBar(content: Text('Элемент: ${item.title}')),
       );
     }
+  }
+
+  String _formatLatestPointsEntry(StudentPointsEntry entry) {
+    final label = entry.reasonCode.labelRu;
+    return 'Последнее: ${entry.signedLabel} · $label';
   }
 }
 

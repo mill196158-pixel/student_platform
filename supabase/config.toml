@@ -14,3 +14,21 @@ entrypoint = "./functions/dispatch-push-notifications/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/cleanup-chat-files/index.ts"
+
+# Stage 16.2: user JWT for upload/download; CLEANUP_DISPATCH_SECRET / service_role for processCleanup.
+[functions.subject-media]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/subject-media/index.ts"
+
+# Stage 16.3: managed content-media (local only; deploy owner-gated).
+[functions.content-media]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/content-media/index.ts"
+
+# Stage 17: vacancy-media signed I/O + cleanup (local only; deploy owner-gated).
+[functions.vacancy-media]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/vacancy-media/index.ts"

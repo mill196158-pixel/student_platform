@@ -6,12 +6,18 @@
 ## Статус документа
 
 - Дата аудита: **27 июля 2026**
-- Обновлено: **28 июля 2026** (Stage 13.12 group-action cards + unified details DONE; physical OCR/race/push smoke remain)
-- Проверенная основная ветка: `refactor/chat-tab`
+- Обновлено: **29 июля 2026** (добавлены Content Platform Stages 14–21; Stage 13.0–13.12.8 считаются завершёнными)
+- Проверенная основная ветка: `refactor/chat-tab` (база)
+- Рабочая ветка контента: `feature/content-platform`
 - Проверенная административная ветка: `feature/admin-console`
 - Репозиторий: `mill196158-pixel/student_platform`
+- Worktree: `/Users/annasuvorova/student_platform_content`
+- Codex thread: `019fa373-81f2-7962-a8c9-81d86cb62311`
+- Remote project: `gwdanmwluhrcfxbnplwd`
 - Статус карты: **ACTIVE**
-- Следующий рекомендуемый этап: **PHYSICAL OCR SMOKE** + two-device topic race + controlled push; затем REAL XLSX
+- Content Platform Stages **14–21 локально закрыты** на `feature/content-platform` (remote apply / Edge deploy / Stage 14.1 residuals — owner-gated)
+- Owner residuals Stage 13 (не блокируют 14–19): PHYSICAL OCR / two-device topic race / controlled push / REAL XLSX
+- Контрольные документы: `docs/content_platform/CONTENT_PLATFORM_SPEC.md`, `docs/content_platform/ACCEPTANCE_CHECKLIST.md`, `docs/agent_coordination/CURRENT_TASK.md`
 
 Обозначения:
 
@@ -19,7 +25,9 @@
 - [ ] не сделано;
 - [~] сделано частично или требует продуктового решения;
 - [!] блокер для первой цельной версии;
-- [?] решение нужно подтвердить после физической проверки.
+- [?] решение нужно подтвердить после физической проверки;
+- [→] перенесено в Content Platform Stage 14–21;
+- [obsolete] устарело / заменено более точным этапом.
 
 ---
 
@@ -123,8 +131,8 @@
 
 - [x] убрать карточку «Текущий семестр» из профиля — выполнено в Stage 13.1 (`0693f19`);
 - [ ] убрать дублирующий вход «Мой дневник» из профиля после проверки доступности с Главной и из предмета;
-- [ ] перенести «Карту СПбГАСУ» в справочный раздел вкладки «Предметы»;
-- [ ] убрать демонстрационную «Ленту» из профиля: новости уже живут на Главной.
+- [→] перенести «Карту СПбГАСУ» в справочный раздел вкладки «Предметы» — **Stage 16.3**;
+- [→] демонстрационную «Ленту» профиля заменить управляемым placement `profile_feed` — **Stage 15.3** (не автокопия новостей).
 
 ---
 
@@ -283,20 +291,21 @@ PDF не входит в критерии готовности Stage 13 и пе�
 
 Не запускать свободные отзывы без защиты.
 
-Порядок:
+Порядок (детали и DONE-критерии — **[→] Stage 18**):
 
-- [ ] сначала числовая оценка сложности;
-- [ ] затем короткие структурированные теги:
+- [→] сначала числовая оценка сложности;
+- [→] затем короткие структурированные теги:
   - объясняет понятно;
   - строгая проверка;
   - важна посещаемость;
   - много практики;
-- [ ] после этого текстовые отзывы;
-- [ ] очередь модерации;
-- [ ] жалоба на отзыв;
-- [ ] скрытие персональных данных и оскорблений;
-- [ ] лимит один отзыв на связку студент + преподаватель + предмет/период;
-- [ ] публикация только после модерации.
+- [→] после этого текстовые отзывы;
+- [→] очередь модерации;
+- [→] жалоба на отзыв;
+- [→] скрытие персональных данных и оскорблений;
+- [→] лимит один отзыв на связку студент + преподаватель + предмет/период;
+- [→] публикация только после модерации;
+- [→] внутренние баллы после одобрения (идемпотентный ledger).
 
 ---
 
@@ -756,8 +765,10 @@ Edge Function: not redeployed (unchanged in 13.10).
 5. ~~**Stage 13.11**~~ **TECHNICALLY DONE** — remote `20260728140108_stage13_11_membership_capabilities_ux`; Codex APPROVE (14/14); smoke PASS.
 6. ~~**Stage 13.11.1**~~ **DONE** — keyboard focus hotfix (`KeyboardDismissScope`: dismiss scroll only on `dragDetails`; no inset false-unfocus); Codex APPROVE (9/9); Flutter-only.
 7. ~~**Stage 13.12**~~ **DONE** — card envelope + batch cards + UnifiedTaskDetailsScreen + deep topic editor; remote `20260728165633_stage13_12_group_action_cards_unified_details`; Codex APPROVE (15/15).
-8. **Владелец:** PHYSICAL OCR smoke + two-device topic race + controlled push на Android/iPhone.
-9. **Владелец:** реальные Excel (teachers/subjects/students) через Admin dry-run → apply.
+8. ~~**Stage 13.12.8**~~ **DONE** — members → FriendProfileScreen + PDF roster export capability; Codex APPROVE.
+9. **Владелец (residuals, не блокируют Content Platform):** PHYSICAL OCR smoke + two-device topic race + controlled push на Android/iPhone.
+10. **Владелец / Stage 19:** реальные Excel (teachers/subjects/students) через Import Studio dry-run → apply — только после отдельного разрешения.
+11. **Активный продуктовый трек:** Content Platform Stages **14–21** (см. ниже). Не переделывать готовые чаты, групповые действия, новости-архив и RBAC Stage 13 без подтверждённой необходимости.
 
 ### 13.11 — доступность групповых действий, единая модель заданий, финальный UX
 
@@ -811,7 +822,7 @@ Remote migration: `20260728165633_stage13_12_group_action_cards_unified_details`
 
 ---
 
-## 14. Git и технический housekeeping
+## Appendix A — Git и технический housekeeping *(исторический §14, не Content Platform Stage 14)*
 
 - [x] Stage 12.2 News находится в основной `refactor/chat-tab`;
 - [x] хвост архива/удаления новостей перенесён из `feature/admin-console` cherry-pick'ом `23e8799` → commit `ac282f3` (без полного merge веток);
@@ -822,15 +833,16 @@ Remote migration: `20260728165633_stage13_12_group_action_cards_unified_details`
 - [x] foundation commit `6dccc9d` и archive port `ac282f3` загружены в `origin/refactor/chat-tab`;
 - [x] рабочее дерево после housekeeping чистое — можно начинать read-only аудит 13.2;
 - [x] эта карта (`docs/master_roadmap.md`) принята как основной продуктовый roadmap;
-- [ ] обновить старый `docs/admin_console/ADMIN_ROADMAP.md` (вторичный, не блокирует 13.2);
+- [ ] обновить старый `docs/admin_console/ADMIN_ROADMAP.md` (вторичный; не блокирует Content Platform);
 - [x] обновлять чекбоксы после каждого review/apply/commit/push;
 - [x] не отмечать этап DONE без пользовательского и технического smoke;
 - [x] remote apply Stage 13 + news archive выполнен (owner-authorized 2026-07-27);
 - [x] Edge Functions Stage 13 redeployed; force push по-прежнему запрещён.
+- [ ] Content Platform: локальные commits после Codex APPROVE разрешены; **push / remote apply / Edge deploy запрещены** до отдельной команды владельца.
 
 ---
 
-## 15. Решения владельца продукта
+## Appendix B — Решения владельца продукта *(исторический §15)*
 
 - [x] Главная остаётся стартовой вкладкой.
 - [x] Новости управляются через Web Admin.
@@ -849,10 +861,11 @@ Remote migration: `20260728165633_stage13_12_group_action_cards_unified_details`
 - [x] Не добавлять свободное создание команд в первой версии.
 - [x] Запланировать в пространстве группы `Сбор группы` и `Выбор темы`.
 - [ ] Передать реальный Excel для проектирования точного импорта.
+- [x] Content Platform Stages 14–21 приняты как следующий большой трек (docs gate → код только после Codex APPROVE).
 
 ---
 
-## 16. Короткий Definition of Done первой цельной версии
+## Appendix C — Короткий Definition of Done первой цельной версии *(исторический §16)*
 
 Первая версия логически закончена, когда:
 
@@ -867,4 +880,269 @@ Remote migration: `20260728165633_stage13_12_group_action_cards_unified_details`
 - сбор группы и выбор темы работают как организационные инструменты, а не как платёжная система;
 - отзывы безопасны или честно отключены;
 - Android и iPhone проходят физический smoke;
-- остаются только контентное наполнение и небольшие подтверждённые баги.
+- остаются только контентное наполнение и небольшие подтверждённые баги;
+- управляемый контент (Главная / профиль / справочник / предметы / вакансии) редактируется без сырого JSON в UI;
+- Import Studio даёт dry-run/diff до apply.
+
+---
+
+# Content Platform — Stages 14–21
+
+> Единый трек управляемого контента, предметов, справочника, вакансий, отзывов, Import Studio, AI-спеки и плана переноса в РФ.
+> Детали: `docs/content_platform/CONTENT_PLATFORM_SPEC.md`.
+> Атомарные чекбоксы приёмки: `docs/content_platform/ACCEPTANCE_CHECKLIST.md`.
+> Активный подэтап: `docs/agent_coordination/CURRENT_TASK.md`.
+
+**Жёсткие запреты сессии (до команды владельца):** remote migration apply; Edge deploy; GitHub push (в т.ч. force); импорт реальных данных; service_role во Flutter Web; удаление существующих данных; правка уже применённых миграций; дублирующий roadmap.
+
+**Gate:** этап не DONE без кода + тестов + Codex APPROVE. Чекбокс в ACCEPTANCE_CHECKLIST не отмечать «на глаз».
+
+---
+
+## Stage 14 — Managed Content Platform foundation
+
+Status: **DONE (local)** / Codex **APPROVE** (`2588581`, `691f43e`, `74c779d`) — remote apply pending owner
+
+Понятия:
+
+- [x] content item;
+- [x] approved template;
+- [x] placement;
+- [x] audience (нормализованные связи, не UUID-список в клиентском payload);
+- [x] asset;
+- [x] version + restore; *(Admin version-history UI residual)*
+- [x] draft / published / archived;
+- [x] publication schedule;
+- [x] priority / order;
+- [x] origin: demo / admin / import / user_submission;
+- [x] audit;
+- [x] impressions / clicks без лишнего слежения.
+
+Аудитории:
+
+- [x] все пользователи;
+- [x] одна или несколько групп;
+- [x] явный набор пользователей;
+- [x] комбинации только по серверным правилам.
+
+Placements v1:
+
+- [x] `home_promo`;
+- [x] `profile_feed`;
+- [x] `reference`;
+- [x] расширение существующего news targeting (не rewrite news backend).
+
+Обязательно:
+
+- [x] preview аудитории до публикации (число получателей без лишних ПДн);
+- [~] история версий и восстановление; *(SQL yes; Admin UI residual)*
+- [x] расписание показа;
+- [~] скрытие / архив / безопасное удаление; *(archive yes; Admin safe-delete UI residual)*
+- [x] cache-first mobile + refresh после resume / pull-to-refresh;
+- [ ] отсутствие N+1; *(formal evidence residual)*
+- [x] отсутствие сырого JSON в UI;
+- [x] только утверждённые шаблоны + серверная валидация payload/schema_version;
+- [~] RLS / RPC / grants / security review; *(authored/static-reviewed; live psql not run this audit)*
+- [x] не создавать новые таблицы, пока нельзя безопасно расширить существующие.
+
+### Stage 14.1 — Demo content governance
+
+- [ ] инвентаризация hardcoded/demo элементов;
+- [ ] `origin=demo`;
+- [ ] фильтр «Демо» в админке;
+- [ ] архивирование и удаление через админку;
+- [ ] замена реальным материалом;
+- [ ] демо не возвращается самопроизвольно после удаления;
+- [ ] demo fallback не маскирует ошибку сервера;
+- [ ] demo-вакансии/отзывы явно «Пример» или вне production-аудитории;
+- [ ] текущие демо не удалять до готовой миграции/замены.
+
+---
+
+## Stage 15 — Главная, новости и профиль
+
+Status: **DONE (local)** / Codex **APPROVE** (`183efc8`, `001e1f0`, `cebfcf5`) — remote apply pending owner
+
+### 15.1 Управляемые блоки Главной
+
+- [ ] блоки вроде «Застрял с заданием?» → managed promo-карточки;
+- [ ] редактирование: заголовок, подзаголовок, изображение, градиент, иконка, CTA, маршрут/проверенная внешняя ссылка;
+- [ ] аудитория, период, порядок, возможность закрыть, повторный показ;
+- [ ] статусы draft/published/archived/demo;
+- [ ] общий renderer в `packages/student_ui` для Mobile и Admin Preview.
+
+### 15.2 Новости (расширение, не rewrite)
+
+- [ ] аудитория «все»;
+- [ ] несколько групп;
+- [ ] явный набор пользователей;
+- [ ] preview получателей;
+- [ ] сохранить существующие публикации и изображения;
+- [ ] обратная совместимость;
+- [ ] нет утечки скрытых новостей через RPC / кеш / signed URL.
+
+### 15.3 Лента профиля
+
+- [ ] отдельный placement общей content platform;
+- [ ] контент для всех / групп / отдельных пользователей;
+- [ ] порядок, расписание, preview, Admin;
+- [ ] единый дизайн приложения;
+- [ ] новости не дублируются автоматически — placement выбирает администратор.
+
+---
+
+## Stage 16 — Предметы и справочник
+
+Status: **16.2 DONE (local)** / Codex **APPROVE_WITH_NOTES**; **16.3 DONE (local)** / Codex **APPROVE** — §S closed; remote apply / Edge deploy pending owner
+
+### 16.1 Карточка предмета (Admin visual editor)
+
+- [x] название, краткое и подробное описание;
+- [x] чему научится студент; форма контроля; часы / ЗЕ; требования; советы;
+- [x] преподаватели; дата актуальности; ссылки; порядок секций;
+- [x] изображения; файлы — **16.2**;
+- [x] preview настоящей мобильной карточки;
+- [x] catalog-level + безопасный offering-level override;
+- [x] связи только через `subject_id` / `subject_catalog_id` / `subject_offering_id` (не по названию).
+- Codex **APPROVE** 16.1 (local commit on `feature/content-platform`).
+
+### 16.2 Файлы предмета
+
+- [x] private Storage; signed upload/download;
+- [x] whitelist MIME/размера; versioning; cleanup после безопасного удаления;
+- [x] без Base64 в БД.
+- Codex **APPROVE_WITH_NOTES** 16.2 (local commit on `feature/content-platform`; deploy owner-gated).
+
+### 16.3 Справочный раздел
+
+- [x] категории, иконка, заголовок, короткий/полный текст, изображения, файлы, ссылки, CTA;
+- [x] порядок, аудитория, draft/publish/archive;
+- [x] Admin Preview + mobile cache-first renderer;
+- [x] «Сообщить об ошибке»;
+- [x] без произвольного HTML/JS.
+- Codex **APPROVE** 16.3 (local commit on `feature/content-platform`; apply/deploy owner-gated).
+
+---
+
+## Stage 17 — Вакансии
+
+Status: **DONE (local)** / Codex **APPROVE** — §T closed; remote apply / Edge deploy pending owner
+
+- [ ] отдельная доменная модель (не generic content JSON);
+- [ ] создание админом; предложение пользователем через форму; *(local Admin editor + ProposeVacancyScreen scaffold)*
+- [ ] user submission никогда не публикуется сразу; *(enforced in VacancySubmissionService + migration)*
+- [ ] поля: название, организация, описание, формат, локация/удалённо, зарплата, требования, контакты, ссылка, срок, аудитория, медиа, автор, источник, дата проверки;
+- [ ] процесс: `draft/submitted → moderation → approved/published → expired/archived/rejected`;
+- [ ] предпросмотр, срок окончания, жалоба, защита контактов, проверка ссылок, причина отклонения, журнал модерации;
+- [ ] красивые mobile/admin карточки;
+- [ ] demo-вакансии управляются отдельно и не вводят в заблуждение.
+
+---
+
+## Stage 18 — Отзывы, баллы и единая модерация
+
+Status: **DONE (local)** / Codex **APPROVE** — §U–§W closed; remote apply pending owner
+
+- [x] отзывы для предусмотренных сущностей (преподаватель, предмет; вакансия/работодатель — только после отдельного продуктового решения);
+- [x] 1 одобренный отзыв → 1 внутренний балл (не деньги, не вывод);
+- [x] начисление только после модерации; идемпотентно; ledger по `review_id`;
+- [x] повторная отправка/редактирование не даёт второй балл;
+- [x] удаление за нарушение → компенсирующая запись;
+- [x] история баллов для студента; rate limit / антиспам;
+- [x] нельзя модерировать собственный отзыв;
+- [x] структурированные оценки/теги, короткий текст, анонимность для студентов (не для модерации);
+- [x] жалоба; редактирование до начала модерации; один отзыв на разрешённый контекст;
+- [x] блок ПДн/оскорблений/обвинений; публикация только после модерации;
+- [x] единый Admin «Модерация»: отзывы, вакансии, жалобы, исправления контента;
+- [x] фильтры: тип, статус, дата, автор, приоритет, назначенный модератор;
+- [x] действия: принять / отклонить с причиной / запросить уточнение / скрыть / восстановить / история;
+- [x] все действия в audit log.
+Codex **APPROVE** 18 (local commit on `feature/content-platform`; apply/deploy owner-gated).
+
+---
+
+## Stage 19 — Import Studio
+
+Status: **DONE (local)** / Codex **APPROVE** — §X/§Y closed; all 9 domains apply; rollback-safe for terms/curriculum/offerings/teacher_links (create-only, drift-checked); remote apply pending owner
+
+Домены:
+
+- [x] преподаватели; предметы; студенты; группы; семестры;
+- [x] учебные планы групп; offering; связи преподавателей; enrollment.
+
+Для каждого импорта:
+
+- [x] скачать шаблон Excel;
+- [x] визуальный предпросмотр таблицы в админке;
+- [x] обязательные/необязательные колонки + примеры;
+- [x] ошибки обычным языком;
+- [x] загрузка XLSX; определение листов; mapping колонок;
+- [x] dry-run; таблица валидных/ошибочных строк; diff до apply;
+- [x] предупреждение о создаваемых предметах/командах/чатах;
+- [x] apply только после подтверждения; audit/import batch id;
+- [x] повторный запуск без дублей; безопасный rollback batch где возможно *(refuse when unsafe / updates / drift)*.
+
+Цепочка учебного плана группы (существующая):
+
+- [x] academic term → group → subject_catalog → curriculum → subject_offering → offering_teachers → enrollment → team/chat;
+- [x] не связывать по отображаемому названию при наличии ID;
+- [x] не переключать текущий семестр автоматически;
+- [x] не создавать осень 2026 без разрешения владельца;
+- [x] Web Admin без service_role; привилегии только через RPC/Edge + RBAC.
+Codex **APPROVE** 19 completion (local commit on `feature/content-platform`; apply/deploy owner-gated).
+
+---
+
+## Stage 20 — AI-функции (только спецификация)
+
+Status: **SPEC DONE** / Codex **APPROVE_WITH_NOTES** (2026-07-29 refresh) — платный AI не внедрять; §AA closed
+
+Варианты для документа:
+
+- [x] определение колонок неизвестного Excel;
+- [x] сопоставление преподавателей/предметов и поиск дублей;
+- [x] очистка OCR;
+- [x] черновик карточки предмета из файла;
+- [x] черновик новости/promo;
+- [x] классификация вакансии;
+- [x] предварительная проверка отзывов;
+- [x] поиск ПДн и оскорблений;
+- [x] объяснение ошибок импорта;
+- [x] помощник администратора по контенту.
+
+Правила:
+
+- [x] AI создаёт только черновик; публикация только человеком;
+- [x] никаких скрытых автодействий;
+- [x] минимизация ПДн; журнал источников; лимиты стоимости; полный opt-out.
+
+---
+
+## Stage 21 — Перенос инфраструктуры в РФ (только roadmap)
+
+Status: **ROADMAP DONE** / Codex **APPROVE_WITH_NOTES** (2026-07-29 refresh) — перенос сейчас не выполнять; §AB closed
+
+План:
+
+- [x] российский VPS; PostgreSQL; Auth; Storage; Realtime; Edge/worker/cron; *(documented phases only)*
+- [x] резервные копии; мониторинг; домен/TLS; *(documented)*
+- [x] миграционная репетиция; проверка целостности; rollback; *(documented; RPO open decision)*
+- [x] временный read-only/cutover; обновление Flutter конфигурации; *(documented)*
+- [x] явно: российский backend снижает зависимость от Supabase, но FCM/APNs остаются внешними; полная независимость от VPN без физического сетевого теста **не обещается**.
+
+---
+
+## Порядок реализации (одна длинная сессия)
+
+1. Read-only аудит + docs gate (этот блок) → Codex APPROVE.
+2. Stage 14 foundation.
+3. Вертикальный slice Stage 15: один promo Главной + audience + Admin Preview.
+4. Расширение audience новостей.
+5. Лента профиля.
+6. Stage 16: subject content + файлы.
+7. Справочный раздел.
+8. Stage 17–18: доменные модели + moderation foundation.
+9. Stage 19: Import Studio template/dry-run foundation.
+10. Stage 20–21: только подробные спецификации.
+
+Не завершать все production-модули одним огромным diff. Небольшие независимые подэтапы + локальный commit после Codex APPROVE.

@@ -1,29 +1,30 @@
 # CURRENT_TASK
 
-* Status: **STAGE_13_12_8_MEMBERS_PROFILE_ROSTER_PDF** / Codex **APPROVE**
-* Branch: `refactor/chat-tab`
+* Status: **INTEGRATION IN PROGRESS** — Codex path A GO; path B pending green checks + PITR + Edge runbook re-APPROVE
+* Active Stage: production integration Stages 14–21
+* Branch: `feature/content-platform` (pushed)
+* Worktree: `/Users/annasuvorova/student_platform_content`
 * Codex thread: `019fa373-81f2-7962-a8c9-81d86cb62311`
-* Remote project: `gwdanmwluhrcfxbnplwd`
-* PR: https://github.com/mill196158-pixel/student_platform/pull/1
+* Remote: `gwdanmwluhrcfxbnplwd` (**no apply / no Edge deploy yet**)
 
-## Stage 13.12.8
+## Done
 
-* Members row → FriendProfileScreen
-* «PDF для преподавателя»: A4 roster №|ФИО|Оценка|Подпись|Примечание
-* Server `can_export_roster` via get_team_members_directory
-* No DB bulk member import (export-only for teacher workflow)
-* Migration applied: stage13_12_8_team_roster_export_capability
+* Preflight: `docs/content_platform/INTEGRATION_PREFLIGHT_2026_07_30.md` (Edge smoke runbook §11)
+* Admin suite **157/157 PASS**; Android/iOS builds PASS
+* Local disposable DB: all 22 Stage 14–19 migrations applied
+* Security reviews Stage 14–19 **PASS** after aligning checks with `private.*` helpers
+* Pushed `origin/feature/content-platform`
+* Backup tag `backup/pre-content-platform-20260730` @ `c31f572`
+* Backup branch `backup/refactor-chat-tab-pre-content-20260730` pushed
 
-## Residuals (owner)
+## Next
 
-* **PHYSICAL OCR SMOKE REQUIRED**
-* **TWO-DEVICE TOPIC RACE REQUIRED**
-* **CONTROLLED PUSH REQUIRED**
-* **REAL XLSX REQUIRED**
+1. Codex re-review after check + preflight updates → APPROVE for B (or confirm A still GO)
+2. Merge `feature/content-platform` → `refactor/chat-tab` (main worktree) → retest → push
+3. Confirm Dashboard PITR / retention for `gwdanmwluhrcfxbnplwd`
+4. Remote apply 22 migrations one-by-one + Edge deploy 3 functions + smoke §11
+5. Web Admin + Mobile verify; update acceptance docs; clean trees
 
-## Constraints
+## Hard bans until B APPROVE + PITR confirmed
 
-* No force-push
-* No teacher-media deploy until explicitly requested
-* Do not create autumn 2026 / do not flip current term without explicit owner OK
-* Do not apply remote Supabase without explicit permission
+No remote migration apply · No Edge deploy · No real import · No force-push

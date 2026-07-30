@@ -10,7 +10,12 @@ import '../core/navigation/admin_shell.dart';
 import '../features/academic/students/students_screen.dart';
 import '../features/academic/subjects/subjects_screen.dart';
 import '../features/academic/teachers/teachers_screen.dart';
+import '../features/content/home_promo/home_promo_editor_screen.dart';
 import '../features/content/news/news_editor_screen.dart';
+import '../features/content/profile_feed/profile_feed_editor_screen.dart';
+import '../features/content/reference/reference_editor_screen.dart';
+import '../features/content/vacancies/vacancy_editor_screen.dart';
+import '../features/import_studio/import_studio_screen.dart';
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/moderation/moderation_screen.dart';
 import '../features/system/terms/terms_screen.dart';
@@ -74,6 +79,9 @@ GoRouter createAdminRouter(AdminSessionController session) {
       if (loc.startsWith('/academic') && !caps.canReadAcademic) {
         return '/no-access';
       }
+      if (loc.startsWith('/import-studio') && !caps.canReadAcademic) {
+        return '/no-access';
+      }
       if (loc.startsWith('/system/terms') && !caps.canManageTerms) {
         return '/no-access';
       }
@@ -121,6 +129,31 @@ GoRouter createAdminRouter(AdminSessionController session) {
           GoRoute(
             path: '/content/news',
             builder: (context, state) => NewsEditorScreen(session: session),
+          ),
+          GoRoute(
+            path: '/content/home-promo',
+            builder: (context, state) =>
+                HomePromoEditorScreen(session: session),
+          ),
+          GoRoute(
+            path: '/content/profile-feed',
+            builder: (context, state) =>
+                ProfileFeedEditorScreen(session: session),
+          ),
+          GoRoute(
+            path: '/content/reference',
+            builder: (context, state) =>
+                ReferenceEditorScreen(session: session),
+          ),
+          GoRoute(
+            path: '/content/vacancies',
+            builder: (context, state) =>
+                VacancyEditorScreen(session: session),
+          ),
+          GoRoute(
+            path: '/import-studio',
+            builder: (context, state) =>
+                ImportStudioScreen(session: session),
           ),
           GoRoute(
             path: '/academic/subjects',

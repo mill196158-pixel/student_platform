@@ -16,6 +16,7 @@ import 'news_preview.dart';
 import 'news_repository.dart';
 import 'supabase_admin_image_store.dart';
 import 'supabase_news_repository.dart';
+import 'widgets/news_audience_panel.dart';
 import 'widgets/news_image_field.dart';
 
 enum _NewsListTab { published, drafts, archived }
@@ -65,6 +66,7 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
   String? _imageError;
   String? _banner;
   String? _loadError;
+  bool _audienceRpcAvailable = true;
 
   NewsAdminListPartitions get _partitions => partitionAdminNews(_items);
 
@@ -1112,6 +1114,44 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
                 onArchive: _archive,
                 onRestoreArchived: _restoreArchived,
                 onDeletePermanently: _deleteArchivedPermanently,
+                normalizedAudienceAvailable:
+                    _repository is LocalNewsRepository || _audienceRpcAvailable,
+                onSaveAudience: ({
+                  required mode,
+                  required groupIds,
+                  required userIds,
+                }) async {
+                  final selected = _selected;
+                  if (selected == null) return;
+                  try {
+                    final updated = await _repository.setAudience(
+                      id: selected.id,
+                      mode: mode,
+                      groupIds: groupIds,
+                      userIds: userIds,
+                      expectedVersion: selected.versionNumber,
+                    );
+                    if (!mounted) return;
+                    setState(() {
+                      final idx = _items.indexWhere((e) => e.id == updated.id);
+                      if (idx >= 0) {
+                        _items = [..._items]..[idx] = updated;
+                      }
+                      _selectedId = updated.id;
+                      _banner = 'Аудитория сохранена.';
+                    });
+                  } on NewsRepositoryException catch (error) {
+                    if (error.message.contains('RPC недоступен') ||
+                        error.message.contains('local apply')) {
+                      if (mounted) {
+                        setState(() => _audienceRpcAvailable = false);
+                      }
+                    }
+                    rethrow;
+                  }
+                },
+                onPreviewAudience: () =>
+                    _repository.previewAudience(_selected!.id),
               );
 
         if (wide) {
@@ -1742,6 +1782,9 @@ class _PropertiesPanel extends StatelessWidget {
     required this.onArchive,
     required this.onRestoreArchived,
     required this.onDeletePermanently,
+    required this.normalizedAudienceAvailable,
+    required this.onSaveAudience,
+    required this.onPreviewAudience,
   });
 
   final NewsItem selected;
@@ -1770,6 +1813,13 @@ class _PropertiesPanel extends StatelessWidget {
   final VoidCallback onArchive;
   final VoidCallback onRestoreArchived;
   final VoidCallback onDeletePermanently;
+  final bool normalizedAudienceAvailable;
+  final Future<void> Function({
+    required NewsAudienceMode mode,
+    required List<String> groupIds,
+    required List<String> userIds,
+  }) onSaveAudience;
+  final Future<NewsAudiencePreview> Function() onPreviewAudience;
 
   static const _focusOptions = <(String, Alignment)>[
     ('Центр', Alignment.center),
@@ -1948,6 +1998,16 @@ class _PropertiesPanel extends StatelessWidget {
               label: const Text('В архив'),
             ),
           ],
+          const SizedBox(height: 20),
+          const Divider(),
+          const SizedBox(height: 12),
+          NewsAudiencePanel(
+            item: selected,
+            enabled: canWrite && selected.isDraft,
+            normalizedAvailable: normalizedAudienceAvailable,
+            onSave: onSaveAudience,
+            onPreview: onPreviewAudience,
+          ),
         ],
       ),
     );

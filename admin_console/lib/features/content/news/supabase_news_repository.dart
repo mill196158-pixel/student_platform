@@ -64,7 +64,30 @@ class SupabaseNewsRepository implements NewsRepository {
         'Окончательное удаление и восстановление доступны только для архивных новостей.',
       );
     }
-    return NewsRepositoryException(
+    if (code == 'PGRST202' ||
+        code == '42883' ||
+        message.contains('could not find the function')) {
+      return const NewsRepositoryException(
+        'RPC недоступен на этом backend (ожидается local apply Stage 15.2). '
+        'Multi-group/user аудитория отключена fail-closed.',
+      );
+    }
+    if (message.contains('use_admin_set_news_audience')) {
+      return const NewsRepositoryException(
+        'Аудиторию меняйте через отдельный контроль Stage 15.2.',
+      );
+    }
+    if (message.contains('draft_only')) {
+      return const NewsRepositoryException(
+        'Аудиторию можно менять только у черновика.',
+      );
+    }
+    if (message.contains('version_conflict')) {
+      return const NewsRepositoryException(
+        'Новость изменилась. Обновите список.',
+      );
+    }
+    return const NewsRepositoryException(
       'Не удалось выполнить операцию. Попробуйте ещё раз.',
     );
   }
@@ -151,6 +174,89 @@ class SupabaseNewsRepository implements NewsRepository {
       'p_patch': item.toPatchJson(imagePathPatch: imagePathPatch),
     });
     return NewsItem.fromJson(_asMap(data));
+  }
+
+  @override
+  Future<NewsItem> setAudience({
+    required String id,
+    required NewsAudienceMode mode,
+    List<String> groupIds = const [],
+    List<String> userIds = const [],
+    required int expectedVersion,
+  }) async {
+    try {
+      final data = await _call('admin_set_news_audience', {
+        'p_id': id,
+        'p_mode': newsAudienceModeWire(mode),
+        'p_expected_version': expectedVersion,
+        'p_group_ids': groupIds,
+        'p_user_ids': userIds,
+      });
+      return NewsItem.fromJson(_asMap(data));
+    } on NewsRepositoryException catch (error) {
+      // Fail-closed dual-read: only legacy all / single-group may fall back
+      // through admin_update_news_draft when Stage 15.2 RPCs are absent.
+      if (!_looksLikeMissingRpc(error.message)) rethrow;
+      return _legacyAudienceFallback(
+        id: id,
+        mode: mode,
+        groupIds: groupIds,
+        userIds: userIds,
+      );
+    }
+  }
+
+  bool _looksLikeMissingRpc(String message) {
+    final m = message.toLowerCase();
+    return m.contains('rpc недоступен') ||
+        m.contains('could not find the function') ||
+        m.contains('local apply');
+  }
+
+  Future<NewsItem> _legacyAudienceFallback({
+    required String id,
+    required NewsAudienceMode mode,
+    required List<String> groupIds,
+    required List<String> userIds,
+  }) async {
+    if (mode == NewsAudienceMode.users ||
+        mode == NewsAudienceMode.groupsAndUsers ||
+        (mode == NewsAudienceMode.groups && groupIds.length != 1) ||
+        userIds.isNotEmpty) {
+      throw const NewsRepositoryException(
+        'Расширенная аудитория недоступна на этом backend '
+        '(ожидается local apply Stage 15.2). '
+        'Доступны только legacy «все» или одна группа.',
+      );
+    }
+    final data = await _call('admin_update_news_draft', {
+      'p_id': id,
+      'p_patch': {
+        'audience_type': mode == NewsAudienceMode.all ? 'all' : 'group',
+        'audience_group_id':
+            mode == NewsAudienceMode.all ? '' : groupIds.first,
+      },
+    });
+    return NewsItem.fromJson(_asMap(data));
+  }
+
+  @override
+  Future<NewsAudiencePreview> previewAudience(String id) async {
+    try {
+      final data = await _call('admin_preview_news_audience', {'p_id': id});
+      return NewsAudiencePreview.fromJson(_asMap(data));
+    } on NewsRepositoryException {
+      rethrow;
+    } catch (error) {
+      final message = error.toString().toLowerCase();
+      if (message.contains('could not find the function') ||
+          message.contains('pgrst202')) {
+        throw const NewsRepositoryException(
+          'Preview аудитории недоступен: RPC Stage 15.2 не применён.',
+        );
+      }
+      rethrow;
+    }
   }
 
   @override

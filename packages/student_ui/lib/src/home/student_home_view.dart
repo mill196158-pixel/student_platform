@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../content/content_models.dart';
+import '../content/student_home_promo_card.dart';
 import 'home_preview_models.dart';
 import 'widgets/student_home_news_card.dart';
 
@@ -17,6 +19,10 @@ class StudentHomeView extends StatelessWidget {
     this.onAssignmentTap,
     this.onAssignmentDoneTap,
     this.onHelpTap,
+    this.onHomePromoDismiss,
+    this.homePromo,
+    this.homePromoIsDemo = false,
+    this.hideHomePromo = false,
     this.hiddenAssignmentIds = const {},
     this.markingDoneAssignmentIds = const {},
     this.selectedNewsId,
@@ -37,6 +43,16 @@ class StudentHomeView extends StatelessWidget {
   final ValueChanged<StudentHomeAssignment>? onAssignmentTap;
   final ValueChanged<StudentHomeAssignment>? onAssignmentDoneTap;
   final VoidCallback? onHelpTap;
+  final VoidCallback? onHomePromoDismiss;
+
+  /// Managed home promo payload. When null and not [hideHomePromo], uses demo stub.
+  final HomePromoPayload? homePromo;
+
+  /// When true, shows «Пример».
+  final bool homePromoIsDemo;
+
+  /// Successful empty server list — do not resurrect demo (Stage 14.1).
+  final bool hideHomePromo;
   final Set<String> hiddenAssignmentIds;
   final Set<String> markingDoneAssignmentIds;
   final String? selectedNewsId;
@@ -71,10 +87,7 @@ class StudentHomeView extends StatelessWidget {
         SliverToBoxAdapter(
           child: _AnimatedEntry(
             delay: const Duration(milliseconds: 70),
-            child: _TodaySummaryCard(
-              data: data,
-              onTap: onSummaryTap,
-            ),
+            child: _TodaySummaryCard(data: data, onTap: onSummaryTap),
           ),
         ),
         SliverToBoxAdapter(
@@ -92,12 +105,19 @@ class StudentHomeView extends StatelessWidget {
             ),
           ),
         ),
-        SliverToBoxAdapter(
-          child: _AnimatedEntry(
-            delay: const Duration(milliseconds: 170),
-            child: _HelpCard(onTap: onHelpTap),
+        if (!hideHomePromo)
+          SliverToBoxAdapter(
+            child: _AnimatedEntry(
+              delay: const Duration(milliseconds: 170),
+              child: StudentHomePromoCard(
+                payload: homePromo ?? HomePromoPayload.demoStuckWithAssignment,
+                onTap: onHelpTap,
+                onDismiss: onHomePromoDismiss,
+                showDemoBadge:
+                    homePromoIsDemo || (homePromo == null && !hideHomePromo),
+              ),
+            ),
           ),
-        ),
         const SliverToBoxAdapter(child: SizedBox(height: 96)),
       ],
     );
@@ -289,10 +309,7 @@ class _NotificationBadge extends StatelessWidget {
 }
 
 class _TodaySummaryCard extends StatelessWidget {
-  const _TodaySummaryCard({
-    required this.data,
-    required this.onTap,
-  });
+  const _TodaySummaryCard({required this.data, required this.onTap});
 
   final StudentHomeData data;
   final VoidCallback? onTap;
@@ -360,10 +377,7 @@ class _TodaySummaryCard extends StatelessWidget {
                   Positioned(
                     right: 38,
                     bottom: -36,
-                    child: _GlowBubble(
-                      size: 76,
-                      opacity: isDark ? 0.06 : 0.13,
-                    ),
+                    child: _GlowBubble(size: 76, opacity: isDark ? 0.06 : 0.13),
                   ),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -515,11 +529,7 @@ class _LessonPreview extends StatelessWidget {
 }
 
 class _GroupActionPreview extends StatelessWidget {
-  const _GroupActionPreview({
-    required this.action,
-    this.onTap,
-    this.onDelete,
-  });
+  const _GroupActionPreview({required this.action, this.onTap, this.onDelete});
 
   final StudentHomeGroupAction action;
   final VoidCallback? onTap;
@@ -530,10 +540,9 @@ class _GroupActionPreview extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final foreground = isDark ? Colors.white : const Color(0xFF1F2937);
     final accent = isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C63D8);
-    final displayTitle =
-        (action.followUpTitle ?? '').trim().isNotEmpty
-            ? action.followUpTitle!.trim()
-            : action.title;
+    final displayTitle = (action.followUpTitle ?? '').trim().isNotEmpty
+        ? action.followUpTitle!.trim()
+        : action.title;
     final listTitle = action.title.trim();
     final hasPickedTopic = (action.followUpTitle ?? '').trim().isNotEmpty;
     // Type first (Тема / Сбор). List name is separate — «Доклад» ≠ задание.
@@ -626,10 +635,7 @@ class _GroupActionPreview extends StatelessWidget {
                     if (v == 'delete') onDelete!();
                   },
                   itemBuilder: (_) => const [
-                    PopupMenuItem(
-                      value: 'delete',
-                      child: Text('Удалить'),
-                    ),
+                    PopupMenuItem(value: 'delete', child: Text('Удалить')),
                   ],
                 ),
             ],
@@ -845,16 +851,11 @@ class _UpcomingItem {
     required this.sortAt,
   });
 
-  factory _UpcomingItem.assignment(StudentHomeAssignment a) => _UpcomingItem._(
-        assignment: a,
-        sortAt: a.dueAt,
-      );
+  factory _UpcomingItem.assignment(StudentHomeAssignment a) =>
+      _UpcomingItem._(assignment: a, sortAt: a.dueAt);
 
   factory _UpcomingItem.groupAction(StudentHomeGroupAction g) =>
-      _UpcomingItem._(
-        groupAction: g,
-        sortAt: g.occursAt,
-      );
+      _UpcomingItem._(groupAction: g, sortAt: g.occursAt);
 
   final StudentHomeAssignment? assignment;
   final StudentHomeGroupAction? groupAction;
@@ -1016,11 +1017,7 @@ class _DoneCheckButton extends StatelessWidget {
 }
 
 class _Pill extends StatelessWidget {
-  const _Pill({
-    required this.icon,
-    required this.text,
-    required this.color,
-  });
+  const _Pill({required this.icon, required this.text, required this.color});
 
   final IconData icon;
   final String text;
@@ -1094,105 +1091,6 @@ class _EmptyAssignments extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _HelpCard extends StatelessWidget {
-  const _HelpCard({required this.onTap});
-
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final titleColor = isDark ? Colors.white : const Color(0xFF111827);
-    final bodyColor =
-        isDark ? Colors.white.withValues(alpha: 0.72) : const Color(0xFF64748B);
-    final accent = isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C63D8);
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(28),
-        child: Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            gradient: isDark
-                ? null
-                : const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [Color(0xFFFFFBFF), Color(0xFFF3EEF9)],
-                  ),
-            color: isDark ? const Color(0xFF182331) : null,
-            borderRadius: BorderRadius.circular(28),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.05),
-                blurRadius: 22,
-                offset: const Offset(0, 10),
-              ),
-            ],
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: isDark ? 0.18 : 0.12),
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Icon(Icons.psychology_alt_outlined, color: accent),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Застрял с заданием?',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        color: titleColor,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Можно разобрать задачу, подготовиться к сдаче или понять, с чего начать.',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: bodyColor,
-                        height: 1.35,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    FilledButton(
-                      onPressed: onTap,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: accent,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                      ),
-                      child: const Text(
-                        'Получить помощь',
-                        style: TextStyle(fontWeight: FontWeight.w800),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
