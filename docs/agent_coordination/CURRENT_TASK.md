@@ -1,41 +1,33 @@
 # CURRENT_TASK
 
-* Status: **STAGES 14–21 LOCAL CHAIN CLOSED** / Codex overall **APPROVE**
-* Active Stage: owner-gated next — remote apply / Edge deploy / Stage 14.1 residuals / physical smoke
-* Branch: `feature/content-platform`
+* Status: **INTEGRATION BLOCKED — Codex 403** (cannot get APPROVE for push/merge/apply)
+* Active Stage: production integration Stages 14–21 — paused before dangerous actions
+* Branch: `feature/content-platform` @ `1392981` (ahead of `origin/refactor/chat-tab`, behind 0)
 * Worktree: `/Users/annasuvorova/student_platform_content`
 * Codex thread: `019fa373-81f2-7962-a8c9-81d86cb62311`
-* Remote: `gwdanmwluhrcfxbnplwd` (**no apply / no deploy / no push**)
+* Remote: `gwdanmwluhrcfxbnplwd` (**no apply / no deploy / no push yet**)
 
-## Just closed (local)
+## Ready locally (P1 gates closed pending Codex re-APPROVE)
 
-* Stage **14–21 acceptance audit** — Codex overall **APPROVE** — `docs/content_platform/STAGE_14_21_ACCEPTANCE_AUDIT.md`
-* Stage **20–21** specs — Codex **APPROVE_WITH_NOTES** → `7b25ca5`
-* Stage **19 completion** — Codex **APPROVE** → `544fcd4`
-* Stage **19 foundation** — Codex **APPROVE_WITH_NOTES** → `716c604`
-* Corrective Stage 14/15.2 checks — Codex **APPROVE** → `91325f1`
-* Stage **18** — Codex **APPROVE** → `8a3f533`
-* Stage **17** — Codex **APPROVE** → `0b4a040`
-* Stage **16.3** — Codex **APPROVE** → `65039d4`
+* Preflight: `docs/content_platform/INTEGRATION_PREFLIGHT_2026_07_30.md`
+* Admin suite **157/157 PASS**
+* Local disposable DB: all 22 Stage 14–19 migrations applied; Stage 14 roleplay PASS; 15.2/17/19 security PASS
+* Remote read-only: tip `stage13_12_11`; before-counts recorded; none of 22 applied
+* Android debug + iOS simulator builds PASS
+* Dashboard production copy fixed; news cache test fixed
 
-## Residuals intentionally OPEN
+## Blocker
 
-1. Stage **14.1** — Admin «Демо» filter + managed-content safe-delete UI + Codex APPROVE 14.1
-2. Managed content Admin version-history UI (SQL restore exists)
-3. Design contract Z matrix (goldens / device / a11y suite)
-4. Event retention cron wiring + formal N+1 evidence artifact
-5. Live `psql` execution of Stage 14 security/roleplay/IDOR checks
-6. Remote migration apply + Edge deploy (owner)
-7. Real Import Studio XLSX apply (owner)
-8. Paid AI (Stage 20) and RF infra execution (Stage 21)
-9. Legacy full `admin_console` suite failures (news/auth widget) — not claimed closed
+Codex CLI returns **HTTP 403** from OpenAI (`Unable to load site` / Ray IDs in HEL). Per rules: do **not** push, merge, remote-apply, or Edge-deploy without Codex APPROVE after CHANGES_REQUESTED.
 
-## Next (owner permission required)
+## Next (when Codex reachable)
 
-1. Remote apply Stages 14–19 + deploy media Edges
-2. Optional Stage 14.1 completion
-3. Physical smoke + real XLSX dry-run
+1. Resume Codex integration re-review → APPROVE
+2. Push `feature/content-platform`
+3. Backup tag on `refactor/chat-tab`
+4. Merge into main worktree → tests → push
+5. Remote apply 22 migrations one-by-one + Edge deploy 3 functions + smoke
 
-## Hard bans
+## Hard bans until APPROVE
 
-No remote migration apply · No Edge deploy · No GitHub push · No real import · No merge into `refactor/chat-tab` · No checklist DONE without tests + Codex APPROVE
+No remote migration apply · No Edge deploy · No GitHub push · No merge · No real import
