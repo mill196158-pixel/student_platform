@@ -6,8 +6,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 /// Admin helper for Stage 17 vacancy-media signed upload.
 class VacancyMediaStore {
   VacancyMediaStore({SupabaseClient? client, http.Client? httpClient})
-      : _client = client,
-        _http = httpClient ?? http.Client();
+    : _client = client,
+      _http = httpClient ?? http.Client();
 
   final SupabaseClient? _client;
   final http.Client _http;
@@ -37,9 +37,10 @@ class VacancyMediaStore {
     if (signedUrl.isEmpty || intentId.isEmpty) {
       throw StateError('createUpload missing fields');
     }
-    final leakedPath = (data['path'] ?? data['storage_path'] ?? data['storagePath'])
-        ?.toString()
-        .trim();
+    final leakedPath =
+        (data['path'] ?? data['storage_path'] ?? data['storagePath'])
+            ?.toString()
+            .trim();
     if (leakedPath != null && leakedPath.isNotEmpty) {
       throw StateError('createUpload leaked storage path');
     }
@@ -53,11 +54,7 @@ class VacancyMediaStore {
     }
     final finalize = await _sb.functions.invoke(
       'vacancy-media',
-      body: {
-        'action': 'finalizeUpload',
-        'intentId': intentId,
-        'title': title,
-      },
+      body: {'action': 'finalizeUpload', 'intentId': intentId, 'title': title},
     );
     if (finalize.status >= 400) {
       throw StateError('finalizeUpload failed: ${finalize.status}');

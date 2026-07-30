@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:student_ui/student_ui.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -5,24 +6,30 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/auth/admin_backend_config.dart';
 import '../../../core/auth/admin_session_controller.dart';
 import '../../academic/students/students_repository.dart';
+import '../reference/content_media_store.dart';
+import '../shared/admin_content_backend.dart';
+import '../shared/phone_preview_frame.dart';
+import '../shared/visual_editor_list_panel.dart';
+import '../shared/visual_editor_shell.dart';
+import '../shared/visual_editor_states.dart';
 import 'content_audience_selectors.dart';
 import 'profile_feed_item.dart';
+import 'profile_feed_preview.dart';
 import 'profile_feed_repository.dart';
 import 'supabase_profile_feed_repository.dart';
 
-/// Admin editor for managed Profile feed (`profile_feed_card_v1`).
-///
-/// Create always sets placement `profile_feed` explicitly.
-/// No news import/copy path.
+/// Admin visual editor for managed Profile feed (`profile_feed_card_v1`).
 class ProfileFeedEditorScreen extends StatefulWidget {
   const ProfileFeedEditorScreen({
     super.key,
     this.repository,
     this.session,
+    this.mediaStore,
   });
 
   final ProfileFeedRepository? repository;
   final AdminSessionController? session;
+  final ContentMediaStore? mediaStore;
 
   @override
   State<ProfileFeedEditorScreen> createState() =>
@@ -32,6 +39,14 @@ class ProfileFeedEditorScreen extends StatefulWidget {
 class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
   late final ProfileFeedRepository _repository =
       widget.repository ?? _defaultRepo();
+  late final StudentsRepository _studentsRepository = _defaultStudentsRepo();
+  ContentMediaStore? get _mediaStore {
+    if (widget.mediaStore != null) return widget.mediaStore;
+    if (AdminBackendConfig.isDemoMode) return null;
+    final client = _tryClient();
+    if (client == null) return null;
+    return ContentMediaStore(client: client);
+  }
 
   final _titleController = TextEditingController();
   final _subtitleController = TextEditingController();
@@ -39,38 +54,58 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
   final _ctaRouteController = TextEditingController();
   final _ctaUrlController = TextEditingController();
   final _sortOrderController = TextEditingController(text: '0');
+  final _priorityController = TextEditingController(text: '0');
 
   List<ProfileFeedItem> _items = [];
   String? _selectedId;
+  VisualEditorListTab _listTab = VisualEditorListTab.published;
+  bool _showDemoOnly = false;
   bool _loading = true;
   bool _busy = false;
+  bool _deleting = false;
+  bool _dirty = false;
+  bool _imageUploading = false;
   String _audienceMode = 'all';
-  String _origin = 'admin';
-  DateTime? _startsAt;
-  DateTime? _endsAt;
   List<String> _groupIds = const [];
   List<String> _userIds = const [];
+  DateTime? _startsAt;
+  DateTime? _endsAt;
   ProfileFeedAudiencePreview? _audiencePreview;
   String? _banner;
   String? _loadError;
-  late final StudentsRepository _studentsRepository = _defaultStudentsRepo();
+
+  ProfileFeedAdminListPartitions get _partitions =>
+      partitionAdminProfileFeed(_items);
+
+  VisualEditorTabCounts get _tabCounts => VisualEditorTabCounts(
+    published: _partitions.published.length,
+    drafts: _partitions.drafts.length,
+    archived: _partitions.archived.length,
+  );
+
+  List<ProfileFeedItem> get _tabItems {
+    final parts = _partitions;
+    final base = switch (_listTab) {
+      VisualEditorListTab.published => parts.published,
+      VisualEditorListTab.drafts => parts.drafts,
+      VisualEditorListTab.archived => parts.archived,
+    };
+    if (!_showDemoOnly) return base;
+    return base.where((e) => e.origin == ContentOrigin.demo).toList();
+  }
 
   ProfileFeedItem? get _selected {
+    if (_selectedId == null) return null;
     for (final item in _items) {
       if (item.id == _selectedId) return item;
     }
     return null;
   }
 
-  bool get _canWrite =>
-      widget.session == null ||
-      widget.session!.isLocalPrototype ||
-      widget.session!.capabilities.canWriteContent;
+  bool get _canWrite => widget.session?.capabilities.canWriteContent ?? true;
 
   bool get _canPublish =>
-      widget.session == null ||
-      widget.session!.isLocalPrototype ||
-      widget.session!.capabilities.canPublishContent;
+      widget.session?.capabilities.canPublishContent ?? true;
 
   SupabaseClient? _tryClient() {
     try {
@@ -81,47 +116,27 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
   }
 
   ProfileFeedRepository _defaultRepo() {
-    if (AdminBackendConfig.isDemoMode) return LocalProfileFeedRepository();
-    final client = _tryClient();
-    if (client == null) return LocalProfileFeedRepository();
-    return SupabaseProfileFeedRepository(client: client);
+    return AdminContentBackend.resolveRepository<ProfileFeedRepository>(
+      isDemoMode: AdminBackendConfig.isDemoMode,
+      client: _tryClient(),
+      localFactory: LocalProfileFeedRepository.new,
+      supabaseFactory: (client) =>
+          SupabaseProfileFeedRepository(client: client),
+    );
   }
 
   StudentsRepository _defaultStudentsRepo() {
     if (AdminBackendConfig.isDemoMode) return LocalStudentsRepository();
     final client = _tryClient();
-    if (client == null) return LocalStudentsRepository();
-    return SupabaseStudentsRepository(client: client);
-  }
-
-  String _statusRu(ProfileFeedStatus status) {
-    switch (status) {
-      case ProfileFeedStatus.draft:
-        return 'Черновик';
-      case ProfileFeedStatus.published:
-        return 'Опубликовано';
-      case ProfileFeedStatus.archived:
-        return 'В архиве';
-    }
-  }
-
-  String _audienceModeRu(String mode) {
-    switch (mode) {
-      case 'groups':
-        return 'Группы';
-      case 'users':
-        return 'Пользователи';
-      case 'groups_and_users':
-        return 'Группы и пользователи';
-      default:
-        return 'Все';
-    }
+    if (client != null) return SupabaseStudentsRepository(client: client);
+    if (widget.repository != null) return LocalStudentsRepository();
+    throw StateError(AdminContentBackend.realUnavailableMessage);
   }
 
   @override
   void initState() {
     super.initState();
-    _reload();
+    _bootstrap();
   }
 
   @override
@@ -132,54 +147,113 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
     _ctaRouteController.dispose();
     _ctaUrlController.dispose();
     _sortOrderController.dispose();
+    _priorityController.dispose();
     super.dispose();
   }
 
-  Future<void> _reload() async {
-    setState(() {
-      _loading = true;
-      _loadError = null;
-    });
+  Future<void> _bootstrap() async {
     try {
       final items = await _repository.list();
       if (!mounted) return;
       setState(() {
         _items = items;
-        _selectedId ??= items.isEmpty ? null : items.first.id;
         _loading = false;
+        _loadError = null;
+        _ensureSelectionForTab();
       });
-      final selected = _selected;
-      if (selected != null) _bind(selected);
-    } catch (error) {
+      _syncControllers();
+    } catch (_) {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _loadError = error.toString();
+        _loadError =
+            'Не удалось загрузить ленту профиля. Попробуйте обновить страницу.';
       });
     }
   }
 
-  void _bind(ProfileFeedItem item) {
-    final p = item.payload;
-    _titleController.text = p.title;
-    _subtitleController.text = p.subtitle;
-    _ctaLabelController.text = p.ctaLabel;
-    _ctaRouteController.text = p.ctaRoute ?? '';
-    _ctaUrlController.text = p.ctaUrl ?? '';
-    _audienceMode = item.audienceMode;
-    _origin = switch (item.origin) {
-      ContentOrigin.demo => 'demo',
-      ContentOrigin.admin => 'admin',
-      ContentOrigin.importSource => 'import',
-      ContentOrigin.userSubmission => 'user_submission',
-    };
-    _startsAt = item.startsAt;
-    _endsAt = item.endsAt;
-    _sortOrderController.text = '${item.sortOrder}';
-    _groupIds = item.audienceGroupIds;
-    _userIds = item.audienceUserIds;
+  void _syncControllers() {
+    final selected = _selected;
+    _titleController.value = TextEditingValue(
+      text: selected?.payload.title ?? '',
+      selection: TextSelection.collapsed(
+        offset: (selected?.payload.title ?? '').length,
+      ),
+    );
+    _subtitleController.value = TextEditingValue(
+      text: selected?.payload.subtitle ?? '',
+      selection: TextSelection.collapsed(
+        offset: (selected?.payload.subtitle ?? '').length,
+      ),
+    );
+    _ctaLabelController.value = TextEditingValue(
+      text: selected?.payload.ctaLabel ?? '',
+      selection: TextSelection.collapsed(
+        offset: (selected?.payload.ctaLabel ?? '').length,
+      ),
+    );
+    _ctaRouteController.text = selected?.payload.ctaRoute ?? '';
+    _ctaUrlController.text = selected?.payload.ctaUrl ?? '';
+    _sortOrderController.text = '${selected?.sortOrder ?? 0}';
+    _priorityController.text = '${selected?.priority ?? 0}';
+    _audienceMode = selected?.audienceMode ?? 'all';
+    _groupIds = selected?.audienceGroupIds ?? const [];
+    _userIds = selected?.audienceUserIds ?? const [];
+    _startsAt = selected?.startsAt;
+    _endsAt = selected?.endsAt;
     _audiencePreview = null;
-    setState(() {});
+  }
+
+  void _replaceItem(ProfileFeedItem item) {
+    final index = _items.indexWhere((e) => e.id == item.id);
+    if (index >= 0) _items[index] = item;
+  }
+
+  void _ensureSelectionForTab() {
+    final tabItems = _tabItems;
+    if (tabItems.isEmpty) {
+      _selectedId = null;
+      return;
+    }
+    if (_selectedId != null && tabItems.any((e) => e.id == _selectedId)) {
+      return;
+    }
+    _selectedId = tabItems.first.id;
+  }
+
+  void _select(String id) {
+    ProfileFeedItem? item;
+    for (final candidate in _items) {
+      if (candidate.id == id) {
+        item = candidate;
+        break;
+      }
+    }
+    setState(() {
+      _selectedId = id;
+      if (item != null) {
+        _listTab = switch (item.status) {
+          ProfileFeedStatus.published => VisualEditorListTab.published,
+          ProfileFeedStatus.draft => VisualEditorListTab.drafts,
+          ProfileFeedStatus.archived => VisualEditorListTab.archived,
+        };
+      }
+    });
+    _syncControllers();
+  }
+
+  void _selectNextAfterRemoval(String removedId, List<ProfileFeedItem> before) {
+    final index = before.indexWhere((e) => e.id == removedId);
+    final remaining = before.where((e) => e.id != removedId).toList();
+    if (remaining.isEmpty) {
+      _selectedId = null;
+      return;
+    }
+    if (index >= 0 && index < remaining.length) {
+      _selectedId = remaining[index].id;
+    } else {
+      _selectedId = remaining.last.id;
+    }
   }
 
   ProfileFeedPayload? _draftPayload() {
@@ -199,89 +273,106 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
     return parsed.copyWith(imageAssetId: existingImage);
   }
 
-  Future<void> _run(Future<void> Function() action) async {
-    if (_busy) return;
+  void _updateSelected(ProfileFeedItem Function(ProfileFeedItem item) update) {
+    final selected = _selected;
+    if (selected == null) return;
+    setState(() {
+      _replaceItem(update(selected));
+      _dirty = true;
+    });
+  }
+
+  void _showBanner(String message) => setState(() => _banner = message);
+
+  void _snack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<T?> _runGuarded<T>(Future<T> Function() action) async {
+    if (_busy) return null;
     setState(() {
       _busy = true;
       _banner = null;
     });
     try {
-      await action();
-    } catch (error) {
-      if (!mounted) return;
-      setState(() => _banner = error.toString());
+      return await action();
+    } on ProfileFeedRepositoryException catch (error) {
+      _showBanner(error.message);
+      return null;
+    } catch (_) {
+      _showBanner('Не удалось выполнить операцию. Попробуйте ещё раз.');
+      return null;
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _create() async {
-    final payload = _draftPayload();
-    if (payload == null) {
-      setState(
-        () => _banner =
-            'Нельзя создать: заполните заголовок, подзаголовок и CTA '
-            '(fail-closed, запись не создана).',
-      );
+    if (!_canWrite) {
+      _showBanner('Недостаточно прав для создания карточек.');
       return;
     }
-    await _run(() async {
-      final origin = ContentOrigin.tryParse(_origin);
-      if (origin != ContentOrigin.admin && origin != ContentOrigin.demo) {
-        setState(
-          () => _banner =
-              'Ручное создание только с origin admin|demo. '
-              'Новости сюда не копируются.',
-        );
-        return;
-      }
-      final created = await _repository.createDraft(
-        payload: payload,
-        title: payload.title,
-        origin: origin!,
-      );
-      await _reload();
+    await _runGuarded(() async {
+      final created = await _repository.createDraft();
       if (!mounted) return;
       setState(() {
+        _items = [..._items, created];
+        _listTab = VisualEditorListTab.drafts;
         _selectedId = created.id;
-        _banner =
-            'Черновик создан: шаблон «карточка ленты профиля», '
-            'размещение «лента профиля» (явно).';
+        _dirty = false;
       });
-      final selected = _selected;
-      if (selected != null) _bind(selected);
+      _syncControllers();
+      _snack('Черновик создан');
     });
   }
 
-  Future<void> _save() async {
+  Future<void> _duplicate() async {
     final selected = _selected;
-    if (selected == null) return;
+    if (selected == null || !_canWrite) return;
+    await _runGuarded(() async {
+      final copy = await _repository.duplicate(selected.id);
+      if (!mounted) return;
+      setState(() {
+        _items = [..._items, copy];
+        _listTab = VisualEditorListTab.drafts;
+        _selectedId = copy.id;
+        _dirty = false;
+      });
+      _syncControllers();
+      _snack('Создана копия');
+    });
+  }
+
+  Future<ProfileFeedItem?> _saveSelected() async {
+    final selected = _selected;
+    if (selected == null) return null;
     final payload = _draftPayload();
     if (payload == null) {
-      setState(() => _banner = 'Проверьте поля карточки (fail-closed parse).');
-      return;
+      throw const ProfileFeedRepositoryException(
+        'Проверьте поля карточки (заголовок, подзаголовок, CTA).',
+      );
     }
-    await _run(() async {
-      final nextOrigin =
-          (selected.origin == ContentOrigin.importSource ||
-                  selected.origin == ContentOrigin.userSubmission)
-              ? selected.origin
-              : (ContentOrigin.tryParse(_origin) ?? selected.origin);
-      var next = selected.copyWith(
-        title: payload.title,
-        payload: payload,
-        origin: nextOrigin,
-        startsAt: _startsAt,
-        endsAt: _endsAt,
-        clearStartsAt: _startsAt == null,
-        clearEndsAt: _endsAt == null,
-      );
-      next = await _repository.updateDraft(next);
-      next = await _repository.setPlacements(
-        id: next.id,
-        sortOrder: int.tryParse(_sortOrderController.text.trim()) ?? 0,
-        expectedRowVersion: next.rowVersion,
-      );
+    var next = selected.copyWith(
+      title: payload.title,
+      payload: payload,
+      priority:
+          int.tryParse(_priorityController.text.trim()) ?? selected.priority,
+      startsAt: _startsAt,
+      endsAt: _endsAt,
+      clearStartsAt: _startsAt == null,
+      clearEndsAt: _endsAt == null,
+    );
+    next = await _repository.updateDraft(next);
+    next = await _repository.setPlacements(
+      id: next.id,
+      sortOrder:
+          int.tryParse(_sortOrderController.text.trim()) ?? next.sortOrder,
+      expectedRowVersion: next.rowVersion,
+    );
+    if (_audienceDirty(selected)) {
       next = await _repository.setAudience(
         id: next.id,
         audienceMode: _audienceMode,
@@ -289,21 +380,18 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
         userIds: _userIds,
         expectedRowVersion: next.rowVersion,
       );
-      await _reload();
-      if (!mounted) return;
-      setState(() {
-        _selectedId = next.id;
-        _banner = 'Сохранено.';
-        _audiencePreview = null;
-      });
-      final rebound = _selected;
-      if (rebound != null) _bind(rebound);
+    }
+    if (!mounted) return next;
+    setState(() {
+      _replaceItem(next);
+      _dirty = false;
+      _audiencePreview = null;
     });
+    _syncControllers();
+    return next;
   }
 
-  bool get _audienceDirty {
-    final selected = _selected;
-    if (selected == null) return false;
+  bool _audienceDirty(ProfileFeedItem selected) {
     if (selected.audienceMode != _audienceMode) return true;
     if (!_sameIdSet(selected.audienceGroupIds, _groupIds)) return true;
     if (!_sameIdSet(selected.audienceUserIds, _userIds)) return true;
@@ -312,54 +400,320 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
 
   bool _sameIdSet(List<String> a, List<String> b) {
     if (a.length != b.length) return false;
-    final left = {...a};
-    final right = {...b};
-    return left.length == right.length && left.containsAll(right);
+    return {...a}.containsAll(b);
+  }
+
+  Future<void> _saveDraft() async {
+    if (!_canWrite) {
+      _showBanner('Недостаточно прав для сохранения.');
+      return;
+    }
+    await _runGuarded(() async {
+      final saved = await _saveSelected();
+      if (saved != null) _snack('Черновик сохранён');
+    });
+  }
+
+  Future<void> _publish() async {
+    final selected = _selected;
+    if (selected == null || !_canPublish) return;
+    await _runGuarded(() async {
+      var current = selected;
+      if (_dirty) {
+        final saved = await _saveSelected();
+        if (saved == null) return;
+        current = saved;
+      }
+      final published = await _repository.publish(
+        current.id,
+        current.rowVersion,
+      );
+      if (!mounted) return;
+      setState(() => _replaceItem(published));
+      _snack('Карточка опубликована');
+    });
+  }
+
+  Future<void> _unpublish() async {
+    final selected = _selected;
+    if (selected == null || !_canPublish) return;
+    await _runGuarded(() async {
+      final updated = await _repository.unpublish(
+        selected.id,
+        selected.rowVersion,
+      );
+      if (!mounted) return;
+      setState(() => _replaceItem(updated));
+      _snack('Публикация снята');
+    });
+  }
+
+  Future<void> _archive() async {
+    final selected = _selected;
+    if (selected == null || !_canWrite) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Отправить в архив?'),
+        content: Text('«${selected.title}» скроется из ленты профиля.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('В архив'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final before = List<ProfileFeedItem>.from(_tabItems);
+    await _runGuarded(() async {
+      final updated = await _repository.archive(
+        selected.id,
+        selected.rowVersion,
+      );
+      if (!mounted) return;
+      setState(() {
+        _replaceItem(updated);
+        _selectNextAfterRemoval(updated.id, before);
+      });
+      _syncControllers();
+      _snack('Карточка в архиве');
+    });
+  }
+
+  Future<void> _restoreArchived() async {
+    final selected = _selected;
+    if (selected == null || !selected.isArchived || !_canWrite) return;
+    await _runGuarded(() async {
+      final updated = await _repository.restoreArchived(
+        selected.id,
+        selected.rowVersion,
+      );
+      if (!mounted) return;
+      setState(() {
+        _replaceItem(updated);
+        _listTab = VisualEditorListTab.drafts;
+        _selectedId = updated.id;
+      });
+      _syncControllers();
+      _snack('Карточка восстановлена как черновик');
+    });
+  }
+
+  Future<void> _safeDelete() async {
+    final selected = _selected;
+    if (selected == null || !selected.isArchived || !_canPublish) return;
+    if (_deleting || _busy) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Удалить карточку навсегда?'),
+        content: const Text(
+          'Карточку и её версии восстановить будет нельзя. '
+          'Демо-идентификатор будет помечен как удалённый.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(dialogContext).colorScheme.error,
+            ),
+            child: const Text('Удалить навсегда'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final before = List<ProfileFeedItem>.from(_tabItems);
+    final removedId = selected.id;
+    setState(() {
+      _deleting = true;
+      _busy = true;
+      _banner = null;
+    });
+    try {
+      await _repository.safeDelete(removedId, selected.rowVersion);
+      if (!mounted) return;
+      setState(() {
+        _items = _items.where((e) => e.id != removedId).toList();
+        _selectNextAfterRemoval(removedId, before);
+        _dirty = false;
+      });
+      _syncControllers();
+      _snack('Карточка удалена');
+    } on ProfileFeedRepositoryException catch (error) {
+      _showBanner(error.message);
+    } catch (_) {
+      _showBanner('Не удалось удалить карточку. Попробуйте ещё раз.');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _deleting = false;
+          _busy = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _promoteDemo() async {
+    final selected = _selected;
+    if (selected == null ||
+        selected.origin != ContentOrigin.demo ||
+        !_canWrite) {
+      return;
+    }
+    await _runGuarded(() async {
+      final updated = await _repository.promoteDemo(
+        selected.id,
+        selected.rowVersion,
+      );
+      if (!mounted) return;
+      setState(() => _replaceItem(updated));
+      _snack('Демо-карточка переведена в управляемый контент');
+    });
+  }
+
+  Future<void> _move(int delta) async {
+    if (_listTab == VisualEditorListTab.archived) return;
+    final selected = _selected;
+    if (selected == null) return;
+    final tabItems = List<ProfileFeedItem>.from(_tabItems);
+    final index = tabItems.indexWhere((e) => e.id == selected.id);
+    final target = index + delta;
+    if (index < 0 || target < 0 || target >= tabItems.length) return;
+    final moved = tabItems.removeAt(index);
+    tabItems.insert(target, moved);
+    final otherIds = _items
+        .where((e) => !tabItems.any((t) => t.id == e.id))
+        .map((e) => e.id)
+        .toList();
+    final orderedIds = [...tabItems.map((e) => e.id), ...otherIds];
+    setState(() {
+      for (var i = 0; i < orderedIds.length; i++) {
+        final itemIndex = _items.indexWhere((e) => e.id == orderedIds[i]);
+        if (itemIndex >= 0) {
+          _items[itemIndex] = _items[itemIndex].copyWith(sortOrder: i);
+        }
+      }
+      _items.sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+    });
+    await _runGuarded(() async {
+      await _repository.reorder(
+        tabItems.map((e) => e.id).toList(),
+        tabItems.map((e) => e.rowVersion).toList(),
+      );
+    });
+  }
+
+  Future<void> _pickImage() async {
+    final selected = _selected;
+    if (selected == null || !selected.isDraft) return;
+    final store = _mediaStore;
+    if (store == null) {
+      _showBanner('Загрузка изображений недоступна в локальном режиме.');
+      return;
+    }
+    final picked = await FilePicker.pickFiles(
+      type: FileType.image,
+      withData: true,
+    );
+    final file = picked?.files.single;
+    final bytes = file?.bytes;
+    if (bytes == null || bytes.isEmpty) return;
+    final name = (file?.name ?? '').toLowerCase();
+    final contentType = name.endsWith('.png')
+        ? 'image/png'
+        : name.endsWith('.webp')
+        ? 'image/webp'
+        : 'image/jpeg';
+    setState(() => _imageUploading = true);
+    try {
+      final assetId = await store.uploadBytes(
+        contentItemId: selected.id,
+        bytes: bytes,
+        contentType: contentType,
+        title: file?.name ?? '',
+      );
+      if (!mounted) return;
+      _updateSelected(
+        (item) => item.copyWith(
+          payload: item.payload.copyWith(imageAssetId: assetId),
+        ),
+      );
+      _snack('Изображение загружено');
+    } catch (error) {
+      if (!mounted) return;
+      _showBanner('Не удалось загрузить изображение: $error');
+    } finally {
+      if (mounted) setState(() => _imageUploading = false);
+    }
+  }
+
+  Future<void> _clearImage() async {
+    _updateSelected(
+      (item) => item.copyWith(
+        payload: item.payload.copyWith(clearImageAssetId: true),
+      ),
+    );
   }
 
   Future<void> _previewAudience() async {
     final selected = _selected;
     if (selected == null) return;
-    if (_audienceDirty) {
-      setState(
-        () => _banner =
-            'Сначала сохраните аудиторию — Preview считает только '
-            'сохранённые данные на сервере.',
-      );
+    if (_dirty || _audienceDirty(selected)) {
+      _showBanner('Сначала сохраните черновик с актуальной аудиторией.');
       return;
     }
-    await _run(() async {
+    await _runGuarded(() async {
       final preview = await _repository.previewAudience(selected.id);
       if (!mounted) return;
       setState(() {
         _audiencePreview = preview;
         _banner =
             'Preview аудитории: ${preview.recipientCount} получателей '
-            '(${_audienceModeRu(preview.audienceMode)}; '
-            'групп: ${preview.groupCount}; '
-            'явных пользователей: ${preview.explicitUserCount}). '
-            'Список студентов не показывается.';
+            '(групп: ${preview.groupCount}; '
+            'явных пользователей: ${preview.explicitUserCount}).';
       });
     });
   }
 
-  Future<void> _publish() async {
+  Future<void> _showVersions() async {
     final selected = _selected;
     if (selected == null) return;
-    await _run(() async {
-      await _repository.publish(selected.id, selected.rowVersion);
-      await _reload();
-      setState(() => _banner = 'Опубликовано.');
-    });
-  }
-
-  Future<void> _archive() async {
-    final selected = _selected;
-    if (selected == null) return;
-    await _run(() async {
-      await _repository.archive(selected.id, selected.rowVersion);
-      await _reload();
-      setState(() => _banner = 'В архиве.');
+    final versions = await _runGuarded(
+      () => _repository.listVersions(selected.id),
+    );
+    if (versions == null || !mounted) return;
+    if (versions.isEmpty) {
+      _snack('История версий пуста');
+      return;
+    }
+    final restore = await showDialog<int>(
+      context: context,
+      builder: (dialogContext) => _VersionHistoryDialog(versions: versions),
+    );
+    if (restore == null) return;
+    await _runGuarded(() async {
+      final restored = await _repository.restoreVersion(
+        selected.id,
+        restore,
+        selected.rowVersion,
+      );
+      if (!mounted) return;
+      setState(() {
+        _replaceItem(restored);
+        _dirty = false;
+      });
+      _syncControllers();
+      _snack('Версия $restore восстановлена');
     });
   }
 
@@ -378,295 +732,792 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
       } else {
         _endsAt = date;
       }
+      _dirty = true;
     });
+  }
+
+  void _openCardDetail(ManagedProfileFeedCard card) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Предпросмотр карточки',
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 180,
+              child: StudentProfileFeedCard(
+                payload: card.payload,
+                showDemoBadge: card.showDemoBadge,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              card.payload.subtitle,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            if (card.payload.ctaRoute != null || card.payload.ctaUrl != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  card.payload.ctaRoute ?? card.payload.ctaUrl ?? '',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFF6B7280),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmDiscard() async {
+    final navigator = Navigator.of(context);
+    final discard = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Несохранённые изменения'),
+        content: const Text('Выйти без сохранения черновика?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Остаться'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Выйти'),
+          ),
+        ],
+      ),
+    );
+    if (discard == true && mounted) {
+      setState(() => _dirty = false);
+      navigator.maybePop();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
+    if (_loading) return const VisualEditorLoadingState();
     if (_loadError != null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(_loadError!),
-            const SizedBox(height: 12),
-            FilledButton(onPressed: _reload, child: const Text('Повторить')),
-          ],
-        ),
+      return VisualEditorErrorState(
+        message: _loadError!,
+        onRetry: () {
+          setState(() => _loading = true);
+          _bootstrap();
+        },
       );
     }
 
     final selected = _selected;
-    final preview = _draftPayload() ?? ProfileFeedPayload.demoFeed.first;
-    final draftOnly =
-        selected == null || selected.status == ProfileFeedStatus.draft;
+    final previewItems = _partitions.publishedPreviewItems;
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        SizedBox(
-          width: 280,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+    return VisualEditorShell(
+      title: 'Визуальный редактор ленты профиля',
+      selectedTitle: selected?.title,
+      statusChip: selected?.status.russianLabel,
+      originDemoBadge: selected?.origin == ContentOrigin.demo,
+      dirty: _dirty,
+      busy: _busy || _imageUploading,
+      banner: _banner,
+      defaultInfoMessage:
+          'Размещение profile_feed / шаблон profile_feed_card_v1. '
+          'Новости сюда не копируются.',
+      canWrite: _canWrite,
+      canPublish: _canPublish && selected != null && !selected.isArchived,
+      canUnpublish: _canPublish,
+      listTab: _listTab,
+      tabCounts: _tabCounts,
+      onTabChanged: (tab) {
+        setState(() {
+          _listTab = tab;
+          _ensureSelectionForTab();
+        });
+        _syncControllers();
+      },
+      onCreate: _canWrite ? _create : null,
+      onSaveDraft: _saveDraft,
+      onPublish: _publish,
+      onUnpublish: _unpublish,
+      onVersions: _showVersions,
+      onPopDirtyConfirm: _confirmDiscard,
+      listBuilder: (context) => VisualEditorListPanel(
+        panelTitle: 'Карточки ленты',
+        tab: _listTab,
+        tabCounts: _tabCounts,
+        items: [
+          for (final item in _tabItems)
+            VisualEditorListItem(
+              id: item.id,
+              title: item.title,
+              subtitle: item.payload.subtitle,
+              isDemo: item.origin == ContentOrigin.demo,
+              statusLabel: item.status.russianLabel,
+              leading: CircleAvatar(
+                backgroundColor: const Color(0xFFDCD0FA),
+                child: Text(
+                  '${item.sortOrder + 1}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF4C1D95),
+                  ),
+                ),
+              ),
+            ),
+        ],
+        selectedId: _selectedId,
+        onTabChanged: (tab) {
+          setState(() {
+            _listTab = tab;
+            _ensureSelectionForTab();
+          });
+          _syncControllers();
+        },
+        onSelected: _select,
+        onMove: _move,
+        onCreate: _canWrite ? _create : null,
+        showDemoOnly: _showDemoOnly,
+        onDemoFilterChanged: (value) => setState(() => _showDemoOnly = value),
+      ),
+      previewBuilder: (context) => _ProfileFeedPhonePreview(
+        cards: [
+          for (final item in previewItems)
+            item.toManagedCard(showDemoBadge: false),
+        ],
+        selectedId: previewItems.any((e) => e.id == _selectedId)
+            ? _selectedId
+            : null,
+        onCardTap: (card) {
+          _select(card.id);
+          _openCardDetail(card);
+        },
+        onVisibleCard: (card) {
+          if (_selectedId != card.id) _select(card.id);
+        },
+      ),
+      propertiesBuilder: (context) => selected == null
+          ? VisualEditorEmptyState(
+              message: _tabItems.isEmpty
+                  ? _listTab.emptyMessageRu
+                  : 'Выберите карточку',
+              actionLabel: _canWrite && _tabItems.isEmpty ? 'Создать' : null,
+              onAction: _canWrite && _tabItems.isEmpty ? _create : null,
+            )
+          : _PropertiesPanel(
+              selected: selected,
+              canWrite: _canWrite,
+              canPublish: _canPublish,
+              busy: _busy,
+              deleting: _deleting,
+              imageUploading: _imageUploading,
+              mediaAvailable: _mediaStore != null,
+              titleController: _titleController,
+              subtitleController: _subtitleController,
+              ctaLabelController: _ctaLabelController,
+              ctaRouteController: _ctaRouteController,
+              ctaUrlController: _ctaUrlController,
+              sortOrderController: _sortOrderController,
+              priorityController: _priorityController,
+              audienceMode: _audienceMode,
+              groupIds: _groupIds,
+              userIds: _userIds,
+              startsAt: _startsAt,
+              endsAt: _endsAt,
+              audiencePreview: _audiencePreview,
+              studentsRepository: _studentsRepository,
+              onTitleChanged: (value) => _updateSelected(
+                (item) => item.copyWith(
+                  title: value,
+                  payload: item.payload.copyWith(title: value),
+                ),
+              ),
+              onSubtitleChanged: (value) => _updateSelected(
+                (item) => item.copyWith(
+                  payload: item.payload.copyWith(subtitle: value),
+                ),
+              ),
+              onCtaLabelChanged: (value) => _updateSelected(
+                (item) => item.copyWith(
+                  payload: item.payload.copyWith(ctaLabel: value),
+                ),
+              ),
+              onCtaRouteChanged: (value) => _updateSelected(
+                (item) => item.copyWith(
+                  payload: item.payload.copyWith(
+                    ctaRoute: value.trim().isEmpty ? null : value.trim(),
+                    clearCtaRoute: value.trim().isEmpty,
+                  ),
+                ),
+              ),
+              onCtaUrlChanged: (value) => _updateSelected(
+                (item) => item.copyWith(
+                  payload: item.payload.copyWith(
+                    ctaUrl: value.trim().isEmpty ? null : value.trim(),
+                    clearCtaUrl: value.trim().isEmpty,
+                  ),
+                ),
+              ),
+              onSortOrderChanged: (_) => setState(() => _dirty = true),
+              onPriorityChanged: (_) => setState(() => _dirty = true),
+              onAudienceModeChanged: (value) => setState(() {
+                _audienceMode = value;
+                _audiencePreview = null;
+                _dirty = true;
+              }),
+              onAudienceChanged: ({required groupIds, required userIds}) {
+                setState(() {
+                  _groupIds = groupIds;
+                  _userIds = userIds;
+                  _audiencePreview = null;
+                  _dirty = true;
+                });
+              },
+              onPickStarts: () => _pickDate(starts: true),
+              onPickEnds: () => _pickDate(starts: false),
+              onClearSchedule: () => setState(() {
+                _startsAt = null;
+                _endsAt = null;
+                _dirty = true;
+              }),
+              onPickImage: _pickImage,
+              onClearImage: _clearImage,
+              onDuplicate: _duplicate,
+              onArchive: _archive,
+              onRestoreArchived: _restoreArchived,
+              onSafeDelete: _safeDelete,
+              onPromoteDemo: _promoteDemo,
+              onPreviewAudience: _previewAudience,
+            ),
+    );
+  }
+}
+
+class _ProfileFeedPhonePreview extends StatelessWidget {
+  const _ProfileFeedPhonePreview({
+    required this.cards,
+    required this.selectedId,
+    required this.onCardTap,
+    required this.onVisibleCard,
+  });
+
+  final List<ManagedProfileFeedCard> cards;
+  final String? selectedId;
+  final ValueChanged<ManagedProfileFeedCard> onCardTap;
+  final ValueChanged<ManagedProfileFeedCard> onVisibleCard;
+
+  @override
+  Widget build(BuildContext context) {
+    return PhonePreviewFrame(
+      child: Theme(
+        data: studentPlatformLightTheme(),
+        child: ColoredBox(
+          color: const Color(0xFFFAF8FC),
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 56, 16, 24),
             children: [
-              Text(
-                'Лента профиля',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleLarge
-                    ?.copyWith(fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 8),
+              const _ProfilePreviewHeader(),
+              const SizedBox(height: 20),
               const Text(
-                'Только placement profile_feed / template '
-                'profile_feed_card_v1. Новости не копируются.',
-              ),
-              const SizedBox(height: 12),
-              if (_canWrite)
-                FilledButton.icon(
-                  onPressed: _busy ? null : _create,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Новая карточка'),
+                'Лента',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF111827),
                 ),
-              const SizedBox(height: 12),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: _items.length,
-                  itemBuilder: (context, index) {
-                    final item = _items[index];
-                    return ListTile(
-                      selected: item.id == _selectedId,
-                      title: Text(item.title),
-                      subtitle: Text(
-                        '${_statusRu(item.status)} · '
-                        '${item.origin.labelRu} · порядок ${item.sortOrder + 1}',
+              ),
+              const SizedBox(height: 10),
+              if (cards.isEmpty)
+                const Card(
+                  child: Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Text(
+                      'Нет опубликованных карточек для предпросмотра',
+                    ),
+                  ),
+                )
+              else
+                selectedId == null
+                    ? StudentProfileFeedCarousel(
+                        cards: cards,
+                        onTap: onCardTap,
+                        onVisibleCard: onVisibleCard,
+                      )
+                    : DecoratedBox(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: const Color(0xFF6656D9),
+                            width: 2,
+                          ),
+                        ),
+                        child: StudentProfileFeedCarousel(
+                          cards: cards,
+                          onTap: onCardTap,
+                          onVisibleCard: onVisibleCard,
+                        ),
                       ),
-                      onTap: () {
-                        setState(() => _selectedId = item.id);
-                        _bind(item);
-                      },
-                    );
-                  },
-                ),
-              ),
             ],
           ),
         ),
-        const VerticalDivider(width: 24),
-        Expanded(
-          child: selected == null
-              ? const Center(child: Text('Создайте карточку ленты.'))
-              : ListView(
-                  children: [
-                    if (_banner != null) ...[
-                      Text(_banner!),
-                      const SizedBox(height: 8),
-                    ],
-                    Text(
-                      'Preview (тот же виджет, что Mobile)',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleMedium
-                          ?.copyWith(fontWeight: FontWeight.w800),
-                    ),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      height: 160,
-                      child: StudentProfileFeedCard(
-                        payload: preview,
-                        showDemoBadge: selected.origin == ContentOrigin.demo,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: _titleController,
-                      decoration:
-                          const InputDecoration(labelText: 'Заголовок'),
-                      enabled: _canWrite && draftOnly,
-                      onChanged: (_) => setState(() {}),
-                    ),
-                    TextField(
-                      controller: _subtitleController,
-                      decoration:
-                          const InputDecoration(labelText: 'Подзаголовок'),
-                      enabled: _canWrite && draftOnly,
-                      onChanged: (_) => setState(() {}),
-                    ),
-                    TextField(
-                      controller: _ctaLabelController,
-                      decoration: const InputDecoration(labelText: 'CTA'),
-                      enabled: _canWrite && draftOnly,
-                      onChanged: (_) => setState(() {}),
-                    ),
-                    TextField(
-                      controller: _ctaRouteController,
-                      decoration: const InputDecoration(
-                        labelText: 'Внутренний маршрут',
-                      ),
-                      enabled: _canWrite && draftOnly,
-                    ),
-                    TextField(
-                      controller: _ctaUrlController,
-                      decoration: const InputDecoration(
-                        labelText: 'Внешняя ссылка',
-                      ),
-                      enabled: _canWrite && draftOnly,
-                    ),
-                    const SizedBox(height: 8),
-                    const InputDecorator(
-                      decoration: InputDecoration(
-                        labelText: 'Иллюстрация',
-                        helperText:
-                            'image_asset_id отключён до signed-URL path; '
-                            'существующий id сохраняется при save.',
-                      ),
-                      child: Text('— не редактируется —'),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _sortOrderController,
-                      decoration: const InputDecoration(
-                        labelText: 'Порядок (sort_order)',
-                      ),
-                      enabled: _canWrite && draftOnly,
-                      keyboardType: TextInputType.number,
-                    ),
-                    DropdownButtonFormField<String>(
-                      key: ValueKey('audience-$_audienceMode'),
-                      initialValue: _audienceMode,
-                      decoration: const InputDecoration(
-                        labelText: 'Аудитория',
-                      ),
-                      items: const [
-                        DropdownMenuItem(
-                          value: 'all',
-                          child: Text('Все'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'groups',
-                          child: Text('Группы'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'users',
-                          child: Text('Пользователи'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'groups_and_users',
-                          child: Text('Группы и пользователи'),
-                        ),
-                      ],
-                      onChanged: !_canWrite || !draftOnly
-                          ? null
-                          : (value) {
-                              if (value == null) return;
-                              setState(() {
-                                _audienceMode = value;
-                                _audiencePreview = null;
-                              });
-                            },
-                    ),
-                    const SizedBox(height: 8),
-                    ContentAudienceSelectors(
-                      studentsRepository: _studentsRepository,
-                      audienceMode: _audienceMode,
-                      selectedGroupIds: _groupIds,
-                      selectedUserIds: _userIds,
-                      enabled: _canWrite && draftOnly,
-                      onChanged: ({
-                        required groupIds,
-                        required userIds,
-                      }) {
-                        setState(() {
-                          _groupIds = groupIds;
-                          _userIds = userIds;
-                          _audiencePreview = null;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 8),
-                    OutlinedButton.icon(
-                      onPressed: _busy || selected == null
-                          ? null
-                          : _previewAudience,
-                      icon: const Icon(Icons.preview_outlined),
-                      label: const Text('Preview аудитории'),
-                    ),
-                    if (_audiencePreview != null) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        'Получателей: ${_audiencePreview!.recipientCount}. '
-                        'Групп в разбивке: ${_audiencePreview!.groupCount}. '
-                        'Явных пользователей: '
-                        '${_audiencePreview!.explicitUserCount}.',
-                      ),
-                    ],
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      children: [
-                        OutlinedButton(
-                          onPressed: !_canWrite || !draftOnly
-                              ? null
-                              : () => _pickDate(starts: true),
-                          child: Text(
-                            _startsAt == null
-                                ? 'Начало (не задано)'
-                                : 'Начало: ${_startsAt!.toIso8601String().substring(0, 10)}',
-                          ),
-                        ),
-                        OutlinedButton(
-                          onPressed: !_canWrite || !draftOnly
-                              ? null
-                              : () => _pickDate(starts: false),
-                          child: Text(
-                            _endsAt == null
-                                ? 'Конец (не задано)'
-                                : 'Конец: ${_endsAt!.toIso8601String().substring(0, 10)}',
-                          ),
-                        ),
-                        if (_canWrite && draftOnly)
-                          TextButton(
-                            onPressed: () => setState(() {
-                              _startsAt = null;
-                              _endsAt = null;
-                            }),
-                            child: const Text('Сбросить даты'),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8,
-                      children: [
-                        FilledButton(
-                          onPressed: !_canWrite || _busy || !draftOnly
-                              ? null
-                              : _save,
-                          child: const Text('Сохранить'),
-                        ),
-                        FilledButton.tonal(
-                          onPressed: !_canPublish ||
-                                  _busy ||
-                                  selected.status != ProfileFeedStatus.draft
-                              ? null
-                              : _publish,
-                          child: const Text('Опубликовать'),
-                        ),
-                        OutlinedButton(
-                          onPressed: !_canWrite ||
-                                  _busy ||
-                                  selected.status == ProfileFeedStatus.archived
-                              ? null
-                              : _archive,
-                          child: const Text('В архив'),
-                        ),
-                      ],
-                    ),
-                  ],
+      ),
+    );
+  }
+}
+
+class _ProfilePreviewHeader extends StatelessWidget {
+  const _ProfilePreviewHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        CircleAvatar(
+          radius: 42,
+          backgroundColor: const Color(0xFFE9E0F8),
+          child: Text(
+            'М',
+            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+              fontWeight: FontWeight.w900,
+              color: const Color(0xFF4C1D95),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        const Text(
+          'Минь',
+          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'СПбГASU · 1-См(ВВ)-2',
+          style: TextStyle(
+            color: Color(0xFF6B7280),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PropertiesPanel extends StatelessWidget {
+  const _PropertiesPanel({
+    required this.selected,
+    required this.canWrite,
+    required this.canPublish,
+    required this.busy,
+    required this.deleting,
+    required this.imageUploading,
+    required this.mediaAvailable,
+    required this.titleController,
+    required this.subtitleController,
+    required this.ctaLabelController,
+    required this.ctaRouteController,
+    required this.ctaUrlController,
+    required this.sortOrderController,
+    required this.priorityController,
+    required this.audienceMode,
+    required this.groupIds,
+    required this.userIds,
+    required this.startsAt,
+    required this.endsAt,
+    required this.audiencePreview,
+    required this.studentsRepository,
+    required this.onTitleChanged,
+    required this.onSubtitleChanged,
+    required this.onCtaLabelChanged,
+    required this.onCtaRouteChanged,
+    required this.onCtaUrlChanged,
+    required this.onSortOrderChanged,
+    required this.onPriorityChanged,
+    required this.onAudienceModeChanged,
+    required this.onAudienceChanged,
+    required this.onPickStarts,
+    required this.onPickEnds,
+    required this.onClearSchedule,
+    required this.onPickImage,
+    required this.onClearImage,
+    required this.onDuplicate,
+    required this.onArchive,
+    required this.onRestoreArchived,
+    required this.onSafeDelete,
+    required this.onPromoteDemo,
+    required this.onPreviewAudience,
+  });
+
+  final ProfileFeedItem selected;
+  final bool canWrite;
+  final bool canPublish;
+  final bool busy;
+  final bool deleting;
+  final bool imageUploading;
+  final bool mediaAvailable;
+  final TextEditingController titleController;
+  final TextEditingController subtitleController;
+  final TextEditingController ctaLabelController;
+  final TextEditingController ctaRouteController;
+  final TextEditingController ctaUrlController;
+  final TextEditingController sortOrderController;
+  final TextEditingController priorityController;
+  final String audienceMode;
+  final List<String> groupIds;
+  final List<String> userIds;
+  final DateTime? startsAt;
+  final DateTime? endsAt;
+  final ProfileFeedAudiencePreview? audiencePreview;
+  final StudentsRepository studentsRepository;
+  final ValueChanged<String> onTitleChanged;
+  final ValueChanged<String> onSubtitleChanged;
+  final ValueChanged<String> onCtaLabelChanged;
+  final ValueChanged<String> onCtaRouteChanged;
+  final ValueChanged<String> onCtaUrlChanged;
+  final ValueChanged<String> onSortOrderChanged;
+  final ValueChanged<String> onPriorityChanged;
+  final ValueChanged<String> onAudienceModeChanged;
+  final void Function({
+    required List<String> groupIds,
+    required List<String> userIds,
+  })
+  onAudienceChanged;
+  final VoidCallback onPickStarts;
+  final VoidCallback onPickEnds;
+  final VoidCallback onClearSchedule;
+  final VoidCallback onPickImage;
+  final VoidCallback onClearImage;
+  final VoidCallback onDuplicate;
+  final VoidCallback onArchive;
+  final VoidCallback onRestoreArchived;
+  final VoidCallback onSafeDelete;
+  final VoidCallback onPromoteDemo;
+  final VoidCallback onPreviewAudience;
+
+  bool get _enabled => canWrite && selected.isDraft;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Text(
+            'Свойства карточки',
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: titleController,
+            enabled: _enabled,
+            onChanged: onTitleChanged,
+            decoration: const InputDecoration(labelText: 'Заголовок'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: subtitleController,
+            enabled: _enabled,
+            onChanged: onSubtitleChanged,
+            maxLines: 3,
+            decoration: const InputDecoration(labelText: 'Подзаголовок'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: ctaLabelController,
+            enabled: _enabled,
+            onChanged: onCtaLabelChanged,
+            decoration: const InputDecoration(labelText: 'Текст кнопки'),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _enabled && mediaAvailable && !imageUploading
+                      ? onPickImage
+                      : null,
+                  icon: imageUploading
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.image_outlined),
+                  label: Text(imageUploading ? 'Загрузка…' : 'Иллюстрация'),
                 ),
+              ),
+              if (selected.payload.imageAssetId != null) ...[
+                const SizedBox(width: 8),
+                IconButton(
+                  tooltip: 'Убрать изображение',
+                  onPressed: _enabled ? onClearImage : null,
+                  icon: const Icon(Icons.close),
+                ),
+              ],
+            ],
+          ),
+          if (!mediaAvailable)
+            const Padding(
+              padding: EdgeInsets.only(top: 6),
+              child: Text(
+                'Загрузка через content-media доступна только при подключении к Supabase.',
+                style: TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+              ),
+            ),
+          const Divider(height: 28),
+          DropdownButtonFormField<String>(
+            key: ValueKey('audience-$audienceMode'),
+            initialValue: audienceMode,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Аудитория'),
+            items: const [
+              DropdownMenuItem(value: 'all', child: Text('Все')),
+              DropdownMenuItem(value: 'groups', child: Text('Группы')),
+              DropdownMenuItem(value: 'users', child: Text('Пользователи')),
+              DropdownMenuItem(
+                value: 'groups_and_users',
+                child: Text('Группы и пользователи'),
+              ),
+            ],
+            onChanged: !_enabled
+                ? null
+                : (value) {
+                    if (value != null) onAudienceModeChanged(value);
+                  },
+          ),
+          const SizedBox(height: 8),
+          ContentAudienceSelectors(
+            studentsRepository: studentsRepository,
+            audienceMode: audienceMode,
+            selectedGroupIds: groupIds,
+            selectedUserIds: userIds,
+            enabled: _enabled,
+            onChanged: onAudienceChanged,
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: busy ? null : onPreviewAudience,
+            icon: const Icon(Icons.preview_outlined),
+            label: const Text('Preview аудитории'),
+          ),
+          if (audiencePreview != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Получателей: ${audiencePreview!.recipientCount}. '
+              'Групп: ${audiencePreview!.groupCount}. '
+              'Явных пользователей: ${audiencePreview!.explicitUserCount}.',
+            ),
+          ],
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton(
+                onPressed: _enabled ? onPickStarts : null,
+                child: Text(
+                  startsAt == null
+                      ? 'Начало (не задано)'
+                      : 'Начало: ${startsAt!.toIso8601String().substring(0, 10)}',
+                ),
+              ),
+              OutlinedButton(
+                onPressed: _enabled ? onPickEnds : null,
+                child: Text(
+                  endsAt == null
+                      ? 'Конец (не задано)'
+                      : 'Конец: ${endsAt!.toIso8601String().substring(0, 10)}',
+                ),
+              ),
+              if (_enabled)
+                TextButton(
+                  onPressed: onClearSchedule,
+                  child: const Text('Сбросить даты'),
+                ),
+            ],
+          ),
+          const Divider(height: 28),
+          if (selected.isArchived) ...[
+            FilledButton.tonalIcon(
+              onPressed: canWrite && !busy && !deleting
+                  ? onRestoreArchived
+                  : null,
+              icon: const Icon(Icons.unarchive_outlined),
+              label: const Text('Восстановить как черновик'),
+            ),
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              onPressed: canPublish && !busy && !deleting ? onSafeDelete : null,
+              style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+              ),
+              icon: deleting
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.delete_forever_outlined),
+              label: Text(deleting ? 'Удаление…' : 'Удалить окончательно'),
+            ),
+          ] else ...[
+            if (selected.origin == ContentOrigin.demo)
+              FilledButton.tonalIcon(
+                onPressed: canWrite && !busy ? onPromoteDemo : null,
+                icon: const Icon(Icons.upgrade_outlined),
+                label: const Text('Перевести из демо'),
+              ),
+            if (selected.origin == ContentOrigin.demo)
+              const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: canWrite ? onDuplicate : null,
+              icon: const Icon(Icons.copy_outlined),
+              label: const Text('Дублировать'),
+            ),
+            const SizedBox(height: 10),
+            TextButton.icon(
+              onPressed: canWrite ? onArchive : null,
+              style: TextButton.styleFrom(
+                foregroundColor: Theme.of(context).colorScheme.error,
+              ),
+              icon: const Icon(Icons.archive_outlined),
+              label: const Text('В архив'),
+            ),
+          ],
+          const SizedBox(height: 16),
+          ExpansionTile(
+            title: const Text(
+              'Дополнительно',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+            children: [
+              _ReadOnlyField(label: 'ID', value: selected.id),
+              _ReadOnlyField(
+                label: 'legacy_key',
+                value: selected.legacyKey ?? '—',
+              ),
+              _ReadOnlyField(
+                label: 'row_version',
+                value: '${selected.rowVersion}',
+              ),
+              _ReadOnlyField(
+                label: 'version_number',
+                value: '${selected.versionNumber}',
+              ),
+              _ReadOnlyField(label: 'origin', value: selected.origin.labelRu),
+              TextField(
+                controller: sortOrderController,
+                enabled: _enabled,
+                keyboardType: TextInputType.number,
+                onChanged: onSortOrderChanged,
+                decoration: const InputDecoration(labelText: 'sort_order'),
+              ),
+              TextField(
+                controller: priorityController,
+                enabled: _enabled,
+                keyboardType: TextInputType.number,
+                onChanged: onPriorityChanged,
+                decoration: const InputDecoration(labelText: 'priority'),
+              ),
+              TextField(
+                controller: ctaRouteController,
+                enabled: _enabled,
+                onChanged: onCtaRouteChanged,
+                decoration: const InputDecoration(labelText: 'cta_route'),
+              ),
+              TextField(
+                controller: ctaUrlController,
+                enabled: _enabled,
+                onChanged: onCtaUrlChanged,
+                decoration: const InputDecoration(labelText: 'cta_url'),
+              ),
+              _ReadOnlyField(
+                label: 'image_asset_id',
+                value: selected.payload.imageAssetId ?? '—',
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReadOnlyField extends StatelessWidget {
+  const _ReadOnlyField({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: InputDecorator(
+        decoration: InputDecoration(labelText: label),
+        child: SelectableText(value),
+      ),
+    );
+  }
+}
+
+class _VersionHistoryDialog extends StatelessWidget {
+  const _VersionHistoryDialog({required this.versions});
+
+  final List<ProfileFeedVersionInfo> versions;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('История версий'),
+      content: SizedBox(
+        width: 380,
+        child: ListView.separated(
+          shrinkWrap: true,
+          itemCount: versions.length,
+          separatorBuilder: (_, _) => const Divider(height: 1),
+          itemBuilder: (context, index) {
+            final version = versions[index];
+            final subtitleParts = <String>[
+              if (version.title.isNotEmpty) version.title,
+              if (version.status != null) version.status!.russianLabel,
+            ];
+            return ListTile(
+              leading: CircleAvatar(child: Text('${version.versionNumber}')),
+              title: Text('Версия ${version.versionNumber}'),
+              subtitle: subtitleParts.isEmpty
+                  ? null
+                  : Text(subtitleParts.join(' · ')),
+              trailing: TextButton(
+                onPressed: () =>
+                    Navigator.of(context).pop(version.versionNumber),
+                child: const Text('Восстановить'),
+              ),
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Закрыть'),
         ),
       ],
     );

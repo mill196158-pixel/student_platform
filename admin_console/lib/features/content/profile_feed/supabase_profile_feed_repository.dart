@@ -25,10 +25,11 @@ class SupabaseProfileFeedRepository implements ProfileFeedRepository {
   SupabaseProfileFeedRepository({
     SupabaseClient? client,
     ProfileFeedAdminRpcClient? rpcClient,
-  }) : _rpc = rpcClient ??
-            SupabaseProfileFeedAdminRpcClient(
-              client ?? Supabase.instance.client,
-            );
+  }) : _rpc =
+           rpcClient ??
+           SupabaseProfileFeedAdminRpcClient(
+             client ?? Supabase.instance.client,
+           );
 
   final ProfileFeedAdminRpcClient _rpc;
 
@@ -134,23 +135,29 @@ class SupabaseProfileFeedRepository implements ProfileFeedRepository {
       'p_placement': 'profile_feed',
       'p_origin': null,
     });
-    return _asList(data)
-        .map(ProfileFeedItem.tryParse)
-        .whereType<ProfileFeedItem>()
-        .toList();
+    return _asList(
+      data,
+    ).map(ProfileFeedItem.tryParse).whereType<ProfileFeedItem>().toList();
   }
 
   @override
   Future<ProfileFeedItem> createDraft({
-    required ProfileFeedPayload payload,
+    ProfileFeedPayload? payload,
     String? title,
     ContentOrigin origin = ContentOrigin.admin,
   }) async {
+    final basePayload =
+        payload ??
+        const ProfileFeedPayload(
+          title: 'Новая карточка',
+          subtitle: 'Краткое описание',
+          ctaLabel: 'Открыть',
+        );
     final data = await _call('admin_create_content_draft', {
       'p_template_key': 'profile_feed_card_v1',
       'p_schema_version': 1,
-      'p_title': title ?? payload.title,
-      'p_payload': payload.toWireJson(),
+      'p_title': title ?? basePayload.title,
+      'p_payload': basePayload.toWireJson(),
       'p_origin': _originWire(origin),
     });
     final created = _parseRequired(data);
@@ -231,6 +238,74 @@ class SupabaseProfileFeedRepository implements ProfileFeedRepository {
   Future<ProfileFeedItem> archive(String id, int expectedRowVersion) async {
     final data = await _call('admin_archive_content', {
       'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return _parseRequired(data);
+  }
+
+  @override
+  Future<ProfileFeedItem> unpublish(String id, int expectedRowVersion) async {
+    final data = await _call('admin_unpublish_content', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return _parseRequired(data);
+  }
+
+  @override
+  Future<ProfileFeedItem> restoreArchived(
+    String id,
+    int expectedRowVersion,
+  ) async {
+    final data = await _call('admin_unarchive_content', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return _parseRequired(data);
+  }
+
+  @override
+  Future<ProfileFeedDeleteResult> safeDelete(
+    String id,
+    int expectedRowVersion,
+  ) async {
+    final data = await _call('admin_safe_delete_content', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return ProfileFeedDeleteResult.fromJson(_asMap(data));
+  }
+
+  @override
+  Future<ProfileFeedItem> duplicate(String id) async {
+    final data = await _call('admin_duplicate_content', {'p_id': id});
+    return _parseRequired(data);
+  }
+
+  @override
+  Future<ProfileFeedItem> promoteDemo(String id, int expectedRowVersion) async {
+    final data = await _call('admin_promote_demo_content', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return _parseRequired(data);
+  }
+
+  @override
+  Future<List<ProfileFeedVersionInfo>> listVersions(String id) async {
+    final data = await _call('admin_list_content_versions', {'p_id': id});
+    return _asList(data).map(ProfileFeedVersionInfo.fromJson).toList();
+  }
+
+  @override
+  Future<ProfileFeedItem> restoreVersion(
+    String id,
+    int versionNumber,
+    int expectedRowVersion,
+  ) async {
+    final data = await _call('admin_restore_content_version', {
+      'p_id': id,
+      'p_version_number': versionNumber,
       'p_expected_row_version': expectedRowVersion,
     });
     return _parseRequired(data);

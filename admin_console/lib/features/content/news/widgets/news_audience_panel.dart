@@ -24,7 +24,8 @@ class NewsAudiencePanel extends StatefulWidget {
     required NewsAudienceMode mode,
     required List<String> groupIds,
     required List<String> userIds,
-  }) onSave;
+  })
+  onSave;
   final Future<NewsAudiencePreview> Function() onPreview;
 
   @override
@@ -117,10 +118,9 @@ class _NewsAudiencePanelState extends State<NewsAudiencePanel> {
       children: [
         Text(
           'Аудитория',
-          style: Theme.of(context)
-              .textTheme
-              .titleMedium
-              ?.copyWith(fontWeight: FontWeight.w800),
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
         ),
         if (!widget.normalizedAvailable)
           const Padding(
@@ -132,13 +132,14 @@ class _NewsAudiencePanelState extends State<NewsAudiencePanel> {
           ),
         const SizedBox(height: 8),
         DropdownButtonFormField<NewsAudienceMode>(
-          initialValue: (_mode == NewsAudienceMode.all ||
+          initialValue:
+              (_mode == NewsAudienceMode.all ||
                   _mode == NewsAudienceMode.groups ||
                   canUseNormalized)
               ? (_mode == NewsAudienceMode.users ||
-                      _mode == NewsAudienceMode.groupsAndUsers
-                  ? NewsAudienceMode.all
-                  : _mode)
+                        _mode == NewsAudienceMode.groupsAndUsers
+                    ? NewsAudienceMode.all
+                    : _mode)
               : NewsAudienceMode.all,
           decoration: const InputDecoration(labelText: 'Режим'),
           items: [
@@ -148,9 +149,7 @@ class _NewsAudiencePanelState extends State<NewsAudiencePanel> {
             ),
             const DropdownMenuItem(
               value: NewsAudienceMode.groups,
-              child: Text(
-                'Группа(ы)',
-              ),
+              child: Text('Группа(ы)'),
             ),
             if (canUseNormalized) ...const [
               DropdownMenuItem(
@@ -179,7 +178,8 @@ class _NewsAudiencePanelState extends State<NewsAudiencePanel> {
           const SizedBox(height: 8),
           TextField(
             controller: _groups,
-            enabled: widget.enabled &&
+            enabled:
+                widget.enabled &&
                 (_mode == NewsAudienceMode.groups ||
                     _mode == NewsAudienceMode.groupsAndUsers),
             decoration: InputDecoration(
@@ -195,7 +195,8 @@ class _NewsAudiencePanelState extends State<NewsAudiencePanel> {
             const SizedBox(height: 8),
             TextField(
               controller: _users,
-              enabled: widget.enabled &&
+              enabled:
+                  widget.enabled &&
                   (_mode == NewsAudienceMode.users ||
                       _mode == NewsAudienceMode.groupsAndUsers),
               decoration: const InputDecoration(
@@ -214,9 +215,7 @@ class _NewsAudiencePanelState extends State<NewsAudiencePanel> {
               child: const Text('Сохранить аудиторию'),
             ),
             OutlinedButton(
-              onPressed: widget.enabled &&
-                      widget.normalizedAvailable &&
-                      !_busy
+              onPressed: widget.enabled && widget.normalizedAvailable && !_busy
                   ? _previewTap
                   : null,
               child: const Text('Preview получателей'),
@@ -231,10 +230,7 @@ class _NewsAudiencePanelState extends State<NewsAudiencePanel> {
             'явных пользователей: ${_preview!.explicitUserCount}',
           ),
         ],
-        if (_banner != null) ...[
-          const SizedBox(height: 8),
-          Text(_banner!),
-        ],
+        if (_banner != null) ...[const SizedBox(height: 8), Text(_banner!)],
       ],
     );
   }

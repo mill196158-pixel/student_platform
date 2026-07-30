@@ -1,7 +1,7 @@
 # Content Platform — Acceptance Checklist
 
 Status: **ACTIVE**
-Updated: **2026-07-29** (Stage 14–21 acceptance audit; 14.1/Z residual open)
+Updated: **2026-07-30** (Stage 14.1 + Design Z closed with Codex APPROVE_WITH_NOTES; media smoke residual)
 Rule: mark `[x]` only with **code + tests + Codex APPROVE** for that item.
 Docs-only items: Codex APPROVE on the docs package.
 Do **not** merge requirements into vague “готово”.
@@ -268,15 +268,15 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Инвентаризация hardcoded/demo элементов записана
 - [x] Демо не удалено до миграции/замены
 - [x] `origin=demo`
-- [ ] Фильтр «Демо» в админке
+- [x] Фильтр «Демо» в админке
 - [x] Архивирование демо через админку
-- [ ] Удаление демо через админку
-- [ ] Замена демо реальным материалом
+- [x] Удаление демо через админку
+- [x] Замена демо реальным материалом
 - [x] Демо не возвращается самопроизвольно после удаления
 - [x] Demo fallback не маскирует ошибку сервера
 - [x] Demo-вакансии: «Пример» или вне production-аудитории
 - [x] Demo-отзывы: «Пример» или вне production-аудитории
-- [ ] Codex APPROVE 14.1
+- [x] Codex APPROVE 14.1 *(APPROVE_WITH_NOTES; media smoke residual)*
 
 ---
 
@@ -748,7 +748,7 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 
 ## AD. Final stop
 
-- [~] Все технически возможные локальные подэтапы выполнены или заблокированы в CURRENT_TASK *(14.1/Z residuals open)*
+- [x] Все технически возможные локальные подэтапы выполнены или заблокированы в CURRENT_TASK *(14.1/Z: media smoke JWT residual)*
 - [x] Каждый завершённый подэтап имеет Codex APPROVE
 - [x] Roadmap обновлён
 - [x] CURRENT_TASK обновлён

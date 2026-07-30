@@ -1,28 +1,48 @@
 # CURRENT_TASK
 
-* Status: **PATH B APPLIED** — migrations + Edge deploy + controlled smoke done
-* Active Stage: production integration Stages 14–21 (post-apply)
+* Status: **READY TO CLOSE** — Stage 14.1 + Design Z (visual editors + demo bootstrap)
+* Active Stage: **14.1 + Design Z**
 * Branch: `refactor/chat-tab`
-* Codex thread: `019fa373-81f2-7962-a8c9-81d86cb62311` — Path B **APPROVE** (logical backup, no PITR)
+* Codex thread: `019fa373-81f2-7962-a8c9-81d86cb62311`
 * Remote: `gwdanmwluhrcfxbnplwd`
-* Backup: `/Users/annasuvorova/student_platform_backups/pre_content_platform_20260730_133051/` (outside Git; `0700`/`0600`)
+* Remote migration: `20260730144804_stage14_1_demo_bootstrap_legacy_keys` **applied**
+* Bootstrap: **applied** (idempotent re-run = 18× `skip_existing`)
 
 ## Done
 
-* Free logical backup verified (full restore + counts/FK); PITR/add-ons not used
-* All **22** Stage 14–19 migrations applied; core counts unchanged (`users=34`, `messages=261`, `news_posts=3`, …); content/vacancies/import rows = 0
-* Security reviews Stage 14–19 **PASS** on remote (Stage 18 allowlist includes pre-existing `subject_alias_review_queue`)
-* Edge deployed: `content-media`, `subject-media`, `vacancy-media` (v1, `verify_jwt=false`, handler auth)
-* Smoke §11 subset: unauth **401**, bad bearer **401**, anon cleanup **403** — all three functions (**9/9**)
+* Audit: Demo Admin = Local\*Repository seeds; Real Admin was empty Supabase tables
+* Inventory bootstrapped 1:1 from Mobile (existing only):
+  * home promo ×1 published (`content:home_promo:stuck_with_assignment`)
+  * profile feed ×3 published
+  * reference categories ×5 + articles ×6 published
+  * vacancies ×3 draft `origin=demo`
+* Residual (not bootstrapped): `subject_info_screen._HelpCard`
+* Shared `VisualEditorShell` + phone preview using `student_ui` widgets
+* Editors: Home promo / Profile feed / Reference / Vacancies — news-parity 3-pane
+* Demo/Real fail-closed: Real mode never falls back to Local when Supabase missing (`AdminContentBackend`)
+* Dashboard Real Admin: bootstrap dry-run → apply; blocks on conflicts
+* Menu: «Карточки главной»; sections Участники/Модерация
+* Checks: roleplay + security review (identity args accepts `boolean` / `p_dry_run boolean`)
 
-## Residuals (not blockers)
+## Remote counts (after bootstrap)
 
-* Full authz upload/download/cross-user + trusted cleanup smoke needs real user JWTs + cleanup secret (owner fixture session)
-* No Web Admin / Mobile interactive verify in this pass
-* No mass import / demo publish / push
+| Table | Count |
+|---|---|
+| content_items | 10 (published, origin=demo) |
+| vacancies | 3 (draft, origin=demo) |
+| reference_categories | 6 (1 seed `general` + 5 demo) |
+| content_item_placements | 10 |
+| content_item_versions | 10 |
+| vacancy_versions | 3 |
+| content_legacy_tombstones | 0 |
+| users / messages / news_posts | 34 / 261 / 3 (unchanged) |
 
-## Next (optional)
+## Residuals
 
-1. Owner JWT fixture smoke for upload/download/cross-user/trusted cleanup
-2. Web Admin + Mobile quick verify against live RPCs
-3. Mark acceptance checklist items that are now live-backed
+* Authenticated media smoke needs runtime JWT (no secrets in agent)
+* Vacancy tags/accentColor remain student_ui presentation-only
+* deno not on PATH for Edge check (no new Edge Functions in this slice)
+
+## Hard bans still active until owner lifts
+
+* No mass publish push / no XLSX import / no force-push / no editing applied migrations

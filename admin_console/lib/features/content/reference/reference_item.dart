@@ -75,7 +75,8 @@ class ReferenceCategoryItem {
       iconKey: iconKey,
       sortOrder: _asInt(json['sort_order']) ?? 0,
       rowVersion: _asInt(json['row_version']) ?? 1,
-      status: parseReferenceCategoryStatus(json['status']) ??
+      status:
+          parseReferenceCategoryStatus(json['status']) ??
           ReferenceCategoryStatus.published,
     );
   }
@@ -117,6 +118,7 @@ class ReferenceArticleItem {
     required this.sortOrder,
     required this.audienceMode,
     this.categoryTitle,
+    this.legacyKey,
     this.audienceGroupIds = const [],
     this.audienceUserIds = const [],
   });
@@ -128,6 +130,9 @@ class ReferenceArticleItem {
   final ReferenceArticlePayload payload;
   final String categoryId;
   final String? categoryTitle;
+
+  /// Stable Stage 14.1 bootstrap identity. It is retained after demo promotion.
+  final String? legacyKey;
   final int rowVersion;
   final int sortOrder;
   final String audienceMode;
@@ -150,10 +155,11 @@ class ReferenceArticleItem {
       Map<String, dynamic>.from(payloadRaw),
     );
     if (payload == null) return null;
-    final categoryId = (json['category_id'] ??
-            json['reference_category_id'] ??
-            json['referenceCategoryId'])
-        ?.toString();
+    final categoryId =
+        (json['category_id'] ??
+                json['reference_category_id'] ??
+                json['referenceCategoryId'])
+            ?.toString();
     if (categoryId == null || categoryId.isEmpty) return null;
     final title = (json['title'] ?? payload.shortText).toString();
     var sortOrder = _asInt(json['sort_order']) ?? 0;
@@ -174,6 +180,7 @@ class ReferenceArticleItem {
       payload: payload,
       categoryId: categoryId,
       categoryTitle: json['category_title']?.toString(),
+      legacyKey: json['legacy_key']?.toString(),
       rowVersion: _asInt(json['row_version']) ?? 1,
       sortOrder: sortOrder,
       audienceMode: (json['audience_mode'] ?? 'all').toString(),
@@ -189,6 +196,7 @@ class ReferenceArticleItem {
     ReferenceArticlePayload? payload,
     String? categoryId,
     String? categoryTitle,
+    String? legacyKey,
     int? rowVersion,
     int? sortOrder,
     String? audienceMode,
@@ -203,6 +211,7 @@ class ReferenceArticleItem {
       payload: payload ?? this.payload,
       categoryId: categoryId ?? this.categoryId,
       categoryTitle: categoryTitle ?? this.categoryTitle,
+      legacyKey: legacyKey ?? this.legacyKey,
       rowVersion: rowVersion ?? this.rowVersion,
       sortOrder: sortOrder ?? this.sortOrder,
       audienceMode: audienceMode ?? this.audienceMode,

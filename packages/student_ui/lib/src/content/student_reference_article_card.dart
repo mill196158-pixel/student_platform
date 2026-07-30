@@ -243,7 +243,9 @@ class _ReferenceBlockTile extends StatelessWidget {
             title: caption ?? 'Изображение',
             subtitle: assetId.isEmpty
                 ? 'Медиа не привязано'
-                : (onOpenAsset == null ? 'asset:$assetId' : 'Открыть изображение'),
+                : (onOpenAsset == null
+                    ? 'asset:$assetId'
+                    : 'Открыть изображение'),
             onTap: assetId.isEmpty || onOpenAsset == null
                 ? null
                 : () => onOpenAsset!(assetId),
@@ -344,7 +346,8 @@ class _IconRow extends StatelessWidget {
           ),
         ),
         if (onTap != null)
-          const Icon(Icons.chevron_right_rounded, size: 18, color: Colors.black38),
+          const Icon(Icons.chevron_right_rounded,
+              size: 18, color: Colors.black38),
       ],
     );
     if (onTap == null) return row;

@@ -6,7 +6,7 @@
 ## Статус документа
 
 - Дата аудита: **27 июля 2026**
-- Обновлено: **29 июля 2026** (добавлены Content Platform Stages 14–21; Stage 13.0–13.12.8 считаются завершёнными)
+- Обновлено: **30 июля 2026** (Stage 14.1 + Design Z: visual editors + demo bootstrap applied on remote)
 - Проверенная основная ветка: `refactor/chat-tab` (база)
 - Рабочая ветка контента: `feature/content-platform`
 - Проверенная административная ветка: `feature/admin-console`
@@ -15,7 +15,7 @@
 - Codex thread: `019fa373-81f2-7962-a8c9-81d86cb62311`
 - Remote project: `gwdanmwluhrcfxbnplwd`
 - Статус карты: **ACTIVE**
-- Content Platform Stages **14–21 локально закрыты** на `feature/content-platform` (remote apply / Edge deploy / Stage 14.1 residuals — owner-gated)
+- Content Platform Stages **14–21** + **14.1/Design Z** на `refactor/chat-tab` (remote migration+bootstrap applied; Edge deploy / media smoke JWT — owner-gated residuals)
 - Owner residuals Stage 13 (не блокируют 14–19): PHYSICAL OCR / two-device topic race / controlled push / REAL XLSX
 - Контрольные документы: `docs/content_platform/CONTENT_PLATFORM_SPEC.md`, `docs/content_platform/ACCEPTANCE_CHECKLIST.md`, `docs/agent_coordination/CURRENT_TASK.md`
 
@@ -947,15 +947,18 @@ Placements v1:
 
 ### Stage 14.1 — Demo content governance
 
-- [ ] инвентаризация hardcoded/demo элементов;
-- [ ] `origin=demo`;
-- [ ] фильтр «Демо» в админке;
-- [ ] архивирование и удаление через админку;
-- [ ] замена реальным материалом;
-- [ ] демо не возвращается самопроизвольно после удаления;
-- [ ] demo fallback не маскирует ошибку сервера;
-- [ ] demo-вакансии/отзывы явно «Пример» или вне production-аудитории;
-- [ ] текущие демо не удалять до готовой миграции/замены.
+Status: **DONE** / Codex **APPROVE_WITH_NOTES** (2026-07-30) — migration `20260730144804` + bootstrap on `gwdanmwluhrcfxbnplwd`
+
+- [x] инвентаризация hardcoded/demo элементов;
+- [x] `origin=demo`;
+- [x] фильтр «Демо» в админке;
+- [x] архивирование и удаление через админку;
+- [x] замена реальным материалом *(promote demo → managed)*;
+- [x] демо не возвращается самопроизвольно после удаления *(tombstones)*;
+- [x] demo fallback не маскирует ошибку сервера;
+- [x] demo-вакансии/отзывы явно «Пример» или вне production-аудитории;
+- [x] текущие демо не удалять до готовой миграции/замены;
+- [~] authenticated media smoke *(runtime JWT residual)*.
 
 ---
 

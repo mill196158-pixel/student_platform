@@ -7,8 +7,14 @@ import '../../../core/auth/admin_backend_config.dart';
 import '../../../core/auth/admin_session_controller.dart';
 import '../../academic/students/students_repository.dart';
 import '../profile_feed/content_audience_selectors.dart';
+import '../shared/admin_content_backend.dart';
+import '../shared/phone_preview_frame.dart';
+import '../shared/visual_editor_list_panel.dart';
+import '../shared/visual_editor_shell.dart';
+import '../shared/visual_editor_states.dart';
 import 'content_media_store.dart';
 import 'reference_item.dart';
+import 'reference_preview.dart';
 import 'reference_repository.dart';
 import 'supabase_reference_repository.dart';
 
@@ -41,14 +47,24 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
   List<ReferenceCorrectionItem> _corrections = [];
   String? _selectedArticleId;
   String? _selectedCategoryId;
+  String? _filterCategoryId;
+  VisualEditorListTab _listTab = VisualEditorListTab.published;
+  bool _showDemoOnly = false;
   bool _loading = true;
   bool _busy = false;
+  bool _dirty = false;
   String _audienceMode = 'all';
   List<String> _groupIds = const [];
   List<String> _userIds = const [];
+  ReferenceAudiencePreview? _audiencePreview;
   String? _banner;
+  String? _successBanner;
   String? _loadError;
+  _EditorSnapshot? _boundSnapshot;
   late final StudentsRepository _studentsRepository = _defaultStudentsRepo();
+
+  ReferenceAdminListPartitions get _partitions =>
+      partitionAdminReference(_articles);
 
   ReferenceArticleItem? get _selectedArticle {
     for (final item in _articles) {
@@ -56,6 +72,28 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
     }
     return null;
   }
+
+  List<ReferenceArticleItem> get _tabItems {
+    final parts = _partitions;
+    final base = switch (_listTab) {
+      VisualEditorListTab.published => parts.published,
+      VisualEditorListTab.drafts => parts.drafts,
+      VisualEditorListTab.archived => parts.archived,
+    };
+    return base
+        .where((item) => !_showDemoOnly || item.origin == ContentOrigin.demo)
+        .where(
+          (item) =>
+              _filterCategoryId == null || item.categoryId == _filterCategoryId,
+        )
+        .toList();
+  }
+
+  VisualEditorTabCounts get _tabCounts => VisualEditorTabCounts(
+    published: _partitions.published.length,
+    drafts: _partitions.drafts.length,
+    archived: _partitions.archived.length,
+  );
 
   bool get _canWrite =>
       widget.session == null ||
@@ -68,17 +106,20 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
       widget.session!.capabilities.canPublishContent;
 
   ReferenceRepository _defaultRepo() {
-    if (AdminBackendConfig.isDemoMode) return LocalReferenceRepository();
-    final client = _tryClient();
-    if (client == null) return LocalReferenceRepository();
-    return SupabaseReferenceRepository(client: client);
+    return AdminContentBackend.resolveRepository<ReferenceRepository>(
+      isDemoMode: AdminBackendConfig.isDemoMode,
+      client: _tryClient(),
+      localFactory: LocalReferenceRepository.new,
+      supabaseFactory: (client) => SupabaseReferenceRepository(client: client),
+    );
   }
 
   StudentsRepository _defaultStudentsRepo() {
     if (AdminBackendConfig.isDemoMode) return LocalStudentsRepository();
     final client = _tryClient();
-    if (client == null) return LocalStudentsRepository();
-    return SupabaseStudentsRepository(client: client);
+    if (client != null) return SupabaseStudentsRepository(client: client);
+    if (widget.repository != null) return LocalStudentsRepository();
+    throw StateError(AdminContentBackend.realUnavailableMessage);
   }
 
   SupabaseClient? _tryClient() {
@@ -104,7 +145,7 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
     super.dispose();
   }
 
-  Future<void> _reload() async {
+  Future<void> _reload({String? selectId}) async {
     setState(() {
       _loading = true;
       _loadError = null;
@@ -118,13 +159,13 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
         _categories = categories;
         _articles = articles;
         _corrections = corrections;
-        _selectedArticleId ??= articles.isEmpty ? null : articles.first.id;
-        _selectedCategoryId ??=
-            categories.isEmpty ? null : categories.first.id;
+        if (selectId != null) {
+          _selectedArticleId = selectId;
+        }
+        _ensureSelectionForTab();
         _loading = false;
       });
-      final selected = _selectedArticle;
-      if (selected != null) _bindArticle(selected);
+      _bindSelected();
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -132,6 +173,25 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
         _loadError = error.toString();
       });
     }
+  }
+
+  void _ensureSelectionForTab() {
+    final tabItems = _tabItems;
+    if (tabItems.isEmpty) {
+      _selectedArticleId = null;
+      return;
+    }
+    if (_selectedArticleId != null &&
+        tabItems.any((item) => item.id == _selectedArticleId)) {
+      return;
+    }
+    _selectedArticleId = tabItems.first.id;
+  }
+
+  void _select(String id) {
+    if (id == _selectedArticleId) return;
+    setState(() => _selectedArticleId = id);
+    _bindSelected();
   }
 
   Future<void> _manageCategories() async {
@@ -164,23 +224,22 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
                     children: [
                       TextField(
                         controller: editTitle,
-                        decoration:
-                            const InputDecoration(labelText: 'Название'),
+                        decoration: const InputDecoration(
+                          labelText: 'Название',
+                        ),
                       ),
                       TextField(
                         controller: editIcon,
-                        decoration:
-                            const InputDecoration(labelText: 'icon_key'),
+                        decoration: const InputDecoration(
+                          labelText: 'icon_key',
+                        ),
                       ),
                       DropdownButtonFormField<ReferenceCategoryStatus>(
                         value: status,
                         decoration: const InputDecoration(labelText: 'Статус'),
                         items: [
                           for (final s in ReferenceCategoryStatus.values)
-                            DropdownMenuItem(
-                              value: s,
-                              child: Text(s.name),
-                            ),
+                            DropdownMenuItem(value: s, child: Text(s.name)),
                         ],
                         onChanged: (value) {
                           if (value == null) return;
@@ -252,16 +311,14 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
                               onSelected: (status) {
                                 setDialogState(() {
                                   working = [...working];
-                                  working[i] =
-                                      working[i].copyWith(status: status);
+                                  working[i] = working[i].copyWith(
+                                    status: status,
+                                  );
                                 });
                               },
                               itemBuilder: (context) => [
                                 for (final s in ReferenceCategoryStatus.values)
-                                  PopupMenuItem(
-                                    value: s,
-                                    child: Text(s.name),
-                                  ),
+                                  PopupMenuItem(value: s, child: Text(s.name)),
                               ],
                               child: const Icon(Icons.flag_outlined),
                             ),
@@ -295,8 +352,9 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
                     const Divider(),
                     TextField(
                       controller: titleController,
-                      decoration:
-                          const InputDecoration(labelText: 'Новая категория'),
+                      decoration: const InputDecoration(
+                        labelText: 'Новая категория',
+                      ),
                     ),
                     TextField(
                       controller: keyController,
@@ -306,8 +364,7 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
                     ),
                     TextField(
                       controller: iconController,
-                      decoration:
-                          const InputDecoration(labelText: 'icon_key'),
+                      decoration: const InputDecoration(labelText: 'icon_key'),
                     ),
                     Align(
                       alignment: Alignment.centerRight,
@@ -376,21 +433,58 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
       }
       await _reload();
       if (!mounted) return;
-      setState(() => _banner = 'Категории обновлены');
+      setState(() => _successBanner = 'Категории обновлены');
     });
   }
 
-  void _bindArticle(ReferenceArticleItem item) {
-    _titleController.text = item.title;
-    _iconKeyController.text = item.payload.iconKey;
-    _shortTextController.text = item.payload.shortText;
-    _blocks = List<ReferenceBlock>.from(item.payload.blocks);
-    _sortOrderController.text = '${item.sortOrder}';
-    _selectedCategoryId = item.categoryId;
-    _audienceMode = item.audienceMode;
-    _groupIds = item.audienceGroupIds;
-    _userIds = item.audienceUserIds;
-    setState(() {});
+  void _bindSelected() {
+    final selected = _selectedArticle;
+    if (selected == null) {
+      _boundSnapshot = null;
+      setState(() {
+        _dirty = false;
+        _banner = null;
+        _successBanner = null;
+        _audiencePreview = null;
+      });
+      return;
+    }
+    _titleController.text = selected.title;
+    _iconKeyController.text = selected.payload.iconKey;
+    _shortTextController.text = selected.payload.shortText;
+    _blocks = List<ReferenceBlock>.from(selected.payload.blocks);
+    _sortOrderController.text = '${selected.sortOrder}';
+    _selectedCategoryId = selected.categoryId;
+    _audienceMode = selected.audienceMode;
+    _groupIds = [...selected.audienceGroupIds];
+    _userIds = [...selected.audienceUserIds];
+    _audiencePreview = null;
+    _boundSnapshot = _captureSnapshot();
+    setState(() {
+      _dirty = false;
+      _banner = null;
+      _successBanner = null;
+    });
+  }
+
+  _EditorSnapshot _captureSnapshot() {
+    return _EditorSnapshot(
+      title: _titleController.text,
+      iconKey: _iconKeyController.text,
+      shortText: _shortTextController.text,
+      sortOrder: _sortOrderController.text,
+      categoryId: _selectedCategoryId,
+      audienceMode: _audienceMode,
+      groupIds: [..._groupIds],
+      userIds: [..._userIds],
+      blocksWire: [for (final block in _blocks) block.toWireJson().toString()],
+    );
+  }
+
+  void _markDirty() {
+    final nextDirty =
+        _boundSnapshot != null && _captureSnapshot() != _boundSnapshot;
+    setState(() => _dirty = nextDirty);
   }
 
   ReferenceArticlePayload? _draftPayload() {
@@ -410,6 +504,7 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
     setState(() {
       _busy = true;
       _banner = null;
+      _successBanner = null;
     });
     try {
       await action();
@@ -421,14 +516,69 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
     }
   }
 
-  Future<void> _createArticle() async {
+  Future<ReferenceArticleItem?> _saveSelected() async {
+    final selected = _selectedArticle;
     final payload = _draftPayload();
     final categoryId = _selectedCategoryId;
-    final title = _titleController.text.trim();
-    if (payload == null || categoryId == null || title.isEmpty) {
+    if (selected == null || payload == null || categoryId == null) {
+      setState(() => _banner = 'Проверьте поля статьи (fail-closed parse).');
+      return null;
+    }
+    var next = selected.copyWith(
+      title: _titleController.text.trim(),
+      payload: payload,
+      categoryId: categoryId,
+    );
+    next = await _repository.updateArticleDraft(next);
+    next = await _repository.setArticleSortOrder(
+      id: next.id,
+      sortOrder: int.tryParse(_sortOrderController.text.trim()) ?? 0,
+      expectedRowVersion: next.rowVersion,
+    );
+    next = await _repository.setAudience(
+      id: next.id,
+      audienceMode: _audienceMode,
+      groupIds: _groupIds,
+      userIds: _userIds,
+      expectedRowVersion: next.rowVersion,
+    );
+    if (!mounted) return next;
+    setState(() {
+      final idx = _articles.indexWhere((e) => e.id == next.id);
+      if (idx >= 0) _articles = [..._articles]..[idx] = next;
+      _selectedArticleId = next.id;
+      _dirty = false;
+      _boundSnapshot = _captureSnapshot();
+    });
+    return next;
+  }
+
+  Future<void> _saveDraft() async {
+    if (!_canWrite) {
+      setState(() => _banner = 'Недостаточно прав для сохранения.');
+      return;
+    }
+    await _run(() async {
+      final saved = await _saveSelected();
+      if (saved != null) {
+        setState(() => _successBanner = 'Черновик сохранён.');
+      }
+    });
+  }
+
+  Future<void> _createArticle() async {
+    final payload = _draftPayload();
+    final categoryId =
+        _selectedCategoryId ??
+        _filterCategoryId ??
+        (_categories.isEmpty ? null : _categories.first.id);
+    final title = _titleController.text.trim().isEmpty
+        ? 'Новая статья справочника'
+        : _titleController.text.trim();
+    if (payload == null || categoryId == null) {
       setState(
         () => _banner =
-            'Нельзя создать: заполните заголовок, поля и блоки '
+            'Нельзя создать: заполните поля и блоки '
             '(fail-closed, запись не создана).',
       );
       return;
@@ -439,52 +589,10 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
         payload: payload,
         categoryId: categoryId,
       );
-      await _reload();
       if (!mounted) return;
-      setState(() {
-        _selectedArticleId = created.id;
-        _banner = 'Черновик статьи создан (schema 2, placement reference).';
-      });
-      final selected = _selectedArticle;
-      if (selected != null) _bindArticle(selected);
-    });
-  }
-
-  Future<void> _saveArticle() async {
-    final selected = _selectedArticle;
-    final payload = _draftPayload();
-    final categoryId = _selectedCategoryId;
-    if (selected == null || payload == null || categoryId == null) {
-      setState(() => _banner = 'Проверьте поля статьи (fail-closed parse).');
-      return;
-    }
-    await _run(() async {
-      var next = selected.copyWith(
-        title: _titleController.text.trim(),
-        payload: payload,
-        categoryId: categoryId,
-      );
-      next = await _repository.updateArticleDraft(next);
-      next = await _repository.setArticleSortOrder(
-        id: next.id,
-        sortOrder: int.tryParse(_sortOrderController.text.trim()) ?? 0,
-        expectedRowVersion: next.rowVersion,
-      );
-      next = await _repository.setAudience(
-        id: next.id,
-        audienceMode: _audienceMode,
-        groupIds: _groupIds,
-        userIds: _userIds,
-        expectedRowVersion: next.rowVersion,
-      );
-      await _reload();
-      if (!mounted) return;
-      setState(() {
-        _selectedArticleId = next.id;
-        _banner = 'Сохранено.';
-      });
-      final rebound = _selectedArticle;
-      if (rebound != null) _bindArticle(rebound);
+      setState(() => _listTab = VisualEditorListTab.drafts);
+      await _reload(selectId: created.id);
+      setState(() => _successBanner = 'Черновик статьи создан.');
     });
   }
 
@@ -494,10 +602,7 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
     await _run(() async {
       final preview = await _repository.previewAudience(selected.id);
       if (!mounted) return;
-      setState(() {
-        _banner =
-            'Preview аудитории: ${preview.recipientCount} получателей.';
-      });
+      setState(() => _audiencePreview = preview);
     });
   }
 
@@ -505,9 +610,17 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
     final selected = _selectedArticle;
     if (selected == null) return;
     await _run(() async {
-      await _repository.publish(selected.id, selected.rowVersion);
-      await _reload();
-      setState(() => _banner = 'Опубликовано.');
+      var current = selected;
+      if (_dirty) {
+        final saved = await _saveSelected();
+        if (saved == null) return;
+        current = saved;
+      }
+      await _repository.publish(current.id, current.rowVersion);
+      if (!mounted) return;
+      setState(() => _listTab = VisualEditorListTab.published);
+      await _reload(selectId: current.id);
+      setState(() => _successBanner = 'Опубликовано.');
     });
   }
 
@@ -516,8 +629,135 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
     if (selected == null) return;
     await _run(() async {
       await _repository.archive(selected.id, selected.rowVersion);
+      if (!mounted) return;
+      setState(() => _listTab = VisualEditorListTab.archived);
+      await _reload(selectId: selected.id);
+      setState(() => _successBanner = 'Перемещено в архив.');
+    });
+  }
+
+  Future<void> _unpublish() async {
+    final selected = _selectedArticle;
+    if (selected == null) return;
+    await _run(() async {
+      await _repository.unpublish(selected.id, selected.rowVersion);
+      if (!mounted) return;
+      setState(() => _listTab = VisualEditorListTab.drafts);
+      await _reload(selectId: selected.id);
+      setState(() => _successBanner = 'Снято с публикации.');
+    });
+  }
+
+  Future<void> _unarchive() async {
+    final selected = _selectedArticle;
+    if (selected == null) return;
+    await _run(() async {
+      await _repository.unarchive(selected.id, selected.rowVersion);
+      if (!mounted) return;
+      setState(() => _listTab = VisualEditorListTab.drafts);
+      await _reload(selectId: selected.id);
+      setState(() => _successBanner = 'Восстановлено как черновик.');
+    });
+  }
+
+  Future<void> _promoteDemo() async {
+    final selected = _selectedArticle;
+    if (selected == null || selected.origin != ContentOrigin.demo) return;
+    await _run(() async {
+      await _repository.promoteDemo(selected.id, selected.rowVersion);
+      await _reload(selectId: selected.id);
+      if (mounted) {
+        setState(
+          () => _successBanner = 'Демо-статья переведена в управляемую.',
+        );
+      }
+    });
+  }
+
+  Future<void> _showVersions() async {
+    final selected = _selectedArticle;
+    if (selected == null) return;
+    List<ReferenceVersionInfo>? versions;
+    await _run(() async {
+      versions = await _repository.listVersions(selected.id);
+    });
+    if (versions == null || !mounted) return;
+    if (versions!.isEmpty) {
+      setState(() => _successBanner = 'История версий пуста.');
+      return;
+    }
+    final restore = await showDialog<int>(
+      context: context,
+      builder: (dialogContext) => _VersionHistoryDialog(versions: versions!),
+    );
+    if (restore == null) return;
+    await _run(() async {
+      final restored = await _repository.restoreVersion(
+        selected.id,
+        restore,
+        selected.rowVersion,
+      );
+      await _reload(selectId: restored.id);
+      setState(() => _successBanner = 'Версия $restore восстановлена.');
+    });
+  }
+
+  Future<void> _handlePopDirtyConfirm() async {
+    final navigator = Navigator.of(context);
+    final discard = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Несохранённые изменения'),
+        content: const Text('Выйти без сохранения черновика?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Остаться'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Выйти'),
+          ),
+        ],
+      ),
+    );
+    if (discard == true && mounted) {
+      setState(() => _dirty = false);
+      navigator.maybePop();
+    }
+  }
+
+  Future<void> _safeDelete() async {
+    final selected = _selectedArticle;
+    if (selected == null ||
+        selected.status != ReferenceArticleStatus.archived) {
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Удалить статью навсегда?'),
+        content: const Text(
+          'Будет удалена только архивная статья. Демо-ключ останется помеченным, '
+          'поэтому bootstrap не создаст её повторно.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await _run(() async {
+      await _repository.safeDelete(selected.id, selected.rowVersion);
       await _reload();
-      setState(() => _banner = 'В архиве.');
+      if (mounted) setState(() => _successBanner = 'Статья удалена.');
     });
   }
 
@@ -538,7 +778,7 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
         reason: reason,
       );
       await _reload();
-      setState(() => _banner = 'Обращение обработано.');
+      setState(() => _successBanner = 'Обращение обработано.');
     });
   }
 
@@ -601,6 +841,66 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
     );
   }
 
+  List<ManagedReferenceArticle> _previewArticles() {
+    final selected = _selectedArticle;
+    var published = _partitions.publishedPreviewItems;
+    if (_filterCategoryId != null) {
+      published = published
+          .where((item) => item.categoryId == _filterCategoryId)
+          .toList();
+    }
+    final cards = published
+        .map((item) => item.toManagedArticle())
+        .toList(growable: true);
+
+    if (selected == null) return cards;
+
+    final selectedPublished =
+        selected.status == ReferenceArticleStatus.published &&
+        published.any((item) => item.id == selected.id);
+    if (selectedPublished) return cards;
+
+    final draft = _previewArticle();
+    if (draft == null) return cards;
+    cards.removeWhere((item) => item.id == draft.id);
+    cards.insert(0, draft);
+    return cards;
+  }
+
+  void _openArticleDetail(ManagedReferenceArticle article) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.75,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        builder: (context, scrollController) => SingleChildScrollView(
+          controller: scrollController,
+          child: Theme(
+            data: studentPlatformLightTheme(),
+            child: StudentReferenceArticleDetail(
+              article: article,
+              showDemoBadge: article.showDemoBadge,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String? get _headerBanner => _banner;
+
+  String? get _infoBanner {
+    if (_banner != null) return null;
+    return _successBanner;
+  }
+
   void _addBlock(String type) {
     setState(() {
       _blocks = [
@@ -610,16 +910,17 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
           'image' => const ReferenceImageBlock(assetId: ''),
           'file' => const ReferenceFileBlock(assetId: ''),
           'link' => const ReferenceLinkBlock(
-              label: '',
-              url: 'https://example.com',
-            ),
+            label: '',
+            url: 'https://example.com',
+          ),
           'cta' => const ReferenceCtaBlock(
-              cta: ReferenceArticleCta(label: '', route: '/'),
-            ),
+            cta: ReferenceArticleCta(label: '', route: '/'),
+          ),
           _ => const ReferenceTextBlock(text: ''),
         },
       ];
     });
+    _markDirty();
   }
 
   void _updateBlock(int index, ReferenceBlock block) {
@@ -628,6 +929,7 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
       next[index] = block;
       _blocks = next;
     });
+    _markDirty();
   }
 
   void _removeBlock(int index) {
@@ -635,6 +937,7 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
       final next = List<ReferenceBlock>.from(_blocks)..removeAt(index);
       _blocks = next.isEmpty ? [const ReferenceTextBlock(text: '')] : next;
     });
+    _markDirty();
   }
 
   void _moveBlock(int index, int delta) {
@@ -646,234 +949,639 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
       next.insert(target, item);
       _blocks = next;
     });
+    _markDirty();
   }
 
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Padding(
+        padding: EdgeInsets.all(20),
+        child: VisualEditorLoadingState(),
+      );
     }
     if (_loadError != null) {
-      return Center(child: Text(_loadError!));
+      return Padding(
+        padding: const EdgeInsets.all(20),
+        child: VisualEditorErrorState(
+          message: _loadError!,
+          onRetry: () {
+            setState(() => _loading = true);
+            _reload();
+          },
+        ),
+      );
     }
 
-    final preview = _previewArticle();
+    final selected = _selectedArticle;
+    final previewArticles = _previewArticles();
+    final isArchived = selected?.status == ReferenceArticleStatus.archived;
 
-    return SizedBox(
-      height: 720,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            flex: 2,
-            child: _ArticleListPanel(
-              articles: _articles,
-              selectedId: _selectedArticleId,
-              onSelect: (id) {
-                setState(() => _selectedArticleId = id);
-                final item = _selectedArticle;
-                if (item != null) _bindArticle(item);
-              },
-              onCreate: _canWrite ? _createArticle : null,
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: VisualEditorShell(
+        title: 'Справочник · статьи',
+        selectedTitle: selected?.title,
+        statusChip: selected?.status.russianLabel,
+        originDemoBadge: selected?.origin == ContentOrigin.demo,
+        dirty: _dirty,
+        busy: _busy,
+        banner: _headerBanner,
+        defaultInfoMessage:
+            _infoBanner ??
+            'Статьи `reference_article_v1` (schema 2). '
+                'Публикация видна студентам сразу.',
+        canWrite: _canWrite,
+        canPublish: _canPublish && selected != null && !isArchived,
+        canUnpublish: _canPublish,
+        isPublished: selected?.status == ReferenceArticleStatus.published,
+        isArchived: isArchived,
+        listTab: _listTab,
+        tabCounts: _tabCounts,
+        onTabChanged: (tab) {
+          setState(() {
+            _listTab = tab;
+            _ensureSelectionForTab();
+          });
+          _bindSelected();
+        },
+        onCreate: _canWrite ? _createArticle : null,
+        onSaveDraft: _canWrite ? _saveDraft : null,
+        onPublish: _canPublish ? _publish : null,
+        onUnpublish: _canPublish ? _unpublish : null,
+        onVersions: _showVersions,
+        onPopDirtyConfirm: _handlePopDirtyConfirm,
+        listBuilder: (_) => Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilterChip(
+                  label: const Text('Все'),
+                  selected: _filterCategoryId == null,
+                  onSelected: (_) {
+                    setState(() {
+                      _filterCategoryId = null;
+                      _ensureSelectionForTab();
+                    });
+                    _bindSelected();
+                  },
+                ),
+                for (final category in _categories)
+                  FilterChip(
+                    label: Text(category.title),
+                    selected: _filterCategoryId == category.id,
+                    onSelected: (_) {
+                      setState(() {
+                        _filterCategoryId = category.id;
+                        _ensureSelectionForTab();
+                      });
+                      _bindSelected();
+                    },
+                  ),
+              ],
             ),
-          ),
-          Expanded(
-            flex: 3,
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Справочник',
-                    style: Theme.of(context).textTheme.headlineSmall,
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Статьи `reference_article_v1` (schema 2) + категории '
-                    'через dedicated RPC. Аудитория/publish — Stage 14 RPC.',
-                  ),
-                  if (_banner != null) ...[
-                    const SizedBox(height: 12),
-                    Text(_banner!, style: const TextStyle(color: Colors.green)),
-                  ],
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          value: _selectedCategoryId,
-                          decoration:
-                              const InputDecoration(labelText: 'Категория'),
-                          items: [
-                            for (final category in _categories)
-                              DropdownMenuItem(
-                                value: category.id,
-                                child: Text(category.title),
-                              ),
-                          ],
-                          onChanged: _canWrite
-                              ? (value) =>
-                                  setState(() => _selectedCategoryId = value)
-                              : null,
-                        ),
-                      ),
-                      if (_canWrite) ...[
-                        const SizedBox(width: 8),
-                        OutlinedButton.icon(
-                          onPressed: _busy ? null : _manageCategories,
-                          icon: const Icon(Icons.category_outlined),
-                          label: const Text('Категории'),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _titleController,
-                    enabled: _canWrite,
-                    decoration: const InputDecoration(labelText: 'Заголовок'),
-                  ),
-                  TextField(
-                    controller: _iconKeyController,
-                    enabled: _canWrite,
-                    decoration: const InputDecoration(labelText: 'icon_key'),
-                  ),
-                  TextField(
-                    controller: _shortTextController,
-                    enabled: _canWrite,
-                    decoration: const InputDecoration(labelText: 'short_text'),
-                  ),
-                  TextField(
-                    controller: _sortOrderController,
-                    enabled: _canWrite,
-                    decoration: const InputDecoration(labelText: 'sort_order'),
-                  ),
-                  const SizedBox(height: 12),
-                  _ReferenceBlocksEditor(
-                    blocks: _blocks,
-                    enabled: _canWrite,
-                    contentItemId: _selectedArticleId,
-                    onAdd: _addBlock,
-                    onUpdate: _updateBlock,
-                    onRemove: _removeBlock,
-                    onMove: _moveBlock,
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    value: _audienceMode,
-                    decoration: const InputDecoration(labelText: 'Аудитория'),
-                    items: const [
-                      DropdownMenuItem(value: 'all', child: Text('Все')),
-                      DropdownMenuItem(value: 'groups', child: Text('Группы')),
-                      DropdownMenuItem(
-                          value: 'users', child: Text('Пользователи')),
-                      DropdownMenuItem(
-                        value: 'groups_and_users',
-                        child: Text('Группы и пользователи'),
-                      ),
-                    ],
-                    onChanged: _canWrite
-                        ? (value) {
-                            if (value == null) return;
-                            setState(() => _audienceMode = value);
-                          }
-                        : null,
-                  ),
-                  ContentAudienceSelectors(
-                    studentsRepository: _studentsRepository,
-                    audienceMode: _audienceMode,
-                    selectedGroupIds: _groupIds,
-                    selectedUserIds: _userIds,
-                    enabled: _canWrite,
-                    onChanged: ({required groupIds, required userIds}) {
+            if (_canWrite) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: _busy ? null : _manageCategories,
+                  icon: const Icon(Icons.category_outlined),
+                  label: const Text('Управление категориями'),
+                ),
+              ),
+            ],
+            const SizedBox(height: 8),
+            Expanded(
+              child: VisualEditorListPanel(
+                panelTitle: 'Статьи справочника',
+                tab: _listTab,
+                tabCounts: _tabCounts,
+                items: [
+                  for (final item in _tabItems)
+                    VisualEditorListItem(
+                      id: item.id,
+                      title: item.title,
+                      subtitle: item.payload.shortText,
+                      isDemo: item.origin == ContentOrigin.demo,
+                      statusLabel: item.status.russianLabel,
+                    ),
+                ],
+                selectedId: _selectedArticleId,
+                onTabChanged: (tab) {
+                  setState(() {
+                    _listTab = tab;
+                    _ensureSelectionForTab();
+                  });
+                  _bindSelected();
+                },
+                onSelected: _select,
+                onCreate: _canWrite ? _createArticle : null,
+                showDemoOnly: _showDemoOnly,
+                onDemoFilterChanged: (value) {
+                  setState(() {
+                    _showDemoOnly = value;
+                    _ensureSelectionForTab();
+                  });
+                  _bindSelected();
+                },
+              ),
+            ),
+          ],
+        ),
+        previewBuilder: (_) => _ReferencePhonePreview(
+          articles: previewArticles,
+          selectedId: selected?.id,
+          onArticleTap: (article) {
+            _select(article.id);
+            _openArticleDetail(article);
+          },
+        ),
+        propertiesBuilder: (_) => selected == null
+            ? VisualEditorEmptyState(
+                message: _tabItems.isEmpty
+                    ? _listTab.emptyMessageRu
+                    : 'Выберите статью',
+                actionLabel: _canWrite && _tabItems.isEmpty ? 'Создать' : null,
+                onAction: _canWrite && _tabItems.isEmpty
+                    ? _createArticle
+                    : null,
+              )
+            : _ReferencePropertiesPanel(
+                selected: selected,
+                categories: _categories,
+                corrections: _corrections,
+                canWrite: _canWrite,
+                canPublish: _canPublish,
+                busy: _busy,
+                titleController: _titleController,
+                iconKeyController: _iconKeyController,
+                shortTextController: _shortTextController,
+                sortOrderController: _sortOrderController,
+                selectedCategoryId: _selectedCategoryId,
+                blocks: _blocks,
+                audienceMode: _audienceMode,
+                groupIds: _groupIds,
+                userIds: _userIds,
+                audiencePreview: _audiencePreview,
+                studentsRepository: _studentsRepository,
+                onChanged: _markDirty,
+                onCategoryChanged: (value) {
+                  setState(() => _selectedCategoryId = value);
+                  _markDirty();
+                },
+                onAudienceModeChanged: (value) {
+                  setState(() {
+                    _audienceMode = value;
+                    _audiencePreview = null;
+                  });
+                  _markDirty();
+                },
+                onAudienceSelectionChanged:
+                    ({required groupIds, required userIds}) {
                       setState(() {
                         _groupIds = groupIds;
                         _userIds = userIds;
+                        _audiencePreview = null;
                       });
+                      _markDirty();
                     },
-                  ),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      if (_canWrite)
-                        FilledButton(
-                          onPressed: _busy ? null : _saveArticle,
-                          child: const Text('Сохранить'),
-                        ),
-                      if (_canWrite)
-                        OutlinedButton(
-                          onPressed: _busy ? null : _previewAudience,
-                          child: const Text('Preview аудитории'),
-                        ),
-                      if (_canPublish)
-                        FilledButton.tonal(
-                          onPressed: _busy ? null : _publish,
-                          child: const Text('Опубликовать'),
-                        ),
-                      if (_canPublish)
-                        OutlinedButton(
-                          onPressed: _busy ? null : _archive,
-                          child: const Text('В архив'),
-                        ),
-                    ],
-                  ),
-                  if (preview != null) ...[
-                    const SizedBox(height: 20),
-                    const Text(
-                      'Preview (shared widget)',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    StudentReferenceArticleCard(article: preview),
-                    StudentReferenceArticleDetail(article: preview),
-                  ],
-                  const SizedBox(height: 24),
-                  Text(
-                    'Обращения об ошибках (${_corrections.length})',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  if (_corrections.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 8),
-                      child: Text('Открытых обращений нет.'),
-                    )
-                  else
-                    for (final correction in _corrections)
-                      ListTile(
-                        title: Text(correction.contentTitle),
-                        subtitle: Text(correction.note),
-                        trailing: Wrap(
-                          spacing: 4,
-                          children: [
-                            TextButton(
-                              onPressed: _busy
-                                  ? null
-                                  : () => _resolveCorrection(
-                                        correction,
-                                        'resolve',
-                                      ),
-                              child: const Text('Закрыть'),
-                            ),
-                            TextButton(
-                              onPressed: _busy
-                                  ? null
-                                  : () => _resolveCorrection(
-                                        correction,
-                                        'reject',
-                                      ),
-                              child: const Text('Отклонить'),
-                            ),
-                          ],
-                        ),
-                      ),
-                ],
+                onPreviewAudience: _previewAudience,
+                onAddBlock: _addBlock,
+                onUpdateBlock: _updateBlock,
+                onRemoveBlock: _removeBlock,
+                onMoveBlock: _moveBlock,
+                onArchive: isArchived ? null : _archive,
+                onRestoreArchived: isArchived ? _unarchive : null,
+                onSafeDelete: isArchived ? _safeDelete : null,
+                onPromoteDemo: selected.origin == ContentOrigin.demo
+                    ? _promoteDemo
+                    : null,
+                onResolveCorrection: _resolveCorrection,
               ),
+      ),
+    );
+  }
+}
+
+class _EditorSnapshot {
+  const _EditorSnapshot({
+    required this.title,
+    required this.iconKey,
+    required this.shortText,
+    required this.sortOrder,
+    required this.categoryId,
+    required this.audienceMode,
+    required this.groupIds,
+    required this.userIds,
+    required this.blocksWire,
+  });
+
+  final String title;
+  final String iconKey;
+  final String shortText;
+  final String sortOrder;
+  final String? categoryId;
+  final String audienceMode;
+  final List<String> groupIds;
+  final List<String> userIds;
+  final List<String> blocksWire;
+
+  @override
+  bool operator ==(Object other) {
+    return other is _EditorSnapshot &&
+        other.title == title &&
+        other.iconKey == iconKey &&
+        other.shortText == shortText &&
+        other.sortOrder == sortOrder &&
+        other.categoryId == categoryId &&
+        other.audienceMode == audienceMode &&
+        _listEq(other.groupIds, groupIds) &&
+        _listEq(other.userIds, userIds) &&
+        _listEq(other.blocksWire, blocksWire);
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    title,
+    iconKey,
+    shortText,
+    sortOrder,
+    categoryId,
+    audienceMode,
+    Object.hashAll(groupIds),
+    Object.hashAll(userIds),
+    Object.hashAll(blocksWire),
+  );
+}
+
+bool _listEq(List<String> a, List<String> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
+}
+
+class _ReferencePhonePreview extends StatelessWidget {
+  const _ReferencePhonePreview({
+    required this.articles,
+    required this.selectedId,
+    required this.onArticleTap,
+  });
+
+  final List<ManagedReferenceArticle> articles;
+  final String? selectedId;
+  final ValueChanged<ManagedReferenceArticle> onArticleTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return PhonePreviewFrame(
+      child: Theme(
+        data: studentPlatformLightTheme(),
+        child: ColoredBox(
+          color: const Color(0xFFFAF8FC),
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 56, 16, 24),
+            children: [
+              const Text(
+                'Справочник',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                  color: Color(0xFF111827),
+                ),
+              ),
+              const SizedBox(height: 12),
+              if (articles.isEmpty)
+                const Card(
+                  child: Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Text('Нет опубликованных статей для предпросмотра'),
+                  ),
+                )
+              else
+                for (final article in articles)
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(26),
+                      border: article.id == selectedId
+                          ? Border.all(color: const Color(0xFF6656D9), width: 2)
+                          : null,
+                    ),
+                    child: StudentReferenceArticleCard(
+                      article: article,
+                      showDemoBadge: article.showDemoBadge,
+                      onTap: () => onArticleTap(article),
+                    ),
+                  ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ReferencePropertiesPanel extends StatelessWidget {
+  const _ReferencePropertiesPanel({
+    required this.selected,
+    required this.categories,
+    required this.corrections,
+    required this.canWrite,
+    required this.canPublish,
+    required this.busy,
+    required this.titleController,
+    required this.iconKeyController,
+    required this.shortTextController,
+    required this.sortOrderController,
+    required this.selectedCategoryId,
+    required this.blocks,
+    required this.audienceMode,
+    required this.groupIds,
+    required this.userIds,
+    required this.audiencePreview,
+    required this.studentsRepository,
+    required this.onChanged,
+    required this.onCategoryChanged,
+    required this.onAudienceModeChanged,
+    required this.onAudienceSelectionChanged,
+    required this.onPreviewAudience,
+    required this.onAddBlock,
+    required this.onUpdateBlock,
+    required this.onRemoveBlock,
+    required this.onMoveBlock,
+    required this.onArchive,
+    required this.onRestoreArchived,
+    required this.onSafeDelete,
+    required this.onPromoteDemo,
+    required this.onResolveCorrection,
+  });
+
+  final ReferenceArticleItem selected;
+  final List<ReferenceCategoryItem> categories;
+  final List<ReferenceCorrectionItem> corrections;
+  final bool canWrite;
+  final bool canPublish;
+  final bool busy;
+  final TextEditingController titleController;
+  final TextEditingController iconKeyController;
+  final TextEditingController shortTextController;
+  final TextEditingController sortOrderController;
+  final String? selectedCategoryId;
+  final List<ReferenceBlock> blocks;
+  final String audienceMode;
+  final List<String> groupIds;
+  final List<String> userIds;
+  final ReferenceAudiencePreview? audiencePreview;
+  final StudentsRepository studentsRepository;
+  final VoidCallback onChanged;
+  final ValueChanged<String?> onCategoryChanged;
+  final ValueChanged<String> onAudienceModeChanged;
+  final void Function({
+    required List<String> groupIds,
+    required List<String> userIds,
+  })
+  onAudienceSelectionChanged;
+  final VoidCallback onPreviewAudience;
+  final ValueChanged<String> onAddBlock;
+  final void Function(int index, ReferenceBlock block) onUpdateBlock;
+  final ValueChanged<int> onRemoveBlock;
+  final void Function(int index, int delta) onMoveBlock;
+  final VoidCallback? onArchive;
+  final VoidCallback? onRestoreArchived;
+  final VoidCallback? onSafeDelete;
+  final VoidCallback? onPromoteDemo;
+  final Future<void> Function(ReferenceCorrectionItem item, String action)
+  onResolveCorrection;
+
+  bool get _editable =>
+      canWrite && selected.status == ReferenceArticleStatus.draft;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          _textField(titleController, 'Заголовок'),
+          DropdownButtonFormField<String>(
+            isExpanded: true,
+            initialValue: selectedCategoryId,
+            decoration: const InputDecoration(labelText: 'Категория'),
+            items: [
+              for (final category in categories)
+                DropdownMenuItem(
+                  value: category.id,
+                  child: Text(category.title),
+                ),
+            ],
+            onChanged: _editable ? onCategoryChanged : null,
+          ),
+          const SizedBox(height: 10),
+          _textField(iconKeyController, 'Иконка'),
+          _textField(shortTextController, 'Краткое описание', maxLines: 3),
+          _textField(sortOrderController, 'Порядок сортировки'),
+          const SizedBox(height: 12),
+          _ReferenceBlocksEditor(
+            blocks: blocks,
+            enabled: _editable,
+            contentItemId: selected.id,
+            onAdd: onAddBlock,
+            onUpdate: onUpdateBlock,
+            onRemove: onRemoveBlock,
+            onMove: onMoveBlock,
+          ),
+          const Divider(height: 24),
+          Text(
+            'Аудитория',
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            isExpanded: true,
+            initialValue: audienceMode,
+            decoration: const InputDecoration(labelText: 'Кому показывать'),
+            items: const [
+              DropdownMenuItem(value: 'all', child: Text('Всем')),
+              DropdownMenuItem(value: 'groups', child: Text('Группам')),
+              DropdownMenuItem(value: 'users', child: Text('Пользователям')),
+              DropdownMenuItem(
+                value: 'groups_and_users',
+                child: Text('Группам и пользователям'),
+              ),
+            ],
+            onChanged: !_editable
+                ? null
+                : (value) => onAudienceModeChanged(value ?? 'all'),
+          ),
+          ContentAudienceSelectors(
+            studentsRepository: studentsRepository,
+            audienceMode: audienceMode,
+            selectedGroupIds: groupIds,
+            selectedUserIds: userIds,
+            enabled: _editable,
+            onChanged: onAudienceSelectionChanged,
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: busy ? null : onPreviewAudience,
+            icon: const Icon(Icons.groups_rounded),
+            label: Text(
+              audiencePreview == null
+                  ? 'Предпросмотр охвата'
+                  : 'Охват: ${audiencePreview!.recipientCount}',
             ),
+          ),
+          const Divider(height: 24),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (onPromoteDemo != null)
+                OutlinedButton.icon(
+                  onPressed: busy ? null : onPromoteDemo,
+                  icon: const Icon(Icons.upgrade_rounded),
+                  label: const Text('Сделать управляемой'),
+                ),
+              if (onArchive != null)
+                OutlinedButton.icon(
+                  onPressed: busy || !canPublish ? null : onArchive,
+                  icon: const Icon(Icons.inventory_2_outlined),
+                  label: const Text('В архив'),
+                ),
+              if (onRestoreArchived != null)
+                OutlinedButton.icon(
+                  onPressed: busy ? null : onRestoreArchived,
+                  icon: const Icon(Icons.unarchive_outlined),
+                  label: const Text('Восстановить'),
+                ),
+              if (onSafeDelete != null)
+                OutlinedButton.icon(
+                  onPressed: busy ? null : onSafeDelete,
+                  icon: const Icon(Icons.delete_forever_outlined),
+                  label: const Text('Удалить навсегда'),
+                ),
+            ],
+          ),
+          ExpansionTile(
+            title: Text('Обращения об ошибках (${corrections.length})'),
+            children: [
+              if (corrections.isEmpty)
+                const ListTile(
+                  dense: true,
+                  title: Text('Открытых обращений нет.'),
+                )
+              else
+                for (final correction in corrections)
+                  ListTile(
+                    dense: true,
+                    title: Text(correction.contentTitle),
+                    subtitle: Text(correction.note),
+                    trailing: Wrap(
+                      spacing: 4,
+                      children: [
+                        TextButton(
+                          onPressed: busy
+                              ? null
+                              : () =>
+                                    onResolveCorrection(correction, 'resolve'),
+                          child: const Text('Закрыть'),
+                        ),
+                        TextButton(
+                          onPressed: busy
+                              ? null
+                              : () => onResolveCorrection(correction, 'reject'),
+                          child: const Text('Отклонить'),
+                        ),
+                      ],
+                    ),
+                  ),
+            ],
+          ),
+          ExpansionTile(
+            title: const Text('Дополнительно'),
+            children: [
+              ListTile(
+                dense: true,
+                title: const Text('Версия строки'),
+                subtitle: Text('${selected.rowVersion}'),
+              ),
+              if (selected.legacyKey != null)
+                ListTile(
+                  dense: true,
+                  title: const Text('Legacy key'),
+                  subtitle: Text(selected.legacyKey!),
+                ),
+            ],
           ),
         ],
       ),
+    );
+  }
+
+  Widget _textField(
+    TextEditingController controller,
+    String label, {
+    int maxLines = 1,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: TextField(
+        controller: controller,
+        maxLines: maxLines,
+        enabled: _editable,
+        decoration: InputDecoration(labelText: label),
+        onChanged: (_) => onChanged(),
+      ),
+    );
+  }
+}
+
+class _VersionHistoryDialog extends StatelessWidget {
+  const _VersionHistoryDialog({required this.versions});
+
+  final List<ReferenceVersionInfo> versions;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('История версий'),
+      content: SizedBox(
+        width: 380,
+        child: ListView.separated(
+          shrinkWrap: true,
+          itemCount: versions.length,
+          separatorBuilder: (_, _) => const Divider(height: 1),
+          itemBuilder: (context, index) {
+            final version = versions[index];
+            return ListTile(
+              leading: CircleAvatar(child: Text('${version.versionNumber}')),
+              title: Text('Версия ${version.versionNumber}'),
+              subtitle: Text(
+                '${version.title} · ${version.status.russianLabel}',
+              ),
+              trailing: TextButton(
+                onPressed: () =>
+                    Navigator.of(context).pop(version.versionNumber),
+                child: const Text('Восстановить'),
+              ),
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Закрыть'),
+        ),
+      ],
     );
   }
 }
@@ -904,13 +1612,15 @@ class _ReferenceBlocksEditor extends StatelessWidget {
       children: [
         Row(
           children: [
-            Text(
-              'Блоки контента',
-              style: Theme.of(context).textTheme.titleSmall,
+            Expanded(
+              child: Text(
+                'Блоки контента',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
             ),
-            const Spacer(),
             if (enabled)
               PopupMenuButton<String>(
+                tooltip: 'Добавить блок',
                 onSelected: onAdd,
                 itemBuilder: (context) => const [
                   PopupMenuItem(value: 'text', child: Text('Текст')),
@@ -919,17 +1629,7 @@ class _ReferenceBlocksEditor extends StatelessWidget {
                   PopupMenuItem(value: 'link', child: Text('Ссылка')),
                   PopupMenuItem(value: 'cta', child: Text('CTA')),
                 ],
-                child: const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.add, size: 18),
-                      SizedBox(width: 4),
-                      Text('Добавить блок'),
-                    ],
-                  ),
-                ),
+                icon: const Icon(Icons.add_rounded),
               ),
           ],
         ),
@@ -1003,7 +1703,9 @@ class _ReferenceBlockTileState extends State<_ReferenceBlockTile> {
     if (itemId == null || itemId.isEmpty || _uploading) return;
     final picked = await FilePicker.pickFiles(
       type: image ? FileType.image : FileType.custom,
-      allowedExtensions: image ? null : const ['pdf', 'png', 'jpg', 'jpeg', 'webp'],
+      allowedExtensions: image
+          ? null
+          : const ['pdf', 'png', 'jpg', 'jpeg', 'webp'],
       withData: true,
     );
     final file = picked?.files.single;
@@ -1013,10 +1715,10 @@ class _ReferenceBlockTileState extends State<_ReferenceBlockTile> {
     final contentType = name.endsWith('.png')
         ? 'image/png'
         : name.endsWith('.webp')
-            ? 'image/webp'
-            : name.endsWith('.pdf')
-                ? 'application/pdf'
-                : 'image/jpeg';
+        ? 'image/webp'
+        : name.endsWith('.pdf')
+        ? 'application/pdf'
+        : 'image/jpeg';
     setState(() => _uploading = true);
     try {
       final assetId = await ContentMediaStore().uploadBytes(
@@ -1092,278 +1794,233 @@ class _ReferenceBlockTileState extends State<_ReferenceBlockTile> {
           children: [
             Row(
               children: [
-                Text(
-                  'Блок ${widget.index + 1}: ${block.type}',
-                  style: Theme.of(context).textTheme.labelLarge,
+                Expanded(
+                  child: Text(
+                    'Блок ${widget.index + 1}: ${block.type}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
                 ),
-                const Spacer(),
-                if (widget.enabled) ...[
-                  IconButton(
-                    tooltip: 'Выше',
-                    onPressed: widget.canMoveUp ? widget.onMoveUp : null,
-                    icon: const Icon(Icons.arrow_upward),
+                if (widget.enabled)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'Выше',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: widget.canMoveUp ? widget.onMoveUp : null,
+                        icon: const Icon(Icons.arrow_upward),
+                      ),
+                      IconButton(
+                        tooltip: 'Ниже',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: widget.canMoveDown
+                            ? widget.onMoveDown
+                            : null,
+                        icon: const Icon(Icons.arrow_downward),
+                      ),
+                      IconButton(
+                        tooltip: 'Удалить',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: widget.onRemove,
+                        icon: const Icon(Icons.delete_outline),
+                      ),
+                    ],
                   ),
-                  IconButton(
-                    tooltip: 'Ниже',
-                    onPressed: widget.canMoveDown ? widget.onMoveDown : null,
-                    icon: const Icon(Icons.arrow_downward),
-                  ),
-                  IconButton(
-                    tooltip: 'Удалить',
-                    onPressed: widget.onRemove,
-                    icon: const Icon(Icons.delete_outline),
-                  ),
-                ],
               ],
             ),
             const SizedBox(height: 8),
             switch (block) {
               ReferenceTextBlock() => TextField(
-                  enabled: widget.enabled,
-                  controller: _primary,
-                  minLines: 2,
-                  maxLines: 6,
-                  decoration: const InputDecoration(
-                    labelText: 'text',
-                    alignLabelWithHint: true,
-                  ),
-                  onChanged: (value) =>
-                      widget.onUpdate(ReferenceTextBlock(text: value)),
+                enabled: widget.enabled,
+                controller: _primary,
+                minLines: 2,
+                maxLines: 6,
+                decoration: const InputDecoration(
+                  labelText: 'text',
+                  alignLabelWithHint: true,
                 ),
+                onChanged: (value) =>
+                    widget.onUpdate(ReferenceTextBlock(text: value)),
+              ),
               ReferenceImageBlock() => Column(
-                  children: [
-                    TextField(
-                      enabled: widget.enabled,
-                      controller: _primary,
-                      decoration:
-                          const InputDecoration(labelText: 'asset_id'),
-                      onChanged: (value) => widget.onUpdate(
-                        ReferenceImageBlock(
-                          assetId: value,
-                          caption: _secondary.text.trim().isEmpty
-                              ? null
-                              : _secondary.text.trim(),
-                        ),
+                children: [
+                  TextField(
+                    enabled: widget.enabled,
+                    controller: _primary,
+                    decoration: const InputDecoration(labelText: 'asset_id'),
+                    onChanged: (value) => widget.onUpdate(
+                      ReferenceImageBlock(
+                        assetId: value,
+                        caption: _secondary.text.trim().isEmpty
+                            ? null
+                            : _secondary.text.trim(),
                       ),
                     ),
-                    TextField(
-                      enabled: widget.enabled,
-                      controller: _secondary,
-                      decoration: const InputDecoration(
-                        labelText: 'caption (опц.)',
-                      ),
-                      onChanged: (value) => widget.onUpdate(
-                        ReferenceImageBlock(
-                          assetId: _primary.text,
-                          caption:
-                              value.trim().isEmpty ? null : value.trim(),
-                        ),
+                  ),
+                  TextField(
+                    enabled: widget.enabled,
+                    controller: _secondary,
+                    decoration: const InputDecoration(
+                      labelText: 'caption (опц.)',
+                    ),
+                    onChanged: (value) => widget.onUpdate(
+                      ReferenceImageBlock(
+                        assetId: _primary.text,
+                        caption: value.trim().isEmpty ? null : value.trim(),
                       ),
                     ),
-                    if (widget.enabled && widget.contentItemId != null)
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: TextButton.icon(
-                          onPressed: () => _uploadMedia(
-                            image: true,
-                            onAsset: (id) => widget.onUpdate(
-                              ReferenceImageBlock(
-                                assetId: id,
-                                caption: _secondary.text.trim().isEmpty
-                                    ? null
-                                    : _secondary.text.trim(),
-                              ),
+                  ),
+                  if (widget.enabled && widget.contentItemId != null)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: () => _uploadMedia(
+                          image: true,
+                          onAsset: (id) => widget.onUpdate(
+                            ReferenceImageBlock(
+                              assetId: id,
+                              caption: _secondary.text.trim().isEmpty
+                                  ? null
+                                  : _secondary.text.trim(),
                             ),
                           ),
-                          icon: const Icon(Icons.upload_file),
-                          label: const Text('Загрузить изображение'),
                         ),
+                        icon: const Icon(Icons.upload_file),
+                        label: const Text('Загрузить изображение'),
                       ),
-                  ],
-                ),
+                    ),
+                ],
+              ),
               ReferenceFileBlock() => Column(
-                  children: [
-                    TextField(
-                      enabled: widget.enabled,
-                      controller: _primary,
-                      decoration:
-                          const InputDecoration(labelText: 'asset_id'),
-                      onChanged: (value) => widget.onUpdate(
-                        ReferenceFileBlock(
-                          assetId: value,
-                          title: _secondary.text.trim().isEmpty
-                              ? null
-                              : _secondary.text.trim(),
-                        ),
+                children: [
+                  TextField(
+                    enabled: widget.enabled,
+                    controller: _primary,
+                    decoration: const InputDecoration(labelText: 'asset_id'),
+                    onChanged: (value) => widget.onUpdate(
+                      ReferenceFileBlock(
+                        assetId: value,
+                        title: _secondary.text.trim().isEmpty
+                            ? null
+                            : _secondary.text.trim(),
                       ),
                     ),
-                    TextField(
-                      enabled: widget.enabled,
-                      controller: _secondary,
-                      decoration:
-                          const InputDecoration(labelText: 'title (опц.)'),
-                      onChanged: (value) => widget.onUpdate(
-                        ReferenceFileBlock(
-                          assetId: _primary.text,
-                          title: value.trim().isEmpty ? null : value.trim(),
-                        ),
+                  ),
+                  TextField(
+                    enabled: widget.enabled,
+                    controller: _secondary,
+                    decoration: const InputDecoration(
+                      labelText: 'title (опц.)',
+                    ),
+                    onChanged: (value) => widget.onUpdate(
+                      ReferenceFileBlock(
+                        assetId: _primary.text,
+                        title: value.trim().isEmpty ? null : value.trim(),
                       ),
                     ),
-                    if (widget.enabled && widget.contentItemId != null)
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: TextButton.icon(
-                          onPressed: () => _uploadMedia(
-                            image: false,
-                            onAsset: (id) => widget.onUpdate(
-                              ReferenceFileBlock(
-                                assetId: id,
-                                title: _secondary.text.trim().isEmpty
-                                    ? null
-                                    : _secondary.text.trim(),
-                              ),
+                  ),
+                  if (widget.enabled && widget.contentItemId != null)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: () => _uploadMedia(
+                          image: false,
+                          onAsset: (id) => widget.onUpdate(
+                            ReferenceFileBlock(
+                              assetId: id,
+                              title: _secondary.text.trim().isEmpty
+                                  ? null
+                                  : _secondary.text.trim(),
                             ),
                           ),
-                          icon: const Icon(Icons.upload_file),
-                          label: const Text('Загрузить файл'),
                         ),
+                        icon: const Icon(Icons.upload_file),
+                        label: const Text('Загрузить файл'),
                       ),
-                  ],
-                ),
+                    ),
+                ],
+              ),
               ReferenceLinkBlock() => Column(
-                  children: [
-                    TextField(
-                      enabled: widget.enabled,
-                      controller: _primary,
-                      decoration: const InputDecoration(labelText: 'label'),
-                      onChanged: (value) => widget.onUpdate(
-                        ReferenceLinkBlock(
-                          label: value,
-                          url: _secondary.text,
-                        ),
-                      ),
+                children: [
+                  TextField(
+                    enabled: widget.enabled,
+                    controller: _primary,
+                    decoration: const InputDecoration(labelText: 'label'),
+                    onChanged: (value) => widget.onUpdate(
+                      ReferenceLinkBlock(label: value, url: _secondary.text),
                     ),
-                    TextField(
-                      enabled: widget.enabled,
-                      controller: _secondary,
-                      decoration: const InputDecoration(labelText: 'url'),
-                      onChanged: (value) => widget.onUpdate(
-                        ReferenceLinkBlock(
-                          label: _primary.text,
-                          url: value,
-                        ),
-                      ),
+                  ),
+                  TextField(
+                    enabled: widget.enabled,
+                    controller: _secondary,
+                    decoration: const InputDecoration(labelText: 'url'),
+                    onChanged: (value) => widget.onUpdate(
+                      ReferenceLinkBlock(label: _primary.text, url: value),
                     ),
-                  ],
-                ),
+                  ),
+                ],
+              ),
               ReferenceCtaBlock() => Column(
-                  children: [
-                    TextField(
-                      enabled: widget.enabled,
-                      controller: _primary,
-                      decoration: const InputDecoration(labelText: 'label'),
-                      onChanged: (value) => widget.onUpdate(
-                        ReferenceCtaBlock(
-                          cta: ReferenceArticleCta(
-                            label: value,
-                            route: _secondary.text.trim().isEmpty
-                                ? null
-                                : _secondary.text.trim(),
-                            url: _tertiary.text.trim().isEmpty
-                                ? null
-                                : _tertiary.text.trim(),
-                          ),
+                children: [
+                  TextField(
+                    enabled: widget.enabled,
+                    controller: _primary,
+                    decoration: const InputDecoration(labelText: 'label'),
+                    onChanged: (value) => widget.onUpdate(
+                      ReferenceCtaBlock(
+                        cta: ReferenceArticleCta(
+                          label: value,
+                          route: _secondary.text.trim().isEmpty
+                              ? null
+                              : _secondary.text.trim(),
+                          url: _tertiary.text.trim().isEmpty
+                              ? null
+                              : _tertiary.text.trim(),
                         ),
                       ),
                     ),
-                    TextField(
-                      enabled: widget.enabled,
-                      controller: _secondary,
-                      decoration:
-                          const InputDecoration(labelText: 'route (опц.)'),
-                      onChanged: (value) => widget.onUpdate(
-                        ReferenceCtaBlock(
-                          cta: ReferenceArticleCta(
-                            label: _primary.text,
-                            route: value.trim().isEmpty ? null : value.trim(),
-                            url: _tertiary.text.trim().isEmpty
-                                ? null
-                                : _tertiary.text.trim(),
-                          ),
+                  ),
+                  TextField(
+                    enabled: widget.enabled,
+                    controller: _secondary,
+                    decoration: const InputDecoration(
+                      labelText: 'route (опц.)',
+                    ),
+                    onChanged: (value) => widget.onUpdate(
+                      ReferenceCtaBlock(
+                        cta: ReferenceArticleCta(
+                          label: _primary.text,
+                          route: value.trim().isEmpty ? null : value.trim(),
+                          url: _tertiary.text.trim().isEmpty
+                              ? null
+                              : _tertiary.text.trim(),
                         ),
                       ),
                     ),
-                    TextField(
-                      enabled: widget.enabled,
-                      controller: _tertiary,
-                      decoration:
-                          const InputDecoration(labelText: 'url (опц.)'),
-                      onChanged: (value) => widget.onUpdate(
-                        ReferenceCtaBlock(
-                          cta: ReferenceArticleCta(
-                            label: _primary.text,
-                            route: _secondary.text.trim().isEmpty
-                                ? null
-                                : _secondary.text.trim(),
-                            url: value.trim().isEmpty ? null : value.trim(),
-                          ),
+                  ),
+                  TextField(
+                    enabled: widget.enabled,
+                    controller: _tertiary,
+                    decoration: const InputDecoration(labelText: 'url (опц.)'),
+                    onChanged: (value) => widget.onUpdate(
+                      ReferenceCtaBlock(
+                        cta: ReferenceArticleCta(
+                          label: _primary.text,
+                          route: _secondary.text.trim().isEmpty
+                              ? null
+                              : _secondary.text.trim(),
+                          url: value.trim().isEmpty ? null : value.trim(),
                         ),
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
+              ),
             },
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _ArticleListPanel extends StatelessWidget {
-  const _ArticleListPanel({
-    required this.articles,
-    required this.selectedId,
-    required this.onSelect,
-    this.onCreate,
-  });
-
-  final List<ReferenceArticleItem> articles;
-  final String? selectedId;
-  final ValueChanged<String> onSelect;
-  final VoidCallback? onCreate;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          ListTile(
-            title: const Text('Статьи справочника'),
-            trailing: onCreate == null
-                ? null
-                : TextButton(
-                    onPressed: onCreate,
-                    child: const Text('Новая статья'),
-                  ),
-          ),
-          Expanded(
-            child: ListView.builder(
-              itemCount: articles.length,
-              itemBuilder: (context, index) {
-                final item = articles[index];
-                return ListTile(
-                  selected: item.id == selectedId,
-                  title: Text(item.title),
-                  subtitle: Text(referenceArticleStatusWire(item.status)),
-                  onTap: () => onSelect(item.id),
-                );
-              },
-            ),
-          ),
-        ],
       ),
     );
   }

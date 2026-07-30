@@ -25,8 +25,9 @@ class SupabaseHomePromoRepository implements HomePromoRepository {
   SupabaseHomePromoRepository({
     SupabaseClient? client,
     HomePromoRpcClient? rpcClient,
-  }) : _rpc = rpcClient ??
-            SupabaseHomePromoRpcClient(client ?? Supabase.instance.client);
+  }) : _rpc =
+           rpcClient ??
+           SupabaseHomePromoRpcClient(client ?? Supabase.instance.client);
 
   final HomePromoRpcClient _rpc;
 
@@ -48,7 +49,9 @@ class SupabaseHomePromoRepository implements HomePromoRepository {
       );
     }
     if (code == '28000' || message.contains('not_authenticated')) {
-      return const HomePromoRepositoryException('Требуется вход. Войдите снова.');
+      return const HomePromoRepositoryException(
+        'Требуется вход. Войдите снова.',
+      );
     }
     if (code == 'P0002' || message.contains('not_found')) {
       return const HomePromoRepositoryException('Карточка не найдена.');
@@ -128,10 +131,9 @@ class SupabaseHomePromoRepository implements HomePromoRepository {
       'p_placement': 'home_promo',
       'p_origin': null,
     });
-    return _asList(data)
-        .map(HomePromoItem.tryParse)
-        .whereType<HomePromoItem>()
-        .toList();
+    return _asList(
+      data,
+    ).map(HomePromoItem.tryParse).whereType<HomePromoItem>().toList();
   }
 
   @override
@@ -222,6 +224,84 @@ class SupabaseHomePromoRepository implements HomePromoRepository {
       'p_expected_row_version': expectedRowVersion,
     });
     return _parseRequired(data);
+  }
+
+  @override
+  Future<HomePromoItem> unpublish(String id, int expectedRowVersion) async {
+    final data = await _call('admin_unpublish_content', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return _parseRequired(data);
+  }
+
+  @override
+  Future<HomePromoItem> restoreArchived(
+    String id,
+    int expectedRowVersion,
+  ) async {
+    final data = await _call('admin_unarchive_content', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return _parseRequired(data);
+  }
+
+  @override
+  Future<HomePromoSafeDeleteResult> safeDelete(
+    String id,
+    int expectedRowVersion,
+  ) async {
+    final data = await _call('admin_safe_delete_content', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return HomePromoSafeDeleteResult.fromJson(_asMap(data));
+  }
+
+  @override
+  Future<HomePromoItem> duplicate(String id) async {
+    final data = await _call('admin_duplicate_content', {'p_id': id});
+    return _parseRequired(data);
+  }
+
+  @override
+  Future<HomePromoItem> promoteDemo(String id, int expectedRowVersion) async {
+    final data = await _call('admin_promote_demo_content', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return _parseRequired(data);
+  }
+
+  @override
+  Future<List<HomePromoVersionInfo>> listVersions(String id) async {
+    final data = await _call('admin_list_content_versions', {'p_id': id});
+    return _asList(data).map(HomePromoVersionInfo.fromJson).toList();
+  }
+
+  @override
+  Future<HomePromoItem> restoreVersion(String id, int versionNumber) async {
+    final current = await list();
+    final item = current.cast<HomePromoItem?>().firstWhere(
+      (e) => e?.id == id,
+      orElse: () => null,
+    );
+    if (item == null) {
+      throw const HomePromoRepositoryException('Карточка не найдена.');
+    }
+    final data = await _call('admin_restore_content_version', {
+      'p_id': id,
+      'p_version_number': versionNumber,
+      'p_expected_row_version': item.rowVersion,
+    });
+    return _parseRequired(data);
+  }
+
+  @override
+  Future<HomePromoAudiencePreview> previewAudience(String id) async {
+    final data = await _call('admin_preview_content_audience', {'p_id': id});
+    return HomePromoAudiencePreview.fromJson(_asMap(data));
   }
 
   @override

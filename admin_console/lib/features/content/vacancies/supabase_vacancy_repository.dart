@@ -40,9 +40,7 @@ class SupabaseVacancyRepository implements VacancyRepository {
     VacancyMediaStore? mediaStore,
   }) : _rpc =
            rpcClient ??
-           SupabaseVacancyAdminRpcClient(
-             client ?? Supabase.instance.client,
-           ),
+           SupabaseVacancyAdminRpcClient(client ?? Supabase.instance.client),
        _mediaStore = mediaStore;
 
   final VacancyAdminRpcClient _rpc;
@@ -66,9 +64,7 @@ class SupabaseVacancyRepository implements VacancyRepository {
       );
     }
     if (code == '28000' || message.contains('not_authenticated')) {
-      return const VacancyRepositoryException(
-        'Требуется вход. Войдите снова.',
-      );
+      return const VacancyRepositoryException('Требуется вход. Войдите снова.');
     }
     if (code == 'P0002' || message.contains('not_found')) {
       return const VacancyRepositoryException('Вакансия не найдена.');
@@ -134,9 +130,7 @@ class SupabaseVacancyRepository implements VacancyRepository {
       try {
         value = jsonDecode(value);
       } catch (_) {
-        throw const VacancyRepositoryException(
-          'Некорректный ответ сервера.',
-        );
+        throw const VacancyRepositoryException('Некорректный ответ сервера.');
       }
     }
     if (value is Map) return Map<String, dynamic>.from(value);
@@ -151,10 +145,9 @@ class SupabaseVacancyRepository implements VacancyRepository {
       'p_limit': 100,
       'p_offset': 0,
     });
-    return _asList(data)
-        .map(VacancyItem.tryParse)
-        .whereType<VacancyItem>()
-        .toList();
+    return _asList(
+      data,
+    ).map(VacancyItem.tryParse).whereType<VacancyItem>().toList();
   }
 
   @override
@@ -219,6 +212,23 @@ class SupabaseVacancyRepository implements VacancyRepository {
   }
 
   @override
+  Future<VacancyItem> promoteDemo(String id, int expectedRowVersion) async {
+    final data = await _call('admin_promote_demo_vacancy', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return _parseRequired(data);
+  }
+
+  @override
+  Future<void> safeDelete(String id, int expectedRowVersion) async {
+    await _call('admin_safe_delete_vacancy', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+  }
+
+  @override
   Future<VacancyItem> moderate({
     required String id,
     required String action,
@@ -253,10 +263,9 @@ class SupabaseVacancyRepository implements VacancyRepository {
   @override
   Future<List<VacancyVersionEntry>> listVersions(String id) async {
     final data = await _call('admin_list_vacancy_versions', {'p_id': id});
-    return _asList(data)
-        .map(VacancyVersionEntry.fromJson)
-        .where((e) => e.id.isNotEmpty)
-        .toList();
+    return _asList(
+      data,
+    ).map(VacancyVersionEntry.fromJson).where((e) => e.id.isNotEmpty).toList();
   }
 
   @override

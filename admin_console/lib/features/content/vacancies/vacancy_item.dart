@@ -82,6 +82,7 @@ class VacancyItem {
     this.audienceGroupIds = const [],
     this.audienceUserIds = const [],
     this.assetIds = const [],
+    this.legacyKey,
   });
 
   final String id;
@@ -110,16 +111,24 @@ class VacancyItem {
   final List<String> audienceUserIds;
   final List<String> assetIds;
 
-  VacancyCardPayload get previewPayload => VacancyCardPayload(
-        title: title,
-        companyName: companyName,
-        summary: summary.isNotEmpty ? summary : description,
-        employmentType: employmentType,
-        workFormat: workFormat,
-        location: location,
-        salaryText: salaryText,
-        externalUrl: externalUrl,
-      );
+  /// Stable Stage 14.1 bootstrap identity, retained after demo promotion.
+  final String? legacyKey;
+
+  VacancyCardPayload get previewPayload {
+    final split = splitVacancyDescription(description);
+    return VacancyCardPayload(
+      title: title,
+      companyName: companyName,
+      summary: summary.isNotEmpty ? summary : description,
+      descriptionFull: split.body.isNotEmpty ? split.body : description,
+      requirementsText: split.requirements,
+      employmentType: employmentType,
+      workFormat: workFormat,
+      location: location,
+      salaryText: salaryText,
+      externalUrl: externalUrl,
+    );
+  }
 
   static VacancyItem? tryParse(Map<String, dynamic> json) {
     final id = json['id']?.toString();
@@ -157,6 +166,7 @@ class VacancyItem {
       audienceGroupIds: _asIdList(json['audience_group_ids']),
       audienceUserIds: _asIdList(json['audience_user_ids']),
       assetIds: _asIdList(json['asset_ids']),
+      legacyKey: _nullableString(json['legacy_key']),
     );
   }
 
@@ -185,6 +195,7 @@ class VacancyItem {
     List<String>? audienceGroupIds,
     List<String>? audienceUserIds,
     List<String>? assetIds,
+    String? legacyKey,
     bool clearEmploymentType = false,
     bool clearWorkFormat = false,
     bool clearLocation = false,
@@ -205,13 +216,13 @@ class VacancyItem {
       rowVersion: rowVersion ?? this.rowVersion,
       priority: priority ?? this.priority,
       audienceMode: audienceMode ?? this.audienceMode,
-      employmentType:
-          clearEmploymentType ? null : (employmentType ?? this.employmentType),
+      employmentType: clearEmploymentType
+          ? null
+          : (employmentType ?? this.employmentType),
       workFormat: clearWorkFormat ? null : (workFormat ?? this.workFormat),
       location: clearLocation ? null : (location ?? this.location),
       salaryText: clearSalaryText ? null : (salaryText ?? this.salaryText),
-      externalUrl:
-          clearExternalUrl ? null : (externalUrl ?? this.externalUrl),
+      externalUrl: clearExternalUrl ? null : (externalUrl ?? this.externalUrl),
       contacts: contacts ?? this.contacts,
       startsAt: clearStartsAt ? null : (startsAt ?? this.startsAt),
       endsAt: clearEndsAt ? null : (endsAt ?? this.endsAt),
@@ -222,6 +233,7 @@ class VacancyItem {
       audienceGroupIds: audienceGroupIds ?? this.audienceGroupIds,
       audienceUserIds: audienceUserIds ?? this.audienceUserIds,
       assetIds: assetIds ?? this.assetIds,
+      legacyKey: legacyKey ?? this.legacyKey,
     );
   }
 
@@ -262,7 +274,8 @@ class VacancyItem {
       if (employmentType != null) 'employment_type': employmentType!.wireValue,
       if (workFormat != null) 'work_format': workFormat!.wireValue,
       if (location != null && location!.isNotEmpty) 'location': location,
-      if (salaryText != null && salaryText!.isNotEmpty) 'salary_text': salaryText,
+      if (salaryText != null && salaryText!.isNotEmpty)
+        'salary_text': salaryText,
       if (externalUrl != null && externalUrl!.isNotEmpty)
         'external_url': externalUrl,
       if (contacts.isNotEmpty) 'contacts': contacts,
@@ -283,7 +296,8 @@ class VacancyItem {
       if (employmentType != null) 'employment_type': employmentType!.wireValue,
       if (workFormat != null) 'work_format': workFormat!.wireValue,
       if (location != null && location!.isNotEmpty) 'location': location,
-      if (salaryText != null && salaryText!.isNotEmpty) 'salary_text': salaryText,
+      if (salaryText != null && salaryText!.isNotEmpty)
+        'salary_text': salaryText,
       if (externalUrl != null && externalUrl!.isNotEmpty)
         'external_url': externalUrl,
       if (contacts.isNotEmpty) 'contacts': contacts,

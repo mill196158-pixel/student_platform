@@ -23,7 +23,8 @@ class ContentAudienceSelectors extends StatefulWidget {
   final void Function({
     required List<String> groupIds,
     required List<String> userIds,
-  }) onChanged;
+  })
+  onChanged;
 
   @override
   State<ContentAudienceSelectors> createState() =>
@@ -169,10 +170,9 @@ class _ContentAudienceSelectorsState extends State<ContentAudienceSelectors> {
                         itemCount: results.length,
                         itemBuilder: (context, index) {
                           final s = results[index];
-                          final label =
-                              '${s.surname} ${s.name}'.trim().isEmpty
-                                  ? s.login
-                                  : '${s.surname} ${s.name}'.trim();
+                          final label = '${s.surname} ${s.name}'.trim().isEmpty
+                              ? s.login
+                              : '${s.surname} ${s.name}'.trim();
                           return ListTile(
                             title: Text(label),
                             subtitle: Text(s.groupName ?? s.login),
@@ -229,11 +229,11 @@ class _ContentAudienceSelectorsState extends State<ContentAudienceSelectors> {
                   label: Text(_groupLabel(id)),
                   onDeleted: widget.enabled
                       ? () => widget.onChanged(
-                            groupIds: widget.selectedGroupIds
-                                .where((e) => e != id)
-                                .toList(),
-                            userIds: widget.selectedUserIds,
-                          )
+                          groupIds: widget.selectedGroupIds
+                              .where((e) => e != id)
+                              .toList(),
+                          userIds: widget.selectedUserIds,
+                        )
                       : null,
                 ),
               if (widget.enabled)
@@ -256,11 +256,11 @@ class _ContentAudienceSelectorsState extends State<ContentAudienceSelectors> {
                   label: Text(_userLabel(id)),
                   onDeleted: widget.enabled
                       ? () => widget.onChanged(
-                            groupIds: widget.selectedGroupIds,
-                            userIds: widget.selectedUserIds
-                                .where((e) => e != id)
-                                .toList(),
-                          )
+                          groupIds: widget.selectedGroupIds,
+                          userIds: widget.selectedUserIds
+                              .where((e) => e != id)
+                              .toList(),
+                        )
                       : null,
                 ),
               if (widget.enabled)

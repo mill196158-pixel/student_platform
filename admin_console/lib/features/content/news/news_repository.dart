@@ -84,13 +84,15 @@ class NewsAudiencePreview {
 
   factory NewsAudiencePreview.fromJson(Map<String, dynamic> json) {
     final breakdown = json['breakdown'];
-    final breakdownMap =
-        breakdown is Map ? Map<String, dynamic>.from(breakdown) : const {};
+    final breakdownMap = breakdown is Map
+        ? Map<String, dynamic>.from(breakdown)
+        : const {};
     final groups = breakdownMap['groups'];
     final groupCount = groups is List
         ? groups.length
         : int.tryParse('${json['group_count'] ?? 0}') ?? 0;
-    final explicit = int.tryParse(
+    final explicit =
+        int.tryParse(
           '${breakdownMap['explicit_users_count'] ?? json['explicit_users_count'] ?? 0}',
         ) ??
         0;
@@ -311,8 +313,12 @@ class LocalNewsRepository implements NewsRepository {
     if (current.versionNumber != expectedVersion) {
       throw const NewsRepositoryException('Новость изменилась. Обновите.');
     }
-    final groups = [...{...groupIds.where((e) => e.trim().isNotEmpty)}];
-    final users = [...{...userIds.where((e) => e.trim().isNotEmpty)}];
+    final groups = [
+      ...{...groupIds.where((e) => e.trim().isNotEmpty)},
+    ];
+    final users = [
+      ...{...userIds.where((e) => e.trim().isNotEmpty)},
+    ];
     if (mode == NewsAudienceMode.groups && groups.isEmpty) {
       throw const NewsRepositoryException('Нужна хотя бы одна группа.');
     }

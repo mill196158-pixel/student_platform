@@ -2,6 +2,18 @@ import 'package:student_ui/student_ui.dart';
 
 enum ProfileFeedStatus { draft, published, archived }
 
+extension ProfileFeedStatusLabels on ProfileFeedStatus {
+  String get russianLabel => switch (this) {
+    ProfileFeedStatus.draft => 'Черновик',
+    ProfileFeedStatus.published => 'Опубликован',
+    ProfileFeedStatus.archived => 'В архиве',
+  };
+
+  bool get isDraft => this == ProfileFeedStatus.draft;
+  bool get isPublished => this == ProfileFeedStatus.published;
+  bool get isArchived => this == ProfileFeedStatus.archived;
+}
+
 ProfileFeedStatus? parseProfileFeedStatus(Object? raw) {
   switch (raw?.toString()) {
     case 'draft':
@@ -26,6 +38,62 @@ String profileFeedStatusWire(ProfileFeedStatus status) {
   }
 }
 
+class ProfileFeedVersionInfo {
+  const ProfileFeedVersionInfo({
+    required this.versionNumber,
+    this.createdAt,
+    this.title = '',
+    this.status,
+  });
+
+  final int versionNumber;
+  final DateTime? createdAt;
+  final String title;
+  final ProfileFeedStatus? status;
+
+  factory ProfileFeedVersionInfo.fromJson(Map<String, dynamic> json) {
+    final snapshot = json['snapshot'];
+    String title = '';
+    ProfileFeedStatus? status;
+    if (snapshot is Map) {
+      title = (snapshot['title'] ?? '').toString();
+      status = parseProfileFeedStatus(snapshot['status']);
+    }
+    return ProfileFeedVersionInfo(
+      versionNumber: ProfileFeedItem._asInt(json['version_number']) ?? 0,
+      createdAt: ProfileFeedItem._asDate(json['created_at']),
+      title: title,
+      status: status,
+    );
+  }
+}
+
+class ProfileFeedDeleteResult {
+  const ProfileFeedDeleteResult({
+    required this.id,
+    this.legacyKey,
+    this.queuedMedia = 0,
+  });
+
+  final String id;
+  final String? legacyKey;
+  final int queuedMedia;
+
+  factory ProfileFeedDeleteResult.fromJson(Map<String, dynamic> json) {
+    return ProfileFeedDeleteResult(
+      id: (json['id'] ?? '').toString(),
+      legacyKey: json['legacy_key']?.toString(),
+      queuedMedia: ProfileFeedItem._asInt(json['queued_media']) ?? 0,
+    );
+  }
+}
+
+extension ProfileFeedItemStatus on ProfileFeedItem {
+  bool get isDraft => status.isDraft;
+  bool get isPublished => status.isPublished;
+  bool get isArchived => status.isArchived;
+}
+
 class ProfileFeedItem {
   const ProfileFeedItem({
     required this.id,
@@ -37,6 +105,8 @@ class ProfileFeedItem {
     required this.priority,
     required this.sortOrder,
     required this.audienceMode,
+    this.legacyKey,
+    this.versionNumber = 1,
     this.startsAt,
     this.endsAt,
     this.audienceGroupIds = const [],
@@ -52,6 +122,8 @@ class ProfileFeedItem {
   final int priority;
   final int sortOrder;
   final String audienceMode;
+  final String? legacyKey;
+  final int versionNumber;
   final DateTime? startsAt;
   final DateTime? endsAt;
   final List<String> audienceGroupIds;
@@ -64,8 +136,8 @@ class ProfileFeedItem {
     final origin = ContentOrigin.tryParse(json['origin']);
     if (status == null || origin == null) return null;
 
-    final templateKey =
-        (json['template_key'] ?? json['templateKey'])?.toString();
+    final templateKey = (json['template_key'] ?? json['templateKey'])
+        ?.toString();
     if (templateKey != null &&
         templateKey.isNotEmpty &&
         templateKey != 'profile_feed_card_v1') {
@@ -105,6 +177,8 @@ class ProfileFeedItem {
       priority: priority,
       sortOrder: sortOrder,
       audienceMode: (json['audience_mode'] ?? 'all').toString(),
+      legacyKey: json['legacy_key']?.toString(),
+      versionNumber: _asInt(json['version_number']) ?? 1,
       startsAt: _asDate(json['starts_at']),
       endsAt: _asDate(json['ends_at']),
       audienceGroupIds: _asIdList(json['audience_group_ids']),
@@ -112,7 +186,19 @@ class ProfileFeedItem {
     );
   }
 
+  ManagedProfileFeedCard toManagedCard({bool? showDemoBadge}) {
+    return ManagedProfileFeedCard(
+      id: id,
+      origin: origin,
+      sortOrder: sortOrder,
+      priority: priority,
+      payload: payload,
+      showDemoBadge: showDemoBadge ?? origin == ContentOrigin.demo,
+    );
+  }
+
   ProfileFeedItem copyWith({
+    String? id,
     ProfileFeedStatus? status,
     ContentOrigin? origin,
     String? title,
@@ -121,15 +207,18 @@ class ProfileFeedItem {
     int? priority,
     int? sortOrder,
     String? audienceMode,
+    String? legacyKey,
+    int? versionNumber,
     DateTime? startsAt,
     DateTime? endsAt,
     List<String>? audienceGroupIds,
     List<String>? audienceUserIds,
     bool clearStartsAt = false,
     bool clearEndsAt = false,
+    bool clearLegacyKey = false,
   }) {
     return ProfileFeedItem(
-      id: id,
+      id: id ?? this.id,
       status: status ?? this.status,
       origin: origin ?? this.origin,
       title: title ?? this.title,
@@ -138,6 +227,8 @@ class ProfileFeedItem {
       priority: priority ?? this.priority,
       sortOrder: sortOrder ?? this.sortOrder,
       audienceMode: audienceMode ?? this.audienceMode,
+      legacyKey: clearLegacyKey ? null : (legacyKey ?? this.legacyKey),
+      versionNumber: versionNumber ?? this.versionNumber,
       startsAt: clearStartsAt ? null : (startsAt ?? this.startsAt),
       endsAt: clearEndsAt ? null : (endsAt ?? this.endsAt),
       audienceGroupIds: audienceGroupIds ?? this.audienceGroupIds,

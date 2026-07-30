@@ -33,7 +33,7 @@ class AdminShell extends StatelessWidget {
         isVisible: local || caps.canReadContent,
       ),
       _AdminDestination(
-        label: 'Главная promo',
+        label: 'Карточки главной',
         icon: Icons.home_outlined,
         path: '/content/home-promo',
         section: 'Контент',
@@ -78,18 +78,21 @@ class AdminShell extends StatelessWidget {
         label: 'Преподаватели',
         icon: Icons.school_outlined,
         path: '/academic/teachers',
+        section: 'Участники',
         isVisible: local || caps.canReadAcademic,
       ),
       _AdminDestination(
         label: 'Студенты',
         icon: Icons.groups_outlined,
         path: '/academic/students',
+        section: 'Участники',
         isVisible: local || caps.canReadStudents || caps.canWriteGroups,
       ),
       _AdminDestination(
         label: 'Модерация',
         icon: Icons.shield_outlined,
         path: '/moderation',
+        section: 'Модерация',
         isVisible:
             local ||
             caps.can('moderation.read') ||

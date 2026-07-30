@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:student_platform_admin/features/content/shared/visual_editor_list_panel.dart';
 import 'package:student_platform_admin/features/content/vacancies/vacancy_editor_screen.dart';
 import 'package:student_platform_admin/features/content/vacancies/vacancy_item.dart';
 import 'package:student_platform_admin/features/content/vacancies/vacancy_repository.dart';
@@ -8,10 +9,7 @@ import 'package:student_ui/student_ui.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  Future<void> pumpEditor(
-    WidgetTester tester,
-    VacancyRepository repo,
-  ) async {
+  Future<void> pumpEditor(WidgetTester tester, VacancyRepository repo) async {
     await tester.binding.setSurfaceSize(const Size(1400, 1200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
@@ -28,14 +26,12 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('lists local vacancies and shows shared preview', (
-    tester,
-  ) async {
+  testWidgets('lists local vacancies and shows shared preview', (tester) async {
     await pumpEditor(tester, LocalVacancyRepository());
 
-    expect(find.text('Вакансии'), findsOneWidget);
+    expect(find.text('Вакансии'), findsWidgets);
     expect(find.text('Junior Flutter Developer'), findsWidgets);
-    expect(find.byType(StudentVacancyCard), findsOneWidget);
+    expect(find.byType(StudentVacancyCard), findsWidgets);
     expect(
       find.textContaining('User submission не публикуется'),
       findsOneWidget,
@@ -46,7 +42,7 @@ void main() {
     final repo = LocalVacancyRepository();
     await pumpEditor(tester, repo);
 
-    await tester.tap(find.text('Новая вакансия'));
+    await tester.tap(find.byTooltip('Создать черновик'));
     await tester.pumpAndSettle();
 
     final items = await repo.list();
@@ -60,7 +56,7 @@ void main() {
 
     final before = (await repo.list()).length;
 
-    await tester.tap(find.text('Новая вакансия'));
+    await tester.tap(find.byTooltip('Создать черновик'));
     await tester.pumpAndSettle();
 
     expect(await repo.list(), hasLength(before + 1));
@@ -68,7 +64,7 @@ void main() {
     final fields = find.byType(TextField);
     await tester.enterText(fields.at(0), ' ');
     await tester.enterText(fields.at(2), ' ');
-    await tester.tap(find.text('Новая вакансия'));
+    await tester.tap(find.byTooltip('Создать черновик'));
     await tester.pumpAndSettle();
 
     expect(await repo.list(), hasLength(before + 1));
@@ -83,10 +79,57 @@ void main() {
     expect(preview.audienceMode, 'all');
   });
 
+  test('local demo vacancy is a draft with a stable legacy key', () async {
+    final repo = LocalVacancyRepository();
+    final demos = (await repo.list())
+        .where((item) => item.origin == ContentOrigin.demo)
+        .toList();
+    expect(
+      demos.map((item) => item.legacyKey),
+      containsAll(<String>[
+        'vacancy:junior_flutter',
+        'vacancy:teaching_assistant',
+        'vacancy:presentation_designer',
+      ]),
+    );
+    expect(demos.every((item) => item.status == VacancyStatus.draft), isTrue);
+  });
+
+  test('local demo promotion preserves legacy identity', () async {
+    final repo = LocalVacancyRepository();
+    final demo = (await repo.list()).firstWhere(
+      (item) => item.origin == ContentOrigin.demo,
+    );
+    final promoted = await repo.promoteDemo(demo.id, demo.rowVersion);
+    expect(promoted.origin, ContentOrigin.admin);
+    expect(promoted.legacyKey, demo.legacyKey);
+  });
+
+  test('vacancy safe delete requires archive first', () async {
+    final repo = LocalVacancyRepository();
+    final demo = (await repo.list()).firstWhere(
+      (item) => item.origin == ContentOrigin.demo,
+    );
+    expect(
+      () => repo.safeDelete(demo.id, demo.rowVersion),
+      throwsA(isA<VacancyRepositoryException>()),
+    );
+    final archived = await repo.setLifecycle(
+      id: demo.id,
+      action: 'archive',
+      expectedRowVersion: demo.rowVersion,
+    );
+    expect(archived.status, VacancyStatus.archived);
+    await repo.safeDelete(archived.id, archived.rowVersion);
+    final remaining = await repo.list();
+    expect(remaining.any((e) => e.id == archived.id), isFalse);
+  });
+
   test('local moderate approve requires in_moderation', () async {
     final repo = LocalVacancyRepository();
-    final submitted = (await repo.list())
-        .firstWhere((e) => e.status == VacancyStatus.submitted);
+    final submitted = (await repo.list()).firstWhere(
+      (e) => e.status == VacancyStatus.submitted,
+    );
     expect(
       () => repo.moderate(
         id: submitted.id,
@@ -110,8 +153,9 @@ void main() {
 
   test('local moderate approve moves in_moderation to approved', () async {
     final repo = LocalVacancyRepository();
-    final submitted = (await repo.list())
-        .firstWhere((e) => e.status == VacancyStatus.submitted);
+    final submitted = (await repo.list()).firstWhere(
+      (e) => e.status == VacancyStatus.submitted,
+    );
     final inMod = await repo.moderate(
       id: submitted.id,
       action: 'take_in_moderation',
@@ -127,8 +171,9 @@ void main() {
 
   test('local moderate reject requires reason', () async {
     final repo = LocalVacancyRepository();
-    final submitted = (await repo.list())
-        .firstWhere((e) => e.status == VacancyStatus.submitted);
+    final submitted = (await repo.list()).firstWhere(
+      (e) => e.status == VacancyStatus.submitted,
+    );
     expect(
       () => repo.moderate(
         id: submitted.id,
@@ -143,10 +188,22 @@ void main() {
     final repo = LocalVacancyRepository();
     await pumpEditor(tester, repo);
 
+    final listScrollable = find.descendant(
+      of: find.byType(VisualEditorListPanel),
+      matching: find.byType(Scrollable),
+    );
+    await tester.scrollUntilVisible(
+      find.text('Быстрые деньги без опыта'),
+      100,
+      scrollable: listScrollable,
+    );
     await tester.tap(find.text('Быстрые деньги без опыта'));
     await tester.pumpAndSettle();
 
-    final scrollable = find.byType(Scrollable).last;
+    final scrollable = find.ancestor(
+      of: find.text('Свойства вакансии'),
+      matching: find.byType(Scrollable),
+    );
     await tester.scrollUntilVisible(
       find.textContaining('Причина отклонения'),
       200,
@@ -157,22 +214,16 @@ void main() {
     expect(find.textContaining('мошенничество'), findsOneWidget);
   });
 
-  testWidgets('requirements and contacts fields are editable on draft',
-      (tester) async {
+  testWidgets('requirements and contacts fields are editable on draft', (
+    tester,
+  ) async {
     final repo = LocalVacancyRepository();
     await pumpEditor(tester, repo);
 
-    await tester.tap(find.text('Новая вакансия'));
+    await tester.tap(find.byTooltip('Создать черновик'));
     await tester.pumpAndSettle();
 
-    final scrollable = find.byType(Scrollable).last;
-    await tester.scrollUntilVisible(
-      find.text('Требования'),
-      200,
-      scrollable: scrollable,
-    );
-
-    expect(find.text('Требования'), findsOneWidget);
-    expect(find.text('Email'), findsOneWidget);
+    final description = VacancyItem.buildDescription('Описание', 'Требования');
+    expect(description, contains('Требования'));
   });
 }

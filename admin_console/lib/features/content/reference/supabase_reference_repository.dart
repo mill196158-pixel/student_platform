@@ -37,10 +37,9 @@ class SupabaseReferenceRepository implements ReferenceRepository {
   SupabaseReferenceRepository({
     SupabaseClient? client,
     ReferenceAdminRpcClient? rpcClient,
-  }) : _rpc = rpcClient ??
-            SupabaseReferenceAdminRpcClient(
-              client ?? Supabase.instance.client,
-            );
+  }) : _rpc =
+           rpcClient ??
+           SupabaseReferenceAdminRpcClient(client ?? Supabase.instance.client);
 
   final ReferenceAdminRpcClient _rpc;
 
@@ -62,7 +61,9 @@ class SupabaseReferenceRepository implements ReferenceRepository {
       );
     }
     if (code == '28000' || message.contains('not_authenticated')) {
-      return const ReferenceRepositoryException('Требуется вход. Войдите снова.');
+      return const ReferenceRepositoryException(
+        'Требуется вход. Войдите снова.',
+      );
     }
     if (code == 'P0002' || message.contains('not_found')) {
       return const ReferenceRepositoryException('Запись не найдена.');
@@ -268,7 +269,9 @@ class SupabaseReferenceRepository implements ReferenceRepository {
     for (final article in listed) {
       if (article.id == id) return article;
     }
-    throw StateError('Reference audience save succeeded but article $id missing');
+    throw StateError(
+      'Reference audience save succeeded but article $id missing',
+    );
   }
 
   @override
@@ -278,7 +281,10 @@ class SupabaseReferenceRepository implements ReferenceRepository {
   }
 
   @override
-  Future<ReferenceArticleItem> publish(String id, int expectedRowVersion) async {
+  Future<ReferenceArticleItem> publish(
+    String id,
+    int expectedRowVersion,
+  ) async {
     final data = await _call('admin_publish_content', {
       'p_id': id,
       'p_expected_row_version': expectedRowVersion,
@@ -287,9 +293,76 @@ class SupabaseReferenceRepository implements ReferenceRepository {
   }
 
   @override
-  Future<ReferenceArticleItem> archive(String id, int expectedRowVersion) async {
+  Future<ReferenceArticleItem> unpublish(
+    String id,
+    int expectedRowVersion,
+  ) async {
+    final data = await _call('admin_unpublish_content', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return _parseArticleRequired(data);
+  }
+
+  @override
+  Future<ReferenceArticleItem> archive(
+    String id,
+    int expectedRowVersion,
+  ) async {
     final data = await _call('admin_archive_content', {
       'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return _parseArticleRequired(data);
+  }
+
+  @override
+  Future<ReferenceArticleItem> unarchive(
+    String id,
+    int expectedRowVersion,
+  ) async {
+    final data = await _call('admin_unarchive_content', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return _parseArticleRequired(data);
+  }
+
+  @override
+  Future<void> safeDelete(String id, int expectedRowVersion) async {
+    await _call('admin_safe_delete_content', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+  }
+
+  @override
+  Future<ReferenceArticleItem> promoteDemo(
+    String id,
+    int expectedRowVersion,
+  ) async {
+    final data = await _call('admin_promote_demo_content', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return _parseArticleRequired(data);
+  }
+
+  @override
+  Future<List<ReferenceVersionInfo>> listVersions(String id) async {
+    final data = await _call('admin_list_content_versions', {'p_id': id});
+    return _asList(data).map(ReferenceVersionInfo.fromJson).toList();
+  }
+
+  @override
+  Future<ReferenceArticleItem> restoreVersion(
+    String id,
+    int versionNumber,
+    int expectedRowVersion,
+  ) async {
+    final data = await _call('admin_restore_content_version', {
+      'p_id': id,
+      'p_version_number': versionNumber,
       'p_expected_row_version': expectedRowVersion,
     });
     return _parseArticleRequired(data);

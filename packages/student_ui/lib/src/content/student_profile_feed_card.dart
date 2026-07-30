@@ -165,10 +165,10 @@ class _StudentProfileFeedCarouselState
       }
     }
     final nextId = widget.cards[_pageIndex].id;
-    final oldId = oldWidget.cards.isEmpty ||
-            _pageIndex >= oldWidget.cards.length
-        ? null
-        : oldWidget.cards[_pageIndex].id;
+    final oldId =
+        oldWidget.cards.isEmpty || _pageIndex >= oldWidget.cards.length
+            ? null
+            : oldWidget.cards[_pageIndex].id;
     if (nextId != oldId || nextId != _lastVisibleId) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;

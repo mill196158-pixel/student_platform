@@ -9,8 +9,14 @@ import '../../../core/auth/admin_backend_config.dart';
 import '../../../core/auth/admin_session_controller.dart';
 import '../../academic/students/students_repository.dart';
 import '../profile_feed/content_audience_selectors.dart';
+import '../shared/admin_content_backend.dart';
+import '../shared/phone_preview_frame.dart';
+import '../shared/visual_editor_list_panel.dart';
+import '../shared/visual_editor_shell.dart';
+import '../shared/visual_editor_states.dart';
 import 'supabase_vacancy_repository.dart';
 import 'vacancy_item.dart';
+import 'vacancy_preview.dart';
 import 'vacancy_repository.dart';
 
 /// Admin editor for Stage 17 vacancies domain (dedicated model, not content_items).
@@ -42,8 +48,11 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
 
   List<VacancyItem> _items = [];
   String? _selectedId;
+  VisualEditorListTab _listTab = VisualEditorListTab.drafts;
+  bool _showDemoOnly = false;
   bool _loading = true;
   bool _busy = false;
+  bool _dirty = false;
   String _audienceMode = 'all';
   String _origin = 'admin';
   VacancyEmploymentType? _employmentType;
@@ -56,8 +65,32 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
   List<VacancyReportEntry> _openReports = const [];
   DateTime? _expiresAt;
   String? _banner;
+  String? _successBanner;
   String? _loadError;
   late final StudentsRepository _studentsRepository = _defaultStudentsRepo();
+  _EditorSnapshot? _boundSnapshot;
+
+  VacancyAdminListPartitions get _partitions => partitionAdminVacancy(_items);
+
+  VisualEditorTabCounts get _tabCounts => VisualEditorTabCounts(
+    published: _partitions.published.length,
+    drafts: _partitions.drafts.length,
+    archived: _partitions.archived.length,
+  );
+
+  List<VacancyItem> get _tabItems {
+    final parts = _partitions;
+    final base = switch (_listTab) {
+      VisualEditorListTab.published => parts.published,
+      VisualEditorListTab.drafts => parts.drafts,
+      VisualEditorListTab.archived => parts.archived,
+    };
+    if (!_showDemoOnly) return base;
+    return base.where((item) => item.origin == ContentOrigin.demo).toList();
+  }
+
+  bool get _isDemoBackend =>
+      AdminBackendConfig.isDemoMode || _repository is LocalVacancyRepository;
 
   VacancyItem? get _selected {
     for (final item in _items) {
@@ -91,44 +124,26 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
   }
 
   VacancyRepository _defaultRepo() {
-    if (AdminBackendConfig.isDemoMode) return LocalVacancyRepository();
-    final client = _tryClient();
-    if (client == null) return LocalVacancyRepository();
-    return SupabaseVacancyRepository(client: client);
+    return AdminContentBackend.resolveRepository<VacancyRepository>(
+      isDemoMode: AdminBackendConfig.isDemoMode,
+      client: _tryClient(),
+      localFactory: LocalVacancyRepository.new,
+      supabaseFactory: (client) => SupabaseVacancyRepository(client: client),
+    );
   }
 
   StudentsRepository _defaultStudentsRepo() {
     if (AdminBackendConfig.isDemoMode) return LocalStudentsRepository();
     final client = _tryClient();
-    if (client == null) return LocalStudentsRepository();
-    return SupabaseStudentsRepository(client: client);
-  }
-
-  String _statusRu(VacancyStatus status) {
-    switch (status) {
-      case VacancyStatus.draft:
-        return 'Черновик';
-      case VacancyStatus.submitted:
-        return 'Отправлена';
-      case VacancyStatus.inModeration:
-        return 'На модерации';
-      case VacancyStatus.approved:
-        return 'Одобрена';
-      case VacancyStatus.published:
-        return 'Опубликована';
-      case VacancyStatus.expired:
-        return 'Истекла';
-      case VacancyStatus.archived:
-        return 'В архиве';
-      case VacancyStatus.rejected:
-        return 'Отклонена';
-    }
+    if (client != null) return SupabaseStudentsRepository(client: client);
+    if (widget.repository != null) return LocalStudentsRepository();
+    throw StateError(AdminContentBackend.realUnavailableMessage);
   }
 
   @override
   void initState() {
     super.initState();
-    _reload();
+    _bootstrap();
     unawaited(_loadReports());
   }
 
@@ -148,7 +163,7 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
     super.dispose();
   }
 
-  Future<void> _reload() async {
+  Future<void> _bootstrap() async {
     setState(() {
       _loading = true;
       _loadError = null;
@@ -158,14 +173,10 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
       if (!mounted) return;
       setState(() {
         _items = items;
-        _selectedId ??= items.isEmpty ? null : items.first.id;
         _loading = false;
+        _ensureSelectionForTab();
       });
-      final selected = _selected;
-      if (selected != null) {
-        _bind(selected);
-        unawaited(_loadJournal(selected));
-      }
+      _bindSelected();
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -175,7 +186,88 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
     }
   }
 
-  void _bind(VacancyItem item) {
+  Future<void> _reload({String? selectId}) async {
+    setState(() {
+      _loading = false;
+      _loadError = null;
+    });
+    try {
+      final items = await _repository.list();
+      if (!mounted) return;
+      setState(() {
+        _items = items;
+        if (selectId != null) _selectedId = selectId;
+        _ensureSelectionForTab();
+      });
+      _bindSelected();
+      final selected = _selected;
+      if (selected != null) unawaited(_loadJournal(selected));
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _loadError = error.toString());
+    }
+  }
+
+  void _ensureSelectionForTab() {
+    final tabItems = _tabItems;
+    if (tabItems.isEmpty) {
+      _selectedId = null;
+      return;
+    }
+    if (_selectedId != null && tabItems.any((e) => e.id == _selectedId)) {
+      return;
+    }
+    _selectedId = tabItems.first.id;
+  }
+
+  void _select(String id) {
+    if (id == _selectedId) return;
+    setState(() => _selectedId = id);
+    _bindSelected();
+    final selected = _selected;
+    if (selected != null) unawaited(_loadJournal(selected));
+  }
+
+  _EditorSnapshot _captureSnapshot() {
+    return _EditorSnapshot(
+      title: _titleController.text,
+      company: _companyController.text,
+      summary: _summaryController.text,
+      description: _descriptionController.text,
+      requirements: _requirementsController.text,
+      location: _locationController.text,
+      salary: _salaryController.text,
+      url: _urlController.text,
+      contactEmail: _contactEmailController.text,
+      contactPhone: _contactPhoneController.text,
+      contactTelegram: _contactTelegramController.text,
+      employmentType: _employmentType,
+      workFormat: _workFormat,
+      audienceMode: _audienceMode,
+      origin: _origin,
+      groupIds: [..._groupIds],
+      userIds: [..._userIds],
+      expiresAt: _expiresAt,
+    );
+  }
+
+  void _markDirty() {
+    final nextDirty =
+        _boundSnapshot != null && _captureSnapshot() != _boundSnapshot;
+    setState(() => _dirty = nextDirty);
+  }
+
+  void _bindSelected() {
+    final item = _selected;
+    if (item == null) {
+      _boundSnapshot = null;
+      setState(() {
+        _dirty = false;
+        _banner = null;
+        _successBanner = null;
+      });
+      return;
+    }
     _titleController.text = item.title;
     _companyController.text = item.companyName;
     _summaryController.text = item.summary;
@@ -203,7 +295,12 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
     _audiencePreview = null;
     _versions = const [];
     _moderationJournal = const [];
-    setState(() {});
+    _boundSnapshot = _captureSnapshot();
+    setState(() {
+      _dirty = false;
+      _banner = null;
+      _successBanner = null;
+    });
   }
 
   Future<void> _loadJournal(VacancyItem item) async {
@@ -259,30 +356,30 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
               audienceMode: 'all',
             ))
         .copyWith(
-      title: title,
-      companyName: _companyController.text.trim(),
-      summary: summary,
-      description: description,
-      employmentType: _employmentType,
-      workFormat: _workFormat,
-      location: _locationController.text.trim().isEmpty
-          ? null
-          : _locationController.text.trim(),
-      salaryText: _salaryController.text.trim().isEmpty
-          ? null
-          : _salaryController.text.trim(),
-      externalUrl: _urlController.text.trim().isEmpty
-          ? null
-          : _urlController.text.trim(),
-      contacts: _contactsFromFields(),
-      expiresAt: _expiresAt,
-      clearLocation: _locationController.text.trim().isEmpty,
-      clearSalaryText: _salaryController.text.trim().isEmpty,
-      clearExternalUrl: _urlController.text.trim().isEmpty,
-      clearEmploymentType: _employmentType == null,
-      clearWorkFormat: _workFormat == null,
-      clearExpiresAt: _expiresAt == null,
-    );
+          title: title,
+          companyName: _companyController.text.trim(),
+          summary: summary,
+          description: description,
+          employmentType: _employmentType,
+          workFormat: _workFormat,
+          location: _locationController.text.trim().isEmpty
+              ? null
+              : _locationController.text.trim(),
+          salaryText: _salaryController.text.trim().isEmpty
+              ? null
+              : _salaryController.text.trim(),
+          externalUrl: _urlController.text.trim().isEmpty
+              ? null
+              : _urlController.text.trim(),
+          contacts: _contactsFromFields(),
+          expiresAt: _expiresAt,
+          clearLocation: _locationController.text.trim().isEmpty,
+          clearSalaryText: _salaryController.text.trim().isEmpty,
+          clearExternalUrl: _urlController.text.trim().isEmpty,
+          clearEmploymentType: _employmentType == null,
+          clearWorkFormat: _workFormat == null,
+          clearExpiresAt: _expiresAt == null,
+        );
   }
 
   Future<void> _run(Future<void> Function() action) async {
@@ -290,6 +387,7 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
     setState(() {
       _busy = true;
       _banner = null;
+      _successBanner = null;
     });
     try {
       await action();
@@ -314,24 +412,112 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
     await _run(() async {
       final origin = ContentOrigin.tryParse(_origin);
       if (origin != ContentOrigin.admin && origin != ContentOrigin.demo) {
-        setState(
-          () => _banner = 'Ручное создание только с origin admin|demo.',
-        );
+        setState(() => _banner = 'Ручное создание только с origin admin|demo.');
         return;
       }
       final created = await _repository.createDraft(
         draft: draft,
         origin: origin!,
       );
-      await _reload();
+      await _reload(selectId: created.id);
       if (!mounted) return;
       setState(() {
-        _selectedId = created.id;
-        _banner = 'Черновик вакансии создан.';
+        _listTab = VisualEditorListTab.drafts;
+        _successBanner = 'Черновик вакансии создан.';
       });
-      final selected = _selected;
-      if (selected != null) _bind(selected);
     });
+  }
+
+  Future<void> _createDemoDraft() async {
+    final seed = VacancyCardPayload.demoVacancies.first;
+    final draft = VacancyItem(
+      id: '',
+      status: VacancyStatus.draft,
+      origin: ContentOrigin.demo,
+      title: seed.title,
+      companyName: seed.companyName,
+      summary: seed.summary,
+      description: seed.summary,
+      employmentType: seed.employmentType,
+      workFormat: seed.workFormat,
+      location: seed.location,
+      salaryText: seed.salaryText,
+      externalUrl: seed.externalUrl,
+      rowVersion: 1,
+      priority: 0,
+      audienceMode: 'all',
+    );
+    await _run(() async {
+      final created = await _repository.createDraft(
+        draft: draft,
+        origin: ContentOrigin.demo,
+      );
+      await _reload(selectId: created.id);
+      if (mounted) {
+        setState(() {
+          _listTab = VisualEditorListTab.drafts;
+          _successBanner = 'Демо-черновик создан локально.';
+        });
+      }
+    });
+  }
+
+  Future<void> _promoteDemo() async {
+    final selected = _selected;
+    if (selected == null || selected.origin != ContentOrigin.demo) return;
+    await _run(() async {
+      final updated = await _repository.promoteDemo(
+        selected.id,
+        selected.rowVersion,
+      );
+      await _reload(selectId: updated.id);
+      if (mounted) {
+        setState(
+          () => _successBanner = 'Демо-вакансия переведена в управляемую.',
+        );
+      }
+    });
+  }
+
+  Future<void> _safeDelete() async {
+    final selected = _selected;
+    if (selected == null || selected.status != VacancyStatus.archived) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Удалить навсегда?'),
+        content: const Text(
+          'Вакансия будет удалена безвозвратно. '
+          'Демо-ключ будет помечен и не вернётся при bootstrap.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await _run(() async {
+      await _repository.safeDelete(selected.id, selected.rowVersion);
+      await _reload();
+      if (mounted) {
+        setState(() => _successBanner = 'Вакансия удалена.');
+      }
+    });
+  }
+
+  Future<void> _saveDraft() async {
+    if (!_canWrite) {
+      setState(() => _banner = 'Недостаточно прав для сохранения.');
+      return;
+    }
+    await _save();
   }
 
   Future<void> _save() async {
@@ -351,15 +537,14 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
         userIds: _userIds,
         expectedRowVersion: next.rowVersion,
       );
-      await _reload();
+      await _reload(selectId: next.id);
       if (!mounted) return;
       setState(() {
-        _selectedId = next.id;
-        _banner = 'Сохранено.';
+        _successBanner = 'Сохранено.';
         _audiencePreview = null;
+        _dirty = false;
+        _boundSnapshot = _captureSnapshot();
       });
-      final rebound = _selected;
-      if (rebound != null) _bind(rebound);
     });
   }
 
@@ -381,14 +566,12 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
         selected.id,
         selected.rowVersion,
       );
-      await _reload();
+      await _reload(selectId: published.id);
       if (!mounted) return;
       setState(() {
-        _selectedId = published.id;
-        _banner = 'Опубликовано.';
+        _listTab = VisualEditorListTab.published;
+        _successBanner = 'Опубликовано.';
       });
-      final rebound = _selected;
-      if (rebound != null) _bind(rebound);
     });
   }
 
@@ -401,15 +584,19 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
         action: action,
         expectedRowVersion: selected.rowVersion,
       );
-      await _reload();
+      await _reload(selectId: updated.id);
       if (!mounted) return;
       setState(() {
-        _selectedId = updated.id;
-        _banner = switch (action) {
+        _successBanner = switch (action) {
           'unpublish' => 'Снято с публикации.',
           'expire' => 'Помечено истекшей.',
           'archive' => 'Архивировано.',
           _ => 'Обновлено.',
+        };
+        _listTab = switch (action) {
+          'unpublish' => VisualEditorListTab.drafts,
+          'expire' || 'archive' => VisualEditorListTab.archived,
+          _ => _listTab,
         };
       });
     });
@@ -456,14 +643,12 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
     );
     if (date == null) return;
     setState(() => _expiresAt = date);
+    _markDirty();
   }
 
   Future<void> _resolveReport(VacancyReportEntry report, String action) async {
     await _run(() async {
-      await _repository.resolveReport(
-        reportId: report.id,
-        action: action,
-      );
+      await _repository.resolveReport(reportId: report.id, action: action);
       await _loadReports();
       if (!mounted) return;
       setState(() => _banner = 'Жалоба обработана.');
@@ -494,8 +679,7 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
                 child: const Text('Отмена'),
               ),
               FilledButton(
-                onPressed: () =>
-                    Navigator.pop(context, controller.text.trim()),
+                onPressed: () => Navigator.pop(context, controller.text.trim()),
                 child: const Text('Отклонить'),
               ),
             ],
@@ -511,20 +695,141 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
         expectedRowVersion: selected.rowVersion,
         reason: reason,
       );
-      await _reload();
+      await _reload(selectId: updated.id);
       if (!mounted) return;
       setState(() {
-        _selectedId = updated.id;
-        _banner = switch (action) {
+        _successBanner = switch (action) {
           'take_in_moderation' => 'Взято на модерацию.',
           'approve' => 'Одобрено.',
           'reject' => 'Отклонено.',
           _ => 'Обновлено.',
         };
       });
-      final rebound = _selected;
-      if (rebound != null) _bind(rebound);
     });
+  }
+
+  Future<void> _unpublish() async => _lifecycle('unpublish');
+
+  Future<void> _showVersions() async {
+    final selected = _selected;
+    if (selected == null) return;
+    List<VacancyVersionEntry>? versions;
+    await _run(() async {
+      versions = await _repository.listVersions(selected.id);
+    });
+    if (versions == null || !mounted) return;
+    if (versions!.isEmpty) {
+      setState(() => _successBanner = 'История версий пуста.');
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('История версий'),
+        content: SizedBox(
+          width: 380,
+          child: ListView.separated(
+            shrinkWrap: true,
+            itemCount: versions!.length,
+            separatorBuilder: (_, _) => const Divider(height: 1),
+            itemBuilder: (context, index) {
+              final version = versions![index];
+              return ListTile(
+                leading: CircleAvatar(child: Text('${version.versionNumber}')),
+                title: Text('Версия ${version.versionNumber}'),
+                subtitle: version.snapshotTitle == null
+                    ? null
+                    : Text(version.snapshotTitle!),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Закрыть'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handlePopDirtyConfirm() async {
+    final navigator = Navigator.of(context);
+    final discard = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Несохранённые изменения'),
+        content: const Text('Выйти без сохранения черновика?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Остаться'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Выйти'),
+          ),
+        ],
+      ),
+    );
+    if (discard == true && mounted) {
+      setState(() => _dirty = false);
+      navigator.maybePop();
+    }
+  }
+
+  void _openVacancyDetail(ManagedVacancyCard card) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.75,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        builder: (context, scrollController) => SingleChildScrollView(
+          controller: scrollController,
+          child: Theme(
+            data: studentPlatformLightTheme(),
+            child: StudentVacancyDetailSheet(
+              card: card,
+              showDemoBadge: card.showDemoBadge,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<ManagedVacancyCard> _previewCards() {
+    final selected = _selected;
+    final published = _partitions.publishedPreviewItems;
+    final cards = published.map((item) => item.toManagedCard()).toList();
+    if (selected == null) return cards;
+
+    final selectedPublished =
+        selected.status == VacancyStatus.published &&
+        published.any((e) => e.id == selected.id);
+    if (selectedPublished) return cards;
+
+    final draft = _draftFromFields(base: selected);
+    if (draft == null) return cards;
+    return [
+      draft.toManagedCard(showDemoBadge: selected.origin == ContentOrigin.demo),
+      ...cards,
+    ];
+  }
+
+  String? get _headerBanner => _banner;
+
+  String? get _infoBanner {
+    if (_banner != null) return null;
+    return _successBanner;
   }
 
   bool get _draftOnly {
@@ -538,499 +843,852 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Padding(
+        padding: EdgeInsets.all(20),
+        child: VisualEditorLoadingState(),
+      );
     }
     if (_loadError != null) {
-      return Center(child: Text(_loadError!));
+      return Padding(
+        padding: const EdgeInsets.all(20),
+        child: VisualEditorErrorState(
+          message: _loadError!,
+          onRetry: () {
+            setState(() => _loading = true);
+            _bootstrap();
+          },
+        ),
+      );
     }
 
     final selected = _selected;
-    final preview = _draftFromFields(base: selected)?.previewPayload ??
-        VacancyCardPayload.demoVacancies.first;
+    final previewCards = _previewCards();
+    final isArchived =
+        selected != null &&
+        (selected.status == VacancyStatus.archived ||
+            selected.status == VacancyStatus.expired);
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        SizedBox(
-          width: 300,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Вакансии',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Отдельная доменная модель Stage 17. '
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: VisualEditorShell(
+        title: 'Вакансии',
+        selectedTitle: selected?.title,
+        statusChip: selected?.status.russianLabel,
+        originDemoBadge: selected?.origin == ContentOrigin.demo,
+        dirty: _dirty,
+        busy: _busy,
+        banner: _headerBanner,
+        defaultInfoMessage:
+            _infoBanner ??
+            'Отдельная доменная модель Stage 17. '
                 'User submission не публикуется автоматически.',
+        canWrite: _canWrite,
+        canPublish:
+            _canPublish &&
+            selected != null &&
+            selected.status == VacancyStatus.approved,
+        canUnpublish: _canPublish,
+        isPublished: selected?.status == VacancyStatus.published,
+        isArchived: isArchived,
+        listTab: _listTab,
+        tabCounts: _tabCounts,
+        onTabChanged: (tab) {
+          setState(() {
+            _listTab = tab;
+            _ensureSelectionForTab();
+          });
+          _bindSelected();
+        },
+        onCreate: _canWrite ? _create : null,
+        onSaveDraft: _canWrite ? _saveDraft : null,
+        onPublish: _canPublish ? _publish : null,
+        onUnpublish: _canPublish ? _unpublish : null,
+        onVersions: _showVersions,
+        onPopDirtyConfirm: _handlePopDirtyConfirm,
+        listBuilder: (_) => Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: VisualEditorListPanel(
+                panelTitle: 'Вакансии',
+                tab: _listTab,
+                tabCounts: _tabCounts,
+                items: [
+                  for (final item in _tabItems)
+                    VisualEditorListItem(
+                      id: item.id,
+                      title: item.title,
+                      subtitle: item.companyName,
+                      isDemo: item.origin == ContentOrigin.demo,
+                      statusLabel: item.status.russianLabel,
+                    ),
+                ],
+                selectedId: _selectedId,
+                onTabChanged: (tab) {
+                  setState(() {
+                    _listTab = tab;
+                    _ensureSelectionForTab();
+                  });
+                  _bindSelected();
+                },
+                onSelected: _select,
+                onCreate: _canWrite ? _create : null,
+                showDemoOnly: _showDemoOnly,
+                onDemoFilterChanged: (value) =>
+                    setState(() => _showDemoOnly = value),
+              ),
+            ),
+            if (_isDemoBackend && _canWrite) ...[
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _busy ? null : _createDemoDraft,
+                icon: const Icon(Icons.auto_awesome_outlined),
+                label: const Text('Создать демо-черновик'),
+              ),
+            ],
+          ],
+        ),
+        previewBuilder: (_) => _VacancyPhonePreview(
+          cards: previewCards,
+          selectedId: selected?.id,
+          onCardTap: (card) {
+            _select(card.id);
+            _openVacancyDetail(card);
+          },
+        ),
+        propertiesBuilder: (_) => selected == null
+            ? VisualEditorEmptyState(
+                message: _tabItems.isEmpty
+                    ? _listTab.emptyMessageRu
+                    : 'Выберите вакансию',
+                actionLabel: _canWrite && _tabItems.isEmpty ? 'Создать' : null,
+                onAction: _canWrite && _tabItems.isEmpty ? _create : null,
+              )
+            : _VacancyPropertiesPanel(
+                selected: selected,
+                canWrite: _canWrite,
+                canPublish: _canPublish,
+                canModerate: _canModerate,
+                busy: _busy,
+                draftOnly: _draftOnly,
+                titleController: _titleController,
+                companyController: _companyController,
+                summaryController: _summaryController,
+                descriptionController: _descriptionController,
+                requirementsController: _requirementsController,
+                locationController: _locationController,
+                salaryController: _salaryController,
+                urlController: _urlController,
+                contactEmailController: _contactEmailController,
+                contactPhoneController: _contactPhoneController,
+                contactTelegramController: _contactTelegramController,
+                employmentType: _employmentType,
+                workFormat: _workFormat,
+                expiresAt: _expiresAt,
+                origin: _origin,
+                audienceMode: _audienceMode,
+                groupIds: _groupIds,
+                userIds: _userIds,
+                audiencePreview: _audiencePreview,
+                moderationJournal: _moderationJournal,
+                versions: _versions,
+                openReports: _openReports,
+                studentsRepository: _studentsRepository,
+                onChanged: _markDirty,
+                onEmploymentTypeChanged: (value) {
+                  setState(() => _employmentType = value);
+                  _markDirty();
+                },
+                onWorkFormatChanged: (value) {
+                  setState(() => _workFormat = value);
+                  _markDirty();
+                },
+                onExpiresAtChanged: (value) {
+                  setState(() => _expiresAt = value);
+                  _markDirty();
+                },
+                onOriginChanged: (value) {
+                  setState(() => _origin = value);
+                  _markDirty();
+                },
+                onAudienceModeChanged: (value) {
+                  setState(() {
+                    _audienceMode = value;
+                    _audiencePreview = null;
+                  });
+                  _markDirty();
+                },
+                onAudienceChanged: ({required groupIds, required userIds}) {
+                  setState(() {
+                    _groupIds = groupIds;
+                    _userIds = userIds;
+                    _audiencePreview = null;
+                  });
+                  _markDirty();
+                },
+                onPickExpiresAt: _pickExpiresAt,
+                onPreviewAudience: _previewAudience,
+                onSave: _saveDraft,
+                onPublish: _publish,
+                onModerate: _moderate,
+                onLifecycle: _lifecycle,
+                onPromoteDemo: _promoteDemo,
+                onSafeDelete: _safeDelete,
+                onUploadAsset: _uploadAsset,
+                onResolveReport: _resolveReport,
+              ),
+      ),
+    );
+  }
+}
+
+class _EditorSnapshot {
+  const _EditorSnapshot({
+    required this.title,
+    required this.company,
+    required this.summary,
+    required this.description,
+    required this.requirements,
+    required this.location,
+    required this.salary,
+    required this.url,
+    required this.contactEmail,
+    required this.contactPhone,
+    required this.contactTelegram,
+    required this.employmentType,
+    required this.workFormat,
+    required this.audienceMode,
+    required this.origin,
+    required this.groupIds,
+    required this.userIds,
+    required this.expiresAt,
+  });
+
+  final String title;
+  final String company;
+  final String summary;
+  final String description;
+  final String requirements;
+  final String location;
+  final String salary;
+  final String url;
+  final String contactEmail;
+  final String contactPhone;
+  final String contactTelegram;
+  final VacancyEmploymentType? employmentType;
+  final VacancyWorkFormat? workFormat;
+  final String audienceMode;
+  final String origin;
+  final List<String> groupIds;
+  final List<String> userIds;
+  final DateTime? expiresAt;
+
+  @override
+  bool operator ==(Object other) {
+    return other is _EditorSnapshot &&
+        other.title == title &&
+        other.company == company &&
+        other.summary == summary &&
+        other.description == description &&
+        other.requirements == requirements &&
+        other.location == location &&
+        other.salary == salary &&
+        other.url == url &&
+        other.contactEmail == contactEmail &&
+        other.contactPhone == contactPhone &&
+        other.contactTelegram == contactTelegram &&
+        other.employmentType == employmentType &&
+        other.workFormat == workFormat &&
+        other.audienceMode == audienceMode &&
+        other.origin == origin &&
+        _listEq(other.groupIds, groupIds) &&
+        _listEq(other.userIds, userIds) &&
+        other.expiresAt == expiresAt;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    title,
+    company,
+    summary,
+    description,
+    requirements,
+    location,
+    salary,
+    url,
+    contactEmail,
+    contactPhone,
+    contactTelegram,
+    employmentType,
+    workFormat,
+    audienceMode,
+    origin,
+    Object.hashAll(groupIds),
+    Object.hashAll(userIds),
+    expiresAt,
+  );
+}
+
+bool _listEq(List<String> a, List<String> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
+}
+
+class _VacancyPhonePreview extends StatelessWidget {
+  const _VacancyPhonePreview({
+    required this.cards,
+    required this.selectedId,
+    required this.onCardTap,
+  });
+
+  final List<ManagedVacancyCard> cards;
+  final String? selectedId;
+  final ValueChanged<ManagedVacancyCard> onCardTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return PhonePreviewFrame(
+      child: Theme(
+        data: studentPlatformLightTheme(),
+        child: ColoredBox(
+          color: const Color(0xFFFAF8FC),
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 56, 16, 24),
+            children: [
+              const Text(
+                'Вакансии',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                  color: Color(0xFF111827),
+                ),
               ),
               const SizedBox(height: 12),
-              if (_canWrite)
-                FilledButton.icon(
-                  onPressed: _busy ? null : _create,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Новая вакансия'),
-                ),
-              const SizedBox(height: 12),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: _items.length,
-                  itemBuilder: (context, index) {
-                    final item = _items[index];
-                    return ListTile(
-                      selected: item.id == _selectedId,
-                      title: Text(item.title),
-                      subtitle: Text(
-                        '${_statusRu(item.status)} · ${item.origin.labelRu}',
+              if (cards.isEmpty)
+                const Card(
+                  child: Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Text(
+                      'Нет опубликованных вакансий для предпросмотра',
+                    ),
+                  ),
+                )
+              else
+                for (final card in cards)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(20),
+                        border: card.id == selectedId
+                            ? Border.all(
+                                color: const Color(0xFF6656D9),
+                                width: 2,
+                              )
+                            : null,
                       ),
-                      onTap: () {
-                        setState(() => _selectedId = item.id);
-                        _bind(item);
-                      },
-                    );
-                  },
-                ),
-              ),
+                      child: StudentVacancyCard(
+                        payload: card.payload,
+                        showDemoBadge: card.showDemoBadge,
+                        expiresLabel: vacancyExpiresLabel(card.expiresAt),
+                        onTap: () => onCardTap(card),
+                      ),
+                    ),
+                  ),
             ],
           ),
         ),
-        const VerticalDivider(width: 24),
-        Expanded(
-          child: selected == null
-              ? const Center(child: Text('Создайте вакансию.'))
-              : ListView(
-                  children: [
-                    if (_banner != null) ...[
-                      Text(_banner!),
-                      const SizedBox(height: 8),
-                    ],
-                    Text(
-                      'Preview (тот же виджет, что Mobile)',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w800,
-                          ),
-                    ),
-                    const SizedBox(height: 8),
-                    StudentVacancyCard(
-                      payload: preview,
-                      showDemoBadge: selected.origin == ContentOrigin.demo,
-                      expiresLabel: vacancyExpiresLabel(selected.expiresAt),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Статус: ${_statusRu(selected.status)} · '
-                      '${selected.origin.labelRu}',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                    if (selected.rejectionReason != null &&
-                        selected.rejectionReason!.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        'Причина отклонения: ${selected.rejectionReason}',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: Theme.of(context).colorScheme.error,
-                            ),
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _titleController,
-                      decoration: const InputDecoration(labelText: 'Название'),
-                      enabled: _canWrite && _draftOnly,
-                      onChanged: (_) => setState(() {}),
-                    ),
-                    TextField(
-                      controller: _companyController,
-                      decoration: const InputDecoration(
-                        labelText: 'Организация',
-                      ),
-                      enabled: _canWrite && _draftOnly,
-                      onChanged: (_) => setState(() {}),
-                    ),
-                    TextField(
-                      controller: _summaryController,
-                      decoration: const InputDecoration(
-                        labelText: 'Краткое описание',
-                      ),
-                      enabled: _canWrite && _draftOnly,
-                      maxLines: 2,
-                      onChanged: (_) => setState(() {}),
-                    ),
-                    TextField(
-                      controller: _descriptionController,
-                      decoration: const InputDecoration(
-                        labelText: 'Полное описание',
-                      ),
-                      enabled: _canWrite && _draftOnly,
-                      maxLines: 4,
-                    ),
-                    TextField(
-                      controller: _requirementsController,
-                      decoration: const InputDecoration(
-                        labelText: 'Требования',
-                      ),
-                      enabled: _canWrite && _draftOnly,
-                      maxLines: 3,
-                    ),
-                    DropdownButtonFormField<VacancyEmploymentType?>(
-                      key: ValueKey('employment-$_employmentType'),
-                      initialValue: _employmentType,
-                      decoration: const InputDecoration(
-                        labelText: 'Формат занятости',
-                      ),
-                      items: [
-                        const DropdownMenuItem(
-                          value: null,
-                          child: Text('— не указано —'),
-                        ),
-                        ...VacancyEmploymentType.values.map(
-                          (e) => DropdownMenuItem(
-                            value: e,
-                            child: Text(e.labelRu),
-                          ),
-                        ),
-                      ],
-                      onChanged: !_canWrite || !_draftOnly
-                          ? null
-                          : (value) => setState(() => _employmentType = value),
-                    ),
-                    DropdownButtonFormField<VacancyWorkFormat?>(
-                      key: ValueKey('format-$_workFormat'),
-                      initialValue: _workFormat,
-                      decoration: const InputDecoration(
-                        labelText: 'Местоположение / удалённо',
-                      ),
-                      items: [
-                        const DropdownMenuItem(
-                          value: null,
-                          child: Text('— не указано —'),
-                        ),
-                        ...VacancyWorkFormat.values.map(
-                          (e) => DropdownMenuItem(
-                            value: e,
-                            child: Text(e.labelRu),
-                          ),
-                        ),
-                      ],
-                      onChanged: !_canWrite || !_draftOnly
-                          ? null
-                          : (value) => setState(() => _workFormat = value),
-                    ),
-                    TextField(
-                      controller: _locationController,
-                      decoration: const InputDecoration(
-                        labelText: 'Местоположение (текст)',
-                      ),
-                      enabled: _canWrite && _draftOnly,
-                    ),
-                    TextField(
-                      controller: _salaryController,
-                      decoration: const InputDecoration(
-                        labelText: 'Зарплата (optional)',
-                      ),
-                      enabled: _canWrite && _draftOnly,
-                    ),
-                    TextField(
-                      controller: _urlController,
-                      decoration: const InputDecoration(
-                        labelText: 'Ссылка',
-                      ),
-                      enabled: _canWrite && _draftOnly,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Контакты',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                    ),
-                    TextField(
-                      controller: _contactEmailController,
-                      decoration: const InputDecoration(labelText: 'Email'),
-                      enabled: _canWrite && _draftOnly,
-                      keyboardType: TextInputType.emailAddress,
-                    ),
-                    TextField(
-                      controller: _contactPhoneController,
-                      decoration: const InputDecoration(labelText: 'Телефон'),
-                      enabled: _canWrite && _draftOnly,
-                      keyboardType: TextInputType.phone,
-                    ),
-                    TextField(
-                      controller: _contactTelegramController,
-                      decoration: const InputDecoration(labelText: 'Telegram'),
-                      enabled: _canWrite && _draftOnly,
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: InputDecorator(
-                            decoration: const InputDecoration(
-                              labelText: 'Срок актуальности',
-                            ),
-                            child: Text(
-                              _expiresAt == null
-                                  ? '— не указан —'
-                                  : vacancyExpiresLabel(_expiresAt!) ??
-                                      _expiresAt!.toLocal().toString(),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        OutlinedButton(
-                          onPressed: !_canWrite || !_draftOnly || _busy
-                              ? null
-                              : _pickExpiresAt,
-                          child: const Text('Выбрать'),
-                        ),
-                        if (_expiresAt != null)
-                          IconButton(
-                            tooltip: 'Очистить',
-                            onPressed: !_canWrite || !_draftOnly || _busy
-                                ? null
-                                : () => setState(() => _expiresAt = null),
-                            icon: const Icon(Icons.clear),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    if (selected.origin == ContentOrigin.userSubmission ||
-                        selected.origin == ContentOrigin.importSource)
-                      InputDecorator(
-                        decoration: const InputDecoration(labelText: 'Источник'),
-                        child: Text(selected.origin.labelRu),
-                      )
-                    else
-                      DropdownButtonFormField<String>(
-                        key: ValueKey('origin-$_origin'),
-                        initialValue: _origin,
-                        decoration:
-                            const InputDecoration(labelText: 'Источник'),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'admin',
-                            child: Text('Админ'),
-                          ),
-                          DropdownMenuItem(value: 'demo', child: Text('Demo')),
-                        ],
-                        onChanged: !_canWrite || !_draftOnly
-                            ? null
-                            : (value) {
-                                if (value == null) return;
-                                setState(() => _origin = value);
-                              },
-                      ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      key: ValueKey('audience-$_audienceMode'),
-                      initialValue: _audienceMode,
-                      decoration: const InputDecoration(labelText: 'Аудитория'),
-                      items: const [
-                        DropdownMenuItem(value: 'all', child: Text('Все')),
-                        DropdownMenuItem(
-                          value: 'groups',
-                          child: Text('Группы'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'users',
-                          child: Text('Пользователи'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'groups_and_users',
-                          child: Text('Группы и пользователи'),
-                        ),
-                      ],
-                      onChanged: !_canWrite || !_draftOnly
-                          ? null
-                          : (value) {
-                              if (value == null) return;
-                              setState(() {
-                                _audienceMode = value;
-                                _audiencePreview = null;
-                              });
-                            },
-                    ),
-                    ContentAudienceSelectors(
-                      studentsRepository: _studentsRepository,
-                      audienceMode: _audienceMode,
-                      selectedGroupIds: _groupIds,
-                      selectedUserIds: _userIds,
-                      enabled: _canWrite && _draftOnly,
-                      onChanged: ({required groupIds, required userIds}) {
-                        setState(() {
-                          _groupIds = groupIds;
-                          _userIds = userIds;
-                          _audiencePreview = null;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 8),
-                    OutlinedButton.icon(
-                      onPressed: _busy || selected == null
-                          ? null
-                          : _previewAudience,
-                      icon: const Icon(Icons.preview_outlined),
-                      label: const Text('Preview аудитории'),
-                    ),
-                    if (_audiencePreview != null) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        'Получателей: ${_audiencePreview!.recipientCount}. '
-                        'Групп: ${_audiencePreview!.groupCount}. '
-                        'Явных пользователей: '
-                        '${_audiencePreview!.explicitUserCount}.',
-                      ),
-                    ],
-                    const SizedBox(height: 16),
-                    Wrap(
-                      spacing: 8,
-                      children: [
-                        FilledButton(
-                          onPressed: !_canWrite || !_draftOnly || _busy
-                              ? null
-                              : _save,
-                          child: const Text('Сохранить'),
-                        ),
-                        if (_canPublish &&
-                            selected.status == VacancyStatus.approved)
-                          FilledButton.tonal(
-                            onPressed: _busy ? null : _publish,
-                            child: const Text('Опубликовать'),
-                          ),
-                        if (_canModerate &&
-                            selected.status == VacancyStatus.submitted)
-                          OutlinedButton(
-                            onPressed: _busy
-                                ? null
-                                : () => _moderate('take_in_moderation'),
-                            child: const Text('На модерацию'),
-                          ),
-                        if (_canModerate &&
-                            selected.status == VacancyStatus.inModeration)
-                          FilledButton.tonal(
-                            onPressed:
-                                _busy ? null : () => _moderate('approve'),
-                            child: const Text('Одобрить'),
-                          ),
-                        if (_canModerate &&
-                            (selected.status == VacancyStatus.submitted ||
-                                selected.status == VacancyStatus.inModeration))
-                          OutlinedButton(
-                            onPressed: _busy ? null : () => _moderate('reject'),
-                            child: const Text('Отклонить'),
-                          ),
-                        if (_canPublish &&
-                            selected.status == VacancyStatus.published)
-                          OutlinedButton(
-                            onPressed: _busy ? null : () => _lifecycle('unpublish'),
-                            child: const Text('Снять с публикации'),
-                          ),
-                        if (_canPublish &&
-                            selected.status == VacancyStatus.published)
-                          OutlinedButton(
-                            onPressed: _busy ? null : () => _lifecycle('expire'),
-                            child: const Text('Истекла'),
-                          ),
-                        if (_canPublish &&
-                            selected.status != VacancyStatus.archived)
-                          OutlinedButton(
-                            onPressed: _busy ? null : () => _lifecycle('archive'),
-                            child: const Text('В архив'),
-                          ),
-                        if (_canWrite && _draftOnly)
-                          OutlinedButton.icon(
-                            onPressed: _busy ? null : _uploadAsset,
-                            icon: const Icon(Icons.upload_file_outlined),
-                            label: const Text('Загрузить вложение'),
-                          ),
-                      ],
-                    ),
-                    if (selected.assetIds.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        'Вложения: ${selected.assetIds.length}',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ],
-                    if (_moderationJournal.isNotEmpty) ...[
-                      const SizedBox(height: 16),
-                      Text(
-                        'Журнал модерации',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w800,
-                            ),
-                      ),
-                      const SizedBox(height: 6),
-                      for (final entry in _moderationJournal.take(8))
-                        Text(
-                          '${entry.action}'
-                          '${entry.fromStatus != null ? ' (${entry.fromStatus}→${entry.toStatus})' : ''}'
-                          '${entry.reasonText.isNotEmpty ? ': ${entry.reasonText}' : ''}',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                    ],
-                    if (_versions.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      Text(
-                        'Версии: ${_versions.length}',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ],
-                    if (_openReports.isNotEmpty) ...[
-                      const SizedBox(height: 16),
-                      Text(
-                        'Открытые жалобы (${_openReports.length})',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w800,
-                            ),
-                      ),
-                      for (final report in _openReports.take(5))
-                        ListTile(
-                          dense: true,
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(
-                            report.vacancyTitle ?? report.vacancyId,
-                            style: Theme.of(context).textTheme.bodyMedium,
-                          ),
-                          subtitle: Text('${report.reasonCode} · ${report.status}'),
-                          trailing: _canModerate
-                              ? Wrap(
-                                  spacing: 4,
-                                  children: [
-                                    TextButton(
-                                      onPressed: _busy
-                                          ? null
-                                          : () => _resolveReport(report, 'resolve'),
-                                      child: const Text('Resolve'),
-                                    ),
-                                    TextButton(
-                                      onPressed: _busy
-                                          ? null
-                                          : () => _resolveReport(report, 'reject'),
-                                      child: const Text('Reject'),
-                                    ),
-                                  ],
-                                )
-                              : null,
-                        ),
-                    ],
-                    if (selected.status != VacancyStatus.approved &&
-                        selected.status != VacancyStatus.published) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        'Публикация доступна только после одобрения модерацией '
-                        '(approved).',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ],
-                  ],
+      ),
+    );
+  }
+}
+
+class _VacancyPropertiesPanel extends StatelessWidget {
+  const _VacancyPropertiesPanel({
+    required this.selected,
+    required this.canWrite,
+    required this.canPublish,
+    required this.canModerate,
+    required this.busy,
+    required this.draftOnly,
+    required this.titleController,
+    required this.companyController,
+    required this.summaryController,
+    required this.descriptionController,
+    required this.requirementsController,
+    required this.locationController,
+    required this.salaryController,
+    required this.urlController,
+    required this.contactEmailController,
+    required this.contactPhoneController,
+    required this.contactTelegramController,
+    required this.employmentType,
+    required this.workFormat,
+    required this.expiresAt,
+    required this.origin,
+    required this.audienceMode,
+    required this.groupIds,
+    required this.userIds,
+    required this.audiencePreview,
+    required this.moderationJournal,
+    required this.versions,
+    required this.openReports,
+    required this.studentsRepository,
+    required this.onChanged,
+    required this.onEmploymentTypeChanged,
+    required this.onWorkFormatChanged,
+    required this.onExpiresAtChanged,
+    required this.onOriginChanged,
+    required this.onAudienceModeChanged,
+    required this.onAudienceChanged,
+    required this.onPickExpiresAt,
+    required this.onPreviewAudience,
+    required this.onSave,
+    required this.onPublish,
+    required this.onModerate,
+    required this.onLifecycle,
+    required this.onPromoteDemo,
+    required this.onSafeDelete,
+    required this.onUploadAsset,
+    required this.onResolveReport,
+  });
+
+  final VacancyItem selected;
+  final bool canWrite;
+  final bool canPublish;
+  final bool canModerate;
+  final bool busy;
+  final bool draftOnly;
+  final TextEditingController titleController;
+  final TextEditingController companyController;
+  final TextEditingController summaryController;
+  final TextEditingController descriptionController;
+  final TextEditingController requirementsController;
+  final TextEditingController locationController;
+  final TextEditingController salaryController;
+  final TextEditingController urlController;
+  final TextEditingController contactEmailController;
+  final TextEditingController contactPhoneController;
+  final TextEditingController contactTelegramController;
+  final VacancyEmploymentType? employmentType;
+  final VacancyWorkFormat? workFormat;
+  final DateTime? expiresAt;
+  final String origin;
+  final String audienceMode;
+  final List<String> groupIds;
+  final List<String> userIds;
+  final VacancyAudiencePreview? audiencePreview;
+  final List<VacancyModerationEntry> moderationJournal;
+  final List<VacancyVersionEntry> versions;
+  final List<VacancyReportEntry> openReports;
+  final StudentsRepository studentsRepository;
+  final VoidCallback onChanged;
+  final ValueChanged<VacancyEmploymentType?> onEmploymentTypeChanged;
+  final ValueChanged<VacancyWorkFormat?> onWorkFormatChanged;
+  final ValueChanged<DateTime?> onExpiresAtChanged;
+  final ValueChanged<String> onOriginChanged;
+  final ValueChanged<String> onAudienceModeChanged;
+  final void Function({
+    required List<String> groupIds,
+    required List<String> userIds,
+  })
+  onAudienceChanged;
+  final Future<void> Function() onPickExpiresAt;
+  final Future<void> Function() onPreviewAudience;
+  final Future<void> Function() onSave;
+  final Future<void> Function() onPublish;
+  final Future<void> Function(String action) onModerate;
+  final Future<void> Function(String action) onLifecycle;
+  final Future<void> Function() onPromoteDemo;
+  final Future<void> Function() onSafeDelete;
+  final Future<void> Function() onUploadAsset;
+  final Future<void> Function(VacancyReportEntry report, String action)
+  onResolveReport;
+
+  bool get _editable => canWrite && draftOnly;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Text(
+            'Свойства вакансии',
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Статус: ${selected.status.russianLabel} · ${selected.origin.labelRu}',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          if (selected.rejectionReason != null &&
+              selected.rejectionReason!.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Причина отклонения: ${selected.rejectionReason}',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.error,
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          TextField(
+            controller: titleController,
+            decoration: const InputDecoration(labelText: 'Название'),
+            enabled: _editable,
+            onChanged: (_) => onChanged(),
+          ),
+          TextField(
+            controller: companyController,
+            decoration: const InputDecoration(labelText: 'Организация'),
+            enabled: _editable,
+            onChanged: (_) => onChanged(),
+          ),
+          TextField(
+            controller: summaryController,
+            decoration: const InputDecoration(labelText: 'Краткое описание'),
+            enabled: _editable,
+            maxLines: 2,
+            onChanged: (_) => onChanged(),
+          ),
+          TextField(
+            controller: descriptionController,
+            decoration: const InputDecoration(labelText: 'Полное описание'),
+            enabled: _editable,
+            maxLines: 4,
+            onChanged: (_) => onChanged(),
+          ),
+          TextField(
+            controller: requirementsController,
+            decoration: const InputDecoration(labelText: 'Требования'),
+            enabled: _editable,
+            maxLines: 3,
+            onChanged: (_) => onChanged(),
+          ),
+          DropdownButtonFormField<VacancyEmploymentType?>(
+            key: ValueKey('employment-$employmentType'),
+            initialValue: employmentType,
+            decoration: const InputDecoration(labelText: 'Формат занятости'),
+            items: [
+              const DropdownMenuItem(
+                value: null,
+                child: Text('— не указано —'),
+              ),
+              ...VacancyEmploymentType.values.map(
+                (e) => DropdownMenuItem(value: e, child: Text(e.labelRu)),
+              ),
+            ],
+            onChanged: !_editable ? null : onEmploymentTypeChanged,
+          ),
+          DropdownButtonFormField<VacancyWorkFormat?>(
+            key: ValueKey('format-$workFormat'),
+            initialValue: workFormat,
+            decoration: const InputDecoration(
+              labelText: 'Местоположение / удалённо',
+            ),
+            items: [
+              const DropdownMenuItem(
+                value: null,
+                child: Text('— не указано —'),
+              ),
+              ...VacancyWorkFormat.values.map(
+                (e) => DropdownMenuItem(value: e, child: Text(e.labelRu)),
+              ),
+            ],
+            onChanged: !_editable ? null : onWorkFormatChanged,
+          ),
+          TextField(
+            controller: locationController,
+            decoration: const InputDecoration(
+              labelText: 'Местоположение (текст)',
+            ),
+            enabled: _editable,
+            onChanged: (_) => onChanged(),
+          ),
+          TextField(
+            controller: salaryController,
+            decoration: const InputDecoration(labelText: 'Зарплата (optional)'),
+            enabled: _editable,
+            onChanged: (_) => onChanged(),
+          ),
+          TextField(
+            controller: urlController,
+            decoration: const InputDecoration(labelText: 'Ссылка'),
+            enabled: _editable,
+            onChanged: (_) => onChanged(),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Контакты',
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          TextField(
+            controller: contactEmailController,
+            decoration: const InputDecoration(labelText: 'Email'),
+            enabled: _editable,
+            keyboardType: TextInputType.emailAddress,
+            onChanged: (_) => onChanged(),
+          ),
+          TextField(
+            controller: contactPhoneController,
+            decoration: const InputDecoration(labelText: 'Телефон'),
+            enabled: _editable,
+            keyboardType: TextInputType.phone,
+            onChanged: (_) => onChanged(),
+          ),
+          TextField(
+            controller: contactTelegramController,
+            decoration: const InputDecoration(labelText: 'Telegram'),
+            enabled: _editable,
+            onChanged: (_) => onChanged(),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: InputDecorator(
+                  decoration: const InputDecoration(
+                    labelText: 'Срок актуальности',
+                  ),
+                  child: Text(
+                    expiresAt == null
+                        ? '— не указан —'
+                        : vacancyExpiresLabel(expiresAt!) ??
+                              expiresAt!.toLocal().toString(),
+                  ),
                 ),
-        ),
-      ],
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed: !_editable || busy ? null : onPickExpiresAt,
+                child: const Text('Выбрать'),
+              ),
+              if (expiresAt != null)
+                IconButton(
+                  tooltip: 'Очистить',
+                  onPressed: !_editable || busy
+                      ? null
+                      : () => onExpiresAtChanged(null),
+                  icon: const Icon(Icons.clear),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (selected.origin == ContentOrigin.userSubmission ||
+              selected.origin == ContentOrigin.importSource)
+            InputDecorator(
+              decoration: const InputDecoration(labelText: 'Источник'),
+              child: Text(selected.origin.labelRu),
+            )
+          else
+            DropdownButtonFormField<String>(
+              key: ValueKey('origin-$origin'),
+              initialValue: origin,
+              decoration: const InputDecoration(labelText: 'Источник'),
+              items: const [
+                DropdownMenuItem(value: 'admin', child: Text('Админ')),
+                DropdownMenuItem(value: 'demo', child: Text('Demo')),
+              ],
+              onChanged: !_editable
+                  ? null
+                  : (value) {
+                      if (value != null) onOriginChanged(value);
+                    },
+            ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            key: ValueKey('audience-$audienceMode'),
+            initialValue: audienceMode,
+            decoration: const InputDecoration(labelText: 'Аудитория'),
+            items: const [
+              DropdownMenuItem(value: 'all', child: Text('Все')),
+              DropdownMenuItem(value: 'groups', child: Text('Группы')),
+              DropdownMenuItem(value: 'users', child: Text('Пользователи')),
+              DropdownMenuItem(
+                value: 'groups_and_users',
+                child: Text('Группы и пользователи'),
+              ),
+            ],
+            onChanged: !_editable
+                ? null
+                : (value) {
+                    if (value != null) onAudienceModeChanged(value);
+                  },
+          ),
+          ContentAudienceSelectors(
+            studentsRepository: studentsRepository,
+            audienceMode: audienceMode,
+            selectedGroupIds: groupIds,
+            selectedUserIds: userIds,
+            enabled: _editable,
+            onChanged: onAudienceChanged,
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: busy ? null : onPreviewAudience,
+            icon: const Icon(Icons.preview_outlined),
+            label: const Text('Preview аудитории'),
+          ),
+          if (audiencePreview != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Получателей: ${audiencePreview!.recipientCount}. '
+              'Групп: ${audiencePreview!.groupCount}. '
+              'Явных пользователей: ${audiencePreview!.explicitUserCount}.',
+            ),
+          ],
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (canPublish && selected.status == VacancyStatus.approved)
+                FilledButton.tonal(
+                  onPressed: busy ? null : onPublish,
+                  child: const Text('Опубликовать'),
+                ),
+              if (canModerate && selected.status == VacancyStatus.submitted)
+                OutlinedButton(
+                  onPressed: busy
+                      ? null
+                      : () => onModerate('take_in_moderation'),
+                  child: const Text('На модерацию'),
+                ),
+              if (canModerate && selected.status == VacancyStatus.inModeration)
+                FilledButton.tonal(
+                  onPressed: busy ? null : () => onModerate('approve'),
+                  child: const Text('Одобрить'),
+                ),
+              if (canModerate &&
+                  (selected.status == VacancyStatus.submitted ||
+                      selected.status == VacancyStatus.inModeration))
+                OutlinedButton(
+                  onPressed: busy ? null : () => onModerate('reject'),
+                  child: const Text('Отклонить'),
+                ),
+              if (canPublish && selected.status == VacancyStatus.published)
+                OutlinedButton(
+                  onPressed: busy ? null : () => onLifecycle('unpublish'),
+                  child: const Text('Снять с публикации'),
+                ),
+              if (canPublish && selected.status == VacancyStatus.published)
+                OutlinedButton(
+                  onPressed: busy ? null : () => onLifecycle('expire'),
+                  child: const Text('Истекла'),
+                ),
+              if (canPublish && selected.status != VacancyStatus.archived)
+                OutlinedButton(
+                  onPressed: busy ? null : () => onLifecycle('archive'),
+                  child: const Text('В архив'),
+                ),
+              if (canPublish && selected.status == VacancyStatus.archived)
+                OutlinedButton.icon(
+                  onPressed: busy ? null : onSafeDelete,
+                  icon: const Icon(Icons.delete_forever_outlined),
+                  label: const Text('Удалить навсегда'),
+                ),
+              if (canWrite && selected.origin == ContentOrigin.demo)
+                OutlinedButton.icon(
+                  onPressed: busy ? null : onPromoteDemo,
+                  icon: const Icon(Icons.upgrade_outlined),
+                  label: const Text('Перевести из демо'),
+                ),
+              if (canWrite && draftOnly)
+                OutlinedButton.icon(
+                  onPressed: busy ? null : onUploadAsset,
+                  icon: const Icon(Icons.upload_file_outlined),
+                  label: const Text('Загрузить вложение'),
+                ),
+            ],
+          ),
+          if (selected.assetIds.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Вложения: ${selected.assetIds.length}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+          if (moderationJournal.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Text(
+              'Журнал модерации',
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 6),
+            for (final entry in moderationJournal.take(8))
+              Text(
+                '${entry.action}'
+                '${entry.fromStatus != null ? ' (${entry.fromStatus}→${entry.toStatus})' : ''}'
+                '${entry.reasonText.isNotEmpty ? ': ${entry.reasonText}' : ''}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+          ],
+          if (versions.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(
+              'Версии: ${versions.length}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+          if (openReports.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Text(
+              'Открытые жалобы (${openReports.length})',
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            for (final report in openReports.take(5))
+              ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  report.vacancyTitle ?? report.vacancyId,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                subtitle: Text('${report.reasonCode} · ${report.status}'),
+                trailing: canModerate
+                    ? Wrap(
+                        spacing: 4,
+                        children: [
+                          TextButton(
+                            onPressed: busy
+                                ? null
+                                : () => onResolveReport(report, 'resolve'),
+                            child: const Text('Resolve'),
+                          ),
+                          TextButton(
+                            onPressed: busy
+                                ? null
+                                : () => onResolveReport(report, 'reject'),
+                            child: const Text('Reject'),
+                          ),
+                        ],
+                      )
+                    : null,
+              ),
+          ],
+          if (selected.status != VacancyStatus.approved &&
+              selected.status != VacancyStatus.published) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Публикация доступна только после одобрения модерацией (approved).',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

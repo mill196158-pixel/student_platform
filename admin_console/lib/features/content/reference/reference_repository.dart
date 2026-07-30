@@ -65,7 +65,25 @@ abstract class ReferenceRepository {
 
   Future<ReferenceArticleItem> publish(String id, int expectedRowVersion);
 
+  Future<ReferenceArticleItem> unpublish(String id, int expectedRowVersion);
+
   Future<ReferenceArticleItem> archive(String id, int expectedRowVersion);
+
+  Future<ReferenceArticleItem> unarchive(String id, int expectedRowVersion);
+
+  /// Permanently deletes an archived item and preserves its legacy tombstone.
+  Future<void> safeDelete(String id, int expectedRowVersion);
+
+  /// Converts an existing demo item to managed content; it never creates a copy.
+  Future<ReferenceArticleItem> promoteDemo(String id, int expectedRowVersion);
+
+  Future<List<ReferenceVersionInfo>> listVersions(String id);
+
+  Future<ReferenceArticleItem> restoreVersion(
+    String id,
+    int versionNumber,
+    int expectedRowVersion,
+  );
 
   Future<List<ReferenceCorrectionItem>> listCorrections({
     String status = 'open',
@@ -78,11 +96,32 @@ abstract class ReferenceRepository {
   });
 }
 
-class ReferenceRepositoryException implements Exception {
-  const ReferenceRepositoryException(
-    this.message, {
-    this.isForbidden = false,
+class ReferenceVersionInfo {
+  const ReferenceVersionInfo({
+    required this.versionNumber,
+    required this.title,
+    required this.status,
   });
+
+  final int versionNumber;
+  final String title;
+  final ReferenceArticleStatus status;
+
+  factory ReferenceVersionInfo.fromJson(Map<String, dynamic> json) {
+    final snapshot = json['snapshot'];
+    final data = snapshot is Map ? Map<String, dynamic>.from(snapshot) : json;
+    return ReferenceVersionInfo(
+      versionNumber: int.tryParse('${json['version_number'] ?? 0}') ?? 0,
+      title: '${data['title'] ?? ''}',
+      status:
+          parseReferenceArticleStatus(data['status']) ??
+          ReferenceArticleStatus.draft,
+    );
+  }
+}
+
+class ReferenceRepositoryException implements Exception {
+  const ReferenceRepositoryException(this.message, {this.isForbidden = false});
 
   final String message;
   final bool isForbidden;
@@ -119,6 +158,8 @@ class LocalReferenceRepository implements ReferenceRepository {
           rowVersion: 1,
           sortOrder: article.sortOrder,
           audienceMode: 'all',
+          legacyKey:
+              'content:reference_article:${_referenceLegacyKey(article.id)}',
         ),
     ];
   }
@@ -140,11 +181,10 @@ class LocalReferenceRepository implements ReferenceRepository {
     final filtered = status == null
         ? _articles
         : _articles
-            .where(
-              (e) => referenceArticleStatusWire(e.status) == status,
-            )
-            .toList();
-    final copy = [...filtered]..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+              .where((e) => referenceArticleStatusWire(e.status) == status)
+              .toList();
+    final copy = [...filtered]
+      ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
     return copy;
   }
 
@@ -309,7 +349,10 @@ class LocalReferenceRepository implements ReferenceRepository {
   }
 
   @override
-  Future<ReferenceArticleItem> publish(String id, int expectedRowVersion) async {
+  Future<ReferenceArticleItem> publish(
+    String id,
+    int expectedRowVersion,
+  ) async {
     final idx = _articles.indexWhere((e) => e.id == id);
     if (idx < 0) {
       throw const ReferenceRepositoryException('Статья не найдена.');
@@ -329,7 +372,26 @@ class LocalReferenceRepository implements ReferenceRepository {
   }
 
   @override
-  Future<ReferenceArticleItem> archive(String id, int expectedRowVersion) async {
+  Future<ReferenceArticleItem> unpublish(String id, int expectedRowVersion) =>
+      _transition(id, expectedRowVersion, ReferenceArticleStatus.draft);
+
+  @override
+  Future<ReferenceArticleItem> archive(
+    String id,
+    int expectedRowVersion,
+  ) async {
+    return _transition(id, expectedRowVersion, ReferenceArticleStatus.archived);
+  }
+
+  @override
+  Future<ReferenceArticleItem> unarchive(String id, int expectedRowVersion) =>
+      _transition(id, expectedRowVersion, ReferenceArticleStatus.draft);
+
+  Future<ReferenceArticleItem> _transition(
+    String id,
+    int expectedRowVersion,
+    ReferenceArticleStatus status,
+  ) async {
     final idx = _articles.indexWhere((e) => e.id == id);
     if (idx < 0) {
       throw const ReferenceRepositoryException('Статья не найдена.');
@@ -341,11 +403,90 @@ class LocalReferenceRepository implements ReferenceRepository {
       );
     }
     final next = current.copyWith(
-      status: ReferenceArticleStatus.archived,
+      status: status,
       rowVersion: current.rowVersion + 1,
     );
     _articles = [..._articles]..[idx] = next;
     return next;
+  }
+
+  @override
+  Future<void> safeDelete(String id, int expectedRowVersion) async {
+    final idx = _articles.indexWhere((e) => e.id == id);
+    if (idx < 0) throw const ReferenceRepositoryException('Статья не найдена.');
+    final item = _articles[idx];
+    if (item.rowVersion != expectedRowVersion) {
+      throw const ReferenceRepositoryException(
+        'Статья изменилась. Обновите список.',
+      );
+    }
+    if (item.status != ReferenceArticleStatus.archived) {
+      throw const ReferenceRepositoryException(
+        'Удалять можно только статью из архива.',
+      );
+    }
+    _articles = [..._articles]..removeAt(idx);
+  }
+
+  @override
+  Future<ReferenceArticleItem> promoteDemo(
+    String id,
+    int expectedRowVersion,
+  ) async {
+    final idx = _articles.indexWhere((e) => e.id == id);
+    if (idx < 0) throw const ReferenceRepositoryException('Статья не найдена.');
+    final item = _articles[idx];
+    if (item.rowVersion != expectedRowVersion) {
+      throw const ReferenceRepositoryException(
+        'Статья изменилась. Обновите список.',
+      );
+    }
+    if (item.origin != ContentOrigin.demo) {
+      throw const ReferenceRepositoryException(
+        'Перевести можно только демо-статью.',
+      );
+    }
+    final next = item.copyWith(
+      origin: ContentOrigin.admin,
+      rowVersion: item.rowVersion + 1,
+    );
+    _articles = [..._articles]..[idx] = next;
+    return next;
+  }
+
+  @override
+  Future<List<ReferenceVersionInfo>> listVersions(String id) async {
+    final item = _articles.where((item) => item.id == id).firstOrNull;
+    if (item == null)
+      throw const ReferenceRepositoryException('Статья не найдена.');
+    return [
+      ReferenceVersionInfo(
+        versionNumber: item.rowVersion,
+        title: item.title,
+        status: item.status,
+      ),
+    ];
+  }
+
+  @override
+  Future<ReferenceArticleItem> restoreVersion(
+    String id,
+    int versionNumber,
+    int expectedRowVersion,
+  ) async {
+    final item = _articles.where((item) => item.id == id).firstOrNull;
+    if (item == null || versionNumber <= 0) {
+      throw const ReferenceRepositoryException('Версия не найдена.');
+    }
+    if (item.rowVersion != expectedRowVersion) {
+      throw const ReferenceRepositoryException(
+        'Статья изменилась. Обновите список.',
+      );
+    }
+    final restored = item.copyWith(rowVersion: item.rowVersion + 1);
+    final idx = _articles.indexWhere((e) => e.id == id);
+    _articles = [..._articles]..[idx] = restored;
+    return restored;
   }
 
   @override
@@ -376,4 +517,16 @@ class LocalReferenceRepository implements ReferenceRepository {
       createdAt: current.createdAt,
     );
   }
+}
+
+String _referenceLegacyKey(String id) {
+  const byDemoId = <String, String>{
+    'demo-reference-0': 'login_cabinet',
+    'demo-reference-1': 'download_materials',
+    'demo-reference-2': 'order_certificate',
+    'demo-reference-3': 'install_software',
+    'demo-reference-4': 'campus_map',
+    'demo-reference-5': 'faq',
+  };
+  return byDemoId[id] ?? id;
 }

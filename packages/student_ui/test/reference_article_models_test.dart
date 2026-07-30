@@ -221,7 +221,8 @@ void main() {
   });
 
   group('StudentReferenceArticleDetail media callbacks', () {
-    testWidgets('invokes onOpenAsset for image and file blocks', (tester) async {
+    testWidgets('invokes onOpenAsset for image and file blocks',
+        (tester) async {
       final opened = <String>[];
       final article = ManagedReferenceArticle.tryParse(
         sampleArticle(

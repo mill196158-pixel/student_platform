@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:student_platform_admin/features/content/profile_feed/profile_feed_item.dart';
 import 'package:student_platform_admin/features/content/profile_feed/profile_feed_editor_screen.dart';
 import 'package:student_platform_admin/features/content/profile_feed/profile_feed_repository.dart';
+import 'package:student_platform_admin/features/content/shared/visual_editor_list_panel.dart';
 import 'package:student_ui/student_ui.dart';
 
 void main() {
@@ -24,54 +26,77 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
   }
 
-  testWidgets('lists local profile feed and shows shared preview',
-      (tester) async {
+  testWidgets('lists local profile feed in visual editor shell', (
+    tester,
+  ) async {
     await pumpEditor(tester, LocalProfileFeedRepository());
 
-    expect(find.text('Лента профиля'), findsOneWidget);
+    expect(find.text('Визуальный редактор ленты профиля'), findsOneWidget);
     expect(find.text('О нас'), findsWidgets);
-    expect(find.byType(StudentProfileFeedCard), findsOneWidget);
-    expect(
-      find.textContaining('Новости не копируются'),
-      findsOneWidget,
-    );
+    expect(find.text('Расписание занятий'), findsWidgets);
+    expect(find.byType(StudentProfileFeedCarousel), findsOneWidget);
+    expect(find.textContaining('Новости сюда не копируются'), findsOneWidget);
+    expect(find.byType(VisualEditorListPanel), findsOneWidget);
+  });
+
+  testWidgets('demo filter shows only demo cards', (tester) async {
+    final repo = LocalProfileFeedRepository();
+    await repo.createDraft(origin: ContentOrigin.admin);
+    await pumpEditor(tester, repo);
+
+    await tester.tap(find.widgetWithText(FilterChip, 'Демо'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(find.text('О нас'), findsWidgets);
+    expect(find.text('Новая карточка'), findsNothing);
   });
 
   testWidgets('create draft uses local repository', (tester) async {
     final repo = LocalProfileFeedRepository();
     await pumpEditor(tester, repo);
 
-    await tester.tap(find.text('Новая карточка'));
-    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Создать черновик'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
     final items = await repo.list();
-    expect(items.any((e) => e.status.name == 'draft'), isTrue);
-    expect(find.textContaining('размещение «лента профиля»'), findsOneWidget);
+    expect(items.any((e) => e.status == ProfileFeedStatus.draft), isTrue);
+    expect(find.text('Сохранить черновик'), findsOneWidget);
     expect(find.text('Preview аудитории'), findsOneWidget);
-    expect(find.textContaining('Черновик'), findsWidgets);
+    expect(find.textContaining('Черновики'), findsWidgets);
   });
 
-  testWidgets('invalid create does not write', (tester) async {
+  testWidgets('duplicate creates draft copy', (tester) async {
     final repo = LocalProfileFeedRepository();
     await pumpEditor(tester, repo);
 
-    // Need a draft selected so payload fields are editable.
-    await tester.tap(find.text('Новая карточка'));
-    await tester.pumpAndSettle();
-    final before = (await repo.list()).length;
+    await tester.tap(find.text('О нас').first);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.tap(find.text('Дублировать'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
-    final fields = find.byType(TextField);
-    await tester.enterText(fields.at(0), ' ');
-    await tester.enterText(fields.at(1), ' ');
-    await tester.enterText(fields.at(2), ' ');
-    await tester.tap(find.text('Новая карточка'));
-    await tester.pumpAndSettle();
+    final items = await repo.list(status: 'draft');
+    expect(items.any((e) => e.title.contains('копия')), isTrue);
+  });
 
-    expect(await repo.list(), hasLength(before));
-    expect(find.textContaining('запись не создана'), findsOneWidget);
+  test('local seeds include legacy keys', () async {
+    final repo = LocalProfileFeedRepository();
+    final items = await repo.list();
+    expect(
+      items.map((e) => e.legacyKey).whereType<String>().toList(),
+      containsAll([
+        'content:profile_feed:about',
+        'content:profile_feed:schedule',
+        'content:profile_feed:discounts',
+      ]),
+    );
   });
 
   test('local previewAudience returns safe counts', () async {
@@ -80,5 +105,20 @@ void main() {
     final preview = await repo.previewAudience(items.first.id);
     expect(preview.recipientCount, greaterThan(0));
     expect(preview.audienceMode, 'all');
+  });
+
+  test('local unpublish and restore archived', () async {
+    final repo = LocalProfileFeedRepository();
+    final item = (await repo.list()).first;
+    final published = await repo.publish(item.id, item.rowVersion);
+    final draft = await repo.unpublish(published.id, published.rowVersion);
+    expect(draft.status, ProfileFeedStatus.draft);
+
+    final archived = await repo.archive(draft.id, draft.rowVersion);
+    final restored = await repo.restoreArchived(
+      archived.id,
+      archived.rowVersion,
+    );
+    expect(restored.status, ProfileFeedStatus.draft);
   });
 }

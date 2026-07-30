@@ -20,6 +20,7 @@ void main() {
   });
 
   testWidgets('news editor embeds shared student home view', (tester) async {
+    AdminBackendConfig.debugDemoModeOverride = true;
     tester.view.physicalSize = const Size(1440, 1000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);

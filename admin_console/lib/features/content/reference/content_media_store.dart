@@ -6,8 +6,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 /// Admin helper for Stage 16.3 content-media signed upload.
 class ContentMediaStore {
   ContentMediaStore({SupabaseClient? client, http.Client? httpClient})
-      : _client = client,
-        _http = httpClient ?? http.Client();
+    : _client = client,
+      _http = httpClient ?? http.Client();
 
   final SupabaseClient? _client;
   final http.Client _http;
@@ -39,9 +39,10 @@ class ContentMediaStore {
       throw StateError('createUpload missing fields');
     }
     // Fail closed if Edge ever leaks a storage path to the Admin client.
-    final leakedPath = (data['path'] ?? data['storage_path'] ?? data['storagePath'])
-        ?.toString()
-        .trim();
+    final leakedPath =
+        (data['path'] ?? data['storage_path'] ?? data['storagePath'])
+            ?.toString()
+            .trim();
     if (leakedPath != null && leakedPath.isNotEmpty) {
       throw StateError('createUpload leaked storage path');
     }
@@ -55,11 +56,7 @@ class ContentMediaStore {
     }
     final finalize = await _sb.functions.invoke(
       'content-media',
-      body: {
-        'action': 'finalizeUpload',
-        'intentId': intentId,
-        'title': title,
-      },
+      body: {'action': 'finalizeUpload', 'intentId': intentId, 'title': title},
     );
     if (finalize.status >= 400) {
       throw StateError('finalizeUpload failed: ${finalize.status}');
@@ -70,5 +67,19 @@ class ContentMediaStore {
     final id = (asset['id'] ?? '').toString();
     if (id.isEmpty) throw StateError('finalize missing asset id');
     return id;
+  }
+
+  Future<Uint8List?> downloadBytes({required String assetId}) async {
+    final download = await _sb.functions.invoke(
+      'content-media',
+      body: {'action': 'createDownload', 'assetId': assetId},
+    );
+    if (download.status >= 400) return null;
+    final data = Map<String, dynamic>.from(download.data as Map);
+    final signedUrl = (data['signedUrl'] ?? '').toString();
+    if (signedUrl.isEmpty) return null;
+    final response = await _http.get(Uri.parse(signedUrl));
+    if (response.statusCode != 200) return null;
+    return response.bodyBytes;
   }
 }
