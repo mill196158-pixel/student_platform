@@ -345,7 +345,7 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Tests: variant/media/WD overlay/discard (Codex final package)
 - [x] Builds: Admin/Main Web, Android, iOS
 - [x] Codex APPROVE 14.1.3
-- [x] Commit + normal push `origin/refactor/chat-tab` (`b57c315`)
+- [x] Commit + normal push `origin/refactor/chat-tab` (`50af78f`; feature `b57c315`)
 
 ---
 
