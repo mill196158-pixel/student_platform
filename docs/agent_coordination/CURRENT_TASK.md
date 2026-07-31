@@ -5,12 +5,13 @@
 * Branch: `refactor/chat-tab`
 * Prior HEAD: `43fffa3` (14.2 docs closeout)
 * Feature SHA: `548969f`
+* Docs SHA: `57b073a`
 * Codex plan: **APPROVE**
 * Codex final: **APPROVE** (after reference WD row_version + transactional roleplay P1 fixes)
 * Remote: `gwdanmwluhrcfxbnplwd`
 * Migration applied: `20260731102302_stage14_2_1_content_asset_upload_working_draft`
 * Edge deployed: `content-media` v2 (`verify_jwt=false`, BusinessError 409/422)
-* Push: `origin/refactor/chat-tab` (`43fffa3..548969f`)
+* Push: `origin/refactor/chat-tab` (`43fffa3..57b073a`)
 
 ## Cause
 
