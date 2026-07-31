@@ -3044,16 +3044,21 @@ class _JobsHeroCard extends StatelessWidget {
     required this.submissionService,
   });
 
-  static const _minTouch = 44.0;
+  static const _minTouch = 40.0;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final primary = theme.colorScheme.primary;
+    final actionStyle = theme.textTheme.labelLarge?.copyWith(
+      fontWeight: FontWeight.w800,
+      fontSize: 12,
+      height: 1.1,
+    );
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(16),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -3064,9 +3069,9 @@ class _JobsHeroCard extends StatelessWidget {
         ),
         boxShadow: [
           BoxShadow(
-            color: primary.withValues(alpha: 0.18),
-            blurRadius: 12,
-            offset: const Offset(0, 5),
+            color: primary.withValues(alpha: 0.16),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
           ),
         ],
       ),
@@ -3074,92 +3079,101 @@ class _JobsHeroCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 40,
-                height: 40,
+                width: 32,
+                height: 32,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: const Icon(
                   Icons.work_outline_rounded,
                   color: Colors.white,
-                  size: 22,
+                  size: 18,
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Expanded(
-                child: Text(
-                  'Доска вакансий',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w900,
-                    height: 1.15,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Доска вакансий',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                        height: 1.15,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      showLegacyDemoBadge
+                          ? 'Пример вакансий для просмотра'
+                          : 'Подработки, стажировки и проектные задачи.',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: Colors.white.withValues(alpha: 0.88),
+                        height: 1.25,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
           const SizedBox(height: 8),
-          Text(
-            showLegacyDemoBadge
-                ? 'Пример вакансий для просмотра'
-                : 'Подработки, стажировки и проектные задачи для студентов.',
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: Colors.white.withValues(alpha: 0.88),
-              height: 1.3,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 10),
-          ConstrainedBox(
-            constraints: const BoxConstraints(
-              minWidth: double.infinity,
-              minHeight: _minTouch,
-            ),
-            child: FilledButton.icon(
-              onPressed: () => _openProposeVacancy(context),
-              icon: const Icon(Icons.add_rounded, size: 18),
-              label: const Text('Предложить вакансию'),
-              style: FilledButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: primary,
-                minimumSize: const Size(0, _minTouch),
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                visualDensity: VisualDensity.compact,
-                textStyle: theme.textTheme.labelLarge?.copyWith(
-                  fontWeight: FontWeight.w800,
+          Row(
+            children: [
+              Expanded(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: _minTouch),
+                  child: Tooltip(
+                    message: 'Предложить вакансию',
+                    child: FilledButton.icon(
+                      onPressed: () => _openProposeVacancy(context),
+                      icon: const Icon(Icons.add_rounded, size: 16),
+                      label: const Text('Предложить'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: primary,
+                        minimumSize: const Size(0, _minTouch),
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        visualDensity: VisualDensity.compact,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        textStyle: actionStyle,
+                      ),
+                    ),
+                  ),
                 ),
               ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          ConstrainedBox(
-            constraints: const BoxConstraints(
-              minWidth: double.infinity,
-              minHeight: _minTouch,
-            ),
-            child: OutlinedButton.icon(
-              onPressed: () => _openMyVacancySubmissions(context),
-              icon: const Icon(Icons.inbox_outlined, size: 18),
-              label: const Text('Мои заявки'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white,
-                side: const BorderSide(color: Colors.white70),
-                minimumSize: const Size(0, _minTouch),
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                visualDensity: VisualDensity.compact,
-                textStyle: theme.textTheme.labelLarge?.copyWith(
-                  fontWeight: FontWeight.w700,
+              const SizedBox(width: 8),
+              Expanded(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: _minTouch),
+                  child: OutlinedButton.icon(
+                    onPressed: () => _openMyVacancySubmissions(context),
+                    icon: const Icon(Icons.inbox_outlined, size: 16),
+                    label: const Text('Мои заявки'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Colors.white70),
+                      minimumSize: const Size(0, _minTouch),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      visualDensity: VisualDensity.compact,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      textStyle: actionStyle,
+                    ),
+                  ),
                 ),
               ),
-            ),
+            ],
           ),
         ],
       ),

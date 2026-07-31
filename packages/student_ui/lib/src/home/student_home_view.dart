@@ -39,6 +39,13 @@ class StudentHomePromoPlacement {
 }
 
 class StudentHomeView extends StatelessWidget {
+  /// Uniform vertical gap between major home blocks (news, summary, upcoming, promo).
+  static const double sectionGap = 14;
+
+  static const Widget _sectionSpacer = SliverToBoxAdapter(
+    child: SizedBox(height: sectionGap),
+  );
+
   const StudentHomeView({
     required this.data,
     this.notificationCount = 0,
@@ -120,7 +127,7 @@ class StudentHomeView extends StatelessWidget {
         .toList();
     if (cards.isEmpty) return const [];
     return [
-      for (var i = 0; i < cards.length; i++)
+      for (var i = 0; i < cards.length; i++) ...[
         SliverToBoxAdapter(
           child: _AnimatedEntry(
             delay: delay + Duration(milliseconds: i * 20),
@@ -139,6 +146,8 @@ class StudentHomeView extends StatelessWidget {
             ),
           ),
         ),
+        _sectionSpacer,
+      ],
     ];
   }
 
@@ -156,18 +165,22 @@ class StudentHomeView extends StatelessWidget {
             onNotificationsTap: onNotificationsTap,
           ),
         ),
+        _sectionSpacer,
         // System block: news (immovable).
-        SliverToBoxAdapter(
-          child: _AnimatedEntry(
-            delay: const Duration(milliseconds: 20),
-            child: StudentHomeNewsFeed(
-              news: data.news,
-              onNewsTap: onNewsTap,
-              selectedNewsId: selectedNewsId,
-              adminHighlightColor: adminNewsHighlightColor,
+        if (data.news.isNotEmpty) ...[
+          SliverToBoxAdapter(
+            child: _AnimatedEntry(
+              delay: const Duration(milliseconds: 20),
+              child: StudentHomeNewsFeed(
+                news: data.news,
+                onNewsTap: onNewsTap,
+                selectedNewsId: selectedNewsId,
+                adminHighlightColor: adminNewsHighlightColor,
+              ),
             ),
           ),
-        ),
+          _sectionSpacer,
+        ],
         ..._promoSliversFor(
           'after_news',
           delay: const Duration(milliseconds: 40),
@@ -179,6 +192,7 @@ class StudentHomeView extends StatelessWidget {
             child: _TodaySummaryCard(data: data, onTap: onSummaryTap),
           ),
         ),
+        _sectionSpacer,
         ..._promoSliversFor(
           'after_day_summary',
           delay: const Duration(milliseconds: 90),
@@ -199,6 +213,7 @@ class StudentHomeView extends StatelessWidget {
             ),
           ),
         ),
+        _sectionSpacer,
         ..._promoSliversFor(
           'after_assignments',
           delay: const Duration(milliseconds: 170),
@@ -262,7 +277,7 @@ class _HomeHeader extends StatelessWidget {
     ].join(' · ');
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
       child: Row(
         children: [
           Expanded(
@@ -503,7 +518,7 @@ class _TodaySummaryCard extends StatelessWidget {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 14),
+                      const SizedBox(height: 10),
                       Text(
                         title,
                         style: theme.textTheme.titleLarge?.copyWith(
@@ -512,18 +527,18 @@ class _TodaySummaryCard extends StatelessWidget {
                           height: 1.08,
                         ),
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 4),
                       Text(
                         subtitle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: mutedForeground,
-                          height: 1.35,
+                          height: 1.3,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 10),
                       // Day summary = pairs/schedule only. Group actions
                       // (topic / collection) belong under «Ближайшие дела».
                       if (data.lessons.isEmpty)
@@ -750,21 +765,26 @@ class _NoLessonsPreview extends StatelessWidget {
     final foreground = isDark ? Colors.white : const Color(0xFF1F2937);
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
+      constraints: const BoxConstraints(minHeight: 40),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: isDark ? 0.14 : 0.62),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
         children: [
-          Icon(Icons.weekend_rounded, color: foreground, size: 20),
-          const SizedBox(width: 10),
+          Icon(Icons.weekend_rounded, color: foreground, size: 18),
+          const SizedBox(width: 8),
           Expanded(
             child: Text(
               text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: foreground.withValues(alpha: 0.82),
                 fontWeight: FontWeight.w800,
+                fontSize: 13,
+                height: 1.15,
               ),
             ),
           ),
@@ -825,8 +845,9 @@ class _AssignmentsSection extends StatelessWidget {
     final subtitle = _upcomingSubtitle(capped);
 
     // Section title sits outside the tinted card (not trapped in an oval).
+    // Vertical gap to neighbors is owned by [StudentHomeView.sectionGap].
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

@@ -69,6 +69,9 @@ class StudentProfileScreenPreview extends StatelessWidget {
   static const _lavender = Color(0xFFDCD0FA);
   static const _accent = Color(0xFF7C63D8);
 
+  /// Uniform vertical gap between major profile blocks.
+  static const double sectionGap = 14;
+
   @override
   Widget build(BuildContext context) {
     if (detailCard != null) {
@@ -95,10 +98,10 @@ class StudentProfileScreenPreview extends StatelessWidget {
               avatarUrl: avatarUrl,
             ),
             if (pointsChip != null) ...[
-              const SizedBox(height: 12),
+              const SizedBox(height: sectionGap),
               Center(child: pointsChip!),
             ],
-            const SizedBox(height: 16),
+            const SizedBox(height: sectionGap),
             _ActionsRow(
               messagesBadge: messagesBadge,
               friendsBadge: friendsBadge,
@@ -106,9 +109,7 @@ class StudentProfileScreenPreview extends StatelessWidget {
               onFriendsTap: onFriendsTap,
             ),
             if (feedLoadError) ...[
-              const SizedBox(height: 20),
-              const _SectionTitle('Лента'),
-              const SizedBox(height: 10),
+              const SizedBox(height: sectionGap),
               Card(
                 child: ListTile(
                   leading: const Icon(Icons.error_outline),
@@ -125,9 +126,7 @@ class StudentProfileScreenPreview extends StatelessWidget {
                 ),
               ),
             ] else if (feedCards.isNotEmpty) ...[
-              const SizedBox(height: 20),
-              const _SectionTitle('Лента'),
-              const SizedBox(height: 10),
+              const SizedBox(height: sectionGap),
               StudentProfileFeedCarousel(
                 cards: feedCards,
                 selectedId: selectedFeedId,
@@ -136,9 +135,9 @@ class StudentProfileScreenPreview extends StatelessWidget {
               ),
             ],
             if (showStudySection) ...[
-              const SizedBox(height: 20),
+              const SizedBox(height: sectionGap),
               const _SectionTitle('Учёба'),
-              const SizedBox(height: 10),
+              const SizedBox(height: sectionGap),
               _StudyBanner(
                 title: 'Мой дневник',
                 subtitle:
@@ -148,7 +147,7 @@ class StudentProfileScreenPreview extends StatelessWidget {
                 colors: const [Color(0xFFDCD0FA), Color(0xFFC5EFE5)],
                 onTap: onDiaryTap,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: sectionGap),
               _StudyBanner(
                 title: 'Карта СПБГАСУ',
                 icon: Icons.map_outlined,
@@ -158,7 +157,7 @@ class StudentProfileScreenPreview extends StatelessWidget {
                 compact: true,
               ),
             ],
-            const SizedBox(height: 12),
+            const SizedBox(height: sectionGap),
             OutlinedButton.icon(
               onPressed: onReviewsTap,
               icon: const Icon(Icons.rate_review_outlined),

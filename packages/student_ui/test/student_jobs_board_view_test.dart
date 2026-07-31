@@ -48,7 +48,7 @@ void main() {
     );
 
     expect(find.text('Доска вакансий'), findsOneWidget);
-    expect(find.text('Предложить вакансию'), findsOneWidget);
+    expect(find.text('Предложить'), findsOneWidget);
     expect(find.text('Мои заявки'), findsOneWidget);
     expect(find.text('Вакансии пока пусты'), findsOneWidget);
     expect(find.textContaining('активн'), findsNothing);

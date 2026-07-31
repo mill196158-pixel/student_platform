@@ -190,15 +190,20 @@ class _JobsHeroCard extends StatelessWidget {
   final VoidCallback? onProposeVacancy;
   final VoidCallback? onMySubmissions;
 
-  static const _minTouch = 44.0;
+  static const _minTouch = 40.0;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final actionStyle = theme.textTheme.labelLarge?.copyWith(
+      fontWeight: FontWeight.w800,
+      fontSize: 12,
+      height: 1.1,
+    );
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(16),
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -209,9 +214,9 @@ class _JobsHeroCard extends StatelessWidget {
         ),
         boxShadow: [
           BoxShadow(
-            color: StudentJobsBoardView._lavenderEnd.withValues(alpha: 0.22),
-            blurRadius: 12,
-            offset: const Offset(0, 5),
+            color: StudentJobsBoardView._lavenderEnd.withValues(alpha: 0.18),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
           ),
         ],
       ),
@@ -219,87 +224,96 @@ class _JobsHeroCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 40,
-                height: 40,
+                width: 32,
+                height: 32,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.55),
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: const Icon(
                   Icons.work_outline_rounded,
-                  size: 22,
+                  size: 18,
                   color: StudentJobsBoardView._accent,
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Expanded(
-                child: Text(
-                  'Доска вакансий',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: StudentJobsBoardView._title,
-                    fontWeight: FontWeight.w900,
-                    height: 1.15,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Доска вакансий',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: StudentJobsBoardView._title,
+                        fontWeight: FontWeight.w900,
+                        height: 1.15,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: const Color(0xFF374151),
+                        height: 1.25,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Text(
-            subtitle,
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: const Color(0xFF374151),
-              height: 1.3,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
           if (showProposeActions) ...[
-            const SizedBox(height: 10),
-            ConstrainedBox(
-              constraints: const BoxConstraints(
-                minWidth: double.infinity,
-                minHeight: _minTouch,
-              ),
-              child: FilledButton.icon(
-                onPressed: onProposeVacancy,
-                icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('Предложить вакансию'),
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size(0, _minTouch),
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  visualDensity: VisualDensity.compact,
-                  textStyle: theme.textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w800,
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: _minTouch),
+                    child: Tooltip(
+                      message: 'Предложить вакансию',
+                      child: FilledButton.icon(
+                        onPressed: onProposeVacancy,
+                        icon: const Icon(Icons.add_rounded, size: 16),
+                        label: const Text('Предложить'),
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(0, _minTouch),
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          visualDensity: VisualDensity.compact,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          textStyle: actionStyle,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
-            const SizedBox(height: 6),
-            ConstrainedBox(
-              constraints: const BoxConstraints(
-                minWidth: double.infinity,
-                minHeight: _minTouch,
-              ),
-              child: OutlinedButton.icon(
-                onPressed: onMySubmissions,
-                icon: const Icon(Icons.inbox_outlined, size: 18),
-                label: const Text('Мои заявки'),
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size(0, _minTouch),
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  visualDensity: VisualDensity.compact,
-                  textStyle: theme.textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: _minTouch),
+                    child: OutlinedButton.icon(
+                      onPressed: onMySubmissions,
+                      icon: const Icon(Icons.inbox_outlined, size: 16),
+                      label: const Text('Мои заявки'),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, _minTouch),
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        visualDensity: VisualDensity.compact,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        textStyle: actionStyle,
+                      ),
+                    ),
                   ),
                 ),
-              ),
+              ],
             ),
           ],
         ],

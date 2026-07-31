@@ -858,9 +858,9 @@ class ProfileStudySection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const _SectionTitle('Учёба'),
-        const SizedBox(height: 10),
+        const SizedBox(height: 14),
         _PersonalDiaryBanner(onTap: onDiaryTap),
-        const SizedBox(height: 12),
+        const SizedBox(height: 14),
         _MapBanner(onTap: onMapTap),
       ],
     );

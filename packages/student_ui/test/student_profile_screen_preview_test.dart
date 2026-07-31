@@ -33,7 +33,7 @@ void main() {
 
     expect(find.text('Мой дневник'), findsOneWidget);
     expect(find.textContaining('Карта'), findsOneWidget);
-    expect(find.text('Лента'), findsOneWidget);
+    expect(find.text('Лента'), findsNothing);
     expect(find.text('Мои отзывы'), findsOneWidget);
     expect(find.text('Сообщения'), findsOneWidget);
     expect(find.text('2'), findsOneWidget);

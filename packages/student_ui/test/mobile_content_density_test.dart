@@ -110,16 +110,16 @@ void main() {
 
         expect(tester.takeException(), isNull);
         expect(find.text('Доска вакансий'), findsOneWidget);
-        expect(find.text('Предложить вакансию'), findsOneWidget);
+        expect(find.text('Предложить'), findsOneWidget);
         expect(find.text('Мои заявки'), findsOneWidget);
         expect(find.textContaining('активн'), findsNothing);
 
-        final propose = tester.getSize(find.text('Предложить вакансию'));
+        final propose = tester.getSize(find.text('Предложить'));
         final proposeButton = tester.getSize(
-          find.widgetWithText(FilledButton, 'Предложить вакансию'),
+          find.widgetWithText(FilledButton, 'Предложить'),
         );
         expect(propose.height, lessThanOrEqualTo(proposeButton.height));
-        expect(proposeButton.height, greaterThanOrEqualTo(44));
+        expect(proposeButton.height, greaterThanOrEqualTo(40));
       });
 
       testWidgets('help browse densifies without overflow $tag',
