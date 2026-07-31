@@ -1,9 +1,10 @@
 # CURRENT_TASK
 
-* Status: **READY TO CLOSE** — Stage 14.1.4 (Full Visual Parity & Media Reliability)
+* Status: **DONE** — Stage 14.1.4 (Full Visual Parity & Media Reliability)
 * Active Stage: **14.1.4 / M5**
 * Branch: `refactor/chat-tab`
-* Base HEAD was: `7a96ccc`
+* Feature SHA: `5337037`
+* Final HEAD / origin: `9189311`
 * Codex final: **APPROVE** (after multi-slot Home P1 fixes)
 * Remote: `gwdanmwluhrcfxbnplwd`
 * Gate: `content_visual_studio_v2_publish` remains **OFF**
