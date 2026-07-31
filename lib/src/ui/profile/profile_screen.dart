@@ -8,7 +8,6 @@ import 'package:student_platform/router_observer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:collection/collection.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import 'package:student_ui/student_ui.dart';
@@ -18,6 +17,7 @@ import 'package:student_platform/src/services/auth_service.dart';
 import 'package:student_platform/src/ui/chats/my_chats_screen.dart';
 import 'package:student_platform/src/ui/friends/my_friends_screen.dart';
 import 'package:student_platform/src/ui/learning/data/supabase_learning_repository.dart';
+import 'package:student_platform/src/ui/content/content_nav_executor.dart';
 import 'package:student_platform/src/ui/info/content_media_service.dart';
 import 'package:student_platform/src/ui/profile/profile_feed_service.dart';
 import 'package:student_platform/src/ui/profile/student_points_service.dart';
@@ -219,25 +219,33 @@ class _ProfileScreenState extends State<ProfileScreen>
       await _feedService.recordEvent(card.id, 'click');
     }
     final payload = card.payload;
-    final route = payload.ctaRoute?.trim();
-    if (route != null && route.isNotEmpty) {
-      if (!mounted) return;
-      context.push(route);
+    final intent = ContentNavResolver.resolve(
+      action: payload.action,
+      ctaRoute: payload.ctaRoute,
+      ctaUrl: payload.ctaUrl,
+    );
+    if (!mounted) return;
+    if (intent is ContentNavNone) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(payload.title)),
+      );
       return;
     }
-    final url = payload.ctaUrl?.trim();
-    if (url != null && url.isNotEmpty) {
-      final uri = Uri.tryParse(url);
-      if (uri != null &&
-          (uri.scheme == 'https' || uri.scheme == 'http') &&
-          await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-        return;
-      }
-    }
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(payload.title)),
+    await const ContentNavExecutor().execute(
+      context,
+      intent,
+      onUnavailable: () {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Контент недоступен')),
+        );
+      },
+      onDisabled: () {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Действие недоступно')),
+        );
+      },
     );
   }
 

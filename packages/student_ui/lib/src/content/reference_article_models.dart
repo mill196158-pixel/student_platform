@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'content_models.dart';
+import 'content_nav_intent.dart';
 
 String? _readString(Map<String, dynamic> json, List<String> keys) {
   for (final key in keys) {
@@ -88,11 +89,22 @@ class ReferenceArticleCta {
     required this.label,
     this.route,
     this.url,
+    this.action,
   });
 
   final String label;
   final String? route;
   final String? url;
+
+  /// Structured tap action (schema v2+). Takes precedence over [route]/[url].
+  final Map<String, dynamic>? action;
+
+  /// Typed navigation intent for Mobile whitelist execution.
+  ContentNavIntent get navIntent => ContentNavResolver.resolve(
+        action: action,
+        ctaRoute: route,
+        ctaUrl: url,
+      );
 
   static ReferenceArticleCta? tryParse(Map<String, dynamic>? json) {
     if (json == null) return null;
@@ -100,14 +112,27 @@ class ReferenceArticleCta {
     if (label == null) return null;
     final route = _readString(json, const ['route', 'cta_route', 'ctaRoute']);
     final url = _readString(json, const ['url', 'cta_url', 'ctaUrl']);
-    if (route == null && url == null) return null;
-    return ReferenceArticleCta(label: label, route: route, url: url);
+    Map<String, dynamic>? action;
+    if (json.containsKey('action')) {
+      final raw = json['action'];
+      action = raw is Map
+          ? Map<String, dynamic>.from(raw)
+          : const <String, dynamic>{'kind': '__malformed__'};
+    }
+    if (route == null && url == null && action == null) return null;
+    return ReferenceArticleCta(
+      label: label,
+      route: route,
+      url: url,
+      action: action,
+    );
   }
 
   Map<String, dynamic> toWireJson() => {
         'label': label,
         if (route != null) 'route': route,
         if (url != null) 'url': url,
+        if (action != null) 'action': action,
       };
 }
 

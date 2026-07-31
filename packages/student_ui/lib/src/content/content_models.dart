@@ -101,6 +101,18 @@ double? _readDouble(Map<String, dynamic> json, List<String> keys) {
   return null;
 }
 
+/// Preserve action presence for fail-closed CTA precedence.
+///
+/// Missing key → null (legacy CTA may apply). Present non-map / null value →
+/// sentinel map that [ContentNavResolver] resolves to [ContentNavDisabled]
+/// without falling back to legacy fields.
+Map<String, dynamic>? _readActionMap(Map<String, dynamic> json) {
+  if (!json.containsKey('action')) return null;
+  final raw = json['action'];
+  if (raw is Map) return Map<String, dynamic>.from(raw);
+  return const <String, dynamic>{'kind': '__malformed__'};
+}
+
 /// Typed home promo payload for template `home_promo_v1`.
 @immutable
 class HomePromoPayload {
@@ -265,9 +277,7 @@ class HomePromoPayload {
           'gradientAngle',
           'gradient_angle',
         ]),
-        action: json['action'] is Map
-            ? Map<String, dynamic>.from(json['action'] as Map)
-            : null,
+        action: _readActionMap(json),
         overlayOpacity: overlayOpacity,
         focalX: focalX,
         focalY: focalY,
@@ -413,7 +423,9 @@ class ManagedContentCard {
   final HomePromoPayload homePromo;
   final bool showDemoBadge;
 
-  /// Fail-closed parser for `home_promo_v1` / schema_version 1.
+  /// Fail-closed parser for `home_promo_v1` / schema_version 1 or 2.
+  ///
+  /// Unknown schema versions return null so sibling cards still render.
   static ManagedContentCard? tryParseHomePromo(Map<String, dynamic> json) {
     try {
       final id = _readString(json, const ['id']);
@@ -431,7 +443,8 @@ class ManagedContentCard {
         'schema_version',
         'schemaVersion',
       ]);
-      if (schemaVersionRaw == null || schemaVersionRaw != 1) {
+      if (schemaVersionRaw == null ||
+          (schemaVersionRaw != 1 && schemaVersionRaw != 2)) {
         return null;
       }
 
@@ -595,9 +608,7 @@ class ProfileFeedPayload {
           'gradient_angle',
         ]),
         overlayOpacity: overlayOpacity,
-        action: json['action'] is Map
-            ? Map<String, dynamic>.from(json['action'] as Map)
-            : null,
+        action: _readActionMap(json),
       );
     } catch (_) {
       return null;

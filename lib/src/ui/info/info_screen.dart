@@ -1,11 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -15,6 +13,8 @@ import 'package:student_ui/student_ui.dart';
 import '../../core/auth_session.dart';
 import '../../data/academic_context_service.dart';
 import '../../services/auth_service.dart';
+import '../content/content_deep_link_bus.dart';
+import '../content/content_nav_executor.dart';
 import 'content_media_service.dart';
 import 'info_subjects_cache.dart';
 import 'subject_attachment_open.dart';
@@ -35,6 +35,290 @@ enum _UsefulSection { subjects, help, jobs }
 
 BoxConstraints _fullWidthSheetConstraints(BuildContext context) {
   return BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width);
+}
+
+Future<void> _openManagedExternalUrl(BuildContext context, String url) async {
+  final uri = ContentNavResolver.tryParseSafeHttpsUri(url);
+  if (uri == null) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Ссылка недоступна')),
+    );
+    return;
+  }
+  final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+  if (!ok && context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Не удалось открыть ссылку')),
+    );
+  }
+}
+
+Future<void> _openManagedCta(
+  BuildContext context,
+  ReferenceArticleCta cta,
+) async {
+  final intent = cta.navIntent;
+  if (intent is ContentNavNone) return;
+  if (intent is ContentNavDisabled) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Действие недоступно')),
+    );
+    return;
+  }
+  if (intent is ContentNavExternalHttps) {
+    await _openManagedExternalUrl(context, intent.uri.toString());
+    return;
+  }
+  if (!context.mounted) return;
+  await const ContentNavExecutor().execute(
+    context,
+    intent,
+    onUnavailable: () {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Контент недоступен')),
+      );
+    },
+    onDisabled: () {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Действие недоступно')),
+      );
+    },
+  );
+}
+
+void _showReferenceArticleSheet(
+  BuildContext context, {
+  required ManagedReferenceArticle article,
+  required ReferenceLoadResult reference,
+  required ReferenceService referenceService,
+  required ContentMediaService mediaService,
+}) {
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    constraints: _fullWidthSheetConstraints(context),
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    builder: (sheetContext) => DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.72,
+      minChildSize: 0.4,
+      maxChildSize: 0.95,
+      builder: (sheetContext, scrollController) => SingleChildScrollView(
+        controller: scrollController,
+        child: StudentReferenceArticleDetail(
+          article: article,
+          showDemoBadge: reference.isDemoFallback || article.showDemoBadge,
+          onReportError: article.isManaged
+              ? () => _reportReferenceArticleError(
+                    sheetContext,
+                    article: article,
+                    referenceService: referenceService,
+                  )
+              : null,
+          onOpenAsset: article.isManaged
+              ? (assetId) => _openReferenceAsset(
+                    sheetContext,
+                    assetId: assetId,
+                    mediaService: mediaService,
+                  )
+              : null,
+          onOpenUrl: (url) => _openManagedExternalUrl(sheetContext, url),
+          onOpenCta: (cta) => _openManagedCta(sheetContext, cta),
+        ),
+      ),
+    ),
+  );
+}
+
+Future<void> _openReferenceAsset(
+  BuildContext context, {
+  required String assetId,
+  required ContentMediaService mediaService,
+}) async {
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    final download = await mediaService.resolveDownload(assetId);
+    if (!context.mounted) return;
+    if (download == null) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Файл недоступен')),
+      );
+      return;
+    }
+    final mime = (download.mimeType ?? 'application/octet-stream').trim();
+    final ext = mime.contains('png')
+        ? 'png'
+        : mime.contains('webp')
+            ? 'webp'
+            : mime.contains('pdf')
+                ? 'pdf'
+                : mime.contains('jpeg') || mime.contains('jpg')
+                    ? 'jpg'
+                    : 'bin';
+    final fileName =
+        'content_${assetId.replaceAll('-', '').substring(0, 8)}.$ext';
+    if (kIsWeb) {
+      await openSubjectAttachmentBytes(
+        bytes: Uint8List(0),
+        fileName: fileName,
+        mimeType: mime,
+        signedUrl: download.signedUrl,
+      );
+      return;
+    }
+    final bytes = await mediaService.fetchBytes(assetId);
+    if (!context.mounted) return;
+    if (bytes == null) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Файл недоступен')),
+      );
+      return;
+    }
+    await openSubjectAttachmentBytes(
+      bytes: bytes,
+      fileName: fileName,
+      mimeType: mime,
+      signedUrl: download.signedUrl,
+    );
+  } catch (error) {
+    if (!context.mounted) return;
+    messenger.showSnackBar(
+      SnackBar(content: Text('Не удалось открыть файл: $error')),
+    );
+  }
+}
+
+Future<void> _reportReferenceArticleError(
+  BuildContext context, {
+  required ManagedReferenceArticle article,
+  required ReferenceService referenceService,
+}) async {
+  final note = await showDialog<String>(
+    context: context,
+    builder: (dialogContext) {
+      final controller = TextEditingController();
+      return AlertDialog(
+        title: const Text('Сообщить об ошибке'),
+        content: TextField(
+          controller: controller,
+          maxLines: 4,
+          maxLength: 1000,
+          decoration: const InputDecoration(
+            hintText: 'Опишите, что не так в этой статье',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(dialogContext, controller.text.trim());
+            },
+            child: const Text('Отправить'),
+          ),
+        ],
+      );
+    },
+  );
+  if (note == null || note.isEmpty || !context.mounted) return;
+  try {
+    await referenceService.submitCorrection(
+      contentItemId: article.id,
+      note: note,
+    );
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Сообщение отправлено модераторам')),
+    );
+    Navigator.of(context).pop();
+  } catch (error) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Не удалось отправить: $error')),
+    );
+  }
+}
+
+void _showVacancyDetailSheet(
+  BuildContext context, {
+  required ManagedVacancyCard card,
+  required bool sectionDemoFallback,
+  required VacancyService vacancyService,
+  required VacancyMediaService vacancyMediaService,
+}) {
+  final isDemo = sectionDemoFallback || card.showDemoBadge;
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    constraints: _fullWidthSheetConstraints(context),
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    builder: (sheetContext) => DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.75,
+      minChildSize: 0.4,
+      maxChildSize: 0.95,
+      builder: (sheetContext, scrollController) => SingleChildScrollView(
+        controller: scrollController,
+        child: StudentVacancyDetailSheet(
+          card: card,
+          showDemoBadge: isDemo,
+          logoBytes: card.logoBytes == null
+              ? null
+              : Uint8List.fromList(card.logoBytes!),
+          coverBytes: card.coverBytes == null
+              ? null
+              : Uint8List.fromList(card.coverBytes!),
+          backgroundBytes: card.backgroundBytes == null
+              ? null
+              : Uint8List.fromList(card.backgroundBytes!),
+          onOpenExternalUrl: isDemo
+              ? null
+              : (url) async {
+                  final uri = ContentNavResolver.tryParseSafeHttpsUri(url);
+                  if (uri == null) return;
+                  if (await canLaunchUrl(uri)) {
+                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  }
+                },
+          onRevealContacts: isDemo || !card.hasContacts
+              ? null
+              : () => vacancyService.fetchContacts(card.id),
+          onOpenAsset: isDemo
+              ? null
+              : (assetId) async {
+                  final url = await vacancyMediaService.openAsset(assetId);
+                  if (url == null) return;
+                  final uri = ContentNavResolver.tryParseSafeHttpsUri(url) ??
+                      Uri.tryParse(url);
+                  if (uri == null) return;
+                  if (uri.scheme != 'https') return;
+                  if (await canLaunchUrl(uri)) {
+                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  }
+                },
+          onReport: isDemo
+              ? null
+              : (reason, note) => vacancyService.reportVacancy(
+                    vacancyId: card.id,
+                    reason: reason,
+                    note: note,
+                  ),
+        ),
+      ),
+    ),
+  );
 }
 
 class InfoScreen extends StatefulWidget {
@@ -87,7 +371,7 @@ class InfoScreen extends StatefulWidget {
   State<InfoScreen> createState() => _InfoScreenState();
 }
 
-class _InfoScreenState extends State<InfoScreen> {
+class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
   // In-memory (RAM) layer of the cache. Survives across screen re-creations
   // within one app session, so re-opening the tab is instant with no spinner.
   // The SharedPreferences layer keeps data across app restarts.
@@ -109,13 +393,13 @@ class _InfoScreenState extends State<InfoScreen> {
   ReferenceLoadResult _reference =
       const ReferenceLoadResult(isDemoFallback: true);
   int _referenceLoadGeneration = 0;
-  bool _referenceLoadInFlight = false;
+  Future<void>? _referenceLoadFuture;
   late final VacancyService _vacancyService;
   late final VacancySubmissionService _vacancySubmissionService;
   late final VacancyMediaService _vacancyMediaService;
   VacancyLoadResult _vacancies = const VacancyLoadResult(isDemoFallback: true);
   int _vacancyLoadGeneration = 0;
-  bool _vacancyLoadInFlight = false;
+  Future<void>? _vacancyLoadFuture;
 
   UsefulSubjectsRepository get _subjectsRepository =>
       widget.subjectsRepository ?? UsefulSubjectsRepository();
@@ -128,6 +412,8 @@ class _InfoScreenState extends State<InfoScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    ContentDeepLinkBus.instance.pending.addListener(_onDeepLinkPending);
     _vacancyService = widget.vacancyService ??
         VacancyService(
           currentUserId: () =>
@@ -171,44 +457,155 @@ class _InfoScreenState extends State<InfoScreen> {
     }
     unawaited(_loadReference());
     unawaited(_loadVacancies());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_consumeDeepLink());
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    if (!mounted) return;
+    unawaited(AuthSession.ensureFreshSession(Supabase.instance.client));
+    unawaited(_loadReference());
+    unawaited(_loadVacancies());
+    unawaited(_reloadQuietly());
+  }
+
+  void _onDeepLinkPending() {
+    unawaited(_consumeDeepLink());
+  }
+
+  Future<void> _consumeDeepLink() async {
+    final intent = ContentDeepLinkBus.instance.take();
+    if (intent == null || !mounted) return;
+    await _openDeepLinkIntent(intent);
+  }
+
+  Future<void> _openDeepLinkIntent(ContentNavIntent intent) async {
+    if (!mounted) return;
+    switch (intent) {
+      case ContentNavReferenceArticle(:final targetId):
+        setState(() => _section = _UsefulSection.help);
+        await _loadReference();
+        if (!mounted) return;
+        ManagedReferenceArticle? article;
+        for (final item in _reference.bundle?.articles ?? const []) {
+          if (item.id == targetId) {
+            article = item;
+            break;
+          }
+        }
+        if (article == null) {
+          _showContentUnavailable();
+          return;
+        }
+        _showReferenceArticleSheet(
+          context,
+          article: article,
+          reference: _reference,
+          referenceService: _referenceService,
+          mediaService: ContentMediaService(
+            currentUserId: () =>
+                widget.debugUserId ??
+                Supabase.instance.client.auth.currentUser?.id,
+          ),
+        );
+      case ContentNavVacancy(:final targetId):
+        setState(() => _section = _UsefulSection.jobs);
+        await _loadVacancies();
+        if (!mounted) return;
+        ManagedVacancyCard? card;
+        for (final item in _vacancies.cards) {
+          if (item.id == targetId) {
+            card = item;
+            break;
+          }
+        }
+        if (card == null) {
+          _showContentUnavailable();
+          return;
+        }
+        _showVacancyDetailSheet(
+          context,
+          card: card,
+          sectionDemoFallback: _vacancies.isDemoFallback,
+          vacancyService: _vacancyService,
+          vacancyMediaService: _vacancyMediaService,
+        );
+      case ContentNavSubject(:final targetId):
+        setState(() => _section = _UsefulSection.subjects);
+        await _reloadQuietly();
+        if (!mounted) return;
+        final subjects = _latestState?.subjects ?? const <UsefulSubject>[];
+        UsefulSubject? match;
+        for (final item in subjects) {
+          if (item.id == targetId ||
+              item.subjectId == targetId ||
+              item.teamId == targetId) {
+            match = item;
+            break;
+          }
+        }
+        if (match == null) {
+          _showContentUnavailable();
+          return;
+        }
+        await _openSubjectAndRefresh(match);
+      default:
+        break;
+    }
+  }
+
+  void _showContentUnavailable() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Контент недоступен')),
+    );
   }
 
   int _vacancyMediaGeneration = 0;
 
-  Future<void> _loadVacancies() async {
-    if (_vacancyLoadInFlight) return;
+  Future<void> _loadVacancies() {
+    final existing = _vacancyLoadFuture;
+    if (existing != null) return existing;
+    final future = _loadVacanciesBody();
+    _vacancyLoadFuture = future;
+    return future.whenComplete(() {
+      if (identical(_vacancyLoadFuture, future)) {
+        _vacancyLoadFuture = null;
+      }
+    });
+  }
+
+  Future<void> _loadVacanciesBody() async {
     final generation = ++_vacancyLoadGeneration;
-    _vacancyLoadInFlight = true;
+    final cached = await _vacancyService.loadCached();
+    if (!mounted || generation != _vacancyLoadGeneration) return;
+    if (cached.cards.isNotEmpty) {
+      setState(() => _vacancies = cached);
+      unawaited(_hydrateVacancyMedia(cached));
+    }
     try {
-      final cached = await _vacancyService.loadCached();
+      final next = await _vacancyService.load();
       if (!mounted || generation != _vacancyLoadGeneration) return;
-      if (cached.cards.isNotEmpty) {
-        setState(() => _vacancies = cached);
-        unawaited(_hydrateVacancyMedia(cached));
+      setState(() => _vacancies = next);
+      unawaited(_hydrateVacancyMedia(next));
+    } catch (error) {
+      debugPrint('[info] vacancies load failed: $error');
+      if (!mounted || generation != _vacancyLoadGeneration) return;
+      if (_vacancies.cards.isNotEmpty) {
+        setState(
+          () => _vacancies = VacancyLoadResult(
+            cards: _vacancies.cards,
+            loadError: true,
+          ),
+        );
+      } else {
+        setState(
+          () => _vacancies = const VacancyLoadResult(loadError: true),
+        );
       }
-      try {
-        final next = await _vacancyService.load();
-        if (!mounted || generation != _vacancyLoadGeneration) return;
-        setState(() => _vacancies = next);
-        unawaited(_hydrateVacancyMedia(next));
-      } catch (error) {
-        debugPrint('[info] vacancies load failed: $error');
-        if (!mounted || generation != _vacancyLoadGeneration) return;
-        if (_vacancies.cards.isNotEmpty) {
-          setState(
-            () => _vacancies = VacancyLoadResult(
-              cards: _vacancies.cards,
-              loadError: true,
-            ),
-          );
-        } else {
-          setState(
-            () => _vacancies = const VacancyLoadResult(loadError: true),
-          );
-        }
-      }
-    } finally {
-      _vacancyLoadInFlight = false;
     }
   }
 
@@ -255,44 +652,51 @@ class _InfoScreenState extends State<InfoScreen> {
     });
   }
 
-  Future<void> _loadReference() async {
-    if (_referenceLoadInFlight) return;
+  Future<void> _loadReference() {
+    final existing = _referenceLoadFuture;
+    if (existing != null) return existing;
+    final future = _loadReferenceBody();
+    _referenceLoadFuture = future;
+    return future.whenComplete(() {
+      if (identical(_referenceLoadFuture, future)) {
+        _referenceLoadFuture = null;
+      }
+    });
+  }
+
+  Future<void> _loadReferenceBody() async {
     final generation = ++_referenceLoadGeneration;
-    _referenceLoadInFlight = true;
+    final cached = await _referenceService.loadCached();
+    if (!mounted || generation != _referenceLoadGeneration) return;
+    if (cached.bundle != null && cached.bundle!.articles.isNotEmpty) {
+      setState(() => _reference = cached);
+    }
     try {
-      final cached = await _referenceService.loadCached();
+      final next = await _referenceService.load();
       if (!mounted || generation != _referenceLoadGeneration) return;
-      if (cached.bundle != null && cached.bundle!.articles.isNotEmpty) {
-        setState(() => _reference = cached);
+      setState(() => _reference = next);
+    } catch (error) {
+      debugPrint('[info] reference load failed: $error');
+      if (!mounted || generation != _referenceLoadGeneration) return;
+      if (_reference.bundle != null && _reference.bundle!.articles.isNotEmpty) {
+        setState(
+          () => _reference = ReferenceLoadResult(
+            bundle: _reference.bundle,
+            loadError: true,
+          ),
+        );
+      } else {
+        setState(
+          () => _reference = const ReferenceLoadResult(loadError: true),
+        );
       }
-      try {
-        final next = await _referenceService.load();
-        if (!mounted || generation != _referenceLoadGeneration) return;
-        setState(() => _reference = next);
-      } catch (error) {
-        debugPrint('[info] reference load failed: $error');
-        if (!mounted || generation != _referenceLoadGeneration) return;
-        if (_reference.bundle != null &&
-            _reference.bundle!.articles.isNotEmpty) {
-          setState(
-            () => _reference = ReferenceLoadResult(
-              bundle: _reference.bundle,
-              loadError: true,
-            ),
-          );
-        } else {
-          setState(
-            () => _reference = const ReferenceLoadResult(loadError: true),
-          );
-        }
-      }
-    } finally {
-      _referenceLoadInFlight = false;
     }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    ContentDeepLinkBus.instance.pending.removeListener(_onDeepLinkPending);
     InfoSubjectsCache.revision.removeListener(_onSubjectsCacheInvalidated);
     InfoSubjectsCache.detachMemoryClear(clearMemoryCache);
     super.dispose();
@@ -2524,179 +2928,18 @@ class _HelpSection extends StatelessWidget {
                     article: article,
                     showDemoBadge:
                         reference.isDemoFallback || article.showDemoBadge,
-                    onTap: () => _openArticle(context, article),
+                    onTap: () => _showReferenceArticleSheet(
+                      context,
+                      article: article,
+                      reference: reference,
+                      referenceService: referenceService,
+                      mediaService: _mediaService,
+                    ),
                   ),
               ],
             ),
       ],
     );
-  }
-
-  void _openArticle(BuildContext context, ManagedReferenceArticle article) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      constraints: _fullWidthSheetConstraints(context),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.72,
-        minChildSize: 0.4,
-        maxChildSize: 0.95,
-        builder: (context, scrollController) => SingleChildScrollView(
-          controller: scrollController,
-          child: StudentReferenceArticleDetail(
-            article: article,
-            showDemoBadge: reference.isDemoFallback || article.showDemoBadge,
-            onReportError:
-                article.isManaged ? () => _reportError(context, article) : null,
-            onOpenAsset: article.isManaged
-                ? (assetId) => _openAsset(context, assetId)
-                : null,
-            onOpenUrl: (url) => _openExternalUrl(context, url),
-            onOpenCta: (cta) => _openCta(context, cta),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _openAsset(BuildContext context, String assetId) async {
-    final messenger = ScaffoldMessenger.of(context);
-    try {
-      final download = await _mediaService.resolveDownload(assetId);
-      if (!context.mounted) return;
-      if (download == null) {
-        messenger.showSnackBar(
-          const SnackBar(content: Text('Файл недоступен')),
-        );
-        return;
-      }
-      final mime = (download.mimeType ?? 'application/octet-stream').trim();
-      final ext = mime.contains('png')
-          ? 'png'
-          : mime.contains('webp')
-              ? 'webp'
-              : mime.contains('pdf')
-                  ? 'pdf'
-                  : mime.contains('jpeg') || mime.contains('jpg')
-                      ? 'jpg'
-                      : 'bin';
-      final fileName =
-          'content_${assetId.replaceAll('-', '').substring(0, 8)}.$ext';
-      if (kIsWeb) {
-        await openSubjectAttachmentBytes(
-          bytes: Uint8List(0),
-          fileName: fileName,
-          mimeType: mime,
-          signedUrl: download.signedUrl,
-        );
-        return;
-      }
-      final bytes = await _mediaService.fetchBytes(assetId);
-      if (!context.mounted) return;
-      if (bytes == null) {
-        messenger.showSnackBar(
-          const SnackBar(content: Text('Файл недоступен')),
-        );
-        return;
-      }
-      await openSubjectAttachmentBytes(
-        bytes: bytes,
-        fileName: fileName,
-        mimeType: mime,
-        signedUrl: download.signedUrl,
-      );
-    } catch (error) {
-      if (!context.mounted) return;
-      messenger.showSnackBar(
-        SnackBar(content: Text('Не удалось открыть файл: $error')),
-      );
-    }
-  }
-
-  Future<void> _openExternalUrl(BuildContext context, String url) async {
-    final uri = Uri.tryParse(url.trim());
-    if (uri == null || !(uri.isScheme('https') || uri.isScheme('http'))) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Ссылка недоступна')),
-      );
-      return;
-    }
-    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!ok && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Не удалось открыть ссылку')),
-      );
-    }
-  }
-
-  Future<void> _openCta(BuildContext context, ReferenceArticleCta cta) async {
-    final route = (cta.route ?? '').trim();
-    if (route.startsWith('/')) {
-      context.push(route);
-      return;
-    }
-    final url = (cta.url ?? '').trim();
-    if (url.isNotEmpty) {
-      await _openExternalUrl(context, url);
-    }
-  }
-
-  Future<void> _reportError(
-    BuildContext context,
-    ManagedReferenceArticle article,
-  ) async {
-    final note = await showDialog<String>(
-      context: context,
-      builder: (context) {
-        final controller = TextEditingController();
-        return AlertDialog(
-          title: const Text('Сообщить об ошибке'),
-          content: TextField(
-            controller: controller,
-            maxLines: 4,
-            maxLength: 1000,
-            decoration: const InputDecoration(
-              hintText: 'Опишите, что не так в этой статье',
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Отмена'),
-            ),
-            FilledButton(
-              onPressed: () {
-                Navigator.pop(context, controller.text.trim());
-              },
-              child: const Text('Отправить'),
-            ),
-          ],
-        );
-      },
-    );
-    if (note == null || note.isEmpty || !context.mounted) return;
-    try {
-      await referenceService.submitCorrection(
-        contentItemId: article.id,
-        note: note,
-      );
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Сообщение отправлено модераторам')),
-      );
-      Navigator.of(context).pop();
-    } catch (error) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось отправить: $error')),
-      );
-    }
   }
 }
 
@@ -3081,79 +3324,16 @@ class _JobsGroupSection extends StatelessWidget {
                 backgroundBytes: card.backgroundBytes == null
                     ? null
                     : Uint8List.fromList(card.backgroundBytes!),
-                onTap: () => _openVacancy(context, card, showDemoBadge),
+                onTap: () => _showVacancyDetailSheet(
+                  context,
+                  card: card,
+                  sectionDemoFallback: showDemoBadge,
+                  vacancyService: vacancyService,
+                  vacancyMediaService: vacancyMediaService,
+                ),
               ),
             ),
         ],
-      ),
-    );
-  }
-
-  void _openVacancy(
-    BuildContext context,
-    ManagedVacancyCard card,
-    bool sectionDemoFallback,
-  ) {
-    final isDemo = sectionDemoFallback || card.showDemoBadge;
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      constraints: _fullWidthSheetConstraints(context),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.75,
-        minChildSize: 0.4,
-        maxChildSize: 0.95,
-        builder: (context, scrollController) => SingleChildScrollView(
-          controller: scrollController,
-          child: StudentVacancyDetailSheet(
-            card: card,
-            showDemoBadge: isDemo,
-            logoBytes: card.logoBytes == null
-                ? null
-                : Uint8List.fromList(card.logoBytes!),
-            coverBytes: card.coverBytes == null
-                ? null
-                : Uint8List.fromList(card.coverBytes!),
-            backgroundBytes: card.backgroundBytes == null
-                ? null
-                : Uint8List.fromList(card.backgroundBytes!),
-            onOpenExternalUrl: isDemo
-                ? null
-                : (url) async {
-                    final uri = Uri.parse(url);
-                    if (await canLaunchUrl(uri)) {
-                      await launchUrl(uri,
-                          mode: LaunchMode.externalApplication);
-                    }
-                  },
-            onRevealContacts: isDemo || !card.hasContacts
-                ? null
-                : () => vacancyService.fetchContacts(card.id),
-            onOpenAsset: isDemo
-                ? null
-                : (assetId) async {
-                    final url = await vacancyMediaService.openAsset(assetId);
-                    if (url == null) return;
-                    final uri = Uri.parse(url);
-                    if (await canLaunchUrl(uri)) {
-                      await launchUrl(uri,
-                          mode: LaunchMode.externalApplication);
-                    }
-                  },
-            onReport: isDemo
-                ? null
-                : (reason, note) => vacancyService.reportVacancy(
-                      vacancyId: card.id,
-                      reason: reason,
-                      note: note,
-                    ),
-          ),
-        ),
       ),
     );
   }

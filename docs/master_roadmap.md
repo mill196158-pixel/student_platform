@@ -6,7 +6,7 @@
 ## Статус документа
 
 - Дата аудита: **27 июля 2026**
-- Updated: **31 июля 2026** (Stage 14.1.5 Final Visual Preview Integrity — DONE)
+- Updated: **31 июля 2026** (Stage 14.2 Managed Content v2 → main mobile — DONE)
 - Проверенная основная ветка: `refactor/chat-tab` (база)
 - Рабочая ветка контента: `feature/content-platform`
 - Проверенная административная ветка: `feature/admin-console`
@@ -1017,6 +1017,18 @@ Status: **DONE** / Codex **APPROVE** — M6; gate OFF; feature `4976ee2`; no new
 - [x] Admin multi-slot preview integrity + profile shared composition;
 - [x] Humanized editor banners + parameterized/golden tests;
 - [x] Codex APPROVE 14.1.5.
+
+### Stage 14.2 — Managed Content v2 → main mobile
+
+Status: **DONE** / Codex **APPROVE** — M7; base `be6ac42`; gate ON via owner SQL; migration `20260731122000`
+
+- [x] Home dual-read schema 1|2 (all slots/variants) + media/CTA/audience/schedule/dismiss/order;
+- [x] Profile real chrome + managed carousel/detail/back;
+- [x] Reference category→article→back; Vacancy list/detail (no drafts);
+- [x] Typed ContentNavIntent whitelist (student_ui parse, mobile execute);
+- [x] Info resume + pull/tab freshness (Realtime residual);
+- [x] Student READ RPC projects home/profile wire schema_version 2→1 for legacy clients;
+- [x] Tests/builds + Codex APPROVE + controlled smoke + owner gate flip + push.
 
 ### Next after 14.1.4 — Import Studio (separate stage)
 

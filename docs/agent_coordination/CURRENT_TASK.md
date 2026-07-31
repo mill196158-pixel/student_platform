@@ -1,24 +1,25 @@
 # CURRENT_TASK
 
-* Status: **DONE** — Stage 14.1.5 (Final Visual Preview Integrity)
-* Active Stage: **14.1.5 / M6**
+* Status: **DONE** — Stage 14.2 (Managed Content v2 → main mobile)
+* Active Stage: **14.2 / M7**
 * Branch: `refactor/chat-tab`
-* Base HEAD: `690cd76`
-* Feature SHA: `4976ee2`
-* Codex final: **APPROVE** (after published-mode + sort P1 fixes)
+* Base HEAD: `be6ac42`
+* Codex plan: **APPROVE** (revised)
+* Codex final: **APPROVE** (after action parse/typed-field P1 fixes)
 * Remote: `gwdanmwluhrcfxbnplwd`
-* Gate: `content_visual_studio_v2_publish` remains **OFF**
-* Migration/Edge: none
+* Gate: `content_visual_studio_v2_publish` **ON** (owner SQL after smoke)
+* Migration applied: `20260731122000_stage14_2_student_read_schema_wire_projection`
 
-## Root cause
+## Smoke evidence (remote)
 
-`image_full` / `image_overlay` collapsed under unbounded `CustomScrollView` because ready `_PromoImagePlane` used `SizedBox(height: null)` with expanding stacks. `image_top_text` always used height 140.
+* Before: gate=false; home_v1=1; home_v2=0; profile_v1=3; profile_v2=0; vacancies_published=0; vacancies_non_published=3
+* After projection migration + gate ON: same content counts; users_count=34; no deletes; no mass publish
+* Wire projection verified in `get_my_content_for_placement`
+* Vacancy assets still exclude `working_draft_id`
 
-## Done
+## Delivered
 
-* Invariant 180px bleed geometry for full/overlay (ready/loading/missing/failed)
-* HomePromoPayload overlay/focal/image_fit dual-read
-* Admin placements: published mode keeps published cards; draft overlay only in live mode; id tie-break sort
-* Shared `StudentProfileScreenPreview` on Admin + Mobile
-* Human banners; Stage/schema in Diagnostics
-* Parameterized + golden tests 390×844 / 430×932
+* Home schema 1|2 dual-read; ContentNavIntent whitelist; Mobile executor (tabs/diary/HTTPS/entity)
+* Profile/Reference/Vacancy real surfaces + Info resume freshness
+* Legacy-safe RPC wire schema_version 2→1 for home/profile
+* Tests + Web/Android/iOS builds; commit + normal push

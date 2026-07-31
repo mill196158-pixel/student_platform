@@ -135,12 +135,52 @@ void main() {
     );
   });
 
-  test('ManagedContentCard.tryParseHomePromo enforces schema_version=1', () {
+  test('ManagedContentCard.tryParseHomePromo accepts schema_version 1 and 2',
+      () {
     expect(
       ManagedContentCard.tryParseHomePromo({
         'id': 'x',
         'template_key': 'home_promo_v1',
         'schema_version': 2,
+        'origin': 'admin',
+        'payload': {
+          'title': 'Заголовок',
+          'subtitle': 'Текст',
+          'icon_key': 'help',
+          'cta_label': 'Открыть',
+          'gradient_colors': ['#7367F0', '#B784F7'],
+          'dismissible': true,
+          'home_slot': 'after_news',
+          'card_variant': 'image_overlay',
+        },
+      }),
+      isA<ManagedContentCard>()
+          .having((c) => c.schemaVersion, 'schema', 2)
+          .having((c) => c.homePromo.effectiveHomeSlot, 'slot', 'after_news')
+          .having((c) => c.homePromo.cardVariant, 'variant', 'image_overlay'),
+    );
+    expect(
+      ManagedContentCard.tryParseHomePromo({
+        'id': 'x',
+        'template_key': 'home_promo_v1',
+        'schema_version': 1,
+        'origin': 'admin',
+        'payload': {
+          'title': 'Заголовок',
+          'subtitle': 'Текст',
+          'icon_key': 'help',
+          'cta_label': 'Открыть',
+          'gradient_colors': ['#7367F0', '#B784F7'],
+          'dismissible': true,
+        },
+      }),
+      isA<ManagedContentCard>().having((c) => c.schemaVersion, 'schema', 1),
+    );
+    expect(
+      ManagedContentCard.tryParseHomePromo({
+        'id': 'x',
+        'template_key': 'home_promo_v1',
+        'schema_version': 99,
         'origin': 'admin',
         'payload': {
           'title': 'Заголовок',

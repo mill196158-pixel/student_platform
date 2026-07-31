@@ -384,6 +384,26 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 
 ---
 
+## M7. Stage 14.2 — Managed Content v2 → main mobile
+
+- [x] Home: schema 1|2 dual-read; all 5 home_slot; all 7 card variants
+- [x] Home: multi promo + order + dismiss + audience/schedule (server) + media focal/overlay/fit/icon/CTA
+- [x] Profile: real chrome retained; managed carousel + detail/back + media + audience/schedule
+- [x] Reference: categories/articles/blocks/files/links/CTA; nav category→article→back; legacy only if empty/network
+- [x] Vacancies: list/detail/logo/cover/background/requirements/format/location/salary/CTA; no draft/moderation for students
+- [x] Media cache-first: memory→disk→single-flight→skeleton→last-good→generation guard; key=user+asset+version (not signed URL)
+- [x] Freshness without restart: pull-to-refresh + app resume + tab reopen (Realtime residual; no reconnect claim)
+- [x] ContentNavIntent whitelist in student_ui; mobile executor (tabs/diary/HTTPS/entity); structured action never falls back to legacy
+- [x] Student READ RPC projects home/profile wire schema_version 2→1 for legacy clients
+- [x] Unknown schema/variant/icon/action fail-safe per row
+- [x] Tests: variants/slots/carousel/reference/vacancy/media/offline/v1-v2/unknown/audience/draft-absent
+- [x] Builds: format, analyze, student_ui + mobile content tests, Admin relevant, Main Web, Android APK, iOS sim; git diff --check; secret scan
+- [x] Codex APPROVE 14.2
+- [x] Controlled remote smoke (v1 still served) + owner gate SQL (no migration enables flag)
+- [ ] Commit + normal push `origin/refactor/chat-tab` *(pending this closeout)*
+
+---
+
 ## N. Stage 15.1 — Home promo
 
 - [x] «Застрял с заданием?» → managed promo

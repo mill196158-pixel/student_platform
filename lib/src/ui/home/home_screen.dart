@@ -6,10 +6,9 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:student_ui/student_ui.dart';
 
-import 'package:url_launcher/url_launcher.dart';
-
 import 'package:student_platform/src/services/push/app_notifications_api.dart';
 import 'package:student_platform/src/services/push/in_app_notification_bus.dart';
+import 'package:student_platform/src/ui/content/content_nav_executor.dart';
 import 'package:student_platform/src/ui/home/home_dashboard_service.dart';
 import 'package:student_platform/src/ui/home/home_promo_service.dart';
 import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
@@ -763,37 +762,39 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       await _promoService.recordEvent(managedId, 'click');
     }
 
-    final route = resolved.ctaRoute?.trim();
-    if (route != null && route.isNotEmpty) {
-      if (route == '/help' ||
-          route == '/info' ||
-          route == '/my-diary' ||
-          route == '/diary') {
-        if (route == '/my-diary' || route == '/diary') {
-          context.push('/my-diary');
-          return;
-        }
-        _showHelpDetails(resolved);
+    final intent = ContentNavResolver.resolve(
+      action: resolved.action,
+      ctaRoute: resolved.ctaRoute,
+      ctaUrl: resolved.ctaUrl,
+    );
+    if (intent is ContentNavNone || intent is ContentNavDisabled) {
+      if (!mounted) return;
+      if (intent is ContentNavDisabled) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Действие недоступно')),
+        );
         return;
       }
-      try {
-        context.push(route);
-        return;
-      } catch (_) {
-        // Fall through to URL / sheet.
-      }
+      _showHelpDetails(resolved);
+      return;
     }
-    final url = resolved.ctaUrl?.trim();
-    if (url != null && url.isNotEmpty) {
-      final uri = Uri.tryParse(url);
-      if (uri != null &&
-          (uri.scheme == 'https' || uri.scheme == 'http') &&
-          await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-        return;
-      }
-    }
-    _showHelpDetails(resolved);
+    if (!mounted) return;
+    await const ContentNavExecutor().execute(
+      context,
+      intent,
+      onUnavailable: () {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Контент недоступен')),
+        );
+      },
+      onDisabled: () {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Действие недоступно')),
+        );
+      },
+    );
   }
 
   Future<void> _onHomePromoDismiss(ManagedContentCard card) async {
