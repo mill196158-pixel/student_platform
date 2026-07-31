@@ -427,7 +427,7 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] UI «Публикуем…» + spinner; destructive/publish actions locked during pipeline
 - [x] Tests: coordinator + serialization + Admin full suite; mobile content; Web/Android/iOS builds
 - [x] Codex APPROVE 14.2.2
-- [x] Controlled remote smoke (no mass publish) + commit + push
+- [x] Controlled remote smoke (no mass publish) + commit + push (`35cb5fb`)
 
 ---
 

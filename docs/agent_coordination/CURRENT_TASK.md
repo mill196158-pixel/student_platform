@@ -4,10 +4,12 @@
 * Active Stage: **14.2.2**
 * Branch: `refactor/chat-tab`
 * Prior HEAD: `879cec8`
+* Feature SHA: `35cb5fb`
 * Codex plan: **APPROVE**
 * Codex final: **APPROVE** (after `profile_feed_card_v1` template-key fix)
 * Remote: `gwdanmwluhrcfxbnplwd`
 * Migration applied: `20260731110419_stage14_2_2_home_profile_schema_upgrade_wd`
+* Push: `origin/refactor/chat-tab` (`879cec8..35cb5fb`)
 
 ## Exact server error
 

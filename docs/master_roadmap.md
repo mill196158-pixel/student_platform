@@ -1042,7 +1042,7 @@ Status: **DONE** / Codex **APPROVE** — hotfix `548969f`; migration `2026073110
 
 ### Stage 14.2.2 — reliable Visual Content Studio publish
 
-Status: **DONE** / Codex **APPROVE** — migration `20260731110419`
+Status: **DONE** / Codex **APPROVE** — `35cb5fb`; migration `20260731110419`
 
 - [x] Root cause: `invalid_schema_upgrade` on schema-1 WD save with forced `target_schema_version=2`;
 - [x] Allow home_promo_v1 / profile_feed_card_v1 WD 1→2; publish still uses v2 gate;
