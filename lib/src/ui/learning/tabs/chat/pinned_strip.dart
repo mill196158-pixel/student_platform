@@ -22,11 +22,31 @@ class PinEntry {
   factory PinEntry.text({required String id, required String title}) =>
       PinEntry._(id: id, type: PinType.text, title: title);
 
-  factory PinEntry.message({required String id, required String title, String? subtitle, required String messageId}) =>
-      PinEntry._(id: id, type: PinType.message, title: title, subtitle: subtitle, refId: messageId);
+  factory PinEntry.message(
+          {required String id,
+          required String title,
+          String? subtitle,
+          required String messageId}) =>
+      PinEntry._(
+          id: id,
+          type: PinType.message,
+          title: title,
+          subtitle: subtitle,
+          refId: messageId);
 
-  factory PinEntry.assignment({required String id, required String title, String? subtitle, required String assignmentId, bool isAuto = false}) =>
-      PinEntry._(id: id, type: PinType.assignment, title: title, subtitle: subtitle, refId: assignmentId, isAuto: isAuto);
+  factory PinEntry.assignment(
+          {required String id,
+          required String title,
+          String? subtitle,
+          required String assignmentId,
+          bool isAuto = false}) =>
+      PinEntry._(
+          id: id,
+          type: PinType.assignment,
+          title: title,
+          subtitle: subtitle,
+          refId: assignmentId,
+          isAuto: isAuto);
 
   IconData get icon => switch (type) {
         PinType.text => Icons.push_pin_outlined,
@@ -98,7 +118,8 @@ class _ChipItem extends StatelessWidget {
   final PinEntry entry;
   final VoidCallback onTap;
   final VoidCallback onClose;
-  const _ChipItem({required this.entry, required this.onTap, required this.onClose});
+  const _ChipItem(
+      {required this.entry, required this.onTap, required this.onClose});
 
   @override
   Widget build(BuildContext context) {
@@ -118,15 +139,21 @@ class _ChipItem extends StatelessWidget {
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 220),
                 child: Text(
-                  entry.subtitle != null ? '${entry.title}  •  ${entry.subtitle}' : entry.title,
+                  entry.subtitle != null
+                      ? '${entry.title}  •  ${entry.subtitle}'
+                      : entry.title,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
               if (!entry.isAuto) ...[
                 const SizedBox(width: 6),
-                GestureDetector(
+                InkWell(
                   onTap: onClose,
-                  child: const Icon(Icons.close, size: 16),
+                  customBorder: const CircleBorder(),
+                  child: const Padding(
+                    padding: EdgeInsets.all(2),
+                    child: Icon(Icons.close, size: 16),
+                  ),
                 ),
               ],
             ],

@@ -1,0 +1,1054 @@
+﻿## PATTERN: Supabase.instance
+lib\all_dart_code.txt:155:_session = Supabase.instance.client.auth.currentSession;
+lib\all_dart_code.txt:156:Supabase.instance.client.auth.onAuthStateChange.listen((event) {
+lib\all_dart_code.txt:357:static SupabaseClient get client => Supabase.instance.client;
+lib\all_dart_code.txt:402:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:424:final SupabaseClient _sb = Supabase.instance.client;
+lib\all_dart_code.txt:1210:static final _sb = Supabase.instance.client;
+lib\all_dart_code.txt:2105:final _sb = Supabase.instance.client;
+lib\all_dart_code.txt:2340:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:2620:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:2712:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:2861:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:2948:final res = await Supabase.instance.client
+lib\all_dart_code.txt:2962:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:2997:final res = await Supabase.instance.client
+lib\all_dart_code.txt:3138:final res = await Supabase.instance.client
+lib\all_dart_code.txt:3198:final res = await Supabase.instance.client
+lib\all_dart_code.txt:3528:final res = await Supabase.instance.client
+lib\all_dart_code.txt:4247:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:4336:final res = await Supabase.instance.client
+lib\all_dart_code.txt:4351:final unreadRes = await Supabase.instance.client
+lib\all_dart_code.txt:4431:currentUserId: Supabase.instance.client.auth.currentUser?.id,
+lib\all_dart_code.txt:4483:String get currentUserId => Supabase.instance.client.auth.currentUser?.id ?? '';
+lib\all_dart_code.txt:4513:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:4554:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:4985:: _repo = ChatRepository(supabase: Supabase.instance.client);
+lib\all_dart_code.txt:4997:String get currentUserId => Supabase.instance.client.auth.currentUser?.id ?? '';
+lib\all_dart_code.txt:5065:final r = await Supabase.instance.client
+lib\all_dart_code.txt:5200:_att = ChatAttachmentsController(_fileService, _globalCache, Supabase.instance.client)
+lib\all_dart_code.txt:5344:final rows = await Supabase.instance.client
+lib\all_dart_code.txt:5356:final fileRow = await Supabase.instance.client
+lib\all_dart_code.txt:6406:static final SupabaseClient _sb = Supabase.instance.client;
+lib\all_dart_code.txt:6822:final _sb = Supabase.instance.client;
+lib\all_dart_code.txt:7200:final _sb = Supabase.instance.client;
+lib\all_dart_code.txt:8165:final _sb = Supabase.instance.client;
+lib\all_dart_code.txt:9967:final client = Supabase.instance.client;
+lib\all_dart_code.txt:11126:final SupabaseClient _sb = Supabase.instance.client;
+lib\all_dart_code.txt:12534:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:12570:final uid = Supabase.instance.client.auth.currentUser?.id;
+lib\all_dart_code.txt:12572:final row = await Supabase.instance.client
+lib\all_dart_code.txt:12604:final uid = Supabase.instance.client.auth.currentUser?.id;
+lib\all_dart_code.txt:12606:final row = await Supabase.instance.client
+lib\all_dart_code.txt:12635:final currentUid = Supabase.instance.client.auth.currentUser?.id ?? '';
+lib\all_dart_code.txt:12713:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:12845:await Supabase.instance.client.rpc('propose_assignment', params: {
+lib\all_dart_code.txt:12875:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:12915:await Supabase.instance.client.rpc('publish_assignment', params: {
+lib\all_dart_code.txt:12937:await Supabase.instance.client.rpc('set_assignment_done', params: {
+lib\all_dart_code.txt:12952:await Supabase.instance.client.rpc('update_assignment', params: {
+lib\all_dart_code.txt:12964:await Supabase.instance.client.rpc('remove_assignment', params: {
+lib\all_dart_code.txt:13056:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:14019:final uid = Supabase.instance.client.auth.currentUser?.id;
+lib\all_dart_code.txt:14195:_att = ChatAttachmentsController(_fileService, _globalCache, Supabase.instance.client)
+lib\all_dart_code.txt:14197:_repo = ChatRepository(supabase: Supabase.instance.client, fileService: _fileService);
+lib\all_dart_code.txt:14665:final user = Supabase.instance.client.auth.currentUser;
+lib\all_dart_code.txt:14703:await Supabase.instance.client
+lib\all_dart_code.txt:14877:currentUserId: Supabase.instance.client.auth.currentUser?.id,
+lib\all_dart_code.txt:15321:final response = await Supabase.instance.client
+lib\all_dart_code.txt:15343:final fileResponse = await Supabase.instance.client
+lib\all_dart_code.txt:15384:await Supabase.instance.client
+lib\all_dart_code.txt:15803:final SupabaseClient _sb = Supabase.instance.client;
+lib\all_dart_code.txt:19172:final isMe = message.isMine(Supabase.instance.client.auth.currentUser?.id);
+lib\all_dart_code.txt:21114:final uid = Supabase.instance.client.auth.currentUser?.id;
+lib\all_dart_code.txt:21425:final userId = Supabase.instance.client.auth.currentUser?.id;
+lib\all_dart_code.txt:21732:final userId = Supabase.instance.client.auth.currentUser?.id;
+lib\all_dart_code.txt:23975:final _sb = Supabase.instance.client;
+lib\all_dart_code.txt:24351:final _sb = Supabase.instance.client;
+lib\all_dart_code.txt:24430:final SupabaseClient _sb = Supabase.instance.client;
+lib\all_dart_code.txt:26600:final _sb = Supabase.instance.client;
+lib\all_dart_code.txt:26664:_channel = Supabase.instance.client
+lib\all_dart_code.txt:27121:final client = Supabase.instance.client;
+lib\all_dart_code.txt:27144:final client = Supabase.instance.client;
+lib\all_dart_code.txt:29932:final client = Supabase.instance.client;
+lib\all_dart_code.txt:29960:final client = Supabase.instance.client;
+lib\src\app.dart:20:_session = Supabase.instance.client.auth.currentSession;
+lib\src\app.dart:22:Supabase.instance.client.auth.onAuthStateChange.listen((event) {
+lib\src\app.dart:29:final userId = Supabase.instance.client.auth.currentUser?.id;
+lib\src\app.dart:35:final row = await Supabase.instance.client
+lib\src\config\supabase_config.dart:17:static SupabaseClient get client => Supabase.instance.client;
+lib\src\core\session.dart:23:final sb = Supabase.instance.client;
+lib\src\data\academic_context_service.dart:80:: _sb = client ?? Supabase.instance.client;
+lib\src\data\personal_diary_service.dart:201:: _sb = client ?? Supabase.instance.client,
+lib\src\data\subject_diary_repository_supabase.dart:5:final SupabaseClient _sb = Supabase.instance.client;
+lib\src\services\auth_service.dart:10:static final _sb = Supabase.instance.client;
+lib\src\services\file_service.dart:21:})  : _supabase = supabase ?? Supabase.instance.client,
+lib\src\ui\authentication\screens\change_password_screen.dart:34:final sb = Supabase.instance.client;
+lib\src\ui\authentication\screens\login_screen.dart:26:final _sb = Supabase.instance.client;
+lib\src\ui\authentication\screens\register_screen.dart:46:final sb = Supabase.instance.client;
+lib\src\ui\chats\my_chats_screen.dart:61:final sb = Supabase.instance.client;
+lib\src\ui\chats\my_chats_screen.dart:162:final sb = Supabase.instance.client;
+lib\src\ui\chats\my_chats_screen.dart:319:final sb = Supabase.instance.client;
+lib\src\ui\chats\my_chats_screen.dart:419:final res = await Supabase.instance.client
+lib\src\ui\chats\my_chats_screen.dart:433:final sb = Supabase.instance.client;
+lib\src\ui\chats\my_chats_screen.dart:473:final res = await Supabase.instance.client
+lib\src\ui\chats\my_chats_screen.dart:701:final res = await Supabase.instance.client
+lib\src\ui\chats\my_chats_screen.dart:1044:final res = await Supabase.instance.client
+lib\src\ui\chats\my_chats_screen.dart:1780:final sb = Supabase.instance.client;
+lib\src\ui\chats\my_chats_screen.dart:1872:final res = await Supabase.instance.client
+lib\src\ui\chats\my_chats_screen.dart:1887:final unreadRes = await Supabase.instance.client
+lib\src\ui\chats\my_chats_screen.dart:1974:Supabase.instance.client.auth.currentUser?.id,
+lib\src\ui\chats\core\dm_chat_service.dart:28:Supabase.instance.client.auth.currentUser?.id ?? '';
+lib\src\ui\chats\core\dm_chat_service.dart:73:final sb = Supabase.instance.client;
+lib\src\ui\chats\core\dm_chat_service.dart:117:final sb = Supabase.instance.client;
+lib\src\ui\chats\core\team_chat_service.dart:21:supabase: Supabase.instance.client,
+lib\src\ui\chats\core\team_chat_service.dart:36:Supabase.instance.client.auth.currentUser?.id ?? '';
+lib\src\ui\chats\core\team_chat_service.dart:111:final r = await Supabase.instance.client
+lib\src\ui\chats\core\unified_chat_screen.dart:141:_fileService, _globalCache, Supabase.instance.client)
+lib\src\ui\chats\core\unified_chat_screen.dart:303:final rows = await Supabase.instance.client
+lib\src\ui\chats\core\unified_chat_screen.dart:315:final fileRow = await Supabase.instance.client
+lib\src\ui\chats\data\dm_api.dart:12:static final SupabaseClient _sb = Supabase.instance.client;
+lib\src\ui\chats\forward\forward_picker.dart:37:final _sb = Supabase.instance.client;
+lib\src\ui\exams\exams_screen.dart:2031:final SupabaseClient _sb = Supabase.instance.client;
+lib\src\ui\friends\friend_profile_screen.dart:31:final _sb = Supabase.instance.client;
+lib\src\ui\friends\my_friends_screen.dart:20:final _sb = Supabase.instance.client;
+lib\src\ui\info\info_screen.dart:295:: _sb = client ?? Supabase.instance.client;
+lib\src\ui\info\subject_info_screen.dart:169:: _sb = client ?? Supabase.instance.client;
+lib\src\ui\learning\learning_screen.dart:71:final client = Supabase.instance.client;
+lib\src\ui\learning\data\supabase_learning_repository.dart:16:final SupabaseClient _sb = Supabase.instance.client;
+lib\src\ui\learning\state\team_cubit.dart:129:final rows = await Supabase.instance.client
+lib\src\ui\learning\state\team_cubit.dart:236:final sb = Supabase.instance.client;
+lib\src\ui\learning\state\team_cubit.dart:271:final uid = Supabase.instance.client.auth.currentUser?.id;
+lib\src\ui\learning\state\team_cubit.dart:273:final row = await Supabase.instance.client
+lib\src\ui\learning\state\team_cubit.dart:305:final uid = Supabase.instance.client.auth.currentUser?.id;
+lib\src\ui\learning\state\team_cubit.dart:307:final row = await Supabase.instance.client
+lib\src\ui\learning\state\team_cubit.dart:336:final currentUid = Supabase.instance.client.auth.currentUser?.id ?? '';
+lib\src\ui\learning\state\team_cubit.dart:490:final sb = Supabase.instance.client;
+lib\src\ui\learning\state\team_cubit.dart:607:await Supabase.instance.client.rpc('propose_assignment', params: {
+lib\src\ui\learning\state\team_cubit.dart:663:final sb = Supabase.instance.client;
+lib\src\ui\learning\state\team_cubit.dart:688:await Supabase.instance.client.rpc('publish_assignment', params: {
+lib\src\ui\learning\state\team_cubit.dart:701:await Supabase.instance.client.rpc('set_assignment_done', params: {
+lib\src\ui\learning\state\team_cubit.dart:712:await Supabase.instance.client.rpc('set_assignment_done', params: {
+lib\src\ui\learning\state\team_cubit.dart:727:await Supabase.instance.client.rpc('update_assignment', params: {
+lib\src\ui\learning\state\team_cubit.dart:739:await Supabase.instance.client.rpc('remove_assignment', params: {
+lib\src\ui\learning\state\team_cubit.dart:826:final sb = Supabase.instance.client;
+lib\src\ui\learning\tabs\chat_tab.dart:76:final uid = Supabase.instance.client.auth.currentUser?.id;
+lib\src\ui\learning\tabs\chat_tab.dart:258:_fileService, _globalCache, Supabase.instance.client)
+lib\src\ui\learning\tabs\chat_tab.dart:263:supabase: Supabase.instance.client, fileService: _fileService);
+lib\src\ui\learning\tabs\chat_tab.dart:826:final user = Supabase.instance.client.auth.currentUser;
+lib\src\ui\learning\tabs\chat_tab.dart:864:await Supabase.instance.client.from('chat_files').update({
+lib\src\ui\learning\tabs\chat_tab.dart:1058:Supabase.instance.client.auth.currentUser?.id,
+lib\src\ui\learning\tabs\chat_tab.dart:1621:final response = await Supabase.instance.client
+lib\src\ui\learning\tabs\chat_tab.dart:1646:final fileResponse = await Supabase.instance.client
+lib\src\ui\learning\tabs\chat_tab.dart:1692:await Supabase.instance.client
+lib\src\ui\learning\tabs\files_tab.dart:28:final SupabaseClient _sb = Supabase.instance.client;
+lib\src\ui\learning\tabs\chat\message_bubble.dart:65:final isMe = message.isMine(Supabase.instance.client.auth.currentUser?.id);
+lib\src\ui\learning\tabs\chat\actions\chat_actions.dart:23:final uid = Supabase.instance.client.auth.currentUser?.id;
+lib\src\ui\learning\tabs\chat\actions\chat_actions.dart:334:final userId = Supabase.instance.client.auth.currentUser?.id;
+lib\src\ui\learning\tabs\chat\actions\chat_actions.dart:641:final userId = Supabase.instance.client.auth.currentUser?.id;
+lib\src\ui\profile\edit_profile_screen.dart:44:final _sb = Supabase.instance.client;
+lib\src\ui\profile\profile_repository.dart:5:final _sb = Supabase.instance.client;
+lib\src\ui\profile\profile_screen.dart:33:final SupabaseClient _sb = Supabase.instance.client;
+lib\src\ui\schedule\all_dart_text.txt:1024:final _sb = Supabase.instance.client;
+lib\src\ui\schedule\all_dart_text.txt:1088:_channel = Supabase.instance.client
+lib\src\ui\schedule\all_dart_text.txt:1545:final client = Supabase.instance.client;
+lib\src\ui\schedule\all_dart_text.txt:1568:final client = Supabase.instance.client;
+lib\src\ui\schedule\all_dart_text.txt:4298:final client = Supabase.instance.client;
+lib\src\ui\schedule\all_dart_text.txt:4326:final client = Supabase.instance.client;
+lib\src\ui\schedule\schedule_screen.dart:14:final _sb = Supabase.instance.client;
+lib\src\ui\schedule\schedule_screen.dart:116:_channel = Supabase.instance.client
+lib\src\ui\schedule\subject_diary_screen.dart:87:final client = Supabase.instance.client;
+lib\src\ui\schedule\subject_diary_screen.dart:110:final client = Supabase.instance.client;
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:80:final client = Supabase.instance.client;
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:108:final client = Supabase.instance.client;
+scripts\collect_project_snapshot.ps1:109:Write-Search "supabase_from_usage.txt" @("Supabase.instance", "supabase", ".from(")
+
+## PATTERN: supabase
+lib\all_dart_code.txt:6:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:65:// === РўР’РћР СЂРµР°Р»СЊРЅС‹Рµ Р·РЅР°С‡РµРЅРёСЏ РёР· Supabase Settings в†’ API ===
+lib\all_dart_code.txt:66:const supabaseUrl = 'https://gwdanmwluhrcfxbnplwd.supabase.co';
+lib\all_dart_code.txt:67:const supabaseAnonKey =
+lib\all_dart_code.txt:70:await Supabase.initialize(
+lib\all_dart_code.txt:71:url: supabaseUrl,
+lib\all_dart_code.txt:72:anonKey: supabaseAnonKey,
+lib\all_dart_code.txt:79:SubjectDiaryRepository.instance = SubjectDiaryRepositorySupabase();
+lib\all_dart_code.txt:139:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:155:_session = Supabase.instance.client.auth.currentSession;
+lib\all_dart_code.txt:156:Supabase.instance.client.auth.onAuthStateChange.listen((event) {
+lib\all_dart_code.txt:335:/// РџСЂРµРІСЂР°С‰Р°РµС‚ РІРІРµРґС‘РЅРЅС‹Р№ Р»РѕРіРёРЅ РІ email РґР»СЏ Supabase Auth.
+lib\all_dart_code.txt:342:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:344:class SupabaseConfig {
+lib\all_dart_code.txt:349:await Supabase.initialize(
+lib\all_dart_code.txt:350:url: const String.fromEnvironment('https://gwdanmwluhrcfxbnplwd.supabase.co'),
+lib\all_dart_code.txt:357:static SupabaseClient get client => Supabase.instance.client;
+lib\all_dart_code.txt:380:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:402:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:422:/// Р РµР°Р»РёР·Р°С†РёСЏ СЂРµРїРѕР·РёС‚РѕСЂРёСЏ РґРЅРµРІРЅРёРєР° С‡РµСЂРµР· Supabase RPC + Yandex S3.
+lib\all_dart_code.txt:423:class SubjectDiaryRepositorySupabase implements SubjectDiaryRepository {
+lib\all_dart_code.txt:424:final SupabaseClient _sb = Supabase.instance.client;
+lib\all_dart_code.txt:434:SubjectDiaryRepositorySupabase() {
+lib\all_dart_code.txt:459:return await SubjectDiaryRepositorySupabase().addText(subjectKey: subjectKey, date: date, text: text);
+lib\all_dart_code.txt:1204:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:1210:static final _sb = Supabase.instance.client;
+lib\all_dart_code.txt:2088:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:2105:final _sb = Supabase.instance.client;
+lib\all_dart_code.txt:2300:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:2340:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:2580:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:2583:import 'package:student_platform/src/ui/learning/data/supabase_learning_repository.dart';
+lib\all_dart_code.txt:2603:final _repo = SupabaseLearningRepository();
+lib\all_dart_code.txt:2620:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:2712:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:2861:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:2948:final res = await Supabase.instance.client
+lib\all_dart_code.txt:2962:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:2997:final res = await Supabase.instance.client
+lib\all_dart_code.txt:3138:final res = await Supabase.instance.client
+lib\all_dart_code.txt:3198:final res = await Supabase.instance.client
+lib\all_dart_code.txt:3528:final res = await Supabase.instance.client
+lib\all_dart_code.txt:4212:final _repo = SupabaseLearningRepository();
+lib\all_dart_code.txt:4247:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:4336:final res = await Supabase.instance.client
+lib\all_dart_code.txt:4351:final unreadRes = await Supabase.instance.client
+lib\all_dart_code.txt:4431:currentUserId: Supabase.instance.client.auth.currentUser?.id,
+lib\all_dart_code.txt:4460:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:4483:String get currentUserId => Supabase.instance.client.auth.currentUser?.id ?? '';
+lib\all_dart_code.txt:4513:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:4554:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:4916:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:4971:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:4985:: _repo = ChatRepository(supabase: Supabase.instance.client);
+lib\all_dart_code.txt:4997:String get currentUserId => Supabase.instance.client.auth.currentUser?.id ?? '';
+lib\all_dart_code.txt:5065:final r = await Supabase.instance.client
+lib\all_dart_code.txt:5080:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:5200:_att = ChatAttachmentsController(_fileService, _globalCache, Supabase.instance.client)
+lib\all_dart_code.txt:5344:final rows = await Supabase.instance.client
+lib\all_dart_code.txt:5356:final fileRow = await Supabase.instance.client
+lib\all_dart_code.txt:6400:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:6406:static final SupabaseClient _sb = Supabase.instance.client;
+lib\all_dart_code.txt:6788:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:6822:final _sb = Supabase.instance.client;
+lib\all_dart_code.txt:7176:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:7200:final _sb = Supabase.instance.client;
+lib\all_dart_code.txt:8152:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:8165:final _sb = Supabase.instance.client;
+lib\all_dart_code.txt:9920:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:9967:final client = Supabase.instance.client;
+lib\all_dart_code.txt:11112:// lib/src/ui/learning/data/supabase_learning_repository.dart
+lib\all_dart_code.txt:11116:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:11125:class SupabaseLearningRepository implements LearningRepository {
+lib\all_dart_code.txt:11126:final SupabaseClient _sb = Supabase.instance.client;
+lib\all_dart_code.txt:11455:print('[SupabaseLearningRepository] loadReactionsForMessage error: $e');
+lib\all_dart_code.txt:12318:import 'package:student_platform/src/ui/learning/data/supabase_learning_repository.dart';
+lib\all_dart_code.txt:12326:: repo = repository ?? SupabaseLearningRepository(),
+lib\all_dart_code.txt:12428:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:12431:import 'package:student_platform/src/ui/learning/data/supabase_learning_repository.dart';
+lib\all_dart_code.txt:12495:: repo = SupabaseLearningRepository(),
+lib\all_dart_code.txt:12534:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:12570:final uid = Supabase.instance.client.auth.currentUser?.id;
+lib\all_dart_code.txt:12572:final row = await Supabase.instance.client
+lib\all_dart_code.txt:12604:final uid = Supabase.instance.client.auth.currentUser?.id;
+lib\all_dart_code.txt:12606:final row = await Supabase.instance.client
+lib\all_dart_code.txt:12635:final currentUid = Supabase.instance.client.auth.currentUser?.id ?? '';
+lib\all_dart_code.txt:12713:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:12845:await Supabase.instance.client.rpc('propose_assignment', params: {
+lib\all_dart_code.txt:12875:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:12915:await Supabase.instance.client.rpc('publish_assignment', params: {
+lib\all_dart_code.txt:12937:await Supabase.instance.client.rpc('set_assignment_done', params: {
+lib\all_dart_code.txt:12952:await Supabase.instance.client.rpc('update_assignment', params: {
+lib\all_dart_code.txt:12964:await Supabase.instance.client.rpc('remove_assignment', params: {
+lib\all_dart_code.txt:13056:final sb = Supabase.instance.client;
+lib\all_dart_code.txt:13961:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:14019:final uid = Supabase.instance.client.auth.currentUser?.id;
+lib\all_dart_code.txt:14195:_att = ChatAttachmentsController(_fileService, _globalCache, Supabase.instance.client)
+lib\all_dart_code.txt:14197:_repo = ChatRepository(supabase: Supabase.instance.client, fileService: _fileService);
+lib\all_dart_code.txt:14665:final user = Supabase.instance.client.auth.currentUser;
+lib\all_dart_code.txt:14703:await Supabase.instance.client
+lib\all_dart_code.txt:14877:currentUserId: Supabase.instance.client.auth.currentUser?.id,
+lib\all_dart_code.txt:15321:final response = await Supabase.instance.client
+lib\all_dart_code.txt:15343:final fileResponse = await Supabase.instance.client
+lib\all_dart_code.txt:15384:await Supabase.instance.client
+lib\all_dart_code.txt:15782:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:15803:final SupabaseClient _sb = Supabase.instance.client;
+lib\all_dart_code.txt:19115:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:19172:final isMe = message.isMine(Supabase.instance.client.auth.currentUser?.id);
+lib\all_dart_code.txt:21100:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:21114:final uid = Supabase.instance.client.auth.currentUser?.id;
+lib\all_dart_code.txt:21425:final userId = Supabase.instance.client.auth.currentUser?.id;
+lib\all_dart_code.txt:21732:final userId = Supabase.instance.client.auth.currentUser?.id;
+lib\all_dart_code.txt:21998:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:22008:final SupabaseClient supabase;
+lib\all_dart_code.txt:22013:ChatAttachmentsController(this.fileService, this.cache, this.supabase);
+lib\all_dart_code.txt:22056:uploadedBy: supabase.auth.currentUser!.id,
+lib\all_dart_code.txt:22068:uploadedBy: supabase.auth.currentUser!.id,
+lib\all_dart_code.txt:22104:final response = await supabase.rpc('save_chat_file', params: {
+lib\all_dart_code.txt:22403:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:22408:final SupabaseClient supabase;
+lib\all_dart_code.txt:22411:ChatRepository({required this.supabase, required this.fileService});
+lib\all_dart_code.txt:22415:final response = await supabase.rpc(
+lib\all_dart_code.txt:22429:final res = await supabase.rpc('toggle_message_reaction', params: {
+lib\all_dart_code.txt:22438:final rows = await supabase
+lib\all_dart_code.txt:22445:final uid = supabase.auth.currentUser?.id;
+lib\all_dart_code.txt:22460:final response = await supabase.rpc('save_chat_file', params: {
+lib\all_dart_code.txt:22479:final response = await supabase
+lib\all_dart_code.txt:22494:await supabase.rpc('mark_chat_read', params: {
+lib\all_dart_code.txt:22502:final res = await supabase.rpc('get_unread_in_chat', params: {'p_chat_id': chatId});
+lib\all_dart_code.txt:22524:final uid = supabase.auth.currentUser?.id;
+lib\all_dart_code.txt:22527:final row = await supabase
+lib\all_dart_code.txt:22553:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:23942:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:23975:final _sb = Supabase.instance.client;
+lib\all_dart_code.txt:24348:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:24351:final _sb = Supabase.instance.client;
+lib\all_dart_code.txt:24406:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:24413:import 'package:student_platform/src/ui/learning/data/supabase_learning_repository.dart';
+lib\all_dart_code.txt:24430:final SupabaseClient _sb = Supabase.instance.client;
+lib\all_dart_code.txt:24431:final _repo = SupabaseLearningRepository();
+lib\all_dart_code.txt:26591:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:26600:final _sb = Supabase.instance.client;
+lib\all_dart_code.txt:26664:_channel = Supabase.instance.client
+lib\all_dart_code.txt:27066:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:27121:final client = Supabase.instance.client;
+lib\all_dart_code.txt:27144:final client = Supabase.instance.client;
+lib\all_dart_code.txt:28592:static SubjectDiaryRepository instance = SubjectDiaryRepositorySupabase();
+lib\all_dart_code.txt:28903:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\all_dart_code.txt:28913:// СЃРµСЂРІРµСЂРЅР°СЏ СЂРµР°Р»РёР·Р°С†РёСЏ СЂРµРїРѕР·РёС‚РѕСЂРёСЏ (Supabase + Yandex S3)
+lib\all_dart_code.txt:28914:part '../../../data/subject_diary_repository_supabase.dart';
+lib\all_dart_code.txt:29932:final client = Supabase.instance.client;
+lib\all_dart_code.txt:29960:final client = Supabase.instance.client;
+lib\main.dart:6:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\main.dart:25:import 'src/config/supabase_config.dart';
+lib\main.dart:76:SupabaseConfig.validate();
+lib\main.dart:77:await Supabase.initialize(
+lib\main.dart:78:url: SupabaseConfig.url,
+lib\main.dart:79:anonKey: SupabaseConfig.anonKey,
+lib\main.dart:86:SubjectDiaryRepository.instance = SubjectDiaryRepositorySupabase();
+lib\src\app.dart:2:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\app.dart:20:_session = Supabase.instance.client.auth.currentSession;
+lib\src\app.dart:22:Supabase.instance.client.auth.onAuthStateChange.listen((event) {
+lib\src\app.dart:29:final userId = Supabase.instance.client.auth.currentUser?.id;
+lib\src\app.dart:35:final row = await Supabase.instance.client
+lib\src\config\auth_email_adapter.dart:1:/// Converts a student login or email into the email used by Supabase Auth.
+lib\src\config\supabase_config.dart:1:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\config\supabase_config.dart:3:class SupabaseConfig {
+lib\src\config\supabase_config.dart:4:static const String url = String.fromEnvironment('SUPABASE_URL');
+lib\src\config\supabase_config.dart:5:static const String anonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+lib\src\config\supabase_config.dart:10:'Supabase config is missing. Run with '
+lib\src\config\supabase_config.dart:11:'--dart-define=SUPABASE_URL=... '
+lib\src\config\supabase_config.dart:12:'--dart-define=SUPABASE_ANON_KEY=...',
+lib\src\config\supabase_config.dart:17:static SupabaseClient get client => Supabase.instance.client;
+lib\src\core\session.dart:1:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\core\session.dart:23:final sb = Supabase.instance.client;
+lib\src\data\academic_context_service.dart:1:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\data\academic_context_service.dart:79:AcademicContextService({SupabaseClient? client})
+lib\src\data\academic_context_service.dart:80:: _sb = client ?? Supabase.instance.client;
+lib\src\data\academic_context_service.dart:82:final SupabaseClient _sb;
+lib\src\data\personal_diary_service.dart:4:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\data\personal_diary_service.dart:200:PersonalDiaryService({SupabaseClient? client})
+lib\src\data\personal_diary_service.dart:201:: _sb = client ?? Supabase.instance.client,
+lib\src\data\personal_diary_service.dart:204:final SupabaseClient _sb;
+lib\src\data\subject_diary_repository_supabase.dart:3:/// Реализация репозитория дневника через Supabase RPC + Yandex S3.
+lib\src\data\subject_diary_repository_supabase.dart:4:class SubjectDiaryRepositorySupabase implements SubjectDiaryRepository {
+lib\src\data\subject_diary_repository_supabase.dart:5:final SupabaseClient _sb = Supabase.instance.client;
+lib\src\data\subject_diary_repository_supabase.dart:17:SubjectDiaryRepositorySupabase() {
+lib\src\data\subject_diary_repository_supabase.dart:61:return await SubjectDiaryRepositorySupabase()
+lib\src\services\auth_service.dart:3:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\services\auth_service.dart:10:static final _sb = Supabase.instance.client;
+lib\src\services\file_service.dart:6:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\services\file_service.dart:13:final SupabaseClient _supabase;
+lib\src\services\file_service.dart:19:SupabaseClient? supabase,
+lib\src\services\file_service.dart:21:})  : _supabase = supabase ?? Supabase.instance.client,
+lib\src\services\file_service.dart:27:if (_supabase.auth.currentSession == null) {
+lib\src\services\file_service.dart:205:final session = _supabase.auth.currentSession;
+lib\src\services\file_service.dart:211:final response = await _supabase.functions.invoke(
+lib\src\ui\authentication\screens\change_password_screen.dart:7:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\authentication\screens\change_password_screen.dart:34:final sb = Supabase.instance.client;
+lib\src\ui\authentication\screens\login_screen.dart:6:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\authentication\screens\login_screen.dart:26:final _sb = Supabase.instance.client;
+lib\src\ui\authentication\screens\register_screen.dart:4:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\authentication\screens\register_screen.dart:46:final sb = Supabase.instance.client;
+lib\src\ui\chats\my_chats_screen.dart:8:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\chats\my_chats_screen.dart:11:import 'package:student_platform/src/ui/learning/data/supabase_learning_repository.dart';
+lib\src\ui\chats\my_chats_screen.dart:34:final _repo = SupabaseLearningRepository();
+lib\src\ui\chats\my_chats_screen.dart:61:final sb = Supabase.instance.client;
+lib\src\ui\chats\my_chats_screen.dart:162:final sb = Supabase.instance.client;
+lib\src\ui\chats\my_chats_screen.dart:319:final sb = Supabase.instance.client;
+lib\src\ui\chats\my_chats_screen.dart:419:final res = await Supabase.instance.client
+lib\src\ui\chats\my_chats_screen.dart:433:final sb = Supabase.instance.client;
+lib\src\ui\chats\my_chats_screen.dart:473:final res = await Supabase.instance.client
+lib\src\ui\chats\my_chats_screen.dart:635:final res = await Supabase
+lib\src\ui\chats\my_chats_screen.dart:701:final res = await Supabase.instance.client
+lib\src\ui\chats\my_chats_screen.dart:1044:final res = await Supabase.instance.client
+lib\src\ui\chats\my_chats_screen.dart:1745:final _repo = SupabaseLearningRepository();
+lib\src\ui\chats\my_chats_screen.dart:1780:final sb = Supabase.instance.client;
+lib\src\ui\chats\my_chats_screen.dart:1872:final res = await Supabase.instance.client
+lib\src\ui\chats\my_chats_screen.dart:1887:final unreadRes = await Supabase.instance.client
+lib\src\ui\chats\my_chats_screen.dart:1974:Supabase.instance.client.auth.currentUser?.id,
+lib\src\ui\chats\core\dm_chat_service.dart:3:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\chats\core\dm_chat_service.dart:28:Supabase.instance.client.auth.currentUser?.id ?? '';
+lib\src\ui\chats\core\dm_chat_service.dart:73:final sb = Supabase.instance.client;
+lib\src\ui\chats\core\dm_chat_service.dart:117:final sb = Supabase.instance.client;
+lib\src\ui\chats\core\team_chat_service.dart:5:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\chats\core\team_chat_service.dart:21:supabase: Supabase.instance.client,
+lib\src\ui\chats\core\team_chat_service.dart:36:Supabase.instance.client.auth.currentUser?.id ?? '';
+lib\src\ui\chats\core\team_chat_service.dart:111:final r = await Supabase.instance.client
+lib\src\ui\chats\core\unified_chat_screen.dart:10:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\chats\core\unified_chat_screen.dart:141:_fileService, _globalCache, Supabase.instance.client)
+lib\src\ui\chats\core\unified_chat_screen.dart:303:final rows = await Supabase.instance.client
+lib\src\ui\chats\core\unified_chat_screen.dart:315:final fileRow = await Supabase.instance.client
+lib\src\ui\chats\data\dm_api.dart:4:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\chats\data\dm_api.dart:12:static final SupabaseClient _sb = Supabase.instance.client;
+lib\src\ui\chats\forward\forward_picker.dart:3:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\chats\forward\forward_picker.dart:37:final _sb = Supabase.instance.client;
+lib\src\ui\exams\exams_screen.dart:10:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\exams\exams_screen.dart:2031:final SupabaseClient _sb = Supabase.instance.client;
+lib\src\ui\exams\exams_screen.dart:2095:// The v2 RPC appears only after the Supabase migration is applied.
+lib\src\ui\friends\friend_profile_screen.dart:6:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\friends\friend_profile_screen.dart:31:final _sb = Supabase.instance.client;
+lib\src\ui\friends\my_friends_screen.dart:7:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\friends\my_friends_screen.dart:20:final _sb = Supabase.instance.client;
+lib\src\ui\info\info_screen.dart:4:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\info\info_screen.dart:294:_UsefulSubjectsRepository({SupabaseClient? client})
+lib\src\ui\info\info_screen.dart:295:: _sb = client ?? Supabase.instance.client;
+lib\src\ui\info\info_screen.dart:297:final SupabaseClient _sb;
+lib\src\ui\info\subject_info_screen.dart:2:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\info\subject_info_screen.dart:168:_SubjectInfoRepository({SupabaseClient? client})
+lib\src\ui\info\subject_info_screen.dart:169:: _sb = client ?? Supabase.instance.client;
+lib\src\ui\info\subject_info_screen.dart:171:final SupabaseClient _sb;
+lib\src\ui\learning\learning_screen.dart:8:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\learning\learning_screen.dart:71:final client = Supabase.instance.client;
+lib\src\ui\learning\data\supabase_learning_repository.dart:1:// lib/src/ui/learning/data/supabase_learning_repository.dart
+lib\src\ui\learning\data\supabase_learning_repository.dart:5:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\learning\data\supabase_learning_repository.dart:15:class SupabaseLearningRepository implements LearningRepository {
+lib\src\ui\learning\data\supabase_learning_repository.dart:16:final SupabaseClient _sb = Supabase.instance.client;
+lib\src\ui\learning\data\supabase_learning_repository.dart:567:'[SupabaseLearningRepository] loadReactionsForMessage failed message=${maskDebugId(messageId)} error=${e.runtimeType}');
+lib\src\ui\learning\state\learning_cubit.dart:5:import 'package:student_platform/src/ui/learning/data/supabase_learning_repository.dart';
+lib\src\ui\learning\state\learning_cubit.dart:13:: repo = repository ?? SupabaseLearningRepository(),
+lib\src\ui\learning\state\team_cubit.dart:8:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\learning\state\team_cubit.dart:11:import 'package:student_platform/src/ui/learning/data/supabase_learning_repository.dart';
+lib\src\ui\learning\state\team_cubit.dart:77:: repo = SupabaseLearningRepository(),
+lib\src\ui\learning\state\team_cubit.dart:129:final rows = await Supabase.instance.client
+lib\src\ui\learning\state\team_cubit.dart:236:final sb = Supabase.instance.client;
+lib\src\ui\learning\state\team_cubit.dart:271:final uid = Supabase.instance.client.auth.currentUser?.id;
+lib\src\ui\learning\state\team_cubit.dart:273:final row = await Supabase.instance.client
+lib\src\ui\learning\state\team_cubit.dart:305:final uid = Supabase.instance.client.auth.currentUser?.id;
+lib\src\ui\learning\state\team_cubit.dart:307:final row = await Supabase.instance.client
+lib\src\ui\learning\state\team_cubit.dart:336:final currentUid = Supabase.instance.client.auth.currentUser?.id ?? '';
+lib\src\ui\learning\state\team_cubit.dart:490:final sb = Supabase.instance.client;
+lib\src\ui\learning\state\team_cubit.dart:607:await Supabase.instance.client.rpc('propose_assignment', params: {
+lib\src\ui\learning\state\team_cubit.dart:663:final sb = Supabase.instance.client;
+lib\src\ui\learning\state\team_cubit.dart:688:await Supabase.instance.client.rpc('publish_assignment', params: {
+lib\src\ui\learning\state\team_cubit.dart:701:await Supabase.instance.client.rpc('set_assignment_done', params: {
+lib\src\ui\learning\state\team_cubit.dart:712:await Supabase.instance.client.rpc('set_assignment_done', params: {
+lib\src\ui\learning\state\team_cubit.dart:727:await Supabase.instance.client.rpc('update_assignment', params: {
+lib\src\ui\learning\state\team_cubit.dart:739:await Supabase.instance.client.rpc('remove_assignment', params: {
+lib\src\ui\learning\state\team_cubit.dart:792:// messages.assignment_id returned by Supabase.
+lib\src\ui\learning\state\team_cubit.dart:826:final sb = Supabase.instance.client;
+lib\src\ui\learning\tabs\chat_tab.dart:11:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\learning\tabs\chat_tab.dart:76:final uid = Supabase.instance.client.auth.currentUser?.id;
+lib\src\ui\learning\tabs\chat_tab.dart:258:_fileService, _globalCache, Supabase.instance.client)
+lib\src\ui\learning\tabs\chat_tab.dart:263:supabase: Supabase.instance.client, fileService: _fileService);
+lib\src\ui\learning\tabs\chat_tab.dart:826:final user = Supabase.instance.client.auth.currentUser;
+lib\src\ui\learning\tabs\chat_tab.dart:864:await Supabase.instance.client.from('chat_files').update({
+lib\src\ui\learning\tabs\chat_tab.dart:1058:Supabase.instance.client.auth.currentUser?.id,
+lib\src\ui\learning\tabs\chat_tab.dart:1621:final response = await Supabase.instance.client
+lib\src\ui\learning\tabs\chat_tab.dart:1646:final fileResponse = await Supabase.instance.client
+lib\src\ui\learning\tabs\chat_tab.dart:1692:await Supabase.instance.client
+lib\src\ui\learning\tabs\files_tab.dart:6:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\learning\tabs\files_tab.dart:28:final SupabaseClient _sb = Supabase.instance.client;
+lib\src\ui\learning\tabs\chat\message_bubble.dart:8:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\learning\tabs\chat\message_bubble.dart:65:final isMe = message.isMine(Supabase.instance.client.auth.currentUser?.id);
+lib\src\ui\learning\tabs\chat\actions\chat_actions.dart:9:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\learning\tabs\chat\actions\chat_actions.dart:23:final uid = Supabase.instance.client.auth.currentUser?.id;
+lib\src\ui\learning\tabs\chat\actions\chat_actions.dart:334:final userId = Supabase.instance.client.auth.currentUser?.id;
+lib\src\ui\learning\tabs\chat\actions\chat_actions.dart:641:final userId = Supabase.instance.client.auth.currentUser?.id;
+lib\src\ui\learning\tabs\chat\attachments\chat_attachments_controller.dart:3:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\learning\tabs\chat\attachments\chat_attachments_controller.dart:13:final SupabaseClient supabase;
+lib\src\ui\learning\tabs\chat\attachments\chat_attachments_controller.dart:19:ChatAttachmentsController(this.fileService, this.cache, this.supabase);
+lib\src\ui\learning\tabs\chat\attachments\chat_attachments_controller.dart:113:uploadedBy: supabase.auth.currentUser!.id,
+lib\src\ui\learning\tabs\chat\attachments\chat_attachments_controller.dart:145:uploadedBy: supabase.auth.currentUser!.id,
+lib\src\ui\learning\tabs\chat\attachments\chat_attachments_controller.dart:204:final response = await supabase.rpc('save_chat_file', params: {
+lib\src\ui\learning\tabs\chat\data\chat_repository.dart:2:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\learning\tabs\chat\data\chat_repository.dart:8:final SupabaseClient supabase;
+lib\src\ui\learning\tabs\chat\data\chat_repository.dart:11:ChatRepository({required this.supabase, required this.fileService});
+lib\src\ui\learning\tabs\chat\data\chat_repository.dart:16:final response = await supabase.rpc(
+lib\src\ui\learning\tabs\chat\data\chat_repository.dart:37:final res = await supabase.rpc('toggle_message_reaction', params: {
+lib\src\ui\learning\tabs\chat\data\chat_repository.dart:46:final rows = await supabase
+lib\src\ui\learning\tabs\chat\data\chat_repository.dart:53:final uid = supabase.auth.currentUser?.id;
+lib\src\ui\learning\tabs\chat\data\chat_repository.dart:68:final response = await supabase.rpc('save_chat_file', params: {
+lib\src\ui\learning\tabs\chat\data\chat_repository.dart:89:final response = await supabase
+lib\src\ui\learning\tabs\chat\data\chat_repository.dart:104:await supabase.rpc('mark_chat_read', params: {
+lib\src\ui\learning\tabs\chat\data\chat_repository.dart:113:await supabase.rpc('get_unread_in_chat', params: {'p_chat_id': chatId});
+lib\src\ui\learning\tabs\chat\data\chat_repository.dart:135:final uid = supabase.auth.currentUser?.id;
+lib\src\ui\learning\tabs\chat\data\chat_repository.dart:138:final row = await supabase
+lib\src\ui\profile\edit_profile_screen.dart:9:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\profile\edit_profile_screen.dart:44:final _sb = Supabase.instance.client;
+lib\src\ui\profile\profile_repository.dart:2:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\profile\profile_repository.dart:5:final _sb = Supabase.instance.client;
+lib\src\ui\profile\profile_screen.dart:9:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\profile\profile_screen.dart:16:import 'package:student_platform/src/ui/learning/data/supabase_learning_repository.dart';
+lib\src\ui\profile\profile_screen.dart:33:final SupabaseClient _sb = Supabase.instance.client;
+lib\src\ui\profile\profile_screen.dart:34:final _repo = SupabaseLearningRepository();
+lib\src\ui\schedule\all_dart_text.txt:1015:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\schedule\all_dart_text.txt:1024:final _sb = Supabase.instance.client;
+lib\src\ui\schedule\all_dart_text.txt:1088:_channel = Supabase.instance.client
+lib\src\ui\schedule\all_dart_text.txt:1490:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\schedule\all_dart_text.txt:1545:final client = Supabase.instance.client;
+lib\src\ui\schedule\all_dart_text.txt:1568:final client = Supabase.instance.client;
+lib\src\ui\schedule\all_dart_text.txt:3014:static SubjectDiaryRepository instance = SubjectDiaryRepositorySupabase();
+lib\src\ui\schedule\all_dart_text.txt:3292:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\schedule\all_dart_text.txt:3302:// СЃРµСЂРІРµСЂРЅР°СЏ СЂРµР°Р»РёР·Р°С†РёСЏ СЂРµРїРѕР·РёС‚РѕСЂРёСЏ (Supabase + Yandex S3)
+lib\src\ui\schedule\all_dart_text.txt:3303:part '../../../data/subject_diary_repository_supabase.dart';
+lib\src\ui\schedule\all_dart_text.txt:4298:final client = Supabase.instance.client;
+lib\src\ui\schedule\all_dart_text.txt:4326:final client = Supabase.instance.client;
+lib\src\ui\schedule\schedule_screen.dart:5:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\schedule\schedule_screen.dart:14:final _sb = Supabase.instance.client;
+lib\src\ui\schedule\schedule_screen.dart:116:_channel = Supabase.instance.client
+lib\src\ui\schedule\subject_diary_screen.dart:3:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\schedule\subject_diary_screen.dart:87:final client = Supabase.instance.client;
+lib\src\ui\schedule\subject_diary_screen.dart:110:final client = Supabase.instance.client;
+lib\src\ui\schedule\subject_diary\repo.dart:48:static SubjectDiaryRepository instance = SubjectDiaryRepositorySupabase();
+lib\src\ui\schedule\subject_diary\subject_diary.dart:17:import 'package:supabase_flutter/supabase_flutter.dart';
+lib\src\ui\schedule\subject_diary\subject_diary.dart:27:// серверная реализация репозитория (Supabase + Yandex S3)
+lib\src\ui\schedule\subject_diary\subject_diary.dart:28:part '../../../data/subject_diary_repository_supabase.dart';
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:80:final client = Supabase.instance.client;
+lib\src\ui\schedule\subject_diary\screens\quick_note_screen.dart:108:final client = Supabase.instance.client;
+scripts\collect_project_snapshot.ps1:62:(Join-Path $ProjectRoot "supabase")
+scripts\collect_project_snapshot.ps1:105:Write-Tree "supabase_tree.txt" "supabase" 6
+scripts\collect_project_snapshot.ps1:109:Write-Search "supabase_from_usage.txt" @("Supabase.instance", "supabase", ".from(")
+scripts\collect_project_snapshot.ps1:110:Write-Search "supabase_auth_usage.txt" @("auth.")
+scripts\collect_project_snapshot.ps1:111:Write-Search "supabase_storage_usage.txt" @("storage.from")
+scripts\collect_project_snapshot.ps1:112:Write-Search "supabase_rpc_usage.txt" @(".rpc(")
+scripts\create_vv_2024_auth_users.js:78:async function updateCredential({ supabaseUrl, serviceRoleKey, id, patch }) {
+scripts\create_vv_2024_auth_users.js:79:const url = `${supabaseUrl}/rest/v1/stage_student_auth_credentials_vv_2024?id=eq.${encodeURIComponent(id)}`;
+scripts\create_vv_2024_auth_users.js:95:const supabaseUrl = trimTrailingSlash(process.env.SUPABASE_URL || '');
+scripts\create_vv_2024_auth_users.js:96:const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+scripts\create_vv_2024_auth_users.js:98:if (!supabaseUrl || !serviceRoleKey) {
+scripts\create_vv_2024_auth_users.js:100:'Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY. Put them in .env.local or the process environment.',
+scripts\create_vv_2024_auth_users.js:111:`${supabaseUrl}/rest/v1/stage_student_auth_credentials_vv_2024` +
+scripts\create_vv_2024_auth_users.js:128:const createdUser = await requestJson(`${supabaseUrl}/auth/v1/admin/users`, {
+scripts\create_vv_2024_auth_users.js:152:supabaseUrl,
+scripts\create_vv_2024_auth_users.js:170:supabaseUrl,
+scripts\import_academic_batch.js:135:class SupabaseRest {
+scripts\import_academic_batch.js:955:const supabaseUrl = process.env.SUPABASE_URL;
+scripts\import_academic_batch.js:956:const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+scripts\import_academic_batch.js:957:if (!supabaseUrl || !serviceRoleKey) {
+scripts\import_academic_batch.js:958:throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in environment or .env.local');
+scripts\import_academic_batch.js:962:const db = new SupabaseRest(supabaseUrl, serviceRoleKey);
+supabase\check_pin_message.sql:2:-- Safe to run in Supabase SQL editor. Uses auth.uid() of current session.
+supabase\check_pin_message.sql:25:where pubname = 'supabase_realtime'
+supabase\enable_pin_for_all.sql:55:WHERE pubname = 'supabase_realtime'
+supabase\enable_pin_for_all.sql:59:ALTER PUBLICATION supabase_realtime ADD TABLE public.messages;
+supabase\fix_pin_message.sql:2:-- Safe, idempotent. Run in Supabase SQL editor.
+supabase\fix_pin_message.sql:79:where pubname = 'supabase_realtime'
+supabase\fix_pin_message.sql:83:execute 'alter publication supabase_realtime add table public.messages';
+supabase\.temp\pooler-url:1:postgresql://postgres.gwdanmwluhrcfxbnplwd:[YOUR-PASSWORD]@aws-1-eu-central-1.pooler.supabase.com:6543/postgres
+supabase\functions\generate-upload-url\index.ts:1:import { createClient } from "npm:@supabase/supabase-js@2";
+supabase\functions\generate-upload-url\index.ts:47:const supabase = createUserScopedSupabaseClient(authHeader);
+supabase\functions\generate-upload-url\index.ts:51:} = await supabase.auth.getUser(token);
+supabase\functions\generate-upload-url\index.ts:59:const hasAccess = await userCanAccessChat(supabase, user.id, input.chatId);
+supabase\functions\generate-upload-url\index.ts:95:function createUserScopedSupabaseClient(authHeader: string) {
+supabase\functions\generate-upload-url\index.ts:96:const supabaseUrl = Deno.env.get("SUPABASE_URL");
+supabase\functions\generate-upload-url\index.ts:97:const supabaseKey = Deno.env.get("SUPABASE_ANON_KEY") ?? getDefaultPublishableKey();
+supabase\functions\generate-upload-url\index.ts:99:if (!supabaseUrl || !supabaseKey) {
+supabase\functions\generate-upload-url\index.ts:100:throw new Error("Missing Supabase function environment");
+supabase\functions\generate-upload-url\index.ts:103:return createClient(supabaseUrl, supabaseKey, {
+supabase\functions\generate-upload-url\index.ts:111:const raw = Deno.env.get("SUPABASE_PUBLISHABLE_KEYS");
+supabase\functions\generate-upload-url\index.ts:157:supabase: ReturnType<typeof createClient>,
+supabase\functions\generate-upload-url\index.ts:161:const { data: directMember, error: directMemberError } = await supabase
+supabase\functions\generate-upload-url\index.ts:176:const { data: chat, error: chatError } = await supabase
+supabase\functions\generate-upload-url\index.ts:191:const { data: teamMember, error: teamMemberError } = await supabase
+supabase\migrations\20260609080000_create_vv_2024_staging_tables.sql:3:-- production tables and does not create Supabase Auth users.
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:11:--   admin model. Supabase service_role bypasses RLS and does not need policies.
+supabase\migrations\20260609120000_import_vv_2024_students_from_stage_draft.sql:6:-- - do not create Supabase Auth users;
+
+## PATTERN: .from(
+lib\all_dart_code.txt:409:final m = Map<String, dynamic>.from(res);
+lib\all_dart_code.txt:412:final m = Map<String, dynamic>.from(res.first as Map);
+lib\all_dart_code.txt:576:final m = Map<String, dynamic>.from(it as Map);
+lib\all_dart_code.txt:613:final files = await _sb.from('subject_diary_files').select('yandex_key').eq('entry_id', id);
+lib\all_dart_code.txt:623:final m = Map<String, dynamic>.from(row as Map);
+lib\all_dart_code.txt:673:final meta = await _sb.from('subject_diary_files').select('id,yandex_key').eq('file_url', fileUrl).limit(1);
+lib\all_dart_code.txt:675:final m = Map<String, dynamic>.from(meta.first as Map);
+lib\all_dart_code.txt:691:final meta = await _sb.from('subject_diary_files').select('id').eq('file_url', fileUrl).limit(1);
+lib\all_dart_code.txt:693:final m = Map<String, dynamic>.from(meta.first as Map);
+lib\all_dart_code.txt:709:final row = await _sb.from('subject_diary_entries').select('text, entry_date').eq('id', entryId).maybeSingle();
+lib\all_dart_code.txt:713:final m = Map<String, dynamic>.from(row as Map);
+lib\all_dart_code.txt:735:final files = await _sb.from('subject_diary_files').select('id,yandex_key').eq('entry_id', entryId);
+lib\all_dart_code.txt:745:final m = Map<String, dynamic>.from(row as Map);
+lib\all_dart_code.txt:753:final row = await _sb.from('subject_diary_entries').select('text').eq('id', entryId).maybeSingle();
+lib\all_dart_code.txt:755:final m = Map<String, dynamic>.from(row as Map);
+lib\all_dart_code.txt:768:final files = await _sb.from('subject_diary_files').select('id,yandex_key').eq('entry_id', entryId);
+lib\all_dart_code.txt:778:final m = Map<String, dynamic>.from(row as Map);
+lib\all_dart_code.txt:791:final rows = await _sb.from('subject_diary_files').select('id,yandex_key,mime').eq('entry_id', entryId);
+lib\all_dart_code.txt:801:final m = Map<String, dynamic>.from(row as Map);
+lib\all_dart_code.txt:840:final list = res.map((e) => Map<String, dynamic>.from(e as Map)).map((m) {
+lib\all_dart_code.txt:907:final first = Map<String, dynamic>.from(res.first as Map);
+lib\all_dart_code.txt:917:final data = await _sb.from('team_members').select('team_id').limit(1);
+lib\all_dart_code.txt:941:final m = Map<String, dynamic>.from(it as Map);
+lib\all_dart_code.txt:964:final m = Map<String, dynamic>.from(it as Map);
+lib\all_dart_code.txt:972:.from('teams')
+lib\all_dart_code.txt:978:final rm = Map<String, dynamic>.from(row as Map);
+lib\all_dart_code.txt:1010:final m = Map<String, dynamic>.from(it as Map);
+lib\all_dart_code.txt:2133:data = Map<String, dynamic>.from(rows.first as Map);
+lib\all_dart_code.txt:2143:.from('users')
+lib\all_dart_code.txt:2149:data = Map<String, dynamic>.from(row as Map);
+lib\all_dart_code.txt:2622:.from('messages')
+lib\all_dart_code.txt:2718:.from('chat_members')
+lib\all_dart_code.txt:2731:.from('chats')
+lib\all_dart_code.txt:2752:row = Map<String, dynamic>.from(prof.first as Map);
+lib\all_dart_code.txt:2754:row = Map<String, dynamic>.from(prof);
+lib\all_dart_code.txt:2778:row = Map<String, dynamic>.from(res.first as Map);
+lib\all_dart_code.txt:2780:row = Map<String, dynamic>.from(res);
+lib\all_dart_code.txt:2794:final m = Map<String, dynamic>.from(res.first as Map);
+lib\all_dart_code.txt:2797:final m = Map<String, dynamic>.from(res);
+lib\all_dart_code.txt:2872:final m = Map<String, dynamic>.from(res.first as Map);
+lib\all_dart_code.txt:2875:final m = Map<String, dynamic>.from(res);
+lib\all_dart_code.txt:2887:row = Map<String, dynamic>.from(res.first as Map);
+lib\all_dart_code.txt:2889:row = Map<String, dynamic>.from(res);
+lib\all_dart_code.txt:2898:final u = await sb.from('users').select('name,surname').eq('id', authorId).maybeSingle();
+lib\all_dart_code.txt:2949:.from('chats')
+lib\all_dart_code.txt:2971:lastRow = Map<String, dynamic>.from(res.first as Map);
+lib\all_dart_code.txt:2973:lastRow = Map<String, dynamic>.from(res);
+lib\all_dart_code.txt:2982:final u = await sb.from('users').select('name,surname').eq('id', authorId).maybeSingle();
+lib\all_dart_code.txt:3000:final m = Map<String, dynamic>.from(res.first as Map);
+lib\all_dart_code.txt:3003:final m = Map<String, dynamic>.from(res);
+lib\all_dart_code.txt:3139:.from('chats')
+lib\all_dart_code.txt:3199:.from('chats')
+lib\all_dart_code.txt:3533:final m = Map<String, dynamic>.from(res.first as Map);
+lib\all_dart_code.txt:3536:final m = Map<String, dynamic>.from(res);
+lib\all_dart_code.txt:4275:.from('users')
+lib\all_dart_code.txt:4292:.from('messages')
+lib\all_dart_code.txt:4337:.from('chats')
+lib\all_dart_code.txt:4358:final m = Map<String, dynamic>.from(unreadRes.first as Map);
+lib\all_dart_code.txt:4362:final m = Map<String, dynamic>.from(unreadRes);
+lib\all_dart_code.txt:4518:? Map<String, dynamic>.from(res.first as Map)
+lib\all_dart_code.txt:4519:: (res is Map ? Map<String, dynamic>.from(res as Map) : <String, dynamic>{});
+lib\all_dart_code.txt:4530:final mm = Map<String, dynamic>.from(r1.first as Map);
+lib\all_dart_code.txt:4534:final mm = Map<String, dynamic>.from(r1 as Map);
+lib\all_dart_code.txt:4539:.from('chat_reads')
+lib\all_dart_code.txt:5066:.from('chat_files')
+lib\all_dart_code.txt:5345:.from('messages')
+lib\all_dart_code.txt:5357:.from('chat_files')
+lib\all_dart_code.txt:6429:final m = Map<String, dynamic>.from(e as Map);
+lib\all_dart_code.txt:6442:reactions: (m['reactions'] is Map) ? Map<String, int>.from(m['reactions']) : null,
+lib\all_dart_code.txt:6448:final filesRows = await _sb.from('chat_files').select('*').inFilter('message_id', ids);
+lib\all_dart_code.txt:6451:final m = Map<String, dynamic>.from(r as Map);
+lib\all_dart_code.txt:6523:final m = Map<String, dynamic>.from(res.first as Map);
+lib\all_dart_code.txt:6532:.from('messages')
+lib\all_dart_code.txt:6546:final mid = Map<String, dynamic>.from(inserted as Map)['id'].toString();
+lib\all_dart_code.txt:6553:.from('chat_files')
+lib\all_dart_code.txt:6567:.from('chat_reads')
+lib\all_dart_code.txt:6581:final m = Map<String, dynamic>.from(res.first as Map);
+lib\all_dart_code.txt:6588:final m = Map<String, dynamic>.from(res);
+lib\all_dart_code.txt:6607:await _sb.from('messages').update({'is_pinned': pin}).eq('id', messageId);
+lib\all_dart_code.txt:6611:await _sb.from('messages').delete().eq('id', messageId);
+lib\all_dart_code.txt:6636:final row = await _sb.from('chat_files').select('*').eq('id', fileId).maybeSingle();
+lib\all_dart_code.txt:6638:return ChatFile.fromJson(Map<String, dynamic>.from(row as Map));
+lib\all_dart_code.txt:6740:final files = (j['f'] as List? ?? const []).map((e) => ForwardFileRef.fromJson(Map<String, dynamic>.from(e as Map))).toList();
+lib\all_dart_code.txt:6780:final itemsList = (j['items'] as List? ?? const []).map((e) => ForwardItem.fromJson(Map<String, dynamic>.from(e as Map))).toList();
+lib\all_dart_code.txt:6837:final dmRows = await _sb.from('users').select('id, name, surname, avatar_url').limit(50);
+lib\all_dart_code.txt:6865:final teamRows = await _sb.from('teams').select('id, title, logo_url').limit(50);
+lib\all_dart_code.txt:7251:if (res.isNotEmpty) g = Map<String, dynamic>.from(res.first as Map);
+lib\all_dart_code.txt:7253:g = Map<String, dynamic>.from(res);
+lib\all_dart_code.txt:7371:.from('friends')
+lib\all_dart_code.txt:7386:.from('friend_requests')
+lib\all_dart_code.txt:7400:.from('friend_requests')
+lib\all_dart_code.txt:7420:await _sb.from('friend_requests').insert({
+lib\all_dart_code.txt:7443:await _sb.from('friends').insert({'user_id': me, 'friend_id': other});
+lib\all_dart_code.txt:7444:await _sb.from('friend_requests').delete().eq('from_id', other).eq('to_id', me);
+lib\all_dart_code.txt:7473:.from('friends')
+lib\all_dart_code.txt:7493:await _sb.from('friend_requests').delete().match({'from_id': me, 'to_id': other});
+lib\all_dart_code.txt:7510:await _sb.from('friend_requests').delete().match({'from_id': other, 'to_id': me});
+lib\all_dart_code.txt:7536:.from('friends')
+lib\all_dart_code.txt:7554:.from('users')
+lib\all_dart_code.txt:7579:.from('users')
+lib\all_dart_code.txt:8256:.from('friends')
+lib\all_dart_code.txt:8278:if (res is List && res.isNotEmpty) return Map<String, dynamic>.from(res.first as Map);
+lib\all_dart_code.txt:8279:if (res is Map) return Map<String, dynamic>.from(res as Map);
+lib\all_dart_code.txt:8385:.from('friend_requests')
+lib\all_dart_code.txt:8404:if (res is List && res.isNotEmpty) return Map<String, dynamic>.from(res.first as Map);
+lib\all_dart_code.txt:8405:if (res is Map) return Map<String, dynamic>.from(res as Map);
+lib\all_dart_code.txt:8438:await _sb.from('friends').insert({'user_id': uid, 'friend_id': f.id});
+lib\all_dart_code.txt:8439:await _sb.from('friend_requests').delete().match({'from_id': f.id, 'to_id': uid});
+lib\all_dart_code.txt:8461:await _sb.from('friend_requests').delete().match({'from_id': f.id, 'to_id': uid});
+lib\all_dart_code.txt:8521:rows = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+lib\all_dart_code.txt:8531:.from('users')
+lib\all_dart_code.txt:8542:.from('users')
+lib\all_dart_code.txt:9771:_draftFiles[chatId] = List.from(files);
+lib\all_dart_code.txt:9836:final fileCacheData = Map<String, dynamic>.from(jsonDecode(fileCacheJson));
+lib\all_dart_code.txt:9868:_draftTexts.addAll(Map<String, String>.from(jsonDecode(draftTextsJson)));
+lib\all_dart_code.txt:9875:_draftFiles[entry.key] = List<Map<String, dynamic>>.from(entry.value);
+lib\all_dart_code.txt:11145:.map((e) => Map<String, dynamic>.from(e as Map))
+lib\all_dart_code.txt:11156:.map((e) => Team.fromJson(Map<String, dynamic>.from(e as Map)))
+lib\all_dart_code.txt:11222:final rows = await _sb.from('users').select('login').eq('id', user.id).limit(1);
+lib\all_dart_code.txt:11224:final m = Map<String, dynamic>.from(rows.first as Map);
+lib\all_dart_code.txt:11237:.from('chats')
+lib\all_dart_code.txt:11262:final first = Map<String, dynamic>.from(value.first as Map);
+lib\all_dart_code.txt:11327:.map((e) => Message.fromJson(Map<String, dynamic>.from(e as Map)))
+lib\all_dart_code.txt:11344:final m = Map<String, dynamic>.from(e as Map);
+lib\all_dart_code.txt:11367:reactions: (m['reactions'] is Map) ? Map<String, int>.from(m['reactions'] as Map) : (m['reactions'] is String && (m['reactions'] as String).isNotEmpty ? Map<String,int>.from(jsonDecode(m['reactions'] as String) as Map) : null),
+lib\all_dart_code.txt:11436:.from('message_reactions')
+lib\all_dart_code.txt:11445:final map = Map<String, dynamic>.from(r as Map);
+lib\all_dart_code.txt:11468:.from('chat_files')
+lib\all_dart_code.txt:11476:.from('messages')
+lib\all_dart_code.txt:11511:.map((e) => FileItem.fromJson(Map<String, dynamic>.from(e as Map)))
+lib\all_dart_code.txt:11530:final mm = Map<String, dynamic>.from(it as Map);
+lib\all_dart_code.txt:11559:.map((e) => Map<String, dynamic>.from(e as Map))
+lib\all_dart_code.txt:11574:.map((e) => Assignment.fromJson(Map<String, dynamic>.from(e as Map)))
+lib\all_dart_code.txt:11594:return Set<String>.from((jsonDecode(raw) as List).map((e) => e.toString()));
+lib\all_dart_code.txt:12539:.from('team_members')
+lib\all_dart_code.txt:12561:final m = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+lib\all_dart_code.txt:12573:.from('users')
+lib\all_dart_code.txt:12578:final mm = Map<String, dynamic>.from(row as Map);
+lib\all_dart_code.txt:12598:final m = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+lib\all_dart_code.txt:12607:.from('users')
+lib\all_dart_code.txt:12612:final mm = Map<String, dynamic>.from(row as Map);
+lib\all_dart_code.txt:12674:final updated = List<Message>.from(state.chat)..removeAt(idx);
+lib\all_dart_code.txt:12698:final updated = List<Message>.from(state.chat);
+lib\all_dart_code.txt:12705:final reverted = List<Message>.from(updated);
+lib\all_dart_code.txt:12716:.from('chats')
+lib\all_dart_code.txt:12796:final counts = Map<String, int>.from(res['counts'] ?? {});
+lib\all_dart_code.txt:12817:final counts = Map<String, int>.from(res['counts'] ?? {});
+lib\all_dart_code.txt:12881:await sb.from('assignment_votes').upsert(
+lib\all_dart_code.txt:14704:.from('chat_files')
+lib\all_dart_code.txt:15322:.from('messages')
+lib\all_dart_code.txt:15344:.from('chat_files')
+lib\all_dart_code.txt:15385:.from('chat_files')
+lib\all_dart_code.txt:15845:.from('chat_files')
+lib\all_dart_code.txt:15851:.map((e) => ChatFile.fromJson(Map<String, dynamic>.from(e as Map)))
+lib\all_dart_code.txt:16398:.from('chats')
+lib\all_dart_code.txt:18784:if (decoded is Map && decoded['fg'] == 1) return Map<String, dynamic>.from(decoded);
+lib\all_dart_code.txt:18795:final items = List<Map<String, dynamic>>.from(fg['items'] ?? const []);
+lib\all_dart_code.txt:18920:final fileObjs = rawF.whereType<Map>().map((e) => Map<String, dynamic>.from(e as Map)).toList();
+lib\all_dart_code.txt:22127:List<LocalAttach> getPendingFiles() => List.from(pending);
+lib\all_dart_code.txt:22439:.from('message_reactions')
+lib\all_dart_code.txt:22448:final map = Map<String, dynamic>.from(r as Map);
+lib\all_dart_code.txt:22480:.from('chats')
+lib\all_dart_code.txt:22505:final m = Map<String, dynamic>.from(res.first as Map);
+lib\all_dart_code.txt:22512:final m = Map<String, dynamic>.from(res);
+lib\all_dart_code.txt:22528:.from('chat_reads')
+lib\all_dart_code.txt:22535:final map = Map<String, dynamic>.from(row as Map);
+lib\all_dart_code.txt:23127:List<PinEntry> get pins => List.from(_pins);
+lib\all_dart_code.txt:24022:await _sb.storage.from('avatars').uploadBinary(
+lib\all_dart_code.txt:24031:final publicUrl = _sb.storage.from('avatars').getPublicUrl(path);
+lib\all_dart_code.txt:24033:await _sb.from('users').update({'avatar_url': publicUrl}).eq('id', id);
+lib\all_dart_code.txt:24036:final u = Map<String, dynamic>.from(_user!);
+lib\all_dart_code.txt:24065:await _sb.from('users').update({'status': newStatus}).eq('id', id);
+lib\all_dart_code.txt:24068:final u = Map<String, dynamic>.from(_user!);
+lib\all_dart_code.txt:24357:.from('users')
+lib\all_dart_code.txt:24371:await _sb.from('users').update({
+lib\all_dart_code.txt:24386:await _sb.storage.from('avatars').upload(
+lib\all_dart_code.txt:24392:final publicUrl = _sb.storage.from('avatars').getPublicUrl(path);
+lib\all_dart_code.txt:24393:await _sb.from('users').update({'avatar_url': publicUrl}).eq('id', uid);
+lib\all_dart_code.txt:24703:final m = Map<String, dynamic>.from(res.first as Map);
+lib\all_dart_code.txt:24707:final m = Map<String, dynamic>.from(res);
+lib\all_dart_code.txt:24726:final m = Map<String, dynamic>.from(res);
+lib\all_dart_code.txt:24734:final m = Map<String, dynamic>.from(res.first as Map);
+lib\all_dart_code.txt:24790:.from('users')
+lib\all_dart_code.txt:24797:final mapFresh = Map<String, dynamic>.from(fresh as Map);
+lib\all_dart_code.txt:28765:return List<SubjectDiaryEntry>.from(_store[subjectKey] ?? const []);
+lib\all_dart_code.txt:28809:final nf = List<SubjectDiaryFile>.from(old.files)..removeWhere((f) => f.url == fileUrl);
+lib\src\app.dart:36:.from('users')
+lib\src\core\session.dart:30:final m = Map<String, dynamic>.from(res);
+lib\src\core\session.dart:33:final m = Map<String, dynamic>.from(res.first as Map);
+lib\src\data\academic_context_service.dart:93:.from('users')
+lib\src\data\academic_context_service.dart:101:.from('student_enrollments')
+lib\src\data\academic_context_service.dart:156:.from('groups')
+lib\src\data\academic_context_service.dart:171:.from('group_term_semesters')
+lib\src\data\academic_context_service.dart:184:final row = Map<String, dynamic>.from(raw as Map);
+lib\src\data\academic_context_service.dart:193:rows.map((raw) => Map<String, dynamic>.from(raw as Map)).firstWhere(
+lib\src\data\academic_context_service.dart:202:orElse: () => Map<String, dynamic>.from(rows.first as Map),
+lib\src\data\academic_context_service.dart:213:if (value is Map) return Map<String, dynamic>.from(value);
+lib\src\data\personal_diary_service.dart:237:.from('subject_offerings')
+lib\src\data\personal_diary_service.dart:244:.map((row) => Map<String, dynamic>.from(row as Map))
+lib\src\data\personal_diary_service.dart:304:.from('subject_diary_entries')
+lib\src\data\personal_diary_service.dart:314:.map((row) => Map<String, dynamic>.from(row as Map))
+lib\src\data\personal_diary_service.dart:325:.from('subject_diary_files')
+lib\src\data\personal_diary_service.dart:329:final row = Map<String, dynamic>.from(raw as Map);
+lib\src\data\personal_diary_service.dart:343:.from('assignments')
+lib\src\data\personal_diary_service.dart:353:.map((row) => Map<String, dynamic>.from(row as Map))
+lib\src\data\personal_diary_service.dart:365:.from('messages')
+lib\src\data\personal_diary_service.dart:369:final row = Map<String, dynamic>.from(raw as Map);
+lib\src\data\personal_diary_service.dart:378:.from('assignment_done')
+lib\src\data\personal_diary_service.dart:383:final row = Map<String, dynamic>.from(raw as Map);
+lib\src\data\personal_diary_service.dart:544:.from('assignments')
+lib\src\data\personal_diary_service.dart:554:.map((row) => Map<String, dynamic>.from(row as Map))
+lib\src\data\personal_diary_service.dart:564:.from('assignment_done')
+lib\src\data\personal_diary_service.dart:569:final row = Map<String, dynamic>.from(raw as Map);
+lib\src\data\personal_diary_service.dart:612:.from('personal_diary_tasks')
+lib\src\data\personal_diary_service.dart:621:.map((row) => Map<String, dynamic>.from(row as Map)));
+lib\src\data\personal_diary_service.dart:626:.from('personal_diary_tasks')
+lib\src\data\personal_diary_service.dart:635:.map((row) => Map<String, dynamic>.from(row as Map)));
+lib\src\data\personal_diary_service.dart:669:.from('personal_diary_tasks')
+lib\src\data\personal_diary_service.dart:683:return _taskFromRow(Map<String, dynamic>.from(row as Map), {
+lib\src\data\personal_diary_service.dart:716:await _sb.from('personal_diary_tasks').update({
+lib\src\data\personal_diary_service.dart:733:.from('lessons')
+lib\src\data\personal_diary_service.dart:745:.map((row) => Map<String, dynamic>.from(row as Map))
+lib\src\data\personal_diary_service.dart:913:.map((row) => Map<String, dynamic>.from(row))
+lib\src\data\subject_diary_repository_supabase.dart:258:final m = Map<String, dynamic>.from(it as Map);
+lib\src\data\subject_diary_repository_supabase.dart:302:.from('subject_diary_entries')
+lib\src\data\subject_diary_repository_supabase.dart:315:final m = Map<String, dynamic>.from(it as Map);
+lib\src\data\subject_diary_repository_supabase.dart:345:.from('subject_diary_files')
+lib\src\data\subject_diary_repository_supabase.dart:351:final m = Map<String, dynamic>.from(row as Map);
+lib\src\data\subject_diary_repository_supabase.dart:408:.from('subject_diary_files')
+lib\src\data\subject_diary_repository_supabase.dart:413:final m = Map<String, dynamic>.from(meta.first as Map);
+lib\src\data\subject_diary_repository_supabase.dart:425:.from('subject_diary_files')
+lib\src\data\subject_diary_repository_supabase.dart:430:final m = Map<String, dynamic>.from(meta.first as Map);
+lib\src\data\subject_diary_repository_supabase.dart:448:.from('subject_diary_entries')
+lib\src\data\subject_diary_repository_supabase.dart:455:final m = Map<String, dynamic>.from(row as Map);
+lib\src\data\subject_diary_repository_supabase.dart:481:.from('subject_diary_files')
+lib\src\data\subject_diary_repository_supabase.dart:487:final m = Map<String, dynamic>.from(row as Map);
+lib\src\data\subject_diary_repository_supabase.dart:501:.from('subject_diary_entries')
+lib\src\data\subject_diary_repository_supabase.dart:506:final m = Map<String, dynamic>.from(row as Map);
+lib\src\data\subject_diary_repository_supabase.dart:521:.from('subject_diary_files')
+lib\src\data\subject_diary_repository_supabase.dart:527:final m = Map<String, dynamic>.from(row as Map);
+lib\src\data\subject_diary_repository_supabase.dart:545:.from('subject_diary_files')
+lib\src\data\subject_diary_repository_supabase.dart:551:final m = Map<String, dynamic>.from(row as Map);
+lib\src\data\subject_diary_repository_supabase.dart:606:res.map((e) => Map<String, dynamic>.from(e as Map)).map((m) {
+lib\src\data\subject_diary_repository_supabase.dart:723:.from('subject_diary_entries')
+lib\src\data\subject_diary_repository_supabase.dart:777:.from('subject_diary_entries')
+lib\src\data\subject_diary_repository_supabase.dart:784:.from('subject_diary_entries')
+lib\src\data\subject_diary_repository_supabase.dart:806:.from('subject_offerings')
+lib\src\data\subject_diary_repository_supabase.dart:813:offering == null ? <String, dynamic>{} : Map<String, dynamic>.from(offering);
+lib\src\data\subject_diary_repository_supabase.dart:816:.from('teams')
+lib\src\data\subject_diary_repository_supabase.dart:856:final first = Map<String, dynamic>.from(res.first as Map);
+lib\src\data\subject_diary_repository_supabase.dart:866:final data = await _sb.from('team_members').select('team_id').limit(1);
+lib\src\data\subject_diary_repository_supabase.dart:890:final m = Map<String, dynamic>.from(it as Map);
+lib\src\data\subject_diary_repository_supabase.dart:913:final m = Map<String, dynamic>.from(it as Map);
+lib\src\data\subject_diary_repository_supabase.dart:921:.from('teams')
+lib\src\data\subject_diary_repository_supabase.dart:927:final rm = Map<String, dynamic>.from(row as Map);
+lib\src\data\subject_diary_repository_supabase.dart:960:final m = Map<String, dynamic>.from(it as Map);
+lib\src\services\auth_service.dart:29:.from('users')
+lib\src\ui\authentication\screens\change_password_screen.dart:44:.from('users')
+lib\src\ui\authentication\screens\login_screen.dart:46:data = Map<String, dynamic>.from(rows.first as Map);
+lib\src\ui\authentication\screens\login_screen.dart:56:.from('users')
+lib\src\ui\authentication\screens\login_screen.dart:63:data = Map<String, dynamic>.from(row as Map);
+lib\src\ui\authentication\screens\login_screen.dart:69:.from('users')
+lib\src\ui\chats\my_chats_screen.dart:63:.from('messages')
+lib\src\ui\chats\my_chats_screen.dart:168:.from('chat_members')
+lib\src\ui\chats\my_chats_screen.dart:182:await sb.from('chats').select('id,type').inFilter('id', chatIds);
+lib\src\ui\chats\my_chats_screen.dart:202:row = Map<String, dynamic>.from(prof.first as Map);
+lib\src\ui\chats\my_chats_screen.dart:204:row = Map<String, dynamic>.from(prof);
+lib\src\ui\chats\my_chats_screen.dart:229:row = Map<String, dynamic>.from(res.first as Map);
+lib\src\ui\chats\my_chats_screen.dart:231:row = Map<String, dynamic>.from(res);
+lib\src\ui\chats\my_chats_screen.dart:246:final m = Map<String, dynamic>.from(res.first as Map);
+lib\src\ui\chats\my_chats_screen.dart:249:final m = Map<String, dynamic>.from(res);
+lib\src\ui\chats\my_chats_screen.dart:331:final m = Map<String, dynamic>.from(res.first as Map);
+lib\src\ui\chats\my_chats_screen.dart:334:final m = Map<String, dynamic>.from(res);
+lib\src\ui\chats\my_chats_screen.dart:345:row = Map<String, dynamic>.from(res.first as Map);
+lib\src\ui\chats\my_chats_screen.dart:347:row = Map<String, dynamic>.from(res);
+lib\src\ui\chats\my_chats_screen.dart:358:.from('users')
+lib\src\ui\chats\my_chats_screen.dart:420:.from('chats')
+lib\src\ui\chats\my_chats_screen.dart:442:lastRow = Map<String, dynamic>.from(res.first as Map);
+lib\src\ui\chats\my_chats_screen.dart:444:lastRow = Map<String, dynamic>.from(res);
+lib\src\ui\chats\my_chats_screen.dart:454:.from('users')
+lib\src\ui\chats\my_chats_screen.dart:476:final m = Map<String, dynamic>.from(res.first as Map);
+lib\src\ui\chats\my_chats_screen.dart:479:final m = Map<String, dynamic>.from(res);
+lib\src\ui\chats\my_chats_screen.dart:637:.from('chats')
+lib\src\ui\chats\my_chats_screen.dart:702:.from('chats')
+lib\src\ui\chats\my_chats_screen.dart:1049:final m = Map<String, dynamic>.from(res.first as Map);
+lib\src\ui\chats\my_chats_screen.dart:1052:final m = Map<String, dynamic>.from(res);
+lib\src\ui\chats\my_chats_screen.dart:1808:.from('users')
+lib\src\ui\chats\my_chats_screen.dart:1826:.from('messages')
+lib\src\ui\chats\my_chats_screen.dart:1873:.from('chats')
+lib\src\ui\chats\my_chats_screen.dart:1894:final m = Map<String, dynamic>.from(unreadRes.first as Map);
+lib\src\ui\chats\my_chats_screen.dart:1898:final m = Map<String, dynamic>.from(unreadRes);
+lib\src\ui\chats\core\chat_message_memory_cache.dart:40:final current = List<Message>.from(_messagesByChatId[chatId] ?? const []);
+lib\src\ui\chats\core\dm_chat_service.dart:79:? Map<String, dynamic>.from(res.first as Map)
+lib\src\ui\chats\core\dm_chat_service.dart:80:: (res is Map ? Map<String, dynamic>.from(res) : <String, dynamic>{});
+lib\src\ui\chats\core\dm_chat_service.dart:93:final mm = Map<String, dynamic>.from(r1.first as Map);
+lib\src\ui\chats\core\dm_chat_service.dart:97:final mm = Map<String, dynamic>.from(r1);
+lib\src\ui\chats\core\dm_chat_service.dart:102:.from('chat_reads')
+lib\src\ui\chats\core\forward_payload.dart:75:.map((e) => ForwardFileRef.fromJson(Map<String, dynamic>.from(e as Map)))
+lib\src\ui\chats\core\forward_payload.dart:118:.map((e) => ForwardItem.fromJson(Map<String, dynamic>.from(e as Map)))
+lib\src\ui\chats\core\team_chat_service.dart:112:.from('chat_files')
+lib\src\ui\chats\core\unified_chat_screen.dart:304:.from('messages')
+lib\src\ui\chats\core\unified_chat_screen.dart:316:.from('chat_files')
+lib\src\ui\chats\data\dm_api.dart:40:.map((e) => _messageFromRow(Map<String, dynamic>.from(e as Map),
+lib\src\ui\chats\data\dm_api.dart:74:? Map<String, int>.from(m['reactions'])
+lib\src\ui\chats\data\dm_api.dart:82:.from('chat_files')
+lib\src\ui\chats\data\dm_api.dart:87:final m = Map<String, dynamic>.from(r as Map);
+lib\src\ui\chats\data\dm_api.dart:100:.from('users')
+lib\src\ui\chats\data\dm_api.dart:105:final u = Map<String, dynamic>.from(user as Map);
+lib\src\ui\chats\data\dm_api.dart:122:.from('messages')
+lib\src\ui\chats\data\dm_api.dart:129:final data = Map<String, dynamic>.from(row as Map);
+lib\src\ui\chats\data\dm_api.dart:151:.from('messages')
+lib\src\ui\chats\data\dm_api.dart:160:final data = Map<String, dynamic>.from(row as Map);
+lib\src\ui\chats\data\dm_api.dart:372:final m = Map<String, dynamic>.from(res.first as Map);
+lib\src\ui\chats\data\dm_api.dart:385:.from('messages')
+lib\src\ui\chats\data\dm_api.dart:399:final mid = Map<String, dynamic>.from(inserted as Map)['id'].toString();
+lib\src\ui\chats\data\dm_api.dart:407:.from('chat_files')
+lib\src\ui\chats\data\dm_api.dart:422:await _sb.from('chat_reads').upsert({
+lib\src\ui\chats\data\dm_api.dart:436:final m = Map<String, dynamic>.from(res.first as Map);
+lib\src\ui\chats\data\dm_api.dart:443:final m = Map<String, dynamic>.from(res);
+lib\src\ui\chats\data\dm_api.dart:462:await _sb.from('messages').update({'is_pinned': pin}).eq('id', messageId);
+lib\src\ui\chats\data\dm_api.dart:466:await _sb.from('messages').delete().eq('id', messageId);
+lib\src\ui\chats\data\dm_api.dart:492:.from('chat_files')
+lib\src\ui\chats\data\dm_api.dart:497:return ChatFile.fromJson(Map<String, dynamic>.from(row as Map));
+lib\src\ui\chats\forward\forward_picker.dart:52:final dmRows = await _sb.from('users').select('id, name, surname, avatar_url').limit(50);
+lib\src\ui\chats\forward\forward_picker.dart:80:final teamRows = await _sb.from('teams').select('id, title, logo_url').limit(50);
+lib\src\ui\exams\exams_screen.dart:2039:.from('student_enrollments')
+lib\src\ui\exams\exams_screen.dart:2065:.from('group_term_semesters')
+lib\src\ui\exams\exams_screen.dart:2078:.from('group_academic_profiles')
+lib\src\ui\exams\exams_screen.dart:2089:.map((row) => Map<String, dynamic>.from(row as Map))
+lib\src\ui\exams\exams_screen.dart:2103:.from('subject_offerings')
+lib\src\ui\exams\exams_screen.dart:2128:_StudySubject.fromMap(Map<String, dynamic>.from(row as Map)))
+lib\src\ui\exams\exams_screen.dart:2512:if (value is Map) return Map<String, dynamic>.from(value);
+lib\src\ui\exams\exams_screen.dart:2514:return Map<String, dynamic>.from(value.first as Map);
+lib\src\ui\friends\friend_profile_screen.dart:82:if (res.isNotEmpty) g = Map<String, dynamic>.from(res.first as Map);
+lib\src\ui\friends\friend_profile_screen.dart:84:g = Map<String, dynamic>.from(res);
+lib\src\ui\friends\friend_profile_screen.dart:202:.from('friends')
+lib\src\ui\friends\friend_profile_screen.dart:217:.from('friend_requests')
+lib\src\ui\friends\friend_profile_screen.dart:231:.from('friend_requests')
+lib\src\ui\friends\friend_profile_screen.dart:256:await _sb.from('friend_requests').insert({
+lib\src\ui\friends\friend_profile_screen.dart:280:.from('friends')
+lib\src\ui\friends\friend_profile_screen.dart:286:await _sb.from('friends').insert({'user_id': me, 'friend_id': other});
+lib\src\ui\friends\friend_profile_screen.dart:288:await _sb.from('friend_requests').delete().eq('from_id', other).eq('to_id', me);
+lib\src\ui\friends\friend_profile_screen.dart:317:.from('friends')
+lib\src\ui\friends\friend_profile_screen.dart:337:await _sb.from('friend_requests').delete().match({'from_id': me, 'to_id': other});
+lib\src\ui\friends\friend_profile_screen.dart:354:await _sb.from('friend_requests').delete().match({'from_id': other, 'to_id': me});
+lib\src\ui\friends\friend_profile_screen.dart:407:.from('friends')
+lib\src\ui\friends\friend_profile_screen.dart:425:.from('users')
+lib\src\ui\friends\my_friends_screen.dart:118:.from('friends')
+lib\src\ui\friends\my_friends_screen.dart:140:if (res is List && res.isNotEmpty) return Map<String, dynamic>.from(res.first as Map);
+lib\src\ui\friends\my_friends_screen.dart:141:if (res is Map) return Map<String, dynamic>.from(res as Map);
+lib\src\ui\friends\my_friends_screen.dart:257:me = Map<String, dynamic>.from(res);
+lib\src\ui\friends\my_friends_screen.dart:259:me = Map<String, dynamic>.from(res.first as Map);
+lib\src\ui\friends\my_friends_screen.dart:264:.from('users')
+lib\src\ui\friends\my_friends_screen.dart:316:.map((row) => Map<String, dynamic>.from(row as Map))
+lib\src\ui\friends\my_friends_screen.dart:327:.from('student_enrollments')
+lib\src\ui\friends\my_friends_screen.dart:341:.from('student_enrollments')
+lib\src\ui\friends\my_friends_screen.dart:359:.from('student_enrollments')
+lib\src\ui\friends\my_friends_screen.dart:368:.from('student_enrollments')
+lib\src\ui\friends\my_friends_screen.dart:382:.from('users')
+lib\src\ui\friends\my_friends_screen.dart:388:.map((row) => Map<String, dynamic>.from(row as Map))
+lib\src\ui\friends\my_friends_screen.dart:402:.from('users')
+lib\src\ui\friends\my_friends_screen.dart:410:.map((row) => Map<String, dynamic>.from(row as Map))
+lib\src\ui\friends\my_friends_screen.dart:442:.from('friend_requests')
+lib\src\ui\friends\my_friends_screen.dart:461:if (res is List && res.isNotEmpty) return Map<String, dynamic>.from(res.first as Map);
+lib\src\ui\friends\my_friends_screen.dart:462:if (res is Map) return Map<String, dynamic>.from(res as Map);
+lib\src\ui\friends\my_friends_screen.dart:495:await _sb.from('friends').insert({'user_id': uid, 'friend_id': f.id});
+lib\src\ui\friends\my_friends_screen.dart:496:await _sb.from('friend_requests').delete().match({'from_id': f.id, 'to_id': uid});
+lib\src\ui\friends\my_friends_screen.dart:518:await _sb.from('friend_requests').delete().match({'from_id': f.id, 'to_id': uid});
+lib\src\ui\friends\my_friends_screen.dart:578:rows = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+lib\src\ui\friends\my_friends_screen.dart:588:.from('users')
+lib\src\ui\friends\my_friends_screen.dart:599:.from('users')
+lib\src\ui\info\info_screen.dart:301:.from('subject_offerings')
+lib\src\ui\info\info_screen.dart:312:final row = Map<String, dynamic>.from(raw as Map);
+lib\src\ui\info\info_screen.dart:320:.from('subject_catalog')
+lib\src\ui\info\info_screen.dart:329:.from('curriculum_subjects')
+lib\src\ui\info\info_screen.dart:336:.from('teams')
+lib\src\ui\info\info_screen.dart:346:.from('chats')
+lib\src\ui\info\info_screen.dart:381:if (value is Map) return Map<String, dynamic>.from(value);
+lib\src\ui\info\subject_info_screen.dart:181:.from('subject_offerings')
+lib\src\ui\info\subject_info_screen.dart:197:.from('subject_catalog')
+lib\src\ui\info\subject_info_screen.dart:206:.from('curriculum_subjects')
+lib\src\ui\info\subject_info_screen.dart:215:.from('teams')
+lib\src\ui\info\subject_info_screen.dart:225:.from('chats')
+lib\src\ui\info\subject_info_screen.dart:263:if (value is Map) return Map<String, dynamic>.from(value);
+lib\src\ui\learning\global_cache.dart:45:_draftFiles[chatId] = List.from(files);
+lib\src\ui\learning\global_cache.dart:114:Map<String, dynamic>.from(jsonDecode(fileCacheJson));
+lib\src\ui\learning\global_cache.dart:148:.addAll(Map<String, String>.from(jsonDecode(draftTextsJson)));
+lib\src\ui\learning\global_cache.dart:155:_draftFiles[entry.key] = List<Map<String, dynamic>>.from(entry.value);
+lib\src\ui\learning\data\supabase_learning_repository.dart:36:.map((e) => Map<String, dynamic>.from(e as Map))
+lib\src\ui\learning\data\supabase_learning_repository.dart:48:.map((e) => Team.fromJson(Map<String, dynamic>.from(e as Map)))
+lib\src\ui\learning\data\supabase_learning_repository.dart:81:.from('teams')
+lib\src\ui\learning\data\supabase_learning_repository.dart:88:final row = Map<String, dynamic>.from(raw as Map);
+lib\src\ui\learning\data\supabase_learning_repository.dart:162:await _sb.from('users').select('login').eq('id', user.id).limit(1);
+lib\src\ui\learning\data\supabase_learning_repository.dart:164:final m = Map<String, dynamic>.from(rows.first as Map);
+lib\src\ui\learning\data\supabase_learning_repository.dart:177:.from('chats')
+lib\src\ui\learning\data\supabase_learning_repository.dart:202:final first = Map<String, dynamic>.from(value.first as Map);
+lib\src\ui\learning\data\supabase_learning_repository.dart:296:.map((e) => Message.fromJson(Map<String, dynamic>.from(e as Map)))
+lib\src\ui\learning\data\supabase_learning_repository.dart:326:? Map<String, int>.from(m['reactions'] as Map)
+lib\src\ui\learning\data\supabase_learning_repository.dart:328:? Map<String, int>.from(
+lib\src\ui\learning\data\supabase_learning_repository.dart:339:await _sb.from('chat_files').select('*').eq('message_id', messageId);
+lib\src\ui\learning\data\supabase_learning_repository.dart:341:.map((e) => ChatFile.fromJson(Map<String, dynamic>.from(e as Map)))
+lib\src\ui\learning\data\supabase_learning_repository.dart:359:final m = Map<String, dynamic>.from(e as Map);
+lib\src\ui\learning\data\supabase_learning_repository.dart:385:.from('messages')
+lib\src\ui\learning\data\supabase_learning_repository.dart:392:final data = Map<String, dynamic>.from(row as Map);
+lib\src\ui\learning\data\supabase_learning_repository.dart:402:.from('users')
+lib\src\ui\learning\data\supabase_learning_repository.dart:407:final u = Map<String, dynamic>.from(user as Map);
+lib\src\ui\learning\data\supabase_learning_repository.dart:437:.from('messages')
+lib\src\ui\learning\data\supabase_learning_repository.dart:446:final data = Map<String, dynamic>.from(row as Map);
+lib\src\ui\learning\data\supabase_learning_repository.dart:459:.from('users')
+lib\src\ui\learning\data\supabase_learning_repository.dart:464:final u = Map<String, dynamic>.from(user as Map);
+lib\src\ui\learning\data\supabase_learning_repository.dart:547:.from('message_reactions')
+lib\src\ui\learning\data\supabase_learning_repository.dart:556:final map = Map<String, dynamic>.from(r as Map);
+lib\src\ui\learning\data\supabase_learning_repository.dart:580:.from('chat_files')
+lib\src\ui\learning\data\supabase_learning_repository.dart:586:await _sb.from('messages').delete().eq('id', messageId);
+lib\src\ui\learning\data\supabase_learning_repository.dart:620:.map((e) => FileItem.fromJson(Map<String, dynamic>.from(e as Map)))
+lib\src\ui\learning\data\supabase_learning_repository.dart:639:final mm = Map<String, dynamic>.from(it as Map);
+lib\src\ui\learning\data\supabase_learning_repository.dart:689:.map((e) => Map<String, dynamic>.from(e as Map))
+lib\src\ui\learning\data\supabase_learning_repository.dart:705:.map((e) => Assignment.fromJson(Map<String, dynamic>.from(e as Map)))
+lib\src\ui\learning\data\supabase_learning_repository.dart:725:return Set<String>.from((jsonDecode(raw) as List).map((e) => e.toString()));
+lib\src\ui\learning\models\message.dart:54:Map<String, dynamic>.from(x as Map)))
+lib\src\ui\learning\models\message.dart:67:? Map<String, dynamic>.from(j['forward'] as Map)
+lib\src\ui\learning\models\message.dart:74:ForwardItemModel.fromJson(Map<String, dynamic>.from(x as Map)))
+lib\src\ui\learning\state\team_cubit.dart:130:.from('chats')
+lib\src\ui\learning\state\team_cubit.dart:159:final updated = List<Message>.from(state.chat)
+lib\src\ui\learning\state\team_cubit.dart:241:.from('team_members')
+lib\src\ui\learning\state\team_cubit.dart:263:final m = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+lib\src\ui\learning\state\team_cubit.dart:274:.from('users')
+lib\src\ui\learning\state\team_cubit.dart:279:final mm = Map<String, dynamic>.from(row as Map);
+lib\src\ui\learning\state\team_cubit.dart:299:final m = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+lib\src\ui\learning\state\team_cubit.dart:308:.from('users')
+lib\src\ui\learning\state\team_cubit.dart:313:final mm = Map<String, dynamic>.from(row as Map);
+lib\src\ui\learning\state\team_cubit.dart:431:final updated = List<Message>.from(state.chat);
+lib\src\ui\learning\state\team_cubit.dart:438:final reverted = List<Message>.from(updated);
+lib\src\ui\learning\state\team_cubit.dart:472:final updated = List<Message>.from(state.chat);
+lib\src\ui\learning\state\team_cubit.dart:558:final counts = Map<String, int>.from(res['counts'] ?? {});
+lib\src\ui\learning\state\team_cubit.dart:579:final counts = Map<String, int>.from(res['counts'] ?? {});
+lib\src\ui\learning\state\team_cubit.dart:631:final data = Map<String, dynamic>.from(res);
+lib\src\ui\learning\tabs\chat_tab.dart:864:await Supabase.instance.client.from('chat_files').update({
+lib\src\ui\learning\tabs\chat_tab.dart:1622:.from('messages')
+lib\src\ui\learning\tabs\chat_tab.dart:1647:.from('chat_files')
+lib\src\ui\learning\tabs\chat_tab.dart:1693:.from('chat_files')
+lib\src\ui\learning\tabs\files_tab.dart:70:.from('chat_files')
+lib\src\ui\learning\tabs\files_tab.dart:76:.map((e) => ChatFile.fromJson(Map<String, dynamic>.from(e as Map)))
+lib\src\ui\learning\tabs\files_tab.dart:692:.from('chats')
+lib\src\ui\learning\tabs\chat\forward_group_bubble.dart:68:if (decoded is Map && decoded['fg'] == 1) return Map<String, dynamic>.from(decoded);
+lib\src\ui\learning\tabs\chat\forward_group_bubble.dart:79:final items = List<Map<String, dynamic>>.from(fg['items'] ?? const []);
+lib\src\ui\learning\tabs\chat\forward_group_bubble.dart:204:final fileObjs = rawF.whereType<Map>().map((e) => Map<String, dynamic>.from(e as Map)).toList();
+lib\src\ui\learning\tabs\chat\attachments\chat_attachments_controller.dart:229:List<LocalAttach> getPendingFiles() => List.from(pending);
+lib\src\ui\learning\tabs\chat\data\chat_repository.dart:29:final first = Map<String, dynamic>.from(response.first as Map);
+lib\src\ui\learning\tabs\chat\data\chat_repository.dart:47:.from('message_reactions')
+lib\src\ui\learning\tabs\chat\data\chat_repository.dart:56:final map = Map<String, dynamic>.from(r as Map);
+lib\src\ui\learning\tabs\chat\data\chat_repository.dart:90:.from('chats')
+lib\src\ui\learning\tabs\chat\data\chat_repository.dart:116:final m = Map<String, dynamic>.from(res.first as Map);
+lib\src\ui\learning\tabs\chat\data\chat_repository.dart:123:final m = Map<String, dynamic>.from(res);
+lib\src\ui\learning\tabs\chat\data\chat_repository.dart:139:.from('chat_reads')
+lib\src\ui\learning\tabs\chat\data\chat_repository.dart:146:final map = Map<String, dynamic>.from(row as Map);
+lib\src\ui\learning\tabs\chat\pins\pin_controller.dart:95:List<PinEntry> get pins => List.from(_pins);
+lib\src\ui\profile\edit_profile_screen.dart:92:await _sb.storage.from('avatars').uploadBinary(
+lib\src\ui\profile\edit_profile_screen.dart:101:final publicUrl = _sb.storage.from('avatars').getPublicUrl(path);
+lib\src\ui\profile\edit_profile_screen.dart:103:await _sb.from('users').update({'avatar_url': publicUrl}).eq('id', id);
+lib\src\ui\profile\edit_profile_screen.dart:106:final u = Map<String, dynamic>.from(_user!);
+lib\src\ui\profile\edit_profile_screen.dart:134:await _sb.from('users').update({'status': newStatus}).eq('id', id);
+lib\src\ui\profile\edit_profile_screen.dart:137:final u = Map<String, dynamic>.from(_user!);
+lib\src\ui\profile\profile_repository.dart:11:.from('users')
+lib\src\ui\profile\profile_repository.dart:25:await _sb.from('users').update({
+lib\src\ui\profile\profile_repository.dart:40:await _sb.storage.from('avatars').upload(
+lib\src\ui\profile\profile_repository.dart:46:final publicUrl = _sb.storage.from('avatars').getPublicUrl(path);
+lib\src\ui\profile\profile_repository.dart:47:await _sb.from('users').update({'avatar_url': publicUrl}).eq('id', uid);
+lib\src\ui\profile\profile_screen.dart:315:final m = Map<String, dynamic>.from(res.first as Map);
+lib\src\ui\profile\profile_screen.dart:319:final m = Map<String, dynamic>.from(res);
+lib\src\ui\profile\profile_screen.dart:338:final m = Map<String, dynamic>.from(res);
+lib\src\ui\profile\profile_screen.dart:346:final m = Map<String, dynamic>.from(res.first as Map);
+lib\src\ui\profile\profile_screen.dart:403:.from('users')
+lib\src\ui\profile\profile_screen.dart:410:final mapFresh = Map<String, dynamic>.from(fresh as Map);
+lib\src\ui\schedule\all_dart_text.txt:3187:return List<SubjectDiaryEntry>.from(_store[subjectKey] ?? const []);
+lib\src\ui\schedule\all_dart_text.txt:3231:final nf = List<SubjectDiaryFile>.from(old.files)..removeWhere((f) => f.url == fileUrl);
+lib\src\ui\schedule\schedule_screen.dart:32:.map((m) => Lesson.fromMap(Map<String, dynamic>.from(m as Map)))
+lib\src\ui\schedule\schedule_screen.dart:57:.from('lessons')
+lib\src\ui\schedule\schedule_screen.dart:65:final row = Map<String, dynamic>.from(raw as Map);
+lib\src\ui\schedule\subject_diary\repo.dart:225:return List<SubjectDiaryEntry>.from(_store[subjectKey] ?? const []);
+lib\src\ui\schedule\subject_diary\repo.dart:274:final nf = List<SubjectDiaryFile>.from(old.files)..removeWhere((f) => f.url == fileUrl);
+scripts\collect_project_snapshot.ps1:109:Write-Search "supabase_from_usage.txt" @("Supabase.instance", "supabase", ".from(")
+scripts\import_academic_batch.js:35:throw new Error(`Invalid --step "${args.step}". Expected one of: ${Array.from(VALID_STEPS).join(', ')}`);
+scripts\import_academic_batch.js:116:return Array.from(map.values());
+scripts\import_academic_batch.js:130:return Array.from(counts.entries())
+supabase\functions\generate-upload-url\index.ts:162:.from("chat_members")
+supabase\functions\generate-upload-url\index.ts:177:.from("chats")
+supabase\functions\generate-upload-url\index.ts:192:.from("team_members")
+

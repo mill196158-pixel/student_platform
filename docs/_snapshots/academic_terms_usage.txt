@@ -1,0 +1,580 @@
+﻿## PATTERN: academic_years
+scripts\collect_project_snapshot.ps1:115:Write-Search "academic_terms_usage.txt" @("academic_years", "academic_terms", "group_academic_profiles", "group_term_semesters", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects")
+scripts\import_academic_batch.js:266:db.list('academic_years'),
+supabase\checks\academic_rls_audit.sql:7:('academic_years'),
+supabase\checks\academic_rls_audit.sql:50:('academic_years'),
+supabase\checks\academic_rls_audit.sql:92:('academic_years'),
+supabase\checks\academic_rls_audit.sql:138:('academic_years'),
+supabase\checks\academic_rls_audit.sql:244:'academic_years',
+supabase\checks\academic_rls_audit.sql:268:'academic_years',
+supabase\checks\academic_years_terms_seed_check.sql:13:from public.academic_years
+supabase\checks\academic_years_terms_seed_check.sql:32:join public.academic_years ay on ay.id = at.academic_year_id
+supabase\checks\academic_years_terms_seed_check.sql:39:count(distinct ay.id)::bigint as academic_years_count,
+supabase\checks\academic_years_terms_seed_check.sql:41:from public.academic_years ay
+supabase\checks\academic_years_terms_seed_check.sql:58:join public.academic_years ay on ay.id = at.academic_year_id
+supabase\checks\vv_2024_curriculum_import_post_check.sql:61:left join public.academic_years ay on ay.id = so.academic_year_id
+supabase\checks\vv_2024_group_terms_check.sql:41:left join public.academic_years ay on ay.id = gts.academic_year_id
+supabase\checks\vv_2024_group_terms_check.sql:74:join public.academic_years ay on ay.id = gts.academic_year_id
+supabase\checks\vv_2024_preflight_before_import.sql:32:('academic_years'),
+supabase\checks\vv_2024_preflight_before_import.sql:124:from public.academic_years
+supabase\checks\vv_2024_preflight_before_import.sql:141:join public.academic_years ay on ay.id = at.academic_year_id
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:22:alter table public.academic_years enable row level security;
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:38:create policy "academic_years_read_authenticated"
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:39:on public.academic_years
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:179:create policy "academic_years_admin_manage"
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:180:on public.academic_years
+supabase\migrations\20260609114500_seed_academic_years_terms_2024_2026.sql:2:-- Scope: public.academic_years and public.academic_terms only.
+supabase\migrations\20260609114500_seed_academic_years_terms_2024_2026.sql:6:insert into public.academic_years(name, start_year, starts_on, ends_on, is_current)
+supabase\migrations\20260609114500_seed_academic_years_terms_2024_2026.sql:38:join public.academic_years ay on ay.name = term_data.academic_year_name
+supabase\migrations\20260609115000_seed_vv_2024_group_terms.sql:53:join public.academic_years ay on ay.name = tm.academic_year_name
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:5:create table if not exists public.academic_years (
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:13:constraint academic_years_name_unique unique (name),
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:14:constraint academic_years_start_year_unique unique (start_year),
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:15:constraint academic_years_dates_check check (ends_on >= starts_on)
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:20:academic_year_id uuid not null references public.academic_years(id) on delete cascade,
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:53:academic_year_id uuid not null references public.academic_years(id) on delete cascade,
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:180:academic_year_id uuid null references public.academic_years(id) on delete set null,
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:219:academic_year_id uuid not null references public.academic_years(id) on delete restrict,
+supabase\migrations_recovered\migration_002_extend_existing_tables.sql:10:add column if not exists academic_year_id uuid null references public.academic_years(id),
+supabase\migrations_recovered\migration_002_extend_existing_tables.sql:21:add column if not exists academic_year_id uuid null references public.academic_years(id),
+supabase\migrations_recovered\migration_002_extend_existing_tables.sql:29:add column if not exists academic_year_id uuid null references public.academic_years(id),
+supabase\migrations_recovered\migration_002_extend_existing_tables.sql:37:add column if not exists academic_year_id uuid null references public.academic_years(id),
+supabase\migrations_recovered\migration_002_extend_existing_tables.sql:45:add column if not exists academic_year_id uuid null references public.academic_years(id),
+
+## PATTERN: academic_terms
+lib\src\data\academic_context_service.dart:173:'semester_number,academic_year_id,academic_term_id,academic_terms(is_current,starts_on,ends_on)',
+lib\src\data\academic_context_service.dart:185:final term = _asMap(row['academic_terms']);
+lib\src\data\academic_context_service.dart:195:final term = _asMap(row['academic_terms']);
+scripts\collect_project_snapshot.ps1:115:Write-Search "academic_terms_usage.txt" @("academic_years", "academic_terms", "group_academic_profiles", "group_term_semesters", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects")
+scripts\import_academic_batch.js:267:db.list('academic_terms'),
+supabase\dev_seed_test_schedule_subject_link.sql:48:join public.academic_terms at on at.id = gts.academic_term_id
+supabase\stage2_3_schedule_subject_resolver.sql:101:join public.academic_terms at on at.id = gts.academic_term_id
+supabase\stage2_3_schedule_subject_resolver.sql:291:join public.academic_terms at on at.id = gts.academic_term_id
+supabase\checks\academic_rls_audit.sql:8:('academic_terms'),
+supabase\checks\academic_rls_audit.sql:51:('academic_terms'),
+supabase\checks\academic_rls_audit.sql:93:('academic_terms'),
+supabase\checks\academic_rls_audit.sql:139:('academic_terms'),
+supabase\checks\academic_rls_audit.sql:245:'academic_terms',
+supabase\checks\academic_rls_audit.sql:269:'academic_terms',
+supabase\checks\academic_years_terms_seed_check.sql:31:from public.academic_terms at
+supabase\checks\academic_years_terms_seed_check.sql:40:count(at.id)::bigint as academic_terms_count
+supabase\checks\academic_years_terms_seed_check.sql:42:left join public.academic_terms at on at.academic_year_id = ay.id
+supabase\checks\academic_years_terms_seed_check.sql:57:from public.academic_terms at
+supabase\checks\vv_2024_curriculum_import_post_check.sql:62:left join public.academic_terms at on at.id = so.academic_term_id
+supabase\checks\vv_2024_group_terms_check.sql:42:left join public.academic_terms at on at.id = gts.academic_term_id
+supabase\checks\vv_2024_group_terms_check.sql:75:join public.academic_terms at on at.id = gts.academic_term_id
+supabase\checks\vv_2024_preflight_before_import.sql:33:('academic_terms'),
+supabase\checks\vv_2024_preflight_before_import.sql:140:from public.academic_terms at
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:23:alter table public.academic_terms enable row level security;
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:44:create policy "academic_terms_read_authenticated"
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:45:on public.academic_terms
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:186:create policy "academic_terms_admin_manage"
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:187:on public.academic_terms
+supabase\migrations\20260609114500_seed_academic_years_terms_2024_2026.sql:2:-- Scope: public.academic_years and public.academic_terms only.
+supabase\migrations\20260609114500_seed_academic_years_terms_2024_2026.sql:12:insert into public.academic_terms(
+supabase\migrations\20260609115000_seed_vv_2024_group_terms.sql:54:join public.academic_terms at
+supabase\migrations\20260609133000_create_subject_student_knowledge.sql:204:join public.academic_terms at on at.id = gts.academic_term_id
+supabase\migrations\20260609133000_create_subject_student_knowledge.sql:345:join public.academic_terms at on at.id = gts.academic_term_id
+supabase\migrations\20260609141000_fix_vote_subject_difficulty_v2_conflict.sql:68:join public.academic_terms at on at.id = gts.academic_term_id
+supabase\migrations\20260609143000_prevent_repeat_subject_difficulty_votes.sql:68:join public.academic_terms at on at.id = gts.academic_term_id
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:18:create table if not exists public.academic_terms (
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:29:constraint academic_terms_term_in_year_check check (term_in_year in (1, 2)),
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:30:constraint academic_terms_term_sequence_check check (term_sequence > 0),
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:31:constraint academic_terms_dates_check check (ends_on >= starts_on),
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:32:constraint academic_terms_preload_check check (preload_starts_on is null or preload_starts_on <= starts_on),
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:33:constraint academic_terms_unique unique (academic_year_id, term_in_year)
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:36:create index if not exists academic_terms_academic_year_id_idx
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:37:on public.academic_terms(academic_year_id);
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:54:academic_term_id uuid not null references public.academic_terms(id) on delete cascade,
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:220:academic_term_id uuid not null references public.academic_terms(id) on delete restrict,
+supabase\migrations_recovered\migration_002_extend_existing_tables.sql:11:add column if not exists academic_term_id uuid null references public.academic_terms(id),
+supabase\migrations_recovered\migration_002_extend_existing_tables.sql:22:add column if not exists academic_term_id uuid null references public.academic_terms(id),
+supabase\migrations_recovered\migration_002_extend_existing_tables.sql:30:add column if not exists academic_term_id uuid null references public.academic_terms(id),
+supabase\migrations_recovered\migration_002_extend_existing_tables.sql:38:add column if not exists academic_term_id uuid null references public.academic_terms(id),
+supabase\migrations_recovered\migration_002_extend_existing_tables.sql:46:add column if not exists academic_term_id uuid null references public.academic_terms(id),
+
+## PATTERN: group_academic_profiles
+lib\src\ui\exams\exams_screen.dart:2078:.from('group_academic_profiles')
+scripts\collect_project_snapshot.ps1:115:Write-Search "academic_terms_usage.txt" @("academic_years", "academic_terms", "group_academic_profiles", "group_term_semesters", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects")
+supabase\checks\academic_rls_audit.sql:9:('group_academic_profiles'),
+supabase\checks\academic_rls_audit.sql:52:('group_academic_profiles'),
+supabase\checks\academic_rls_audit.sql:94:('group_academic_profiles'),
+supabase\checks\academic_rls_audit.sql:140:('group_academic_profiles'),
+supabase\checks\academic_rls_audit.sql:246:'group_academic_profiles',
+supabase\checks\academic_rls_audit.sql:270:'group_academic_profiles',
+supabase\checks\subject_student_knowledge_preflight.sql:82:'group_academic_profiles_program_columns' as check_name,
+supabase\checks\subject_student_knowledge_preflight.sql:87:and table_name = 'group_academic_profiles'
+supabase\checks\vv_2024_group_terms_check.sql:22:left join public.group_academic_profiles gap on gap.group_id = g.id
+supabase\checks\vv_2024_group_terms_check.sql:56:left join public.group_academic_profiles gap on gap.group_id = g.id
+supabase\checks\vv_2024_preflight_before_import.sql:34:('group_academic_profiles'),
+supabase\checks\vv_2024_preflight_before_import.sql:65:('group_academic_profiles', array['group_id']),
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:24:alter table public.group_academic_profiles enable row level security;
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:82:create policy "group_academic_profiles_read_active_group"
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:83:on public.group_academic_profiles
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:90:where se.group_id = group_academic_profiles.group_id
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:193:create policy "group_academic_profiles_admin_manage"
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:194:on public.group_academic_profiles
+supabase\migrations\20260609115000_seed_vv_2024_group_terms.sql:2:-- Scope: public.group_academic_profiles and public.group_term_semesters only.
+supabase\migrations\20260609115000_seed_vv_2024_group_terms.sql:11:insert into public.group_academic_profiles(
+supabase\migrations\20260609190000_get_my_classmates_rpc.sql:41:from public.group_academic_profiles gap
+supabase\migrations\20260609190000_get_my_classmates_rpc.sql:47:from public.group_academic_profiles gap
+supabase\migrations\20260609190000_get_my_classmates_rpc.sql:74:left join public.group_academic_profiles gap
+supabase\migrations\20260609190500_fix_get_my_classmates_strict_group.sql:36:from public.group_academic_profiles gap
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:39:create table if not exists public.group_academic_profiles (
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:46:constraint group_academic_profiles_admission_year_check check (admission_year between 2000 and 2100),
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:47:constraint group_academic_profiles_nominal_semesters_check check (nominal_semesters > 0)
+
+## PATTERN: group_term_semesters
+lib\src\data\academic_context_service.dart:171:.from('group_term_semesters')
+lib\src\ui\exams\exams_screen.dart:2065:.from('group_term_semesters')
+lib\src\ui\learning\learning_screen.dart:670:value: 'student_enrollments / group_term_semesters',
+scripts\collect_project_snapshot.ps1:115:Write-Search "academic_terms_usage.txt" @("academic_years", "academic_terms", "group_academic_profiles", "group_term_semesters", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects")
+scripts\import_academic_batch.js:268:db.list('group_term_semesters'),
+supabase\dev_seed_test_schedule_subject_link.sql:47:join public.group_term_semesters gts on gts.group_id = g.id
+supabase\dev_seed_test_schedule_subject_link.sql:61:join public.group_term_semesters gts on gts.group_id = g.id
+supabase\stage2_3_schedule_subject_resolver.sql:100:from public.group_term_semesters gts
+supabase\stage2_3_schedule_subject_resolver.sql:114:from public.group_term_semesters gts
+supabase\stage2_3_schedule_subject_resolver.sql:290:join public.group_term_semesters gts on gts.group_id = g.id
+supabase\checks\academic_rls_audit.sql:10:('group_term_semesters'),
+supabase\checks\academic_rls_audit.sql:53:('group_term_semesters'),
+supabase\checks\academic_rls_audit.sql:95:('group_term_semesters'),
+supabase\checks\academic_rls_audit.sql:141:('group_term_semesters'),
+supabase\checks\academic_rls_audit.sql:247:'group_term_semesters',
+supabase\checks\academic_rls_audit.sql:271:'group_term_semesters',
+supabase\checks\subject_student_knowledge_checks.sql:132:from public.group_term_semesters gts
+supabase\checks\subject_student_knowledge_preflight.sql:51:('group_term_semesters'),
+supabase\checks\subject_student_knowledge_preflight.sql:93:count(distinct gts.group_id) as groups_with_group_term_semesters,
+supabase\checks\subject_student_knowledge_preflight.sql:96:left join public.group_term_semesters gts on gts.group_id = so.group_id;
+supabase\checks\vv_2024_curriculum_import_dry_run.sql:24:left join public.group_term_semesters gts
+supabase\checks\vv_2024_curriculum_import_dry_run.sql:205:left join public.group_term_semesters gts
+supabase\checks\vv_2024_curriculum_import_post_check.sql:99:left join public.group_term_semesters gts
+supabase\checks\vv_2024_group_terms_check.sql:40:left join public.group_term_semesters gts on gts.group_id = g.id
+supabase\checks\vv_2024_group_terms_check.sql:57:left join public.group_term_semesters gts on gts.group_id = g.id
+supabase\checks\vv_2024_group_terms_check.sql:72:from public.group_term_semesters gts
+supabase\checks\vv_2024_group_terms_check.sql:87:from public.group_term_semesters gts
+supabase\checks\vv_2024_preflight_before_import.sql:35:('group_term_semesters'),
+supabase\checks\vv_2024_preflight_before_import.sql:66:('group_term_semesters', array['group_id']),
+supabase\checks\vv_2024_preflight_before_import.sql:67:('group_term_semesters', array['academic_year_id']),
+supabase\checks\vv_2024_preflight_before_import.sql:68:('group_term_semesters', array['academic_term_id']),
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:25:alter table public.group_term_semesters enable row level security;
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:97:create policy "group_term_semesters_read_active_group"
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:98:on public.group_term_semesters
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:105:where se.group_id = group_term_semesters.group_id
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:200:create policy "group_term_semesters_admin_manage"
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:201:on public.group_term_semesters
+supabase\migrations\20260609103000_add_academic_fk_indexes.sql:4:create index if not exists group_term_semesters_academic_year_id_idx
+supabase\migrations\20260609103000_add_academic_fk_indexes.sql:5:on public.group_term_semesters(academic_year_id);
+supabase\migrations\20260609115000_seed_vv_2024_group_terms.sql:2:-- Scope: public.group_academic_profiles and public.group_term_semesters only.
+supabase\migrations\20260609115000_seed_vv_2024_group_terms.sql:58:insert into public.group_term_semesters(
+supabase\migrations\20260609123500_import_vv_2024_curriculum_from_stage_draft.sql:227:join public.group_term_semesters gts
+supabase\migrations\20260609133000_create_subject_student_knowledge.sql:203:from public.group_term_semesters gts
+supabase\migrations\20260609133000_create_subject_student_knowledge.sql:212:from public.group_term_semesters gts
+supabase\migrations\20260609133000_create_subject_student_knowledge.sql:344:from public.group_term_semesters gts
+supabase\migrations\20260609133000_create_subject_student_knowledge.sql:353:from public.group_term_semesters gts
+supabase\migrations\20260609141000_fix_vote_subject_difficulty_v2_conflict.sql:67:from public.group_term_semesters gts
+supabase\migrations\20260609141000_fix_vote_subject_difficulty_v2_conflict.sql:76:from public.group_term_semesters gts
+supabase\migrations\20260609143000_prevent_repeat_subject_difficulty_votes.sql:67:from public.group_term_semesters gts
+supabase\migrations\20260609143000_prevent_repeat_subject_difficulty_votes.sql:76:from public.group_term_semesters gts
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:50:create table if not exists public.group_term_semesters (
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:59:constraint group_term_semesters_unique unique (group_id, academic_term_id),
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:60:constraint group_term_semesters_semester_check check (semester_number > 0),
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:61:constraint group_term_semesters_source_check check (source in ('manual', 'auto', 'import', 'admin'))
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:64:create index if not exists group_term_semesters_group_id_idx
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:65:on public.group_term_semesters(group_id);
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:67:create index if not exists group_term_semesters_academic_term_id_idx
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:68:on public.group_term_semesters(academic_term_id);
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:70:create index if not exists group_term_semesters_semester_number_idx
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:71:on public.group_term_semesters(semester_number);
+
+## PATTERN: student_enrollments
+lib\src\data\academic_context_service.dart:101:.from('student_enrollments')
+lib\src\ui\exams\exams_screen.dart:2039:.from('student_enrollments')
+lib\src\ui\friends\my_friends_screen.dart:327:.from('student_enrollments')
+lib\src\ui\friends\my_friends_screen.dart:341:.from('student_enrollments')
+lib\src\ui\friends\my_friends_screen.dart:359:.from('student_enrollments')
+lib\src\ui\friends\my_friends_screen.dart:368:.from('student_enrollments')
+lib\src\ui\learning\learning_screen.dart:670:value: 'student_enrollments / group_term_semesters',
+scripts\collect_project_snapshot.ps1:115:Write-Search "academic_terms_usage.txt" @("academic_years", "academic_terms", "group_academic_profiles", "group_term_semesters", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects")
+scripts\collect_project_snapshot.ps1:116:Write-Search "table_terms_usage.txt" @("groups", "teams", "team_members", "chats", "chat_members", "messages", "chat_files", "users", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects", "schedule", "lessons", "assignments", "diary", "friends", "useful")
+scripts\import_academic_batch.js:57:students    Fill public.users and student_enrollments
+scripts\import_academic_batch.js:265:db.list('student_enrollments'),
+scripts\import_academic_batch.js:585:await db.insert('student_enrollments', [{
+scripts\import_academic_batch.js:815:ctx.db.list('student_enrollments'),
+scripts\import_academic_batch.js:856:db.list('student_enrollments'),
+scripts\import_academic_batch.js:906:ctx.db.list('student_enrollments'),
+supabase\dev_seed_test_schedule_subject_link.sql:372:join public.student_enrollments se
+supabase\dev_seed_test_schedule_subject_link.sql:390:join public.student_enrollments se
+supabase\stage2_3_schedule_subject_resolver.sql:468:join public.student_enrollments se
+supabase\stage2_3_schedule_subject_resolver.sql:485:join public.student_enrollments se
+supabase\checks\academic_rls_audit.sql:18:('student_enrollments'),
+supabase\checks\academic_rls_audit.sql:61:('student_enrollments'),
+supabase\checks\academic_rls_audit.sql:103:('student_enrollments'),
+supabase\checks\academic_rls_audit.sql:149:('student_enrollments'),
+supabase\checks\academic_rls_audit.sql:255:'student_enrollments',
+supabase\checks\academic_rls_audit.sql:279:'student_enrollments',
+supabase\checks\subject_student_knowledge_checks.sql:50:from public.student_enrollments se
+supabase\checks\subject_student_knowledge_preflight.sql:49:('student_enrollments'),
+supabase\checks\subject_student_knowledge_preflight.sql:103:from public.student_enrollments
+supabase\checks\vv_2024_current_semester_teams_dry_run.sql:31:from public.student_enrollments se
+supabase\checks\vv_2024_current_semester_teams_dry_run.sql:44:join public.student_enrollments se
+supabase\checks\vv_2024_current_semester_teams_dry_run.sql:54:join public.student_enrollments se
+supabase\checks\vv_2024_current_semester_teams_dry_run.sql:208:left join public.student_enrollments se
+supabase\checks\vv_2024_current_semester_teams_dry_run.sql:229:from public.student_enrollments se
+supabase\checks\vv_2024_current_semester_teams_post_check.sql:42:join public.student_enrollments se
+supabase\checks\vv_2024_current_semester_teams_post_check.sql:119:from public.student_enrollments se
+supabase\checks\vv_2024_current_semester_teams_post_check.sql:127:join public.student_enrollments se
+supabase\checks\vv_2024_current_semester_teams_post_check.sql:137:join public.student_enrollments se
+supabase\checks\vv_2024_group_terms_check.sql:115:union all select 'student_enrollments', count(*)::bigint from public.student_enrollments
+supabase\checks\vv_2024_preflight_before_import.sql:38:('student_enrollments'),
+supabase\checks\vv_2024_preflight_before_import.sql:76:('student_enrollments', array['user_id']),
+supabase\checks\vv_2024_preflight_before_import.sql:77:('student_enrollments', array['group_id']),
+supabase\checks\vv_2024_preflight_before_import.sql:78:('student_enrollments', array['created_by']),
+supabase\checks\vv_2024_preflight_before_import.sql:79:('student_enrollments', array['transferred_from_enrollment_id']),
+supabase\checks\vv_2024_students_import_dry_run.sql:33:left join public.student_enrollments ae
+supabase\checks\vv_2024_students_import_dry_run.sql:162:left join public.student_enrollments ae
+supabase\checks\vv_2024_students_import_dry_run.sql:239:left join public.student_enrollments ae
+supabase\checks\vv_2024_students_import_post_check.sql:27:left join public.student_enrollments ae
+supabase\checks\vv_2024_students_import_post_check.sql:59:left join public.student_enrollments ae
+supabase\checks\vv_2024_students_import_post_check.sql:87:join public.student_enrollments ae
+supabase\checks\vv_2024_students_import_post_check.sql:119:left join public.student_enrollments ae
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:8:--   subject offerings through student_enrollments.
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:28:alter table public.student_enrollments enable row level security;
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:75:create policy "student_enrollments_read_own"
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:76:on public.student_enrollments
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:89:from public.student_enrollments se
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:104:from public.student_enrollments se
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:119:from public.student_enrollments se
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:134:from public.student_enrollments se
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:151:from public.student_enrollments se
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:167:join public.student_enrollments se on se.group_id = so.group_id
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:221:create policy "student_enrollments_admin_manage"
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:222:on public.student_enrollments
+supabase\migrations\20260609103000_add_academic_fk_indexes.sql:28:create index if not exists student_enrollments_created_by_idx
+supabase\migrations\20260609103000_add_academic_fk_indexes.sql:29:on public.student_enrollments(created_by);
+supabase\migrations\20260609103000_add_academic_fk_indexes.sql:31:create index if not exists student_enrollments_transferred_from_enrollment_id_idx
+supabase\migrations\20260609103000_add_academic_fk_indexes.sql:32:on public.student_enrollments(transferred_from_enrollment_id);
+supabase\migrations\20260609120000_import_vv_2024_students_from_stage_draft.sql:5:--   and public.student_enrollments;
+supabase\migrations\20260609120000_import_vv_2024_students_from_stage_draft.sql:112:from public.student_enrollments ae
+supabase\migrations\20260609120000_import_vv_2024_students_from_stage_draft.sql:141:from public.student_enrollments same_group
+supabase\migrations\20260609120000_import_vv_2024_students_from_stage_draft.sql:149:from public.student_enrollments other_group
+supabase\migrations\20260609120000_import_vv_2024_students_from_stage_draft.sql:157:insert into public.student_enrollments (
+supabase\migrations\20260609120000_import_vv_2024_students_from_stage_draft.sql:177:from public.student_enrollments existing
+supabase\migrations\20260609120000_import_vv_2024_students_from_stage_draft.sql:189:(select count(*) from inserted_enrollments) as student_enrollments_inserted;
+supabase\migrations\20260609123500_import_vv_2024_curriculum_from_stage_draft.sql:7:-- - do not touch auth.users, RLS policies, public.users, or student_enrollments.
+supabase\migrations\20260609124500_create_vv_2024_current_semester_teams_draft.sql:6:-- - add team_members only from active student_enrollments;
+supabase\migrations\20260609124500_create_vv_2024_current_semester_teams_draft.sql:9:--   student_enrollments, RLS policies, or backfill flows.
+supabase\migrations\20260609124500_create_vv_2024_current_semester_teams_draft.sql:44:from public.student_enrollments se
+supabase\migrations\20260609124500_create_vv_2024_current_semester_teams_draft.sql:89:join public.student_enrollments se
+supabase\migrations\20260609133000_create_subject_student_knowledge.sql:224:from public.student_enrollments se
+supabase\migrations\20260609133000_create_subject_student_knowledge.sql:332:from public.student_enrollments se
+supabase\migrations\20260609133500_subject_student_knowledge_rls_draft.sql:31:join public.student_enrollments se on se.group_id = so.group_id
+supabase\migrations\20260609133500_subject_student_knowledge_rls_draft.sql:81:from public.student_enrollments se
+supabase\migrations\20260609141000_fix_vote_subject_difficulty_v2_conflict.sql:88:from public.student_enrollments se
+supabase\migrations\20260609143000_prevent_repeat_subject_difficulty_votes.sql:88:from public.student_enrollments se
+supabase\migrations\20260609190000_get_my_classmates_rpc.sql:4:-- client-side RLS allows a student to read only their own student_enrollments row,
+supabase\migrations\20260609190000_get_my_classmates_rpc.sql:30:from public.student_enrollments se
+supabase\migrations\20260609190000_get_my_classmates_rpc.sql:54:from public.student_enrollments se
+supabase\migrations\20260609190500_fix_get_my_classmates_strict_group.sql:25:from public.student_enrollments se
+supabase\migrations\20260609190500_fix_get_my_classmates_strict_group.sql:43:from public.student_enrollments se
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:116:create table if not exists public.student_enrollments (
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:124:transferred_from_enrollment_id uuid null references public.student_enrollments(id) on delete set null,
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:128:constraint student_enrollments_status_check
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:130:constraint student_enrollments_dates_check
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:134:comment on column public.student_enrollments.user_id is
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:137:create unique index if not exists student_enrollments_one_active_per_user
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:138:on public.student_enrollments(user_id)
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:141:create index if not exists student_enrollments_user_id_idx
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:142:on public.student_enrollments(user_id);
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:144:create index if not exists student_enrollments_group_id_idx
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:145:on public.student_enrollments(group_id);
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:147:create index if not exists student_enrollments_status_idx
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:148:on public.student_enrollments(status);
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:150:create index if not exists student_enrollments_period_idx
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:151:on public.student_enrollments(started_at, ended_at);
+
+## PATTERN: subject_offerings
+lib\src\data\personal_diary_service.dart:237:.from('subject_offerings')
+lib\src\data\subject_diary_repository_supabase.dart:806:.from('subject_offerings')
+lib\src\ui\exams\exams_screen.dart:2103:.from('subject_offerings')
+lib\src\ui\info\info_screen.dart:301:.from('subject_offerings')
+lib\src\ui\info\subject_info_screen.dart:181:.from('subject_offerings')
+scripts\collect_project_snapshot.ps1:115:Write-Search "academic_terms_usage.txt" @("academic_years", "academic_terms", "group_academic_profiles", "group_term_semesters", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects")
+scripts\collect_project_snapshot.ps1:116:Write-Search "table_terms_usage.txt" @("groups", "teams", "team_members", "chats", "chat_members", "messages", "chat_files", "users", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects", "schedule", "lessons", "assignments", "diary", "friends", "useful")
+scripts\import_academic_batch.js:58:curriculum  Create subject_catalog, subject_aliases, curriculum_subjects, subject_offerings
+scripts\import_academic_batch.js:670:const existingOfferings = await ctx.db.list('subject_offerings');
+scripts\import_academic_batch.js:775:const existingOfferings = await db.list('subject_offerings');
+scripts\import_academic_batch.js:804:await db.insert('subject_offerings', offeringRows, { ignore: true });
+scripts\import_academic_batch.js:811:ctx.db.list('subject_offerings'),
+scripts\import_academic_batch.js:853:db.list('subject_offerings'),
+scripts\import_academic_batch.js:907:ctx.db.list('subject_offerings'),
+supabase\dev_seed_test_schedule_subject_link.sql:209:from public.subject_offerings so
+supabase\dev_seed_test_schedule_subject_link.sql:220:insert into public.subject_offerings (
+supabase\dev_seed_test_schedule_subject_link.sql:410:from public.subject_offerings so
+supabase\dev_seed_test_schedule_subject_link.sql:427:union all select 'subject_offerings', count(*)::bigint from test_offerings
+supabase\dev_seed_test_schedule_subject_link_rollback.sql:15:from public.subject_offerings
+supabase\dev_seed_test_schedule_subject_link_rollback.sql:41:from public.subject_offerings
+supabase\dev_seed_test_schedule_subject_link_rollback.sql:61:from public.subject_offerings
+supabase\dev_seed_test_schedule_subject_link_rollback.sql:82:from public.subject_offerings
+supabase\dev_seed_test_schedule_subject_link_rollback.sql:97:from public.subject_offerings
+supabase\dev_seed_test_schedule_subject_link_rollback.sql:131:delete from public.subject_offerings
+supabase\stage2_3_schedule_subject_resolver.sql:134:from public.subject_offerings so
+supabase\stage2_3_schedule_subject_resolver.sql:177:else 'multiple subject_offerings matched normalized input'
+supabase\stage2_3_schedule_subject_resolver.sql:376:from public.subject_offerings so
+supabase\stage2_3_schedule_subject_resolver.sql:387:insert into public.subject_offerings (
+supabase\stage2_3_schedule_subject_resolver_rollback.sql:40:from public.subject_offerings
+supabase\stage2_3_schedule_subject_resolver_rollback.sql:66:from public.subject_offerings
+supabase\stage2_3_schedule_subject_resolver_rollback.sql:86:from public.subject_offerings
+supabase\stage2_3_schedule_subject_resolver_rollback.sql:107:from public.subject_offerings
+supabase\stage2_3_schedule_subject_resolver_rollback.sql:130:delete from public.subject_offerings
+supabase\stage4_2_3_personal_diary_tasks.sql:8:subject_offering_id uuid null references public.subject_offerings(id) on delete set null,
+supabase\checks\academic_rls_audit.sql:17:('subject_offerings'),
+supabase\checks\academic_rls_audit.sql:60:('subject_offerings'),
+supabase\checks\academic_rls_audit.sql:102:('subject_offerings'),
+supabase\checks\academic_rls_audit.sql:148:('subject_offerings'),
+supabase\checks\academic_rls_audit.sql:254:'subject_offerings',
+supabase\checks\academic_rls_audit.sql:278:'subject_offerings',
+supabase\checks\subject_student_knowledge_checks.sql:24:left join public.subject_offerings so on so.id = v.subject_offering_id
+supabase\checks\subject_student_knowledge_checks.sql:36:join public.subject_offerings so on so.id = v.subject_offering_id
+supabase\checks\subject_student_knowledge_checks.sql:47:join public.subject_offerings so on so.id = v.subject_offering_id
+supabase\checks\subject_student_knowledge_checks.sql:69:left join public.subject_offerings so on so.id = sosp.subject_offering_id
+supabase\checks\subject_student_knowledge_checks.sql:144:join public.subject_offerings so on so.id = v.subject_offering_id
+supabase\checks\subject_student_knowledge_preflight.sql:48:('subject_offerings'),
+supabase\checks\subject_student_knowledge_preflight.sql:95:from public.subject_offerings so
+supabase\checks\vv_2024_current_semester_teams_dry_run.sql:4:-- 1. Summary for semester 4 subject_offerings, teams, chats, and memberships.
+supabase\checks\vv_2024_current_semester_teams_dry_run.sql:16:from public.subject_offerings so
+supabase\checks\vv_2024_current_semester_teams_dry_run.sql:127:(select count(*)::bigint from current_offerings) as current_semester_subject_offerings_total,
+supabase\checks\vv_2024_current_semester_teams_dry_run.sql:146:-- 2. Current semester subject_offerings by group and subject.
+supabase\checks\vv_2024_current_semester_teams_dry_run.sql:154:from public.subject_offerings so
+supabase\checks\vv_2024_current_semester_teams_dry_run.sql:170:from public.subject_offerings so
+supabase\checks\vv_2024_current_semester_teams_dry_run.sql:206:from public.subject_offerings so
+supabase\checks\vv_2024_current_semester_teams_dry_run.sql:234:from public.subject_offerings so
+supabase\checks\vv_2024_current_semester_teams_post_check.sql:13:from public.subject_offerings so
+supabase\checks\vv_2024_current_semester_teams_post_check.sql:76:(select count(*)::bigint from current_offerings) as current_semester_subject_offerings_total,
+supabase\checks\vv_2024_current_semester_teams_post_check.sql:87:(select count(*)::bigint from public.subject_offerings) as subject_offerings_total;
+supabase\checks\vv_2024_current_semester_teams_post_check.sql:99:from public.subject_offerings so
+supabase\checks\vv_2024_current_semester_teams_post_check.sql:144:from public.subject_offerings so
+supabase\checks\vv_2024_current_semester_teams_post_check.sql:167:from public.subject_offerings so
+supabase\checks\vv_2024_curriculum_import_dry_run.sql:232:(select count(*) from public.subject_offerings)::bigint as subject_offerings_total,
+supabase\checks\vv_2024_curriculum_import_post_check.sql:9:(select count(*) from public.subject_offerings)::bigint as subject_offerings_total;
+supabase\checks\vv_2024_curriculum_import_post_check.sql:16:count(*)::bigint as subject_offerings_total
+supabase\checks\vv_2024_curriculum_import_post_check.sql:17:from public.subject_offerings so
+supabase\checks\vv_2024_curriculum_import_post_check.sql:31:from public.subject_offerings so
+supabase\checks\vv_2024_curriculum_import_post_check.sql:58:from public.subject_offerings so
+supabase\checks\vv_2024_curriculum_import_post_check.sql:110:left join public.subject_offerings so
+supabase\checks\vv_2024_group_terms_check.sql:119:union all select 'subject_offerings', count(*)::bigint from public.subject_offerings
+supabase\checks\vv_2024_preflight_before_import.sql:43:('subject_offerings'),
+supabase\checks\vv_2024_preflight_before_import.sql:71:('subject_offerings', array['group_id']),
+supabase\checks\vv_2024_preflight_before_import.sql:72:('subject_offerings', array['subject_id']),
+supabase\checks\vv_2024_preflight_before_import.sql:73:('subject_offerings', array['academic_year_id']),
+supabase\checks\vv_2024_preflight_before_import.sql:74:('subject_offerings', array['academic_term_id']),
+supabase\checks\vv_2024_preflight_before_import.sql:75:('subject_offerings', array['curriculum_subject_id']),
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:18:--   group-scoped through subject_offerings in v2 RPCs.
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:33:alter table public.subject_offerings enable row level security;
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:144:create policy "subject_offerings_read_active_group"
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:145:on public.subject_offerings
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:152:where se.group_id = subject_offerings.group_id
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:166:from public.subject_offerings so
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:256:create policy "subject_offerings_admin_manage"
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:257:on public.subject_offerings
+supabase\migrations\20260609103000_add_academic_fk_indexes.sql:22:create index if not exists subject_offerings_academic_year_id_idx
+supabase\migrations\20260609103000_add_academic_fk_indexes.sql:23:on public.subject_offerings(academic_year_id);
+supabase\migrations\20260609103000_add_academic_fk_indexes.sql:25:create index if not exists subject_offerings_curriculum_subject_id_idx
+supabase\migrations\20260609103000_add_academic_fk_indexes.sql:26:on public.subject_offerings(curriculum_subject_id);
+supabase\migrations\20260609123500_import_vv_2024_curriculum_from_stage_draft.sql:5:--   subject_catalog, subject_aliases, curriculum_subjects, and subject_offerings;
+supabase\migrations\20260609123500_import_vv_2024_curriculum_from_stage_draft.sql:197:insert into public.subject_offerings (
+supabase\migrations\20260609123500_import_vv_2024_curriculum_from_stage_draft.sql:254:from public.subject_offerings existing
+supabase\migrations\20260609124500_create_vv_2024_current_semester_teams_draft.sql:4:-- - create teams only for VV 2024 current semester (semester 4) subject_offerings;
+supabase\migrations\20260609124500_create_vv_2024_current_semester_teams_draft.sql:23:from public.subject_offerings so
+supabase\migrations\20260609133000_create_subject_student_knowledge.sql:8:-- - does not mutate subject_offerings, student imports, auth.users, legacy teams/chats.
+supabase\migrations\20260609133000_create_subject_student_knowledge.sql:40:subject_offering_id uuid not null references public.subject_offerings(id) on delete restrict,
+supabase\migrations\20260609133000_create_subject_student_knowledge.sql:66:subject_offering_id uuid not null references public.subject_offerings(id) on delete restrict,
+supabase\migrations\20260609133000_create_subject_student_knowledge.sql:118:join public.subject_offerings so on so.id = v.subject_offering_id
+supabase\migrations\20260609133000_create_subject_student_knowledge.sql:172:v_offering public.subject_offerings%rowtype;
+supabase\migrations\20260609133000_create_subject_student_knowledge.sql:193:from public.subject_offerings so
+supabase\migrations\20260609133000_create_subject_student_knowledge.sql:436:join public.subject_offerings so on so.group_id = ae.group_id
+supabase\migrations\20260609133500_subject_student_knowledge_rls_draft.sql:30:from public.subject_offerings so
+supabase\migrations\20260609141000_fix_vote_subject_difficulty_v2_conflict.sql:36:v_offering public.subject_offerings%rowtype;
+supabase\migrations\20260609141000_fix_vote_subject_difficulty_v2_conflict.sql:57:from public.subject_offerings so
+supabase\migrations\20260609143000_prevent_repeat_subject_difficulty_votes.sql:36:v_offering public.subject_offerings%rowtype;
+supabase\migrations\20260609143000_prevent_repeat_subject_difficulty_votes.sql:57:from public.subject_offerings so
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:214:create table if not exists public.subject_offerings (
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:225:constraint subject_offerings_status_check
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:227:constraint subject_offerings_semester_check
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:231:create unique index if not exists subject_offerings_curriculum_subject_unique
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:232:on public.subject_offerings(group_id, curriculum_subject_id, academic_year_id, academic_term_id)
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:235:create unique index if not exists subject_offerings_subject_term_unique
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:236:on public.subject_offerings(group_id, subject_id, academic_year_id, academic_term_id)
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:239:create index if not exists subject_offerings_group_id_idx
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:240:on public.subject_offerings(group_id);
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:242:create index if not exists subject_offerings_subject_id_idx
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:243:on public.subject_offerings(subject_id);
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:245:create index if not exists subject_offerings_academic_term_id_idx
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:246:on public.subject_offerings(academic_term_id);
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:262:subject_offering_id uuid not null references public.subject_offerings(id) on delete cascade,
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:274:subject_offering_id uuid null references public.subject_offerings(id) on delete cascade,
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:332:subject_offering_id uuid null references public.subject_offerings(id) on delete cascade,
+supabase\migrations_recovered\migration_002_extend_existing_tables.sql:9:add column if not exists subject_offering_id uuid null references public.subject_offerings(id),
+supabase\migrations_recovered\migration_002_extend_existing_tables.sql:15:add column if not exists subject_offering_id uuid null references public.subject_offerings(id);
+supabase\migrations_recovered\migration_002_extend_existing_tables.sql:20:add column if not exists subject_offering_id uuid null references public.subject_offerings(id),
+supabase\migrations_recovered\migration_002_extend_existing_tables.sql:28:add column if not exists subject_offering_id uuid null references public.subject_offerings(id),
+supabase\migrations_recovered\migration_002_extend_existing_tables.sql:36:add column if not exists subject_offering_id uuid null references public.subject_offerings(id),
+supabase\migrations_recovered\migration_002_extend_existing_tables.sql:43:add column if not exists subject_offering_id uuid null references public.subject_offerings(id),
+
+## PATTERN: subject_catalog
+lib\src\ui\exams\exams_screen.dart:2120:subject_catalog(canonical_name)
+lib\src\ui\exams\exams_screen.dart:2302:final catalog = _asMap(row['subject_catalog']);
+lib\src\ui\info\info_screen.dart:320:.from('subject_catalog')
+lib\src\ui\info\subject_info_screen.dart:197:.from('subject_catalog')
+scripts\collect_project_snapshot.ps1:115:Write-Search "academic_terms_usage.txt" @("academic_years", "academic_terms", "group_academic_profiles", "group_term_semesters", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects")
+scripts\collect_project_snapshot.ps1:116:Write-Search "table_terms_usage.txt" @("groups", "teams", "team_members", "chats", "chat_members", "messages", "chat_files", "users", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects", "schedule", "lessons", "assignments", "diary", "friends", "useful")
+scripts\import_academic_batch.js:58:curriculum  Create subject_catalog, subject_aliases, curriculum_subjects, subject_offerings
+scripts\import_academic_batch.js:605:include_catalog: row.include_in_subject_catalog !== false,
+scripts\import_academic_batch.js:667:const existingSubjects = await ctx.db.list('subject_catalog');
+scripts\import_academic_batch.js:713:await db.insert('subject_catalog', candidates.subjects, { onConflict: 'normalized_name', ignore: true });
+scripts\import_academic_batch.js:714:const subjects = await db.list('subject_catalog');
+supabase\dev_seed_test_schedule_subject_link.sql:4:--   subject_catalog.description = 'stage2_1_test_schedule_subject_link'
+supabase\dev_seed_test_schedule_subject_link.sql:71:insert into public.subject_catalog (canonical_name, normalized_name, description)
+supabase\dev_seed_test_schedule_subject_link.sql:80:from public.subject_catalog
+supabase\dev_seed_test_schedule_subject_link.sql:404:from public.subject_catalog
+supabase\dev_seed_test_schedule_subject_link.sql:424:select 'subject_catalog' as object_type, count(*)::bigint as rows_count from test_subjects
+supabase\dev_seed_test_schedule_subject_link_rollback.sql:9:from public.subject_catalog
+supabase\dev_seed_test_schedule_subject_link_rollback.sql:35:from public.subject_catalog
+supabase\dev_seed_test_schedule_subject_link_rollback.sql:55:from public.subject_catalog
+supabase\dev_seed_test_schedule_subject_link_rollback.sql:76:from public.subject_catalog
+supabase\dev_seed_test_schedule_subject_link_rollback.sql:91:from public.subject_catalog
+supabase\dev_seed_test_schedule_subject_link_rollback.sql:117:from public.subject_catalog
+supabase\dev_seed_test_schedule_subject_link_rollback.sql:127:from public.subject_catalog
+supabase\dev_seed_test_schedule_subject_link_rollback.sql:136:from public.subject_catalog
+supabase\dev_seed_test_schedule_subject_link_rollback.sql:144:delete from public.subject_catalog
+supabase\stage2_3_schedule_subject_resolver.sql:135:join public.subject_catalog sc on sc.id = so.subject_id
+supabase\stage2_3_schedule_subject_resolver.sql:301:insert into public.subject_catalog (canonical_name, normalized_name, description)
+supabase\stage2_3_schedule_subject_resolver.sql:309:from public.subject_catalog
+supabase\stage2_3_schedule_subject_resolver_rollback.sql:10:from public.subject_catalog
+supabase\stage2_3_schedule_subject_resolver_rollback.sql:34:from public.subject_catalog
+supabase\stage2_3_schedule_subject_resolver_rollback.sql:60:from public.subject_catalog
+supabase\stage2_3_schedule_subject_resolver_rollback.sql:80:from public.subject_catalog
+supabase\stage2_3_schedule_subject_resolver_rollback.sql:101:from public.subject_catalog
+supabase\stage2_3_schedule_subject_resolver_rollback.sql:116:from public.subject_catalog
+supabase\stage2_3_schedule_subject_resolver_rollback.sql:126:from public.subject_catalog
+supabase\stage2_3_schedule_subject_resolver_rollback.sql:135:from public.subject_catalog
+supabase\stage2_3_schedule_subject_resolver_rollback.sql:143:delete from public.subject_catalog
+supabase\checks\academic_rls_audit.sql:13:('subject_catalog'),
+supabase\checks\academic_rls_audit.sql:56:('subject_catalog'),
+supabase\checks\academic_rls_audit.sql:98:('subject_catalog'),
+supabase\checks\academic_rls_audit.sql:144:('subject_catalog'),
+supabase\checks\academic_rls_audit.sql:250:'subject_catalog',
+supabase\checks\academic_rls_audit.sql:274:'subject_catalog',
+supabase\checks\stage_vv_2024_quality_checks.sql:155:include_in_subject_catalog,
+supabase\checks\subject_student_knowledge_checks.sql:61:left join public.subject_catalog sc on sc.id = ssp.subject_id
+supabase\checks\subject_student_knowledge_preflight.sql:44:('subject_catalog'),
+supabase\checks\vv_2024_current_semester_teams_dry_run.sql:18:join public.subject_catalog sc on sc.id = so.subject_id
+supabase\checks\vv_2024_current_semester_teams_dry_run.sql:156:join public.subject_catalog sc on sc.id = so.subject_id
+supabase\checks\vv_2024_curriculum_import_dry_run.sql:11:coalesce(sc.include_in_subject_catalog, true) as include_catalog,
+supabase\checks\vv_2024_curriculum_import_dry_run.sql:27:left join public.subject_catalog existing_subject
+supabase\checks\vv_2024_curriculum_import_dry_run.sql:147:(select count(*)::bigint from subject_candidates) as subject_catalog_candidates,
+supabase\checks\vv_2024_curriculum_import_dry_run.sql:148:(select count(*)::bigint from subject_candidates sc left join public.subject_catalog existing on existing.normalized_name = sc.normalized_subject_name where existing.id is null) as subject_catalog_to_create,
+supabase\checks\vv_2024_curriculum_import_dry_run.sql:154:(select count(*)::bigint from duplicate_subject_candidates) as duplicate_subject_catalog_candidates,
+supabase\checks\vv_2024_curriculum_import_dry_run.sql:194:coalesce(sc.include_in_subject_catalog, true) as include_catalog
+supabase\checks\vv_2024_curriculum_import_dry_run.sql:229:(select count(*) from public.subject_catalog)::bigint as subject_catalog_total,
+supabase\checks\vv_2024_curriculum_import_post_check.sql:6:(select count(*) from public.subject_catalog)::bigint as subject_catalog_total,
+supabase\checks\vv_2024_curriculum_import_post_check.sql:33:join public.subject_catalog sc on sc.id = so.subject_id
+supabase\checks\vv_2024_curriculum_import_post_check.sql:59:left join public.subject_catalog sc on sc.id = so.subject_id
+supabase\checks\vv_2024_curriculum_import_post_check.sql:79:coalesce(sc.include_in_subject_catalog, true) as include_catalog,
+supabase\checks\vv_2024_curriculum_import_post_check.sql:102:left join public.subject_catalog subject on subject.normalized_name = s.normalized_subject_name
+supabase\checks\vv_2024_group_terms_check.sql:116:union all select 'subject_catalog', count(*)::bigint from public.subject_catalog
+supabase\checks\vv_2024_preflight_before_import.sql:39:('subject_catalog'),
+supabase\migrations\20260609080000_create_vv_2024_staging_tables.sql:95:include_in_subject_catalog boolean null,
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:29:alter table public.subject_catalog enable row level security;
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:50:create policy "subject_catalog_read_authenticated"
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:51:on public.subject_catalog
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:228:create policy "subject_catalog_admin_manage"
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:229:on public.subject_catalog
+supabase\migrations\20260609123500_import_vv_2024_curriculum_from_stage_draft.sql:5:--   subject_catalog, subject_aliases, curriculum_subjects, and subject_offerings;
+supabase\migrations\20260609123500_import_vv_2024_curriculum_from_stage_draft.sql:11:insert into public.subject_catalog (
+supabase\migrations\20260609123500_import_vv_2024_curriculum_from_stage_draft.sql:20:coalesce(sc.include_in_subject_catalog, true) as include_catalog
+supabase\migrations\20260609123500_import_vv_2024_curriculum_from_stage_draft.sql:50:coalesce(sc.include_in_subject_catalog, true) as include_catalog
+supabase\migrations\20260609123500_import_vv_2024_curriculum_from_stage_draft.sql:74:join public.subject_catalog sc on sc.normalized_name = ac.normalized_subject_name
+supabase\migrations\20260609123500_import_vv_2024_curriculum_from_stage_draft.sql:98:coalesce(sc.include_in_subject_catalog, true) as include_catalog
+supabase\migrations\20260609123500_import_vv_2024_curriculum_from_stage_draft.sql:138:join public.subject_catalog sc on sc.normalized_name = cc.normalized_subject_name
+supabase\migrations\20260609123500_import_vv_2024_curriculum_from_stage_draft.sql:166:coalesce(sc.include_in_subject_catalog, true) as include_catalog
+supabase\migrations\20260609123500_import_vv_2024_curriculum_from_stage_draft.sql:189:join public.subject_catalog sc on sc.normalized_name = mc.normalized_subject_name
+supabase\migrations\20260609123500_import_vv_2024_curriculum_from_stage_draft.sql:212:coalesce(sc.include_in_subject_catalog, true) as include_catalog,
+supabase\migrations\20260609123500_import_vv_2024_curriculum_from_stage_draft.sql:230:join public.subject_catalog sc on sc.normalized_name = s.normalized_subject_name
+supabase\migrations\20260609133000_create_subject_student_knowledge.sql:14:subject_id uuid not null references public.subject_catalog(id) on delete restrict,
+supabase\migrations\20260609133000_create_subject_student_knowledge.sql:65:subject_id uuid not null references public.subject_catalog(id) on delete restrict,
+supabase\migrations\20260609133000_create_subject_student_knowledge.sql:437:join public.subject_catalog sc on sc.id = so.subject_id
+supabase\migrations\20260609133000_create_subject_student_knowledge.sql:471:'Schedule alias matching state: matched, pending, ambiguous, ignored. Never creates subject_catalog rows automatically.';
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:153:create table if not exists public.subject_catalog (
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:160:constraint subject_catalog_normalized_name_unique unique (normalized_name)
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:165:subject_id uuid not null references public.subject_catalog(id) on delete cascade,
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:182:resolved_subject_id uuid null references public.subject_catalog(id) on delete set null,
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:197:subject_id uuid not null references public.subject_catalog(id) on delete restrict,
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:216:subject_id uuid not null references public.subject_catalog(id) on delete restrict,
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:272:subject_id uuid not null references public.subject_catalog(id) on delete cascade,
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:331:subject_id uuid not null references public.subject_catalog(id) on delete cascade,
+supabase\migrations_recovered\migration_002_extend_existing_tables.sql:8:add column if not exists subject_id uuid null references public.subject_catalog(id),
+supabase\migrations_recovered\migration_002_extend_existing_tables.sql:19:add column if not exists subject_id uuid null references public.subject_catalog(id),
+supabase\migrations_recovered\migration_002_extend_existing_tables.sql:27:add column if not exists subject_id uuid null references public.subject_catalog(id),
+supabase\migrations_recovered\migration_002_extend_existing_tables.sql:35:add column if not exists subject_id uuid null references public.subject_catalog(id),
+supabase\migrations_recovered\migration_002_extend_existing_tables.sql:42:add column if not exists subject_id uuid null references public.subject_catalog(id),
+
+## PATTERN: curriculum_subjects
+lib\src\ui\exams\exams_screen.dart:2110:curriculum_subjects(
+lib\src\ui\exams\exams_screen.dart:2301:final curriculum = _asMap(row['curriculum_subjects']);
+lib\src\ui\info\info_screen.dart:329:.from('curriculum_subjects')
+lib\src\ui\info\subject_info_screen.dart:206:.from('curriculum_subjects')
+scripts\collect_project_snapshot.ps1:115:Write-Search "academic_terms_usage.txt" @("academic_years", "academic_terms", "group_academic_profiles", "group_term_semesters", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects")
+scripts\collect_project_snapshot.ps1:116:Write-Search "table_terms_usage.txt" @("groups", "teams", "team_members", "chats", "chat_members", "messages", "chat_files", "users", "student_enrollments", "subject_offerings", "subject_catalog", "curriculum_subjects", "schedule", "lessons", "assignments", "diary", "friends", "useful")
+scripts\import_academic_batch.js:58:curriculum  Create subject_catalog, subject_aliases, curriculum_subjects, subject_offerings
+scripts\import_academic_batch.js:669:const existingCurriculumSubjects = await ctx.db.list('curriculum_subjects');
+scripts\import_academic_batch.js:727:const existingCurriculum = await db.list('curriculum_subjects');
+scripts\import_academic_batch.js:762:await db.insert('curriculum_subjects', curriculumRows);
+scripts\import_academic_batch.js:764:const freshCurriculum = await db.list('curriculum_subjects');
+supabase\dev_seed_test_schedule_subject_link.sql:6:--   curriculum_subjects.subject_index starts with 'STAGE2.1-TEST'
+supabase\dev_seed_test_schedule_subject_link.sql:165:from public.curriculum_subjects
+supabase\dev_seed_test_schedule_subject_link.sql:174:insert into public.curriculum_subjects (
+supabase\dev_seed_test_schedule_subject_link.sql:426:union all select 'curriculum_subjects', count(*)::bigint from public.curriculum_subjects cs join test_subjects ts on ts.id = cs.subject_id
+supabase\dev_seed_test_schedule_subject_link_rollback.sql:140:delete from public.curriculum_subjects
+supabase\stage2_3_schedule_subject_resolver.sql:137:left join public.curriculum_subjects cs on cs.id = so.curriculum_subject_id
+supabase\stage2_3_schedule_subject_resolver.sql:333:from public.curriculum_subjects
+supabase\stage2_3_schedule_subject_resolver.sql:342:insert into public.curriculum_subjects (
+supabase\stage2_3_schedule_subject_resolver_rollback.sql:139:delete from public.curriculum_subjects
+supabase\checks\academic_rls_audit.sql:16:('curriculum_subjects'),
+supabase\checks\academic_rls_audit.sql:59:('curriculum_subjects'),
+supabase\checks\academic_rls_audit.sql:101:('curriculum_subjects'),
+supabase\checks\academic_rls_audit.sql:147:('curriculum_subjects'),
+supabase\checks\academic_rls_audit.sql:253:'curriculum_subjects',
+supabase\checks\academic_rls_audit.sql:277:'curriculum_subjects',
+supabase\checks\subject_student_knowledge_preflight.sql:47:('curriculum_subjects'),
+supabase\checks\vv_2024_curriculum_import_dry_run.sql:231:(select count(*) from public.curriculum_subjects)::bigint as curriculum_subjects_total,
+supabase\checks\vv_2024_curriculum_import_post_check.sql:8:(select count(*) from public.curriculum_subjects)::bigint as curriculum_subjects_total,
+supabase\checks\vv_2024_curriculum_import_post_check.sql:103:left join public.curriculum_subjects cs
+supabase\checks\vv_2024_group_terms_check.sql:118:union all select 'curriculum_subjects', count(*)::bigint from public.curriculum_subjects
+supabase\checks\vv_2024_preflight_before_import.sql:42:('curriculum_subjects'),
+supabase\checks\vv_2024_preflight_before_import.sql:70:('curriculum_subjects', array['subject_id']),
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:17:-- - Confirm whether curriculum_subjects should be globally readable or only
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:32:alter table public.curriculum_subjects enable row level security;
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:62:create policy "curriculum_subjects_read_authenticated"
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:63:on public.curriculum_subjects
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:249:create policy "curriculum_subjects_admin_manage"
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:250:on public.curriculum_subjects
+supabase\migrations\20260609123000_add_curriculum_subject_metadata_columns_draft.sql:4:-- is not present in the current production curriculum_subjects schema.
+supabase\migrations\20260609123000_add_curriculum_subject_metadata_columns_draft.sql:6:alter table public.curriculum_subjects
+supabase\migrations\20260609123000_add_curriculum_subject_metadata_columns_draft.sql:16:create index if not exists curriculum_subjects_subject_index_idx
+supabase\migrations\20260609123000_add_curriculum_subject_metadata_columns_draft.sql:17:on public.curriculum_subjects (subject_index)
+supabase\migrations\20260609123000_add_curriculum_subject_metadata_columns_draft.sql:20:create index if not exists curriculum_subjects_elective_module_code_idx
+supabase\migrations\20260609123000_add_curriculum_subject_metadata_columns_draft.sql:21:on public.curriculum_subjects (elective_module_code)
+supabase\migrations\20260609123500_import_vv_2024_curriculum_from_stage_draft.sql:5:--   subject_catalog, subject_aliases, curriculum_subjects, and subject_offerings;
+supabase\migrations\20260609123500_import_vv_2024_curriculum_from_stage_draft.sql:77:insert into public.curriculum_subjects (
+supabase\migrations\20260609123500_import_vv_2024_curriculum_from_stage_draft.sql:141:from public.curriculum_subjects existing
+supabase\migrations\20260609123500_import_vv_2024_curriculum_from_stage_draft.sql:150:update public.curriculum_subjects cs
+supabase\migrations\20260609123500_import_vv_2024_curriculum_from_stage_draft.sql:231:join public.curriculum_subjects cs
+supabase\migrations\20260609133000_create_subject_student_knowledge.sql:438:left join public.curriculum_subjects cs_sub on cs_sub.id = so.curriculum_subject_id
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:194:create table if not exists public.curriculum_subjects (
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:207:create unique index if not exists curriculum_subjects_plan_subject_unique
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:208:on public.curriculum_subjects(curriculum_plan_id, subject_id, semester_number, module_number)
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:211:create index if not exists curriculum_subjects_subject_id_idx
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:212:on public.curriculum_subjects(subject_id);
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:217:curriculum_subject_id uuid null references public.curriculum_subjects(id) on delete set null,
+supabase\migrations_recovered\migration_001_core_academic_subjects.sql:273:curriculum_subject_id uuid null references public.curriculum_subjects(id) on delete cascade,
+

@@ -35,6 +35,18 @@ class LearningCubit extends Cubit<LearningState> {
   List<Team> get visibleTeams =>
       state.teams.where((t) => !state.hiddenIds.contains(t.id)).toList();
 
+  /// Permanent group chat card for Learning (not a subject tile).
+  Team? get groupSpaceTeam {
+    for (final team in visibleTeams) {
+      if (team.isGroupSpaceChat) return team;
+    }
+    return null;
+  }
+
+  /// Subject teams only — group_space is shown via [groupSpaceTeam].
+  List<Team> get subjectTeams =>
+      visibleTeams.where((t) => !t.isGroupSpaceChat).toList();
+
   Future<void> toggleHidden(String teamId) async {
     final set = {...state.hiddenIds};
     if (set.contains(teamId)) {
@@ -47,7 +59,8 @@ class LearningCubit extends Cubit<LearningState> {
   }
 
   Future<void> toggleViewMode() async {
-    final next = state.viewMode == ViewMode.list ? ViewMode.grid : ViewMode.list;
+    final next =
+        state.viewMode == ViewMode.list ? ViewMode.grid : ViewMode.list;
     await repo.saveViewMode(next == ViewMode.grid ? 'grid' : 'list');
     emit(state.copyWith(viewMode: next));
   }

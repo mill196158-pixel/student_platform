@@ -1,0 +1,108 @@
+-- EXAMPLE ONLY. Do not apply as-is. Never put PUSH_DISPATCH_SECRET in git.
+-- Stage 11: once-per-minute drain for outbox retries + stuck processing.
+--
+-- Architecture:
+--   1) INSERT Database Webhook → fast first delivery (stage11_webhook_setup.sql.example)
+--   2) This Cron (every minute) → retries (pending/available_at) + reclaim stale processing
+--
+-- Preferred UI path (no secret in SQL):
+--   Supabase Dashboard → Integrations → Cron Jobs → Create
+--   Schedule: * * * * *   (every minute)
+--   Type: HTTP request
+--   Method: POST
+--   URL: https://<PROJECT_REF>.supabase.co/functions/v1/dispatch-push-notifications
+--   Headers:
+--     Authorization: Bearer <PUSH_DISPATCH_SECRET>   -- paste from project secrets UI
+--     Content-Type: application/json
+--   Body: {}
+--   Job name: dispatch-push-notifications-minutely
+--
+-- Ensure Edge Function secret exists (CLI / Dashboard Secrets — not SQL):
+--   PUSH_DISPATCH_SECRET=<random long secret>
+--   FIREBASE_SERVICE_ACCOUNT_JSON=<service account json>
+--
+-- ---------------------------------------------------------------------------
+-- Optional SQL path using Vault + pg_net + pg_cron (no plaintext secret in repo)
+-- ---------------------------------------------------------------------------
+-- 1) Store secret once in Vault (run in SQL editor; do not commit the value):
+--
+--   select vault.create_secret(
+--     '<PUSH_DISPATCH_SECRET>',
+--     'push_dispatch_secret',
+--     'Bearer token for dispatch-push-notifications cron'
+--   );
+--
+-- 2) Ensure extensions:
+--
+--   create extension if not exists pg_net with schema extensions;
+--   create extension if not exists pg_cron with schema pg_catalog;
+--
+-- 3) Schedule exactly one job (unschedule previous name first):
+--
+--   select cron.unschedule(jobid)
+--   from cron.job
+--   where jobname = 'dispatch-push-notifications-minutely';
+--
+--   select cron.schedule(
+--     'dispatch-push-notifications-minutely',
+--     '* * * * *',
+--     $cron$
+--     select net.http_post(
+--       url := 'https://<PROJECT_REF>.supabase.co/functions/v1/dispatch-push-notifications',
+--       headers := jsonb_build_object(
+--         'Content-Type', 'application/json',
+--         'Authorization', 'Bearer ' || (
+--           select decrypted_secret
+--           from vault.decrypted_secrets
+--           where name = 'push_dispatch_secret'
+--           limit 1
+--         )
+--       ),
+--       body := '{}'::jsonb,
+--       timeout_milliseconds := 15000
+--     );
+--     $cron$
+--   );
+--
+-- ---------------------------------------------------------------------------
+-- Verification queries (safe to run; no secrets printed)
+-- ---------------------------------------------------------------------------
+
+-- A) Exactly one cron job with this name:
+-- select jobid, jobname, schedule, active
+-- from cron.job
+-- where jobname = 'dispatch-push-notifications-minutely';
+-- -- expect: 1 row, active = true, schedule = '* * * * *'
+
+-- B) Pending due rows exist / are claimable:
+-- select id, status, attempts, available_at, processing_started_at, last_error
+-- from public.notification_outbox
+-- where status = 'pending'
+--   and available_at <= now()
+--   and attempts < 8
+-- order by available_at
+-- limit 20;
+
+-- C) Stale processing (< 8 attempts) is reclaimable by claim:
+-- select id, status, attempts, processing_started_at
+-- from public.notification_outbox
+-- where status = 'processing'
+--   and attempts < 8
+--   and processing_started_at is not null
+--   and processing_started_at <= now() - interval '5 minutes';
+
+-- D) Exhausted stale processing becomes failed on next claim:
+-- select id, status, attempts, processing_started_at, last_error, processed_at
+-- from public.notification_outbox
+-- where status = 'processing'
+--   and attempts >= 8
+--   and processing_started_at is not null
+--   and processing_started_at <= now() - interval '5 minutes';
+-- -- after Edge/cron runs claim: status should be 'failed', last_error = 'max_attempts_exceeded'
+
+-- E) Manual drain (local/ops only; put secret in shell env, not in SQL file):
+-- curl -X POST \
+--   "https://<PROJECT_REF>.supabase.co/functions/v1/dispatch-push-notifications" \
+--   -H "Authorization: Bearer $PUSH_DISPATCH_SECRET" \
+--   -H "Content-Type: application/json" \
+--   -d "{}"

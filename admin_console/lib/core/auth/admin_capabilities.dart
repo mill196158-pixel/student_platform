@@ -1,0 +1,96 @@
+class AdminCapabilities {
+  const AdminCapabilities({
+    required this.userId,
+    required this.permissions,
+    required this.assignments,
+  });
+
+  final String? userId;
+  final Set<String> permissions;
+  final List<AdminAssignmentScope> assignments;
+
+  static const empty = AdminCapabilities(
+    userId: null,
+    permissions: {},
+    assignments: [],
+  );
+
+  bool get hasAnyAdminAccess => permissions.isNotEmpty;
+
+  bool can(String permission) => permissions.contains(permission);
+
+  bool get canViewDashboard => can('dashboard.view');
+  bool get canReadContent => can('content.read') || can('content.write');
+  bool get canWriteContent => can('content.write');
+  bool get canPublishContent => can('content.publish');
+  bool get canReadAcademic =>
+      can('academic.read') ||
+      can('subjects.write') ||
+      can('teachers.write') ||
+      can('students.read') ||
+      can('students.write') ||
+      can('groups.write') ||
+      can('terms.manage');
+  bool get canWriteSubjects => can('subjects.write');
+  bool get canWriteTeachers => can('teachers.write');
+  bool get canReadStudents => can('students.read') || can('students.write');
+  bool get canWriteStudents => can('students.write');
+  bool get canSuspendStudents => can('students.suspend');
+  bool get canWriteGroups => can('groups.write');
+  bool get canManageTerms => can('terms.manage');
+
+  /// Matches server `private.is_group_space_admin` for organizer grants.
+  bool get canManageGroupSpaceOrganizer =>
+      can('groups.write') || can('students.write') || can('terms.manage');
+  bool get canManageRoles => can('roles.manage');
+  bool get canReadAudit => can('audit.read');
+
+  factory AdminCapabilities.fromJson(Map<String, dynamic> json) {
+    final rawPermissions = json['permissions'];
+    final permissions = <String>{};
+    if (rawPermissions is List) {
+      for (final item in rawPermissions) {
+        if (item != null) permissions.add(item.toString());
+      }
+    }
+
+    final rawAssignments = json['assignments'];
+    final assignments = <AdminAssignmentScope>[];
+    if (rawAssignments is List) {
+      for (final item in rawAssignments) {
+        if (item is Map) {
+          assignments.add(
+            AdminAssignmentScope(
+              roleCode: item['role_code']?.toString() ?? '',
+              scopeType: item['scope_type']?.toString() ?? 'global',
+              scopeId: item['scope_id']?.toString(),
+              expiresAt: item['expires_at'] == null
+                  ? null
+                  : DateTime.tryParse(item['expires_at'].toString()),
+            ),
+          );
+        }
+      }
+    }
+
+    return AdminCapabilities(
+      userId: json['user_id']?.toString(),
+      permissions: permissions,
+      assignments: assignments,
+    );
+  }
+}
+
+class AdminAssignmentScope {
+  const AdminAssignmentScope({
+    required this.roleCode,
+    required this.scopeType,
+    this.scopeId,
+    this.expiresAt,
+  });
+
+  final String roleCode;
+  final String scopeType;
+  final String? scopeId;
+  final DateTime? expiresAt;
+}

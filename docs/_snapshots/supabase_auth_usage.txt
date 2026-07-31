@@ -1,0 +1,229 @@
+﻿## PATTERN: auth.
+lib\all_dart_code.txt:155:_session = Supabase.instance.client.auth.currentSession;
+lib\all_dart_code.txt:156:Supabase.instance.client.auth.onAuthStateChange.listen((event) {
+lib\all_dart_code.txt:335:/// РџСЂРµРІСЂР°С‰Р°РµС‚ РІРІРµРґС‘РЅРЅС‹Р№ Р»РѕРіРёРЅ РІ email РґР»СЏ Supabase Auth.
+lib\all_dart_code.txt:403:final sess = sb.auth.currentSession;
+lib\all_dart_code.txt:1044:final String userId = _sb.auth.currentUser?.id ?? 'anon';
+lib\all_dart_code.txt:1220:await _sb.auth.signInWithPassword(email: email, password: password);
+lib\all_dart_code.txt:1229:await _sb.auth.signOut();
+lib\all_dart_code.txt:2124:await _sb.auth.signInWithPassword(email: email, password: pass);
+lib\all_dart_code.txt:2140:final uid = _sb.auth.currentUser?.id;
+lib\all_dart_code.txt:2356:await sb.auth.signInWithPassword(email: _toEmail(login), password: pass);
+lib\all_dart_code.txt:2713:final me = sb.auth.currentUser?.id;
+lib\all_dart_code.txt:4431:currentUserId: Supabase.instance.client.auth.currentUser?.id,
+lib\all_dart_code.txt:4483:String get currentUserId => Supabase.instance.client.auth.currentUser?.id ?? '';
+lib\all_dart_code.txt:4542:.eq('user_id', sb.auth.currentUser!.id)
+lib\all_dart_code.txt:4997:String get currentUserId => Supabase.instance.client.auth.currentUser?.id ?? '';
+lib\all_dart_code.txt:6506:final uid = _sb.auth.currentUser?.id;
+lib\all_dart_code.txt:6564:final uid = _sb.auth.currentUser?.id;
+lib\all_dart_code.txt:7235:_myId = _sb.auth.currentUser?.id;
+lib\all_dart_code.txt:8212:final uid = _sb.auth.currentUser?.id;
+lib\all_dart_code.txt:8248:final uid = _sb.auth.currentUser?.id;
+lib\all_dart_code.txt:8378:final uid = _sb.auth.currentUser?.id;
+lib\all_dart_code.txt:8434:final uid = _sb.auth.currentUser?.id;
+lib\all_dart_code.txt:8457:final uid = _sb.auth.currentUser?.id;
+lib\all_dart_code.txt:8506:final me = _sb.auth.currentUser?.id;
+lib\all_dart_code.txt:9968:final uid = client.auth.currentUser?.id;
+lib\all_dart_code.txt:11219:final user = _sb.auth.currentUser;
+lib\all_dart_code.txt:11334:final me = _sb.auth.currentUser;
+lib\all_dart_code.txt:11442:final uid = _sb.auth.currentUser?.id;
+lib\all_dart_code.txt:12535:final uid = sb.auth.currentUser?.id;
+lib\all_dart_code.txt:12570:final uid = Supabase.instance.client.auth.currentUser?.id;
+lib\all_dart_code.txt:12604:final uid = Supabase.instance.client.auth.currentUser?.id;
+lib\all_dart_code.txt:12635:final currentUid = Supabase.instance.client.auth.currentUser?.id ?? '';
+lib\all_dart_code.txt:12876:final uid = sb.auth.currentUser?.id;
+lib\all_dart_code.txt:14019:final uid = Supabase.instance.client.auth.currentUser?.id;
+lib\all_dart_code.txt:14665:final user = Supabase.instance.client.auth.currentUser;
+lib\all_dart_code.txt:14877:currentUserId: Supabase.instance.client.auth.currentUser?.id,
+lib\all_dart_code.txt:16255:final user = _sb.auth.currentUser;
+lib\all_dart_code.txt:19172:final isMe = message.isMine(Supabase.instance.client.auth.currentUser?.id);
+lib\all_dart_code.txt:21114:final uid = Supabase.instance.client.auth.currentUser?.id;
+lib\all_dart_code.txt:21425:final userId = Supabase.instance.client.auth.currentUser?.id;
+lib\all_dart_code.txt:21732:final userId = Supabase.instance.client.auth.currentUser?.id;
+lib\all_dart_code.txt:22056:uploadedBy: supabase.auth.currentUser!.id,
+lib\all_dart_code.txt:22068:uploadedBy: supabase.auth.currentUser!.id,
+lib\all_dart_code.txt:22445:final uid = supabase.auth.currentUser?.id;
+lib\all_dart_code.txt:22524:final uid = supabase.auth.currentUser?.id;
+lib\all_dart_code.txt:24017:final id = _user!['id'] as String; // auth.uid()
+lib\all_dart_code.txt:24127:await _sb.auth.updateUser(UserAttributes(password: a));
+lib\all_dart_code.txt:24354:final uid = _sb.auth.currentUser?.id;
+lib\all_dart_code.txt:24370:final uid = _sb.auth.currentUser!.id;
+lib\all_dart_code.txt:24382:final uid = _sb.auth.currentUser!.id;
+lib\all_dart_code.txt:24452:_sb.auth.currentUser?.id ?? (_user?['id'] as String?);
+lib\all_dart_code.txt:24522:try { _sb.auth.refreshSession(); } catch (_) {}
+lib\all_dart_code.txt:24598:if (_sb.auth.currentSession != null) return;
+lib\all_dart_code.txt:24601:await _sb.auth.refreshSession();
+lib\all_dart_code.txt:24819:await _sb.auth.signOut();
+lib\src\app.dart:20:_session = Supabase.instance.client.auth.currentSession;
+lib\src\app.dart:22:Supabase.instance.client.auth.onAuthStateChange.listen((event) {
+lib\src\app.dart:29:final userId = Supabase.instance.client.auth.currentUser?.id;
+lib\src\config\auth_email_adapter.dart:1:/// Converts a student login or email into the email used by Supabase Auth.
+lib\src\core\session.dart:24:final sess = sb.auth.currentSession;
+lib\src\data\academic_context_service.dart:85:final authUser = _sb.auth.currentUser;
+lib\src\data\personal_diary_service.dart:209:final userId = _sb.auth.currentUser?.id ?? context.userId ?? '';
+lib\src\data\personal_diary_service.dart:540:final userId = _sb.auth.currentUser?.id ?? '';
+lib\src\data\personal_diary_service.dart:601:final userId = _sb.auth.currentUser?.id ?? '';
+lib\src\data\personal_diary_service.dart:662:final userId = _sb.auth.currentUser?.id ?? '';
+lib\src\data\personal_diary_service.dart:707:final userId = _sb.auth.currentUser?.id ?? '';
+lib\src\data\subject_diary_repository_supabase.dart:296:final authorId = _sb.auth.currentUser?.id ?? '';
+lib\src\data\subject_diary_repository_supabase.dart:718:final authorId = _sb.auth.currentUser?.id ?? '';
+lib\src\data\subject_diary_repository_supabase.dart:746:final authorId = _sb.auth.currentUser?.id ?? '';
+lib\src\data\subject_diary_repository_supabase.dart:1015:final String userId = _sb.auth.currentUser?.id ?? 'anon';
+lib\src\services\auth_service.dart:20:await _sb.auth.signInWithPassword(email: email, password: password);
+lib\src\services\auth_service.dart:25:final uid = _sb.auth.currentUser?.id;
+lib\src\services\auth_service.dart:48:await _sb.auth.signOut();
+lib\src\services\file_service.dart:27:if (_supabase.auth.currentSession == null) {
+lib\src\services\file_service.dart:205:final session = _supabase.auth.currentSession;
+lib\src\ui\authentication\screens\change_password_screen.dart:37:final userId = sb.auth.currentUser?.id;
+lib\src\ui\authentication\screens\change_password_screen.dart:42:await sb.auth.updateUser(UserAttributes(password: _passwordCtrl.text));
+lib\src\ui\authentication\screens\login_screen.dart:37:await _sb.auth.signInWithPassword(email: authEmail, password: pass);
+lib\src\ui\authentication\screens\login_screen.dart:53:final uid = _sb.auth.currentUser?.id;
+lib\src\ui\authentication\screens\login_screen.dart:66:final uid = _sb.auth.currentUser?.id;
+lib\src\ui\authentication\screens\register_screen.dart:62:await sb.auth.signInWithPassword(
+lib\src\ui\chats\my_chats_screen.dart:163:final me = sb.auth.currentUser?.id;
+lib\src\ui\chats\my_chats_screen.dart:1974:Supabase.instance.client.auth.currentUser?.id,
+lib\src\ui\chats\core\dm_chat_service.dart:28:Supabase.instance.client.auth.currentUser?.id ?? '';
+lib\src\ui\chats\core\dm_chat_service.dart:105:.eq('user_id', sb.auth.currentUser!.id)
+lib\src\ui\chats\core\team_chat_service.dart:36:Supabase.instance.client.auth.currentUser?.id ?? '';
+lib\src\ui\chats\data\dm_api.dart:348:final uid = _sb.auth.currentUser?.id;
+lib\src\ui\chats\data\dm_api.dart:420:final uid = _sb.auth.currentUser?.id;
+lib\src\ui\exams\exams_screen.dart:2035:final userId = _sb.auth.currentUser?.id;
+lib\src\ui\friends\friend_profile_screen.dart:66:_myId = _sb.auth.currentUser?.id;
+lib\src\ui\friends\my_friends_screen.dart:70:final uid = _sb.auth.currentUser?.id;
+lib\src\ui\friends\my_friends_screen.dart:110:final uid = _sb.auth.currentUser?.id;
+lib\src\ui\friends\my_friends_screen.dart:237:final uid = _sb.auth.currentUser?.id;
+lib\src\ui\friends\my_friends_screen.dart:435:final uid = _sb.auth.currentUser?.id;
+lib\src\ui\friends\my_friends_screen.dart:491:final uid = _sb.auth.currentUser?.id;
+lib\src\ui\friends\my_friends_screen.dart:514:final uid = _sb.auth.currentUser?.id;
+lib\src\ui\friends\my_friends_screen.dart:563:final me = _sb.auth.currentUser?.id;
+lib\src\ui\learning\learning_screen.dart:72:final uid = client.auth.currentUser?.id;
+lib\src\ui\learning\data\supabase_learning_repository.dart:158:final user = _sb.auth.currentUser;
+lib\src\ui\learning\data\supabase_learning_repository.dart:348:final me = _sb.auth.currentUser;
+lib\src\ui\learning\data\supabase_learning_repository.dart:421:currentUserId: _sb.auth.currentUser?.id ?? '',
+lib\src\ui\learning\data\supabase_learning_repository.dart:478:currentUserId: _sb.auth.currentUser?.id ?? '',
+lib\src\ui\learning\data\supabase_learning_repository.dart:553:final uid = _sb.auth.currentUser?.id;
+lib\src\ui\learning\state\team_cubit.dart:237:final uid = sb.auth.currentUser?.id;
+lib\src\ui\learning\state\team_cubit.dart:271:final uid = Supabase.instance.client.auth.currentUser?.id;
+lib\src\ui\learning\state\team_cubit.dart:305:final uid = Supabase.instance.client.auth.currentUser?.id;
+lib\src\ui\learning\state\team_cubit.dart:336:final currentUid = Supabase.instance.client.auth.currentUser?.id ?? '';
+lib\src\ui\learning\state\team_cubit.dart:664:final uid = sb.auth.currentUser?.id;
+lib\src\ui\learning\tabs\chat_tab.dart:76:final uid = Supabase.instance.client.auth.currentUser?.id;
+lib\src\ui\learning\tabs\chat_tab.dart:826:final user = Supabase.instance.client.auth.currentUser;
+lib\src\ui\learning\tabs\chat_tab.dart:1058:Supabase.instance.client.auth.currentUser?.id,
+lib\src\ui\learning\tabs\files_tab.dart:536:final user = _sb.auth.currentUser;
+lib\src\ui\learning\tabs\chat\message_bubble.dart:65:final isMe = message.isMine(Supabase.instance.client.auth.currentUser?.id);
+lib\src\ui\learning\tabs\chat\actions\chat_actions.dart:23:final uid = Supabase.instance.client.auth.currentUser?.id;
+lib\src\ui\learning\tabs\chat\actions\chat_actions.dart:334:final userId = Supabase.instance.client.auth.currentUser?.id;
+lib\src\ui\learning\tabs\chat\actions\chat_actions.dart:641:final userId = Supabase.instance.client.auth.currentUser?.id;
+lib\src\ui\learning\tabs\chat\attachments\chat_attachments_controller.dart:113:uploadedBy: supabase.auth.currentUser!.id,
+lib\src\ui\learning\tabs\chat\attachments\chat_attachments_controller.dart:145:uploadedBy: supabase.auth.currentUser!.id,
+lib\src\ui\learning\tabs\chat\data\chat_repository.dart:53:final uid = supabase.auth.currentUser?.id;
+lib\src\ui\learning\tabs\chat\data\chat_repository.dart:135:final uid = supabase.auth.currentUser?.id;
+lib\src\ui\profile\edit_profile_screen.dart:87:final id = _user!['id'] as String; // auth.uid()
+lib\src\ui\profile\edit_profile_screen.dart:196:await _sb.auth.updateUser(UserAttributes(password: a));
+lib\src\ui\profile\profile_repository.dart:8:final uid = _sb.auth.currentUser?.id;
+lib\src\ui\profile\profile_repository.dart:24:final uid = _sb.auth.currentUser!.id;
+lib\src\ui\profile\profile_repository.dart:36:final uid = _sb.auth.currentUser!.id;
+lib\src\ui\profile\profile_screen.dart:53:String? get _uid => _sb.auth.currentUser?.id ?? (_user?['id'] as String?);
+lib\src\ui\profile\profile_screen.dart:123:_sb.auth.refreshSession();
+lib\src\ui\profile\profile_screen.dart:203:if (_sb.auth.currentSession != null) return;
+lib\src\ui\profile\profile_screen.dart:206:await _sb.auth.refreshSession();
+lib\src\ui\profile\profile_screen.dart:431:await _sb.auth.signOut();
+scripts\collect_project_snapshot.ps1:110:Write-Search "supabase_auth_usage.txt" @("auth.")
+supabase\check_pin_message.sql:2:-- Safe to run in Supabase SQL editor. Uses auth.uid() of current session.
+supabase\check_pin_message.sql:64:where m.author_id = auth.uid()
+supabase\check_pin_message.sql:71:join public.team_members tm on tm.team_id = c.team_id and tm.user_id = auth.uid()
+supabase\check_pin_message.sql:74:'auth_uid', auth.uid(),
+supabase\check_pin_message.sql:83:select id from public.messages where author_id = auth.uid() order by created_at desc limit 1
+supabase\check_pin_message.sql:101:(select id from public.messages where author_id = auth.uid() order by created_at desc limit 1),
+supabase\enable_pin_for_all.sql:36:JOIN public.team_members tm ON tm.team_id = c.team_id AND tm.user_id = auth.uid()
+supabase\enable_pin_for_all.sql:44:JOIN public.team_members tm ON tm.team_id = c.team_id AND tm.user_id = auth.uid()
+supabase\fix_pin_message.sql:25:'author_id = auth.uid() or exists (select 1 from public.chats c join public.team_members tm on tm.team_id = c.team_id where c.id = messages.chat_id and tm.user_id = auth.uid() and tm.role in (''owner'',''starosta''))',
+supabase\fix_pin_message.sql:26:'author_id = auth.uid() or exists (select 1 from public.chats c join public.team_members tm on tm.team_id = c.team_id where c.id = messages.chat_id and tm.user_id = auth.uid() and tm.role in (''owner'',''starosta''))'
+supabase\fix_pin_message.sql:42:if auth.uid() is null then
+supabase\fix_pin_message.sql:43:raise exception 'auth.uid() is null';
+supabase\fix_pin_message.sql:47:m.author_id = auth.uid()
+supabase\fix_pin_message.sql:52:and tm.user_id = auth.uid()
+supabase\sql_send_message_with_files.sql:23:v_user_id := auth.uid();
+supabase\stage4_2_1b_assignment_persistence_fix.sql:71:where mr.message_id = m.id and mr.user_id = auth.uid()
+supabase\stage4_2_1b_assignment_persistence_fix.sql:101:v_user uuid := auth.uid();
+supabase\stage4_2_1b_assignment_persistence_fix_rollback.sql:57:where mr.message_id = m.id and mr.user_id = auth.uid()
+supabase\stage4_2_1b_assignment_persistence_fix_rollback.sql:86:v_user uuid := auth.uid();
+supabase\stage4_2_1_assignment_model_hardening.sql:48:where d.assignment_id = a.id and d.user_id = auth.uid()
+supabase\stage4_2_1_assignment_model_hardening.sql:79:v_user uuid := auth.uid();
+supabase\stage4_2_1_assignment_model_hardening.sql:198:and tm.user_id = auth.uid()
+supabase\stage4_2_1_assignment_model_hardening.sql:229:v_user uuid := auth.uid();
+supabase\stage4_2_1_assignment_model_hardening_rollback.sql:35:where d.assignment_id = a.id and d.user_id = auth.uid()
+supabase\stage4_2_1_assignment_model_hardening_rollback.sql:62:values (p_team_id, p_title, p_description, nullif(p_link,''), nullif(p_due,''), coalesce(p_attachments,'[]'::jsonb), auth.uid())
+supabase\stage4_2_1_assignment_model_hardening_rollback.sql:77:v_chat, auth.uid(),
+supabase\stage4_2_1_assignment_model_hardening_rollback.sql:102:where tm.team_id = v_team and tm.user_id = auth.uid() and tm.role in ('starosta','teacher','admin','owner')
+supabase\stage4_2_1_assignment_model_hardening_rollback.sql:126:v_user uuid := auth.uid();
+supabase\stage4_2_3_personal_diary_tasks.sql:34:using (author_id = auth.uid());
+supabase\stage4_2_3_personal_diary_tasks.sql:41:with check (author_id = auth.uid());
+supabase\stage4_2_3_personal_diary_tasks.sql:48:using (author_id = auth.uid())
+supabase\stage4_2_3_personal_diary_tasks.sql:49:with check (author_id = auth.uid());
+supabase\stage4_2_3_personal_diary_tasks.sql:56:using (author_id = auth.uid());
+supabase\checks\vv_2024_auth_credentials_dry_run.sql:26:left join auth.users au on lower(au.email) = lower(c.normalized_auth_email)
+supabase\checks\vv_2024_auth_credentials_dry_run.sql:104:join auth.users au on lower(au.email) = lower(c.auth_email)
+supabase\checks\vv_2024_curriculum_import_post_check.sql:130:(select count(*) from auth.users)::bigint as auth_users_total;
+supabase\checks\vv_2024_students_import_dry_run.sql:32:left join auth.users au on au.id = c.auth_user_id
+supabase\checks\vv_2024_students_import_dry_run.sql:161:left join auth.users au on au.id = c.auth_user_id
+supabase\checks\vv_2024_students_import_dry_run.sql:238:left join auth.users au on au.id = c.auth_user_id
+supabase\functions\generate-upload-url\index.ts:51:} = await supabase.auth.getUser(token);
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:79:using (user_id = auth.uid());
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:91:and se.user_id = auth.uid()
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:106:and se.user_id = auth.uid()
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:121:and se.user_id = auth.uid()
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:136:and se.user_id = auth.uid()
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:153:and se.user_id = auth.uid()
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:169:and se.user_id = auth.uid()
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:183:using (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'))
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:184:with check (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'));
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:190:using (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'))
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:191:with check (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'));
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:197:using (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'))
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:198:with check (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'));
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:204:using (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'))
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:205:with check (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'));
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:211:using (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'))
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:212:with check (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'));
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:218:using (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'))
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:219:with check (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'));
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:225:using (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'))
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:226:with check (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'));
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:232:using (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'))
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:233:with check (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'));
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:239:using (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'))
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:240:with check (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'));
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:246:using (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'))
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:247:with check (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'));
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:253:using (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'))
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:254:with check (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'));
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:260:using (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'))
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:261:with check (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'));
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:267:using (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'))
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:268:with check (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'));
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:274:using (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'))
+supabase\migrations\20260609093000_academic_rls_policies_draft.sql:275:with check (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'));
+supabase\migrations\20260609120000_import_vv_2024_students_from_stage_draft.sql:7:-- - do not touch auth.users, teams, chats, team_members, curriculum, subjects, or RLS.
+supabase\migrations\20260609120000_import_vv_2024_students_from_stage_draft.sql:10:-- public.users.id references auth.users(id) and has no default. Therefore this
+supabase\migrations\20260609123500_import_vv_2024_curriculum_from_stage_draft.sql:7:-- - do not touch auth.users, RLS policies, public.users, or student_enrollments.
+supabase\migrations\20260609124500_create_vv_2024_current_semester_teams_draft.sql:8:-- - do not touch legacy teams/chats/memberships, auth.users, public.users,
+supabase\migrations\20260609133000_create_subject_student_knowledge.sql:8:-- - does not mutate subject_offerings, student imports, auth.users, legacy teams/chats.
+supabase\migrations\20260609133000_create_subject_student_knowledge.sql:171:v_user_id uuid := auth.uid();
+supabase\migrations\20260609133000_create_subject_student_knowledge.sql:328:select auth.uid() as user_id
+supabase\migrations\20260609133500_subject_student_knowledge_rls_draft.sql:33:and se.user_id = auth.uid()
+supabase\migrations\20260609133500_subject_student_knowledge_rls_draft.sql:45:using (user_id = auth.uid());
+supabase\migrations\20260609133500_subject_student_knowledge_rls_draft.sql:56:using (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'))
+supabase\migrations\20260609133500_subject_student_knowledge_rls_draft.sql:57:with check (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'));
+supabase\migrations\20260609133500_subject_student_knowledge_rls_draft.sql:63:using (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'))
+supabase\migrations\20260609133500_subject_student_knowledge_rls_draft.sql:64:with check (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'));
+supabase\migrations\20260609133500_subject_student_knowledge_rls_draft.sql:70:using (exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin'));
+supabase\migrations\20260609133500_subject_student_knowledge_rls_draft.sql:83:and se.user_id = auth.uid()
+supabase\migrations\20260609141000_fix_vote_subject_difficulty_v2_conflict.sql:35:v_user_id uuid := auth.uid();
+supabase\migrations\20260609143000_prevent_repeat_subject_difficulty_votes.sql:35:v_user_id uuid := auth.uid();
+supabase\migrations\20260609190000_get_my_classmates_rpc.sql:31:where se.user_id = auth.uid()
+supabase\migrations\20260609190000_get_my_classmates_rpc.sql:59:and se.user_id <> auth.uid()
+supabase\migrations\20260609190500_fix_get_my_classmates_strict_group.sql:26:where se.user_id = auth.uid()
+supabase\migrations\20260609190500_fix_get_my_classmates_strict_group.sql:47:and se.user_id <> auth.uid()
+

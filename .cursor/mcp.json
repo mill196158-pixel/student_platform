@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "codex-reviewer": {
+      "type": "stdio",
+      "command": "/opt/homebrew/bin/codex",
+      "args": ["mcp-server"]
+    }
+  }
+}

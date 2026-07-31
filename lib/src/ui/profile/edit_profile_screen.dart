@@ -16,11 +16,13 @@ class EditProfileScreen extends StatefulWidget {
 }
 
 class _EditProfileScreenState extends State<EditProfileScreen> {
+  static const String _fixedUniversity = 'СПБГАСУ';
+
   final _formKey = GlobalKey<FormState>();
 
   final _firstName = TextEditingController();
   final _lastName = TextEditingController();
-  final _university = TextEditingController();
+  final _university = TextEditingController(text: _fixedUniversity);
   final _group = TextEditingController();
 
   final List<String> _statuses = const [
@@ -34,7 +36,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   String _status = 'Онлайн';
 
   String? _avatarPath; // локальный превью
-  String? _avatarUrl;  // url из БД
+  String? _avatarUrl; // url из БД
 
   bool _saving = false;
   Map<String, dynamic>? _user;
@@ -52,10 +54,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final userJson = prefs.getString('user');
     if (userJson != null) {
       _user = jsonDecode(userJson) as Map<String, dynamic>;
-      _firstName.text  = (_user?['name'] ?? '') as String;
-      _lastName.text   = (_user?['surname'] ?? '') as String;
-      _university.text = (_user?['university'] ?? '') as String;
-      _group.text      = (_user?['group_name'] ?? '') as String;
+      _firstName.text = (_user?['name'] ?? '') as String;
+      _lastName.text = (_user?['surname'] ?? '') as String;
+      _university.text = _fixedUniversity;
+      _group.text = (_user?['group_name'] ?? '') as String;
       final st = (_user?['status'] ?? '') as String;
       if (st.isNotEmpty) _status = st;
       _avatarUrl = (_user?['avatar_url'] as String?)?.trim();
@@ -75,7 +77,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   /// Загрузка в `<uid>/<fileName>.jpg`. Это критично для RLS.
   Future<void> _pickAvatar() async {
     final picker = ImagePicker();
-    final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
+    final picked =
+        await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
     if (picked == null || _user == null) return;
 
     setState(() => _avatarPath = picked.path);
@@ -87,13 +90,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       final path = '$id/$fileName'; // <— ВАЖНО: папка пользователя
 
       await _sb.storage.from('avatars').uploadBinary(
-        path,
-        bytes,
-        fileOptions: const FileOptions(
-          upsert: true,
-          contentType: 'image/jpeg',
-        ),
-      );
+            path,
+            bytes,
+            fileOptions: const FileOptions(
+              upsert: true,
+              contentType: 'image/jpeg',
+            ),
+          );
 
       final publicUrl = _sb.storage.from('avatars').getPublicUrl(path);
 
@@ -119,7 +122,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Future<void> _save() async {
-    // сейчас поля только для чтения — по кнопке просто выходим
     if (!mounted) return;
     context.pop();
   }
@@ -139,90 +141,35 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     } catch (_) {}
   }
 
-  /// Красивая смена пароля: два поля, без BCrypt.
-  Future<void> _changePasswordDialog() async {
-    final newCtrl = TextEditingController();
-    final confirmCtrl = TextEditingController();
-
-    await showDialog(
+  Future<void> _openStatusPicker() async {
+    final picked = await showModalBottomSheet<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Смена пароля'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: newCtrl,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: 'Новый пароль'),
-            ),
-            TextField(
-              controller: confirmCtrl,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: 'Повторите пароль'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Отмена'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              final a = newCtrl.text.trim();
-              final b = confirmCtrl.text.trim();
-
-              if (a.length < 6) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Минимум 6 символов')),
-                  );
-                }
-                return;
-              }
-              if (a != b) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Пароли не совпадают')),
-                  );
-                }
-                return;
-              }
-
-              try {
-                await _sb.auth.updateUser(UserAttributes(password: a));
-                if (mounted) {
-                  Navigator.of(ctx).pop();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Пароль изменён')),
-                  );
-                }
-              } on AuthException catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(e.message)),
-                  );
-                }
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Ошибка: $e')),
-                  );
-                }
-              }
-            },
-            child: const Text('Сохранить'),
-          ),
-        ],
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _StatusPickerSheet(
+        statuses: _statuses,
+        current: _status,
       ),
     );
+    if (picked == null || picked == _status) return;
+    await _setStatus(picked);
+  }
+
+  Future<void> _openChangePassword() async {
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => const _ChangePasswordSheet(),
+    );
+    if (ok == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Пароль изменён')),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-
     ImageProvider? avatarProvider;
     if (_avatarPath != null) {
       avatarProvider = FileImage(File(_avatarPath!));
@@ -231,19 +178,41 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
 
     return Scaffold(
+      backgroundColor: _EP.bg,
       appBar: AppBar(
+        backgroundColor: _EP.bg,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded),
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
           onPressed: () => context.pop(),
         ),
-        title: const Text('Редактировать профиль'),
+        title: const Text(
+          'Настройки профиля',
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            fontSize: 18,
+            color: _EP.ink,
+          ),
+        ),
         centerTitle: true,
         actions: [
           TextButton(
             onPressed: _saving ? null : _save,
+            style: TextButton.styleFrom(
+              foregroundColor: _EP.lavender,
+              textStyle: const TextStyle(fontWeight: FontWeight.w700),
+            ),
             child: _saving
                 ? const SizedBox(
-                    width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: _EP.lavender,
+                    ),
+                  )
                 : const Text('Готово'),
           ),
         ],
@@ -251,30 +220,30 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       body: Form(
         key: _formKey,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
           children: [
-            // ==== AVATAR ====
             Center(
               child: Stack(
                 children: [
                   Container(
-                    width: 120,
-                    height: 120,
+                    width: 92,
+                    height: 92,
                     decoration: const BoxDecoration(
                       shape: BoxShape.circle,
                       gradient: LinearGradient(
-                        colors: [Color(0xFF8EC5FC), Color(0xFFE0C3FC)],
+                        colors: [_EP.lavenderSoft, _EP.lavenderMid],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       ),
                     ),
                     child: Center(
                       child: CircleAvatar(
-                        radius: 54,
+                        radius: 41,
                         backgroundColor: Colors.white,
                         backgroundImage: avatarProvider,
                         child: avatarProvider == null
-                            ? const Icon(Icons.person, size: 44, color: Colors.black54)
+                            ? const Icon(Icons.person,
+                                size: 34, color: Colors.black54)
                             : null,
                       ),
                     ),
@@ -285,74 +254,96 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     child: GestureDetector(
                       onTap: _pickAvatar,
                       child: Container(
-                        width: 40,
-                        height: 40,
+                        width: 32,
+                        height: 32,
                         decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.primary,
+                          color: _EP.lavender,
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
-                              color: Theme.of(context).colorScheme.primary.withOpacity(.35),
-                              blurRadius: 10,
-                              offset: const Offset(0, 6),
+                              color: _EP.lavender.withValues(alpha: 0.35),
+                              blurRadius: 8,
+                              offset: const Offset(0, 4),
                             ),
                           ],
                         ),
-                        child: const Icon(Icons.edit, color: Colors.white, size: 20),
+                        child: const Icon(Icons.edit,
+                            color: Colors.white, size: 16),
                       ),
                     ),
                   ),
                 ],
               ),
             ),
-
-            const SizedBox(height: 20),
-
-            // ==== READ-ONLY FIELDS ====
-            _LabeledField(label: 'Имя',         hint: 'Введите имя',         controller: _firstName,   readOnly: true),
-            _Divider(),
-            _LabeledField(label: 'Фамилия',     hint: 'Введите фамилию',     controller: _lastName,    readOnly: true),
-            _Divider(),
-            _LabeledField(label: 'Университет', hint: 'Например: СПбГАСУ',   controller: _university,  readOnly: true),
-            _Divider(),
-            _LabeledField(label: 'Группа/курс', hint: 'Например: 1-См(ВВ)-2',controller: _group,       readOnly: true),
-
-            const SizedBox(height: 12),
-
-            // ==== STATUS CHIPS ====
-            Text('Статус',
-                style: text.labelMedium?.copyWith(color: Colors.black54, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: -4,
-              children: _statuses.map((s) {
-                final selected = _status == s;
-                return ChoiceChip(
-                  label: Text(s),
-                  selected: selected,
-                  onSelected: (_) => _setStatus(s),
-                  labelStyle: TextStyle(
-                    color: selected ? Colors.white : Colors.black87,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  selectedColor: Theme.of(context).colorScheme.primary,
-                  backgroundColor: Colors.grey.shade200,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                );
-              }).toList(),
+            const SizedBox(height: 16),
+            const _SettingsSectionLabel('Профиль'),
+            _ProfileFieldsCard(
+              children: [
+                _CompactField(
+                  label: 'Имя',
+                  value: _firstName.text,
+                  locked: true,
+                ),
+                _Divider(),
+                _CompactField(
+                  label: 'Фамилия',
+                  value: _lastName.text,
+                  locked: true,
+                ),
+                _Divider(),
+                _CompactField(
+                  label: 'Университет',
+                  value: _university.text,
+                  locked: true,
+                ),
+                _Divider(),
+                _CompactField(
+                  label: 'Группа',
+                  value: _group.text,
+                  locked: true,
+                ),
+              ],
             ),
-
-            const SizedBox(height: 28),
-
-            // ==== PASSWORD ====
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.lock_outline),
-              title: const Text('Сменить пароль'),
-              subtitle: const Text('Два поля: новый и повтор'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: _changePasswordDialog,
+            const SizedBox(height: 14),
+            const _SettingsSectionLabel('Статус'),
+            _ProfileFieldsCard(
+              children: [
+                Builder(
+                  builder: (context) {
+                    final visual = _StatusVisual.forLabel(_status);
+                    return _SettingsNavRow(
+                      icon: visual.icon,
+                      iconWidget: Icon(
+                        visual.icon,
+                        color: visual.color,
+                        size: 18,
+                      ),
+                      title: _status,
+                      subtitle: 'Нажмите, чтобы изменить',
+                      onTap: _openStatusPicker,
+                    );
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            const _SettingsSectionLabel('Безопасность и уведомления'),
+            _ProfileFieldsCard(
+              children: [
+                _SettingsNavRow(
+                  icon: Icons.notifications_none_rounded,
+                  title: 'Уведомления',
+                  subtitle: 'Пуши, сообщения, учёба',
+                  onTap: () => context.push('/notification-settings'),
+                  showDivider: true,
+                ),
+                _SettingsNavRow(
+                  icon: Icons.lock_outline_rounded,
+                  title: 'Сменить пароль',
+                  subtitle: 'Новый пароль для входа',
+                  onTap: _openChangePassword,
+                ),
+              ],
             ),
           ],
         ),
@@ -361,46 +352,624 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 }
 
-class _LabeledField extends StatelessWidget {
-  final String label;
-  final String hint;
-  final TextEditingController controller;
-  final bool readOnly;
-  final int maxLines;
-  final TextInputType? keyboardType;
+class _EP {
+  static const bg = Color(0xFFFAF8FC);
+  static const lavender = Color(0xFF7C63D8);
+  static const lavenderSoft = Color(0xFFDCD0FA);
+  static const lavenderMid = Color(0xFFC9B8F3);
+  static const ink = Color(0xFF1C1B1F);
+  static const muted = Color(0xFF6B6578);
+}
 
-  const _LabeledField({
-    required this.label,
-    required this.hint,
-    required this.controller,
-    this.readOnly = false,
-    this.maxLines = 1,
-    this.keyboardType,
-  });
+class _SettingsSectionLabel extends StatelessWidget {
+  const _SettingsSectionLabel(this.text);
+  final String text;
 
   @override
   Widget build(BuildContext context) {
-    final labelStyle = Theme.of(context)
-        .textTheme
-        .labelMedium
-        ?.copyWith(color: Colors.black54, fontWeight: FontWeight.w600);
-
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: TextFormField(
-        controller: controller,
-        readOnly: readOnly,
-        enableInteractiveSelection: true,
-        keyboardType: keyboardType,
-        maxLines: maxLines,
-        decoration: InputDecoration(
-          labelText: label,
-          labelStyle: labelStyle,
-          hintText: hint,
-          border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+      padding: const EdgeInsets.only(left: 6, bottom: 8),
+      child: Text(
+        text.toUpperCase(),
+        style: const TextStyle(
+          fontSize: 12,
+          letterSpacing: 0.6,
+          fontWeight: FontWeight.w700,
+          color: _EP.muted,
         ),
       ),
+    );
+  }
+}
+
+class _SettingsNavRow extends StatelessWidget {
+  const _SettingsNavRow({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.showDivider = false,
+    this.iconWidget,
+  });
+
+  final IconData icon;
+  final Widget? iconWidget;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final bool showDivider;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 11, 10, 11),
+              child: Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: _EP.lavenderSoft.withValues(alpha: 0.7),
+                      borderRadius: BorderRadius.circular(11),
+                    ),
+                    alignment: Alignment.center,
+                    child: iconWidget ??
+                        Icon(icon, color: _EP.lavender, size: 19),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15,
+                            color: _EP.ink,
+                          ),
+                        ),
+                        const SizedBox(height: 1),
+                        Text(
+                          subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: _EP.muted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(
+                    Icons.chevron_right_rounded,
+                    color: _EP.muted,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (showDivider)
+          const Divider(
+            height: 1,
+            thickness: 1,
+            indent: 60,
+            endIndent: 14,
+            color: Color(0xFFEDEAF4),
+          ),
+      ],
+    );
+  }
+}
+
+class _StatusPickerSheet extends StatelessWidget {
+  const _StatusPickerSheet({
+    required this.statuses,
+    required this.current,
+  });
+
+  final List<String> statuses;
+  final String current;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: _EP.bg,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFD8D2E6),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+              ),
+              const Text(
+                'Статус',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: _EP.ink,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0xFFE8E4F0)),
+                ),
+                child: Column(
+                  children: [
+                    for (var i = 0; i < statuses.length; i++) ...[
+                      if (i > 0)
+                        const Divider(
+                          height: 1,
+                          thickness: 1,
+                          indent: 56,
+                          endIndent: 14,
+                          color: Color(0xFFEDEAF4),
+                        ),
+                      _StatusOptionTile(
+                        label: statuses[i],
+                        selected: statuses[i] == current,
+                        onTap: () => Navigator.of(context).pop(statuses[i]),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StatusVisual {
+  const _StatusVisual(this.icon, this.color);
+  final IconData icon;
+  final Color color;
+
+  static _StatusVisual forLabel(String label) {
+    switch (label) {
+      case 'Онлайн':
+        return const _StatusVisual(Icons.circle, Color(0xFF34C759));
+      case 'Занят 🚫':
+        return const _StatusVisual(
+            Icons.do_not_disturb_on_rounded, Color(0xFFFF3B30));
+      case 'На паре':
+        return const _StatusVisual(Icons.school_rounded, Color(0xFF007AFF));
+      case 'В библиотеке':
+        return const _StatusVisual(Icons.menu_book_rounded, Color(0xFF30B0C7));
+      case 'Готовлюсь к сессии 💪':
+        return const _StatusVisual(
+            Icons.local_fire_department_rounded, Color(0xFFFF9500));
+      case 'Отошёл':
+        return const _StatusVisual(Icons.schedule_rounded, Color(0xFF8E8E93));
+      default:
+        return const _StatusVisual(Icons.circle, _EP.lavender);
+    }
+  }
+}
+
+class _StatusOptionTile extends StatelessWidget {
+  const _StatusOptionTile({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final visual = _StatusVisual.forLabel(label);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: visual.color.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(visual.icon, size: 18, color: visual.color),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                    color: _EP.ink,
+                  ),
+                ),
+              ),
+              if (selected)
+                Icon(Icons.check_circle_rounded, color: visual.color, size: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CompactField extends StatelessWidget {
+  const _CompactField({
+    required this.label,
+    required this.value,
+    this.locked = false,
+  });
+
+  final String label;
+  final String value;
+  final bool locked;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: _EP.muted,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value.isEmpty ? '—' : value,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: _EP.ink,
+                    height: 1.15,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (locked)
+            const Icon(
+              Icons.lock_outline_rounded,
+              size: 16,
+              color: Color(0xFFB7B1C4),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ChangePasswordSheet extends StatefulWidget {
+  const _ChangePasswordSheet();
+
+  @override
+  State<_ChangePasswordSheet> createState() => _ChangePasswordSheetState();
+}
+
+class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
+  final _newCtrl = TextEditingController();
+  final _confirmCtrl = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  bool _obscureNew = true;
+  bool _obscureConfirm = true;
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _newCtrl.dispose();
+    _confirmCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    setState(() => _error = null);
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+
+    final a = _newCtrl.text.trim();
+    setState(() => _busy = true);
+    try {
+      await Supabase.instance.client.auth
+          .updateUser(UserAttributes(password: a));
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } on AuthException catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.message);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = 'Не удалось сменить пароль');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottom),
+      child: Container(
+        decoration: const BoxDecoration(
+          color: _EP.bg,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFD8D2E6),
+                        borderRadius: BorderRadius.circular(99),
+                      ),
+                    ),
+                  ),
+                  Container(
+                    width: 56,
+                    height: 56,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [_EP.lavenderSoft, _EP.lavenderMid],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: const Icon(
+                      Icons.lock_rounded,
+                      color: _EP.lavender,
+                      size: 26,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'Сменить пароль',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      color: _EP.ink,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Придумайте новый пароль — минимум 6 символов',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: _EP.muted,
+                      height: 1.3,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  _PasswordField(
+                    controller: _newCtrl,
+                    label: 'Новый пароль',
+                    obscure: _obscureNew,
+                    onToggle: () =>
+                        setState(() => _obscureNew = !_obscureNew),
+                    validator: (v) {
+                      final t = (v ?? '').trim();
+                      if (t.length < 6) return 'Минимум 6 символов';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  _PasswordField(
+                    controller: _confirmCtrl,
+                    label: 'Повторите пароль',
+                    obscure: _obscureConfirm,
+                    onToggle: () =>
+                        setState(() => _obscureConfirm = !_obscureConfirm),
+                    validator: (v) {
+                      if ((v ?? '').trim() != _newCtrl.text.trim()) {
+                        return 'Пароли не совпадают';
+                      }
+                      return null;
+                    },
+                  ),
+                  if (_error != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      _error!,
+                      style: const TextStyle(
+                        color: Color(0xFFB42318),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 22),
+                  FilledButton(
+                    onPressed: _busy ? null : _submit,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _EP.lavender,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor:
+                          _EP.lavender.withValues(alpha: 0.45),
+                      elevation: 0,
+                      minimumSize: const Size.fromHeight(52),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      textStyle: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
+                    ),
+                    child: _busy
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.4,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Text('Сохранить пароль'),
+                  ),
+                  const SizedBox(height: 8),
+                  TextButton(
+                    onPressed:
+                        _busy ? null : () => Navigator.of(context).pop(false),
+                    style: TextButton.styleFrom(
+                      foregroundColor: _EP.muted,
+                      textStyle: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    child: const Text('Отмена'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PasswordField extends StatelessWidget {
+  const _PasswordField({
+    required this.controller,
+    required this.label,
+    required this.obscure,
+    required this.onToggle,
+    required this.validator,
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final bool obscure;
+  final VoidCallback onToggle;
+  final String? Function(String?) validator;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      controller: controller,
+      obscureText: obscure,
+      validator: validator,
+      style: const TextStyle(
+        fontSize: 16,
+        fontWeight: FontWeight.w600,
+        color: _EP.ink,
+      ),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: const TextStyle(
+          color: _EP.muted,
+          fontWeight: FontWeight.w600,
+        ),
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        suffixIcon: IconButton(
+          onPressed: onToggle,
+          icon: Icon(
+            obscure
+                ? Icons.visibility_outlined
+                : Icons.visibility_off_outlined,
+            color: _EP.muted,
+          ),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: Color(0xFFE8E4F0)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: _EP.lavender, width: 1.6),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: Color(0xFFB42318)),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: Color(0xFFB42318), width: 1.6),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProfileFieldsCard extends StatelessWidget {
+  final List<Widget> children;
+
+  const _ProfileFieldsCard({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE8E4F0)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+      child: Column(children: children),
     );
   }
 }
@@ -408,6 +977,10 @@ class _LabeledField extends StatelessWidget {
 class _Divider extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return const Divider(height: 1, thickness: 1, color: Colors.black12);
+    return const Divider(
+      height: 1,
+      thickness: 1,
+      color: Color(0xFFEDEAF4),
+    );
   }
 }

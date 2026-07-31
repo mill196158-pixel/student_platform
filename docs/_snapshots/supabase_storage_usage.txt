@@ -1,0 +1,11 @@
+﻿## PATTERN: storage.from
+lib\all_dart_code.txt:24022:await _sb.storage.from('avatars').uploadBinary(
+lib\all_dart_code.txt:24031:final publicUrl = _sb.storage.from('avatars').getPublicUrl(path);
+lib\all_dart_code.txt:24386:await _sb.storage.from('avatars').upload(
+lib\all_dart_code.txt:24392:final publicUrl = _sb.storage.from('avatars').getPublicUrl(path);
+lib\src\ui\profile\edit_profile_screen.dart:92:await _sb.storage.from('avatars').uploadBinary(
+lib\src\ui\profile\edit_profile_screen.dart:101:final publicUrl = _sb.storage.from('avatars').getPublicUrl(path);
+lib\src\ui\profile\profile_repository.dart:40:await _sb.storage.from('avatars').upload(
+lib\src\ui\profile\profile_repository.dart:46:final publicUrl = _sb.storage.from('avatars').getPublicUrl(path);
+scripts\collect_project_snapshot.ps1:111:Write-Search "supabase_storage_usage.txt" @("storage.from")
+

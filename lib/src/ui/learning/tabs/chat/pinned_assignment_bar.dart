@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../state/team_cubit.dart';
-import '../../models/assignment.dart';
 import '../../assignment_details_screen.dart';
 
 class PinnedAssignmentBar extends StatelessWidget {
@@ -14,11 +13,13 @@ class PinnedAssignmentBar extends StatelessWidget {
     final lastPublished = st.published.isNotEmpty ? st.published.last : null;
     final isDraft = pending != null;
 
-    final title = isDraft ? pending!.title : (lastPublished?.title ?? '');
-    final due = isDraft ? pending!.due : lastPublished?.due;
+    final title = isDraft ? pending.title : (lastPublished?.title ?? '');
+    final due = isDraft ? pending.due : lastPublished?.due;
 
     final theme = Theme.of(context);
-    final bg = isDraft ? Colors.amber.withOpacity(.15) : theme.colorScheme.primary.withOpacity(.12);
+    final bg = isDraft
+        ? Colors.amber.withValues(alpha: .15)
+        : theme.colorScheme.primary.withValues(alpha: .12);
     final border = isDraft ? Colors.orangeAccent : theme.colorScheme.primary;
 
     return Container(
@@ -27,11 +28,12 @@ class PinnedAssignmentBar extends StatelessWidget {
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: border.withOpacity(.6), width: .6),
+        border: Border.all(color: border.withValues(alpha: .6), width: .6),
       ),
       child: Row(
         children: [
-          Icon(isDraft ? Icons.edit_note_outlined : Icons.push_pin_outlined, color: border),
+          Icon(isDraft ? Icons.edit_note_outlined : Icons.push_pin_outlined,
+              color: border),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -50,7 +52,7 @@ class PinnedAssignmentBar extends StatelessWidget {
           ),
           TextButton(
             onPressed: () {
-              final id = isDraft ? pending!.id : (lastPublished?.id ?? '');
+              final id = isDraft ? pending.id : (lastPublished?.id ?? '');
               if (id.isEmpty) return;
               Navigator.of(context).push(
                 MaterialPageRoute(

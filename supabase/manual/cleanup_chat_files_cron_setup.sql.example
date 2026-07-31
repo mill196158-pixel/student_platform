@@ -1,0 +1,52 @@
+-- EXAMPLE ONLY. Do not apply as-is. Never put CLEANUP_DISPATCH_SECRET in git.
+-- Stage 10b: every 15 minutes drain for chat_file_cleanup_queue.
+--
+-- Preferred path used by migration when Vault secret already exists:
+--   jobname = cleanup-chat-files
+--   schedule = */15 * * * *
+--   POST /functions/v1/cleanup-chat-files
+--   Authorization: Bearer <chat_file_cleanup_secret from Vault>
+--
+-- 1) Edge Function secret (CLI / Dashboard — not SQL):
+--   CLEANUP_DISPATCH_SECRET=<random long secret>
+--   (Yandex secrets already used by generate-upload-url)
+--
+-- 2) Vault (SQL editor once; do not commit the value):
+--   select vault.create_secret(
+--     '<CLEANUP_DISPATCH_SECRET>',
+--     'chat_file_cleanup_secret',
+--     'Bearer token for cleanup-chat-files cron'
+--   );
+--
+-- 3) Exactly one cron job:
+--   select cron.unschedule(jobid)
+--   from cron.job
+--   where jobname = 'cleanup-chat-files';
+--
+--   select cron.schedule(
+--     'cleanup-chat-files',
+--     '*/15 * * * *',
+--     $cron$
+--     select net.http_post(
+--       url := 'https://<PROJECT_REF>.supabase.co/functions/v1/cleanup-chat-files',
+--       headers := jsonb_build_object(
+--         'Content-Type', 'application/json',
+--         'Authorization', 'Bearer ' || (
+--           select decrypted_secret
+--           from vault.decrypted_secrets
+--           where name = 'chat_file_cleanup_secret'
+--           limit 1
+--         )
+--       ),
+--       body := '{}'::jsonb,
+--       timeout_milliseconds := 30000
+--     );
+--     $cron$
+--   );
+--
+-- Verification (safe; no secrets):
+-- select jobid, jobname, schedule, active
+-- from cron.job
+-- where jobname = 'cleanup-chat-files';
+--
+-- select count(*)::int as queue_total from public.chat_file_cleanup_queue;

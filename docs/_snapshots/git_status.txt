@@ -1,0 +1,305 @@
+﻿ M .gitignore
+ D README.md
+ M analysis_options.yaml
+ M android/app/src/main/AndroidManifest.xml
+ D check_chat_function.sql
+ D check_database.sql
+ D check_existing_link_function.sql
+ D check_functions.sql
+ D check_get_chat_messages_function.sql
+ D check_link_function.sql
+ D create_link_function.sql
+ D create_save_chat_file_function.sql
+ D database_schema.sql
+ D debug_dates.sql
+ D diagnose_file_issues.sql
+ D diagnostic_check.sql
+ M docs/_snapshots/academic_terms_usage.txt
+ M docs/_snapshots/blocs_cubits_tree.txt
+ M docs/_snapshots/docs_tree.txt
+ M docs/_snapshots/git_status.txt
+ M docs/_snapshots/lib_tree.txt
+ M docs/_snapshots/models_tree.txt
+ M docs/_snapshots/navigator_usage.txt
+ M docs/_snapshots/repositories_tree.txt
+ M docs/_snapshots/router_usage.txt
+ M docs/_snapshots/screens_tree.txt
+ M docs/_snapshots/supabase_auth_usage.txt
+ M docs/_snapshots/supabase_from_usage.txt
+ M docs/_snapshots/supabase_rpc_usage.txt
+ M docs/_snapshots/supabase_tree.txt
+ M docs/_snapshots/table_terms_usage.txt
+ M docs/stage0_real/08_NEXT_STAGE_PLAN.md
+ M docs/stage0_real/STAGE0_REAL_INDEX.md
+ M docs/stage0_real/WORKLOG.md
+ D drop_and_create_link_function.sql
+ D drop_and_update_get_chat_messages_function.sql
+ D final_fix.sql
+ D final_fix_duplicates.sql
+ D fix_all_get_chat_messages_functions.sql
+ D fix_assignment_bubble.diff
+ D fix_duplicate_functions.sql
+ D fix_duplicates_again.sql
+ D fix_empty_uuids.sql
+ D fix_functions.sql
+ D fix_get_chat_messages_function.sql
+ D fix_link_function.sql
+ D fix_messages_type_constraint.sql
+ M ios/Runner/Info.plist
+ D "lib/all text.txt"
+ D lib/features/auth/presentation/login_page.dart
+ M lib/main.dart
+ D lib/routes/app_router.dart
+ M lib/src/app.dart
+ D lib/src/blocs/profile/edit_profile_screen.dart
+ D lib/src/blocs/profile/profile_cubit.dart
+ D lib/src/blocs/profile/profile_screen.dart
+ M lib/src/config/auth_email_adapter.dart
+ M lib/src/config/yandex_storage_config.dart
+ D lib/src/screens/calendar_screen.dart
+ D lib/src/screens/classes_screen.dart
+ D lib/src/screens/home_screen.dart
+ D lib/src/screens/login_screen.dart
+ D lib/src/screens/navigation_screen.dart
+ D lib/src/screens/profile_screen.dart
+ D lib/src/screens/register_screen.dart
+ D lib/src/screens/splash_screen.dart
+ D lib/src/screens/teams_screen.dart
+ M lib/src/services/auth_service.dart
+ M lib/src/services/file_service.dart
+ M lib/src/services/s3_client.dart
+ M lib/src/ui/authentication/screens/login_screen.dart
+ M lib/src/ui/authentication/screens/register_screen.dart
+ M lib/src/ui/chats/core/dm_chat_service.dart
+ M lib/src/ui/chats/core/team_chat_service.dart
+ M lib/src/ui/chats/core/unified_chat_screen.dart
+ M lib/src/ui/chats/data/dm_api.dart
+ M lib/src/ui/exams/exams_screen.dart
+ M lib/src/ui/info/subject_info_screen.dart
+ M lib/src/ui/learning/assignment_details_screen.dart
+ M lib/src/ui/learning/data/supabase_learning_repository.dart
+ M lib/src/ui/learning/learning_screen.dart
+ M lib/src/ui/learning/models/assignment.dart
+ M lib/src/ui/learning/models/message.dart
+ M lib/src/ui/learning/models/team.dart
+ M lib/src/ui/learning/state/team_cubit.dart
+ M lib/src/ui/learning/tabs/assignment_details_screen.dart
+ M lib/src/ui/learning/tabs/assignments/assignment_card.dart
+ M lib/src/ui/learning/tabs/assignments/assignments_tab.dart
+ M lib/src/ui/learning/tabs/chat/assignment_bubble.dart
+ M lib/src/ui/learning/tabs/chat/assignments/assignment_form_dialog.dart
+ M lib/src/ui/learning/tabs/chat/composer.dart
+ M lib/src/ui/learning/tabs/chat/composer/chat_composer_bar.dart
+ M lib/src/ui/learning/tabs/chat/date_separator.dart
+ M lib/src/ui/learning/tabs/chat/file_message_bubble.dart
+ M lib/src/ui/learning/tabs/chat/message_bubble.dart
+ M lib/src/ui/learning/tabs/chat/pinned_assignment_bar.dart
+ M lib/src/ui/learning/tabs/chat/pinned_strip.dart
+ M lib/src/ui/learning/tabs/chat/plus_button.dart
+ M lib/src/ui/learning/tabs/chat_tab.dart
+ M lib/src/ui/learning/tabs/files_tab.dart
+ M lib/src/ui/learning/team_details_screen.dart
+ M lib/src/ui/learning/widgets/file_message_bubble.dart
+ M lib/src/ui/learning/widgets/fullscreen_image.dart
+ M lib/src/ui/navigation/navigation_screen.dart
+ M lib/src/ui/profile/edit_profile_screen.dart
+ M lib/src/ui/profile/profile_repository.dart
+ M lib/src/ui/profile/profile_screen.dart
+ M lib/src/ui/schedule/lesson_details_screen.dart
+ D lib/src/ui/screens/chat_screen.dart
+ M lib/src/ui/splash/splash_screen.dart
+ D lib/src/widgets/empty_state_widget.dart
+ D lib/tree.txt
+ D lib/vendor/chatview/chatview_lib.dart
+ D lib/vendor/chatview/src/extensions/extensions.dart
+ D lib/vendor/chatview/src/inherited_widgets/configurations_inherited_widgets.dart
+ D lib/vendor/chatview/src/models/chat_bubble.dart
+ D lib/vendor/chatview/src/models/config_models/chat_bubble_configuration.dart
+ D lib/vendor/chatview/src/models/config_models/chat_view_states_configuration.dart
+ D lib/vendor/chatview/src/models/config_models/emoji_message_configuration.dart
+ D lib/vendor/chatview/src/models/config_models/feature_active_config.dart
+ D lib/vendor/chatview/src/models/config_models/image_message_configuration.dart
+ D lib/vendor/chatview/src/models/config_models/link_preview_configuration.dart
+ D lib/vendor/chatview/src/models/config_models/message_configuration.dart
+ D lib/vendor/chatview/src/models/config_models/message_list_configuration.dart
+ D lib/vendor/chatview/src/models/config_models/message_reaction_configuration.dart
+ D lib/vendor/chatview/src/models/config_models/profile_circle_configuration.dart
+ D lib/vendor/chatview/src/models/config_models/reaction_popup_configuration.dart
+ D lib/vendor/chatview/src/models/config_models/receipts_widget_config.dart
+ D lib/vendor/chatview/src/models/config_models/replied_message_configuration.dart
+ D lib/vendor/chatview/src/models/config_models/replied_msg_auto_scroll_config.dart
+ D lib/vendor/chatview/src/models/config_models/reply_popup_configuration.dart
+ D lib/vendor/chatview/src/models/config_models/reply_suggestions_config.dart
+ D lib/vendor/chatview/src/models/config_models/scroll_to_bottom_button_config.dart
+ D lib/vendor/chatview/src/models/config_models/send_message_configuration.dart
+ D lib/vendor/chatview/src/models/config_models/suggestion_list_config.dart
+ D lib/vendor/chatview/src/models/config_models/swipe_to_reply_configuration.dart
+ D lib/vendor/chatview/src/models/config_models/type_indicator_configuration.dart
+ D lib/vendor/chatview/src/models/config_models/voice_message_configuration.dart
+ D lib/vendor/chatview/src/models/models.dart
+ D lib/vendor/chatview/src/utils/chat_view_locale.dart
+ D lib/vendor/chatview/src/utils/constants/constants.dart
+ D lib/vendor/chatview/src/utils/debounce.dart
+ D lib/vendor/chatview/src/utils/emoji_parser.dart
+ D lib/vendor/chatview/src/utils/measure_size.dart
+ D lib/vendor/chatview/src/utils/package_strings.dart
+ D lib/vendor/chatview/src/utils/timeago/en_messages.dart
+ D lib/vendor/chatview/src/utils/timeago/lookupmessages.dart
+ D lib/vendor/chatview/src/utils/timeago/timeago.dart
+ D lib/vendor/chatview/src/values/custom_time_messages.dart
+ D lib/vendor/chatview/src/values/enumeration.dart
+ D lib/vendor/chatview/src/values/typedefs.dart
+ D lib/vendor/chatview/src/widgets/chat_bubble_widget.dart
+ D lib/vendor/chatview/src/widgets/chat_group_header.dart
+ D lib/vendor/chatview/src/widgets/chat_groupedlist_widget.dart
+ D lib/vendor/chatview/src/widgets/chat_list_widget.dart
+ D lib/vendor/chatview/src/widgets/chat_message_sending_to_sent_animation.dart
+ D lib/vendor/chatview/src/widgets/chat_textfield_view_builder.dart
+ D lib/vendor/chatview/src/widgets/chat_view.dart
+ D lib/vendor/chatview/src/widgets/chat_view_appbar.dart
+ D lib/vendor/chatview/src/widgets/chat_view_inherited_widget.dart
+ D lib/vendor/chatview/src/widgets/chatui_textfield.dart
+ D lib/vendor/chatview/src/widgets/chatview_state_widget.dart
+ D lib/vendor/chatview/src/widgets/emoji_picker_widget.dart
+ D lib/vendor/chatview/src/widgets/emoji_row.dart
+ D lib/vendor/chatview/src/widgets/glassmorphism_reaction_popup.dart
+ D lib/vendor/chatview/src/widgets/image_message_view.dart
+ D lib/vendor/chatview/src/widgets/link_preview.dart
+ D lib/vendor/chatview/src/widgets/message_time_widget.dart
+ D lib/vendor/chatview/src/widgets/message_view.dart
+ D lib/vendor/chatview/src/widgets/profile_circle.dart
+ D lib/vendor/chatview/src/widgets/profile_image_widget.dart
+ D lib/vendor/chatview/src/widgets/reaction_popup.dart
+ D lib/vendor/chatview/src/widgets/reaction_widget.dart
+ D lib/vendor/chatview/src/widgets/reactions_bottomsheet.dart
+ D lib/vendor/chatview/src/widgets/reply_icon.dart
+ D lib/vendor/chatview/src/widgets/reply_message_type_view.dart
+ D lib/vendor/chatview/src/widgets/reply_message_view.dart
+ D lib/vendor/chatview/src/widgets/reply_message_widget.dart
+ D lib/vendor/chatview/src/widgets/reply_popup_widget.dart
+ D lib/vendor/chatview/src/widgets/scroll_to_bottom_button.dart
+ D lib/vendor/chatview/src/widgets/selected_image_view_widget.dart
+ D lib/vendor/chatview/src/widgets/send_message_widget.dart
+ D lib/vendor/chatview/src/widgets/share_icon.dart
+ D lib/vendor/chatview/src/widgets/suggestions/suggestion_item.dart
+ D lib/vendor/chatview/src/widgets/suggestions/suggestion_list.dart
+ D lib/vendor/chatview/src/widgets/suggestions/suggestions_config_inherited_widget.dart
+ D lib/vendor/chatview/src/widgets/swipe_to_reply.dart
+ D lib/vendor/chatview/src/widgets/text_message_view.dart
+ D lib/vendor/chatview/src/widgets/type_indicator_widget.dart
+ D lib/vendor/chatview/src/widgets/vertical_line.dart
+ D lib/vendor/chatview/src/widgets/voice_message_view.dart
+ M macos/Flutter/GeneratedPluginRegistrant.swift
+ M pubspec.lock
+ M pubspec.yaml
+ D quick_test.sql
+ D restore_messages.sql
+ D sql_chat_files.sql
+ M supabase/.temp/cli-latest
+ D test_functions.sql
+ D test_queries.sql
+ D ui_patch.diff
+ D update_get_chat_messages_function.sql
+ D update_send_chat_message_for_login.sql
+ D working_functions.sql
+ D "\320\222\321\201\320\265 \320\264\320\260\321\200\321\202 \320\272\320\276\320\264\321\213.txt"
+ D "\320\224\320\265\321\200\320\265\320\262\320\276.txt"
+ D "\320\237\320\273\320\260\320\275\320\270\321\200\321\203\320\265\320\274\321\213\320\265 \320\270\320\267\320\274\320\265\320\275\320\265\320\275\320\270\321\217.txt"
+?? .cursor/
+?? .vscode/
+?? AGENTS.md
+?? FILE_SERVER_DOCUMENTATION.md
+?? INSTRUCTIONS.md
+?? REFACTORING_SUMMARY.md
+?? android/build/
+?? assets/lottie/00e30e9d-fad6-4b8d-a245-f03544ced00f.json
+?? "assets/lottie/Cat fishing on moon.json"
+?? assets/lottie/Cat_in_Box.json
+?? backup_unused_files/
+?? chat_tab_fixes.md
+?? docs/CHAT_FAQ.md
+?? docs/academic_architecture_for_frontend.md
+?? docs/academic_rls_and_visibility_plan.md
+?? docs/bulk_import_cli_usage.md
+?? docs/bulk_import_runbook_full.md
+?? docs/bulk_import_simple_for_beginner.md
+?? docs/legacy_to_new_academic_migration_notes.md
+?? docs/stage0_real/STAGE4_0_PERSONAL_DIARY_AUDIT.md
+?? docs/stage0_real/STAGE4_1_PERSONAL_DIARY_MVP.md
+?? docs/stage0_real/STAGE4_2_1B_ASSIGNMENT_PERSISTENCE_FIX.md
+?? docs/stage0_real/STAGE4_2_1_ASSIGNMENT_MODEL_HARDENING.md
+?? docs/stage0_real/STAGE4_2_2_GROUP_ASSIGNMENTS_IN_PERSONAL_DIARY.md
+?? docs/stage0_real/STAGE4_2_3B_PERSONAL_TASKS_SQL_AND_RUNTIME_CHECK.md
+?? docs/stage0_real/STAGE4_2_3_PERSONAL_TASKS_AND_SUBJECT_DIARY_ASSIGNMENTS.md
+?? docs/stage0_real/STAGE4_2_ASSIGNMENTS_AND_PERSONAL_DIARY_AUDIT.md
+?? docs/supabase_tables_explained.md
+?? docs/vv_2024_import_next_steps.md
+?? docs/vv_2024_staging_import.md
+?? flutter_fixes.md
+?? ios/Podfile
+?? ios/Podfile.lock
+?? lib/all_dart_code.txt
+?? lib/router_observer.dart
+?? lib/src/data/personal_diary_service.dart
+?? lib/src/data/subject_diary_repository_supabase.dart
+?? lib/src/services/image_cache_service.dart
+?? lib/src/ui/authentication/screens/change_password_screen.dart
+?? lib/src/ui/chats/core/chat_message_memory_cache.dart
+?? lib/src/ui/chats/core/dm_composer_bar.dart
+?? lib/src/ui/chats/direct_chat_info_screen.dart
+?? lib/src/ui/chats/direct_chat_screen.dart
+?? lib/src/ui/chats/forward/
+?? lib/src/ui/chats/media/
+?? lib/src/ui/chats/my_chats_screen.dart
+?? lib/src/ui/friends/
+?? lib/src/ui/learning/global_cache.dart
+?? lib/src/ui/learning/models/local_attach.dart
+?? lib/src/ui/learning/tabs/chat/actions/
+?? lib/src/ui/learning/tabs/chat/attachment_widget.dart
+?? lib/src/ui/learning/tabs/chat/attachments/
+?? lib/src/ui/learning/tabs/chat/chat_list.dart
+?? lib/src/ui/learning/tabs/chat/data/
+?? lib/src/ui/learning/tabs/chat/forward_group_bubble.dart
+?? lib/src/ui/learning/tabs/chat/message_builder.dart
+?? lib/src/ui/learning/tabs/chat/messages/
+?? lib/src/ui/learning/tabs/chat/multi_file_bubble.dart
+?? lib/src/ui/learning/tabs/chat/pins/
+?? lib/src/ui/learning/tabs/chat/reply_preview.dart
+?? lib/src/ui/learning/tabs/chat/scroll_controller.dart
+?? lib/src/ui/learning/tabs/chat/search/
+?? lib/src/ui/learning/tabs/chat/selection_bars.dart
+?? lib/src/ui/learning/tabs/chat/widgets.dart
+?? "lib/src/ui/learning/team_details_screen \342\200\224 \320\272\320\276\320\277\320\270\321\217.dart"
+?? lib/src/ui/learning/widgets/file_card.dart
+?? lib/src/ui/profile/personal_diary_screen.dart
+?? lib/src/ui/schedule/all_dart_text.txt
+?? lib/src/ui/schedule/diary_entry_details_screen.dart
+?? lib/src/ui/schedule/subject_diary/
+?? lib/src/ui/schedule/subject_diary_screen.dart
+?? lib/src/ui/schedule/widgets/calendar_icon_button.dart
+?? lib/src/ui/schedule/widgets/mini_calendar.dart
+?? lib/src/utils/
+?? scripts/
+?? server/
+?? supabase/check_pin_message.sql
+?? supabase/checks/
+?? supabase/enable_pin_for_all.sql
+?? supabase/fix_pin_message.sql
+?? supabase/migrations/
+?? supabase/sql_send_message_with_files.sql
+?? supabase/stage4_2_1_assignment_model_hardening.sql
+?? supabase/stage4_2_1_assignment_model_hardening_rollback.sql
+?? supabase/stage4_2_1b_assignment_persistence_fix.sql
+?? supabase/stage4_2_1b_assignment_persistence_fix_rollback.sql
+?? supabase/stage4_2_3_personal_diary_tasks.sql
+?? supabase/stage4_2_3_personal_diary_tasks_rollback.sql
+?? supabase_stage_curriculum_vv_2024.csv
+?? supabase_stage_students_vv_2024.csv
+?? "\320\222\321\201\320\265 \321\201\321\202\321\203\320\264\320\265\320\275\321\202\321\213.xlsx"
+?? "\320\230\320\264\320\265\321\217.docx"
+?? "\320\234\320\276\320\270 \321\201\321\202\321\203\320\264\320\265\320\275\321\202\321\213.xlsx"
+?? "\320\237\321\200\320\260\320\262\320\270\320\273\320\260/"
+?? "\320\237\321\200\320\270\320\276\321\200\320\270\321\202\320\265\321\202\320\275\321\213\320\265 \321\201\321\202\321\203\320\265\320\275\320\264\321\213.xlsx"
+?? "\320\241\320\276\321\202\321\200\321\203\320\264\320\275\320\270\320\272\320\270.xlsx"
+?? "\320\241\321\203\320\277\320\265\321\200 \320\277\321\200\320\270\320\276\321\200\320\270\321\202\320\265\321\202\320\275\321\213\320\265 .xlsx"
+?? "\320\243\321\207\320\265\320\261\320\275\321\213\320\271 \320\277\320\273\320\260\320\275 \320\263\321\200\320\260\321\204\320\270\320\272 \320\274\320\276\320\270.xlsx"

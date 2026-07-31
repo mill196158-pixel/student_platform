@@ -1,0 +1,28 @@
+﻿## PATTERN: GoRouter
+lib\all_dart_code.txt:27:/// ===== GoRouter =====
+lib\all_dart_code.txt:28:final GoRouter appRouter = GoRouter(
+lib\main.dart:30:/// ===== GoRouter =====
+lib\main.dart:31:final GoRouter appRouter = GoRouter(
+scripts\collect_project_snapshot.ps1:114:Write-Search "router_usage.txt" @("GoRouter", "context.go", "ShellRoute")
+
+## PATTERN: context.go
+lib\all_dart_code.txt:1225:if (context.mounted) context.go('/home');
+lib\all_dart_code.txt:1231:if (context.mounted) context.go('/login');
+lib\all_dart_code.txt:2159:context.go('/home');
+lib\all_dart_code.txt:2359:context.go('/home');
+lib\all_dart_code.txt:24821:context.go('/login');
+lib\all_dart_code.txt:31371:context.go('/home');
+lib\all_dart_code.txt:31373:context.go('/login');
+lib\src\services\auth_service.dart:42:context.go('/home');
+lib\src\services\auth_service.dart:50:if (context.mounted) context.go('/login');
+lib\src\ui\authentication\screens\change_password_screen.dart:58:context.go('/home');
+lib\src\ui\authentication\screens\login_screen.dart:92:context.go('/home');
+lib\src\ui\authentication\screens\register_screen.dart:66:context.go('/home');
+lib\src\ui\profile\profile_screen.dart:433:context.go('/login');
+lib\src\ui\splash\splash_screen.dart:46:context.go('/home');
+lib\src\ui\splash\splash_screen.dart:48:context.go('/login');
+scripts\collect_project_snapshot.ps1:114:Write-Search "router_usage.txt" @("GoRouter", "context.go", "ShellRoute")
+
+## PATTERN: ShellRoute
+scripts\collect_project_snapshot.ps1:114:Write-Search "router_usage.txt" @("GoRouter", "context.go", "ShellRoute")
+

@@ -12,6 +12,32 @@
 .swiftpm/
 migrate_working_dir/
 
+# Local secrets / environment
+.env
+.env.*
+!.env.example
+.env.local
+*.env.local
+*.local
+*.secrets
+*.secrets.*
+private/
+**/firebase-service-account*.json
+**/serviceAccount*.json
+**/FIREBASE_SERVICE_ACCOUNT*.json
+*firebase*adminsdk*.json
+*.p8
+AuthKey_*.p8
+*PUSH_DISPATCH_SECRET*
+**/push_dispatch_secret*
+supabase/.temp/
+supabase/.branches/
+supabase/migrations/*.code-workspace
+
+# Local code dumps (may contain outdated secrets)
+**/all_dart_code.txt
+**/all_dart_text.txt
+
 # IntelliJ related
 *.iml
 *.ipr
@@ -32,6 +58,11 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
+
+# iOS / CocoaPods (see also ios/.gitignore)
+ios/Pods/
+ios/.symlinks/
+DerivedData/
 
 # Symbolication related
 app.*.symbols

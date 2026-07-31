@@ -25,7 +25,8 @@ void showEmojiPickerSheet(
               const SizedBox(width: 12),
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 10),
-                child: Text('Эмодзи', style: TextStyle(fontWeight: FontWeight.w600)),
+                child: Text('Эмодзи',
+                    style: TextStyle(fontWeight: FontWeight.w600)),
               ),
               const Spacer(),
               IconButton(
@@ -51,10 +52,11 @@ void showEmojiPickerSheet(
                 final sel = controller.selection;
                 final text = controller.text;
                 final start = sel.start >= 0 ? sel.start : text.length;
-                final end   = sel.end   >= 0 ? sel.end   : text.length;
+                final end = sel.end >= 0 ? sel.end : text.length;
                 controller.value = TextEditingValue(
                   text: text.replaceRange(start, end, emoji.emoji),
-                  selection: TextSelection.collapsed(offset: start + emoji.emoji.length),
+                  selection: TextSelection.collapsed(
+                      offset: start + emoji.emoji.length),
                 );
               },
               config: const Config(

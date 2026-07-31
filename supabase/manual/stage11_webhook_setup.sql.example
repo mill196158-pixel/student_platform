@@ -1,0 +1,32 @@
+-- EXAMPLE ONLY. Do not apply as-is.
+-- Stage 11: fast-path Database Webhook on outbox INSERT.
+-- Never commit real secrets. Prefer Dashboard → Database → Webhooks.
+
+-- Table: public.notification_outbox
+-- Events: INSERT
+-- Filter (if available): NEW.status = 'pending'
+-- Method: POST
+-- URL: https://<PROJECT_REF>.supabase.co/functions/v1/dispatch-push-notifications
+-- Headers:
+--   Authorization: Bearer <PUSH_DISPATCH_SECRET>   -- from Supabase secrets / Vault
+--   Content-Type: application/json
+-- Body: {}  (function ignores payload and claims a batch)
+
+-- Optional SQL form after Database Webhooks / pg_net are enabled:
+--
+-- create trigger "dispatch-push-on-outbox-insert"
+-- after insert on public.notification_outbox
+-- for each row
+-- when (NEW.status = 'pending')
+-- execute function supabase_functions.http_request(
+--   'https://<PROJECT_REF>.supabase.co/functions/v1/dispatch-push-notifications',
+--   'POST',
+--   '{"Content-Type":"application/json","Authorization":"Bearer <PUSH_DISPATCH_SECRET>"}',
+--   '{}',
+--   '5000'
+-- );
+
+-- IMPORTANT:
+-- INSERT webhook does NOT fire when complete_notification_outbox sets status
+-- back to 'pending' (retry). Configure the minute Cron job from
+-- stage11_dispatch_cron_setup.sql.example for retries + stuck processing.

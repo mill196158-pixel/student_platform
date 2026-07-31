@@ -30,14 +30,15 @@ class _FileTestScreenState extends State<FileTestScreen> {
 
     try {
       final result = await _fileService.testConnection();
-      
+
       setState(() {
         _isLoading = false;
         if (result.success) {
           _status = '✅ Подключение успешно!';
         } else {
           _status = '❌ Ошибка подключения';
-          _lastError = result.error ?? 'Не удалось подключиться к Yandex Storage';
+          _lastError =
+              result.error ?? 'Не удалось подключиться к Yandex Storage';
         }
       });
     } catch (e) {
@@ -58,7 +59,7 @@ class _FileTestScreenState extends State<FileTestScreen> {
 
     try {
       final file = await _fileService.pickFile();
-      
+
       if (file == null) {
         setState(() {
           _isLoading = false;
@@ -79,7 +80,8 @@ class _FileTestScreenState extends State<FileTestScreen> {
       setState(() {
         _isLoading = false;
         if (result.success) {
-          _status = '✅ Файл загружен успешно!\nКлюч: ${result.fileKey}\nURL: ${result.fileUrl}';
+          _status =
+              '✅ Файл загружен успешно!\nКлюч: ${result.fileKey}\nURL: ${result.fileUrl}';
         } else {
           _status = '❌ Ошибка загрузки';
           _lastError = result.error;

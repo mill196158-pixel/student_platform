@@ -6,15 +6,16 @@ plugins {
 }
 
 android {
-    namespace = "com.example.student_platform"
+    namespace = "com.mill453020.studentplatform"
     compileSdk = flutter.compileSdkVersion
 
     // Фикс версии NDK под требования плагинов
-    ndkVersion = "27.0.12077973"
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -22,8 +23,7 @@ android {
     }
 
     defaultConfig {
-        // Укажи свой уникальный applicationId, если нужно
-        applicationId = "com.example.student_platform"
+        applicationId = "com.mill453020.studentplatform"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -40,4 +40,17 @@ android {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    // On-device Cyrillic OCR fallback for topic lists (Stage 13.9).
+    implementation("cz.adaptech.tesseract4android:tesseract4android:4.9.0")
+}
+
+// Apply Google Services only when a real google-services.json is present.
+// Do not commit a fake config file.
+val googleServicesFile = file("google-services.json")
+if (googleServicesFile.exists()) {
+    apply(plugin = "com.google.gms.google-services")
 }
