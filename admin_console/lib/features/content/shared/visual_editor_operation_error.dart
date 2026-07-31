@@ -111,7 +111,18 @@ VisualEditorOperationError _mapPostgrest(
   ].whereType<Object>().join(' ').toLowerCase();
   final code = _extractKnownCode(blob) ?? error.code;
 
-  if (code == '42501' || blob.contains('forbidden')) {
+  // Prefer domain codes before generic 42501 / "forbidden" substring matches
+  // (e.g. ready_publish_origin_forbidden contains "forbidden").
+  if (code != null &&
+      (code.startsWith('ready_publish_') ||
+          code.startsWith('invalid_status_transition'))) {
+    return _fromCode(code, stage: stage, raw: error.message);
+  }
+
+  if (code == '42501' ||
+      (blob.contains('forbidden') &&
+          !blob.contains('ready_publish_') &&
+          !blob.contains('invalid_status_transition'))) {
     return _fromCode('forbidden', stage: stage, raw: error.message);
   }
   if (code == '28000' || blob.contains('not_authenticated')) {
@@ -199,6 +210,27 @@ VisualEditorOperationError _fromCode(
         code: code,
         debugDetail: _safeDebug(stage, raw),
       );
+    case 'invalid_status_transition':
+    case 'invalid_status_transition_draft_to_published':
+      return VisualEditorOperationError(
+        'Нельзя опубликовать из текущего статуса. '
+        'Для заявок студентов сначала пройдите модерацию; '
+        'для черновиков admin/demo используйте «Опубликовать» '
+        '(ready-publish) или шаги модерации.',
+        code: code,
+        isValidation: true,
+        debugDetail: _safeDebug(stage, raw),
+      );
+    case 'ready_publish_draft_only':
+    case 'ready_publish_origin_forbidden':
+    case 'ready_publish_has_submitter':
+      return VisualEditorOperationError(
+        'Быстрая публикация доступна только для черновиков admin/demo '
+        'без заявки пользователя.',
+        code: code,
+        isValidation: true,
+        debugDetail: _safeDebug(stage, raw),
+      );
     case 'forbidden':
       return VisualEditorOperationError(
         stage == 'publish' || stage == 'publish_working_draft'
@@ -258,6 +290,11 @@ const _knownCodes = {
   'draft_conflict',
   'invalid_schema_upgrade',
   'visual_studio_v2_publish_disabled',
+  'invalid_status_transition_draft_to_published',
+  'invalid_status_transition',
+  'ready_publish_draft_only',
+  'ready_publish_origin_forbidden',
+  'ready_publish_has_submitter',
   'forbidden',
   'not_found',
   'draft_only',
@@ -270,11 +307,14 @@ const _knownCodes = {
 };
 
 String? _extractKnownCode(String blob) {
-  for (final code in _knownCodes) {
+  // Longer codes first so draft_to_published wins over generic invalid_*.
+  final ordered = _knownCodes.toList()
+    ..sort((a, b) => b.length.compareTo(a.length));
+  for (final code in ordered) {
     if (blob.contains(code)) return code;
   }
   final match = RegExp(
-    r'\b(missing_field_[a-z0-9_]+|invalid_[a-z0-9_]+|unknown_payload_keys)\b',
+    r'\b(missing_field_[a-z0-9_]+|invalid_status_transition_[a-z0-9_]+|invalid_[a-z0-9_]+|unknown_payload_keys|ready_publish_[a-z0-9_]+)\b',
   ).firstMatch(blob);
   return match?.group(1);
 }

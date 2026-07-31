@@ -36,6 +36,14 @@ class ContentMediaIntentState {
     return null;
   }
 
+  /// Local pick wins; removed clears; otherwise use [resolvedBytes] cache.
+  Uint8List? previewBytes({Uint8List? resolvedBytes}) {
+    final local = bytesForPreview;
+    if (local != null) return local;
+    if (shouldOmitAssetOnSave) return null;
+    return resolvedBytes;
+  }
+
   /// When true, persisted asset id must be omitted on save payload.
   bool get shouldOmitAssetOnSave => phase == ContentMediaPhase.removed;
 

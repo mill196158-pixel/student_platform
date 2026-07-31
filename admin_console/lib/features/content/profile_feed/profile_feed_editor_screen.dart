@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:student_ui/student_ui.dart';
@@ -98,6 +101,8 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
   ContentPreviewMode _previewMode = ContentPreviewMode.effectiveDraft;
 
   final Map<String, ContentMediaIntentState> _imageIntent = {};
+  final Map<String, Uint8List> _resolvedAssetBytes = {};
+  final Set<String> _resolvingAssetIds = {};
   ProfileFeedItem? _boundItem;
 
   ProfileFeedAdminListPartitions get _partitions =>
@@ -191,6 +196,7 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
         _ensureSelectionForTab();
       });
       _syncControllers();
+      _scheduleAssetPreloads();
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -280,6 +286,7 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
       );
     });
     _syncControllers();
+    unawaited(_resolveAssetFor(bound.id));
   }
 
   void _replaceItem(ProfileFeedItem item) {
@@ -319,6 +326,7 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
       }
     });
     _syncControllers();
+    unawaited(_resolveAssetFor(id));
   }
 
   Future<void> _beginEdit() async {
@@ -332,6 +340,7 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
         _editingWorkingDraft = true;
       });
       _syncControllers();
+      unawaited(_resolveAssetFor(item.id));
     });
   }
 
@@ -344,8 +353,10 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
       setState(() {
         _editingWorkingDraft = false;
         _replaceItem(item);
+        _resolvedAssetBytes.remove(item.id);
       });
       _syncControllers();
+      unawaited(_resolveAssetFor(item.id));
       _snack('Изменения отменены');
     });
   }
@@ -547,7 +558,9 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
         );
         nextPayload = payload.copyWith(imageAssetId: uploaded.assetId);
         adoptedDraftRowVersion = uploaded.workingDraftRowVersion;
+        // Keep bytes visible until authorized download resolves.
         setState(() {
+          _resolvedAssetBytes[selected.id] = bytes;
           _imageIntent[selected.id] = ContentMediaIntentState(
             assetId: uploaded.assetId,
           ).pickLocal(bytes);
@@ -557,6 +570,7 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
       }
     } else if (intent.shouldOmitAssetOnSave) {
       nextPayload = payload.copyWith(clearImageAssetId: true);
+      _resolvedAssetBytes.remove(selected.id);
     }
 
     var next = selected.copyWith(
@@ -597,6 +611,7 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
         );
       });
       _syncControllers();
+      unawaited(_resolveAssetFor(next.id));
       return next;
     }
     next = await _repository.updateDraft(next);
@@ -625,6 +640,7 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
       );
     });
     _syncControllers();
+    unawaited(_resolveAssetFor(next.id));
     return next;
   }
 
@@ -941,14 +957,20 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
       _imageIntent[selected.id] =
           (_imageIntent[selected.id] ?? ContentMediaIntentState.untouched)
               .pickLocal(bytes);
+      // Image plane only renders for image_* variants.
+      if (!contentCardVariantUsesImage(_cardVariant.key)) {
+        _cardVariant = ContentCardVariant.imageOverlay;
+      }
       _dirty = true;
     });
+    _syncPayloadFromEditors();
   }
 
   Future<void> _clearImage() async {
     final selected = _selected;
     if (selected == null) return;
     setState(() {
+      _resolvedAssetBytes.remove(selected.id);
       _imageIntent[selected.id] =
           (_imageIntent[selected.id] ?? ContentMediaIntentState.untouched)
               .markRemoved();
@@ -1032,10 +1054,110 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
     });
   }
 
+  ContentMediaIntentState _intentFor(String itemId) =>
+      _imageIntent[itemId] ?? ContentMediaIntentState.untouched;
+
+  void _scheduleAssetPreloads() {
+    final media = _mediaStore;
+    if (media == null) return;
+    // Every card rendered in the phone carousel + the selected overlay.
+    final ids = <String>{
+      for (final item in _partitions.publishedPreviewItems) item.id,
+    };
+    final selected = _selected;
+    if (selected != null) ids.add(selected.id);
+    for (final id in ids) {
+      unawaited(_resolveAssetFor(id));
+    }
+  }
+
+  Future<void> _resolveAssetFor(String itemId) async {
+    final media = _mediaStore;
+    if (media == null) return;
+    final intent = _intentFor(itemId);
+    if (intent.hasLocalPick) return;
+    if (intent.shouldOmitAssetOnSave) return;
+    if (_resolvingAssetIds.contains(itemId)) return;
+
+    ProfileFeedItem? item;
+    for (final candidate in _items) {
+      if (candidate.id == itemId) {
+        item = candidate;
+        break;
+      }
+    }
+    final assetId = item?.payload.imageAssetId;
+    if (assetId == null || assetId.isEmpty) return;
+
+    final generation = Object.hash(itemId, assetId, intent.phase);
+    _resolvingAssetIds.add(itemId);
+    try {
+      final bytes = await media.downloadBytes(assetId: assetId);
+      if (!mounted || bytes == null) return;
+      final latest = _intentFor(itemId);
+      if (latest.hasLocalPick || latest.shouldOmitAssetOnSave) return;
+      ProfileFeedItem? latestItem;
+      for (final candidate in _items) {
+        if (candidate.id == itemId) {
+          latestItem = candidate;
+          break;
+        }
+      }
+      final latestAssetId = latestItem?.payload.imageAssetId;
+      if (latestAssetId != assetId) return;
+      final latestGeneration = Object.hash(itemId, latestAssetId, latest.phase);
+      if (latestGeneration != generation) return;
+      setState(() => _resolvedAssetBytes[itemId] = bytes);
+    } catch (_) {
+      // Preview falls back to missing-image plane.
+    } finally {
+      _resolvingAssetIds.remove(itemId);
+      if (mounted) setState(() {});
+    }
+  }
+
+  Uint8List? _imageBytesForItem(String itemId) {
+    final intent = _intentFor(itemId);
+    return intent.previewBytes(resolvedBytes: _resolvedAssetBytes[itemId]);
+  }
+
+  bool _assetLoadingFor(String itemId) {
+    final intent = _intentFor(itemId);
+    if (intent.hasLocalPick) return false;
+    if (intent.shouldOmitAssetOnSave) return false;
+    if (intent.phase == ContentMediaPhase.uploading) return true;
+    ProfileFeedItem? item;
+    for (final candidate in _items) {
+      if (candidate.id == itemId) {
+        item = candidate;
+        break;
+      }
+    }
+    final assetId = item?.payload.imageAssetId;
+    if (assetId == null || assetId.isEmpty) return false;
+    return !_resolvedAssetBytes.containsKey(itemId) &&
+        _resolvingAssetIds.contains(itemId);
+  }
+
+  ManagedProfileFeedCard _managedPreviewCard(
+    ProfileFeedItem item, {
+    required bool showDemoBadge,
+    ProfileFeedPayload? payloadOverride,
+  }) {
+    final payload = payloadOverride ?? item.payload;
+    return item
+        .copyWith(title: payload.title, payload: payload)
+        .toManagedCard(showDemoBadge: showDemoBadge)
+        .copyWith(
+          imageBytes: _imageBytesForItem(item.id),
+          imageLoading: _assetLoadingFor(item.id),
+        );
+  }
+
   List<ManagedProfileFeedCard> _previewCarouselCards() {
     var cards = [
       for (final item in _partitions.publishedPreviewItems)
-        item.toManagedCard(showDemoBadge: false),
+        _managedPreviewCard(item, showDemoBadge: false),
     ];
     final selected = _selected;
     if (selected == null) return cards;
@@ -1056,15 +1178,11 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
     final payload = _draftPayload();
     if (payload == null) return cards;
 
-    final intent =
-        _imageIntent[selected.id] ?? ContentMediaIntentState.untouched;
-    final overlay = selected
-        .copyWith(title: payload.title, payload: payload)
-        .toManagedCard(showDemoBadge: selected.origin == ContentOrigin.demo)
-        .copyWith(
-          imageBytes: intent.bytesForPreview,
-          imageLoading: intent.phase == ContentMediaPhase.uploading,
-        );
+    final overlay = _managedPreviewCard(
+      selected,
+      showDemoBadge: selected.origin == ContentOrigin.demo,
+      payloadOverride: payload,
+    );
     final index = cards.indexWhere((card) => card.id == selected.id);
     if (index >= 0) {
       cards = [...cards]..[index] = overlay;

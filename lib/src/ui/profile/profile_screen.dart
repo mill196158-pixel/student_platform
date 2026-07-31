@@ -159,17 +159,30 @@ class _ProfileScreenState extends State<ProfileScreen>
     final generation = ++_feedMediaGeneration;
     if (feed.hideFeed || feed.isDemoFallback || feed.cards.isEmpty) return;
 
+    // Mark image variants as loading until bytes arrive (home promo parity).
+    final loadingCards = profileFeedCardsWithImageLoading(feed.cards);
+    if (mounted && generation == _feedMediaGeneration) {
+      setState(() {
+        _feed = ProfileFeedLoadResult(
+          cards: loadingCards,
+          isDemoFallback: feed.isDemoFallback,
+          intentionallyEmpty: feed.intentionallyEmpty,
+          loadError: feed.loadError,
+          rpcUnavailable: feed.rpcUnavailable,
+        );
+      });
+    }
+
     final hydrated = <ManagedProfileFeedCard>[];
-    for (final card in feed.cards) {
+    for (final card in loadingCards) {
       if (!mounted || generation != _feedMediaGeneration) return;
       final version = '${card.id}|${card.sortOrder}';
       Uint8List? imageBytes = card.imageBytes;
       Uint8List? iconBytes = card.iconBytes;
       final imageId = card.payload.imageAssetId?.trim();
       final iconId = card.payload.iconAssetId?.trim();
-      if ((imageBytes == null || imageBytes.isEmpty) &&
-          imageId != null &&
-          imageId.isNotEmpty) {
+      final needsImage = profileFeedCardNeedsImageFetch(card);
+      if (needsImage && imageId != null && imageId.isNotEmpty) {
         imageBytes = await _contentMedia.fetchBytes(
           imageId,
           contentVersion: version,
@@ -188,6 +201,8 @@ class _ProfileScreenState extends State<ProfileScreen>
           imageBytes: imageBytes,
           iconBytes: iconBytes,
           imageLoading: false,
+          clearImageBytes: needsImage &&
+              (imageBytes == null || imageBytes.isEmpty),
         ),
       );
     }

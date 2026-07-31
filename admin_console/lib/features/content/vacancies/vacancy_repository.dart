@@ -149,6 +149,9 @@ abstract class VacancyRepository {
 
   Future<VacancyItem> publish(String id, int expectedRowVersion);
 
+  /// Atomic draft→published for admin/demo authored vacancies (no submitter).
+  Future<VacancyItem> readyPublish(String id, int expectedRowVersion);
+
   /// Converts an existing demo vacancy to managed content; never creates a copy.
   Future<VacancyItem> promoteDemo(String id, int expectedRowVersion);
 
@@ -506,6 +509,44 @@ class LocalVacancyRepository implements VacancyRepository {
   }
 
   @override
+  Future<VacancyItem> readyPublish(String id, int expectedRowVersion) async {
+    final idx = _items.indexWhere((e) => e.id == id);
+    if (idx < 0) {
+      throw const VacancyRepositoryException('Вакансия не найдена.');
+    }
+    final current = _items[idx];
+    if (current.rowVersion != expectedRowVersion) {
+      throw const VacancyRepositoryException(
+        'Вакансия изменилась. Обновите список.',
+      );
+    }
+    if (!current.isReadyPublishEligible) {
+      throw const VacancyRepositoryException(
+        'Быстрая публикация доступна только для черновиков admin/demo '
+        'без заявки пользователя.',
+      );
+    }
+    // Mirror server: draft → in_moderation → approved → published (+3 rv).
+    var next = current.copyWith(
+      status: VacancyStatus.inModeration,
+      rowVersion: current.rowVersion + 1,
+    );
+    _appendJournal(id, 'take_in_moderation', 'draft', 'in_moderation');
+    next = next.copyWith(
+      status: VacancyStatus.approved,
+      rowVersion: next.rowVersion + 1,
+    );
+    _appendJournal(id, 'approve', 'in_moderation', 'approved');
+    next = next.copyWith(
+      status: VacancyStatus.published,
+      rowVersion: next.rowVersion + 1,
+    );
+    _appendJournal(id, 'publish', 'approved', 'published');
+    _items = [..._items]..[idx] = next;
+    return next;
+  }
+
+  @override
   Future<VacancyItem> promoteDemo(String id, int expectedRowVersion) async {
     final idx = _items.indexWhere((e) => e.id == id);
     if (idx < 0) throw const VacancyRepositoryException('Вакансия не найдена.');
@@ -570,6 +611,13 @@ class LocalVacancyRepository implements VacancyRepository {
     if (action == 'approve' && current.status != VacancyStatus.inModeration) {
       throw const VacancyRepositoryException(
         'Одобрить можно только вакансию на модерации (in_moderation).',
+      );
+    }
+    if (action == 'take_in_moderation' &&
+        current.status != VacancyStatus.submitted &&
+        current.status != VacancyStatus.draft) {
+      throw const VacancyRepositoryException(
+        'На модерацию можно взять только draft или submitted.',
       );
     }
 

@@ -506,6 +506,8 @@ Dedicated tables: `vacancies`, versions, audience junctions, assets, reports, mo
 Status: `draft → submitted → in_moderation → approved/published → expired|archived|rejected`.  
 User submit never auto-publishes. Demo: `origin=demo` + «Пример» or non-production audience.
 
+**Admin/demo ready-publish (Stage 17.1):** Visual Studio «Опубликовать» on an authored draft (`origin ∈ {admin,demo}` AND `submitted_by IS NULL`) may call `admin_ready_publish_vacancy`, which atomically records `draft → in_moderation → approved → published` (requires `moderation.action|write` + `content.publish`). Any `user_submission` or non-null `submitted_by` stays fail-closed and must use the moderation queue.
+
 ---
 
 ## 6. Stage 18 — Reviews, points, unified moderation

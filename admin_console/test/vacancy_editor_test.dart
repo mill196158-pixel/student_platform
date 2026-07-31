@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:student_platform_admin/core/auth/admin_capabilities.dart';
+import 'package:student_platform_admin/core/auth/admin_session_controller.dart';
 import 'package:student_platform_admin/features/content/shared/visual_editor_list_panel.dart';
 import 'package:student_platform_admin/features/content/vacancies/vacancy_editor_screen.dart';
 import 'package:student_platform_admin/features/content/vacancies/vacancy_item.dart';
@@ -95,6 +97,85 @@ void main() {
       ]),
     );
     expect(demos.every((item) => item.status == VacancyStatus.draft), isTrue);
+  });
+
+  test('local readyPublish publishes admin/demo draft atomically', () async {
+    final repo = LocalVacancyRepository();
+    final demo = (await repo.list()).firstWhere(
+      (item) => item.origin == ContentOrigin.demo,
+    );
+    expect(demo.isReadyPublishEligible, isTrue);
+    final published = await repo.readyPublish(demo.id, demo.rowVersion);
+    expect(published.status, VacancyStatus.published);
+    expect(published.rowVersion, demo.rowVersion + 3);
+  });
+
+  testWidgets('draft Publish disabled without moderation capability', (
+    tester,
+  ) async {
+    final session = AdminSessionController();
+    session.phase = AdminSessionPhase.ready;
+    session.capabilities = const AdminCapabilities(
+      userId: 'pub-only',
+      permissions: {'content.publish', 'content.write', 'content.read'},
+      assignments: [],
+    );
+    final repo = LocalVacancyRepository();
+
+    await tester.binding.setSurfaceSize(const Size(1400, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 1400,
+            height: 1200,
+            child: VacancyEditorScreen(repository: repo, session: session),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Shell hides Publish when onPublish is null (draft shortcut needs moderation).
+    expect(find.text('Опубликовать'), findsNothing);
+    expect(find.text('Опубликовать изменения'), findsNothing);
+  });
+
+  test('readyPublish eligibility excludes user_submission and submitters', () {
+    const base = VacancyItem(
+      id: 'v1',
+      status: VacancyStatus.draft,
+      origin: ContentOrigin.admin,
+      title: 'T',
+      companyName: 'C',
+      summary: 'S',
+      description: 'D',
+      rowVersion: 1,
+      priority: 0,
+      audienceMode: 'all',
+    );
+    expect(base.isReadyPublishEligible, isTrue);
+    expect(
+      base.copyWith(origin: ContentOrigin.userSubmission).isReadyPublishEligible,
+      isFalse,
+    );
+    expect(base.copyWith(submittedBy: 'user-1').isReadyPublishEligible, isFalse);
+    expect(
+      base.copyWith(status: VacancyStatus.approved).isReadyPublishEligible,
+      isFalse,
+    );
+  });
+
+  test('local publish still requires approved (no draft shortcut)', () async {
+    final repo = LocalVacancyRepository();
+    final demo = (await repo.list()).firstWhere(
+      (item) => item.origin == ContentOrigin.demo,
+    );
+    expect(
+      () => repo.publish(demo.id, demo.rowVersion),
+      throwsA(isA<VacancyRepositoryException>()),
+    );
   });
 
   test('local demo promotion preserves legacy identity', () async {

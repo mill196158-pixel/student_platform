@@ -687,6 +687,9 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
         },
         publishCanonical: () {
           final current = _selected ?? selected;
+          if (current.isReadyPublishEligible) {
+            return _repository.readyPublish(current.id, current.rowVersion);
+          }
           return _repository.publish(current.id, current.rowVersion);
         },
         refetch: (item) async {
@@ -1156,8 +1159,9 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
     final selected = _selected;
     if (selected == null || !_canPublish) return false;
     if (_editingWorkingDraft) return true;
-    return selected.status == VacancyStatus.approved ||
-        selected.status == VacancyStatus.draft;
+    if (selected.status == VacancyStatus.approved) return true;
+    // Admin/demo draft shortcut requires moderation + publish (server enforces).
+    return selected.isReadyPublishEligible && _canModerate;
   }
 
   @override
@@ -1903,12 +1907,16 @@ class _VacancyPropertiesPanel extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: [
-              if (canPublish && selected.status == VacancyStatus.approved)
+              if (canPublish &&
+                  (selected.status == VacancyStatus.approved ||
+                      (selected.isReadyPublishEligible && canModerate)))
                 FilledButton.tonal(
                   onPressed: busy ? null : onPublish,
                   child: const Text('Опубликовать'),
                 ),
-              if (canModerate && selected.status == VacancyStatus.submitted)
+              if (canModerate &&
+                  (selected.status == VacancyStatus.submitted ||
+                      selected.status == VacancyStatus.draft))
                 OutlinedButton(
                   onPressed: busy
                       ? null
@@ -2060,10 +2068,20 @@ class _VacancyPropertiesPanel extends StatelessWidget {
               ),
           ],
           if (selected.status != VacancyStatus.approved &&
-              selected.status != VacancyStatus.published) ...[
+              selected.status != VacancyStatus.published &&
+              !selected.isReadyPublishEligible) ...[
             const SizedBox(height: 8),
             Text(
-              'Публикация доступна только после одобрения модерацией (approved).',
+              'Публикация доступна только после одобрения модерацией (approved). '
+              'Заявки студентов нельзя публиковать напрямую.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+          if (selected.isReadyPublishEligible) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Черновик admin/demo можно опубликовать сразу '
+              '(модерация + публикация в одном шаге).',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],

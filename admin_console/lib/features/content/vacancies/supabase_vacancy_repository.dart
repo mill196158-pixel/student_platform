@@ -206,6 +206,15 @@ class SupabaseVacancyRepository implements VacancyRepository {
   }
 
   @override
+  Future<VacancyItem> readyPublish(String id, int expectedRowVersion) async {
+    final data = await _call('admin_ready_publish_vacancy', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return _parseRequired(data);
+  }
+
+  @override
   Future<VacancyItem> promoteDemo(String id, int expectedRowVersion) async {
     final data = await _call('admin_promote_demo_vacancy', {
       'p_id': id,

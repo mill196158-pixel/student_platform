@@ -124,6 +124,7 @@ class VacancyItem {
     this.assets = const [],
     this.clearedVisualRoles = const [],
     this.legacyKey,
+    this.submittedBy,
     this.hasWorkingDraft = false,
     this.workingDraftRowVersion,
   });
@@ -163,6 +164,9 @@ class VacancyItem {
   /// Stable Stage 14.1 bootstrap identity, retained after demo promotion.
   final String? legacyKey;
 
+  /// User submission author when present (blocks admin ready-publish shortcut).
+  final String? submittedBy;
+
   /// True when a server/local working draft exists for this published item.
   final bool hasWorkingDraft;
 
@@ -170,6 +174,16 @@ class VacancyItem {
   final int? workingDraftRowVersion;
 
   bool get isPublished => status == VacancyStatus.published;
+
+  /// Eligible for atomic `admin_ready_publish_vacancy` (server also enforces).
+  bool get isReadyPublishEligible {
+    if (status != VacancyStatus.draft) return false;
+    if (origin != ContentOrigin.admin && origin != ContentOrigin.demo) {
+      return false;
+    }
+    final submitter = submittedBy?.trim();
+    return submitter == null || submitter.isEmpty;
+  }
 
   bool isVisualRoleCleared(String role) => clearedVisualRoles.contains(role);
 
@@ -252,6 +266,7 @@ class VacancyItem {
       assets: VacancyAssetRef.parseList(json['assets']),
       clearedVisualRoles: _asIdList(json['cleared_visual_roles']),
       legacyKey: _nullableString(json['legacy_key']),
+      submittedBy: _nullableString(json['submitted_by']),
       hasWorkingDraft: parseHasWorkingDraft(json),
       workingDraftRowVersion: parseWorkingDraftRowVersion(
         parseWorkingDraftMap(json),
@@ -344,6 +359,8 @@ class VacancyItem {
     List<VacancyAssetRef>? assets,
     List<String>? clearedVisualRoles,
     String? legacyKey,
+    String? submittedBy,
+    bool clearSubmittedBy = false,
     bool clearEmploymentType = false,
     bool clearWorkFormat = false,
     bool clearLocation = false,
@@ -387,6 +404,7 @@ class VacancyItem {
       assets: assets ?? this.assets,
       clearedVisualRoles: clearedVisualRoles ?? this.clearedVisualRoles,
       legacyKey: legacyKey ?? this.legacyKey,
+      submittedBy: clearSubmittedBy ? null : (submittedBy ?? this.submittedBy),
       hasWorkingDraft: hasWorkingDraft ?? this.hasWorkingDraft,
       workingDraftRowVersion: clearWorkingDraftRowVersion
           ? null

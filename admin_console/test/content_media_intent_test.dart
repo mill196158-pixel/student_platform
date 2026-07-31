@@ -53,5 +53,25 @@ void main() {
       expect(cleared.assetId, 'kept');
       expect(cleared.localBytes, isNull);
     });
+
+    test('previewBytes: local overrides resolved cache', () {
+      final local = Uint8List.fromList([1, 2, 3]);
+      final resolved = Uint8List.fromList([9, 9, 9]);
+      final intent = ContentMediaIntentState.untouched.pickLocal(local);
+      expect(intent.previewBytes(resolvedBytes: resolved), local);
+    });
+
+    test('previewBytes: asset-id-only uses resolved cache after save', () {
+      final resolved = Uint8List.fromList([9, 9, 9]);
+      final intent = ContentMediaIntentState(assetId: 'asset-1');
+      expect(intent.previewBytes(resolvedBytes: resolved), resolved);
+      expect(intent.bytesForPreview, isNull);
+    });
+
+    test('previewBytes: cleared intent omits resolved cache', () {
+      final resolved = Uint8List.fromList([9, 9, 9]);
+      final intent = ContentMediaIntentState(assetId: 'asset-1').markRemoved();
+      expect(intent.previewBytes(resolvedBytes: resolved), isNull);
+    });
   });
 }

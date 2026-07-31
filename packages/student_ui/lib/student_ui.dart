@@ -3,6 +3,7 @@ library;
 export 'src/content/content_icon_resolver.dart';
 export 'src/content/content_image_render_state.dart';
 export 'src/content/content_models.dart';
+export 'src/content/profile_feed_media.dart';
 export 'src/content/content_nav_intent.dart';
 export 'src/content/reference_article_models.dart';
 export 'src/content/review_models.dart';

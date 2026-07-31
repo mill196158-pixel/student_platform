@@ -1,12 +1,38 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:student_platform_admin/features/content/profile_feed/profile_feed_item.dart';
 import 'package:student_platform_admin/features/content/profile_feed/profile_feed_editor_screen.dart';
 import 'package:student_platform_admin/features/content/profile_feed/profile_feed_repository.dart';
+import 'package:student_platform_admin/features/content/reference/content_media_store.dart';
 import 'package:student_platform_admin/features/content/shared/content_card_variant_picker.dart';
 import 'package:student_platform_admin/features/content/shared/content_icon_picker.dart';
 import 'package:student_platform_admin/features/content/shared/visual_editor_list_panel.dart';
 import 'package:student_ui/student_ui.dart';
+
+/// Minimal valid 1x1 PNG for MemoryImage assertions.
+final Uint8List _kTestPngBytes = Uint8List.fromList(<int>[
+  0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
+  0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+  0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00,
+  0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+  0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49,
+  0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+]);
+
+class _FakeContentMediaStore extends ContentMediaStore {
+  _FakeContentMediaStore(this.bytesByAssetId);
+
+  final Map<String, Uint8List> bytesByAssetId;
+  final List<String> downloadedAssetIds = [];
+
+  @override
+  Future<Uint8List?> downloadBytes({required String assetId}) async {
+    downloadedAssetIds.add(assetId);
+    return bytesByAssetId[assetId];
+  }
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -321,5 +347,62 @@ void main() {
     await tester.pump();
 
     expect(find.text('Overlay'), findsWidgets);
+  });
+
+  testWidgets('published asset-id cards resolve bytes into phone preview', (
+    tester,
+  ) async {
+    final repo = LocalProfileFeedRepository();
+    final draft = await repo.createDraft(
+      payload: const ProfileFeedPayload(
+        title: 'С картинкой',
+        subtitle: 'Подзаголовок',
+        ctaLabel: 'Открыть',
+        imageAssetId: 'asset-preview-1',
+        cardVariant: 'image_overlay',
+        iconKey: 'info',
+      ),
+    );
+    final published = await repo.publish(draft.id, draft.rowVersion);
+    expect(published.status, ProfileFeedStatus.published);
+
+    final media = _FakeContentMediaStore({
+      'asset-preview-1': _kTestPngBytes,
+    });
+
+    await tester.binding.setSurfaceSize(const Size(1400, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 1400,
+            height: 1200,
+            child: ProfileFeedEditorScreen(
+              repository: repo,
+              mediaStore: media,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(media.downloadedAssetIds, contains('asset-preview-1'));
+
+    // Select the published card so PageView builds that page.
+    await tester.tap(find.text('С картинкой').first);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    final cards = tester
+        .widgetList<StudentProfileFeedCard>(find.byType(StudentProfileFeedCard))
+        .where((card) => card.payload.title == 'С картинкой')
+        .toList();
+    expect(cards, isNotEmpty);
+    expect(cards.first.imageBytes, isNotNull);
+    expect(cards.first.imageBytes, _kTestPngBytes);
+    expect(cards.first.imageLoading, isFalse);
   });
 }
