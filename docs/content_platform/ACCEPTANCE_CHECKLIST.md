@@ -366,7 +366,7 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Tests: rendered overlay/icon/slots/nav/isolation/tombstone (+ goldens where feasible)
 - [x] Builds: Admin/Main Web, Android, iOS
 - [x] Codex APPROVE 14.1.4
-- [ ] Commit + normal push `origin/refactor/chat-tab` *(in progress)*
+- [x] Commit + normal push `origin/refactor/chat-tab` (`5337037`)
 
 ---
 

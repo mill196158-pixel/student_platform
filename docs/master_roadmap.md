@@ -1000,7 +1000,7 @@ Status: **DONE** / Codex **APPROVE** — corrective fidelity (14.1.2 history unc
 
 ### Stage 14.1.4 — Full Visual Parity & Media Reliability
 
-Status: **DONE** / Codex **APPROVE** — M5; gate OFF; migration `20260731000318_stage14_1_4_vacancy_assets_role_in_get_my` applied
+Status: **DONE** / Codex **APPROVE** — M5; gate OFF; HEAD `5337037`; migration `20260731000318_stage14_1_4_vacancy_assets_role_in_get_my` applied
 
 - [x] ContentImageRenderState; no silent image→gradient fallback;
 - [x] Full-screen Admin previews = mobile Profile/Jobs/Help/Home compositions;
