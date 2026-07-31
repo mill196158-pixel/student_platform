@@ -19,6 +19,7 @@ class ContentActionPicker extends StatefulWidget {
     this.loadArticleOptions,
     this.loadSubjectOptions,
     this.loadVacancyOptions,
+    this.loadChatOptions,
     super.key,
   });
 
@@ -29,6 +30,8 @@ class ContentActionPicker extends StatefulWidget {
   final Future<List<ContentActionTargetOption>> Function()? loadArticleOptions;
   final Future<List<ContentActionTargetOption>> Function()? loadSubjectOptions;
   final Future<List<ContentActionTargetOption>> Function()? loadVacancyOptions;
+  final Future<List<ContentActionTargetOption>> Function(String query)?
+  loadChatOptions;
 
   @override
   State<ContentActionPicker> createState() => _ContentActionPickerState();
@@ -36,15 +39,18 @@ class ContentActionPicker extends StatefulWidget {
 
 class _ContentActionPickerState extends State<ContentActionPicker> {
   final _urlController = TextEditingController();
+  final _chatSearchController = TextEditingController();
   String? _urlError;
   List<ContentActionTargetOption>? _targetOptions;
   bool _loadingTargets = false;
+  String _chatTargetMode = 'chat_id';
 
   @override
   void initState() {
     super.initState();
     _urlController.text = widget.selection.url ?? '';
     _urlError = validateContentExternalUrl(_urlController.text);
+    _chatTargetMode = widget.selection.chatTargetMode ?? 'chat_id';
     _maybeLoadTargets();
   }
 
@@ -59,11 +65,15 @@ class _ContentActionPickerState extends State<ContentActionPicker> {
     if (oldWidget.selection.kind != widget.selection.kind) {
       _maybeLoadTargets();
     }
+    if (oldWidget.selection.chatTargetMode != widget.selection.chatTargetMode) {
+      _chatTargetMode = widget.selection.chatTargetMode ?? 'chat_id';
+    }
   }
 
   @override
   void dispose() {
     _urlController.dispose();
+    _chatSearchController.dispose();
     super.dispose();
   }
 
@@ -77,6 +87,14 @@ class _ContentActionPickerState extends State<ContentActionPicker> {
         loader = widget.loadSubjectOptions;
       case ContentActionKind.vacancy:
         loader = widget.loadVacancyOptions;
+      case ContentActionKind.chat:
+        if (_chatTargetMode == 'chat_id') {
+          loader = widget.loadChatOptions == null
+              ? null
+              : () => widget.loadChatOptions!(_chatSearchController.text);
+        } else {
+          loader = null;
+        }
       default:
         loader = null;
     }
@@ -109,8 +127,12 @@ class _ContentActionPickerState extends State<ContentActionPicker> {
       ContentActionSelection(
         kind: kind,
         screenKey: kind == ContentActionKind.appScreen ? 'home' : null,
+        chatTargetMode: kind == ContentActionKind.chat ? 'chat_id' : null,
       ),
     );
+    if (kind == ContentActionKind.chat) {
+      _chatTargetMode = 'chat_id';
+    }
     _maybeLoadTargets();
   }
 
@@ -196,12 +218,71 @@ class _ContentActionPickerState extends State<ContentActionPicker> {
       case ContentActionKind.subject:
       case ContentActionKind.vacancy:
         return _buildTargetPicker(context);
+      case ContentActionKind.chat:
+        return _buildChatPicker(context);
       case ContentActionKind.none:
         return const Text(
           'Кнопка не выполняет переход.',
           style: TextStyle(color: Color(0xFF5C6370), fontSize: 13),
         );
     }
+  }
+
+  Widget _buildChatPicker(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        DropdownButtonFormField<String>(
+          isExpanded: true,
+          key: ValueKey('chat-mode-$_chatTargetMode'),
+          initialValue: _chatTargetMode,
+          decoration: const InputDecoration(labelText: 'Куда открыть чат'),
+          items: const [
+            DropdownMenuItem(value: 'chat_id', child: Text('Конкретный чат')),
+            DropdownMenuItem(
+              value: 'current_group_chat',
+              child: Text('Чат группы текущего студента'),
+            ),
+          ],
+          onChanged: !widget.enabled
+              ? null
+              : (value) {
+                  if (value == null) return;
+                  setState(() => _chatTargetMode = value);
+                  widget.onChanged(
+                    widget.selection.copyWith(
+                      chatTargetMode: value,
+                      clearTargetId: value == 'current_group_chat',
+                    ),
+                  );
+                  _maybeLoadTargets();
+                },
+        ),
+        if (_chatTargetMode == 'chat_id') ...[
+          const SizedBox(height: 8),
+          if (widget.loadChatOptions != null)
+            TextField(
+              controller: _chatSearchController,
+              enabled: widget.enabled,
+              decoration: const InputDecoration(
+                labelText: 'Поиск чата',
+                hintText: 'Название группы или предмета',
+              ),
+              onSubmitted: (_) => _maybeLoadTargets(),
+              onChanged: (_) => _maybeLoadTargets(),
+            ),
+          const SizedBox(height: 8),
+          _buildTargetPicker(context),
+        ] else
+          const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Text(
+              'Студент попадёт в общий чат своей текущей группы.',
+              style: TextStyle(color: Color(0xFF5C6370), fontSize: 13),
+            ),
+          ),
+      ],
+    );
   }
 
   Widget _buildTargetPicker(BuildContext context) {
@@ -221,17 +302,26 @@ class _ContentActionPickerState extends State<ContentActionPicker> {
     if (options.isEmpty) {
       return const Text('Нет доступных элементов.');
     }
+    final selectedId = options.any((o) => o.id == widget.selection.targetId)
+        ? widget.selection.targetId
+        : null;
+    if (selectedId == null && widget.enabled) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (widget.selection.targetId == options.first.id) return;
+        widget.onChanged(widget.selection.copyWith(targetId: options.first.id));
+      });
+    }
     return DropdownButtonFormField<String>(
       isExpanded: true,
-      key: ValueKey('target-${widget.selection.targetId}'),
-      initialValue: options.any((o) => o.id == widget.selection.targetId)
-          ? widget.selection.targetId
-          : options.first.id,
+      key: ValueKey('target-${widget.selection.targetId ?? options.first.id}'),
+      initialValue: selectedId ?? options.first.id,
       decoration: InputDecoration(
         labelText: switch (widget.selection.kind) {
           ContentActionKind.referenceArticle => 'Статья справочника',
           ContentActionKind.subject => 'Предмет',
           ContentActionKind.vacancy => 'Вакансия',
+          ContentActionKind.chat => 'Чат',
           _ => 'Цель',
         },
       ),

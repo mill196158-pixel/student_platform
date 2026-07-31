@@ -154,6 +154,65 @@ void main() {
     expect(restored.hasWorkingDraft, isFalse);
   });
 
+  test('working draft patch targets schema 3 for chat action', () {
+    final item = HomePromoItem(
+      id: 'hp-chat',
+      status: HomePromoStatus.published,
+      origin: ContentOrigin.admin,
+      schemaVersion: 1,
+      title: 'Promo',
+      payload: HomePromoPayload.tryParse({
+        'title': 'Promo',
+        'subtitle': 'Sub',
+        'icon_key': 'psychology',
+        'gradient_colors': ['#FFFBFF', '#F3EEF9'],
+        'cta_label': 'Go',
+        'dismissible': true,
+        'action': contentActionToWire(
+          const ContentActionSelection(
+            kind: ContentActionKind.chat,
+            chatTargetMode: 'current_group_chat',
+          ),
+        ),
+      })!,
+      rowVersion: 1,
+      priority: 0,
+      sortOrder: 0,
+      audienceMode: 'all',
+    );
+
+    final patch = item.toWorkingDraftPatch();
+    expect(patch['target_schema_version'], 3);
+    final payload = patch['payload'] as Map<String, dynamic>;
+    final action = payload['action'] as Map<String, dynamic>;
+    expect(action['kind'], 'chat');
+    expect(action['target_mode'], 'current_group_chat');
+  });
+
+  test('local beginEdit is idempotent for working draft', () async {
+    final repo = LocalHomePromoRepository();
+    final published = (await repo.list()).first;
+    final countBefore = (await repo.list()).length;
+    final first = await repo.beginEdit(published.id);
+    final second = await repo.beginEdit(published.id);
+    expect(first.workingDraftRowVersion, second.workingDraftRowVersion);
+    expect((await repo.list()).length, countBefore);
+  });
+
+  test('local list overlays working draft payload', () async {
+    final repo = LocalHomePromoRepository();
+    final published = (await repo.list()).first;
+    final editing = await repo.beginEdit(published.id);
+    await repo.saveWorkingDraft(
+      editing.copyWith(title: 'WD overlay title'),
+      expectedDraftRowVersion: editing.workingDraftRowVersion!,
+    );
+    final listed = await repo.list();
+    final match = listed.firstWhere((e) => e.id == published.id);
+    expect(match.title, 'WD overlay title');
+    expect(match.hasWorkingDraft, isTrue);
+  });
+
   test('working draft patch persists home_slot and schema v2 target', () {
     final item = HomePromoItem(
       id: 'hp-1',
@@ -266,14 +325,14 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final homeView = tester.widget<StudentHomeView>(find.byType(StudentHomeView));
+    final homeView = tester.widget<StudentHomeView>(
+      find.byType(StudentHomeView),
+    );
     expect(homeView.homePromoPlacements, isNotEmpty);
     expect(homeView.hideHomePromo, isFalse);
   });
 
-  testWidgets('draft-only promo appears in preview placements', (
-    tester,
-  ) async {
+  testWidgets('draft-only promo appears in preview placements', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1400, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -296,11 +355,14 @@ void main() {
     await tester.enterText(titleField, 'Draft-only promo');
     await tester.pump();
 
-    final homeView = tester.widget<StudentHomeView>(find.byType(StudentHomeView));
+    final homeView = tester.widget<StudentHomeView>(
+      find.byType(StudentHomeView),
+    );
     expect(homeView.homePromoPlacements, isNotEmpty);
     expect(
-      homeView.homePromoPlacements
-          .any((p) => p.payload.title == 'Draft-only promo'),
+      homeView.homePromoPlacements.any(
+        (p) => p.payload.title == 'Draft-only promo',
+      ),
       isTrue,
     );
   });
@@ -327,18 +389,21 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(StudentHomeView), findsOneWidget);
-      final homeView =
-          tester.widget<StudentHomeView>(find.byType(StudentHomeView));
+      final homeView = tester.widget<StudentHomeView>(
+        find.byType(StudentHomeView),
+      );
       expect(homeView.homePromoPlacements, isNotEmpty);
       expect(
-        homeView.homePromoPlacements
-            .any((p) => p.payload.title == 'Draft-only promo'),
+        homeView.homePromoPlacements.any(
+          (p) => p.payload.title == 'Draft-only promo',
+        ),
         isFalse,
       );
       // Seeded published demo remains visible without draft overlay.
       expect(
-        homeView.homePromoPlacements
-            .any((p) => p.payload.title.contains('Застрял')),
+        homeView.homePromoPlacements.any(
+          (p) => p.payload.title.contains('Застрял'),
+        ),
         isTrue,
       );
     },
@@ -387,7 +452,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final homeView = tester.widget<StudentHomeView>(find.byType(StudentHomeView));
+    final homeView = tester.widget<StudentHomeView>(
+      find.byType(StudentHomeView),
+    );
     expect(
       homeView.data.news.any(
         (item) => item.title.contains('Добро пожаловать в новый семестр'),

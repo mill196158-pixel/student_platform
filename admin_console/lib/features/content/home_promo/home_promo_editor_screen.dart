@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
@@ -97,6 +98,9 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
   bool _isHidden = false;
   String _audienceMode = 'all';
   String _ctaAction = 'route';
+  ContentActionSelection _actionSelection = const ContentActionSelection(
+    kind: ContentActionKind.none,
+  );
   int _gradientDirection = 45;
   ContentHomeSlot _homeSlot = ContentHomeSlot.afterAssignments;
   ContentCardVariant _cardVariant = ContentCardVariant.gradientText;
@@ -309,19 +313,28 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     _startsAt = selected.startsAt;
     _endsAt = selected.endsAt;
     _ctaAction = (p.ctaUrl != null && p.ctaUrl!.isNotEmpty) ? 'url' : 'route';
+    _actionSelection = p.action != null
+        ? contentActionFromWire(p.action)
+        : contentActionFromLegacy(
+            ctaAction: _ctaAction,
+            ctaRoute: p.ctaRoute ?? '',
+            ctaUrl: p.ctaUrl ?? '',
+          );
+    if (p.action != null) {
+      applyContentActionToLegacy(
+        action: _actionSelection,
+        onCtaActionChanged: (value) => _ctaAction = value,
+        onCtaRouteChanged: (value) => _ctaRouteController.text = value,
+        onCtaUrlChanged: (value) => _ctaUrlController.text = value,
+      );
+    }
     _homeSlot = ContentHomeSlot.fromKey(p.homeSlot);
     _cardVariant =
         ContentCardVariant.fromKey(p.cardVariant) ??
         ContentCardVariant.gradientText;
     _gradientDirection = p.gradientAngle ?? 45;
-    if (p.action != null) {
-      final fromWire = contentActionFromWire(p.action);
-      applyContentActionToLegacy(
-        action: fromWire,
-        onCtaActionChanged: (value) => _ctaAction = value,
-        onCtaRouteChanged: (value) => _ctaRouteController.text = value,
-        onCtaUrlChanged: (value) => _ctaUrlController.text = value,
-      );
+    if (selected.hasWorkingDraft) {
+      _editingWorkingDraft = true;
     }
     _imageIntent.putIfAbsent(
       selected.id,
@@ -361,6 +374,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
       startsAt: _startsAt,
       endsAt: _endsAt,
       ctaAction: _ctaAction,
+      actionSelection: _actionSelection,
       imageIntent: _intentForSelected(),
       iconIntent: _iconIntentForSelected(),
       homeSlot: _homeSlot,
@@ -411,11 +425,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     String? iconAssetIdOverride,
   }) {
     final reshowRaw = _reshowController.text.trim();
-    final actionSelection = contentActionFromLegacy(
-      ctaAction: _ctaAction,
-      ctaRoute: _ctaRouteController.text,
-      ctaUrl: _ctaUrlController.text,
-    );
+    final actionSelection = _actionSelection;
     final map = <String, dynamic>{
       'title': _titleController.text.trim(),
       'subtitle': _subtitleController.text.trim(),
@@ -503,6 +513,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     _startsAt = snapshot.startsAt;
     _endsAt = snapshot.endsAt;
     _ctaAction = snapshot.ctaAction;
+    _actionSelection = snapshot.actionSelection;
     _homeSlot = snapshot.homeSlot;
     _cardVariant = snapshot.cardVariant;
     _gradientDirection = snapshot.gradientDirection;
@@ -568,13 +579,106 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
 
   void _select(String id) {
     if (id == _selectedId) return;
+    if (_dirty) {
+      unawaited(_confirmDiscardDirty(() => _applySelect(id)));
+      return;
+    }
+    _applySelect(id);
+  }
+
+  void _applySelect(String id) {
+    HomePromoItem? item;
+    for (final candidate in _items) {
+      if (candidate.id == id) {
+        item = candidate;
+        break;
+      }
+    }
     setState(() {
       _selectedId = id;
-      _editingWorkingDraft = false;
+      if (item?.hasWorkingDraft == true) {
+        _editingWorkingDraft = true;
+      } else {
+        _editingWorkingDraft = false;
+      }
     });
     _bindSelected();
     unawaited(_resolveAssetFor(id));
     unawaited(_resolveIconFor(id));
+  }
+
+  Future<void> _confirmDiscardDirty(VoidCallback onProceed) async {
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Несохранённые изменения'),
+        content: const Text(
+          'Переключить карточку без сохранения текущих правок?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Остаться'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Переключить'),
+          ),
+        ],
+      ),
+    );
+    if (proceed == true && mounted) onProceed();
+  }
+
+  void _selectNextAfterRemoval(String removedId, List<HomePromoItem> before) {
+    final index = before.indexWhere((e) => e.id == removedId);
+    final remaining = before.where((e) => e.id != removedId).toList();
+    if (remaining.isEmpty) {
+      _selectedId = null;
+      return;
+    }
+    if (index >= 0 && index < remaining.length) {
+      _selectedId = remaining[index].id;
+    } else {
+      _selectedId = remaining.last.id;
+    }
+  }
+
+  Future<List<ContentActionTargetOption>> _loadChatOptions(String query) async {
+    if (AdminBackendConfig.isDemoMode) {
+      return const [
+        ContentActionTargetOption(
+          id: '00000000-0000-4000-8000-000000000001',
+          label: 'Демо · Общий чат группы',
+        ),
+      ];
+    }
+    final client = _tryClient();
+    if (client == null) return const [];
+    try {
+      final data = await client.rpc(
+        'admin_list_content_chat_targets',
+        params: {'p_query': query.trim().isEmpty ? null : query.trim()},
+      );
+      dynamic value = data;
+      if (value is String && value.isNotEmpty) {
+        value = jsonDecode(value);
+      }
+      if (value is! List) return const [];
+      return [
+        for (final row in value.whereType<Map>())
+          ContentActionTargetOption(
+            id: (row['chat_id'] ?? '').toString(),
+            label: [
+              (row['title'] ?? 'Чат').toString(),
+              if ((row['chat_kind_label'] ?? '').toString().isNotEmpty)
+                (row['chat_kind_label'] ?? '').toString(),
+            ].join(' · '),
+          ),
+      ].where((e) => e.id.isNotEmpty).toList();
+    } catch (_) {
+      return const [];
+    }
   }
 
   Future<void> _beginEdit() async {
@@ -976,13 +1080,28 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
 
   Future<void> _safeDelete() async {
     final selected = _selected;
-    if (selected == null) return;
+    if (selected == null || !selected.isArchived) return;
+    final confirmController = TextEditingController();
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Удалить навсегда?'),
-        content: const Text(
-          'Архивная карточка будет удалена без возможности восстановления.',
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Введите заголовок карточки для подтверждения: «${selected.title}»',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: confirmController,
+              decoration: const InputDecoration(
+                labelText: 'Заголовок карточки',
+              ),
+              autofocus: true,
+            ),
+          ],
         ),
         actions: [
           TextButton(
@@ -990,16 +1109,27 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
             child: const Text('Отмена'),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
+            onPressed: () => Navigator.of(
+              dialogContext,
+            ).pop(confirmController.text.trim() == selected.title.trim()),
             child: const Text('Удалить'),
           ),
         ],
       ),
     );
+    confirmController.dispose();
     if (confirmed != true) return;
+    final before = List<HomePromoItem>.from(_tabItems);
+    final removedId = selected.id;
     await _run(() async {
       await _repository.safeDelete(selected.id, selected.rowVersion);
+      if (!mounted) return;
       await _reload();
+      setState(() {
+        _selectNextAfterRemoval(removedId, before);
+        _editingWorkingDraft = false;
+      });
+      _bindSelected();
       setState(() => _successBanner = 'Карточка удалена.');
     });
   }
@@ -1727,6 +1857,8 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
                 userIds: _userIds,
                 audiencePreview: _audiencePreview,
                 ctaAction: _ctaAction,
+                actionSelection: _actionSelection,
+                loadChatOptions: _loadChatOptions,
                 gradientDirection: _gradientDirection,
                 homeSlot: _homeSlot,
                 cardVariant: _cardVariant,
@@ -1744,6 +1876,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
                   _markDirty();
                 },
                 onActionSelectionChanged: (action) {
+                  _actionSelection = action;
                   applyContentActionToLegacy(
                     action: action,
                     onCtaActionChanged: (value) => _ctaAction = value,
@@ -1833,6 +1966,7 @@ class _EditorSnapshot {
     required this.startsAt,
     required this.endsAt,
     required this.ctaAction,
+    required this.actionSelection,
     required this.imageIntent,
     required this.iconIntent,
     required this.homeSlot,
@@ -1857,6 +1991,7 @@ class _EditorSnapshot {
   final DateTime? startsAt;
   final DateTime? endsAt;
   final String ctaAction;
+  final ContentActionSelection actionSelection;
   final ContentMediaIntentState imageIntent;
   final ContentMediaIntentState iconIntent;
   final ContentHomeSlot homeSlot;
@@ -1883,6 +2018,7 @@ class _EditorSnapshot {
         other.startsAt == startsAt &&
         other.endsAt == endsAt &&
         other.ctaAction == ctaAction &&
+        other.actionSelection == actionSelection &&
         other.imageIntent == imageIntent &&
         other.iconIntent == iconIntent &&
         other.homeSlot == homeSlot &&
@@ -1909,6 +2045,7 @@ class _EditorSnapshot {
     startsAt,
     endsAt,
     ctaAction,
+    actionSelection,
     imageIntent,
     iconIntent,
     homeSlot,
@@ -2061,6 +2198,8 @@ class _PropertiesPanel extends StatelessWidget {
     required this.userIds,
     required this.audiencePreview,
     required this.ctaAction,
+    required this.actionSelection,
+    required this.loadChatOptions,
     required this.gradientDirection,
     required this.homeSlot,
     required this.cardVariant,
@@ -2120,6 +2259,9 @@ class _PropertiesPanel extends StatelessWidget {
   final List<String> userIds;
   final HomePromoAudiencePreview? audiencePreview;
   final String ctaAction;
+  final ContentActionSelection actionSelection;
+  final Future<List<ContentActionTargetOption>> Function(String query)
+  loadChatOptions;
   final int gradientDirection;
   final ContentHomeSlot homeSlot;
   final ContentCardVariant cardVariant;
@@ -2333,17 +2475,18 @@ class _PropertiesPanel extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(bottom: 10),
             child: ContentActionPicker(
-              selection: contentActionFromLegacy(
-                ctaAction: ctaAction,
-                ctaRoute: ctaRouteController.text,
-                ctaUrl: ctaUrlController.text,
-              ),
+              selection: actionSelection,
               enabled: _editable,
               allowedKinds: const [
                 ContentActionKind.appScreen,
+                ContentActionKind.referenceArticle,
+                ContentActionKind.subject,
+                ContentActionKind.vacancy,
                 ContentActionKind.externalUrl,
+                ContentActionKind.chat,
                 ContentActionKind.none,
               ],
+              loadChatOptions: loadChatOptions,
               onChanged: onActionSelectionChanged,
             ),
           ),

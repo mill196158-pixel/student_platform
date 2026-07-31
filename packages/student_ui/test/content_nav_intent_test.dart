@@ -186,6 +186,76 @@ void main() {
         isA<ContentNavNone>(),
       );
     });
+
+    test('chat target modes', () {
+      const chatId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+      expect(
+        ContentNavResolver.resolveAction({
+          'kind': 'chat',
+          'target_mode': 'chat_id',
+          'target_id': chatId,
+        }),
+        isA<ContentNavChat>()
+            .having((i) => i.targetMode, 'mode', 'chat_id')
+            .having((i) => i.targetId, 'id', chatId),
+      );
+      expect(
+        ContentNavResolver.resolveAction({
+          'kind': 'chat',
+          'target_mode': 'current_group_chat',
+        }),
+        isA<ContentNavChat>().having(
+          (i) => i.targetMode,
+          'mode',
+          'current_group_chat',
+        ),
+      );
+      expect(
+        ContentNavResolver.resolveAction({
+          'kind': 'chat',
+          'target_mode': 'current_group_chat',
+          'target_id': chatId,
+        }),
+        isA<ContentNavDisabled>(),
+      );
+      expect(
+        ContentNavResolver.resolveAction({
+          'kind': 'chat',
+          'target_mode': 'chat_id',
+          'target_id': 'not-a-uuid',
+        }),
+        isA<ContentNavDisabled>(),
+      );
+      expect(
+        ContentNavResolver.resolveAction({'kind': 'chat'}),
+        isA<ContentNavDisabled>(),
+      );
+    });
+
+    test('shared HTTPS corpus', () {
+      // ignore: avoid_relative_lib_imports
+      final corpus = _loadCorpus();
+      for (final entry in corpus) {
+        final uri = ContentNavResolver.tryParseSafeHttpsUri(entry.url);
+        if (entry.accept) {
+          expect(uri, isNotNull, reason: entry.url);
+        } else {
+          expect(uri, isNull, reason: entry.url);
+        }
+      }
+      expect(
+        ContentNavResolver.tryParseSafeHttpsUri(
+          _urlOfLength(2049),
+        ),
+        isNull,
+      );
+      expect(
+        ContentNavResolver.tryParseSafeHttpsUri(
+          _urlOfLength(2048),
+        ),
+        isNotNull,
+      );
+    });
   });
 
   group('ContentNavResolver legacy', () {
@@ -231,4 +301,33 @@ void main() {
       );
     });
   });
+}
+
+List<_Corpus> _loadCorpus() {
+  return const [
+    _Corpus('https://example.com/a', accept: true),
+    _Corpus('http://example.com/a'),
+    _Corpus('javascript:alert(1)'),
+    _Corpus('data:text/plain,hi'),
+    _Corpus('file:///etc/passwd'),
+    _Corpus('//evil.example'),
+    _Corpus('https://user:pass@example.com'),
+    _Corpus('https:///path-only'),
+  ];
+}
+
+class _Corpus {
+  const _Corpus(this.url, {this.accept = false});
+  final String url;
+  final bool accept;
+}
+
+String safeHttpsCorpusOverlongUrl(int length) {
+  return _urlOfLength(length);
+}
+
+String _urlOfLength(int length) {
+  const prefix = 'https://example.com/';
+  if (length <= prefix.length) return prefix;
+  return '$prefix${'a' * (length - prefix.length)}';
 }

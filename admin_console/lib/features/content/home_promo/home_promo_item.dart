@@ -1,5 +1,6 @@
 import 'package:student_ui/student_ui.dart';
 
+import '../shared/content_action_model.dart';
 import '../shared/content_working_draft.dart';
 
 enum HomePromoStatus { draft, published, archived }
@@ -372,8 +373,13 @@ class HomePromoItem {
       'sort_order': sortOrder,
       if (assetIds.isNotEmpty) 'draft_asset_ids': assetIds.toList(),
     };
-    // Visual Studio targets schema 2. Allowed: canonical 2→2 and legacy 1→2.
-    if (schemaVersion == 1 || schemaVersion == 2) {
+    // Visual Studio schema target: home 1|2→2, chat or canonical 3→3.
+    final action = contentActionFromWire(payload.action);
+    final wantsSchema3 =
+        action.kind == ContentActionKind.chat || schemaVersion >= 3;
+    if (wantsSchema3) {
+      patch['target_schema_version'] = 3;
+    } else if (schemaVersion == 1 || schemaVersion == 2) {
       patch['target_schema_version'] = 2;
     }
     return patch;

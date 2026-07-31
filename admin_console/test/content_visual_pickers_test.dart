@@ -1,3 +1,4 @@
+import '../../test/fixtures/safe_https_corpus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:student_platform_admin/features/content/shared/content_action_model.dart';
@@ -38,6 +39,35 @@ void main() {
 
     test('validateContentExternalUrl accepts https', () {
       expect(validateContentExternalUrl('https://example.com'), isNull);
+    });
+
+    test('validateContentExternalUrl matches shared corpus', () {
+      for (final entry in kSafeHttpsCorpus) {
+        final error = validateContentExternalUrl(entry.url);
+        if (entry.accept) {
+          expect(error, isNull, reason: entry.url);
+        } else {
+          expect(error, isNotNull, reason: entry.url);
+        }
+      }
+      expect(
+        validateContentExternalUrl(safeHttpsCorpusOverlongUrl(2049)),
+        isNotNull,
+      );
+    });
+
+    test('contentActionToWire round-trips chat action', () {
+      const selection = ContentActionSelection(
+        kind: ContentActionKind.chat,
+        chatTargetMode: 'chat_id',
+        targetId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      );
+      final wire = contentActionToWire(selection);
+      expect(wire['kind'], 'chat');
+      expect(wire['target_mode'], 'chat_id');
+      final parsed = contentActionFromWire(wire);
+      expect(parsed.kind, ContentActionKind.chat);
+      expect(parsed.chatTargetMode, 'chat_id');
     });
 
     testWidgets('shows error for non-https URL in picker', (tester) async {

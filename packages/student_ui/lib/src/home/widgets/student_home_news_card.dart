@@ -44,7 +44,6 @@ class StudentHomeNewsFeed extends StatelessWidget {
               },
             ),
           ),
-          const SizedBox(height: 22),
         ],
       ),
     );

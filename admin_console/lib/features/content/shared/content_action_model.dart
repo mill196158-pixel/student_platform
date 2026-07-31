@@ -1,13 +1,17 @@
-/// Kind of tap action for content cards (no chat in v1).
+import 'package:student_ui/student_ui.dart';
+
+/// Kind of tap action for content cards.
 enum ContentActionKind {
   appScreen,
   referenceArticle,
   subject,
   vacancy,
   externalUrl,
+  chat,
   none,
 }
 
+/// Chat target mode for schema-3 home promo actions.
 /// Structured action selection stored in editors; projected to legacy routes in v1.
 class ContentActionSelection {
   const ContentActionSelection({
@@ -15,6 +19,7 @@ class ContentActionSelection {
     this.screenKey,
     this.targetId,
     this.url,
+    this.chatTargetMode,
   });
 
   final ContentActionKind kind;
@@ -22,20 +27,28 @@ class ContentActionSelection {
   final String? targetId;
   final String? url;
 
+  /// When [kind] is [ContentActionKind.chat]: `chat_id` or `current_group_chat`.
+  final String? chatTargetMode;
+
   ContentActionSelection copyWith({
     ContentActionKind? kind,
     String? screenKey,
     String? targetId,
     String? url,
+    String? chatTargetMode,
     bool clearScreenKey = false,
     bool clearTargetId = false,
     bool clearUrl = false,
+    bool clearChatTargetMode = false,
   }) {
     return ContentActionSelection(
       kind: kind ?? this.kind,
       screenKey: clearScreenKey ? null : (screenKey ?? this.screenKey),
       targetId: clearTargetId ? null : (targetId ?? this.targetId),
       url: clearUrl ? null : (url ?? this.url),
+      chatTargetMode: clearChatTargetMode
+          ? null
+          : (chatTargetMode ?? this.chatTargetMode),
     );
   }
 
@@ -45,11 +58,13 @@ class ContentActionSelection {
         other.kind == kind &&
         other.screenKey == screenKey &&
         other.targetId == targetId &&
-        other.url == url;
+        other.url == url &&
+        other.chatTargetMode == chatTargetMode;
   }
 
   @override
-  int get hashCode => Object.hash(kind, screenKey, targetId, url);
+  int get hashCode =>
+      Object.hash(kind, screenKey, targetId, url, chatTargetMode);
 }
 
 /// Human label for each action kind.
@@ -60,6 +75,7 @@ String contentActionKindLabelRu(ContentActionKind kind) {
     ContentActionKind.subject => 'Открыть предмет',
     ContentActionKind.vacancy => 'Открыть вакансию',
     ContentActionKind.externalUrl => 'Открыть внешний сайт',
+    ContentActionKind.chat => 'Открыть чат',
     ContentActionKind.none => 'Без действия',
   };
 }
@@ -157,6 +173,10 @@ void applyContentActionToLegacy({
       onCtaActionChanged('route');
       onCtaRouteChanged('');
       onCtaUrlChanged('');
+    case ContentActionKind.chat:
+      onCtaActionChanged('route');
+      onCtaRouteChanged('');
+      onCtaUrlChanged('');
     case ContentActionKind.referenceArticle:
     case ContentActionKind.subject:
     case ContentActionKind.vacancy:
@@ -173,14 +193,14 @@ String? validateContentExternalUrl(String? raw) {
     return 'Укажите URL';
   }
   final trimmed = raw.trim();
-  final uri = Uri.tryParse(trimmed);
-  if (uri == null || !uri.hasScheme) {
-    return 'Некорректный URL';
-  }
-  if (uri.scheme.toLowerCase() != 'https') {
-    return 'Разрешены только HTTPS-ссылки';
-  }
-  if (uri.host.isEmpty) {
+  if (ContentNavResolver.tryParseSafeHttpsUri(trimmed) == null) {
+    if (trimmed.length > ContentNavResolver.maxSafeHttpsUrlLength) {
+      return 'Ссылка слишком длинная (максимум ${ContentNavResolver.maxSafeHttpsUrlLength} символов)';
+    }
+    final lower = trimmed.toLowerCase();
+    if (lower.startsWith('http:')) {
+      return 'Разрешены только HTTPS-ссылки';
+    }
     return 'Некорректный URL';
   }
   return null;
@@ -202,6 +222,7 @@ String contentActionKindWire(ContentActionKind kind) {
     ContentActionKind.subject => 'subject',
     ContentActionKind.vacancy => 'vacancy',
     ContentActionKind.externalUrl => 'external_url',
+    ContentActionKind.chat => 'chat',
     ContentActionKind.none => 'none',
   };
 }
@@ -212,6 +233,10 @@ Map<String, dynamic> contentActionToWire(ContentActionSelection action) {
     'kind': contentActionKindWire(action.kind),
     if (action.screenKey != null && action.screenKey!.trim().isNotEmpty)
       'screen_key': action.screenKey!.trim(),
+    if (action.kind == ContentActionKind.chat &&
+        action.chatTargetMode != null &&
+        action.chatTargetMode!.trim().isNotEmpty)
+      'target_mode': action.chatTargetMode!.trim(),
     if (action.targetId != null && action.targetId!.trim().isNotEmpty)
       'target_id': action.targetId!.trim(),
     if (action.url != null && action.url!.trim().isNotEmpty)
@@ -230,6 +255,7 @@ ContentActionSelection contentActionFromWire(Object? raw) {
     'subject' => ContentActionKind.subject,
     'vacancy' => ContentActionKind.vacancy,
     'external_url' => ContentActionKind.externalUrl,
+    'chat' => ContentActionKind.chat,
     'none' => ContentActionKind.none,
     _ => ContentActionKind.none,
   };
@@ -238,6 +264,7 @@ ContentActionSelection contentActionFromWire(Object? raw) {
     screenKey: raw['screen_key']?.toString(),
     targetId: raw['target_id']?.toString(),
     url: raw['url']?.toString(),
+    chatTargetMode: raw['target_mode']?.toString(),
   );
 }
 

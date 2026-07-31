@@ -6,7 +6,7 @@
 ## Статус документа
 
 - Дата аудита: **27 июля 2026**
-- Updated: **31 июля 2026** (Stage 14.2.2 reliable Visual Studio publish — DONE)
+- Updated: **31 июля 2026** (Stage 14.2.3 home promo chat CTA — DONE)
 - Проверенная основная ветка: `refactor/chat-tab` (база)
 - Рабочая ветка контента: `feature/content-platform`
 - Проверенная административная ветка: `feature/admin-console`
@@ -1048,6 +1048,17 @@ Status: **DONE** / Codex **APPROVE** — `35cb5fb`; migration `20260731110419`
 - [x] Allow home_promo_v1 / profile_feed_card_v1 WD 1→2; publish still uses v2 gate;
 - [x] Shared single-flight publish coordinator (validate → autosave → publish → refetch) for all 4 editors;
 - [x] Mapped RU business errors; «Публикуем…» UI; tests + smoke + push.
+
+### Stage 14.2.3 — home promo schema 3 + chat CTA + in-place edit
+
+Status: **DONE** / Codex **APPROVE** — migration `20260731113816`
+
+- [x] Root cause: WD without admin JSON overlay + locked edit/archive; Create minted second card;
+- [x] `home_promo_v1@3` chat CTA (`target_mode`, optional `target_id`); profile stays schema 2;
+- [x] Mobile `ContentNavChat` + RPC authorize; external HTTPS corpus 2048; fail-closed unknown actions;
+- [x] Admin chat picker + WD overlay list/resume + schema 3 publish target + safe-delete title confirm;
+- [x] Home section gap constant + multi-promo layout tests;
+- [x] Codex final APPROVE + remote apply + smoke (count 2→2, no live deletes) + push.
 
 ### Next after 14.1.4 — Import Studio (separate stage)
 

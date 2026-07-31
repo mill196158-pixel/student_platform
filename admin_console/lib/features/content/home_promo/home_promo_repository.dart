@@ -123,11 +123,6 @@ class LocalHomePromoRepository implements HomePromoRepository {
     );
   }
 
-  HomePromoItem _withWorkingDraftFlag(HomePromoItem item) {
-    if (!_workingDrafts.containsKey(item.id)) return item;
-    return item.copyWith(hasWorkingDraft: true);
-  }
-
   HomePromoItem _withWorkingDraftOverlay(HomePromoItem item) {
     final draft = _workingDrafts[item.id];
     if (draft == null) return item;
@@ -156,7 +151,7 @@ class LocalHomePromoRepository implements HomePromoRepository {
     final filtered = status == null
         ? _items
         : _items.where((e) => homePromoStatusWire(e.status) == status).toList();
-    final copy = [...filtered.map(_withWorkingDraftFlag)]
+    final copy = [...filtered.map(_withWorkingDraftOverlay)]
       ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
     return copy;
   }

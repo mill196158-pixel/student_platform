@@ -6,6 +6,7 @@ import '../content/content_image_render_state.dart';
 import '../content/content_models.dart';
 import '../content/student_home_promo_card.dart';
 import 'home_preview_models.dart';
+import 'student_home_layout.dart';
 import 'widgets/student_home_news_card.dart';
 
 /// One managed promo placed into a safe home slot (Stage 14.1.2).
@@ -120,7 +121,11 @@ class StudentHomeView extends StatelessWidget {
         .toList();
     if (cards.isEmpty) return const [];
     return [
-      for (var i = 0; i < cards.length; i++)
+      for (var i = 0; i < cards.length; i++) ...[
+        if (i > 0)
+          const SliverToBoxAdapter(
+            child: SizedBox(height: kStudentHomeSectionGap),
+          ),
         SliverToBoxAdapter(
           child: _AnimatedEntry(
             delay: delay + Duration(milliseconds: i * 20),
@@ -139,7 +144,18 @@ class StudentHomeView extends StatelessWidget {
             ),
           ),
         ),
+      ],
+      if (cards.isNotEmpty)
+        const SliverToBoxAdapter(
+          child: SizedBox(height: kStudentHomeSectionGap),
+        ),
     ];
+  }
+
+  SliverToBoxAdapter _sectionGap() {
+    return const SliverToBoxAdapter(
+      child: SizedBox(height: kStudentHomeSectionGap),
+    );
   }
 
   @override
@@ -168,6 +184,7 @@ class StudentHomeView extends StatelessWidget {
             ),
           ),
         ),
+        _sectionGap(),
         ..._promoSliversFor(
           'after_news',
           delay: const Duration(milliseconds: 40),
@@ -179,6 +196,7 @@ class StudentHomeView extends StatelessWidget {
             child: _TodaySummaryCard(data: data, onTap: onSummaryTap),
           ),
         ),
+        _sectionGap(),
         ..._promoSliversFor(
           'after_day_summary',
           delay: const Duration(milliseconds: 90),
@@ -199,6 +217,7 @@ class StudentHomeView extends StatelessWidget {
             ),
           ),
         ),
+        _sectionGap(),
         ..._promoSliversFor(
           'after_assignments',
           delay: const Duration(milliseconds: 170),

@@ -317,7 +317,7 @@ class _VisualEditorHeader extends StatelessWidget {
                 OutlinedButton.icon(
                   onPressed: busy || !canWrite ? null : onDiscardWorkingDraft,
                   icon: const Icon(Icons.undo_rounded),
-                  label: const Text('Сбросить черновик на сервере'),
+                  label: const Text('Отменить правки'),
                 ),
             ] else ...[
               if (isPublished && onUnpublish != null)

@@ -729,7 +729,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           payload: card.homePromo,
           slot: card.homePromo.effectiveHomeSlot,
           showDemoBadge: card.showDemoBadge,
-          onTap: () => _onHomePromoTap(card: card),
+          onTap: _promoTapCallback(card),
           onDismiss: card.homePromo.dismissible
               ? () => _onHomePromoDismiss(card)
               : null,
@@ -750,6 +750,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (!_recordedImpressionIds.add(id)) continue;
       unawaited(_promoService.recordEvent(id, 'impression'));
     }
+  }
+
+  VoidCallback? _promoTapCallback(ManagedContentCard card) {
+    final payload = card.homePromo;
+    final intent = ContentNavResolver.resolve(
+      action: payload.action,
+      ctaRoute: payload.ctaRoute,
+      ctaUrl: payload.ctaUrl,
+    );
+    if (intent is ContentNavDisabled) return null;
+    return () => _onHomePromoTap(card: card);
   }
 
   Future<void> _onHomePromoTap({
@@ -782,10 +793,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await const ContentNavExecutor().execute(
       context,
       intent,
-      onUnavailable: () {
+      onUnavailableMessage: (message) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Контент недоступен')),
+          SnackBar(content: Text(message)),
         );
       },
       onDisabled: () {

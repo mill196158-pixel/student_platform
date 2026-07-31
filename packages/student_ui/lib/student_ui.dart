@@ -20,6 +20,7 @@ export 'src/content/student_vacancy_detail_sheet.dart';
 export 'src/content/vacancy_models.dart';
 export 'src/home/home_preview_models.dart';
 export 'src/home/news_image_bytes_cache.dart';
+export 'src/home/student_home_layout.dart';
 export 'src/home/student_home_view.dart';
 export 'src/home/widgets/news_image_frame.dart';
 export 'src/home/widgets/student_home_news_card.dart';

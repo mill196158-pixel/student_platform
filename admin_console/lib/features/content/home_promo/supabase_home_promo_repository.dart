@@ -123,9 +123,10 @@ class SupabaseHomePromoRepository implements HomePromoRepository {
       'p_placement': 'home_promo',
       'p_origin': null,
     });
-    return _asList(
-      data,
-    ).map(HomePromoItem.tryParse).whereType<HomePromoItem>().toList();
+    return _asList(data)
+        .map(HomePromoItem.tryParseWithWorkingDraftOverlay)
+        .whereType<HomePromoItem>()
+        .toList();
   }
 
   @override

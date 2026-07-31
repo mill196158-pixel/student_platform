@@ -168,6 +168,13 @@ VisualEditorOperationError _fromCode(
         code: code,
         debugDetail: _safeDebug(stage, raw),
       );
+    case 'working_draft_exists':
+      return VisualEditorOperationError(
+        'Сначала отмените черновик изменений',
+        code: code,
+        isValidation: true,
+        debugDetail: _safeDebug(stage, raw),
+      );
     case 'row_version_conflict':
     case 'row_version_required':
     case 'conflict':
@@ -243,6 +250,7 @@ VisualEditorOperationError _fromCode(
 const _knownCodes = {
   'working_draft_required',
   'working_draft_not_found',
+  'working_draft_exists',
   'row_version_conflict',
   'row_version_required',
   'conflict',

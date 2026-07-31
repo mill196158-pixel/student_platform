@@ -53,6 +53,20 @@ final class ContentNavExternalHttps extends ContentNavIntent {
   final Uri uri;
 }
 
+/// Open a team chat after server-side authorize ([content_resolve_chat_cta]).
+final class ContentNavChat extends ContentNavIntent {
+  const ContentNavChat({
+    required this.targetMode,
+    this.targetId,
+  });
+
+  /// `chat_id` or `current_group_chat`.
+  final String targetMode;
+
+  /// Required when [targetMode] is `chat_id`.
+  final String? targetId;
+}
+
 /// Explicit no-op action (`kind: none`).
 final class ContentNavNone extends ContentNavIntent {
   const ContentNavNone();
@@ -97,7 +111,10 @@ class ContentNavResolver {
     'screen_key',
     'target_id',
     'url',
+    'target_mode',
   };
+
+  static const int maxSafeHttpsUrlLength = 2048;
 
   /// Resolve a schema-v2 structured action object.
   static ContentNavIntent resolveAction(Map<String, dynamic> action) {
@@ -112,42 +129,68 @@ class ContentNavResolver {
     if (kind == null) return const ContentNavDisabled();
     if (_invalidPresentActionField(action, 'screen_key') ||
         _invalidPresentActionField(action, 'target_id') ||
-        _invalidPresentActionField(action, 'url')) {
+        _invalidPresentActionField(action, 'url') ||
+        _invalidPresentActionField(action, 'target_mode')) {
       return const ContentNavDisabled();
     }
 
     final screenKey = _optionalActionString(action, 'screen_key');
     final targetId = _optionalActionString(action, 'target_id');
     final url = _optionalActionString(action, 'url');
+    final targetMode = _optionalActionString(action, 'target_mode');
 
     switch (kind) {
       case 'none':
-        if (screenKey != null || targetId != null || url != null) {
+        if (screenKey != null ||
+            targetId != null ||
+            url != null ||
+            targetMode != null) {
           return const ContentNavDisabled();
         }
         return const ContentNavNone();
       case 'app_screen':
-        if (targetId != null || url != null) return const ContentNavDisabled();
+        if (targetId != null || url != null || targetMode != null) {
+          return const ContentNavDisabled();
+        }
         return _screenKeyToIntent(screenKey);
       case 'reference_article':
-        if (screenKey != null || url != null) return const ContentNavDisabled();
+        if (screenKey != null || url != null || targetMode != null) {
+          return const ContentNavDisabled();
+        }
         if (!_isUuid(targetId)) return const ContentNavDisabled();
         return ContentNavReferenceArticle(targetId!);
       case 'subject':
-        if (screenKey != null || url != null) return const ContentNavDisabled();
+        if (screenKey != null || url != null || targetMode != null) {
+          return const ContentNavDisabled();
+        }
         if (!_isUuid(targetId)) return const ContentNavDisabled();
         return ContentNavSubject(targetId!);
       case 'vacancy':
-        if (screenKey != null || url != null) return const ContentNavDisabled();
+        if (screenKey != null || url != null || targetMode != null) {
+          return const ContentNavDisabled();
+        }
         if (!_isUuid(targetId)) return const ContentNavDisabled();
         return ContentNavVacancy(targetId!);
       case 'external_url':
-        if (screenKey != null || targetId != null) {
+        if (screenKey != null || targetId != null || targetMode != null) {
           return const ContentNavDisabled();
         }
         final uri = tryParseSafeHttpsUri(url);
         if (uri == null) return const ContentNavDisabled();
         return ContentNavExternalHttps(uri);
+      case 'chat':
+        if (screenKey != null || url != null) {
+          return const ContentNavDisabled();
+        }
+        if (targetMode == 'chat_id') {
+          if (!_isUuid(targetId)) return const ContentNavDisabled();
+          return ContentNavChat(targetMode: targetMode!, targetId: targetId);
+        }
+        if (targetMode == 'current_group_chat') {
+          if (targetId != null) return const ContentNavDisabled();
+          return ContentNavChat(targetMode: targetMode!);
+        }
+        return const ContentNavDisabled();
       default:
         return const ContentNavDisabled();
     }
@@ -237,19 +280,29 @@ class ContentNavResolver {
     return const ContentNavDisabled();
   }
 
-  /// Absolute https URI with non-empty host and no user-info.
+  /// Absolute https URI with non-empty host and no user-info (max 2048).
   static Uri? tryParseSafeHttpsUri(String? raw) {
     if (raw == null) return null;
     final trimmed = raw.trim();
-    if (trimmed.isEmpty || trimmed.length > 500) return null;
+    if (trimmed.isEmpty || trimmed.length > maxSafeHttpsUrlLength) {
+      return null;
+    }
+    if (trimmed.contains(RegExp(r'[\x00-\x1F\x7F]'))) return null;
+    if (RegExp(r'\s').hasMatch(trimmed)) return null;
     if (trimmed.startsWith('//')) return null;
+    final lower = trimmed.toLowerCase();
+    if (lower.startsWith('javascript:') ||
+        lower.startsWith('data:') ||
+        lower.startsWith('file:') ||
+        lower.startsWith('http:')) {
+      return null;
+    }
     final uri = Uri.tryParse(trimmed);
     if (uri == null) return null;
     if (!uri.hasScheme || uri.scheme.toLowerCase() != 'https') return null;
     if (!uri.hasAuthority) return null;
     if (uri.userInfo.isNotEmpty) return null;
     if (uri.host.isEmpty) return null;
-    if (uri.host.contains(' ')) return null;
     return uri;
   }
 

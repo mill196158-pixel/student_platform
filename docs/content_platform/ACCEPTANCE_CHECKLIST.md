@@ -429,6 +429,17 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Codex APPROVE 14.2.2
 - [x] Controlled remote smoke (no mass publish) + commit + push (`35cb5fb`)
 
+## M7.3 Stage 14.2.3 — home promo schema 3 + chat CTA + in-place edit
+
+- [x] Migration `20260731113816` (home_promo_v1@3, chat RPCs, HTTPS corpus, WD overlay JSON)
+- [x] `ContentNavChat` + mobile executor (`content_resolve_chat_cta` → team chat tab)
+- [x] Admin chat action picker + `admin_list_content_chat_targets` wiring
+- [x] Home promo in-place edit: WD list overlay, auto-resume, schema 3 target, safe-delete confirm
+- [x] `kStudentHomeSectionGap` + multi-promo layout tests
+- [x] Codex final APPROVE 14.2.3
+- [x] Remote migration apply + controlled smoke (no live deletes; placements 2→2)
+- [x] Commit + push `origin/refactor/chat-tab`
+
 ---
 
 ## N. Stage 15.1 — Home promo

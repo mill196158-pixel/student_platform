@@ -1,28 +1,24 @@
 # CURRENT_TASK
 
-* Status: **DONE** — Stage 14.2.2 (reliable Visual Content Studio publish)
-* Active Stage: **14.2.2**
+* Status: **DONE** — Stage 14.2.3 (home_promo schema 3 + chat CTA + in-place edit)
+* Active Stage: **14.2.3**
 * Branch: `refactor/chat-tab`
-* Prior HEAD: `879cec8`
-* Feature SHA: `35cb5fb`
+* Prior HEAD: `4720810`
 * Codex plan: **APPROVE**
-* Codex final: **APPROVE** (after `profile_feed_card_v1` template-key fix)
+* Codex final: **APPROVE** (after template insert / chat picker / HTTPS / LIMIT fixes)
 * Remote: `gwdanmwluhrcfxbnplwd`
-* Migration applied: `20260731110419_stage14_2_2_home_profile_schema_upgrade_wd`
-* Push: `origin/refactor/chat-tab` (`879cec8..35cb5fb`)
+* Migration applied: `20260731113816_stage14_2_3_home_promo_schema3_chat_cta`
+* Edge: none
+* Push: pending this closeout
 
-## Exact server error
+## Root cause (old promo)
 
-`invalid_schema_upgrade` on `admin_save_content_working_draft` when Admin sent `target_schema_version: 2` for published `home_promo_v1` / `schema_version=1` cards. Unmapped → «Не удалось выполнить операцию». Audit showed media finalize / begin_edit but almost no save/publish WD.
+Published `df88b378…` (schema 1, legacy_key `content:home_promo:stuck_with_assignment`) had open WD, but admin JSON only set `has_working_draft` without `working_draft` object → no overlay, fields stayed locked, archive/safe-delete blocked by `working_draft_exists`. Create minted second draft `dbabdc80…`.
 
-## Pipeline (fixed)
+## Smoke (no live deletes)
 
-`validate → pending media (via autosave) → save WD → publish with saved draft RV → refetch`
-
-Single-flight `VisualEditorPublishCoordinator` for Home / Profile / Reference / Vacancy.
-
-## Smoke
-
-* helper allows `home_promo_v1` and `profile_feed_card_v1` 1→2
-* disposable save with `target_schema_version=2` succeeds then rolls back
-* published fixture remains schema 1; published_count=10
+* home_promo placement count before/after: **2 / 2**
+* both live cards unchanged
+* WD object present in admin JSON for `df88b378…`
+* schema upgrade helper allows 1→3
+* HTTPS reject/accept corpus on SQL helper
