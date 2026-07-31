@@ -2714,11 +2714,12 @@ class _HelpSummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(18),
         gradient: LinearGradient(
           colors: [
             primary.withValues(alpha: 0.88),
@@ -2729,44 +2730,55 @@ class _HelpSummaryCard extends StatelessWidget {
         ),
         boxShadow: [
           BoxShadow(
-            color: primary.withValues(alpha: 0.20),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
+            color: primary.withValues(alpha: 0.16),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
       child: Row(
         children: [
           Container(
-            width: 42,
-            height: 42,
+            width: 40,
+            height: 40,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: 0.16),
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(Icons.help_outline_rounded, color: Colors.white),
+            child: const Icon(
+              Icons.help_outline_rounded,
+              color: Colors.white,
+              size: 22,
+            ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   'Справочная информация',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w900,
-                      ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                    height: 1.15,
+                  ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 2),
                 Text(
                   showLegacyDemoBadge
-                      ? 'Пример — managed RPC ещё не применён'
+                      ? 'Пример справочных материалов'
                       : 'Доступы, документы, программы, карта и частые вопросы',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Colors.white.withValues(alpha: 0.88),
-                      ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: Colors.white.withValues(alpha: 0.88),
+                    height: 1.25,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ],
             ),
@@ -2875,7 +2887,7 @@ class _HelpSection extends StatelessWidget {
       return Column(
         children: [
           const _HelpSummaryCard(),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           const _EmptyState(
             text: 'Справочник пока пуст',
             compact: true,
@@ -2888,7 +2900,7 @@ class _HelpSection extends StatelessWidget {
       return Column(
         children: [
           const _HelpSummaryCard(),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           _EmptyState(
             text: 'Не удалось обновить справочник',
             compact: true,
@@ -2912,7 +2924,7 @@ class _HelpSection extends StatelessWidget {
     return Column(
       children: [
         _HelpSummaryCard(showLegacyDemoBadge: showRpcBadge),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         if (articles.isEmpty)
           const _EmptyState(
             text: 'По запросу ничего не найдено',
@@ -2967,9 +2979,7 @@ class _JobsSection extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _JobsHeroCard(submissionService: submissionService),
-          const SizedBox(height: 12),
-          const _JobBoardStats(),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           const _EmptyState(
             text: 'Вакансии пока пусты',
             compact: true,
@@ -2983,9 +2993,7 @@ class _JobsSection extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _JobsHeroCard(submissionService: submissionService),
-          const SizedBox(height: 12),
-          const _JobBoardStats(),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           _EmptyState(
             text: 'Не удалось обновить вакансии',
             compact: true,
@@ -3000,7 +3008,6 @@ class _JobsSection extends StatelessWidget {
         .where((card) => card.matchesQuery(query))
         .toList();
     final showRpcBadge = vacancies.rpcUnavailable && vacancies.isDemoFallback;
-    final activeCount = vacancies.displayCards.length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -3009,9 +3016,7 @@ class _JobsSection extends StatelessWidget {
           showLegacyDemoBadge: showRpcBadge,
           submissionService: submissionService,
         ),
-        const SizedBox(height: 12),
-        _JobBoardStats(activeCount: activeCount),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         if (cards.isEmpty)
           const _EmptyState(
             text: 'По запросу ничего не найдено',
@@ -3039,13 +3044,16 @@ class _JobsHeroCard extends StatelessWidget {
     required this.submissionService,
   });
 
+  static const _minTouch = 44.0;
+
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(26),
+        borderRadius: BorderRadius.circular(20),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -3056,9 +3064,9 @@ class _JobsHeroCard extends StatelessWidget {
         ),
         boxShadow: [
           BoxShadow(
-            color: primary.withValues(alpha: 0.22),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
+            color: primary.withValues(alpha: 0.18),
+            blurRadius: 12,
+            offset: const Offset(0, 5),
           ),
         ],
       ),
@@ -3068,65 +3076,88 @@ class _JobsHeroCard extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 44,
-                height: 44,
+                width: 40,
+                height: 40,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(14),
                 ),
                 child: const Icon(
                   Icons.work_outline_rounded,
                   color: Colors.white,
+                  size: 22,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   'Доска вакансий',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w900,
-                      ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                    height: 1.15,
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           Text(
             showLegacyDemoBadge
-                ? 'Пример — managed RPC ещё не применён'
-                : 'Здесь студенты смогут искать подработки, стажировки и проектные задачи. Публикацию и правила модерации подключим отдельным шагом.',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Colors.white.withValues(alpha: 0.88),
-                  height: 1.35,
-                ),
+                ? 'Пример вакансий для просмотра'
+                : 'Подработки, стажировки и проектные задачи для студентов.',
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: Colors.white.withValues(alpha: 0.88),
+              height: 1.3,
+              fontWeight: FontWeight.w600,
+            ),
           ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
+          const SizedBox(height: 10),
+          ConstrainedBox(
+            constraints: const BoxConstraints(
+              minWidth: double.infinity,
+              minHeight: _minTouch,
+            ),
             child: FilledButton.icon(
               onPressed: () => _openProposeVacancy(context),
-              icon: const Icon(Icons.add_rounded),
+              icon: const Icon(Icons.add_rounded, size: 18),
               label: const Text('Предложить вакансию'),
               style: FilledButton.styleFrom(
                 backgroundColor: Colors.white,
                 foregroundColor: primary,
-                padding: const EdgeInsets.symmetric(vertical: 12),
+                minimumSize: const Size(0, _minTouch),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                visualDensity: VisualDensity.compact,
+                textStyle: theme.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
           ),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
+          const SizedBox(height: 6),
+          ConstrainedBox(
+            constraints: const BoxConstraints(
+              minWidth: double.infinity,
+              minHeight: _minTouch,
+            ),
             child: OutlinedButton.icon(
               onPressed: () => _openMyVacancySubmissions(context),
-              icon: const Icon(Icons.inbox_outlined),
+              icon: const Icon(Icons.inbox_outlined, size: 18),
               label: const Text('Мои заявки'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: Colors.white,
                 side: const BorderSide(color: Colors.white70),
-                padding: const EdgeInsets.symmetric(vertical: 12),
+                minimumSize: const Size(0, _minTouch),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                visualDensity: VisualDensity.compact,
+                textStyle: theme.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ),
@@ -3156,101 +3187,6 @@ class _JobsHeroCard extends StatelessWidget {
   }
 }
 
-class _JobBoardStats extends StatelessWidget {
-  final int? activeCount;
-
-  const _JobBoardStats({this.activeCount});
-
-  @override
-  Widget build(BuildContext context) {
-    final activeLabel = activeCount?.toString() ?? '3';
-    return Row(
-      children: [
-        Expanded(
-          child: _JobStatPill(
-            icon: Icons.flash_on_rounded,
-            title: activeLabel,
-            subtitle: 'активные',
-          ),
-        ),
-        const SizedBox(width: 10),
-        const Expanded(
-          child: _JobStatPill(
-            icon: Icons.verified_user_outlined,
-            title: 'скоро',
-            subtitle: 'модерация',
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _JobStatPill extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-
-  const _JobStatPill({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 34,
-            height: 34,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: primary.withValues(alpha: 0.10),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, color: primary, size: 19),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: Colors.black,
-                        fontWeight: FontWeight.w900,
-                      ),
-                ),
-                Text(
-                  subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: Colors.black54,
-                        fontWeight: FontWeight.w700,
-                      ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _JobsGroupSection extends StatelessWidget {
   final String title;
   final List<ManagedVacancyCard> cards;
@@ -3269,17 +3205,17 @@ class _JobsGroupSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 2),
+      padding: const EdgeInsets.fromLTRB(10, 10, 10, 2),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
+            padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
             child: Row(
               children: [
                 const Icon(
@@ -3291,10 +3227,10 @@ class _JobsGroupSection extends StatelessWidget {
                 Expanded(
                   child: Text(
                     title,
-                    style: const TextStyle(
-                      color: Colors.black87,
-                      fontWeight: FontWeight.w900,
-                    ),
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          color: Colors.black87,
+                          fontWeight: FontWeight.w900,
+                        ),
                   ),
                 ),
                 Text(
@@ -3309,7 +3245,7 @@ class _JobsGroupSection extends StatelessWidget {
           ),
           for (final card in cards)
             Padding(
-              padding: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.only(bottom: 10),
               child: StudentVacancyCard(
                 payload: card.payload,
                 showDemoBadge: showDemoBadge || card.showDemoBadge,
@@ -3351,24 +3287,24 @@ class _HelpGroupSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 2),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.fromLTRB(10, 10, 10, 2),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
+            padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
             child: Text(
               title,
-              style: const TextStyle(
-                color: Colors.black87,
-                fontWeight: FontWeight.w900,
-              ),
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: Colors.black87,
+                    fontWeight: FontWeight.w900,
+                  ),
             ),
           ),
           ...cards,
@@ -3652,26 +3588,34 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: EdgeInsets.all(compact ? 16 : 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              text,
-              style: const TextStyle(fontSize: 14, color: Colors.grey),
-              textAlign: TextAlign.center,
+    return Padding(
+      padding: EdgeInsets.fromLTRB(8, compact ? 8 : 16, 8, compact ? 8 : 16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            text,
+            style: TextStyle(
+              fontSize: compact ? 13 : 14,
+              color: Colors.black54,
+              fontWeight: FontWeight.w600,
             ),
-            if (actionLabel != null && onAction != null) ...[
-              const SizedBox(height: 16),
-              FilledButton(
+            textAlign: TextAlign.center,
+          ),
+          if (actionLabel != null && onAction != null) ...[
+            const SizedBox(height: 10),
+            ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 44),
+              child: FilledButton(
                 onPressed: onAction,
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(0, 44),
+                ),
                 child: Text(actionLabel!),
               ),
-            ],
+            ),
           ],
-        ),
+        ],
       ),
     );
   }

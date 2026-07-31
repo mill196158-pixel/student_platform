@@ -27,7 +27,6 @@ class StudentJobsBoardView extends StatelessWidget {
     this.showProposeActions = false,
     this.onProposeVacancy,
     this.onMySubmissions,
-    this.activeCount,
   });
 
   final List<ManagedVacancyCard> cards;
@@ -44,9 +43,6 @@ class StudentJobsBoardView extends StatelessWidget {
   final VoidCallback? onProposeVacancy;
   final VoidCallback? onMySubmissions;
 
-  /// Override for stats row; defaults to [cards.length].
-  final int? activeCount;
-
   static const _bg = Color(0xFFFAF8FC);
   static const _title = Color(0xFF111827);
   static const _lavenderStart = Color(0xFFDCD0FA);
@@ -62,12 +58,10 @@ class StudentJobsBoardView extends StatelessWidget {
       );
     }
 
-    final count = activeCount ?? cards.length;
-
     return ColoredBox(
       color: _bg,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
         children: [
           _JobsHeroCard(
             subtitle: heroSubtitle ??
@@ -76,16 +70,14 @@ class StudentJobsBoardView extends StatelessWidget {
             onProposeVacancy: onProposeVacancy,
             onMySubmissions: onMySubmissions,
           ),
-          const SizedBox(height: 12),
-          _JobsStatsRow(activeCount: count),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           if (cards.isEmpty)
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 24),
+              padding: const EdgeInsets.fromLTRB(8, 12, 8, 8),
               child: Text(
                 emptyMessage,
                 textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: Colors.black54,
                       fontWeight: FontWeight.w600,
                     ),
@@ -94,12 +86,12 @@ class StudentJobsBoardView extends StatelessWidget {
           else ...[
             Text(
               'Свежие предложения',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w800,
                     color: _title,
                   ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             for (final card in cards) ...[
               DecoratedBox(
                 decoration: BoxDecoration(
@@ -198,12 +190,15 @@ class _JobsHeroCard extends StatelessWidget {
   final VoidCallback? onProposeVacancy;
   final VoidCallback? onMySubmissions;
 
+  static const _minTouch = 44.0;
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(26),
+        borderRadius: BorderRadius.circular(20),
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -214,9 +209,9 @@ class _JobsHeroCard extends StatelessWidget {
         ),
         boxShadow: [
           BoxShadow(
-            color: StudentJobsBoardView._lavenderEnd.withValues(alpha: 0.28),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
+            color: StudentJobsBoardView._lavenderEnd.withValues(alpha: 0.22),
+            blurRadius: 12,
+            offset: const Offset(0, 5),
           ),
         ],
       ),
@@ -226,139 +221,87 @@ class _JobsHeroCard extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 44,
-                height: 44,
+                width: 40,
+                height: 40,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.55),
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(14),
                 ),
                 child: const Icon(
                   Icons.work_outline_rounded,
+                  size: 22,
                   color: StudentJobsBoardView._accent,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   'Доска вакансий',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: StudentJobsBoardView._title,
-                        fontWeight: FontWeight.w900,
-                      ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: StudentJobsBoardView._title,
+                    fontWeight: FontWeight.w900,
+                    height: 1.15,
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           Text(
             subtitle,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: const Color(0xFF374151),
-                  height: 1.35,
-                  fontWeight: FontWeight.w600,
-                ),
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: const Color(0xFF374151),
+              height: 1.3,
+              fontWeight: FontWeight.w600,
+            ),
           ),
           if (showProposeActions) ...[
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
+            const SizedBox(height: 10),
+            ConstrainedBox(
+              constraints: const BoxConstraints(
+                minWidth: double.infinity,
+                minHeight: _minTouch,
+              ),
               child: FilledButton.icon(
                 onPressed: onProposeVacancy,
-                icon: const Icon(Icons.add_rounded),
+                icon: const Icon(Icons.add_rounded, size: 18),
                 label: const Text('Предложить вакансию'),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(0, _minTouch),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  visualDensity: VisualDensity.compact,
+                  textStyle: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
               ),
             ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
+            const SizedBox(height: 6),
+            ConstrainedBox(
+              constraints: const BoxConstraints(
+                minWidth: double.infinity,
+                minHeight: _minTouch,
+              ),
               child: OutlinedButton.icon(
                 onPressed: onMySubmissions,
-                icon: const Icon(Icons.inbox_outlined),
+                icon: const Icon(Icons.inbox_outlined, size: 18),
                 label: const Text('Мои заявки'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(0, _minTouch),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  visualDensity: VisualDensity.compact,
+                  textStyle: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
             ),
           ],
-        ],
-      ),
-    );
-  }
-}
-
-class _JobsStatsRow extends StatelessWidget {
-  const _JobsStatsRow({required this.activeCount});
-
-  final int activeCount;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _JobStatPill(
-            icon: Icons.flash_on_rounded,
-            title: '$activeCount',
-            subtitle: activeCount == 1 ? 'активная' : 'активных',
-          ),
-        ),
-        const SizedBox(width: 10),
-        const Expanded(
-          child: _JobStatPill(
-            icon: Icons.verified_user_outlined,
-            title: 'скоро',
-            subtitle: 'модерация',
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _JobStatPill extends StatelessWidget {
-  const _JobStatPill({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-  });
-
-  final IconData icon;
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 20, color: StudentJobsBoardView._accent),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        color: StudentJobsBoardView._title,
-                      ),
-                ),
-                Text(
-                  subtitle,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        color: const Color(0xFF6B7280),
-                        fontWeight: FontWeight.w600,
-                      ),
-                ),
-              ],
-            ),
-          ),
         ],
       ),
     );
