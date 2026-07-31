@@ -4,11 +4,13 @@
 * Active Stage: **14.2 / M7**
 * Branch: `refactor/chat-tab`
 * Base HEAD: `be6ac42`
+* Feature SHA: `ed94cb9`
 * Codex plan: **APPROVE** (revised)
 * Codex final: **APPROVE** (after action parse/typed-field P1 fixes)
 * Remote: `gwdanmwluhrcfxbnplwd`
 * Gate: `content_visual_studio_v2_publish` **ON** (owner SQL after smoke)
 * Migration applied: `20260731122000_stage14_2_student_read_schema_wire_projection`
+* Push: `origin/refactor/chat-tab` (`be6ac42..ed94cb9`)
 
 ## Smoke evidence (remote)
 

@@ -400,7 +400,7 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Builds: format, analyze, student_ui + mobile content tests, Admin relevant, Main Web, Android APK, iOS sim; git diff --check; secret scan
 - [x] Codex APPROVE 14.2
 - [x] Controlled remote smoke (v1 still served) + owner gate SQL (no migration enables flag)
-- [ ] Commit + normal push `origin/refactor/chat-tab` *(pending this closeout)*
+- [x] Commit + normal push `origin/refactor/chat-tab` (`ed94cb9`)
 
 ---
 

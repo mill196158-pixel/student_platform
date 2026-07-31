@@ -1020,7 +1020,7 @@ Status: **DONE** / Codex **APPROVE** — M6; gate OFF; feature `4976ee2`; no new
 
 ### Stage 14.2 — Managed Content v2 → main mobile
 
-Status: **DONE** / Codex **APPROVE** — M7; base `be6ac42`; gate ON via owner SQL; migration `20260731122000`
+Status: **DONE** / Codex **APPROVE** — M7; feature `ed94cb9`; base `be6ac42`; gate ON via owner SQL; migration `20260731122000`
 
 - [x] Home dual-read schema 1|2 (all slots/variants) + media/CTA/audience/schedule/dismiss/order;
 - [x] Profile real chrome + managed carousel/detail/back;
