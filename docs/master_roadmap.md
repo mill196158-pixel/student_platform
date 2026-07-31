@@ -6,7 +6,7 @@
 ## Статус документа
 
 - Дата аудита: **27 июля 2026**
-- Updated: **31 июля 2026** (Stage 14.2 Managed Content v2 → main mobile — DONE)
+- Updated: **31 июля 2026** (Stage 14.2.1 content-media working-draft upload — DONE)
 - Проверенная основная ветка: `refactor/chat-tab` (база)
 - Рабочая ветка контента: `feature/content-platform`
 - Проверенная административная ветка: `feature/admin-console`
@@ -1029,6 +1029,16 @@ Status: **DONE** / Codex **APPROVE** — M7; feature `ed94cb9`; base `be6ac42`; 
 - [x] Info resume + pull/tab freshness (Realtime residual);
 - [x] Student READ RPC projects home/profile wire schema_version 2→1 for legacy clients;
 - [x] Tests/builds + Codex APPROVE + controlled smoke + owner gate flip + push.
+
+### Stage 14.2.1 — content-media upload for published + working draft
+
+Status: **DONE** / Codex **APPROVE** — hotfix; migration `20260731102302`; Edge `content-media` v2
+
+- [x] Allow upload only with auth + `content.write` + open WD on the same item (or classic `draft`);
+- [x] Bind intent to WD; finalize → `draft_asset_ids` + WD row_version; no direct published-payload upload;
+- [x] Edge business errors → 409/422 (not 500); Admin adopts WD row_version + local preview bytes;
+- [x] Cancel keeps published asset; publish switches student-visible asset; orphans → cleanup;
+- [x] Roleplay/IDOR checks + Admin/mobile tests + Web/Android/iOS builds + remote smoke + push.
 
 ### Next after 14.1.4 — Import Studio (separate stage)
 

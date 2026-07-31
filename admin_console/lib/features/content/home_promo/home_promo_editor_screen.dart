@@ -672,17 +672,30 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
         return null;
       }
       try {
-        uploadedImageAssetId = await media.uploadBytes(
+        final uploaded = await media.uploadBytesDetailed(
           contentItemId: selected.id,
           bytes: bytes,
           contentType: 'image/png',
           title: payload.title,
         );
+        uploadedImageAssetId = uploaded.assetId;
+        if (uploaded.workingDraftRowVersion != null) {
+          next = next.copyWith(
+            workingDraftRowVersion: uploaded.workingDraftRowVersion,
+          );
+        }
+        // Keep local bytes visible until authorized download resolves.
+        setState(() {
+          _resolvedAssetBytes[selected.id] = bytes;
+          _imageIntent[selected.id] = ContentMediaIntentState(
+            assetId: uploaded.assetId,
+          ).pickLocal(bytes);
+        });
       } catch (error) {
         if (mounted) {
           setState(() {
             _imageUploading = false;
-            _banner = 'Не удалось загрузить изображение: $error';
+            _banner = _mediaUploadBanner('изображение', error);
           });
         }
         return null;
@@ -702,17 +715,29 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
         return null;
       }
       try {
-        uploadedIconAssetId = await media.uploadBytes(
+        final uploaded = await media.uploadBytesDetailed(
           contentItemId: selected.id,
           bytes: bytes,
           contentType: 'image/png',
           title: '${payload.title} icon',
         );
+        uploadedIconAssetId = uploaded.assetId;
+        if (uploaded.workingDraftRowVersion != null) {
+          next = next.copyWith(
+            workingDraftRowVersion: uploaded.workingDraftRowVersion,
+          );
+        }
+        setState(() {
+          _resolvedIconBytes[selected.id] = bytes;
+          _iconIntent[selected.id] = ContentMediaIntentState(
+            assetId: uploaded.assetId,
+          ).pickLocal(bytes);
+        });
       } catch (error) {
         if (mounted) {
           setState(() {
             _iconUploading = false;
-            _banner = 'Не удалось загрузить иконку: $error';
+            _banner = _mediaUploadBanner('иконку', error);
           });
         }
         return null;
@@ -733,7 +758,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     next = next.copyWith(payload: savedPayload);
 
     if (_editingWorkingDraft) {
-      final draftVersion = selected.workingDraftRowVersion;
+      final draftVersion = next.workingDraftRowVersion;
       if (draftVersion == null) {
         setState(() => _banner = 'Черновик изменений не найден.');
         return null;
@@ -987,6 +1012,21 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
       await _reload(selectId: item.id);
       setState(() => _successBanner = 'Порядок обновлён.');
     });
+  }
+
+  String _mediaUploadBanner(String label, Object error) {
+    final text = error.toString();
+    if (text.contains('working_draft_required') ||
+        text.contains('draft_only')) {
+      return 'Сначала откройте «Редактировать», затем сохраните изображение.';
+    }
+    if (text.contains('archived_immutable')) {
+      return 'Архивная карточка неизменяема.';
+    }
+    if (text.contains('forbidden') || text.contains('403')) {
+      return 'Недостаточно прав для загрузки $label.';
+    }
+    return 'Не удалось загрузить $label: $error';
   }
 
   Future<void> _pickImage() async {
@@ -1278,8 +1318,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     final selected = _selected;
     final selectedId = _selectedId;
     final byId = <String, StudentHomePromoPlacement>{};
-    final publishedMode =
-        _previewMode == ContentPreviewMode.publishedCanonical;
+    final publishedMode = _previewMode == ContentPreviewMode.publishedCanonical;
 
     for (final item in _partitions.publishedPreviewItems) {
       final isSelected = item.id == selectedId;
@@ -1377,8 +1416,9 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
           itemB?.sortOrder ?? 0,
         );
         if (byOrder != 0) return byOrder;
-        final byPriority =
-            (itemB?.priority ?? 0).compareTo(itemA?.priority ?? 0);
+        final byPriority = (itemB?.priority ?? 0).compareTo(
+          itemA?.priority ?? 0,
+        );
         if (byPriority != 0) return byPriority;
         return a.compareTo(b);
       });

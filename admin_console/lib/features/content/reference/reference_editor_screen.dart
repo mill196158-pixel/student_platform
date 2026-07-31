@@ -238,6 +238,17 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
     });
   }
 
+  void _adoptWorkingDraftRowVersion(int version) {
+    final selected = _selectedArticle;
+    if (selected == null) return;
+    setState(() {
+      final idx = _articles.indexWhere((e) => e.id == selected.id);
+      if (idx < 0) return;
+      _articles = [..._articles]
+        ..[idx] = _articles[idx].copyWith(workingDraftRowVersion: version);
+    });
+  }
+
   Future<void> _discardWorkingDraft() async {
     final selected = _selectedArticle;
     if (selected == null || !_canWrite) return;
@@ -1461,6 +1472,7 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
                 onBeginEdit: !selected.isDraft && !isArchived
                     ? _beginEdit
                     : null,
+                onWorkingDraftRowVersion: _adoptWorkingDraftRowVersion,
                 onResolveCorrection: _resolveCorrection,
               ),
       ),
@@ -1626,6 +1638,7 @@ class _ReferencePropertiesPanel extends StatelessWidget {
     required this.onSafeDelete,
     required this.onPromoteDemo,
     this.onBeginEdit,
+    this.onWorkingDraftRowVersion,
     required this.onResolveCorrection,
   });
 
@@ -1666,6 +1679,7 @@ class _ReferencePropertiesPanel extends StatelessWidget {
   final VoidCallback? onSafeDelete;
   final VoidCallback? onPromoteDemo;
   final VoidCallback? onBeginEdit;
+  final ValueChanged<int>? onWorkingDraftRowVersion;
   final Future<void> Function(ReferenceCorrectionItem item, String action)
   onResolveCorrection;
 
@@ -1730,6 +1744,7 @@ class _ReferencePropertiesPanel extends StatelessWidget {
             blocks: blocks,
             enabled: _editable,
             contentItemId: selected.id,
+            onWorkingDraftRowVersion: onWorkingDraftRowVersion,
             onAdd: onAddBlock,
             onUpdate: onUpdateBlock,
             onRemove: onRemoveBlock,
@@ -1943,6 +1958,7 @@ class _ReferenceBlocksEditor extends StatelessWidget {
     required this.blocks,
     required this.enabled,
     required this.contentItemId,
+    this.onWorkingDraftRowVersion,
     required this.onAdd,
     required this.onUpdate,
     required this.onRemove,
@@ -1953,6 +1969,7 @@ class _ReferenceBlocksEditor extends StatelessWidget {
   final List<ReferenceBlock> blocks;
   final bool enabled;
   final String? contentItemId;
+  final ValueChanged<int>? onWorkingDraftRowVersion;
   final ValueChanged<String> onAdd;
   final void Function(int index, ReferenceBlock block) onUpdate;
   final ValueChanged<int> onRemove;
@@ -2009,6 +2026,7 @@ class _ReferenceBlocksEditor extends StatelessWidget {
             block: blocks[i],
             enabled: enabled,
             contentItemId: contentItemId,
+            onWorkingDraftRowVersion: onWorkingDraftRowVersion,
             canMoveUp: i > 0,
             canMoveDown: i < blocks.length - 1,
             onUpdate: (block) => onUpdate(i, block),
@@ -2029,6 +2047,7 @@ class _ReferenceBlockTile extends StatefulWidget {
     required this.block,
     required this.enabled,
     required this.contentItemId,
+    this.onWorkingDraftRowVersion,
     required this.canMoveUp,
     required this.canMoveDown,
     required this.onUpdate,
@@ -2042,6 +2061,7 @@ class _ReferenceBlockTile extends StatefulWidget {
   final ReferenceBlock block;
   final bool enabled;
   final String? contentItemId;
+  final ValueChanged<int>? onWorkingDraftRowVersion;
   final bool canMoveUp;
   final bool canMoveDown;
   final ValueChanged<ReferenceBlock> onUpdate;
@@ -2105,14 +2125,18 @@ class _ReferenceBlockTileState extends State<_ReferenceBlockTile> {
         : 'image/jpeg';
     setState(() => _uploading = true);
     try {
-      final assetId = await ContentMediaStore().uploadBytes(
+      final uploaded = await ContentMediaStore().uploadBytesDetailed(
         contentItemId: itemId,
         bytes: bytes,
         contentType: contentType,
         title: file?.name ?? '',
       );
-      _primary.text = assetId;
-      onAsset(assetId);
+      final draftRv = uploaded.workingDraftRowVersion;
+      if (draftRv != null) {
+        widget.onWorkingDraftRowVersion?.call(draftRv);
+      }
+      _primary.text = uploaded.assetId;
+      onAsset(uploaded.assetId);
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

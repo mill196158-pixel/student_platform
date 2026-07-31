@@ -517,6 +517,7 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
       );
     }
     var nextPayload = payload;
+    int? adoptedDraftRowVersion;
     final intent =
         _imageIntent[selected.id] ?? ContentMediaIntentState.untouched;
     final store = _mediaStore;
@@ -529,13 +530,19 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
             'Локальное изображение не найдено.',
           );
         }
-        final assetId = await store.uploadBytes(
+        final uploaded = await store.uploadBytesDetailed(
           contentItemId: selected.id,
           bytes: bytes,
           contentType: 'image/png',
           title: payload.title,
         );
-        nextPayload = payload.copyWith(imageAssetId: assetId);
+        nextPayload = payload.copyWith(imageAssetId: uploaded.assetId);
+        adoptedDraftRowVersion = uploaded.workingDraftRowVersion;
+        setState(() {
+          _imageIntent[selected.id] = ContentMediaIntentState(
+            assetId: uploaded.assetId,
+          ).pickLocal(bytes);
+        });
       } finally {
         if (mounted) setState(() => _imageUploading = false);
       }
@@ -557,9 +564,11 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
       audienceMode: _audienceMode,
       audienceGroupIds: _groupIds,
       audienceUserIds: _userIds,
+      workingDraftRowVersion:
+          adoptedDraftRowVersion ?? selected.workingDraftRowVersion,
     );
     if (_editingWorkingDraft) {
-      final draftVersion = selected.workingDraftRowVersion;
+      final draftVersion = next.workingDraftRowVersion;
       if (draftVersion == null) {
         throw const ProfileFeedRepositoryException(
           'Черновик изменений не найден.',

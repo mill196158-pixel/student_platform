@@ -402,6 +402,21 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Controlled remote smoke (v1 still served) + owner gate SQL (no migration enables flag)
 - [x] Commit + normal push `origin/refactor/chat-tab` (`ed94cb9`)
 
+## M7.1 Stage 14.2.1 — content-media upload on published + working draft
+
+- [x] Published item without working draft → upload forbidden (`working_draft_required`)
+- [x] Published item with own working draft → upload allowed and bound to WD
+- [x] Cross-user / non-writer intent → forbidden; finalize actor mismatch → forbidden
+- [x] Finalize attaches asset to `draft_asset_ids`, bumps WD row_version, stores finalize snapshots
+- [x] Idempotent finalize returns snapshots without second RV bump; finalize-after-discard rejected
+- [x] Edge maps business codes to 409/422/403/404 (not HTTP 500 for `draft_only` / `working_draft_required`)
+- [x] Admin Home/Profile/Reference adopt `working_draft_row_version`; preview keeps local bytes until reload
+- [x] Cancel WD preserves published asset; unattached assets remain cleanup-eligible; students see only published payload
+- [x] Tests: roleplay + Admin media/home/profile + mobile content; builds Web/Android/iOS; secret scan; `git diff --check`
+- [x] Codex APPROVE 14.2.1
+- [x] Remote migration `20260731102302` + Edge `content-media` v2 deploy + controlled smoke
+- [x] Commit + normal push `origin/refactor/chat-tab`
+
 ---
 
 ## N. Stage 15.1 — Home promo
