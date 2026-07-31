@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import 'content_icon_resolver.dart';
+import 'content_image_render_state.dart';
 import 'content_models.dart';
 
 /// Shared Home promo renderer for Mobile and Admin Preview.
@@ -18,6 +19,8 @@ class StudentHomePromoCard extends StatelessWidget {
     this.padding = const EdgeInsets.symmetric(horizontal: 20),
     this.imageBytes,
     this.imageLoading = false,
+    this.imageState,
+    this.iconBytes,
   });
 
   final HomePromoPayload payload;
@@ -25,8 +28,16 @@ class StudentHomePromoCard extends StatelessWidget {
   final VoidCallback? onDismiss;
   final bool showDemoBadge;
   final EdgeInsetsGeometry padding;
+
+  /// Legacy image bytes; prefer [imageState].
   final Uint8List? imageBytes;
   final bool imageLoading;
+
+  /// Explicit image plane state (Stage 14.1.4). When null, derived from legacy.
+  final ContentImageRenderState? imageState;
+
+  /// Optional custom icon bytes (independent of hero image).
+  final Uint8List? iconBytes;
 
   /// Convenience constructor for the historic demo card.
   factory StudentHomePromoCard.demoStuckWithAssignment({
@@ -41,15 +52,24 @@ class StudentHomePromoCard extends StatelessWidget {
     );
   }
 
-  bool get _hasImageBytes => imageBytes != null && imageBytes!.isNotEmpty;
-
-  String get _variant {
-    final raw = effectiveContentCardVariant(payload.cardVariant);
-    if (contentCardVariantUsesImage(raw) && !_hasImageBytes && !imageLoading) {
-      return 'gradient_text';
-    }
-    return raw;
+  ContentImageRenderState get resolvedImageState {
+    if (imageState != null) return imageState!;
+    final usesImage = contentCardVariantUsesImage(
+      effectiveContentCardVariant(payload.cardVariant),
+    );
+    return ContentImageRenderState.fromLegacy(
+      usesImageVariant: usesImage,
+      bytes: imageBytes,
+      loading: imageLoading,
+    );
   }
+
+  bool get _hasImageBytes =>
+      resolvedImageState.isReady ||
+      (imageBytes != null && imageBytes!.isNotEmpty);
+
+  /// Variant identity comes exclusively from payload — never silent fallback.
+  String get _variant => effectiveContentCardVariant(payload.cardVariant);
 
   @override
   Widget build(BuildContext context) {
@@ -254,37 +274,91 @@ class _PromoImagePlane extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final radius = borderRadius ?? BorderRadius.zero;
-    final hasBytes = card._hasImageBytes;
+    final state = card.resolvedImageState;
+    final planeHeight = height ?? 160.0;
 
-    if (card.imageLoading && !hasBytes) {
+    if (state.isLoading) {
       return _ImageSkeleton(
-        height: height ?? 160,
+        height: planeHeight,
         borderRadius: radius,
         colors: colors,
       );
     }
 
+    if (state.isReady) {
+      return ClipRRect(
+        borderRadius: radius,
+        child: SizedBox(
+          height: height,
+          width: height == null ? double.infinity : null,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Image.memory(
+                state.bytesOrNull!,
+                fit: BoxFit.cover,
+                alignment: Alignment.center,
+                gaplessPlayback: true,
+              ),
+              if (overlayOpacity > 0)
+                ColoredBox(
+                  color: Colors.black.withValues(alpha: overlayOpacity),
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // missing / failed / notApplicable — keep layout; never collapse the card.
     return ClipRRect(
       borderRadius: radius,
       child: SizedBox(
-        height: height,
-        width: height == null ? double.infinity : null,
+        height: planeHeight,
+        width: double.infinity,
         child: Stack(
           fit: StackFit.expand,
           children: [
-            if (hasBytes)
-              Image.memory(
-                card.imageBytes!,
-                fit: BoxFit.cover,
-                gaplessPlayback: true,
-              )
-            else
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: contentPayloadGradient(
-                    colors: colors,
-                    angle: card.payload.gradientAngle,
-                  ),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: contentPayloadGradient(
+                  colors: colors,
+                  angle: card.payload.gradientAngle,
+                ),
+              ),
+            ),
+            if (state.isFailed || state.isMissing)
+              Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      state.isFailed
+                          ? Icons.broken_image_outlined
+                          : Icons.image_outlined,
+                      color: Colors.white.withValues(alpha: 0.85),
+                      size: 28,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      state.isFailed
+                          ? 'Не удалось загрузить'
+                          : 'Добавьте изображение',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (state is ContentImageFailed &&
+                        state.onRetry != null) ...[
+                      const SizedBox(height: 8),
+                      TextButton(
+                        onPressed: state.onRetry,
+                        child: const Text('Повторить'),
+                      ),
+                    ],
+                  ],
                 ),
               ),
             if (overlayOpacity > 0)
@@ -353,7 +427,7 @@ class _GradientTextLayout extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (!t.icon.isNone && t.icon.iconData != null)
+          if (!t.icon.isNone)
             Container(
               width: 52,
               height: 52,
@@ -361,10 +435,15 @@ class _GradientTextLayout extends StatelessWidget {
                 color: t.accent.withValues(alpha: t.isDark ? 0.18 : 0.12),
                 borderRadius: BorderRadius.circular(18),
               ),
-              child: Icon(t.icon.iconData, color: t.accent),
+              alignment: Alignment.center,
+              child: contentIconWidget(
+                icon: t.icon,
+                iconBytes: card.iconBytes,
+                color: t.accent,
+                size: 28,
+              ),
             ),
-          if (!t.icon.isNone && t.icon.iconData != null)
-            const SizedBox(width: 16),
+          if (!t.icon.isNone) const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -622,7 +701,7 @@ class _CompactIconLayout extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       child: Row(
         children: [
-          if (!t.icon.isNone && t.icon.iconData != null)
+          if (!t.icon.isNone)
             Container(
               width: 40,
               height: 40,
@@ -630,10 +709,15 @@ class _CompactIconLayout extends StatelessWidget {
                 color: t.accent.withValues(alpha: t.isDark ? 0.18 : 0.12),
                 borderRadius: BorderRadius.circular(14),
               ),
-              child: Icon(t.icon.iconData, size: 22, color: t.accent),
+              alignment: Alignment.center,
+              child: contentIconWidget(
+                icon: t.icon,
+                iconBytes: card.iconBytes,
+                color: t.accent,
+                size: 22,
+              ),
             ),
-          if (!t.icon.isNone && t.icon.iconData != null)
-            const SizedBox(width: 12),
+          if (!t.icon.isNone) const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -698,11 +782,14 @@ class _AccentInfoLayout extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            t.icon.isNone ? Icons.info_outline_rounded : t.icon.iconData,
-            color: t.accent,
-            size: 28,
-          ),
+          t.icon.isNone
+              ? Icon(Icons.info_outline_rounded, color: t.accent, size: 28)
+              : contentIconWidget(
+                  icon: t.icon,
+                  iconBytes: card.iconBytes,
+                  color: t.accent,
+                  size: 28,
+                ),
           const SizedBox(width: 14),
           Expanded(
             child: Column(

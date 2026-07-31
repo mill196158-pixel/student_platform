@@ -1,28 +1,24 @@
 # CURRENT_TASK
 
-* Status: **DONE** — Stage 14.1.3 (Visual Editor Fidelity & Media Pipeline)
-* Active Stage: **14.1.3** (closing out)
+* Status: **READY TO CLOSE** — Stage 14.1.4 (Full Visual Parity & Media Reliability)
+* Active Stage: **14.1.4 / M5**
 * Branch: `refactor/chat-tab`
-* Codex: **APPROVE** (2026-07-31) — WD visual-role isolation + snapshot-after-reconcile
+* Base HEAD was: `7a96ccc`
+* Codex final: **APPROVE** (after multi-slot Home P1 fixes)
 * Remote: `gwdanmwluhrcfxbnplwd`
 * Gate: `content_visual_studio_v2_publish` remains **OFF**
+* Migration applied: `20260731000318_stage14_1_4_vacancy_assets_role_in_get_my`
 
-## Delivered
+## Done
 
-1. Unified preview precedence + PreviewMode (`effectiveDraft` / `publishedCanonical`)
-2. ContentIconResolver + 7 card variants + imageBytes in student_ui
-3. Media intent states; home resolve generation-safe
-4. Home / Profile / Reference / Vacancy live draft overlay
-5. Vacancy visual roles with WD isolation (`admin_set_vacancy_asset_role`, `admin_clear_vacancy_visual_role`, publish reconcile)
-6. Migration `20260730225652_stage14_1_3_vacancy_asset_role_rpc.sql` (controlled apply)
+* ContentImageRenderState — no silent image_* → gradient_text
+* Mobile media key `userScope|assetId|contentVersion` + single-flight + generation isolation
+* HomePromoService ordered multi-slot; per-card tap/dismiss/impressions
+* Admin full-screen Home/Profile/Help/Jobs via student_ui
+* Custom icon upload independent of hero; iconBytes painted with BoxFit.contain
+* Vacancy logo/cover/background Admin + mobile hydrate; get_my_vacancies exposes role
+* Tests/builds green; controlled smoke before=after counts (vacancies=3 published=0 assets=0)
 
-## Next
+## Next after closeout
 
-* Import Studio stage (separate) — do not rewrite Import Studio here
-* Owner residuals: Edge/media smoke JWT; enable v2 publish gate only after Mobile client proof
-
-## Hard bans (still)
-
-* No edit of applied migrations / no force-push / no mass publish
-* No enable `content_visual_studio_v2_publish` without Mobile proof
-* No Import Studio rewrite
+* Stage 14.1.5 / next Content Platform substage per roadmap (owner)

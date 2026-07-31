@@ -262,6 +262,7 @@ class VacancyAssetDescriptor {
     required this.id,
     required this.title,
     required this.mimeType,
+    this.role = 'attachment',
   });
 
   final String id;
@@ -270,7 +271,14 @@ class VacancyAssetDescriptor {
 
   final String mimeType;
 
+  /// Visual/attachment role from `vacancy_assets.role` (Stage 14.1.4 dual-read).
+  final String role;
+
   VacancyAssetKind get kind => VacancyAssetKind.fromMime(mimeType);
+
+  bool get isLogo => role == 'logo';
+  bool get isCover => role == 'cover';
+  bool get isBackground => role == 'background';
 
   String get displayLabel {
     final trimmed = title.trim();
@@ -289,11 +297,13 @@ class VacancyAssetDescriptor {
       if (id == null) return null;
 
       final mime = _readString(json, const ['mime_type', 'mimeType']) ?? '';
+      final role = _readString(json, const ['role']) ?? 'attachment';
 
       return VacancyAssetDescriptor(
         id: id,
         title: _readString(json, const ['title']) ?? '',
         mimeType: mime,
+        role: role,
       );
     } catch (_) {
       return null;
@@ -324,6 +334,7 @@ List<VacancyAssetDescriptor> _readVacancyAssets(Object? raw) {
           id: id,
           title: '',
           mimeType: '',
+          role: 'attachment',
         ),
       )
       .toList();
@@ -575,6 +586,7 @@ class ManagedVacancyCard {
     this.publishedAt,
     this.logoBytes,
     this.coverBytes,
+    this.backgroundBytes,
   });
 
   final String id;
@@ -599,7 +611,50 @@ class ManagedVacancyCard {
   /// Admin/Mobile preview cover bytes (not persisted).
   final List<int>? coverBytes;
 
+  /// Admin/Mobile preview detail background bytes (not persisted).
+  final List<int>? backgroundBytes;
+
   bool get hasAssets => assets.isNotEmpty;
+
+  VacancyAssetDescriptor? assetForRole(String role) {
+    for (final asset in assets) {
+      if (asset.role == role) return asset;
+    }
+    return null;
+  }
+
+  ManagedVacancyCard copyWith({
+    String? id,
+    ContentOrigin? origin,
+    VacancyCardPayload? payload,
+    bool? showDemoBadge,
+    bool? hasContacts,
+    List<VacancyAssetDescriptor>? assets,
+    DateTime? expiresAt,
+    DateTime? publishedAt,
+    List<int>? logoBytes,
+    List<int>? coverBytes,
+    List<int>? backgroundBytes,
+    bool clearLogoBytes = false,
+    bool clearCoverBytes = false,
+    bool clearBackgroundBytes = false,
+  }) {
+    return ManagedVacancyCard(
+      id: id ?? this.id,
+      origin: origin ?? this.origin,
+      payload: payload ?? this.payload,
+      showDemoBadge: showDemoBadge ?? this.showDemoBadge,
+      hasContacts: hasContacts ?? this.hasContacts,
+      assets: assets ?? this.assets,
+      expiresAt: expiresAt ?? this.expiresAt,
+      publishedAt: publishedAt ?? this.publishedAt,
+      logoBytes: clearLogoBytes ? null : (logoBytes ?? this.logoBytes),
+      coverBytes: clearCoverBytes ? null : (coverBytes ?? this.coverBytes),
+      backgroundBytes: clearBackgroundBytes
+          ? null
+          : (backgroundBytes ?? this.backgroundBytes),
+    );
+  }
 
   bool matchesQuery(String query) {
     if (query.isEmpty) return true;

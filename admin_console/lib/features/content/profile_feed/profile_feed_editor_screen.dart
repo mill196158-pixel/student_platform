@@ -1345,188 +1345,30 @@ class _ProfileFeedPhonePreviewState extends State<_ProfileFeedPhonePreview> {
 
   @override
   Widget build(BuildContext context) {
-    if (_detailCard != null) {
-      return PhonePreviewFrame(
-        child: Theme(
-          data: studentPlatformLightTheme(),
-          child: _ProfileFeedCardDetailView(
-            card: _detailCard!,
-            onBack: () => setState(() => _detailCard = null),
-          ),
-        ),
-      );
-    }
-
     return PhonePreviewFrame(
       child: Theme(
         data: studentPlatformLightTheme(),
-        child: ColoredBox(
-          color: const Color(0xFFFAF8FC),
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 56, 16, 24),
-            children: [
-              const _ProfilePreviewHeader(),
-              const SizedBox(height: 20),
-              const Text(
-                'Лента',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                  color: Color(0xFF111827),
-                ),
+        child: SafeArea(
+          child: StudentProfileScreenPreview(
+            displayName: 'Анна С.',
+            groupLabel: 'ВВ-2024',
+            universityLabel: 'СПБГАСУ',
+            statusLabel: 'студент',
+            pointsChip: const StudentPointsSummaryChip(
+              summary: StudentPointsSummary(
+                userId: 'preview-user',
+                balance: 128,
               ),
-              const SizedBox(height: 10),
-              if (widget.cards.isEmpty)
-                const Card(
-                  child: Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Text(
-                      'Нет опубликованных карточек для предпросмотра',
-                    ),
-                  ),
-                )
-              else
-                widget.selectedId == null
-                    ? StudentProfileFeedCarousel(
-                        cards: widget.cards,
-                        onTap: _openDetail,
-                        onVisibleCard: widget.onVisibleCard,
-                      )
-                    : DecoratedBox(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: const Color(0xFF6656D9),
-                            width: 2,
-                          ),
-                        ),
-                        child: StudentProfileFeedCarousel(
-                          cards: widget.cards,
-                          selectedId: widget.selectedId,
-                          onTap: _openDetail,
-                          onVisibleCard: widget.onVisibleCard,
-                        ),
-                      ),
-            ],
+            ),
+            feedCards: widget.cards,
+            selectedFeedId: widget.selectedId,
+            onFeedVisible: widget.onVisibleCard,
+            onFeedTap: _openDetail,
+            detailCard: _detailCard,
+            onBack: () => setState(() => _detailCard = null),
           ),
         ),
       ),
-    );
-  }
-}
-
-class _ProfileFeedCardDetailView extends StatelessWidget {
-  const _ProfileFeedCardDetailView({required this.card, required this.onBack});
-
-  final ManagedProfileFeedCard card;
-  final VoidCallback onBack;
-
-  @override
-  Widget build(BuildContext context) {
-    final actionLabel = card.payload.ctaRoute ?? card.payload.ctaUrl;
-    return ColoredBox(
-      color: const Color(0xFFFAF8FC),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Material(
-            color: const Color(0xFFF0F1F6),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(4, 40, 8, 8),
-              child: Row(
-                children: [
-                  IconButton(
-                    tooltip: 'Назад',
-                    onPressed: onBack,
-                    icon: const Icon(Icons.arrow_back_rounded),
-                  ),
-                  Expanded(
-                    child: Text(
-                      card.payload.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-              children: [
-                SizedBox(
-                  height: 180,
-                  child: StudentProfileFeedCard(
-                    payload: card.payload,
-                    showDemoBadge: card.showDemoBadge,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  card.payload.subtitle,
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                if (card.payload.ctaLabel.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  FilledButton(
-                    onPressed: () {},
-                    child: Text(card.payload.ctaLabel),
-                  ),
-                ],
-                if (actionLabel != null && actionLabel.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    actionLabel,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: const Color(0xFF6B7280),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ProfilePreviewHeader extends StatelessWidget {
-  const _ProfilePreviewHeader();
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        CircleAvatar(
-          radius: 42,
-          backgroundColor: const Color(0xFFE9E0F8),
-          child: Text(
-            'М',
-            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-              fontWeight: FontWeight.w900,
-              color: const Color(0xFF4C1D95),
-            ),
-          ),
-        ),
-        const SizedBox(height: 10),
-        const Text(
-          'Минь',
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
-        ),
-        const SizedBox(height: 4),
-        const Text(
-          'СПбГASU · 1-См(ВВ)-2',
-          style: TextStyle(
-            color: Color(0xFF6B7280),
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
     );
   }
 }

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -26,7 +27,9 @@ class VacancyMediaDownload {
   }
 }
 
-/// Mobile signed-download helper for Stage 17 vacancy assets (`vacancy-media` Edge).
+/// Mobile signed-download helper for Stage 17 vacancy assets (`vacancy-media`).
+///
+/// Cache key: `userScope + assetId + contentVersion` (Stage 14.1.4).
 class VacancyMediaService {
   VacancyMediaService({
     SupabaseClient? client,
@@ -44,9 +47,12 @@ class VacancyMediaService {
   final String? Function()? _currentUserId;
 
   static const _function = 'vacancy-media';
-  static const _urlCachePrefix = 'vacancy_media_url_v1';
+  static const _urlCachePrefix = 'vacancy_media_url_v2';
+  static const _legacyUrlCachePrefix = 'vacancy_media_url_v1';
 
   final Map<String, VacancyMediaDownload> _memoryUrls = {};
+  final Map<String, Uint8List> _bytesMemory = {};
+  final Map<String, Future<Uint8List?>> _inflightBytes = {};
 
   SupabaseClient get _sb => _client ?? Supabase.instance.client;
 
@@ -66,13 +72,21 @@ class VacancyMediaService {
     return user.isEmpty ? 'anon' : user;
   }
 
-  String _urlKey(String assetId) => '$_userScope|$assetId';
+  String cacheKey(String assetId, {String? contentVersion}) {
+    final id = assetId.trim();
+    final version = (contentVersion ?? '').trim();
+    if (version.isEmpty) return '$_userScope|$id';
+    return '$_userScope|$id|$version';
+  }
 
-  Future<VacancyMediaDownload?> resolveDownload(String assetId) async {
+  Future<VacancyMediaDownload?> resolveDownload(
+    String assetId, {
+    String? contentVersion,
+  }) async {
     final id = assetId.trim();
     if (id.isEmpty) return null;
 
-    final memKey = _urlKey(id);
+    final memKey = cacheKey(id, contentVersion: contentVersion);
     final cached = _memoryUrls[memKey];
     if (cached != null && !cached.shouldRefresh) return cached;
 
@@ -110,21 +124,65 @@ class VacancyMediaService {
     }
   }
 
+  Future<Uint8List?> fetchBytes(
+    String assetId, {
+    String? contentVersion,
+  }) {
+    final id = assetId.trim();
+    if (id.isEmpty) return Future<Uint8List?>.value(null);
+
+    final key = cacheKey(id, contentVersion: contentVersion);
+    final cached = _bytesMemory[key];
+    if (cached != null && cached.isNotEmpty) {
+      return Future<Uint8List?>.value(cached);
+    }
+
+    return _inflightBytes.putIfAbsent(key, () async {
+      try {
+        final download = await resolveDownload(
+          id,
+          contentVersion: contentVersion,
+        );
+        if (download == null) return null;
+        final response = await _http.get(Uri.parse(download.signedUrl));
+        if (response.statusCode != 200) return null;
+        final bytes = response.bodyBytes;
+        if (bytes.isEmpty) return null;
+        _bytesMemory[key] = bytes;
+        return bytes;
+      } catch (e) {
+        debugPrint('[vacancy-media] download failed: $e');
+        return null;
+      } finally {
+        _inflightBytes.remove(key);
+      }
+    });
+  }
+
   Future<void> clearAll() async {
     _memoryUrls.clear();
+    _bytesMemory.clear();
+    _inflightBytes.clear();
     try {
       final prefs = await _prefs();
       final scope = _userScope;
       for (final key in prefs.getKeys()) {
-        if (key.startsWith('$_urlCachePrefix|') && key.contains('$scope|')) {
+        final isV2 =
+            key.startsWith('$_urlCachePrefix|') && key.contains('$scope|');
+        final isLegacy = key.startsWith('$_legacyUrlCachePrefix|') &&
+            key.contains('$scope|');
+        if (isV2 || isLegacy) {
           await prefs.remove(key);
         }
       }
     } catch (_) {}
   }
 
-  Future<String?> openAsset(String assetId) async {
-    final download = await resolveDownload(assetId);
+  Future<String?> openAsset(String assetId, {String? contentVersion}) async {
+    final download = await resolveDownload(
+      assetId,
+      contentVersion: contentVersion,
+    );
     if (download == null) return null;
     return download.signedUrl;
   }
@@ -132,7 +190,8 @@ class VacancyMediaService {
   Future<VacancyMediaDownload?> _readPersistedUrl(String key) async {
     try {
       final prefs = await _prefs();
-      final raw = prefs.getString('$_urlCachePrefix|$key');
+      final raw = prefs.getString('$_urlCachePrefix|$key') ??
+          prefs.getString('$_legacyUrlCachePrefix|$key');
       if (raw == null || raw.isEmpty) return null;
       final map = jsonDecode(raw);
       if (map is! Map) return null;

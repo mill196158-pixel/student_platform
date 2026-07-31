@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import 'content_models.dart';
@@ -120,6 +122,35 @@ ContentIconResolved resolveContentIcon({
     isUnknown: true,
     source: ContentIconUnknown(key),
   );
+}
+
+/// Paint resolved icon; custom [iconBytes] use [BoxFit.contain] (no SVG).
+Widget contentIconWidget({
+  required ContentIconResolved icon,
+  Uint8List? iconBytes,
+  required Color color,
+  double size = 24,
+}) {
+  if (icon.isNone) return const SizedBox.shrink();
+  final bytes = iconBytes;
+  if (bytes != null &&
+      bytes.isNotEmpty &&
+      (icon.customAssetId != null || icon.source is ContentIconCustom)) {
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Image.memory(
+        bytes,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.medium,
+        errorBuilder: (_, __, ___) => icon.iconData == null
+            ? const SizedBox.shrink()
+            : Icon(icon.iconData, color: color, size: size),
+      ),
+    );
+  }
+  if (icon.iconData == null) return const SizedBox.shrink();
+  return Icon(icon.iconData, color: color, size: size);
 }
 
 /// Normalise card variant key; null/unknown → `gradient_text`.

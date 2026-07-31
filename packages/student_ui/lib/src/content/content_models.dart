@@ -639,6 +639,7 @@ class ManagedProfileFeedCard {
     required this.payload,
     this.showDemoBadge = false,
     this.imageBytes,
+    this.iconBytes,
     this.imageLoading = false,
   });
 
@@ -649,6 +650,7 @@ class ManagedProfileFeedCard {
   final ProfileFeedPayload payload;
   final bool showDemoBadge;
   final Uint8List? imageBytes;
+  final Uint8List? iconBytes;
   final bool imageLoading;
 
   ManagedProfileFeedCard copyWith({
@@ -659,8 +661,10 @@ class ManagedProfileFeedCard {
     ProfileFeedPayload? payload,
     bool? showDemoBadge,
     Uint8List? imageBytes,
+    Uint8List? iconBytes,
     bool? imageLoading,
     bool clearImageBytes = false,
+    bool clearIconBytes = false,
   }) {
     return ManagedProfileFeedCard(
       id: id ?? this.id,
@@ -670,6 +674,7 @@ class ManagedProfileFeedCard {
       payload: payload ?? this.payload,
       showDemoBadge: showDemoBadge ?? this.showDemoBadge,
       imageBytes: clearImageBytes ? null : (imageBytes ?? this.imageBytes),
+      iconBytes: clearIconBytes ? null : (iconBytes ?? this.iconBytes),
       imageLoading: imageLoading ?? this.imageLoading,
     );
   }

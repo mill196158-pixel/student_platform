@@ -5,20 +5,21 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_ui/student_ui.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-/// Result of dual-read Home promo load.
+/// Result of dual-read Home promo load (Stage 14.1.4 multi-slot).
 ///
 /// Remote Stage 14 migration may be absent: undefined RPC → demo fallback.
 /// Successful empty list must NOT resurrect demo (Stage 14.1).
 class HomePromoLoadResult {
   const HomePromoLoadResult({
-    this.card,
+    this.cards = const [],
     this.isDemoFallback = false,
     this.rpcUnavailable = false,
     this.intentionallyEmpty = false,
     this.loadError = false,
   });
 
-  final ManagedContentCard? card;
+  /// Ordered managed promos preserving server/list order and home_slot.
+  final List<ManagedContentCard> cards;
   final bool isDemoFallback;
   final bool rpcUnavailable;
 
@@ -27,6 +28,9 @@ class HomePromoLoadResult {
 
   /// Hard load failure (not missing RPC). Prefer last-good cache in UI.
   final bool loadError;
+
+  /// First card for backward-compatible single-slot call sites.
+  ManagedContentCard? get card => cards.isEmpty ? null : cards.first;
 
   HomePromoPayload get payload =>
       card?.homePromo ?? HomePromoPayload.demoStuckWithAssignment;
@@ -54,7 +58,7 @@ class SupabaseHomePromoRpcClient implements HomePromoRpcClient {
   }
 }
 
-/// Cache-first Home promo reader + dismiss.
+/// Cache-first Home promo reader + dismiss (multi-slot aware).
 class HomePromoService {
   HomePromoService({
     HomePromoRpcClient? rpcClient,
@@ -65,25 +69,35 @@ class HomePromoService {
   final HomePromoRpcClient _rpc;
   final Future<SharedPreferences> Function() _prefs;
 
-  static const String cacheKey = 'home_promo_placement_v1';
+  static const String cacheKey = 'home_promo_placements_v2';
+  static const String legacyCacheKey = 'home_promo_placement_v1';
 
   Future<HomePromoLoadResult> loadCached() async {
     try {
       final prefs = await _prefs();
-      final raw = prefs.getString(cacheKey);
+      final raw = prefs.getString(cacheKey) ?? prefs.getString(legacyCacheKey);
       if (raw == null || raw.isEmpty) {
         return const HomePromoLoadResult(isDemoFallback: true);
       }
       final decoded = jsonDecode(raw);
-      if (decoded is! Map) {
+      final cards = <ManagedContentCard>[];
+      if (decoded is List) {
+        for (final row in decoded.whereType<Map>()) {
+          final card = ManagedContentCard.tryParseHomePromo(
+            Map<String, dynamic>.from(row),
+          );
+          if (card != null) cards.add(card);
+        }
+      } else if (decoded is Map) {
+        final card = ManagedContentCard.tryParseHomePromo(
+          Map<String, dynamic>.from(decoded),
+        );
+        if (card != null) cards.add(card);
+      }
+      if (cards.isEmpty) {
         return const HomePromoLoadResult(isDemoFallback: true);
       }
-      final row = Map<String, dynamic>.from(decoded);
-      final card = ManagedContentCard.tryParseHomePromo(row);
-      if (card == null) {
-        return const HomePromoLoadResult(isDemoFallback: true);
-      }
-      return HomePromoLoadResult(card: card);
+      return HomePromoLoadResult(cards: cards);
     } catch (e) {
       debugPrint('[home] promo cache read failed: $e');
       return const HomePromoLoadResult(isDemoFallback: true);
@@ -98,28 +112,25 @@ class HomePromoService {
       );
       final rows = _asList(response);
       if (rows.isEmpty) {
-        // Successful empty: do not resurrect hardcoded demo (14.1).
         if (writeCache) await _clearCache();
         return const HomePromoLoadResult(intentionallyEmpty: true);
       }
 
-      Map<String, dynamic>? matchedRow;
-      ManagedContentCard? matched;
+      final cards = <ManagedContentCard>[];
+      final matchedRows = <Map<String, dynamic>>[];
       for (final row in rows) {
         final card = ManagedContentCard.tryParseHomePromo(row);
         if (card != null) {
-          matched = card;
-          matchedRow = row;
-          break;
+          cards.add(card);
+          matchedRows.add(row);
         }
       }
-      if (matched == null || matchedRow == null) {
-        // RPC answered but payload unusable — hide strip; do not fake live demo.
+      if (cards.isEmpty) {
         if (writeCache) await _clearCache();
         return const HomePromoLoadResult(intentionallyEmpty: true);
       }
-      if (writeCache) await _writeCache(matchedRow);
-      return HomePromoLoadResult(card: matched);
+      if (writeCache) await _writeCache(matchedRows);
+      return HomePromoLoadResult(cards: cards);
     } on PostgrestException catch (error) {
       if (_isMissingRpc(error)) {
         return const HomePromoLoadResult(
@@ -147,7 +158,6 @@ class HomePromoService {
     await _clearCache();
   }
 
-  /// Nonfatal impression/click for managed cards only.
   Future<void> recordEvent(String contentItemId, String eventType) async {
     try {
       await _rpc.rpc(
@@ -159,10 +169,11 @@ class HomePromoService {
     }
   }
 
-  Future<void> _writeCache(Map<String, dynamic> row) async {
+  Future<void> _writeCache(List<Map<String, dynamic>> rows) async {
     try {
       final prefs = await _prefs();
-      await prefs.setString(cacheKey, jsonEncode(row));
+      await prefs.setString(cacheKey, jsonEncode(rows));
+      await prefs.remove(legacyCacheKey);
     } catch (e) {
       debugPrint('[home] promo cache write failed: $e');
     }
@@ -172,10 +183,10 @@ class HomePromoService {
     try {
       final prefs = await _prefs();
       await prefs.remove(cacheKey);
+      await prefs.remove(legacyCacheKey);
     } catch (_) {}
   }
 
-  /// Only undefined-function / missing RPC signatures — not auth/RLS/DB errors.
   bool _isMissingRpc(PostgrestException error) {
     final code = (error.code ?? '').toUpperCase();
     if (code == 'PGRST202' || code == '42883') return true;

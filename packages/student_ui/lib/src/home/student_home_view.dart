@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import '../content/content_image_render_state.dart';
 import '../content/content_models.dart';
 import '../content/student_home_promo_card.dart';
 import 'home_preview_models.dart';
@@ -18,6 +19,9 @@ class StudentHomePromoPlacement {
     this.onDismiss,
     this.imageBytes,
     this.imageLoading = false,
+    this.imageState,
+    this.iconBytes,
+    this.anchorKey,
   });
 
   final HomePromoPayload payload;
@@ -27,6 +31,11 @@ class StudentHomePromoPlacement {
   final VoidCallback? onDismiss;
   final Uint8List? imageBytes;
   final bool imageLoading;
+  final ContentImageRenderState? imageState;
+  final Uint8List? iconBytes;
+
+  /// Optional key for Admin scroll-into-view of the selected promo.
+  final Key? anchorKey;
 }
 
 class StudentHomeView extends StatelessWidget {
@@ -115,13 +124,18 @@ class StudentHomeView extends StatelessWidget {
         SliverToBoxAdapter(
           child: _AnimatedEntry(
             delay: delay + Duration(milliseconds: i * 20),
-            child: StudentHomePromoCard(
-              payload: cards[i].payload,
-              onTap: cards[i].onTap ?? onHelpTap,
-              onDismiss: cards[i].onDismiss ?? onHomePromoDismiss,
-              showDemoBadge: cards[i].showDemoBadge,
-              imageBytes: cards[i].imageBytes,
-              imageLoading: cards[i].imageLoading,
+            child: KeyedSubtree(
+              key: cards[i].anchorKey,
+              child: StudentHomePromoCard(
+                payload: cards[i].payload,
+                onTap: cards[i].onTap ?? onHelpTap,
+                onDismiss: cards[i].onDismiss ?? onHomePromoDismiss,
+                showDemoBadge: cards[i].showDemoBadge,
+                imageBytes: cards[i].imageBytes,
+                imageLoading: cards[i].imageLoading,
+                imageState: cards[i].imageState,
+                iconBytes: cards[i].iconBytes,
+              ),
             ),
           ),
         ),

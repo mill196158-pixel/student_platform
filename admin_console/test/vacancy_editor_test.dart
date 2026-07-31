@@ -248,6 +248,36 @@ void main() {
     expect(description, contains('Требования'));
   });
 
+  test('registerAsset persists background role', () async {
+    final repo = LocalVacancyRepository();
+    final draft = await repo.createDraft(
+      draft: const VacancyItem(
+        id: 'tmp',
+        status: VacancyStatus.draft,
+        origin: ContentOrigin.admin,
+        title: 'Background media vacancy',
+        companyName: 'Org',
+        summary: 'Summary',
+        description: 'Body',
+        rowVersion: 1,
+        priority: 0,
+        audienceMode: 'all',
+      ),
+    );
+
+    final backgroundId = await repo.registerAsset(
+      vacancyId: draft.id,
+      bytes: const [9, 8, 7],
+      contentType: 'image/png',
+      title: 'background.png',
+      role: 'background',
+    );
+
+    final item = await repo.get(draft.id);
+    expect(item.assetIdForRole('background'), backgroundId);
+    expect(repo.assetRole(backgroundId), 'background');
+  });
+
   testWidgets('draft title edit updates phone preview card', (tester) async {
     final repo = LocalVacancyRepository();
     await pumpEditor(tester, repo);

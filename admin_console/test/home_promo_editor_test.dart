@@ -251,6 +251,48 @@ void main() {
     );
   });
 
+  testWidgets('home preview uses StudentHomeView with promo placements', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: HomePromoEditorScreen(repository: LocalHomePromoRepository()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final homeView = tester.widget<StudentHomeView>(find.byType(StudentHomeView));
+    expect(homeView.homePromoPlacements, isNotEmpty);
+    expect(homeView.hideHomePromo, isFalse);
+  });
+
+  testWidgets('custom icon upload controls are visible on draft', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: HomePromoEditorScreen(repository: LocalHomePromoRepository()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(_createButton);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Загрузить свою'), findsOneWidget);
+    expect(find.textContaining('приоритет над встроенной'), findsOneWidget);
+  });
+
   testWidgets('home preview loads published news when news repo injected', (
     tester,
   ) async {
@@ -272,6 +314,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Добро пожаловать в новый семестр'), findsOneWidget);
+    final homeView = tester.widget<StudentHomeView>(find.byType(StudentHomeView));
+    expect(
+      homeView.data.news.any(
+        (item) => item.title.contains('Добро пожаловать в новый семестр'),
+      ),
+      isTrue,
+    );
   });
 }

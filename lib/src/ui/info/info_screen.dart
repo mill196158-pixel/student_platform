@@ -113,8 +113,7 @@ class _InfoScreenState extends State<InfoScreen> {
   late final VacancyService _vacancyService;
   late final VacancySubmissionService _vacancySubmissionService;
   late final VacancyMediaService _vacancyMediaService;
-  VacancyLoadResult _vacancies =
-      const VacancyLoadResult(isDemoFallback: true);
+  VacancyLoadResult _vacancies = const VacancyLoadResult(isDemoFallback: true);
   int _vacancyLoadGeneration = 0;
   bool _vacancyLoadInFlight = false;
 
@@ -174,6 +173,8 @@ class _InfoScreenState extends State<InfoScreen> {
     unawaited(_loadVacancies());
   }
 
+  int _vacancyMediaGeneration = 0;
+
   Future<void> _loadVacancies() async {
     if (_vacancyLoadInFlight) return;
     final generation = ++_vacancyLoadGeneration;
@@ -183,11 +184,13 @@ class _InfoScreenState extends State<InfoScreen> {
       if (!mounted || generation != _vacancyLoadGeneration) return;
       if (cached.cards.isNotEmpty) {
         setState(() => _vacancies = cached);
+        unawaited(_hydrateVacancyMedia(cached));
       }
       try {
         final next = await _vacancyService.load();
         if (!mounted || generation != _vacancyLoadGeneration) return;
         setState(() => _vacancies = next);
+        unawaited(_hydrateVacancyMedia(next));
       } catch (error) {
         debugPrint('[info] vacancies load failed: $error');
         if (!mounted || generation != _vacancyLoadGeneration) return;
@@ -207,6 +210,49 @@ class _InfoScreenState extends State<InfoScreen> {
     } finally {
       _vacancyLoadInFlight = false;
     }
+  }
+
+  Future<void> _hydrateVacancyMedia(VacancyLoadResult result) async {
+    final generation = ++_vacancyMediaGeneration;
+    if (result.cards.isEmpty) return;
+    final hydrated = <ManagedVacancyCard>[];
+    for (final card in result.cards) {
+      if (!mounted || generation != _vacancyMediaGeneration) return;
+      final version = card.publishedAt?.toUtc().toIso8601String() ?? card.id;
+      Future<List<int>?> bytesFor(String role) async {
+        final asset = card.assetForRole(role);
+        if (asset == null) return null;
+        final bytes = await _vacancyMediaService.fetchBytes(
+          asset.id,
+          contentVersion: '$version|$role',
+        );
+        return bytes;
+      }
+
+      final logo = await bytesFor('logo');
+      final cover = await bytesFor('cover');
+      final background = await bytesFor('background');
+      hydrated.add(
+        card.copyWith(
+          logoBytes: logo,
+          coverBytes: cover,
+          backgroundBytes: background,
+        ),
+      );
+    }
+    if (!mounted || generation != _vacancyMediaGeneration) return;
+    final currentIds = _vacancies.cards.map((c) => c.id).join('|');
+    final sourceIds = result.cards.map((c) => c.id).join('|');
+    if (currentIds != sourceIds && _vacancies.cards.isNotEmpty) return;
+    setState(() {
+      _vacancies = VacancyLoadResult(
+        cards: hydrated,
+        isDemoFallback: result.isDemoFallback,
+        intentionallyEmpty: result.intentionallyEmpty,
+        loadError: result.loadError,
+        rpcUnavailable: result.rpcUnavailable,
+      );
+    });
   }
 
   Future<void> _loadReference() async {
@@ -2476,8 +2522,8 @@ class _HelpSection extends StatelessWidget {
                 for (final article in entry.value)
                   StudentReferenceArticleCard(
                     article: article,
-                    showDemoBadge: reference.isDemoFallback ||
-                        article.showDemoBadge,
+                    showDemoBadge:
+                        reference.isDemoFallback || article.showDemoBadge,
                     onTap: () => _openArticle(context, article),
                   ),
               ],
@@ -2504,11 +2550,9 @@ class _HelpSection extends StatelessWidget {
           controller: scrollController,
           child: StudentReferenceArticleDetail(
             article: article,
-            showDemoBadge:
-                reference.isDemoFallback || article.showDemoBadge,
-            onReportError: article.isManaged
-                ? () => _reportError(context, article)
-                : null,
+            showDemoBadge: reference.isDemoFallback || article.showDemoBadge,
+            onReportError:
+                article.isManaged ? () => _reportError(context, article) : null,
             onOpenAsset: article.isManaged
                 ? (assetId) => _openAsset(context, assetId)
                 : null,
@@ -3028,6 +3072,15 @@ class _JobsGroupSection extends StatelessWidget {
                 showDemoBadge: showDemoBadge || card.showDemoBadge,
                 expiresLabel: vacancyExpiresLabel(card.expiresAt),
                 hasContacts: card.hasContacts,
+                logoBytes: card.logoBytes == null
+                    ? null
+                    : Uint8List.fromList(card.logoBytes!),
+                coverBytes: card.coverBytes == null
+                    ? null
+                    : Uint8List.fromList(card.coverBytes!),
+                backgroundBytes: card.backgroundBytes == null
+                    ? null
+                    : Uint8List.fromList(card.backgroundBytes!),
                 onTap: () => _openVacancy(context, card, showDemoBadge),
               ),
             ),
@@ -3060,12 +3113,22 @@ class _JobsGroupSection extends StatelessWidget {
           child: StudentVacancyDetailSheet(
             card: card,
             showDemoBadge: isDemo,
+            logoBytes: card.logoBytes == null
+                ? null
+                : Uint8List.fromList(card.logoBytes!),
+            coverBytes: card.coverBytes == null
+                ? null
+                : Uint8List.fromList(card.coverBytes!),
+            backgroundBytes: card.backgroundBytes == null
+                ? null
+                : Uint8List.fromList(card.backgroundBytes!),
             onOpenExternalUrl: isDemo
                 ? null
                 : (url) async {
                     final uri = Uri.parse(url);
                     if (await canLaunchUrl(uri)) {
-                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      await launchUrl(uri,
+                          mode: LaunchMode.externalApplication);
                     }
                   },
             onRevealContacts: isDemo || !card.hasContacts
@@ -3078,7 +3141,8 @@ class _JobsGroupSection extends StatelessWidget {
                     if (url == null) return;
                     final uri = Uri.parse(url);
                     if (await canLaunchUrl(uri)) {
-                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      await launchUrl(uri,
+                          mode: LaunchMode.externalApplication);
                     }
                   },
             onReport: isDemo

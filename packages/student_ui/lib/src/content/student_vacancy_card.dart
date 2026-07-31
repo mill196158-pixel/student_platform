@@ -17,6 +17,7 @@ class StudentVacancyCard extends StatelessWidget {
     this.onTap,
     this.logoBytes,
     this.coverBytes,
+    this.backgroundBytes,
   });
 
   final VacancyCardPayload payload;
@@ -27,10 +28,15 @@ class StudentVacancyCard extends StatelessWidget {
   final Uint8List? logoBytes;
   final Uint8List? coverBytes;
 
+  /// Optional soft background plane behind the card surface.
+  final Uint8List? backgroundBytes;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Material(
+    final hasBackground =
+        backgroundBytes != null && backgroundBytes!.isNotEmpty;
+    final card = Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
@@ -38,7 +44,7 @@ class StudentVacancyCard extends StatelessWidget {
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
-            color: Colors.white,
+            color: Colors.white.withValues(alpha: hasBackground ? 0.94 : 1),
             border: Border.all(color: const Color(0xFFE5E7EB)),
             boxShadow: [
               BoxShadow(
@@ -210,6 +216,31 @@ class StudentVacancyCard extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+
+    if (!hasBackground) return card;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: Image.memory(
+              backgroundBytes!,
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+            ),
+          ),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.72),
+              ),
+            ),
+          ),
+          card,
+        ],
       ),
     );
   }

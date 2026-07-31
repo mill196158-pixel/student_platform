@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:student_ui/student_ui.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -22,6 +23,7 @@ import '../shared/content_card_variant_picker.dart';
 import '../shared/content_icon_picker.dart';
 import '../shared/content_placement_slot_picker.dart';
 import '../shared/content_media_intent.dart';
+import '../shared/content_preview_binder.dart';
 import '../shared/content_preview_mode.dart';
 import '../shared/content_technical_panel.dart';
 import '../shared/phone_preview_frame.dart';
@@ -105,11 +107,17 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
   String? _loadError;
   String? _successBanner;
   String? _imageError;
+  String? _iconError;
   bool _imageUploading = false;
+  bool _iconUploading = false;
 
+  final GlobalKey _selectedPromoAnchorKey = GlobalKey();
   final Map<String, ContentMediaIntentState> _imageIntent = {};
+  final Map<String, ContentMediaIntentState> _iconIntent = {};
   final Map<String, Uint8List> _resolvedAssetBytes = {};
+  final Map<String, Uint8List> _resolvedIconBytes = {};
   final Set<String> _resolvingAssetIds = {};
+  final Set<String> _resolvingIconAssetIds = {};
 
   _EditorSnapshot? _boundSnapshot;
 
@@ -315,13 +323,19 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
       selected.id,
       () => ContentMediaIntentState(assetId: p.imageAssetId),
     );
+    _iconIntent.putIfAbsent(
+      selected.id,
+      () => ContentMediaIntentState(assetId: p.iconAssetId),
+    );
     _boundSnapshot = _captureSnapshot();
     setState(() {
       _dirty = false;
       _banner = null;
       _successBanner = null;
       _imageError = null;
+      _iconError = null;
     });
+    _scrollSelectedPromoIntoView();
   }
 
   _EditorSnapshot _captureSnapshot() {
@@ -344,6 +358,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
       endsAt: _endsAt,
       ctaAction: _ctaAction,
       imageIntent: _intentForSelected(),
+      iconIntent: _iconIntentForSelected(),
       homeSlot: _homeSlot,
       cardVariant: _cardVariant,
       gradientDirection: _gradientDirection,
@@ -354,6 +369,26 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     final id = _selectedId;
     if (id == null) return ContentMediaIntentState.untouched;
     return _imageIntent[id] ?? ContentMediaIntentState.untouched;
+  }
+
+  ContentMediaIntentState _iconIntentForSelected() {
+    final id = _selectedId;
+    if (id == null) return ContentMediaIntentState.untouched;
+    return _iconIntent[id] ?? ContentMediaIntentState.untouched;
+  }
+
+  void _scrollSelectedPromoIntoView() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final context = _selectedPromoAnchorKey.currentContext;
+      if (context == null) return;
+      Scrollable.ensureVisible(
+        context,
+        alignment: 0.2,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeInOut,
+      );
+    });
   }
 
   void _markDirty() {
@@ -367,7 +402,10 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     return '#${value.toRadixString(16).padLeft(6, '0').toUpperCase()}';
   }
 
-  HomePromoPayload? _draftPayload({String? imageAssetIdOverride}) {
+  HomePromoPayload? _draftPayload({
+    String? imageAssetIdOverride,
+    String? iconAssetIdOverride,
+  }) {
     final reshowRaw = _reshowController.text.trim();
     final actionSelection = contentActionFromLegacy(
       ctaAction: _ctaAction,
@@ -410,6 +448,20 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
       }
     }
 
+    final iconIntent = _iconIntentForSelected();
+    if (iconIntent.shouldOmitAssetOnSave) {
+      // omit icon_asset_id
+    } else if (iconAssetIdOverride != null && iconAssetIdOverride.isNotEmpty) {
+      map['icon_asset_id'] = iconAssetIdOverride;
+    } else if (iconIntent.assetId != null && iconIntent.assetId!.isNotEmpty) {
+      map['icon_asset_id'] = iconIntent.assetId;
+    } else {
+      final existingIcon = _selected?.payload.iconAssetId;
+      if (existingIcon != null && existingIcon.isNotEmpty) {
+        map['icon_asset_id'] = existingIcon;
+      }
+    }
+
     return HomePromoPayload.tryParse(map);
   }
 
@@ -439,23 +491,13 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     final id = _selectedId;
     if (id != null) {
       _imageIntent[id] = snapshot.imageIntent;
+      _iconIntent[id] = snapshot.iconIntent;
     }
     setState(() {
       _dirty = false;
       _imageError = null;
+      _iconError = null;
     });
-  }
-
-  HomePromoPayload? _previewPayloadForPhone() {
-    final selected = _selected;
-    if (selected == null) return null;
-
-    if (_previewMode == ContentPreviewMode.publishedCanonical) {
-      if (selected.isDraft && !selected.isPublished) return null;
-      return selected.payload;
-    }
-
-    return _draftPayload() ?? selected.payload;
   }
 
   bool get _hidePromoPreview {
@@ -511,6 +553,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     });
     _bindSelected();
     unawaited(_resolveAssetFor(id));
+    unawaited(_resolveIconFor(id));
   }
 
   Future<void> _beginEdit() async {
@@ -596,7 +639,11 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     );
 
     final intent = _intentForSelected();
+    final iconIntent = _iconIntentForSelected();
     final media = _mediaStore;
+    String? uploadedImageAssetId;
+    String? uploadedIconAssetId;
+
     if (intent.hasLocalPick && media != null) {
       setState(() => _imageUploading = true);
       final bytes = intent.localBytes;
@@ -608,15 +655,12 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
         return null;
       }
       try {
-        final assetId = await media.uploadBytes(
+        uploadedImageAssetId = await media.uploadBytes(
           contentItemId: selected.id,
           bytes: bytes,
           contentType: 'image/png',
           title: payload.title,
         );
-        final uploadedPayload = _draftPayload(imageAssetIdOverride: assetId);
-        if (uploadedPayload == null) return null;
-        next = next.copyWith(payload: uploadedPayload);
       } catch (error) {
         if (mounted) {
           setState(() {
@@ -628,10 +672,48 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
       } finally {
         if (mounted) setState(() => _imageUploading = false);
       }
-    } else if (intent.shouldOmitAssetOnSave) {
-      final cleared = _draftPayload(imageAssetIdOverride: '');
-      if (cleared != null) next = next.copyWith(payload: cleared);
     }
+
+    if (iconIntent.hasLocalPick && media != null) {
+      setState(() => _iconUploading = true);
+      final bytes = iconIntent.localBytes;
+      if (bytes == null) {
+        setState(() {
+          _iconUploading = false;
+          _banner = 'Локальная иконка не найдена.';
+        });
+        return null;
+      }
+      try {
+        uploadedIconAssetId = await media.uploadBytes(
+          contentItemId: selected.id,
+          bytes: bytes,
+          contentType: 'image/png',
+          title: '${payload.title} icon',
+        );
+      } catch (error) {
+        if (mounted) {
+          setState(() {
+            _iconUploading = false;
+            _banner = 'Не удалось загрузить иконку: $error';
+          });
+        }
+        return null;
+      } finally {
+        if (mounted) setState(() => _iconUploading = false);
+      }
+    }
+
+    final savedPayload = _draftPayload(
+      imageAssetIdOverride: intent.shouldOmitAssetOnSave
+          ? ''
+          : uploadedImageAssetId,
+      iconAssetIdOverride: iconIntent.shouldOmitAssetOnSave
+          ? ''
+          : uploadedIconAssetId,
+    );
+    if (savedPayload == null) return null;
+    next = next.copyWith(payload: savedPayload);
 
     if (_editingWorkingDraft) {
       final draftVersion = selected.workingDraftRowVersion;
@@ -651,13 +733,14 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
         _imageIntent[next.id] = ContentMediaIntentState(
           assetId: next.payload.imageAssetId,
         );
+        _iconIntent[next.id] = ContentMediaIntentState(
+          assetId: next.payload.iconAssetId,
+        );
         _dirty = false;
         _boundSnapshot = _captureSnapshot();
       });
-      if (intent.hasLocalPick) {
-        // local bytes cleared after upload
-      }
       unawaited(_resolveAssetFor(next.id));
+      unawaited(_resolveIconFor(next.id));
       return next;
     }
 
@@ -678,10 +761,14 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
       _imageIntent[next.id] = ContentMediaIntentState(
         assetId: next.payload.imageAssetId,
       );
+      _iconIntent[next.id] = ContentMediaIntentState(
+        assetId: next.payload.iconAssetId,
+      );
       _dirty = false;
       _boundSnapshot = _captureSnapshot();
     });
     unawaited(_resolveAssetFor(next.id));
+    unawaited(_resolveIconFor(next.id));
     return next;
   }
 
@@ -703,7 +790,9 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     if (selected == null) return;
     await _run(() async {
       var current = selected;
-      if (_dirty || _intentForSelected() != ContentMediaIntentState.untouched) {
+      if (_dirty ||
+          _intentForSelected() != ContentMediaIntentState.untouched ||
+          _iconIntentForSelected() != ContentMediaIntentState.untouched) {
         final saved = await _saveSelected();
         if (saved == null) return;
         current = saved;
@@ -912,14 +1001,70 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     _markDirty();
   }
 
+  Future<void> _pickIcon() async {
+    final selected = _selected;
+    if (selected == null || !_canWrite || selected.isArchived) return;
+    try {
+      final picked = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['png', 'webp'],
+        withData: true,
+        allowMultiple: false,
+      );
+      if (picked == null || picked.files.isEmpty) return;
+      final file = picked.files.single;
+      final bytes = file.bytes;
+      if (bytes == null || bytes.isEmpty) {
+        throw const AdminImagePickException(
+          'Не удалось прочитать файл. Выберите изображение ещё раз.',
+        );
+      }
+      if (bytes.length > LocalAdminImagePicker.maxBytes) {
+        throw const AdminImagePickException(
+          'Изображение слишком большое. Максимум 5 МБ.',
+        );
+      }
+      final ext = (file.extension ?? '').toLowerCase();
+      if (ext != 'png' && ext != 'webp') {
+        throw const AdminImagePickException(
+          'Для своей иконки поддерживаются только PNG и WebP.',
+        );
+      }
+      setState(() {
+        _iconIntent[selected.id] =
+            (_iconIntent[selected.id] ?? ContentMediaIntentState.untouched)
+                .pickLocal(bytes);
+        _iconError = null;
+      });
+      _markDirty();
+    } on AdminImagePickException catch (error) {
+      setState(() => _iconError = error.message);
+    }
+  }
+
+  void _clearIcon() {
+    final selected = _selected;
+    if (selected == null || !_canWrite || selected.isArchived) return;
+    setState(() {
+      _resolvedIconBytes.remove(selected.id);
+      _iconIntent[selected.id] = _iconIntentFor(selected.id).markRemoved();
+      _iconError = null;
+    });
+    _markDirty();
+  }
+
   void _scheduleAssetPreloads() {
     final media = _mediaStore;
     if (media == null) return;
     for (final item in _items.take(8)) {
       unawaited(_resolveAssetFor(item.id));
+      unawaited(_resolveIconFor(item.id));
     }
     final selected = _selected;
-    if (selected != null) unawaited(_resolveAssetFor(selected.id));
+    if (selected != null) {
+      unawaited(_resolveAssetFor(selected.id));
+      unawaited(_resolveIconFor(selected.id));
+    }
   }
 
   Future<void> _resolveAssetFor(String itemId) async {
@@ -970,6 +1115,53 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
   ContentMediaIntentState _intentFor(String itemId) =>
       _imageIntent[itemId] ?? ContentMediaIntentState.untouched;
 
+  ContentMediaIntentState _iconIntentFor(String itemId) =>
+      _iconIntent[itemId] ?? ContentMediaIntentState.untouched;
+
+  Future<void> _resolveIconFor(String itemId) async {
+    final media = _mediaStore;
+    if (media == null) return;
+    final intent = _iconIntentFor(itemId);
+    if (intent.hasLocalPick) return;
+    if (intent.shouldOmitAssetOnSave) return;
+    if (_resolvingIconAssetIds.contains(itemId)) return;
+
+    HomePromoItem? item;
+    for (final candidate in _items) {
+      if (candidate.id == itemId) {
+        item = candidate;
+        break;
+      }
+    }
+    final assetId = item?.payload.iconAssetId;
+    if (assetId == null || assetId.isEmpty) return;
+
+    final generation = Object.hash(itemId, assetId, intent.phase);
+    _resolvingIconAssetIds.add(itemId);
+    try {
+      final bytes = await media.downloadBytes(assetId: assetId);
+      if (!mounted || bytes == null) return;
+      final latest = _iconIntentFor(itemId);
+      if (latest.hasLocalPick || latest.shouldOmitAssetOnSave) return;
+      HomePromoItem? latestItem;
+      for (final candidate in _items) {
+        if (candidate.id == itemId) {
+          latestItem = candidate;
+          break;
+        }
+      }
+      final latestAssetId = latestItem?.payload.iconAssetId;
+      if (latestAssetId != assetId) return;
+      final latestGeneration = Object.hash(itemId, latestAssetId, latest.phase);
+      if (latestGeneration != generation) return;
+      setState(() => _resolvedIconBytes[itemId] = bytes);
+    } catch (_) {
+      // Preview falls back to built-in icon key.
+    } finally {
+      _resolvingIconAssetIds.remove(itemId);
+    }
+  }
+
   Uint8List? _previewImageBytes() {
     final selected = _selected;
     if (selected == null) return null;
@@ -978,6 +1170,16 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     if (local != null) return local;
     if (intent.shouldOmitAssetOnSave) return null;
     return _resolvedAssetBytes[selected.id];
+  }
+
+  Uint8List? _previewIconBytes() {
+    final selected = _selected;
+    if (selected == null) return null;
+    final intent = _iconIntentFor(selected.id);
+    final local = intent.bytesForPreview;
+    if (local != null) return local;
+    if (intent.shouldOmitAssetOnSave) return null;
+    return _resolvedIconBytes[selected.id];
   }
 
   bool _assetLoading() {
@@ -990,6 +1192,122 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     if (assetId == null || assetId.isEmpty) return false;
     return !_resolvedAssetBytes.containsKey(selected.id) &&
         _resolvingAssetIds.contains(selected.id);
+  }
+
+  bool _iconAssetLoading() {
+    final selected = _selected;
+    if (selected == null) return false;
+    final intent = _iconIntentFor(selected.id);
+    if (intent.hasLocalPick) return false;
+    if (intent.shouldOmitAssetOnSave) return false;
+    final assetId = selected.payload.iconAssetId;
+    if (assetId == null || assetId.isEmpty) return false;
+    return !_resolvedIconBytes.containsKey(selected.id) &&
+        _resolvingIconAssetIds.contains(selected.id);
+  }
+
+  ContentImageRenderState _imageStateForPreview({
+    required HomePromoPayload payload,
+    Uint8List? imageBytes,
+    bool imageLoading = false,
+  }) {
+    return ContentImageRenderState.fromLegacy(
+      usesImageVariant: contentCardVariantUsesImage(
+        effectiveContentCardVariant(payload.cardVariant),
+      ),
+      bytes: imageBytes,
+      loading: imageLoading,
+    );
+  }
+
+  Uint8List? _imageBytesForItem(String itemId, HomePromoPayload payload) {
+    if (itemId == _selectedId) return _previewImageBytes();
+    final intent = _intentFor(itemId);
+    if (intent.shouldOmitAssetOnSave) return null;
+    final local = intent.bytesForPreview;
+    if (local != null) return local;
+    return _resolvedAssetBytes[itemId];
+  }
+
+  Uint8List? _iconBytesForItem(String itemId, HomePromoPayload payload) {
+    if (itemId == _selectedId) return _previewIconBytes();
+    final intent = _iconIntentFor(itemId);
+    if (intent.shouldOmitAssetOnSave) return null;
+    final local = intent.bytesForPreview;
+    if (local != null) return local;
+    return _resolvedIconBytes[itemId];
+  }
+
+  bool _shouldOverlaySelectedInPreview(HomePromoItem selected) {
+    if (_previewMode == ContentPreviewMode.publishedCanonical) {
+      return false;
+    }
+    return shouldOverlayLiveDraft(
+      isDraft: selected.isDraft && !selected.isPublished,
+      editingWorkingDraft: _editingWorkingDraft,
+      dirty: _dirty,
+      mode: _previewMode,
+    );
+  }
+
+  List<StudentHomePromoPlacement> _buildPreviewPlacements() {
+    if (_hidePromoPreview) return const [];
+
+    final selected = _selected;
+    final selectedId = _selectedId;
+    final byId = <String, StudentHomePromoPlacement>{};
+
+    for (final item in _partitions.publishedPreviewItems) {
+      final isSelected = item.id == selectedId;
+      byId[item.id] = StudentHomePromoPlacement(
+        payload: item.payload,
+        slot: item.payload.effectiveHomeSlot,
+        showDemoBadge: item.isDemo,
+        imageBytes: _imageBytesForItem(item.id, item.payload),
+        iconBytes: _iconBytesForItem(item.id, item.payload),
+        imageLoading: isSelected && _assetLoading(),
+        imageState: _imageStateForPreview(
+          payload: item.payload,
+          imageBytes: _imageBytesForItem(item.id, item.payload),
+          imageLoading: isSelected && _assetLoading(),
+        ),
+        anchorKey: isSelected ? _selectedPromoAnchorKey : null,
+      );
+    }
+
+    if (selected != null && _shouldOverlaySelectedInPreview(selected)) {
+      final payload = _draftPayload() ?? selected.payload;
+      byId[selected.id] = StudentHomePromoPlacement(
+        payload: payload,
+        slot: _homeSlot.key,
+        showDemoBadge: selected.isDemo,
+        imageBytes: _previewImageBytes(),
+        iconBytes: _previewIconBytes(),
+        imageLoading: _assetLoading(),
+        imageState: _imageStateForPreview(
+          payload: payload,
+          imageBytes: _previewImageBytes(),
+          imageLoading: _assetLoading(),
+        ),
+        anchorKey: _selectedPromoAnchorKey,
+      );
+    } else if (selected != null &&
+        selectedId != null &&
+        byId.containsKey(selectedId)) {
+      final existing = byId[selectedId]!;
+      byId[selectedId] = StudentHomePromoPlacement(
+        payload: existing.payload,
+        slot: existing.slot,
+        showDemoBadge: existing.showDemoBadge,
+        imageBytes: existing.imageBytes,
+        iconBytes: existing.iconBytes,
+        imageLoading: existing.imageLoading,
+        imageState: existing.imageState,
+        anchorKey: _selectedPromoAnchorKey,
+      );
+    }
+
+    return byId.values.toList();
   }
 
   Future<void> _pickDate({required bool starts}) async {
@@ -1089,11 +1407,11 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     }
 
     final selected = _selected;
-    final previewPayload = _previewPayloadForPhone();
+    final previewPlacements = _buildPreviewPlacements();
     final parts = _partitions;
     final v2PublishBlocked =
-        previewPayload != null &&
-        contentWireUsesV2PublishFeatures(previewPayload.toWireJson());
+        _draftPayload() != null &&
+        contentWireUsesV2PublishFeatures(_draftPayload()!.toWireJson());
 
     return Padding(
       padding: const EdgeInsets.all(20),
@@ -1103,7 +1421,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
         statusChip: selected?.status.russianLabel,
         originDemoBadge: selected?.isDemo ?? false,
         dirty: _dirty,
-        busy: _busy || _imageUploading,
+        busy: _busy || _imageUploading || _iconUploading,
         banner: _headerBanner,
         defaultInfoMessage:
             _infoBanner ??
@@ -1182,7 +1500,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
               child: PhonePreviewFrame(
                 child: Theme(
                   data: studentPlatformLightTheme(),
-                  child: _hidePromoPreview || previewPayload == null
+                  child: _hidePromoPreview && previewPlacements.isEmpty
                       ? const Center(
                           child: Padding(
                             padding: EdgeInsets.all(24),
@@ -1193,13 +1511,10 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
                           ),
                         )
                       : _HomePromoPhonePreview(
-                          previewPayload: previewPayload,
-                          showDemoBadge: selected?.isDemo ?? false,
-                          hidePromo: false,
+                          placements: previewPlacements,
                           news: _previewNews,
-                          homeSlot: _homeSlot.key,
-                          imageBytes: _previewImageBytes(),
-                          imageLoading: _assetLoading(),
+                          selectedId: _selectedId,
+                          onPlacementsBuilt: _scrollSelectedPromoIntoView,
                         ),
                 ),
               ),
@@ -1266,6 +1581,9 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
                 imageBytes: _previewImageBytes(),
                 imageLoading: _assetLoading(),
                 imageError: _imageError,
+                iconBytes: _previewIconBytes(),
+                iconLoading: _iconAssetLoading(),
+                iconError: _iconError,
                 studentsRepository: _studentsRepository,
                 onChanged: _markDirty,
                 onDismissibleChanged: (value) {
@@ -1290,6 +1608,8 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
                     },
                 onPickImage: _pickImage,
                 onClearImage: _clearImage,
+                onPickIcon: _pickIcon,
+                onClearIcon: _clearIcon,
                 onPreviewAudience: _previewAudience,
                 onPickDate: _pickDate,
                 onClearStarts: () {
@@ -1337,6 +1657,7 @@ class _EditorSnapshot {
     required this.endsAt,
     required this.ctaAction,
     required this.imageIntent,
+    required this.iconIntent,
     required this.homeSlot,
     required this.cardVariant,
     required this.gradientDirection,
@@ -1360,6 +1681,7 @@ class _EditorSnapshot {
   final DateTime? endsAt;
   final String ctaAction;
   final ContentMediaIntentState imageIntent;
+  final ContentMediaIntentState iconIntent;
   final ContentHomeSlot homeSlot;
   final ContentCardVariant cardVariant;
   final int gradientDirection;
@@ -1385,6 +1707,7 @@ class _EditorSnapshot {
         other.endsAt == endsAt &&
         other.ctaAction == ctaAction &&
         other.imageIntent == imageIntent &&
+        other.iconIntent == iconIntent &&
         other.homeSlot == homeSlot &&
         other.cardVariant == cardVariant &&
         other.gradientDirection == gradientDirection;
@@ -1410,6 +1733,7 @@ class _EditorSnapshot {
     endsAt,
     ctaAction,
     imageIntent,
+    iconIntent,
     homeSlot,
     cardVariant,
     gradientDirection,
@@ -1424,24 +1748,42 @@ bool _listEq(List<String> a, List<String> b) {
   return true;
 }
 
-class _HomePromoPhonePreview extends StatelessWidget {
+class _HomePromoPhonePreview extends StatefulWidget {
   const _HomePromoPhonePreview({
-    required this.previewPayload,
-    required this.showDemoBadge,
-    required this.hidePromo,
+    required this.placements,
     required this.news,
-    required this.homeSlot,
-    this.imageBytes,
-    this.imageLoading = false,
+    required this.selectedId,
+    this.onPlacementsBuilt,
   });
 
-  final HomePromoPayload previewPayload;
-  final bool showDemoBadge;
-  final bool hidePromo;
+  final List<StudentHomePromoPlacement> placements;
   final List<StudentHomeNews> news;
-  final String homeSlot;
-  final Uint8List? imageBytes;
-  final bool imageLoading;
+  final String? selectedId;
+  final VoidCallback? onPlacementsBuilt;
+
+  @override
+  State<_HomePromoPhonePreview> createState() => _HomePromoPhonePreviewState();
+}
+
+class _HomePromoPhonePreviewState extends State<_HomePromoPhonePreview> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.onPlacementsBuilt?.call();
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _HomePromoPhonePreview oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.selectedId != oldWidget.selectedId ||
+        widget.placements.length != oldWidget.placements.length) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        widget.onPlacementsBuilt?.call();
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1480,7 +1822,7 @@ class _HomePromoPhonePreview extends StatelessWidget {
           status: StudentHomeAssignmentStatus.inProgress,
         ),
       ],
-      news: news,
+      news: widget.news,
       totalLessonsToday: 2,
       assignmentsCount: 2,
     );
@@ -1488,18 +1830,8 @@ class _HomePromoPhonePreview extends StatelessWidget {
     return StudentHomeView(
       data: previewData,
       notificationCount: 3,
-      hideHomePromo: hidePromo,
-      homePromoPlacements: hidePromo
-          ? const []
-          : [
-              StudentHomePromoPlacement(
-                payload: previewPayload,
-                slot: homeSlot,
-                showDemoBadge: showDemoBadge,
-                imageBytes: imageBytes,
-                imageLoading: imageLoading,
-              ),
-            ],
+      hideHomePromo: widget.placements.isEmpty,
+      homePromoPlacements: widget.placements,
       bottomNavigationBar: StudentBottomNav(
         currentIndex: 0,
         items: studentBottomNavItems,
@@ -1564,6 +1896,9 @@ class _PropertiesPanel extends StatelessWidget {
     required this.imageBytes,
     required this.imageLoading,
     required this.imageError,
+    required this.iconBytes,
+    required this.iconLoading,
+    required this.iconError,
     required this.studentsRepository,
     required this.onChanged,
     required this.onDismissibleChanged,
@@ -1572,6 +1907,8 @@ class _PropertiesPanel extends StatelessWidget {
     required this.onAudienceSelectionChanged,
     required this.onPickImage,
     required this.onClearImage,
+    required this.onPickIcon,
+    required this.onClearIcon,
     required this.onPreviewAudience,
     required this.onPickDate,
     required this.onClearStarts,
@@ -1618,6 +1955,9 @@ class _PropertiesPanel extends StatelessWidget {
   final Uint8List? imageBytes;
   final bool imageLoading;
   final String? imageError;
+  final Uint8List? iconBytes;
+  final bool iconLoading;
+  final String? iconError;
   final StudentsRepository studentsRepository;
   final VoidCallback onChanged;
   final ValueChanged<bool> onDismissibleChanged;
@@ -1630,6 +1970,8 @@ class _PropertiesPanel extends StatelessWidget {
   onAudienceSelectionChanged;
   final VoidCallback onPickImage;
   final VoidCallback onClearImage;
+  final VoidCallback onPickIcon;
+  final VoidCallback onClearIcon;
   final VoidCallback onPreviewAudience;
   final Future<void> Function({required bool starts}) onPickDate;
   final VoidCallback onClearStarts;
@@ -1666,6 +2008,66 @@ class _PropertiesPanel extends StatelessWidget {
               },
             ),
           ),
+          const Padding(
+            padding: EdgeInsets.only(bottom: 6),
+            child: Text(
+              'Своя иконка (PNG/WebP) имеет приоритет над встроенной.',
+              style: TextStyle(color: Color(0xFF5C6370), fontSize: 12),
+            ),
+          ),
+          if (iconLoading)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: SizedBox(
+                height: 48,
+                child: Center(
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+              ),
+            )
+          else if (iconBytes != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.memory(
+                  iconBytes!,
+                  height: 48,
+                  width: 48,
+                  fit: BoxFit.contain,
+                ),
+              ),
+            ),
+          if (iconError != null) ...[
+            const SizedBox(height: 4),
+            Text(iconError!, style: const TextStyle(color: Color(0xFFB3261E))),
+          ],
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                onPressed: _editable ? onPickIcon : null,
+                icon: const Icon(Icons.upload_rounded),
+                label: const Text('Загрузить свою'),
+              ),
+              OutlinedButton.icon(
+                onPressed:
+                    _editable &&
+                        (iconBytes != null ||
+                            selected.payload.iconAssetId != null)
+                    ? onClearIcon
+                    : null,
+                icon: const Icon(Icons.delete_outline_rounded),
+                label: const Text('Убрать иконку'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
           Padding(
             padding: const EdgeInsets.only(bottom: 10),
             child: ContentGradientField(

@@ -998,7 +998,17 @@ Status: **DONE** / Codex **APPROVE** — corrective fidelity (14.1.2 history unc
 - [x] Vacancy visual-role WD isolation + snapshot-after-reconcile migration;
 - [x] Codex final-diff APPROVE + commit/push.
 
-### Next after 14.1.3 — Import Studio (separate stage)
+### Stage 14.1.4 — Full Visual Parity & Media Reliability
+
+Status: **DONE** / Codex **APPROVE** — M5; gate OFF; migration `20260731000318_stage14_1_4_vacancy_assets_role_in_get_my` applied
+
+- [x] ContentImageRenderState; no silent image→gradient fallback;
+- [x] Full-screen Admin previews = mobile Profile/Jobs/Help/Home compositions;
+- [x] Mobile multi-slot home + media resolve (assetId+version key);
+- [x] Custom icon end-to-end; vacancy logo/cover/background planes;
+- [x] Codex final APPROVE + commit/push.
+
+### Next after 14.1.4 — Import Studio (separate stage)
 
 - [ ] audit several real curriculum file formats (do not force one schema early);
 - [ ] upload sample workbooks; analyze sheets/headers/merged cells;

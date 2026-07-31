@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
@@ -19,6 +20,7 @@ import 'package:student_platform/src/services/auth_service.dart';
 import 'package:student_platform/src/ui/chats/my_chats_screen.dart';
 import 'package:student_platform/src/ui/friends/my_friends_screen.dart';
 import 'package:student_platform/src/ui/learning/data/supabase_learning_repository.dart';
+import 'package:student_platform/src/ui/info/content_media_service.dart';
 import 'package:student_platform/src/ui/profile/profile_feed_service.dart';
 import 'package:student_platform/src/ui/profile/student_points_service.dart';
 import 'package:student_platform/src/ui/profile/my_reviews_screen.dart';
@@ -41,6 +43,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   final SupabaseClient _sb = Supabase.instance.client;
   final _repo = SupabaseLearningRepository();
   final ProfileFeedService _feedService = ProfileFeedService();
+  final ContentMediaService _contentMedia = ContentMediaService();
   ProfileFeedLoadResult _feed =
       const ProfileFeedLoadResult(isDemoFallback: true);
   final StudentPointsService _pointsService = StudentPointsService();
@@ -50,6 +53,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   bool _pointsLoadInFlight = false;
   final Set<String> _recordedFeedImpressions = {};
   int _feedLoadGeneration = 0;
+  int _feedMediaGeneration = 0;
   bool _feedLoadInFlight = false;
 
   // ----- badges -----
@@ -123,11 +127,13 @@ class _ProfileScreenState extends State<ProfileScreen>
       if (!mounted || generation != _feedLoadGeneration) return;
       if (cached.cards.isNotEmpty) {
         setState(() => _feed = cached);
+        unawaited(_hydrateFeedMedia(cached));
       }
       try {
         final next = await _feedService.load();
         if (!mounted || generation != _feedLoadGeneration) return;
         setState(() => _feed = next);
+        unawaited(_hydrateFeedMedia(next));
       } catch (error) {
         debugPrint('[profile] feed load failed: $error');
         if (!mounted || generation != _feedLoadGeneration) return;
@@ -149,6 +155,58 @@ class _ProfileScreenState extends State<ProfileScreen>
         _feedLoadInFlight = false;
       }
     }
+  }
+
+  Future<void> _hydrateFeedMedia(ProfileFeedLoadResult feed) async {
+    final generation = ++_feedMediaGeneration;
+    if (feed.hideFeed || feed.isDemoFallback || feed.cards.isEmpty) return;
+
+    final hydrated = <ManagedProfileFeedCard>[];
+    for (final card in feed.cards) {
+      if (!mounted || generation != _feedMediaGeneration) return;
+      final version = '${card.id}|${card.sortOrder}';
+      Uint8List? imageBytes = card.imageBytes;
+      Uint8List? iconBytes = card.iconBytes;
+      final imageId = card.payload.imageAssetId?.trim();
+      final iconId = card.payload.iconAssetId?.trim();
+      if ((imageBytes == null || imageBytes.isEmpty) &&
+          imageId != null &&
+          imageId.isNotEmpty) {
+        imageBytes = await _contentMedia.fetchBytes(
+          imageId,
+          contentVersion: version,
+        );
+      }
+      if ((iconBytes == null || iconBytes.isEmpty) &&
+          iconId != null &&
+          iconId.isNotEmpty) {
+        iconBytes = await _contentMedia.fetchBytes(
+          iconId,
+          contentVersion: '$version|icon',
+        );
+      }
+      hydrated.add(
+        card.copyWith(
+          imageBytes: imageBytes,
+          iconBytes: iconBytes,
+          imageLoading: false,
+        ),
+      );
+    }
+    if (!mounted || generation != _feedMediaGeneration) return;
+    // Keep last-good if a newer feed load already replaced the set.
+    final currentIds = _feed.cards.map((c) => c.id).join('|');
+    final sourceIds = feed.cards.map((c) => c.id).join('|');
+    if (currentIds != sourceIds && _feed.cards.isNotEmpty) return;
+    setState(() {
+      _feed = ProfileFeedLoadResult(
+        cards: hydrated,
+        isDemoFallback: feed.isDemoFallback,
+        intentionallyEmpty: feed.intentionallyEmpty,
+        loadError: feed.loadError,
+        rpcUnavailable: feed.rpcUnavailable,
+      );
+    });
   }
 
   void _recordVisibleFeedImpression(ManagedProfileFeedCard card) {

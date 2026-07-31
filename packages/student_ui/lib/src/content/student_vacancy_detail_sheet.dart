@@ -1,16 +1,20 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import 'student_vacancy_card.dart';
-
 import 'vacancy_models.dart';
 
 /// Shared vacancy detail sheet (Mobile + can be reused in Admin preview flows).
-
 class StudentVacancyDetailSheet extends StatefulWidget {
   const StudentVacancyDetailSheet({
     super.key,
     required this.card,
     this.showDemoBadge = false,
+    this.logoBytes,
+    this.coverBytes,
+    this.backgroundBytes,
+    this.showCloseButton = true,
     this.onOpenExternalUrl,
     this.onRevealContacts,
     this.onOpenAsset,
@@ -18,15 +22,17 @@ class StudentVacancyDetailSheet extends StatefulWidget {
   });
 
   final ManagedVacancyCard card;
-
   final bool showDemoBadge;
+  final Uint8List? logoBytes;
+  final Uint8List? coverBytes;
+  final Uint8List? backgroundBytes;
+
+  /// When false, hides the trailing «Закрыть» button (embedded phone preview).
+  final bool showCloseButton;
 
   final Future<void> Function(String httpsUrl)? onOpenExternalUrl;
-
   final Future<VacancyContacts?> Function()? onRevealContacts;
-
   final Future<void> Function(String assetId)? onOpenAsset;
-
   final Future<void> Function(VacancyReportReason reason, String? note)?
       onReport;
 
@@ -37,46 +43,61 @@ class StudentVacancyDetailSheet extends StatefulWidget {
 
 class _StudentVacancyDetailSheetState extends State<StudentVacancyDetailSheet> {
   VacancyContacts? _contacts;
-
   bool _contactsLoading = false;
-
   bool _contactsError = false;
-
   bool _reportSent = false;
 
   ManagedVacancyCard get card => widget.card;
-
   VacancyCardPayload get payload => card.payload;
+
+  Uint8List? get _logoBytes {
+    if (widget.logoBytes != null && widget.logoBytes!.isNotEmpty) {
+      return widget.logoBytes;
+    }
+    final raw = card.logoBytes;
+    if (raw == null || raw.isEmpty) return null;
+    return raw is Uint8List ? raw : Uint8List.fromList(raw);
+  }
+
+  Uint8List? get _coverBytes {
+    if (widget.coverBytes != null && widget.coverBytes!.isNotEmpty) {
+      return widget.coverBytes;
+    }
+    final raw = card.coverBytes;
+    if (raw == null || raw.isEmpty) return null;
+    return raw is Uint8List ? raw : Uint8List.fromList(raw);
+  }
+
+  Uint8List? get _backgroundBytes {
+    if (widget.backgroundBytes != null && widget.backgroundBytes!.isNotEmpty) {
+      return widget.backgroundBytes;
+    }
+    final raw = card.backgroundBytes;
+    if (raw == null || raw.isEmpty) return null;
+    return raw is Uint8List ? raw : Uint8List.fromList(raw);
+  }
 
   Future<void> _revealContacts() async {
     if (_contacts != null || _contactsLoading) return;
-
     final fetch = widget.onRevealContacts;
-
     if (fetch == null) return;
 
     setState(() {
       _contactsLoading = true;
-
       _contactsError = false;
     });
 
     try {
       final value = await fetch();
-
       if (!mounted) return;
-
       setState(() {
         _contacts = value;
-
         _contactsLoading = false;
       });
     } catch (_) {
       if (!mounted) return;
-
       setState(() {
         _contactsLoading = false;
-
         _contactsError = true;
       });
     }
@@ -84,7 +105,6 @@ class _StudentVacancyDetailSheetState extends State<StudentVacancyDetailSheet> {
 
   Future<void> _report() async {
     final report = widget.onReport;
-
     if (report == null || _reportSent) return;
 
     final reason = await showDialog<VacancyReportReason>(
@@ -105,17 +125,13 @@ class _StudentVacancyDetailSheetState extends State<StudentVacancyDetailSheet> {
 
     try {
       await report(reason, null);
-
       if (!mounted) return;
-
       setState(() => _reportSent = true);
-
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Жалоба отправлена.')),
       );
     } catch (e) {
       if (!mounted) return;
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Не удалось отправить: $e')),
       );
@@ -125,8 +141,9 @@ class _StudentVacancyDetailSheetState extends State<StudentVacancyDetailSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final background = _backgroundBytes;
 
-    return SingleChildScrollView(
+    final body = SingleChildScrollView(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
         child: Column(
@@ -137,6 +154,8 @@ class _StudentVacancyDetailSheetState extends State<StudentVacancyDetailSheet> {
               showDemoBadge: widget.showDemoBadge || card.showDemoBadge,
               expiresLabel: vacancyExpiresLabel(card.expiresAt),
               hasContacts: card.hasContacts,
+              logoBytes: _logoBytes,
+              coverBytes: _coverBytes,
             ),
             const SizedBox(height: 16),
             if (payload.descriptionFull != null &&
@@ -254,18 +273,40 @@ class _StudentVacancyDetailSheetState extends State<StudentVacancyDetailSheet> {
                     onPressed: _reportSent ? null : _report,
                     icon: const Icon(Icons.flag_outlined),
                     label: Text(
-                        _reportSent ? 'Жалоба отправлена' : 'Пожаловаться'),
+                      _reportSent ? 'Жалоба отправлена' : 'Пожаловаться',
+                    ),
                   ),
                 const Spacer(),
-                FilledButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Закрыть'),
-                ),
+                if (widget.showCloseButton)
+                  FilledButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Закрыть'),
+                  ),
               ],
             ),
           ],
         ),
       ),
+    );
+
+    if (background == null || background.isEmpty) return body;
+
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: Image.memory(
+            background,
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+          ),
+        ),
+        Positioned.fill(
+          child: ColoredBox(
+            color: const Color(0xFFFAF8FC).withValues(alpha: 0.78),
+          ),
+        ),
+        body,
+      ],
     );
   }
 

@@ -78,6 +78,7 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
   ContentPreviewMode _previewMode = ContentPreviewMode.effectiveDraft;
   ContentMediaIntentState _logoMedia = ContentMediaIntentState.untouched;
   ContentMediaIntentState _coverMedia = ContentMediaIntentState.untouched;
+  ContentMediaIntentState _backgroundMedia = ContentMediaIntentState.untouched;
 
   VacancyAdminListPartitions get _partitions => partitionAdminVacancy(_items);
 
@@ -336,6 +337,7 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
     _moderationJournal = const [];
     _logoMedia = _mediaIntentForRole(item, 'logo');
     _coverMedia = _mediaIntentForRole(item, 'cover');
+    _backgroundMedia = _mediaIntentForRole(item, 'background');
     _boundSnapshot = _captureSnapshot();
     setState(() {
       _dirty = false;
@@ -722,19 +724,29 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
         _coverMedia = _coverMedia.pickLocal(Uint8List.fromList(bytes));
         _dirty = true;
       });
+    } else if (isImage && role == 'background') {
+      setState(() {
+        _backgroundMedia = _backgroundMedia.pickLocal(
+          Uint8List.fromList(bytes),
+        );
+        _dirty = true;
+      });
     }
     await _run(() async {
       if (isImage && role == 'logo') {
         setState(() => _logoMedia = _logoMedia.markUploading());
       } else if (isImage && role == 'cover') {
         setState(() => _coverMedia = _coverMedia.markUploading());
+      } else if (isImage && role == 'background') {
+        setState(() => _backgroundMedia = _backgroundMedia.markUploading());
       }
       try {
-        final previousId = role == 'logo'
-            ? _logoMedia.assetId
-            : role == 'cover'
-            ? _coverMedia.assetId
-            : null;
+        final previousId = switch (role) {
+          'logo' => _logoMedia.assetId,
+          'cover' => _coverMedia.assetId,
+          'background' => _backgroundMedia.assetId,
+          _ => null,
+        };
         final previousIsDraft = previousId == null
             ? false
             : selected.assets.any((a) => a.id == previousId && a.isDraftAsset);
@@ -751,7 +763,7 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
             previousId != null &&
             previousId.isNotEmpty &&
             previousId != assetId &&
-            (role == 'logo' || role == 'cover')) {
+            (role == 'logo' || role == 'cover' || role == 'background')) {
           try {
             await _repository.deleteAsset(previousId);
           } catch (_) {
@@ -765,13 +777,16 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
             _logoMedia = _logoMedia.markUploaded(assetId);
           } else if (isImage && role == 'cover') {
             _coverMedia = _coverMedia.markUploaded(assetId);
+          } else if (isImage && role == 'background') {
+            _backgroundMedia = _backgroundMedia.markUploaded(assetId);
           }
           _banner = null;
-          _successBanner = role == 'logo'
-              ? 'Логотип обновлён'
-              : role == 'cover'
-              ? 'Обложка обновлена'
-              : 'Вложение добавлено';
+          _successBanner = switch (role) {
+            'logo' => 'Логотип обновлён',
+            'cover' => 'Обложка обновлена',
+            'background' => 'Фон обновлён',
+            _ => 'Вложение добавлено',
+          };
         });
       } catch (error) {
         if (!mounted) return;
@@ -780,6 +795,8 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
             _logoMedia = _logoMedia.markFailed(error.toString());
           } else if (isImage && role == 'cover') {
             _coverMedia = _coverMedia.markFailed(error.toString());
+          } else if (isImage && role == 'background') {
+            _backgroundMedia = _backgroundMedia.markFailed(error.toString());
           }
           _banner = 'Не удалось загрузить файл.';
         });
@@ -805,8 +822,10 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
     setState(() {
       if (role == 'logo') {
         _logoMedia = _logoMedia.markRemoved();
-      } else {
+      } else if (role == 'cover') {
         _coverMedia = _coverMedia.markRemoved();
+      } else {
+        _backgroundMedia = _backgroundMedia.markRemoved();
       }
       _dirty = true;
     });
@@ -822,12 +841,16 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
           _selectedId = updated.id;
           if (role == 'logo') {
             _logoMedia = _mediaIntentForRole(updated, 'logo');
-          } else {
+          } else if (role == 'cover') {
             _coverMedia = _mediaIntentForRole(updated, 'cover');
+          } else {
+            _backgroundMedia = _mediaIntentForRole(updated, 'background');
           }
-          _successBanner = role == 'logo'
-              ? 'Логотип убран из черновика'
-              : 'Обложка убрана из черновика';
+          _successBanner = switch (role) {
+            'logo' => 'Логотип убран из черновика',
+            'cover' => 'Обложка убрана из черновика',
+            _ => 'Фон убран из черновика',
+          };
         });
       } catch (_) {
         if (!mounted) return;
@@ -1016,6 +1039,7 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
       expiresAt: draft.expiresAt,
       logoBytes: _logoMedia.bytesForPreview,
       coverBytes: _coverMedia.bytesForPreview,
+      backgroundBytes: _backgroundMedia.bytesForPreview,
     );
     final index = cards.indexWhere((c) => c.id == selected.id);
     if (index >= 0) {
@@ -1046,6 +1070,7 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
     _expiresAt = snapshot.expiresAt;
     _logoMedia = ContentMediaIntentState.untouched;
     _coverMedia = ContentMediaIntentState.untouched;
+    _backgroundMedia = ContentMediaIntentState.untouched;
     setState(() => _dirty = false);
   }
 
@@ -1289,8 +1314,10 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
                 onUploadAsset: () => _uploadAsset(),
                 onUploadLogo: () => _uploadAsset(role: 'logo'),
                 onUploadCover: () => _uploadAsset(role: 'cover'),
+                onUploadBackground: () => _uploadAsset(role: 'background'),
                 onClearLogo: () => _clearVisualAsset('logo'),
                 onClearCover: () => _clearVisualAsset('cover'),
+                onClearBackground: () => _clearVisualAsset('background'),
                 onResolveReport: _resolveReport,
               ),
       ),
@@ -1418,109 +1445,24 @@ class _VacancyPhonePreviewState extends State<_VacancyPhonePreview> {
 
   @override
   Widget build(BuildContext context) {
-    if (_detailCard != null) {
-      return PhonePreviewFrame(
-        child: Theme(
-          data: studentPlatformLightTheme(),
-          child: ColoredBox(
-            color: const Color(0xFFFAF8FC),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Material(
-                  color: const Color(0xFFF0F1F6),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 40, 8, 8),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          tooltip: 'Назад',
-                          onPressed: () => setState(() => _detailCard = null),
-                          icon: const Icon(Icons.arrow_back_rounded),
-                        ),
-                        Expanded(
-                          child: Text(
-                            _detailCard!.payload.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.titleSmall
-                                ?.copyWith(fontWeight: FontWeight.w800),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: SingleChildScrollView(
-                    child: StudentVacancyDetailSheet(
-                      card: _detailCard!,
-                      showDemoBadge: _detailCard!.showDemoBadge,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
     return PhonePreviewFrame(
       child: Theme(
         data: studentPlatformLightTheme(),
-        child: ColoredBox(
-          color: const Color(0xFFFAF8FC),
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 56, 16, 24),
-            children: [
-              const Text(
-                'Вакансии',
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w900,
-                  color: Color(0xFF111827),
-                ),
-              ),
-              const SizedBox(height: 12),
-              if (widget.cards.isEmpty)
-                const Card(
-                  child: Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Text(
-                      'Нет опубликованных вакансий для предпросмотра',
-                    ),
-                  ),
-                )
-              else
-                for (final card in widget.cards)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(20),
-                        border: card.id == widget.selectedId
-                            ? Border.all(
-                                color: const Color(0xFF6656D9),
-                                width: 2,
-                              )
-                            : null,
-                      ),
-                      child: StudentVacancyCard(
-                        payload: card.payload,
-                        showDemoBadge: card.showDemoBadge,
-                        expiresLabel: vacancyExpiresLabel(card.expiresAt),
-                        logoBytes: card.logoBytes == null
-                            ? null
-                            : Uint8List.fromList(card.logoBytes!),
-                        coverBytes: card.coverBytes == null
-                            ? null
-                            : Uint8List.fromList(card.coverBytes!),
-                        onTap: () => _openDetail(card),
-                      ),
-                    ),
-                  ),
-            ],
+        child: SafeArea(
+          child: StudentJobsBoardView(
+            cards: widget.cards,
+            selectedId: widget.selectedId,
+            onOpenDetail: (id) {
+              for (final card in widget.cards) {
+                if (card.id == id) {
+                  _openDetail(card);
+                  break;
+                }
+              }
+            },
+            detailPayload: _detailCard,
+            onBack: () => setState(() => _detailCard = null),
+            emptyMessage: 'Нет опубликованных вакансий для предпросмотра',
           ),
         ),
       ),
@@ -1579,8 +1521,10 @@ class _VacancyPropertiesPanel extends StatelessWidget {
     required this.onUploadAsset,
     required this.onUploadLogo,
     required this.onUploadCover,
+    required this.onUploadBackground,
     required this.onClearLogo,
     required this.onClearCover,
+    required this.onClearBackground,
     required this.onResolveReport,
   });
 
@@ -1637,8 +1581,10 @@ class _VacancyPropertiesPanel extends StatelessWidget {
   final Future<void> Function() onUploadAsset;
   final Future<void> Function() onUploadLogo;
   final Future<void> Function() onUploadCover;
+  final Future<void> Function() onUploadBackground;
   final VoidCallback onClearLogo;
   final VoidCallback onClearCover;
+  final VoidCallback onClearBackground;
   final Future<void> Function(VacancyReportEntry report, String action)
   onResolveReport;
 
@@ -1941,6 +1887,11 @@ class _VacancyPropertiesPanel extends StatelessWidget {
                   icon: const Icon(Icons.image_outlined),
                   label: const Text('Обложка'),
                 ),
+                OutlinedButton.icon(
+                  onPressed: busy ? null : onUploadBackground,
+                  icon: const Icon(Icons.wallpaper_outlined),
+                  label: const Text('Фон'),
+                ),
                 TextButton(
                   onPressed: busy ? null : onClearLogo,
                   child: const Text('Убрать логотип'),
@@ -1948,6 +1899,10 @@ class _VacancyPropertiesPanel extends StatelessWidget {
                 TextButton(
                   onPressed: busy ? null : onClearCover,
                   child: const Text('Убрать обложку'),
+                ),
+                TextButton(
+                  onPressed: busy ? null : onClearBackground,
+                  child: const Text('Убрать фон'),
                 ),
                 OutlinedButton.icon(
                   onPressed: busy ? null : onUploadAsset,

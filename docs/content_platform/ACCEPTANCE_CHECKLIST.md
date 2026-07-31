@@ -1,7 +1,7 @@
 # Content Platform — Acceptance Checklist
 
 Status: **ACTIVE**
-Updated: **2026-07-31** (Stage 14.1.3 Visual Editor Fidelity — IN PROGRESS)
+Updated: **2026-07-31** (Stage 14.1.4 Full Visual Parity — DONE)
 Rule: mark `[x]` only with **code + tests + Codex APPROVE** for that item.
 Docs-only items: Codex APPROVE on the docs package.
 Do **not** merge requirements into vague “готово”.
@@ -346,6 +346,27 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Builds: Admin/Main Web, Android, iOS
 - [x] Codex APPROVE 14.1.3
 - [x] Commit + normal push `origin/refactor/chat-tab` (feature `b57c315`)
+
+---
+
+## M5. Stage 14.1.4 — Full Visual Parity & Media Reliability
+
+- [x] ContentImageRenderState (notApplicable/loading/ready/missing/failed) on promo + profile cards
+- [x] Image variants never silently fall back to gradient_text
+- [x] Failed image state exposes retry callback
+- [x] Mobile media key: userScope + assetId + contentVersion; single-flight; generation isolation
+- [x] HomePromoService ordered multi-slot placements (all home_slot values)
+- [x] Custom icon bytes end-to-end (PNG/WebP, contain, independent of hero image)
+- [x] Vacancy logo/cover/background typed states; detail forwards bytes; list reuses resolve
+- [x] Admin Home: full StudentHomeView + scroll-to-selected promo + bottom nav
+- [x] Admin Profile: full chrome (header/actions/points/diary/map/reviews) + carousel sync
+- [x] Admin Reference: shared help browse list→article→back (no segmented mock)
+- [x] Admin Vacancy: shared jobs board list→detail→back
+- [x] Published Mobile shows image variants with resolved bytes
+- [x] Tests: rendered overlay/icon/slots/nav/isolation/tombstone (+ goldens where feasible)
+- [x] Builds: Admin/Main Web, Android, iOS
+- [x] Codex APPROVE 14.1.4
+- [ ] Commit + normal push `origin/refactor/chat-tab` *(in progress)*
 
 ---
 

@@ -1570,58 +1570,21 @@ class _ReferencePhonePreviewState extends State<_ReferencePhonePreview> {
   @override
   Widget build(BuildContext context) {
     final opened = _opened;
+    final showDetail = _showArticle && opened != null;
     return PhonePreviewFrame(
       child: Theme(
         data: studentPlatformLightTheme(),
-        child: Column(
-          children: [
-            Material(
-              color: const Color(0xFFF0F1F6),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(8, 40, 8, 6),
-                child: SegmentedButton<bool>(
-                  segments: const [
-                    ButtonSegment(
-                      value: false,
-                      label: Text('Список', softWrap: false),
-                      icon: Icon(Icons.list_alt_rounded, size: 16),
-                    ),
-                    ButtonSegment(
-                      value: true,
-                      label: Text('Статья', softWrap: false),
-                      icon: Icon(Icons.article_outlined, size: 16),
-                    ),
-                  ],
-                  selected: {_showArticle},
-                  onSelectionChanged: (value) {
-                    if (value.isEmpty) return;
-                    setState(() => _showArticle = value.first);
-                  },
-                  style: const ButtonStyle(
-                    visualDensity: VisualDensity.compact,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                ),
-              ),
-            ),
-            Expanded(
-              child: _showArticle && opened != null
-                  ? StudentReferenceArticleDetail(
-                      article: opened,
-                      showDemoBadge: opened.showDemoBadge,
-                      onBack: () => setState(() => _showArticle = false),
-                    )
-                  : StudentReferenceBrowseView(
-                      categories: widget.categories,
-                      articles: widget.articles,
-                      selectedArticleId: widget.selectedId,
-                      onArticleTap: (article) {
-                        widget.onArticleSelected(article);
-                        setState(() => _showArticle = true);
-                      },
-                    ),
-            ),
-          ],
+        child: SafeArea(
+          child: StudentHelpBrowseView(
+            articles: widget.articles,
+            selectedArticleId: widget.selectedId,
+            selectedArticle: showDetail ? opened : null,
+            onOpenArticle: (article) {
+              widget.onArticleSelected(article);
+              setState(() => _showArticle = true);
+            },
+            onBack: () => setState(() => _showArticle = false),
+          ),
         ),
       ),
     );

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import 'content_icon_resolver.dart';
+import 'content_image_render_state.dart';
 import 'content_models.dart';
 
 const _kDefaultFeedGradient = [Color(0xFFDCD0FA), Color(0xFFC9B8F3)];
@@ -20,6 +21,8 @@ class StudentProfileFeedCard extends StatelessWidget {
     this.gradientColors,
     this.imageBytes,
     this.imageLoading = false,
+    this.imageState,
+    this.iconBytes,
   });
 
   final ProfileFeedPayload payload;
@@ -30,8 +33,20 @@ class StudentProfileFeedCard extends StatelessWidget {
   final List<Color>? gradientColors;
   final Uint8List? imageBytes;
   final bool imageLoading;
+  final ContentImageRenderState? imageState;
+  final Uint8List? iconBytes;
 
-  bool get _hasImageBytes => imageBytes != null && imageBytes!.isNotEmpty;
+  ContentImageRenderState get resolvedImageState {
+    if (imageState != null) return imageState!;
+    final usesImage = contentCardVariantUsesImage(
+      effectiveContentCardVariant(payload.cardVariant),
+    );
+    return ContentImageRenderState.fromLegacy(
+      usesImageVariant: usesImage,
+      bytes: imageBytes,
+      loading: imageLoading,
+    );
+  }
 
   List<Color> get _resolvedGradientColors {
     final fromPayload = payload.gradientColors;
@@ -42,13 +57,8 @@ class StudentProfileFeedCard extends StatelessWidget {
     return _kDefaultFeedGradient;
   }
 
-  String get _variant {
-    final raw = effectiveContentCardVariant(payload.cardVariant);
-    if (contentCardVariantUsesImage(raw) && !_hasImageBytes && !imageLoading) {
-      return 'gradient_text';
-    }
-    return raw;
-  }
+  /// Variant identity comes exclusively from payload — never silent fallback.
+  String get _variant => effectiveContentCardVariant(payload.cardVariant);
 
   @override
   Widget build(BuildContext context) {
@@ -176,29 +186,41 @@ class _FeedImagePlane extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final radius = borderRadius ?? BorderRadius.zero;
-    final hasBytes = card._hasImageBytes;
+    final state = card.resolvedImageState;
+    final planeHeight = height ?? 80.0;
 
-    if (card.imageLoading && !hasBytes) {
+    if (state.isLoading) {
       return _FeedImageSkeleton(
-        height: height ?? 80,
+        height: planeHeight,
         borderRadius: radius,
         colors: colors,
         flex: flex,
       );
     }
 
-    final image = ClipRRect(
-      borderRadius: radius,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          if (hasBytes)
+    final Widget plane;
+    if (state.isReady) {
+      plane = ClipRRect(
+        borderRadius: radius,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
             Image.memory(
-              card.imageBytes!,
+              state.bytesOrNull!,
               fit: BoxFit.cover,
               gaplessPlayback: true,
-            )
-          else
+            ),
+            if (overlayOpacity > 0)
+              ColoredBox(color: Colors.black.withValues(alpha: overlayOpacity)),
+          ],
+        ),
+      );
+    } else {
+      plane = ClipRRect(
+        borderRadius: radius,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
             DecoratedBox(
               decoration: BoxDecoration(
                 gradient: contentPayloadGradient(
@@ -207,16 +229,27 @@ class _FeedImagePlane extends StatelessWidget {
                 ),
               ),
             ),
-          if (overlayOpacity > 0)
-            ColoredBox(color: Colors.black.withValues(alpha: overlayOpacity)),
-        ],
-      ),
-    );
+            if (state.isFailed || state.isMissing)
+              Center(
+                child: Icon(
+                  state.isFailed
+                      ? Icons.broken_image_outlined
+                      : Icons.image_outlined,
+                  color: Colors.white.withValues(alpha: 0.9),
+                  size: 22,
+                ),
+              ),
+            if (overlayOpacity > 0)
+              ColoredBox(color: Colors.black.withValues(alpha: overlayOpacity)),
+          ],
+        ),
+      );
+    }
 
     if (flex != null) {
-      return Expanded(flex: flex!, child: image);
+      return Expanded(flex: flex!, child: plane);
     }
-    return SizedBox(height: height, child: image);
+    return SizedBox(height: planeHeight, child: plane);
   }
 }
 
@@ -278,8 +311,13 @@ class _FeedGradientTextLayout extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (card.showDemoBadge) _FeedDemoBadge(theme: t.theme),
-          if (!t.icon.isNone && t.icon.iconData != null) ...[
-            Icon(t.icon.iconData, color: t.accent, size: 22),
+          if (!t.icon.isNone) ...[
+            contentIconWidget(
+              icon: t.icon,
+              iconBytes: card.iconBytes,
+              color: t.accent,
+              size: 22,
+            ),
             const SizedBox(height: 8),
           ],
           const Spacer(),
@@ -488,7 +526,7 @@ class _FeedImageTopTextLayout extends StatelessWidget {
             card: card,
             colors: t.colors,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-            height: card.imageLoading && !card._hasImageBytes ? 80 : 80,
+            height: 80,
           ),
           Expanded(
             child: Padding(
@@ -537,7 +575,7 @@ class _FeedCompactIconLayout extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       child: Row(
         children: [
-          if (!t.icon.isNone && t.icon.iconData != null)
+          if (!t.icon.isNone)
             Container(
               width: 36,
               height: 36,
@@ -545,10 +583,15 @@ class _FeedCompactIconLayout extends StatelessWidget {
                 color: t.accent.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Icon(t.icon.iconData, size: 20, color: t.accent),
+              alignment: Alignment.center,
+              child: contentIconWidget(
+                icon: t.icon,
+                iconBytes: card.iconBytes,
+                color: t.accent,
+                size: 20,
+              ),
             ),
-          if (!t.icon.isNone && t.icon.iconData != null)
-            const SizedBox(width: 10),
+          if (!t.icon.isNone) const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -609,11 +652,14 @@ class _FeedAccentInfoLayout extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (card.showDemoBadge) _FeedDemoBadge(theme: t.theme),
-          Icon(
-            t.icon.isNone ? Icons.info_outline_rounded : t.icon.iconData,
-            color: t.accent,
-            size: 24,
-          ),
+          t.icon.isNone
+              ? Icon(Icons.info_outline_rounded, color: t.accent, size: 24)
+              : contentIconWidget(
+                  icon: t.icon,
+                  iconBytes: card.iconBytes,
+                  color: t.accent,
+                  size: 24,
+                ),
           const Spacer(),
           Text(
             card.payload.title,
@@ -897,6 +943,7 @@ class _StudentProfileFeedCarouselState
             showDemoBadge: card.showDemoBadge,
             onTap: () => widget.onTap(card),
             imageBytes: card.imageBytes,
+            iconBytes: card.iconBytes,
             imageLoading: card.imageLoading,
           );
         },
