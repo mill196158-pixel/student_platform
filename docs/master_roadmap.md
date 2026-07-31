@@ -1032,7 +1032,7 @@ Status: **DONE** / Codex **APPROVE** — M7; feature `ed94cb9`; base `be6ac42`; 
 
 ### Stage 14.2.1 — content-media upload for published + working draft
 
-Status: **DONE** / Codex **APPROVE** — hotfix; migration `20260731102302`; Edge `content-media` v2
+Status: **DONE** / Codex **APPROVE** — hotfix `548969f`; migration `20260731102302`; Edge `content-media` v2
 
 - [x] Allow upload only with auth + `content.write` + open WD on the same item (or classic `draft`);
 - [x] Bind intent to WD; finalize → `draft_asset_ids` + WD row_version; no direct published-payload upload;

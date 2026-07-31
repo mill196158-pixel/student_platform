@@ -415,7 +415,7 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Tests: roleplay + Admin media/home/profile + mobile content; builds Web/Android/iOS; secret scan; `git diff --check`
 - [x] Codex APPROVE 14.2.1
 - [x] Remote migration `20260731102302` + Edge `content-media` v2 deploy + controlled smoke
-- [x] Commit + normal push `origin/refactor/chat-tab`
+- [x] Commit + normal push `origin/refactor/chat-tab` (`548969f`)
 
 ---
 
