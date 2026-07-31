@@ -4,12 +4,13 @@
 * Active Stage: **14.2.3**
 * Branch: `refactor/chat-tab`
 * Prior HEAD: `4720810`
+* Feature SHA: `0e24c47`
 * Codex plan: **APPROVE**
 * Codex final: **APPROVE** (after template insert / chat picker / HTTPS / LIMIT fixes)
 * Remote: `gwdanmwluhrcfxbnplwd`
 * Migration applied: `20260731113816_stage14_2_3_home_promo_schema3_chat_cta`
 * Edge: none
-* Push: pending this closeout
+* Push: `origin/refactor/chat-tab` (`4720810..0e24c47`)
 
 ## Root cause (old promo)
 
