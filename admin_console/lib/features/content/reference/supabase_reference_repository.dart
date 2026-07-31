@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'reference_item.dart';
 import 'reference_repository.dart';
+import '../shared/visual_editor_operation_error.dart';
 
 /// Supabase Admin repository for reference articles/categories.
 ///
@@ -52,34 +53,16 @@ class SupabaseReferenceRepository implements ReferenceRepository {
   }
 
   ReferenceRepositoryException _mapError(PostgrestException error) {
-    final code = error.code ?? '';
-    final message = error.message.toLowerCase();
-    if (code == '42501' || message.contains('forbidden')) {
-      return const ReferenceRepositoryException(
-        'Недостаточно прав для этого действия.',
-        isForbidden: true,
-      );
-    }
-    if (code == '28000' || message.contains('not_authenticated')) {
-      return const ReferenceRepositoryException(
-        'Требуется вход. Войдите снова.',
-      );
-    }
-    if (code == 'P0002' || message.contains('not_found')) {
-      return const ReferenceRepositoryException('Запись не найдена.');
-    }
-    if (message.contains('row_version') || message.contains('conflict')) {
-      return const ReferenceRepositoryException(
-        'Данные изменились. Обновите список.',
-      );
-    }
-    if (message.contains('could not find the function') || code == 'PGRST202') {
+    final mapped = mapVisualEditorOperationError(error);
+    if ((error.code == 'PGRST202') ||
+        (error.message.toLowerCase().contains('could not find the function'))) {
       return const ReferenceRepositoryException(
         'Reference RPC ещё не применены на remote (ожидается локальный apply).',
       );
     }
-    return const ReferenceRepositoryException(
-      'Не удалось выполнить операцию. Попробуйте ещё раз.',
+    return ReferenceRepositoryException(
+      mapped.message,
+      isForbidden: mapped.isForbidden,
     );
   }
 

@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'vacancy_item.dart';
 import 'vacancy_media_store.dart';
 import 'vacancy_repository.dart';
+import '../shared/visual_editor_operation_error.dart';
 
 /// Supabase Admin repository for Stage 17 vacancies domain.
 ///
@@ -55,32 +56,16 @@ class SupabaseVacancyRepository implements VacancyRepository {
   }
 
   VacancyRepositoryException _mapError(PostgrestException error) {
-    final code = error.code ?? '';
-    final message = error.message.toLowerCase();
-    if (code == '42501' || message.contains('forbidden')) {
-      return const VacancyRepositoryException(
-        'Недостаточно прав для этого действия.',
-        isForbidden: true,
-      );
-    }
-    if (code == '28000' || message.contains('not_authenticated')) {
-      return const VacancyRepositoryException('Требуется вход. Войдите снова.');
-    }
-    if (code == 'P0002' || message.contains('not_found')) {
-      return const VacancyRepositoryException('Вакансия не найдена.');
-    }
-    if (message.contains('row_version') || message.contains('conflict')) {
-      return const VacancyRepositoryException(
-        'Вакансия изменилась. Обновите список.',
-      );
-    }
-    if (message.contains('could not find the function') || code == 'PGRST202') {
+    final mapped = mapVisualEditorOperationError(error);
+    if ((error.code == 'PGRST202') ||
+        (error.message.toLowerCase().contains('could not find the function'))) {
       return const VacancyRepositoryException(
         'Vacancies RPC ещё не применены на remote (ожидается локальный apply).',
       );
     }
-    return const VacancyRepositoryException(
-      'Не удалось выполнить операцию. Попробуйте ещё раз.',
+    return VacancyRepositoryException(
+      mapped.message,
+      isForbidden: mapped.isForbidden,
     );
   }
 

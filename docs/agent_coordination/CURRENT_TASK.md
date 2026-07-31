@@ -1,40 +1,26 @@
 # CURRENT_TASK
 
-* Status: **DONE** — Stage 14.2.1 (content-media working-draft upload on published items)
-* Active Stage: **14.2.1** (hotfix after 14.2 / M7)
+* Status: **DONE** — Stage 14.2.2 (reliable Visual Content Studio publish)
+* Active Stage: **14.2.2**
 * Branch: `refactor/chat-tab`
-* Prior HEAD: `43fffa3` (14.2 docs closeout)
-* Feature SHA: `548969f`
-* Docs SHA: `57b073a`
+* Prior HEAD: `879cec8`
 * Codex plan: **APPROVE**
-* Codex final: **APPROVE** (after reference WD row_version + transactional roleplay P1 fixes)
+* Codex final: **APPROVE** (after `profile_feed_card_v1` template-key fix)
 * Remote: `gwdanmwluhrcfxbnplwd`
-* Migration applied: `20260731102302_stage14_2_1_content_asset_upload_working_draft`
-* Edge deployed: `content-media` v2 (`verify_jwt=false`, BusinessError 409/422)
-* Push: `origin/refactor/chat-tab` (`43fffa3..57b073a`)
+* Migration applied: `20260731110419_stage14_2_2_home_profile_schema_upgrade_wd`
 
-## Cause
+## Exact server error
 
-`admin_create_content_asset_upload_intent` required `content_items.status = 'draft'`. Published cards keep `published` while edits live in `content_item_working_drafts`, so Edge surfaced `draft_only` as HTTP 500.
+`invalid_schema_upgrade` on `admin_save_content_working_draft` when Admin sent `target_schema_version: 2` for published `home_promo_v1` / `schema_version=1` cards. Unmapped → «Не удалось выполнить операцию». Audit showed media finalize / begin_edit but almost no save/publish WD.
 
-## Lifecycle (fixed)
+## Pipeline (fixed)
 
-`published → working draft → upload (bound to WD) → preview local bytes → save draft → publish → students see new asset`
+`validate → pending media (via autosave) → save WD → publish with saved draft RV → refetch`
 
-* No upload into published without open working draft (`working_draft_required` / 409)
-* Cancel WD keeps published image; orphan assets → cleanup
-* Admin adopts `working_draft_row_version` from finalize before next save
+Single-flight `VisualEditorPublishCoordinator` for Home / Profile / Reference / Vacancy.
 
-## Smoke evidence (remote, disposable BEGIN/ROLLBACK)
+## Smoke
 
-* helper + intent columns present
-* published without WD → `working_draft_required`
-* published + WD → intent `bound_to_working_draft=true`
-* leftover smoke items = 0; published_count unchanged; users_count unchanged
-
-## Delivered
-
-* Migration: WD bind columns + `content_assert_asset_upload_allowed` + create/finalize RPCs
-* Edge: map business codes to 409/422/403/404 (not 500)
-* Admin Home/Profile/Reference: `uploadBytesDetailed` + adopt draft RV + keep local preview
-* Roleplay check + unit test; Admin/mobile tests; Web/Android/iOS builds
+* helper allows `home_promo_v1` and `profile_feed_card_v1` 1→2
+* disposable save with `target_schema_version=2` succeeds then rolls back
+* published fixture remains schema 1; published_count=10

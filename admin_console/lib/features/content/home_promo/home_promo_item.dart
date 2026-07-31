@@ -359,10 +359,9 @@ class HomePromoItem {
       if (imageAssetId != null && imageAssetId.isNotEmpty) imageAssetId,
       if (iconAssetId != null && iconAssetId.isNotEmpty) iconAssetId,
     };
-    return {
+    final patch = <String, dynamic>{
       'title': title,
       'payload': payload.toWireJson(),
-      'target_schema_version': 2,
       'priority': priority,
       'starts_at': startsAt?.toUtc().toIso8601String(),
       'ends_at': endsAt?.toUtc().toIso8601String(),
@@ -373,5 +372,10 @@ class HomePromoItem {
       'sort_order': sortOrder,
       if (assetIds.isNotEmpty) 'draft_asset_ids': assetIds.toList(),
     };
+    // Visual Studio targets schema 2. Allowed: canonical 2→2 and legacy 1→2.
+    if (schemaVersion == 1 || schemaVersion == 2) {
+      patch['target_schema_version'] = 2;
+    }
+    return patch;
   }
 }

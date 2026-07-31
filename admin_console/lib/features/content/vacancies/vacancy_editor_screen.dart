@@ -17,6 +17,8 @@ import '../shared/content_preview_mode.dart';
 import '../shared/content_technical_panel.dart';
 import '../shared/phone_preview_frame.dart';
 import '../shared/visual_editor_list_panel.dart';
+import '../shared/visual_editor_operation_error.dart';
+import '../shared/visual_editor_publish_coordinator.dart';
 import '../shared/visual_editor_shell.dart';
 import '../shared/visual_editor_states.dart';
 import 'supabase_vacancy_repository.dart';
@@ -57,6 +59,8 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
   bool _showDemoOnly = false;
   bool _loading = true;
   bool _busy = false;
+  bool _publishing = false;
+  final _publishCoordinator = VisualEditorPublishCoordinator();
   bool _dirty = false;
   bool _editingWorkingDraft = false;
   String _audienceMode = 'all';
@@ -563,50 +567,60 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
     await _save();
   }
 
-  Future<void> _save() async {
+  Future<VacancyItem?> _persistSelected() async {
     final selected = _selected;
-    if (selected == null) return;
+    if (selected == null) return null;
     final draft = _draftFromFields(base: selected);
     if (draft == null) {
       setState(() => _banner = 'Проверьте поля (fail-closed parse).');
-      return;
+      return null;
     }
-    await _run(() async {
-      if (_editingWorkingDraft) {
-        final draftVersion = selected.workingDraftRowVersion;
-        if (draftVersion == null) {
-          setState(() => _banner = 'Черновик изменений не найден.');
-          return;
-        }
-        final next = await _repository.saveWorkingDraft(
-          draft,
-          expectedDraftRowVersion: draftVersion,
-        );
-        await _reload(selectId: next.id);
-        if (!mounted) return;
-        setState(() {
-          _successBanner = 'Изменения сохранены.';
-          _audiencePreview = null;
-          _dirty = false;
-          _boundSnapshot = _captureSnapshot();
-        });
-        return;
+    if (_editingWorkingDraft) {
+      final draftVersion = selected.workingDraftRowVersion;
+      if (draftVersion == null) {
+        setState(() => _banner = 'Черновик изменений не найден.');
+        return null;
       }
-      var next = await _repository.updateDraft(draft);
-      next = await _repository.setAudience(
-        id: next.id,
-        audienceMode: _audienceMode,
-        groupIds: _groupIds,
-        userIds: _userIds,
-        expectedRowVersion: next.rowVersion,
+      final next = await _repository.saveWorkingDraft(
+        draft,
+        expectedDraftRowVersion: draftVersion,
       );
       await _reload(selectId: next.id);
-      if (!mounted) return;
+      if (!mounted) return next;
       setState(() {
-        _successBanner = 'Сохранено.';
         _audiencePreview = null;
         _dirty = false;
         _boundSnapshot = _captureSnapshot();
+      });
+      return _selected ?? next;
+    }
+    var next = await _repository.updateDraft(draft);
+    next = await _repository.setAudience(
+      id: next.id,
+      audienceMode: _audienceMode,
+      groupIds: _groupIds,
+      userIds: _userIds,
+      expectedRowVersion: next.rowVersion,
+    );
+    await _reload(selectId: next.id);
+    if (!mounted) return next;
+    setState(() {
+      _audiencePreview = null;
+      _dirty = false;
+      _boundSnapshot = _captureSnapshot();
+    });
+    return _selected ?? next;
+  }
+
+  Future<void> _save() async {
+    if (_selected == null) return;
+    await _run(() async {
+      final next = await _persistSelected();
+      if (next == null || !mounted) return;
+      setState(() {
+        _successBanner = _editingWorkingDraft
+            ? 'Изменения сохранены.'
+            : 'Сохранено.';
       });
     });
   }
@@ -623,44 +637,92 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
 
   Future<void> _publish() async {
     final selected = _selected;
-    if (selected == null) return;
-    await _run(() async {
-      if (_dirty) {
-        await _save();
-        if (_dirty) return;
-      }
-      if (_editingWorkingDraft) {
-        final current = _selected;
-        if (current == null) return;
-        final draftVersion = current.workingDraftRowVersion;
-        if (draftVersion == null) {
-          setState(() => _banner = 'Черновик изменений не найден.');
-          return;
-        }
-        final published = await _repository.publishWorkingDraft(
-          current.id,
-          expectedDraftRowVersion: draftVersion,
-        );
-        await _reload(selectId: published.id);
-        if (!mounted) return;
-        setState(() {
-          _editingWorkingDraft = false;
-          _listTab = VisualEditorListTab.published;
-          _successBanner = 'Изменения опубликованы.';
-        });
-        return;
-      }
-      final published = await _repository.publish(
-        selected.id,
-        selected.rowVersion,
-      );
-      await _reload(selectId: published.id);
-      if (!mounted) return;
-      setState(() {
-        _listTab = VisualEditorListTab.published;
-        _successBanner = 'Опубликовано.';
-      });
+    if (selected == null || _busy || _publishing) return;
+    setState(() {
+      _publishing = true;
+      _busy = true;
+      _banner = null;
+      _successBanner = null;
     });
+    try {
+      final published = await _publishCoordinator.publishChanges<VacancyItem>(
+        editingWorkingDraft: _editingWorkingDraft,
+        validate: () async {
+          if (_draftFromFields(base: selected) == null) {
+            return 'Проверьте поля (fail-closed parse).';
+          }
+          return null;
+        },
+        saveDraft: () async {
+          final saved = await _persistSelected();
+          if (saved == null) {
+            throw VisualEditorOperationError(
+              _banner ?? 'Не удалось сохранить черновик перед публикацией.',
+              code: 'autosave_failed',
+            );
+          }
+          if (_editingWorkingDraft) {
+            final draftRv = saved.workingDraftRowVersion;
+            if (draftRv == null) {
+              throw const VisualEditorOperationError(
+                'Сначала создайте черновик изменений',
+                code: 'working_draft_required',
+              );
+            }
+            return VisualEditorSavedDraft(
+              item: saved,
+              expectedDraftRowVersion: draftRv,
+            );
+          }
+          return VisualEditorSavedDraft(
+            item: saved,
+            expectedDraftRowVersion: saved.rowVersion,
+          );
+        },
+        publishWorkingDraft: ({required expectedDraftRowVersion}) {
+          return _repository.publishWorkingDraft(
+            selected.id,
+            expectedDraftRowVersion: expectedDraftRowVersion,
+          );
+        },
+        publishCanonical: () {
+          final current = _selected ?? selected;
+          return _repository.publish(current.id, current.rowVersion);
+        },
+        refetch: (item) async {
+          await _reload(selectId: item.id);
+          return _selected ?? item;
+        },
+      );
+      if (!mounted) return;
+      final wasWorkingDraft = _editingWorkingDraft;
+      setState(() {
+        _editingWorkingDraft = false;
+        _listTab = VisualEditorListTab.published;
+        _selectedId = published.id;
+        _successBanner = wasWorkingDraft
+            ? 'Изменения опубликованы.'
+            : 'Опубликовано.';
+      });
+    } on VisualEditorOperationError catch (error) {
+      if (!mounted) return;
+      setState(() => _banner = error.message);
+    } catch (error) {
+      if (!mounted) return;
+      setState(
+        () => _banner = mapVisualEditorOperationError(
+          error,
+          stage: 'publish',
+        ).message,
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _publishing = false;
+          _busy = false;
+        });
+      }
+    }
   }
 
   Future<void> _lifecycle(String action) async {
@@ -1135,6 +1197,7 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
         originDemoBadge: selected?.origin == ContentOrigin.demo,
         dirty: _dirty,
         busy: _busy,
+        publishing: _publishing,
         banner: _headerBanner,
         defaultInfoMessage:
             _infoBanner ??

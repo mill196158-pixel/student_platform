@@ -6,7 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'profile_feed_item.dart';
 import 'profile_feed_repository.dart';
-import '../shared/content_action_model.dart';
+import '../shared/visual_editor_operation_error.dart';
 
 abstract class ProfileFeedAdminRpcClient {
   Future<dynamic> rpc(String function, {Map<String, dynamic>? params});
@@ -44,39 +44,16 @@ class SupabaseProfileFeedRepository implements ProfileFeedRepository {
   }
 
   ProfileFeedRepositoryException _mapError(PostgrestException error) {
-    final code = error.code ?? '';
-    final message = error.message.toLowerCase();
-    if (code == '42501' || message.contains('forbidden')) {
-      return const ProfileFeedRepositoryException(
-        'Недостаточно прав для этого действия.',
-        isForbidden: true,
-      );
-    }
-    if (code == '28000' || message.contains('not_authenticated')) {
-      return const ProfileFeedRepositoryException(
-        'Требуется вход. Войдите снова.',
-      );
-    }
-    if (code == 'P0002' || message.contains('not_found')) {
-      return const ProfileFeedRepositoryException('Карточка не найдена.');
-    }
-    if (message.contains('row_version') || message.contains('conflict')) {
-      return const ProfileFeedRepositoryException(
-        'Карточка изменилась. Обновите список.',
-      );
-    }
-    if (message.contains('visual_studio_v2_publish_disabled')) {
-      return const ProfileFeedRepositoryException(
-        kVisualStudioV2PublishBlockedMessageRu,
-      );
-    }
-    if (message.contains('could not find the function') || code == 'PGRST202') {
+    final mapped = mapVisualEditorOperationError(error);
+    if ((error.code == 'PGRST202') ||
+        (error.message.toLowerCase().contains('could not find the function'))) {
       return const ProfileFeedRepositoryException(
         'Managed content RPC ещё не применены на remote (ожидается локальный apply).',
       );
     }
-    return const ProfileFeedRepositoryException(
-      'Не удалось выполнить операцию. Попробуйте ещё раз.',
+    return ProfileFeedRepositoryException(
+      mapped.message,
+      isForbidden: mapped.isForbidden,
     );
   }
 

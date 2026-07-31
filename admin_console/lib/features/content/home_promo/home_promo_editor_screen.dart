@@ -28,6 +28,8 @@ import '../shared/content_preview_mode.dart';
 import '../shared/content_technical_panel.dart';
 import '../shared/phone_preview_frame.dart';
 import '../shared/visual_editor_list_panel.dart';
+import '../shared/visual_editor_operation_error.dart';
+import '../shared/visual_editor_publish_coordinator.dart';
 import '../shared/visual_editor_shell.dart';
 import '../shared/visual_editor_states.dart';
 import 'home_promo_item.dart';
@@ -87,6 +89,8 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
 
   bool _loading = true;
   bool _busy = false;
+  bool _publishing = false;
+  final _publishCoordinator = VisualEditorPublishCoordinator();
   bool _dirty = false;
   bool _editingWorkingDraft = false;
   bool _dismissible = true;
@@ -829,44 +833,100 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
 
   Future<void> _publish() async {
     final selected = _selected;
-    if (selected == null) return;
-    await _run(() async {
-      var current = selected;
-      if (_dirty ||
-          _intentForSelected() != ContentMediaIntentState.untouched ||
-          _iconIntentForSelected() != ContentMediaIntentState.untouched) {
-        final saved = await _saveSelected();
-        if (saved == null) return;
-        current = saved;
-      }
-      if (_editingWorkingDraft) {
-        final draftVersion = current.workingDraftRowVersion;
-        if (draftVersion == null) {
-          setState(() => _banner = 'Черновик изменений не найден.');
-          return;
-        }
-        final published = await _repository.publishWorkingDraft(
-          current.id,
-          expectedDraftRowVersion: draftVersion,
-        );
-        if (!mounted) return;
-        setState(() {
-          _editingWorkingDraft = false;
-          _listTab = VisualEditorListTab.published;
-        });
-        await _reload(selectId: published.id);
-        setState(() => _successBanner = 'Изменения опубликованы.');
-        return;
-      }
-      final published = await _repository.publish(
-        current.id,
-        current.rowVersion,
+    if (selected == null || _busy || _publishing) return;
+    setState(() {
+      _publishing = true;
+      _busy = true;
+      _banner = null;
+      _successBanner = null;
+    });
+    try {
+      final published = await _publishCoordinator.publishChanges<HomePromoItem>(
+        editingWorkingDraft: _editingWorkingDraft,
+        validate: () async {
+          if (_draftPayload() == null) {
+            return 'Проверьте поля карточки (fail-closed parse).';
+          }
+          return null;
+        },
+        uploadPendingMedia: () async {
+          // Uploads are performed inside autosave so asset ids land in the patch.
+          return null;
+        },
+        saveDraft: () async {
+          // Always autosave before publish (WD row_version may have moved via media).
+          final saved = await _saveSelected();
+          if (saved == null) {
+            throw VisualEditorOperationError(
+              _banner ?? 'Не удалось сохранить черновик перед публикацией.',
+              code: 'autosave_failed',
+            );
+          }
+          if (_editingWorkingDraft) {
+            final draftRv = saved.workingDraftRowVersion;
+            if (draftRv == null) {
+              throw const VisualEditorOperationError(
+                'Сначала создайте черновик изменений',
+                code: 'working_draft_required',
+              );
+            }
+            return VisualEditorSavedDraft(
+              item: saved,
+              expectedDraftRowVersion: draftRv,
+            );
+          }
+          return VisualEditorSavedDraft(
+            item: saved,
+            expectedDraftRowVersion: saved.rowVersion,
+          );
+        },
+        publishWorkingDraft: ({required expectedDraftRowVersion}) {
+          return _repository.publishWorkingDraft(
+            selected.id,
+            expectedDraftRowVersion: expectedDraftRowVersion,
+          );
+        },
+        publishCanonical: () {
+          final current = _selected ?? selected;
+          return _repository.publish(current.id, current.rowVersion);
+        },
+        refetch: (item) async {
+          await _reload(selectId: item.id);
+          return _selected ?? item;
+        },
       );
       if (!mounted) return;
-      setState(() => _listTab = VisualEditorListTab.published);
-      await _reload(selectId: published.id);
-      setState(() => _successBanner = 'Опубликовано.');
-    });
+      final wasWorkingDraft = _editingWorkingDraft;
+      setState(() {
+        _editingWorkingDraft = false;
+        _listTab = VisualEditorListTab.published;
+        _selectedId = published.id;
+        _successBanner = wasWorkingDraft
+            ? 'Изменения опубликованы.'
+            : 'Опубликовано.';
+      });
+    } on VisualEditorOperationError catch (error) {
+      if (!mounted) return;
+      setState(() => _banner = error.message);
+    } on HomePromoRepositoryException catch (error) {
+      if (!mounted) return;
+      setState(() => _banner = error.message);
+    } catch (error) {
+      if (!mounted) return;
+      setState(
+        () => _banner = mapVisualEditorOperationError(
+          error,
+          stage: 'publish',
+        ).message,
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _publishing = false;
+          _busy = false;
+        });
+      }
+    }
   }
 
   Future<void> _unpublish() async {
@@ -1537,6 +1597,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
         originDemoBadge: selected?.isDemo ?? false,
         dirty: _dirty,
         busy: _busy || _imageUploading || _iconUploading,
+        publishing: _publishing,
         banner: _headerBanner,
         defaultInfoMessage:
             _infoBanner ??

@@ -20,6 +20,8 @@ import '../shared/content_media_intent.dart';
 import '../shared/content_technical_panel.dart';
 import '../shared/phone_preview_frame.dart';
 import '../shared/visual_editor_list_panel.dart';
+import '../shared/visual_editor_operation_error.dart';
+import '../shared/visual_editor_publish_coordinator.dart';
 import '../shared/visual_editor_shell.dart';
 import '../shared/visual_editor_states.dart';
 import 'content_audience_selectors.dart';
@@ -75,6 +77,8 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
   bool _showDemoOnly = false;
   bool _loading = true;
   bool _busy = false;
+  bool _publishing = false;
+  final _publishCoordinator = VisualEditorPublishCoordinator();
   bool _deleting = false;
   bool _dirty = false;
   bool _editingWorkingDraft = false;
@@ -432,8 +436,13 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
     } on ProfileFeedRepositoryException catch (error) {
       _showBanner(error.message);
       return null;
-    } catch (_) {
-      _showBanner('Не удалось выполнить операцию. Попробуйте ещё раз.');
+    } on VisualEditorOperationError catch (error) {
+      _showBanner(error.message);
+      return null;
+    } catch (error) {
+      _showBanner(
+        mapVisualEditorOperationError(error, stage: 'operation').message,
+      );
       return null;
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -644,41 +653,95 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
 
   Future<void> _publish() async {
     final selected = _selected;
-    if (selected == null || !_canPublish) return;
-    await _runGuarded(() async {
-      var current = selected;
-      if (_dirty) {
-        final saved = await _saveSelected();
-        if (saved == null) return;
-        current = saved;
-      }
-      if (_editingWorkingDraft) {
-        final draftVersion = current.workingDraftRowVersion;
-        if (draftVersion == null) {
-          _showBanner('Черновик изменений не найден.');
-          return;
-        }
-        final published = await _repository.publishWorkingDraft(
-          current.id,
-          expectedDraftRowVersion: draftVersion,
-        );
-        if (!mounted) return;
-        setState(() {
-          _editingWorkingDraft = false;
-          _replaceItem(published);
-        });
-        _syncControllers();
-        _snack('Изменения опубликованы');
-        return;
-      }
-      final published = await _repository.publish(
-        current.id,
-        current.rowVersion,
-      );
-      if (!mounted) return;
-      setState(() => _replaceItem(published));
-      _snack('Карточка опубликована');
+    if (selected == null || !_canPublish || _busy || _publishing) return;
+    setState(() {
+      _publishing = true;
+      _busy = true;
+      _banner = null;
     });
+    try {
+      final published = await _publishCoordinator
+          .publishChanges<ProfileFeedItem>(
+            editingWorkingDraft: _editingWorkingDraft,
+            validate: () async {
+              if (_draftPayload() == null) {
+                return 'Проверьте поля карточки (fail-closed parse).';
+              }
+              return null;
+            },
+            saveDraft: () async {
+              final saved = await _saveSelected();
+              if (saved == null) {
+                throw VisualEditorOperationError(
+                  _banner ?? 'Не удалось сохранить черновик перед публикацией.',
+                  code: 'autosave_failed',
+                );
+              }
+              if (_editingWorkingDraft) {
+                final draftRv = saved.workingDraftRowVersion;
+                if (draftRv == null) {
+                  throw const VisualEditorOperationError(
+                    'Сначала создайте черновик изменений',
+                    code: 'working_draft_required',
+                  );
+                }
+                return VisualEditorSavedDraft(
+                  item: saved,
+                  expectedDraftRowVersion: draftRv,
+                );
+              }
+              return VisualEditorSavedDraft(
+                item: saved,
+                expectedDraftRowVersion: saved.rowVersion,
+              );
+            },
+            publishWorkingDraft: ({required expectedDraftRowVersion}) {
+              return _repository.publishWorkingDraft(
+                selected.id,
+                expectedDraftRowVersion: expectedDraftRowVersion,
+              );
+            },
+            publishCanonical: () {
+              final current = _selected ?? selected;
+              return _repository.publish(current.id, current.rowVersion);
+            },
+            refetch: (item) async {
+              final items = await _repository.list();
+              if (!mounted) return item;
+              setState(() {
+                _items = items;
+                _selectedId = item.id;
+              });
+              return _selected ?? item;
+            },
+          );
+      if (!mounted) return;
+      final wasWorkingDraft = _editingWorkingDraft;
+      setState(() {
+        _editingWorkingDraft = false;
+        _listTab = VisualEditorListTab.published;
+        _replaceItem(published);
+      });
+      _syncControllers();
+      _snack(
+        wasWorkingDraft ? 'Изменения опубликованы' : 'Карточка опубликована',
+      );
+    } on VisualEditorOperationError catch (error) {
+      _showBanner(error.message);
+    } on ProfileFeedRepositoryException catch (error) {
+      _showBanner(error.message);
+    } catch (error) {
+      _showBanner(
+        mapVisualEditorOperationError(error, stage: 'publish').message,
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _publishing = false;
+          _busy = false;
+        });
+      }
+    }
   }
 
   Future<void> _unpublish() async {
@@ -1072,6 +1135,7 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
       originDemoBadge: selected?.origin == ContentOrigin.demo,
       dirty: _dirty,
       busy: _busy || _imageUploading,
+      publishing: _publishing,
       banner: _banner,
       defaultInfoMessage: v2PublishBlocked
           ? kVisualStudioV2PublishBlockedMessageRu

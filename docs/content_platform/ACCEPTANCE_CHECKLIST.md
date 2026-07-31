@@ -417,6 +417,18 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Remote migration `20260731102302` + Edge `content-media` v2 deploy + controlled smoke
 - [x] Commit + normal push `origin/refactor/chat-tab` (`548969f`)
 
+## M7.2 Stage 14.2.2 — reliable Visual Content Studio publish
+
+- [x] Exact remote error identified: `invalid_schema_upgrade` on schema-1 WD save with `target_schema_version=2`
+- [x] Migration allows home_promo_v1 / profile_feed_card_v1 WD 1→2 (publish still gate-checked)
+- [x] Shared publish coordinator: validate → autosave → publish saved RV → refetch; single-flight
+- [x] Home/Profile/Reference/Vacancy wired; Vacancy nested `_run` save skip fixed
+- [x] Business errors mapped to RU messages (not generic «Не удалось выполнить операцию»)
+- [x] UI «Публикуем…» + spinner; destructive/publish actions locked during pipeline
+- [x] Tests: coordinator + serialization + Admin full suite; mobile content; Web/Android/iOS builds
+- [x] Codex APPROVE 14.2.2
+- [x] Controlled remote smoke (no mass publish) + commit + push
+
 ---
 
 ## N. Stage 15.1 — Home promo

@@ -48,6 +48,7 @@ class VisualEditorShell extends StatelessWidget {
     this.originDemoBadge = false,
     this.dirty = false,
     this.busy = false,
+    this.publishing = false,
     this.banner,
     this.defaultInfoMessage =
         'Изменения сохраняются на сервере. Публикация видна студентам сразу.',
@@ -74,6 +75,7 @@ class VisualEditorShell extends StatelessWidget {
   final bool originDemoBadge;
   final bool dirty;
   final bool busy;
+  final bool publishing;
   final String? banner;
   final String defaultInfoMessage;
   final bool canWrite;
@@ -102,6 +104,7 @@ class VisualEditorShell extends StatelessWidget {
   bool get _isPublished => isPublished ?? statusChip == 'Опубликован';
   bool get _isArchived => isArchived ?? statusChip == 'В архиве';
   bool get _hasSelection => selectedTitle != null || statusChip != null;
+  bool get _actionsLocked => busy || publishing;
 
   Future<void> _handlePopAttempt(BuildContext context) async {
     if (onPopDirtyConfirm != null) {
@@ -148,7 +151,8 @@ class VisualEditorShell extends StatelessWidget {
             statusChip: statusChip,
             originDemoBadge: originDemoBadge,
             dirty: dirty,
-            busy: busy,
+            busy: _actionsLocked,
+            publishing: publishing,
             banner: banner,
             defaultInfoMessage: defaultInfoMessage,
             canWrite: canWrite,
@@ -187,6 +191,7 @@ class _VisualEditorHeader extends StatelessWidget {
     required this.originDemoBadge,
     required this.dirty,
     required this.busy,
+    required this.publishing,
     required this.banner,
     required this.defaultInfoMessage,
     required this.canWrite,
@@ -210,6 +215,7 @@ class _VisualEditorHeader extends StatelessWidget {
   final bool originDemoBadge;
   final bool dirty;
   final bool busy;
+  final bool publishing;
   final String? banner;
   final String defaultInfoMessage;
   final bool canWrite;
@@ -293,8 +299,19 @@ class _VisualEditorHeader extends StatelessWidget {
                   onPressed: busy || !canPublish || isArchived || !hasSelection
                       ? null
                       : onPublish,
-                  icon: const Icon(Icons.publish_outlined),
-                  label: const Text('Опубликовать изменения'),
+                  icon: publishing
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.publish_outlined),
+                  label: Text(
+                    publishing ? 'Публикуем…' : 'Опубликовать изменения',
+                  ),
                 ),
               if (onDiscardWorkingDraft != null)
                 OutlinedButton.icon(
@@ -314,8 +331,17 @@ class _VisualEditorHeader extends StatelessWidget {
                   onPressed: busy || !canPublish || isArchived || !hasSelection
                       ? null
                       : onPublish,
-                  icon: const Icon(Icons.publish_outlined),
-                  label: const Text('Опубликовать'),
+                  icon: publishing
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.publish_outlined),
+                  label: Text(publishing ? 'Публикуем…' : 'Опубликовать'),
                 ),
             ],
           ],

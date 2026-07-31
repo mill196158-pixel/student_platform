@@ -6,7 +6,7 @@
 ## Статус документа
 
 - Дата аудита: **27 июля 2026**
-- Updated: **31 июля 2026** (Stage 14.2.1 content-media working-draft upload — DONE)
+- Updated: **31 июля 2026** (Stage 14.2.2 reliable Visual Studio publish — DONE)
 - Проверенная основная ветка: `refactor/chat-tab` (база)
 - Рабочая ветка контента: `feature/content-platform`
 - Проверенная административная ветка: `feature/admin-console`
@@ -1039,6 +1039,15 @@ Status: **DONE** / Codex **APPROVE** — hotfix `548969f`; migration `2026073110
 - [x] Edge business errors → 409/422 (not 500); Admin adopts WD row_version + local preview bytes;
 - [x] Cancel keeps published asset; publish switches student-visible asset; orphans → cleanup;
 - [x] Roleplay/IDOR checks + Admin/mobile tests + Web/Android/iOS builds + remote smoke + push.
+
+### Stage 14.2.2 — reliable Visual Content Studio publish
+
+Status: **DONE** / Codex **APPROVE** — migration `20260731110419`
+
+- [x] Root cause: `invalid_schema_upgrade` on schema-1 WD save with forced `target_schema_version=2`;
+- [x] Allow home_promo_v1 / profile_feed_card_v1 WD 1→2; publish still uses v2 gate;
+- [x] Shared single-flight publish coordinator (validate → autosave → publish → refetch) for all 4 editors;
+- [x] Mapped RU business errors; «Публикуем…» UI; tests + smoke + push.
 
 ### Next after 14.1.4 — Import Studio (separate stage)
 

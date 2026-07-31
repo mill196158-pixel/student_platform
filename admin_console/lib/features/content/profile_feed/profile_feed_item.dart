@@ -109,6 +109,7 @@ class ProfileFeedItem {
     required this.audienceMode,
     this.legacyKey,
     this.versionNumber = 1,
+    this.schemaVersion = 1,
     this.startsAt,
     this.endsAt,
     this.audienceGroupIds = const [],
@@ -128,6 +129,7 @@ class ProfileFeedItem {
   final String audienceMode;
   final String? legacyKey;
   final int versionNumber;
+  final int schemaVersion;
   final DateTime? startsAt;
   final DateTime? endsAt;
   final List<String> audienceGroupIds;
@@ -189,6 +191,7 @@ class ProfileFeedItem {
       audienceMode: (json['audience_mode'] ?? 'all').toString(),
       legacyKey: json['legacy_key']?.toString(),
       versionNumber: _asInt(json['version_number']) ?? 1,
+      schemaVersion: _asInt(json['schema_version']) ?? 1,
       startsAt: _asDate(json['starts_at']),
       endsAt: _asDate(json['ends_at']),
       audienceGroupIds: _asIdList(json['audience_group_ids']),
@@ -249,10 +252,9 @@ class ProfileFeedItem {
       if (imageAssetId != null && imageAssetId.isNotEmpty) imageAssetId,
       if (iconAssetId != null && iconAssetId.isNotEmpty) iconAssetId,
     };
-    return {
+    final patch = <String, dynamic>{
       'title': title,
       'payload': payload.toWireJson(),
-      'target_schema_version': 2,
       'priority': priority,
       'starts_at': startsAt?.toUtc().toIso8601String(),
       'ends_at': endsAt?.toUtc().toIso8601String(),
@@ -263,6 +265,11 @@ class ProfileFeedItem {
       'sort_order': sortOrder,
       if (assetIds.isNotEmpty) 'draft_asset_ids': assetIds.toList(),
     };
+    // Visual Studio targets schema 2. Allowed: canonical 2→2 and legacy 1→2.
+    if (schemaVersion == 1 || schemaVersion == 2) {
+      patch['target_schema_version'] = 2;
+    }
+    return patch;
   }
 
   ManagedProfileFeedCard toManagedCard({bool? showDemoBadge}) {
@@ -288,6 +295,7 @@ class ProfileFeedItem {
     String? audienceMode,
     String? legacyKey,
     int? versionNumber,
+    int? schemaVersion,
     DateTime? startsAt,
     DateTime? endsAt,
     List<String>? audienceGroupIds,
@@ -311,6 +319,7 @@ class ProfileFeedItem {
       audienceMode: audienceMode ?? this.audienceMode,
       legacyKey: clearLegacyKey ? null : (legacyKey ?? this.legacyKey),
       versionNumber: versionNumber ?? this.versionNumber,
+      schemaVersion: schemaVersion ?? this.schemaVersion,
       startsAt: clearStartsAt ? null : (startsAt ?? this.startsAt),
       endsAt: clearEndsAt ? null : (endsAt ?? this.endsAt),
       audienceGroupIds: audienceGroupIds ?? this.audienceGroupIds,
