@@ -74,20 +74,20 @@ class StudentHelpBrowseView extends StatelessWidget {
     return ColoredBox(
       color: _bg,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
         children: [
           _HelpSummaryCard(
             title: summaryTitle,
             subtitle: summarySubtitle,
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           if (sorted.isEmpty)
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 24),
+              padding: const EdgeInsets.fromLTRB(8, 12, 8, 8),
               child: Text(
                 emptyMessage,
                 textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: Colors.black54,
                       fontWeight: FontWeight.w600,
                     ),
@@ -101,7 +101,7 @@ class StudentHelpBrowseView extends StatelessWidget {
                   for (final article in entry.value)
                     DecoratedBox(
                       decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(26),
+                        borderRadius: BorderRadius.circular(18),
                         border: article.id == selectedArticleId
                             ? Border.all(color: _accent, width: 2)
                             : null,
@@ -133,10 +133,11 @@ class _HelpSummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(18),
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -147,47 +148,53 @@ class _HelpSummaryCard extends StatelessWidget {
         ),
         boxShadow: [
           BoxShadow(
-            color: StudentHelpBrowseView._lavenderEnd.withValues(alpha: 0.28),
-            blurRadius: 14,
-            offset: const Offset(0, 8),
+            color: StudentHelpBrowseView._lavenderEnd.withValues(alpha: 0.22),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
       child: Row(
         children: [
           Container(
-            width: 42,
-            height: 42,
+            width: 40,
+            height: 40,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: 0.55),
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(12),
             ),
             child: const Icon(
               Icons.help_outline_rounded,
+              size: 22,
               color: StudentHelpBrowseView._accent,
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   title,
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: StudentHelpBrowseView._title,
-                        fontWeight: FontWeight.w900,
-                      ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: StudentHelpBrowseView._title,
+                    fontWeight: FontWeight.w900,
+                    height: 1.15,
+                  ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 2),
                 Text(
                   subtitle,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: const Color(0xFF374151),
-                        height: 1.3,
-                        fontWeight: FontWeight.w600,
-                      ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFF374151),
+                    height: 1.25,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ],
             ),
@@ -210,24 +217,24 @@ class _HelpCategorySection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 2),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.fromLTRB(10, 10, 10, 2),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
+            padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
             child: Text(
               title,
-              style: const TextStyle(
-                color: Colors.black87,
-                fontWeight: FontWeight.w900,
-              ),
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: Colors.black87,
+                    fontWeight: FontWeight.w900,
+                  ),
             ),
           ),
           ...children,

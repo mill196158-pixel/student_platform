@@ -27,7 +27,31 @@ void main() {
     expect(find.text('Доска вакансий'), findsOneWidget);
     expect(find.text('Junior Flutter Developer'), findsOneWidget);
     expect(find.text('Свежие предложения'), findsOneWidget);
-    expect(find.textContaining('активн'), findsOneWidget);
+    expect(find.textContaining('активн'), findsNothing);
+    expect(find.text('скоро'), findsNothing);
+    expect(find.text('модерация'), findsNothing);
+  });
+
+  testWidgets('compact hero keeps propose actions without stats',
+      (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StudentJobsBoardView(
+            cards: const [],
+            showProposeActions: true,
+            onProposeVacancy: () {},
+            onMySubmissions: () {},
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Доска вакансий'), findsOneWidget);
+    expect(find.text('Предложить'), findsOneWidget);
+    expect(find.text('Мои заявки'), findsOneWidget);
+    expect(find.text('Вакансии пока пусты'), findsOneWidget);
+    expect(find.textContaining('активн'), findsNothing);
   });
 
   testWidgets('detailPayload shows back and vacancy body', (tester) async {

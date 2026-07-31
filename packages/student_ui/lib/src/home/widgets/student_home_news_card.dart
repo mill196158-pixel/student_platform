@@ -21,30 +21,25 @@ class StudentHomeNewsFeed extends StatelessWidget {
   Widget build(BuildContext context) {
     if (news.isEmpty) return const SizedBox.shrink();
 
-    return Padding(
-      padding: const EdgeInsets.only(top: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            height: 128,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              itemCount: news.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 12),
-              itemBuilder: (context, index) {
-                final item = news[index];
-                return StudentHomeNewsCard(
-                  item: item,
-                  onTap: onNewsTap == null ? null : () => onNewsTap!(index),
-                  isSelected: item.id == selectedNewsId,
-                  adminHighlightColor: adminHighlightColor,
-                );
-              },
-            ),
-          ),
-        ],
+    // Vertical gaps between home sections are owned by [StudentHomeView].
+    // Clip shadows so they do not inflate the visual gap under the strip.
+    return SizedBox(
+      height: 128,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        clipBehavior: Clip.hardEdge,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        itemCount: news.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 12),
+        itemBuilder: (context, index) {
+          final item = news[index];
+          return StudentHomeNewsCard(
+            item: item,
+            onTap: onNewsTap == null ? null : () => onNewsTap!(index),
+            isSelected: item.id == selectedNewsId,
+            adminHighlightColor: adminHighlightColor,
+          );
+        },
       ),
     );
   }
@@ -111,9 +106,9 @@ class _StudentHomeNewsCardState extends State<StudentHomeNewsCard> {
             boxShadow: [
               BoxShadow(
                 color: (isDark ? Colors.black : colors.first)
-                    .withValues(alpha: isDark ? .22 : .20),
-                blurRadius: 18,
-                offset: const Offset(0, 9),
+                    .withValues(alpha: isDark ? .18 : .14),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
               ),
             ],
           ),
