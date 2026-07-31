@@ -1138,8 +1138,8 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
         banner: _headerBanner,
         defaultInfoMessage:
             _infoBanner ??
-            'Отдельная доменная модель Stage 17. '
-                'User submission не публикуется автоматически.',
+            'Заявки от студентов проходят модерацию перед публикацией. '
+                'Черновики видны только в админке.',
         canWrite: _canWrite,
         canPublish: _canPublishSelected && selected != null && !isArchived,
         canUnpublish: _canPublish,
@@ -1597,6 +1597,21 @@ class _VacancyPropertiesPanel extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          ExpansionTile(
+            title: const Text('Диагностика'),
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: Text(
+                  'Отдельная доменная модель Stage 17. '
+                  'User submission не публикуется автоматически.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
+          ),
           Text(
             'Свойства вакансии',
             style: Theme.of(

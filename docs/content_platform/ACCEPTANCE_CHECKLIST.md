@@ -1,7 +1,7 @@
 # Content Platform — Acceptance Checklist
 
 Status: **ACTIVE**
-Updated: **2026-07-31** (Stage 14.1.4 Full Visual Parity — DONE)
+Updated: **2026-07-31** (Stage 14.1.5 Final Visual Preview Integrity — DONE)
 Rule: mark `[x]` only with **code + tests + Codex APPROVE** for that item.
 Docs-only items: Codex APPROVE on the docs package.
 Do **not** merge requirements into vague “готово”.
@@ -367,6 +367,20 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Builds: Admin/Main Web, Android, iOS
 - [x] Codex APPROVE 14.1.4
 - [x] Commit + normal push `origin/refactor/chat-tab` (`5337037`)
+
+---
+
+## M6. Stage 14.1.5 — Final Visual Preview Integrity
+
+- [x] image_full / image_overlay: invariant outer height (180) in unbounded scroll (ready/loading/missing/failed)
+- [x] HomePromoPayload dual-read: overlay_opacity, focal_x, focal_y, image_fit
+- [x] Admin preview: selected draft + all published; published mode no draft overlay; deterministic sort
+- [x] ensureVisible after select / home slot change / placement rebuild
+- [x] Profile: shared StudentProfileScreenPreview for Admin + Mobile scroll body
+- [x] Vacancy/Reference: human default banners; Stage/schema strings only in «Диагностика»
+- [x] Parameterized variant tests + goldens 390×844 / 430×932
+- [x] Codex APPROVE 14.1.5
+- [x] Commit + normal push `origin/refactor/chat-tab`
 
 ---
 

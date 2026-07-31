@@ -33,9 +33,11 @@ void main() {
     expect(find.text('Junior Flutter Developer'), findsWidgets);
     expect(find.byType(StudentVacancyCard), findsWidgets);
     expect(
-      find.textContaining('User submission не публикуется'),
+      find.textContaining('модерацию перед публикацией'),
       findsOneWidget,
     );
+    expect(find.textContaining('Stage 17'), findsNothing);
+    expect(find.textContaining('schema'), findsNothing);
   });
 
   testWidgets('create draft uses local repository', (tester) async {

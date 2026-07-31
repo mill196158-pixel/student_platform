@@ -462,6 +462,20 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
       }
     }
 
+    final existingPayload = _selected?.payload;
+    if (existingPayload?.overlayOpacity != null) {
+      map['overlay_opacity'] = existingPayload!.overlayOpacity;
+    }
+    if (existingPayload?.focalX != null) {
+      map['focal_x'] = existingPayload!.focalX;
+    }
+    if (existingPayload?.focalY != null) {
+      map['focal_y'] = existingPayload!.focalY;
+    }
+    if (existingPayload?.imageFit != null) {
+      map['image_fit'] = existingPayload!.imageFit;
+    }
+
     return HomePromoPayload.tryParse(map);
   }
 
@@ -500,12 +514,15 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     });
   }
 
+  /// True when there is no published-eligible content to show for the phone.
+  /// Selecting a draft-only item in published mode must NOT hide other published
+  /// promos — only omit the draft overlay.
   bool get _hidePromoPreview {
-    final selected = _selected;
-    if (selected == null) return true;
+    if (_selected == null && _partitions.publishedPreviewItems.isEmpty) {
+      return true;
+    }
     if (_previewMode == ContentPreviewMode.publishedCanonical &&
-        selected.isDraft &&
-        !selected.isPublished) {
+        _partitions.publishedPreviewItems.isEmpty) {
       return true;
     }
     return false;
@@ -1250,12 +1267,19 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     );
   }
 
-  List<StudentHomePromoPlacement> _buildPreviewPlacements() {
-    if (_hidePromoPreview) return const [];
+  HomePromoItem? _itemById(String id) {
+    for (final item in _items) {
+      if (item.id == id) return item;
+    }
+    return null;
+  }
 
+  List<StudentHomePromoPlacement> _buildPreviewPlacements() {
     final selected = _selected;
     final selectedId = _selectedId;
     final byId = <String, StudentHomePromoPlacement>{};
+    final publishedMode =
+        _previewMode == ContentPreviewMode.publishedCanonical;
 
     for (final item in _partitions.publishedPreviewItems) {
       final isSelected = item.id == selectedId;
@@ -1275,25 +1299,63 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
       );
     }
 
-    if (selected != null && _shouldOverlaySelectedInPreview(selected)) {
-      final payload = _draftPayload() ?? selected.payload;
-      byId[selected.id] = StudentHomePromoPlacement(
-        payload: payload,
-        slot: _homeSlot.key,
-        showDemoBadge: selected.isDemo,
-        imageBytes: _previewImageBytes(),
-        iconBytes: _previewIconBytes(),
-        imageLoading: _assetLoading(),
-        imageState: _imageStateForPreview(
+    // Draft overlay / draft-only inclusion only in live-draft preview mode.
+    if (!publishedMode) {
+      if (selected != null && _shouldOverlaySelectedInPreview(selected)) {
+        final payload = _draftPayload() ?? selected.payload;
+        byId[selected.id] = StudentHomePromoPlacement(
           payload: payload,
+          slot: _homeSlot.key,
+          showDemoBadge: selected.isDemo,
           imageBytes: _previewImageBytes(),
+          iconBytes: _previewIconBytes(),
           imageLoading: _assetLoading(),
-        ),
-        anchorKey: _selectedPromoAnchorKey,
-      );
+          imageState: _imageStateForPreview(
+            payload: payload,
+            imageBytes: _previewImageBytes(),
+            imageLoading: _assetLoading(),
+          ),
+          anchorKey: _selectedPromoAnchorKey,
+        );
+      } else if (selected != null &&
+          selectedId != null &&
+          !byId.containsKey(selectedId)) {
+        final payload = (_dirty ? _draftPayload() : null) ?? selected.payload;
+        byId[selectedId] = StudentHomePromoPlacement(
+          payload: payload,
+          slot: _dirty || _editingWorkingDraft
+              ? _homeSlot.key
+              : payload.effectiveHomeSlot,
+          showDemoBadge: selected.isDemo,
+          imageBytes: _previewImageBytes(),
+          iconBytes: _previewIconBytes(),
+          imageLoading: _assetLoading(),
+          imageState: _imageStateForPreview(
+            payload: payload,
+            imageBytes: _previewImageBytes(),
+            imageLoading: _assetLoading(),
+          ),
+          anchorKey: _selectedPromoAnchorKey,
+        );
+      } else if (selected != null &&
+          selectedId != null &&
+          byId.containsKey(selectedId)) {
+        final existing = byId[selectedId]!;
+        byId[selectedId] = StudentHomePromoPlacement(
+          payload: existing.payload,
+          slot: existing.slot,
+          showDemoBadge: existing.showDemoBadge,
+          imageBytes: existing.imageBytes,
+          iconBytes: existing.iconBytes,
+          imageLoading: existing.imageLoading,
+          imageState: existing.imageState,
+          anchorKey: _selectedPromoAnchorKey,
+        );
+      }
     } else if (selected != null &&
         selectedId != null &&
         byId.containsKey(selectedId)) {
+      // Published mode: keep published payload, only attach scroll anchor.
       final existing = byId[selectedId]!;
       byId[selectedId] = StudentHomePromoPlacement(
         payload: existing.payload,
@@ -1307,7 +1369,20 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
       );
     }
 
-    return byId.values.toList();
+    final sortedIds = byId.keys.toList()
+      ..sort((a, b) {
+        final itemA = _itemById(a);
+        final itemB = _itemById(b);
+        final byOrder = (itemA?.sortOrder ?? 0).compareTo(
+          itemB?.sortOrder ?? 0,
+        );
+        if (byOrder != 0) return byOrder;
+        final byPriority =
+            (itemB?.priority ?? 0).compareTo(itemA?.priority ?? 0);
+        if (byPriority != 0) return byPriority;
+        return a.compareTo(b);
+      });
+    return [for (final id in sortedIds) byId[id]!];
   }
 
   Future<void> _pickDate({required bool starts}) async {
@@ -1557,6 +1632,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
                 onHomeSlotChanged: (value) {
                   setState(() => _homeSlot = value);
                   _markDirty();
+                  _scrollSelectedPromoIntoView();
                 },
                 onCardVariantChanged: (value) {
                   setState(() => _cardVariant = value);

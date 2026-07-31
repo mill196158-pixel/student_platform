@@ -1245,8 +1245,8 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
         banner: _headerBanner,
         defaultInfoMessage:
             _infoBanner ??
-            'Статьи `reference_article_v1` (schema 2). '
-                'Публикация видна студентам сразу.',
+            'Статьи справочника публикуются сразу после сохранения. '
+                'Студенты видят только опубликованные материалы.',
         canWrite: _canWrite,
         canPublish: _canPublish && selected != null && !isArchived,
         canUnpublish: _canPublish,
@@ -1680,6 +1680,21 @@ class _ReferencePropertiesPanel extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          ExpansionTile(
+            title: const Text('Диагностика'),
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: Text(
+                  'Шаблон reference_article_v1, schema 2. '
+                  'Категория задаётся через справочник категорий.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
+          ),
           _textField(titleController, 'Заголовок'),
           DropdownButtonFormField<String>(
             isExpanded: true,

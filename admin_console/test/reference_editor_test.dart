@@ -43,6 +43,8 @@ void main() {
       expect(find.textContaining('Опубликовано'), findsWidgets);
       expect(find.textContaining('Черновики'), findsWidgets);
       expect(find.textContaining('Архив'), findsWidgets);
+      expect(find.textContaining('reference_article_v1'), findsNothing);
+      expect(find.textContaining('schema 2'), findsNothing);
     },
   );
 

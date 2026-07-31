@@ -271,6 +271,79 @@ void main() {
     expect(homeView.hideHomePromo, isFalse);
   });
 
+  testWidgets('draft-only promo appears in preview placements', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: HomePromoEditorScreen(repository: LocalHomePromoRepository()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Создать черновик'));
+    await tester.pumpAndSettle();
+
+    final titleField = find.byWidgetPredicate(
+      (widget) =>
+          widget is TextField && widget.decoration?.labelText == 'Заголовок',
+    );
+    await tester.enterText(titleField, 'Draft-only promo');
+    await tester.pump();
+
+    final homeView = tester.widget<StudentHomeView>(find.byType(StudentHomeView));
+    expect(homeView.homePromoPlacements, isNotEmpty);
+    expect(
+      homeView.homePromoPlacements
+          .any((p) => p.payload.title == 'Draft-only promo'),
+      isTrue,
+    );
+  });
+
+  testWidgets(
+    'published preview keeps published cards when draft-only selected',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1400, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: HomePromoEditorScreen(repository: LocalHomePromoRepository()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Создать черновик'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Как опубликовано'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(StudentHomeView), findsOneWidget);
+      final homeView =
+          tester.widget<StudentHomeView>(find.byType(StudentHomeView));
+      expect(homeView.homePromoPlacements, isNotEmpty);
+      expect(
+        homeView.homePromoPlacements
+            .any((p) => p.payload.title == 'Draft-only promo'),
+        isFalse,
+      );
+      // Seeded published demo remains visible without draft overlay.
+      expect(
+        homeView.homePromoPlacements
+            .any((p) => p.payload.title.contains('Застрял')),
+        isTrue,
+      );
+    },
+  );
+
   testWidgets('custom icon upload controls are visible on draft', (
     tester,
   ) async {

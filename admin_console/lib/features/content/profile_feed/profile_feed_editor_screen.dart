@@ -1066,8 +1066,7 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
       banner: _banner,
       defaultInfoMessage: v2PublishBlocked
           ? kVisualStudioV2PublishBlockedMessageRu
-          : 'Размещение profile_feed / шаблон profile_feed_card_v1. '
-                'Новости сюда не копируются.',
+          : 'Карточки ленты профиля. Новости сюда не копируются.',
       canWrite: _canWrite,
       canPublish: _canPublish && selected != null && !selected.isArchived,
       canUnpublish: _canPublish,
@@ -1549,10 +1548,25 @@ class _PropertiesPanel extends StatelessWidget {
           const Padding(
             padding: EdgeInsets.only(top: 8, bottom: 12),
             child: Text(
-              'Schema v2: иконка, градиент и вариант сохраняются в черновик. '
-              'Публикация v2 заблокирована на сервере до релиза Mobile.',
+              'Иконка, градиент и вариант сохраняются в черновик и не меняют '
+              'опубликованную карточку, пока вы не опубликуете изменения.',
               style: TextStyle(color: Color(0xFF5C6370), fontSize: 12),
             ),
+          ),
+          ExpansionTile(
+            title: const Text('Диагностика'),
+            childrenPadding: const EdgeInsets.only(bottom: 8),
+            children: const [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Шаблон profile_feed_card_v1. '
+                  'Публикация расширенного оформления может быть ограничена '
+                  'до обновления приложения.',
+                  style: TextStyle(color: Color(0xFF5C6370), fontSize: 12),
+                ),
+              ),
+            ],
           ),
           TextField(
             controller: ctaLabelController,

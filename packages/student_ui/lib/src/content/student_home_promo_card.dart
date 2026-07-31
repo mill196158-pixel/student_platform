@@ -138,7 +138,6 @@ class _CardShell extends StatelessWidget {
     this.padding = const EdgeInsets.all(20),
     this.decoration,
     this.clipBehavior = Clip.none,
-    this.minHeight,
   });
 
   final StudentHomePromoCard card;
@@ -146,7 +145,6 @@ class _CardShell extends StatelessWidget {
   final EdgeInsetsGeometry padding;
   final BoxDecoration? decoration;
   final Clip clipBehavior;
-  final double? minHeight;
 
   @override
   Widget build(BuildContext context) {
@@ -165,8 +163,6 @@ class _CardShell extends StatelessWidget {
     );
 
     return Container(
-      constraints:
-          minHeight != null ? BoxConstraints(minHeight: minHeight!) : null,
       clipBehavior: clipBehavior,
       padding: padding,
       decoration: decoration ?? baseDecoration,
@@ -286,18 +282,23 @@ class _PromoImagePlane extends StatelessWidget {
     }
 
     if (state.isReady) {
+      final fit = contentPayloadImageFit(card.payload.imageFit);
+      final alignment = contentPayloadFocalAlignment(
+        focalX: card.payload.focalX,
+        focalY: card.payload.focalY,
+      );
       return ClipRRect(
         borderRadius: radius,
         child: SizedBox(
-          height: height,
-          width: height == null ? double.infinity : null,
+          height: planeHeight,
+          width: double.infinity,
           child: Stack(
             fit: StackFit.expand,
             children: [
               Image.memory(
                 state.bytesOrNull!,
-                fit: BoxFit.cover,
-                alignment: Alignment.center,
+                fit: fit,
+                alignment: alignment,
                 gaplessPlayback: true,
               ),
               if (overlayOpacity > 0)
@@ -493,11 +494,11 @@ class _ImageFullLayout extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = _PromoTheme(context, card.payload);
+    const bleedHeight = kHomePromoImageBleedHeight;
     return _CardShell(
       card: card,
       padding: EdgeInsets.zero,
       clipBehavior: Clip.antiAlias,
-      minHeight: card.imageLoading && !card._hasImageBytes ? 160 : null,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(28),
         boxShadow: [
@@ -508,35 +509,40 @@ class _ImageFullLayout extends StatelessWidget {
           ),
         ],
       ),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          _PromoImagePlane(
-            card: card,
-            colors: card.payload.gradientColors,
-            borderRadius: BorderRadius.circular(28),
-            height: card.imageLoading && !card._hasImageBytes ? 160 : null,
-          ),
-          if (card.payload.title.isNotEmpty)
-            Positioned(
-              left: 16,
-              bottom: 12,
-              right:
-                  card.payload.dismissible && card.onDismiss != null ? 40 : 16,
-              child: Text(
-                card.payload.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: t.theme.textTheme.labelLarge?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                  shadows: const [
-                    Shadow(color: Colors.black54, blurRadius: 6),
-                  ],
+      child: SizedBox(
+        height: bleedHeight,
+        width: double.infinity,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            _PromoImagePlane(
+              card: card,
+              colors: card.payload.gradientColors,
+              borderRadius: BorderRadius.circular(28),
+              height: bleedHeight,
+            ),
+            if (card.payload.title.isNotEmpty)
+              Positioned(
+                left: 16,
+                bottom: 12,
+                right: card.payload.dismissible && card.onDismiss != null
+                    ? 40
+                    : 16,
+                child: Text(
+                  card.payload.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: t.theme.textTheme.labelLarge?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    shadows: const [
+                      Shadow(color: Colors.black54, blurRadius: 6),
+                    ],
+                  ),
                 ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -550,11 +556,13 @@ class _ImageOverlayLayout extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = _PromoTheme(context, card.payload);
+    const bleedHeight = kHomePromoImageBleedHeight;
+    final overlayOpacity =
+        contentPayloadOverlayOpacity(card.payload.overlayOpacity);
     return _CardShell(
       card: card,
       padding: EdgeInsets.zero,
       clipBehavior: Clip.antiAlias,
-      minHeight: 160,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(28),
         boxShadow: [
@@ -565,52 +573,63 @@ class _ImageOverlayLayout extends StatelessWidget {
           ),
         ],
       ),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          _PromoImagePlane(
-            card: card,
-            colors: card.payload.gradientColors,
-            borderRadius: BorderRadius.circular(28),
-            overlayOpacity: 0.45,
-          ),
-          Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                if (card.showDemoBadge) ...[
-                  _DemoBadge(accent: Colors.white70, theme: t.theme),
-                  const SizedBox(height: 6),
-                ],
-                Text(
-                  card.payload.title,
-                  style: t.theme.textTheme.titleMedium?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  card.payload.subtitle,
-                  style: t.theme.textTheme.bodyMedium?.copyWith(
-                    color: Colors.white.withValues(alpha: 0.88),
-                    height: 1.35,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                _CtaButton(
-                  label: card.payload.ctaLabel,
-                  onTap: card.onTap,
-                  accent: t.accent,
-                  lightOnDark: true,
-                ),
-              ],
+      child: SizedBox(
+        height: bleedHeight,
+        width: double.infinity,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            _PromoImagePlane(
+              card: card,
+              colors: card.payload.gradientColors,
+              borderRadius: BorderRadius.circular(28),
+              height: bleedHeight,
+              overlayOpacity: overlayOpacity,
             ),
-          ),
-        ],
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (card.showDemoBadge) ...[
+                    _DemoBadge(accent: Colors.white70, theme: t.theme),
+                    const SizedBox(height: 4),
+                  ],
+                  Text(
+                    card.payload.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: t.theme.textTheme.titleMedium?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    card.payload.subtitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: t.theme.textTheme.bodyMedium?.copyWith(
+                      color: Colors.white.withValues(alpha: 0.88),
+                      height: 1.25,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  _CtaButton(
+                    label: card.payload.ctaLabel,
+                    onTap: card.onTap,
+                    accent: t.accent,
+                    lightOnDark: true,
+                    compact: true,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

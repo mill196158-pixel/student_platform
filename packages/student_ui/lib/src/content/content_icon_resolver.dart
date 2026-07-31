@@ -215,3 +215,36 @@ LinearGradient contentPayloadGradient({
     colors: resolved,
   );
 }
+
+/// Overlay dim for image-overlay cards; [raw] null → [defaultOpacity] (0.45).
+double contentPayloadOverlayOpacity(
+  double? raw, {
+  double defaultOpacity = 0.45,
+}) {
+  if (raw == null) return defaultOpacity;
+  return raw.clamp(0.0, 1.0);
+}
+
+/// Maps payload focal_x/focal_y (0..1) to [Alignment] for [Image.memory].
+Alignment contentPayloadFocalAlignment({
+  double? focalX,
+  double? focalY,
+}) {
+  final x = (focalX ?? 0.5).clamp(0.0, 1.0);
+  final y = (focalY ?? 0.5).clamp(0.0, 1.0);
+  return Alignment(x * 2 - 1, y * 2 - 1);
+}
+
+/// Hero image fit from payload; unknown/null → cover.
+BoxFit contentPayloadImageFit(String? raw) {
+  switch (raw) {
+    case 'contain':
+      return BoxFit.contain;
+    case 'cover':
+    default:
+      return BoxFit.cover;
+  }
+}
+
+/// Fixed outer height for home promo image_full / image_overlay (unbounded scroll).
+const double kHomePromoImageBleedHeight = 180;

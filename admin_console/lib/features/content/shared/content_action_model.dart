@@ -257,5 +257,5 @@ bool contentWireUsesV2PublishFeatures(Map<String, dynamic> payload) {
 
 /// Shown when publish RPC rejects schema v2 until Mobile release.
 const kVisualStudioV2PublishBlockedMessageRu =
-    'Публикация schema v2 (слоты, варианты карточки, structured action) '
-    'отключена на сервере до релиза Mobile. Черновик можно сохранить.';
+    'Сохранить черновик можно, но опубликовать карточку с новым оформлением '
+    'пока нельзя — приложение для студентов ещё не обновлено.';

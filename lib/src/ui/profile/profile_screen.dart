@@ -1,7 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -728,599 +726,92 @@ class _ProfileScreenState extends State<ProfileScreen>
         ),
         child: RefreshIndicator(
           onRefresh: _refreshFromServer,
-          child: ListView(
+          child: StudentProfileScreenPreview(
             padding: EdgeInsets.fromLTRB(16, headerTopPad, 16, 24),
-            children: [
-              _Header(
-                fullName: fullName.isEmpty ? 'Без имени' : fullName,
-                university: uni,
-                groupName: group,
-                status: status,
-                avatarUrl: avatar,
-              ),
-              if (!_points.hidePoints || _points.showLoadError) ...[
-                const SizedBox(height: 12),
-                if (_points.showLoadError)
-                  Text(
-                    'Баллы временно недоступны',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: const Color(0xFF6B7280),
-                        ),
-                    textAlign: TextAlign.center,
-                  )
-                else ...[
-                  Center(
-                    child: StudentPointsSummaryChip(
-                      summary: _points.displaySummary,
-                      showDemoBadge:
-                          _points.isDemoFallback && _points.rpcUnavailable,
-                    ),
-                  ),
-                  if (_points.displaySummary.entries.isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    Center(
-                      child: Text(
-                        _formatLatestPointsEntry(
-                          _points.displaySummary.entries.first,
-                        ),
+            displayName: fullName.isEmpty ? 'Без имени' : fullName,
+            groupLabel: group,
+            universityLabel: uni.isEmpty ? null : uni,
+            statusLabel: status.isEmpty ? null : status,
+            avatarUrl: avatar,
+            messagesBadge: _unreadTotal,
+            friendsBadge: _requestsCount,
+            pointsChip: (!_points.hidePoints || _points.showLoadError)
+                ? (_points.showLoadError
+                    ? Text(
+                        'Баллы временно недоступны',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: const Color(0xFF6B7280),
                             ),
                         textAlign: TextAlign.center,
-                      ),
-                    ),
-                  ],
-                ],
-              ],
-              const SizedBox(height: 16),
-
-              // Две кнопки: Сообщения / Друзья
-              _ActionsRow(
-                messagesBadge: _unreadTotal,
-                requestsBadge: _requestsCount,
-                onMessagesTap: () async {
-                  await Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const MyChatsScreen()),
-                  );
-                  if (!mounted) return;
-                  await _ensureSession();
-                  await _pollOnce();
-                },
-                onFriendsTap: () async {
-                  await Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const MyFriendsScreen()),
-                  );
-                  if (!mounted) return;
-                  await _ensureSession();
-                  await _pollOnce();
-                },
+                      )
+                    : Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          StudentPointsSummaryChip(
+                            summary: _points.displaySummary,
+                            showDemoBadge: _points.isDemoFallback &&
+                                _points.rpcUnavailable,
+                          ),
+                          if (_points.displaySummary.entries.isNotEmpty) ...[
+                            const SizedBox(height: 6),
+                            Text(
+                              _formatLatestPointsEntry(
+                                _points.displaySummary.entries.first,
+                              ),
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                    color: const Color(0xFF6B7280),
+                                  ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ],
+                      ))
+                : null,
+            feedCards: _feed.hideFeed ? const [] : _feed.displayCards,
+            feedLoadError: _feed.showLoadError,
+            onFeedRetry: () => unawaited(_loadFeed()),
+            onFeedTap: _onManagedFeedTap,
+            onFeedVisible: _recordVisibleFeedImpression,
+            onDiaryTap: () => context.push('/my-diary'),
+            onMapTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const MapSpbgasuScreen(),
               ),
-
-              const SizedBox(height: 20),
-
-              if (_feed.showLoadError) ...[
-                const _SectionTitle('Лента'),
-                const SizedBox(height: 10),
-                Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.error_outline),
-                    title: const Text('Не удалось загрузить ленту'),
-                    subtitle:
-                        const Text('Проверьте соединение и попробуйте снова.'),
-                    trailing: TextButton(
-                      onPressed: () => unawaited(_loadFeed()),
-                      child: const Text('Повторить'),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-              ] else if (!_feed.hideFeed) ...[
-                const _SectionTitle('Лента'),
-                const SizedBox(height: 10),
-                StudentProfileFeedCarousel(
-                  cards: _feed.displayCards,
-                  onTap: _onManagedFeedTap,
-                  onVisibleCard: _recordVisibleFeedImpression,
-                ),
-                const SizedBox(height: 20),
-              ],
-
-              ProfileStudySection(
-                onDiaryTap: () => context.push('/my-diary'),
-                onMapTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const MapSpbgasuScreen(),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const MyReviewsScreen()),
-                  );
-                },
-                icon: const Icon(Icons.rate_review_outlined),
-                label: const Text('Мои отзывы'),
-              ),
-            ],
+            ),
+            onReviewsTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const MyReviewsScreen()),
+              );
+            },
+            onMessagesTap: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const MyChatsScreen()),
+              );
+              if (!mounted) return;
+              await _ensureSession();
+              await _pollOnce();
+            },
+            onFriendsTap: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const MyFriendsScreen()),
+              );
+              if (!mounted) return;
+              await _ensureSession();
+              await _pollOnce();
+            },
           ),
         ),
       ),
     );
-  }
-
-  Future<void> _openFeedItem(BuildContext context, FeedItem item) async {
-    if (item.url != null) {
-      final uri = Uri.parse(item.url!);
-      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-      if (!ok && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Не удалось открыть: ${item.url}')),
-        );
-      }
-      return;
-    }
-    if (item.route != null) {
-      if (context.mounted) context.push(item.route!);
-      return;
-    }
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Элемент: ${item.title}')),
-      );
-    }
   }
 
   String _formatLatestPointsEntry(StudentPointsEntry entry) {
     final label = entry.reasonCode.labelRu;
     return 'Последнее: ${entry.signedLabel} · $label';
-  }
-}
-
-// =================== Вспомогательные виджеты (без изменений по сути) ===================
-
-class _Header extends StatelessWidget {
-  final String fullName;
-  final String university;
-  final String groupName;
-  final String status;
-  final String? avatarUrl;
-
-  const _Header({
-    required this.fullName,
-    required this.university,
-    required this.groupName,
-    required this.status,
-    required this.avatarUrl,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-
-    ImageProvider? avatarProvider;
-    if (avatarUrl != null && avatarUrl!.isNotEmpty) {
-      avatarProvider = NetworkImage(avatarUrl!);
-    }
-
-    return Column(
-      children: [
-        CircleAvatar(
-          radius: 44,
-          backgroundColor: const Color(0xFFDCD0FA),
-          backgroundImage: avatarProvider,
-          child: avatarProvider == null
-              ? const Icon(Icons.person, size: 44)
-              : null,
-        ),
-        const SizedBox(height: 12),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              fullName,
-              style: text.titleLarge
-                  ?.copyWith(fontWeight: FontWeight.w800, color: Colors.black),
-            ),
-            const SizedBox(width: 6),
-            const Icon(Icons.verified, size: 18, color: Color(0xFF7C63D8)),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(
-          university.isEmpty && groupName.isEmpty
-              ? 'Данные профиля не заполнены'
-              : [
-                  if (university.isNotEmpty) university,
-                  if (groupName.isNotEmpty) 'группа $groupName',
-                ].join(', '),
-          style: text.bodyMedium?.copyWith(color: Colors.black),
-          textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: 6),
-        Text(
-          status.isEmpty ? 'Статус не указан' : status,
-          style: text.bodyLarge,
-          textAlign: TextAlign.center,
-        ),
-      ],
-    );
-  }
-}
-
-const double _kActionHeight = 44;
-const double _kActionRadius = 16;
-
-class _ActionsRow extends StatelessWidget {
-  final int messagesBadge;
-  final int requestsBadge;
-  final VoidCallback? onMessagesTap;
-  final VoidCallback? onFriendsTap;
-
-  const _ActionsRow({
-    required this.messagesBadge,
-    required this.requestsBadge,
-    this.onMessagesTap,
-    this.onFriendsTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    debugPrint(
-        '${DateTime.now().toIso8601String().substring(11, 23)} [ActionsRow] build messages=$messagesBadge requests=$requestsBadge');
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              flex: 11,
-              child: _QuickActionButton(
-                label: 'Сообщения',
-                icon: Icons.chat_bubble_outline,
-                badge: 0, // внешний бейдж рисуется поверх ряда
-                gradient: const [Color(0xFFEDE7F6), Color(0xFFD9CCF5)],
-                onTap: onMessagesTap,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              flex: 10,
-              child: _QuickActionButton(
-                label: 'Друзья',
-                icon: Icons.group_outlined,
-                badge: 0, // внешний бейдж рисуется поверх ряда
-                gradient: const [Color(0xFFD6F5EE), Color(0xFFC2ECE4)],
-                onTap: onFriendsTap,
-              ),
-            ),
-          ],
-        ),
-        if (messagesBadge > 0)
-          Positioned(
-            left: 0,
-            top: -10,
-            child: _EdgeBadge(
-              key: ValueKey('msg_${messagesBadge}'),
-              text: messagesBadge > 99 ? '99+' : messagesBadge.toString(),
-              isLeft: true,
-            ),
-          ),
-        if (requestsBadge > 0)
-          Positioned(
-            right: 0,
-            top: -10,
-            child: _EdgeBadge(
-              key: ValueKey('req_${requestsBadge}'),
-              text: requestsBadge > 9 ? '9+' : requestsBadge.toString(),
-              isLeft: false,
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-class _EdgeBadge extends StatelessWidget {
-  final String text;
-  final bool isLeft;
-
-  const _EdgeBadge({super.key, required this.text, required this.isLeft});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 22,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: const [
-          BoxShadow(color: Colors.black26, blurRadius: 8, offset: Offset(0, 2)),
-        ],
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        text,
-        style: const TextStyle(
-            fontSize: 12, fontWeight: FontWeight.w800, color: Colors.black87),
-      ),
-    );
-  }
-}
-// (extension для бейджа удален, чтобы виджет пересобирался корректно)
-
-class _QuickActionButton extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final int badge;
-  final List<Color> gradient;
-  final VoidCallback? onTap;
-
-  const _QuickActionButton({
-    required this.label,
-    required this.icon,
-    required this.badge,
-    required this.gradient,
-    this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final bg = BoxDecoration(
-      gradient: LinearGradient(
-        colors: gradient,
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-      ),
-      borderRadius: BorderRadius.circular(_kActionRadius),
-      boxShadow: [
-        BoxShadow(
-          color: gradient.last.withValues(alpha: .18),
-          blurRadius: 16,
-          offset: const Offset(0, 8),
-        ),
-      ],
-    );
-
-    Widget? badgeWidget;
-    if (badge > 0) {
-      final s = badge > 99 ? '99+' : '$badge';
-      badgeWidget = Positioned(
-        top: 6,
-        left: 6,
-        child: Container(
-          height: 20,
-          padding: const EdgeInsets.symmetric(horizontal: 6),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: .85),
-            borderRadius: BorderRadius.circular(11),
-            boxShadow: const [
-              BoxShadow(
-                  color: Colors.black26, blurRadius: 8, offset: Offset(0, 2)),
-            ],
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            s,
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
-              color: Colors.black87,
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Container(
-      height: _kActionHeight,
-      decoration: bg,
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(_kActionRadius),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(_kActionRadius),
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.start,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Icon(icon, size: 22, color: Colors.black87),
-                      const SizedBox(width: 10),
-                      Flexible(
-                        child: Text(
-                          label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.black,
-                            height: 1.0,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              if (badgeWidget != null) badgeWidget,
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ===== feed/carousel =====
-
-class FeedItem {
-  final String title;
-  final String subtitle;
-  final List<Color> gradient;
-  final String? route;
-  final String? url;
-
-  FeedItem({
-    required this.title,
-    required this.subtitle,
-    required this.gradient,
-    this.route,
-    this.url,
-  });
-}
-
-final List<FeedItem> _demoFeed = [
-  FeedItem(
-    title: 'О нас',
-    subtitle: 'Команда Студент Платформ',
-    gradient: [Color(0xFFDCD0FA), Color(0xFFC9B8F3)],
-    url: 'https://example.com/about',
-  ),
-  FeedItem(
-    title: 'Расписание занятий',
-    subtitle: 'Твое расписание всегда под рукой',
-    gradient: [Color(0xFFC5EFE5), Color(0xFFAEE3D8)],
-    route: '/schedule',
-  ),
-  FeedItem(
-    title: 'Скидки для студентов',
-    subtitle: 'Обновляем лучшие предложения',
-    gradient: [Color(0xFFFFE5B9), Color(0xFFDCD0FA)],
-    url: 'https://example.com/discounts',
-  ),
-];
-
-class _FeedCarousel extends StatefulWidget {
-  final List<FeedItem> items;
-  final void Function(FeedItem) onTapItem;
-  const _FeedCarousel({required this.items, required this.onTapItem});
-
-  @override
-  State<_FeedCarousel> createState() => _FeedCarouselState();
-}
-
-class _FeedCarouselState extends State<_FeedCarousel> {
-  final PageController _controller = PageController(viewportFraction: .92);
-  int _index = 0;
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final items = widget.items;
-
-    return Column(
-      children: [
-        SizedBox(
-          height: 160,
-          child: PageView.builder(
-            controller: _controller,
-            onPageChanged: (i) => setState(() => _index = i),
-            itemCount: items.length,
-            itemBuilder: (_, i) {
-              final it = items[i];
-              return GestureDetector(
-                onTap: () => widget.onTapItem(it),
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 6),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(20),
-                    gradient: LinearGradient(
-                      colors: it.gradient,
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: it.gradient.last.withValues(alpha: .35),
-                        blurRadius: 18,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
-                  ),
-                  child: Stack(
-                    children: [
-                      Positioned(
-                        left: 16,
-                        right: 16,
-                        bottom: 16,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              it.title,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              it.subtitle,
-                              style: const TextStyle(
-                                color: Colors.black,
-                                fontSize: 13.5,
-                                height: 1.2,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-        const SizedBox(height: 10),
-        _DotsIndicator(length: items.length, index: _index),
-      ],
-    );
-  }
-}
-
-class _DotsIndicator extends StatelessWidget {
-  final int length;
-  final int index;
-  const _DotsIndicator({required this.length, required this.index});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: List.generate(length, (i) {
-        final active = i == index;
-        return AnimatedContainer(
-          duration: const Duration(milliseconds: 250),
-          margin: const EdgeInsets.symmetric(horizontal: 4),
-          height: 6,
-          width: active ? 18 : 6,
-          decoration: BoxDecoration(
-            color: active
-                ? Theme.of(context).colorScheme.primary
-                : Colors.grey.shade400,
-            borderRadius: BorderRadius.circular(12),
-          ),
-        );
-      }),
-    );
   }
 }
 

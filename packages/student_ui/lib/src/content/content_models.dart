@@ -120,6 +120,10 @@ class HomePromoPayload {
     this.iconAssetId,
     this.gradientAngle,
     this.action,
+    this.overlayOpacity,
+    this.focalX,
+    this.focalY,
+    this.imageFit,
   });
 
   final String title;
@@ -147,6 +151,16 @@ class HomePromoPayload {
 
   /// Structured tap action (schema v2).
   final Map<String, dynamic>? action;
+
+  /// Image overlay dim (0..1) for image_overlay variant.
+  final double? overlayOpacity;
+
+  /// Focal point for hero image (0..1).
+  final double? focalX;
+  final double? focalY;
+
+  /// Hero image fit: cover | contain (default cover when null).
+  final String? imageFit;
 
   /// Built-in demo matching the historic hardcoded Home help card.
   static const HomePromoPayload demoStuckWithAssignment = HomePromoPayload(
@@ -201,6 +215,38 @@ class HomePromoPayload {
         if (reshow == null || reshow < 1 || reshow > 8760) return null;
       }
 
+      double? overlayOpacity;
+      if (json.containsKey('overlay_opacity') ||
+          json.containsKey('overlayOpacity')) {
+        final raw = _readDouble(json, const [
+          'overlayOpacity',
+          'overlay_opacity',
+        ]);
+        if (raw == null || raw < 0 || raw > 1) return null;
+        overlayOpacity = raw;
+      }
+
+      double? focalX;
+      if (json.containsKey('focal_x') || json.containsKey('focalX')) {
+        final raw = _readDouble(json, const ['focalX', 'focal_x']);
+        if (raw == null || raw < 0 || raw > 1) return null;
+        focalX = raw;
+      }
+
+      double? focalY;
+      if (json.containsKey('focal_y') || json.containsKey('focalY')) {
+        final raw = _readDouble(json, const ['focalY', 'focal_y']);
+        if (raw == null || raw < 0 || raw > 1) return null;
+        focalY = raw;
+      }
+
+      String? imageFit;
+      if (json.containsKey('image_fit') || json.containsKey('imageFit')) {
+        final raw = _readString(json, const ['imageFit', 'image_fit']);
+        if (raw != 'cover' && raw != 'contain') return null;
+        imageFit = raw;
+      }
+
       return HomePromoPayload(
         title: title,
         subtitle: subtitle,
@@ -222,6 +268,10 @@ class HomePromoPayload {
         action: json['action'] is Map
             ? Map<String, dynamic>.from(json['action'] as Map)
             : null,
+        overlayOpacity: overlayOpacity,
+        focalX: focalX,
+        focalY: focalY,
+        imageFit: imageFit,
       );
     } catch (_) {
       return null;
@@ -253,6 +303,10 @@ class HomePromoPayload {
       if (iconAssetId != null) 'icon_asset_id': iconAssetId,
       if (gradientAngle != null) 'gradient_angle': gradientAngle,
       if (action != null) 'action': action,
+      if (overlayOpacity != null) 'overlay_opacity': overlayOpacity,
+      if (focalX != null) 'focal_x': focalX,
+      if (focalY != null) 'focal_y': focalY,
+      if (imageFit != null) 'image_fit': imageFit,
     };
   }
 
@@ -272,6 +326,10 @@ class HomePromoPayload {
     String? iconAssetId,
     int? gradientAngle,
     Map<String, dynamic>? action,
+    double? overlayOpacity,
+    double? focalX,
+    double? focalY,
+    String? imageFit,
     bool clearImageAssetId = false,
     bool clearCtaRoute = false,
     bool clearCtaUrl = false,
@@ -281,6 +339,10 @@ class HomePromoPayload {
     bool clearIconAssetId = false,
     bool clearGradientAngle = false,
     bool clearAction = false,
+    bool clearOverlayOpacity = false,
+    bool clearFocalX = false,
+    bool clearFocalY = false,
+    bool clearImageFit = false,
   }) {
     return HomePromoPayload(
       title: title ?? this.title,
@@ -302,6 +364,11 @@ class HomePromoPayload {
       gradientAngle:
           clearGradientAngle ? null : (gradientAngle ?? this.gradientAngle),
       action: clearAction ? null : (action ?? this.action),
+      overlayOpacity:
+          clearOverlayOpacity ? null : (overlayOpacity ?? this.overlayOpacity),
+      focalX: clearFocalX ? null : (focalX ?? this.focalX),
+      focalY: clearFocalY ? null : (focalY ?? this.focalY),
+      imageFit: clearImageFit ? null : (imageFit ?? this.imageFit),
     );
   }
 

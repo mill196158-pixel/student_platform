@@ -11,6 +11,8 @@ void main() {
             displayName: 'Анна',
             groupLabel: 'ИСТ-401',
             universityLabel: 'СПБГАСУ',
+            messagesBadge: 2,
+            friendsBadge: 1,
             feedCards: [
               ManagedProfileFeedCard(
                 id: 'feed-1',
@@ -33,6 +35,8 @@ void main() {
     expect(find.textContaining('Карта'), findsOneWidget);
     expect(find.text('Лента'), findsOneWidget);
     expect(find.text('Мои отзывы'), findsOneWidget);
+    expect(find.text('Сообщения'), findsOneWidget);
+    expect(find.text('2'), findsOneWidget);
   });
 
   testWidgets('detailCard shows back chrome', (tester) async {

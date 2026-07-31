@@ -42,13 +42,15 @@ void main() {
     expect(find.text('Расписание занятий'), findsWidgets);
     expect(find.byType(StudentProfileFeedCarousel), findsOneWidget);
     expect(
-      find.textContaining('Публикация schema v2').evaluate().isNotEmpty ||
+      find.textContaining('Новости сюда не копируются').evaluate().isNotEmpty ||
           find
-              .textContaining('Новости сюда не копируются')
+              .textContaining('Сохранить черновик можно')
               .evaluate()
               .isNotEmpty,
       isTrue,
     );
+    expect(find.text('Мой дневник'), findsOneWidget);
+    expect(find.byType(StudentProfileScreenPreview), findsOneWidget);
     expect(find.byType(VisualEditorListPanel), findsOneWidget);
   });
 

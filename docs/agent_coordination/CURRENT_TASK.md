@@ -1,25 +1,23 @@
 # CURRENT_TASK
 
-* Status: **DONE** — Stage 14.1.4 (Full Visual Parity & Media Reliability)
-* Active Stage: **14.1.4 / M5**
+* Status: **DONE** — Stage 14.1.5 (Final Visual Preview Integrity)
+* Active Stage: **14.1.5 / M6**
 * Branch: `refactor/chat-tab`
-* Feature SHA: `5337037`
-* Final HEAD / origin: `9189311`
-* Codex final: **APPROVE** (after multi-slot Home P1 fixes)
+* Base HEAD: `690cd76`
+* Codex final: **APPROVE** (after published-mode + sort P1 fixes)
 * Remote: `gwdanmwluhrcfxbnplwd`
 * Gate: `content_visual_studio_v2_publish` remains **OFF**
-* Migration applied: `20260731000318_stage14_1_4_vacancy_assets_role_in_get_my`
+* Migration/Edge: none
+
+## Root cause
+
+`image_full` / `image_overlay` collapsed under unbounded `CustomScrollView` because ready `_PromoImagePlane` used `SizedBox(height: null)` with expanding stacks. `image_top_text` always used height 140.
 
 ## Done
 
-* ContentImageRenderState — no silent image_* → gradient_text
-* Mobile media key `userScope|assetId|contentVersion` + single-flight + generation isolation
-* HomePromoService ordered multi-slot; per-card tap/dismiss/impressions
-* Admin full-screen Home/Profile/Help/Jobs via student_ui
-* Custom icon upload independent of hero; iconBytes painted with BoxFit.contain
-* Vacancy logo/cover/background Admin + mobile hydrate; get_my_vacancies exposes role
-* Tests/builds green; controlled smoke before=after counts (vacancies=3 published=0 assets=0)
-
-## Next after closeout
-
-* Stage 14.1.5 / next Content Platform substage per roadmap (owner)
+* Invariant 180px bleed geometry for full/overlay (ready/loading/missing/failed)
+* HomePromoPayload overlay/focal/image_fit dual-read
+* Admin placements: published mode keeps published cards; draft overlay only in live mode; id tie-break sort
+* Shared `StudentProfileScreenPreview` on Admin + Mobile
+* Human banners; Stage/schema in Diagnostics
+* Parameterized + golden tests 390×844 / 430×932

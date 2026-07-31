@@ -6,7 +6,7 @@
 ## Статус документа
 
 - Дата аудита: **27 июля 2026**
-- Обновлено: **31 июля 2026** (Stage 14.1.3 Visual Editor Fidelity & Media Pipeline)
+- Updated: **31 июля 2026** (Stage 14.1.5 Final Visual Preview Integrity — DONE)
 - Проверенная основная ветка: `refactor/chat-tab` (база)
 - Рабочая ветка контента: `feature/content-platform`
 - Проверенная административная ветка: `feature/admin-console`
@@ -1007,6 +1007,16 @@ Status: **DONE** / Codex **APPROVE** — M5; gate OFF; HEAD `5337037`; migration
 - [x] Mobile multi-slot home + media resolve (assetId+version key);
 - [x] Custom icon end-to-end; vacancy logo/cover/background planes;
 - [x] Codex final APPROVE + commit/push.
+
+### Stage 14.1.5 — Final Visual Preview Integrity
+
+Status: **DONE** / Codex **APPROVE** — M6; gate OFF; no new migration/Edge
+
+- [x] Promo image_full/overlay fixed bleed height under unbounded scroll;
+- [x] HomePromoPayload overlay/focal/image_fit dual-read;
+- [x] Admin multi-slot preview integrity + profile shared composition;
+- [x] Humanized editor banners + parameterized/golden tests;
+- [x] Codex APPROVE 14.1.5.
 
 ### Next after 14.1.4 — Import Studio (separate stage)
 
