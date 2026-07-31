@@ -1010,7 +1010,7 @@ Status: **DONE** / Codex **APPROVE** — M5; gate OFF; HEAD `5337037`; migration
 
 ### Stage 14.1.5 — Final Visual Preview Integrity
 
-Status: **DONE** / Codex **APPROVE** — M6; gate OFF; no new migration/Edge
+Status: **DONE** / Codex **APPROVE** — M6; gate OFF; feature `4976ee2`; no new migration/Edge
 
 - [x] Promo image_full/overlay fixed bleed height under unbounded scroll;
 - [x] HomePromoPayload overlay/focal/image_fit dual-read;

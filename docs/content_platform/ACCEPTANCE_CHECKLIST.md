@@ -323,7 +323,7 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] SQL security review + remote smoke (gate OFF; no mass publish)
 - [x] Codex APPROVE_WITH_NOTES 14.1.2
 - [x] Migrations applied: `20260730190415`, `20260730220218`
-- [x] Commit + normal push `origin/refactor/chat-tab`
+- [x] Commit + normal push `origin/refactor/chat-tab` (`4976ee2`)
 
 ---
 
@@ -345,7 +345,7 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Tests: variant/media/WD overlay/discard (Codex final package)
 - [x] Builds: Admin/Main Web, Android, iOS
 - [x] Codex APPROVE 14.1.3
-- [x] Commit + normal push `origin/refactor/chat-tab` (feature `b57c315`)
+- [x] Commit + normal push `origin/refactor/chat-tab` (`4976ee2`) (feature `b57c315`)
 
 ---
 
@@ -366,7 +366,7 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Tests: rendered overlay/icon/slots/nav/isolation/tombstone (+ goldens where feasible)
 - [x] Builds: Admin/Main Web, Android, iOS
 - [x] Codex APPROVE 14.1.4
-- [x] Commit + normal push `origin/refactor/chat-tab` (`5337037`)
+- [x] Commit + normal push `origin/refactor/chat-tab` (`4976ee2`) (`5337037`)
 
 ---
 
@@ -380,7 +380,7 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Vacancy/Reference: human default banners; Stage/schema strings only in «Диагностика»
 - [x] Parameterized variant tests + goldens 390×844 / 430×932
 - [x] Codex APPROVE 14.1.5
-- [x] Commit + normal push `origin/refactor/chat-tab`
+- [x] Commit + normal push `origin/refactor/chat-tab` (`4976ee2`)
 
 ---
 

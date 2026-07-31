@@ -4,6 +4,7 @@
 * Active Stage: **14.1.5 / M6**
 * Branch: `refactor/chat-tab`
 * Base HEAD: `690cd76`
+* Feature SHA: `4976ee2`
 * Codex final: **APPROVE** (after published-mode + sort P1 fixes)
 * Remote: `gwdanmwluhrcfxbnplwd`
 * Gate: `content_visual_studio_v2_publish` remains **OFF**
