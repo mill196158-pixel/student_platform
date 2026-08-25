@@ -11,6 +11,7 @@
   (no P0/P1)
 * Codex group-recognition implementation verdict: **APPROVE_WITH_NOTES**
   (no P0/P1; PostgreSQL runtime pending)
+* Codex unified Admin academic-workflow verdict: **APPROVE**
 * Remote: `gwdanmwluhrcfxbnplwd`
 * Backup: `/Users/annasuvorova/student_platform_backups/pre_content_platform_20260730_133051/` (outside Git; `0700`/`0600`)
 
@@ -74,6 +75,16 @@
   * durable read-only preview shows exact names, aliases, semantic duplicates,
     plan ambiguity, unknown programs and malformed names;
   * Admin Web exposes a fast group-name check; apply remains fail-closed.
+* Unified Admin academic workflow UI is implemented locally and Codex-approved:
+  * `/import-studio` starts with plan → group/student matching → annual
+    process calendar → schedule/readiness cards;
+  * plan/group/calendar cards open their specialized review panels directly,
+    while all nine legacy XLSX domains remain in a separate advanced section;
+  * global terms, annual process calendar and unavailable schedule validation
+    are labeled as different operations;
+  * duplicate decisions are local review intent only, classification-aware,
+    unselected by default and reset with preview inputs;
+  * student XLSX explicitly updates existing Auth users only.
 
 ## Residuals (not blockers)
 
@@ -88,6 +99,6 @@
    authorization for remote Supabase.
 2. Execute Stage 19.1b migration and rollback-only role-play only with owner
    authorization; focused Flutter tests and analyze already pass.
-3. In a later approved slice, add explicit duplicate decisions and atomic group
+3. In a later approved slice, add persisted duplicate decisions and atomic group
    academic-profile/plan binding. Do not create Auth users, enrollments,
    offerings, group spaces, teams or chats in that apply.

@@ -17,10 +17,20 @@ import 'supabase_import_studio_repository.dart';
 
 /// Stage 19 Import Studio hub — XLSX template → upload → mapping → preview → dry-run.
 class ImportStudioScreen extends StatefulWidget {
-  const ImportStudioScreen({super.key, this.repository, this.session});
+  const ImportStudioScreen({
+    super.key,
+    this.repository,
+    this.session,
+    this.curriculumPanelBuilder,
+    this.groupPanelBuilder,
+    this.calendarPanelBuilder,
+  });
 
   final ImportStudioRepository? repository;
   final AdminSessionController? session;
+  final WidgetBuilder? curriculumPanelBuilder;
+  final WidgetBuilder? groupPanelBuilder;
+  final WidgetBuilder? calendarPanelBuilder;
 
   @override
   State<ImportStudioScreen> createState() => _ImportStudioScreenState();
@@ -244,6 +254,75 @@ class _ImportStudioScreenState extends State<ImportStudioScreen> {
     });
   }
 
+  void _selectDomainByName(String domainName) {
+    for (final domain in _domains) {
+      if (domain.domain == domainName) {
+        _selectDomain(domain);
+        return;
+      }
+    }
+    setState(() {
+      _banner = 'Импорт «${importStudioDomainLabel(domainName)}» недоступен.';
+    });
+  }
+
+  Future<void> _openCurriculumReview() async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => Dialog(
+        insetPadding: const EdgeInsets.all(24),
+        child: SizedBox(
+          width: 1180,
+          height: 820,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child:
+                widget.curriculumPanelBuilder?.call(context) ??
+                CurriculumDocumentReviewPanel(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openGroupRecognition() async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => Dialog(
+        insetPadding: const EdgeInsets.all(24),
+        child: SizedBox(
+          width: 1120,
+          height: 780,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child:
+                widget.groupPanelBuilder?.call(context) ??
+                const GroupRecognitionPanel(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openAcademicProcessCalendarReview() async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => Dialog(
+        insetPadding: const EdgeInsets.all(24),
+        child: SizedBox(
+          width: 1240,
+          height: 860,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child:
+                widget.calendarPanelBuilder?.call(context) ??
+                const AcademicProcessCalendarReviewPanel(),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -283,7 +362,14 @@ class _ImportStudioScreenState extends State<ImportStudioScreen> {
   Widget _buildBody() {
     switch (_step) {
       case ImportStudioWorkflowStep.hub:
-        return _DomainHub(domains: _domains, onSelect: _selectDomain);
+        return _DomainHub(
+          domains: _domains,
+          onSelect: _selectDomain,
+          onOpenCurriculum: _openCurriculumReview,
+          onOpenGroups: _openGroupRecognition,
+          onOpenCalendar: _openAcademicProcessCalendarReview,
+          onOpenStudents: () => _selectDomainByName('students'),
+        );
       case ImportStudioWorkflowStep.template:
         return _ImportSourceStep(
           domain: _selectedDomain!,
@@ -431,33 +517,151 @@ class _Header extends StatelessWidget {
 }
 
 class _DomainHub extends StatelessWidget {
-  const _DomainHub({required this.domains, required this.onSelect});
+  const _DomainHub({
+    required this.domains,
+    required this.onSelect,
+    required this.onOpenCurriculum,
+    required this.onOpenGroups,
+    required this.onOpenCalendar,
+    required this.onOpenStudents,
+  });
 
   final List<ImportStudioDomainInfo> domains;
   final ValueChanged<ImportStudioDomainInfo> onSelect;
+  final VoidCallback onOpenCurriculum;
+  final VoidCallback onOpenGroups;
+  final VoidCallback onOpenCalendar;
+  final VoidCallback onOpenStudents;
 
   @override
   Widget build(BuildContext context) {
-    return ListView.separated(
-      itemCount: domains.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 8),
-      itemBuilder: (context, index) {
-        final domain = domains[index];
-        return Card(
-          child: ListTile(
-            leading: Icon(_domainIcon(domain.domain)),
-            title: Text(domain.label),
-            subtitle: Text(
-              '${importStudioDomainStateLabel(domain.domainState)} · ${domain.applyPermission}',
+    return ListView(
+      children: [
+        const Text(
+          'Академическая цепочка',
+          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Проходите этапы слева направо: что изучают → кто учится → '
+          'когда идут периоды → когда стоят конкретные пары.',
+          style: TextStyle(color: Colors.black54),
+        ),
+        const SizedBox(height: 16),
+        _AcademicChainCard(
+          step: 1,
+          icon: Icons.account_tree_outlined,
+          title: 'Учебный план',
+          status: 'Review + server preview',
+          statusColor: const Color(0xFF3157C8),
+          description:
+              'Загрузите PDF или XLSX, проверьте предметы, семестры, часы '
+              'и формы контроля. Здесь же выбираются программа, форма '
+              'обучения и год поступления.',
+          primaryLabel: 'Открыть проверку плана',
+          onPrimary: onOpenCurriculum,
+          footer:
+              'PDF/XLSX принимаются специализированной проверкой; сохранение '
+              'возможно только после server preview и подтверждения.',
+        ),
+        const _ChainConnector(),
+        _AcademicChainCard(
+          step: 2,
+          icon: Icons.groups_outlined,
+          title: 'Группы и студенты',
+          status: 'Matching preview',
+          statusColor: Color(0xFF8B5A00),
+          description:
+              'Сначала распознайте группу: слева номер параллели, справа '
+              'курс; сервер вычислит год поступления и найдёт план. Затем '
+              'проверяйте список студентов.',
+          primaryLabel: 'Проверить группы и дубли',
+          onPrimary: onOpenGroups,
+          secondaryLabel: 'Existing students XLSX',
+          onSecondary: onOpenStudents,
+          footer:
+              'Импорт студентов сейчас только обновляет существующих Auth '
+              'пользователей и не создаёт аккаунты.',
+        ),
+        const _ChainConnector(),
+        _AcademicChainCard(
+          step: 3,
+          icon: Icons.date_range_outlined,
+          title: 'График учебного процесса',
+          status: 'Review + server preview',
+          statusColor: Color(0xFF3157C8),
+          description:
+              'Загрузите официальный PDF или изображение и вручную проверьте '
+              'периоды занятий, сессии, практики и ГИА для учебного года.',
+          primaryLabel: 'Открыть годовой график',
+          onPrimary: onOpenCalendar,
+          footer:
+              'Это годовой график с периодами. Он не меняет глобальные '
+              'academic_terms и не переключает текущий семестр.',
+        ),
+        const _ChainConnector(),
+        const _AcademicChainCard(
+          step: 4,
+          icon: Icons.event_busy_outlined,
+          title: 'Расписание и готовность',
+          status: 'Не реализовано',
+          statusColor: Color(0xFF6B7280),
+          description:
+              'Будущий этап проверит даты пар и экзаменов по опубликованному '
+              'графику и покажет конфликты до сохранения.',
+          primaryLabel: 'Проверка расписания недоступна',
+          footer:
+              'Валидация и apply расписания отсутствуют. Текущий семестр, '
+              'offering, команды и чаты здесь не создаются.',
+        ),
+        const SizedBox(height: 20),
+        const _AcademicReadinessStrip(),
+        const SizedBox(height: 28),
+        const Text(
+          'Расширенные импорты XLSX',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Все прежние домены сохранены. Это структурированные XLSX-потоки '
+          'с dry-run/diff/apply. PDF и изображения используйте только в '
+          'специализированных проверках плана и годового графика выше.',
+          style: TextStyle(color: Colors.black54),
+        ),
+        const SizedBox(height: 12),
+        for (final domain in domains) ...[
+          Card(
+            child: ListTile(
+              leading: Icon(_domainIcon(domain.domain)),
+              title: Text(domain.label),
+              subtitle: Text(
+                '${_advancedDomainHint(domain.domain)}\n'
+                '${importStudioDomainStateLabel(domain.domainState)} · '
+                '${domain.applyPermission}',
+              ),
+              isThreeLine: true,
+              trailing: domain.canDryRun
+                  ? const Icon(Icons.chevron_right_rounded)
+                  : const Chip(label: Text('Скоро')),
+              onTap: domain.canDryRun ? () => onSelect(domain) : null,
             ),
-            trailing: domain.canDryRun
-                ? const Icon(Icons.chevron_right_rounded)
-                : const Chip(label: Text('Скоро')),
-            onTap: domain.canDryRun ? () => onSelect(domain) : null,
           ),
-        );
-      },
+          const SizedBox(height: 8),
+        ],
+      ],
     );
+  }
+
+  String _advancedDomainHint(String domain) {
+    return switch (domain) {
+      'students' =>
+        'Только существующие Auth-пользователи; аккаунты не создаёт',
+      'terms' => 'Глобальные семестры; не годовой график учебного процесса',
+      'curriculum' => 'Legacy structured XLSX; PDF открывайте в шаге 1',
+      'groups' =>
+        'Legacy XLSX apply; распознавание названий открывайте в шаге 2',
+      _ => 'Структурированный XLSX import',
+    };
   }
 
   IconData _domainIcon(String domain) {
@@ -483,6 +687,204 @@ class _DomainHub extends StatelessWidget {
       default:
         return Icons.upload_file_outlined;
     }
+  }
+}
+
+class _AcademicChainCard extends StatelessWidget {
+  const _AcademicChainCard({
+    required this.step,
+    required this.icon,
+    required this.title,
+    required this.status,
+    required this.statusColor,
+    required this.description,
+    required this.primaryLabel,
+    required this.footer,
+    this.onPrimary,
+    this.secondaryLabel,
+    this.onSecondary,
+  });
+
+  final int step;
+  final IconData icon;
+  final String title;
+  final String status;
+  final Color statusColor;
+  final String description;
+  final String primaryLabel;
+  final String footer;
+  final VoidCallback? onPrimary;
+  final String? secondaryLabel;
+  final VoidCallback? onSecondary;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onPrimary != null;
+    return Card(
+      elevation: 0,
+      color: enabled ? const Color(0xFFF8F9FD) : const Color(0xFFF4F4F5),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: enabled ? const Color(0xFFD9DDEC) : const Color(0xFFE1E1E3),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CircleAvatar(
+              radius: 24,
+              backgroundColor: enabled
+                  ? const Color(0xFFE5E9FA)
+                  : const Color(0xFFE5E7EB),
+              child: Text(
+                '$step',
+                style: TextStyle(
+                  color: enabled ? const Color(0xFF3157C8) : Colors.black45,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(icon, size: 20),
+                          const SizedBox(width: 7),
+                          Text(
+                            title,
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Chip(
+                        side: BorderSide(
+                          color: statusColor.withValues(alpha: .3),
+                        ),
+                        backgroundColor: statusColor.withValues(alpha: .08),
+                        label: Text(
+                          status,
+                          style: TextStyle(
+                            color: statusColor,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(description),
+                  const SizedBox(height: 8),
+                  Text(
+                    footer,
+                    style: const TextStyle(color: Colors.black54, fontSize: 12),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      FilledButton.icon(
+                        onPressed: onPrimary,
+                        icon: Icon(
+                          enabled
+                              ? Icons.open_in_new_rounded
+                              : Icons.lock_outline_rounded,
+                        ),
+                        label: Text(primaryLabel),
+                      ),
+                      if (secondaryLabel != null)
+                        OutlinedButton(
+                          onPressed: onSecondary,
+                          child: Text(secondaryLabel!),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ChainConnector extends StatelessWidget {
+  const _ChainConnector();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.only(left: 39),
+      child: SizedBox(
+        height: 22,
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: VerticalDivider(width: 2, thickness: 2),
+        ),
+      ),
+    );
+  }
+}
+
+class _AcademicReadinessStrip extends StatelessWidget {
+  const _AcademicReadinessStrip();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: const Color(0xFFFFF8E7),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.verified_user_outlined, color: Color(0xFF8B5A00)),
+                SizedBox(width: 8),
+                Text(
+                  'Готовность цепочки',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: const [
+                Chip(label: Text('План: review доступен')),
+                Chip(label: Text('Группы: preview доступен')),
+                Chip(label: Text('Календарь: review доступен')),
+                Chip(label: Text('Расписание: не готово')),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Проверка документов не переключает текущий семестр и не '
+              'создаёт предметные offering, команды или чаты.',
+              style: TextStyle(color: Colors.black54),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -732,6 +1134,25 @@ class _ImportSourceStepState extends State<_ImportSourceStep> {
           widget.domain.notes,
           style: const TextStyle(color: Colors.black54),
         ),
+        if (widget.domain.domain == 'students') ...[
+          const SizedBox(height: 8),
+          const _DomainSafetyNotice(
+            icon: Icons.person_search_outlined,
+            text:
+                'Этот XLSX-поток только обновляет существующих '
+                'Auth-пользователей. Новые аккаунты и временные пароли '
+                'здесь не создаются.',
+          ),
+        ],
+        if (widget.domain.domain == 'terms') ...[
+          const SizedBox(height: 8),
+          const _DomainSafetyNotice(
+            icon: Icons.info_outline,
+            text:
+                'Это глобальные academic_terms. Годовой график занятий, '
+                'сессии и ГИА открывается отдельной кнопкой ниже.',
+          ),
+        ],
         const SizedBox(height: 16),
         Wrap(
           spacing: 8,
@@ -849,6 +1270,34 @@ class _ImportSourceStepState extends State<_ImportSourceStep> {
           ],
         ),
       ],
+    );
+  }
+}
+
+class _DomainSafetyNotice extends StatelessWidget {
+  const _DomainSafetyNotice({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF8E7),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE8D7A9)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Row(
+          children: [
+            Icon(icon, size: 19, color: const Color(0xFF8B5A00)),
+            const SizedBox(width: 8),
+            Expanded(child: Text(text)),
+          ],
+        ),
+      ),
     );
   }
 }

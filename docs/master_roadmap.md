@@ -1146,6 +1146,14 @@ recognition Slice 1 is implemented locally with Codex **APPROVE_WITH_NOTES**
   malformed names and ambiguous plans; Slice 1 apply remains disabled.
 - [x] Fast Admin Web group-name preview with focused Dart tests and Codex
   APPROVE_WITH_NOTES (SQL runtime role-play remains open).
+- [x] Unified `/import-studio` academic chain visibly separates plan review,
+  group/student matching, annual process calendar and future schedule readiness.
+- [x] Primary chain actions open specialized review panels directly; all nine
+  structured XLSX domains remain available as clearly secondary imports.
+- [x] Duplicate review intent is local-only and fail-closed until candidate
+  selection, discriminator/reason, audit and server resolution are implemented.
+- [x] Student XLSX clearly states that it only updates existing Auth users;
+  schedule validation/apply remains disabled and is not presented as ready.
 - [ ] Schedule import/validation against published process-calendar periods.
 
 Remote migrations (`2026-08-25`):

@@ -674,6 +674,14 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Admin Web exposes fast group-name recognition without service_role
 - [ ] Group recognition SQL role-play executed on PostgreSQL
 - [x] Codex APPROVE Stage 19.1b Slice 1
+- [x] Import Studio visibly presents plan → groups/students → calendar → schedule
+- [x] Primary academic cards open specialized review panels directly
+- [x] All nine legacy XLSX domains remain reachable as advanced imports
+- [x] Global terms and annual process calendar are visibly distinct
+- [x] Student XLSX states that it updates existing Auth users only
+- [x] Duplicate intent is local-only, classification-aware and preview-scoped
+- [x] Schedule validation/apply is visibly unavailable and cannot be triggered
+- [x] Codex APPROVE unified Admin academic workflow
 - [~] Full code + SQL + tests Codex APPROVE for each independent substage
 
 SQL-backed foundation items were runtime-verified on remote PostgreSQL with

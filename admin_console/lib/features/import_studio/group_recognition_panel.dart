@@ -4,6 +4,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/auth/admin_backend_config.dart';
 import 'group_recognition_repository.dart';
 
+enum GroupDuplicateReviewIntent { reuseGroup, addAlias }
+
 class GroupRecognitionPanel extends StatefulWidget {
   const GroupRecognitionPanel({
     super.key,
@@ -33,6 +35,7 @@ class _GroupRecognitionPanelState extends State<GroupRecognitionPanel> {
   String? _error;
   int _revision = 0;
   int _request = 0;
+  final Map<String, GroupDuplicateReviewIntent> _reviewIntents = {};
 
   GroupRecognitionRepository _defaultRepository() {
     if (AdminBackendConfig.isDemoMode) {
@@ -72,6 +75,7 @@ class _GroupRecognitionPanelState extends State<GroupRecognitionPanel> {
     setState(() {
       _revision++;
       _preview = null;
+      _reviewIntents.clear();
       _error = null;
     });
   }
@@ -127,6 +131,7 @@ class _GroupRecognitionPanelState extends State<GroupRecognitionPanel> {
     setState(() {
       _busy = true;
       _preview = null;
+      _reviewIntents.clear();
       _error = null;
     });
     try {
@@ -190,6 +195,7 @@ class _GroupRecognitionPanelState extends State<GroupRecognitionPanel> {
                       _selectedYear = year;
                       _revision++;
                       _preview = null;
+                      _reviewIntents.clear();
                       _error = null;
                     });
                   },
@@ -256,7 +262,22 @@ class _GroupRecognitionPanelState extends State<GroupRecognitionPanel> {
                     textAlign: TextAlign.center,
                   ),
                 )
-              : _RecognitionResults(preview: _preview!),
+              : _RecognitionResults(
+                  preview: _preview!,
+                  reviewIntents: _reviewIntents,
+                  onIntentChanged: (item, intent) {
+                    final preview = _preview;
+                    if (preview == null) return;
+                    final key = '${preview.previewId}:${item.sourceRowKey}';
+                    setState(() {
+                      if (intent == null) {
+                        _reviewIntents.remove(key);
+                      } else {
+                        _reviewIntents[key] = intent;
+                      }
+                    });
+                  },
+                ),
         ),
       ],
     );
@@ -264,9 +285,19 @@ class _GroupRecognitionPanelState extends State<GroupRecognitionPanel> {
 }
 
 class _RecognitionResults extends StatelessWidget {
-  const _RecognitionResults({required this.preview});
+  const _RecognitionResults({
+    required this.preview,
+    required this.reviewIntents,
+    required this.onIntentChanged,
+  });
 
   final GroupRecognitionPreview preview;
+  final Map<String, GroupDuplicateReviewIntent> reviewIntents;
+  final void Function(
+    GroupRecognitionItem item,
+    GroupDuplicateReviewIntent? intent,
+  )
+  onIntentChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -295,32 +326,47 @@ class _RecognitionResults extends StatelessWidget {
             separatorBuilder: (_, _) => const SizedBox(height: 6),
             itemBuilder: (context, index) {
               final item = preview.items[index];
+              final intentKey = '${preview.previewId}:${item.sourceRowKey}';
               return Card(
-                child: ListTile(
-                  leading: Icon(
-                    item.isBlocked
-                        ? Icons.warning_amber_rounded
-                        : Icons.check_circle_outline,
-                    color: item.isBlocked ? Colors.orange : Colors.green,
-                  ),
-                  title: Text(item.rawGroupName),
-                  subtitle: Text(
-                    'Параллель: ${item.parallelNumber ?? '—'} · '
-                    'код: ${item.programAliasKey ?? '—'} · '
-                    'курс: ${item.courseNumber ?? '—'} · '
-                    'поступление: ${item.derivedAdmissionYear ?? '—'}\n'
-                    '${_classificationLabel(item.classification)}'
-                    '${item.warnings.isEmpty ? '' : ' · ${item.warnings.join(', ')}'}',
-                  ),
-                  isThreeLine: true,
-                  trailing: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text('групп: ${item.candidateGroupIds.length}'),
-                      Text('планов: ${item.candidatePlanIds.length}'),
-                    ],
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ListTile(
+                      leading: Icon(
+                        item.isBlocked
+                            ? Icons.warning_amber_rounded
+                            : Icons.check_circle_outline,
+                        color: item.isBlocked ? Colors.orange : Colors.green,
+                      ),
+                      title: Text(item.rawGroupName),
+                      subtitle: Text(
+                        'Параллель: ${item.parallelNumber ?? '—'} · '
+                        'код: ${item.programAliasKey ?? '—'} · '
+                        'курс: ${item.courseNumber ?? '—'} · '
+                        'поступление: ${item.derivedAdmissionYear ?? '—'}\n'
+                        '${_classificationLabel(item.classification)}'
+                        '${item.warnings.isEmpty ? '' : ' · ${item.warnings.join(', ')}'}',
+                      ),
+                      isThreeLine: true,
+                      trailing: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text('групп: ${item.candidateGroupIds.length}'),
+                          Text('планов: ${item.candidatePlanIds.length}'),
+                        ],
+                      ),
+                    ),
+                    if (_showsDuplicateReview(item))
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                        child: _DuplicateIntentReview(
+                          item: item,
+                          value: reviewIntents[intentKey],
+                          onChanged: (intent) => onIntentChanged(item, intent),
+                        ),
+                      ),
+                  ],
                 ),
               );
             },
@@ -328,6 +374,15 @@ class _RecognitionResults extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  bool _showsDuplicateReview(GroupRecognitionItem item) {
+    return const {
+      'exact_group',
+      'exact_alias',
+      'semantic_duplicate',
+      'ambiguous_plan',
+    }.contains(item.classification);
   }
 
   String _classificationLabel(String value) {
@@ -342,5 +397,101 @@ class _RecognitionResults extends StatelessWidget {
       'parser_blocked' => 'Формат названия не распознан',
       _ => 'Конфликт: требуется ручная проверка',
     };
+  }
+}
+
+class _DuplicateIntentReview extends StatelessWidget {
+  const _DuplicateIntentReview({
+    required this.item,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final GroupRecognitionItem item;
+  final GroupDuplicateReviewIntent? value;
+  final ValueChanged<GroupDuplicateReviewIntent?> onChanged;
+
+  bool get _hasUniqueCandidate => item.candidateGroupIds.length == 1;
+  bool get _canReuse =>
+      _hasUniqueCandidate &&
+      const {
+        'exact_group',
+        'exact_alias',
+        'semantic_duplicate',
+      }.contains(item.classification);
+  bool get _canAddAlias =>
+      _hasUniqueCandidate && item.classification == 'semantic_duplicate';
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF8E7),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE8D7A9)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Предлагаемое решение по дублю',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Локальная пометка для проверки — не сохраняется и не '
+              'применяется. После изменения списка или года выбор сбросится.',
+              style: TextStyle(color: Colors.black54, fontSize: 12),
+            ),
+            const SizedBox(height: 8),
+            if (!_hasUniqueCandidate)
+              Text(
+                item.classification == 'ambiguous_plan'
+                    ? 'Сначала нужно выбрать версию учебного плана; решение '
+                          'по группе недоступно.'
+                    : 'Нельзя выбрать действие: сервер не нашёл ровно одну '
+                          'группу-кандидата.',
+                style: const TextStyle(color: Color(0xFF8B5A00)),
+              ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ChoiceChip(
+                  label: const Text('Использовать найденную группу'),
+                  selected: value == GroupDuplicateReviewIntent.reuseGroup,
+                  onSelected: _canReuse
+                      ? (selected) => onChanged(
+                          selected
+                              ? GroupDuplicateReviewIntent.reuseGroup
+                              : null,
+                        )
+                      : null,
+                ),
+                ChoiceChip(
+                  label: const Text('Добавить это название как вариант'),
+                  selected: value == GroupDuplicateReviewIntent.addAlias,
+                  onSelected: _canAddAlias
+                      ? (selected) => onChanged(
+                          selected ? GroupDuplicateReviewIntent.addAlias : null,
+                        )
+                      : null,
+                ),
+                const Tooltip(
+                  message:
+                      'Нужны дискриминатор, причина, аудит и server apply.',
+                  child: Chip(
+                    avatar: Icon(Icons.lock_outline, size: 16),
+                    label: Text('Создать отдельную — недоступно'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
