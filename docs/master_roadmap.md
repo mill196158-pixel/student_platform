@@ -967,10 +967,6 @@ Placements v1:
 
 Status: **DONE (remote applied)** / Codex **APPROVE** (`183efc8`, `001e1f0`, `cebfcf5`) — `content-media` deployed
 
-- [x] Единый телефонный Admin Preview использует общую мобильную тему и
-  `student_ui` renderers для News, Home Promo, Profile Feed, Vacancies и
-  Reference; Codex **APPROVE_WITH_NOTES** (без P0/P1).
-
 ### 15.1 Управляемые блоки Главной
 
 - [x] блоки вроде «Застрял с заданием?» → managed promo-карточки;

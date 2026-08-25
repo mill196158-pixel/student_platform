@@ -5,7 +5,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/auth/admin_backend_config.dart';
 import '../../../core/auth/admin_session_controller.dart';
-import '../../../shared/widgets/admin_student_phone_frame.dart';
 import '../../academic/students/students_repository.dart';
 import '../profile_feed/content_audience_selectors.dart';
 import 'content_media_store.dart';
@@ -120,7 +119,8 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
         _articles = articles;
         _corrections = corrections;
         _selectedArticleId ??= articles.isEmpty ? null : articles.first.id;
-        _selectedCategoryId ??= categories.isEmpty ? null : categories.first.id;
+        _selectedCategoryId ??=
+            categories.isEmpty ? null : categories.first.id;
         _loading = false;
       });
       final selected = _selectedArticle;
@@ -164,22 +164,23 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
                     children: [
                       TextField(
                         controller: editTitle,
-                        decoration: const InputDecoration(
-                          labelText: 'Название',
-                        ),
+                        decoration:
+                            const InputDecoration(labelText: 'Название'),
                       ),
                       TextField(
                         controller: editIcon,
-                        decoration: const InputDecoration(
-                          labelText: 'icon_key',
-                        ),
+                        decoration:
+                            const InputDecoration(labelText: 'icon_key'),
                       ),
                       DropdownButtonFormField<ReferenceCategoryStatus>(
                         value: status,
                         decoration: const InputDecoration(labelText: 'Статус'),
                         items: [
                           for (final s in ReferenceCategoryStatus.values)
-                            DropdownMenuItem(value: s, child: Text(s.name)),
+                            DropdownMenuItem(
+                              value: s,
+                              child: Text(s.name),
+                            ),
                         ],
                         onChanged: (value) {
                           if (value == null) return;
@@ -251,14 +252,16 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
                               onSelected: (status) {
                                 setDialogState(() {
                                   working = [...working];
-                                  working[i] = working[i].copyWith(
-                                    status: status,
-                                  );
+                                  working[i] =
+                                      working[i].copyWith(status: status);
                                 });
                               },
                               itemBuilder: (context) => [
                                 for (final s in ReferenceCategoryStatus.values)
-                                  PopupMenuItem(value: s, child: Text(s.name)),
+                                  PopupMenuItem(
+                                    value: s,
+                                    child: Text(s.name),
+                                  ),
                               ],
                               child: const Icon(Icons.flag_outlined),
                             ),
@@ -292,9 +295,8 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
                     const Divider(),
                     TextField(
                       controller: titleController,
-                      decoration: const InputDecoration(
-                        labelText: 'Новая категория',
-                      ),
+                      decoration:
+                          const InputDecoration(labelText: 'Новая категория'),
                     ),
                     TextField(
                       controller: keyController,
@@ -304,7 +306,8 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
                     ),
                     TextField(
                       controller: iconController,
-                      decoration: const InputDecoration(labelText: 'icon_key'),
+                      decoration:
+                          const InputDecoration(labelText: 'icon_key'),
                     ),
                     Align(
                       alignment: Alignment.centerRight,
@@ -492,7 +495,8 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
       final preview = await _repository.previewAudience(selected.id);
       if (!mounted) return;
       setState(() {
-        _banner = 'Preview аудитории: ${preview.recipientCount} получателей.';
+        _banner =
+            'Preview аудитории: ${preview.recipientCount} получателей.';
       });
     });
   }
@@ -606,12 +610,12 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
           'image' => const ReferenceImageBlock(assetId: ''),
           'file' => const ReferenceFileBlock(assetId: ''),
           'link' => const ReferenceLinkBlock(
-            label: '',
-            url: 'https://example.com',
-          ),
+              label: '',
+              url: 'https://example.com',
+            ),
           'cta' => const ReferenceCtaBlock(
-            cta: ReferenceArticleCta(label: '', route: '/'),
-          ),
+              cta: ReferenceArticleCta(label: '', route: '/'),
+            ),
           _ => const ReferenceTextBlock(text: ''),
         },
       ];
@@ -657,284 +661,218 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
 
     return SizedBox(
       height: 720,
-      child: LayoutBuilder(
-        builder: (context, constraints) => Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (constraints.maxWidth >= 1000)
-              Expanded(
-                flex: 2,
-                child: _ArticleListPanel(
-                  articles: _articles,
-                  selectedId: _selectedArticleId,
-                  onSelect: (id) {
-                    setState(() => _selectedArticleId = id);
-                    final item = _selectedArticle;
-                    if (item != null) _bindArticle(item);
-                  },
-                  onCreate: _canWrite ? _createArticle : null,
-                ),
-              ),
-            Expanded(
-              flex: 3,
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Справочник',
-                      style: Theme.of(context).textTheme.headlineSmall,
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Статьи `reference_article_v1` (schema 2) + категории '
-                      'через dedicated RPC. Аудитория/publish — Stage 14 RPC.',
-                    ),
-                    if (_banner != null) ...[
-                      const SizedBox(height: 12),
-                      Text(
-                        _banner!,
-                        style: const TextStyle(color: Colors.green),
-                      ),
-                    ],
-                    const SizedBox(height: 16),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        DropdownButtonFormField<String>(
-                          isExpanded: true,
-                          initialValue: _selectedCategoryId,
-                          decoration: const InputDecoration(
-                            labelText: 'Категория',
-                          ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            flex: 2,
+            child: _ArticleListPanel(
+              articles: _articles,
+              selectedId: _selectedArticleId,
+              onSelect: (id) {
+                setState(() => _selectedArticleId = id);
+                final item = _selectedArticle;
+                if (item != null) _bindArticle(item);
+              },
+              onCreate: _canWrite ? _createArticle : null,
+            ),
+          ),
+          Expanded(
+            flex: 3,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Справочник',
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Статьи `reference_article_v1` (schema 2) + категории '
+                    'через dedicated RPC. Аудитория/publish — Stage 14 RPC.',
+                  ),
+                  if (_banner != null) ...[
+                    const SizedBox(height: 12),
+                    Text(_banner!, style: const TextStyle(color: Colors.green)),
+                  ],
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          value: _selectedCategoryId,
+                          decoration:
+                              const InputDecoration(labelText: 'Категория'),
                           items: [
                             for (final category in _categories)
                               DropdownMenuItem(
                                 value: category.id,
-                                child: Text(
-                                  category.title,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
+                                child: Text(category.title),
                               ),
                           ],
                           onChanged: _canWrite
                               ? (value) =>
-                                    setState(() => _selectedCategoryId = value)
+                                  setState(() => _selectedCategoryId = value)
                               : null,
                         ),
-                        if (_canWrite) ...[
-                          const SizedBox(height: 8),
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: OutlinedButton.icon(
-                              onPressed: _busy ? null : _manageCategories,
-                              icon: const Icon(Icons.category_outlined),
-                              label: const Text('Категории'),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _titleController,
-                      enabled: _canWrite,
-                      decoration: const InputDecoration(labelText: 'Заголовок'),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                    TextField(
-                      controller: _iconKeyController,
-                      enabled: _canWrite,
-                      decoration: const InputDecoration(labelText: 'icon_key'),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                    TextField(
-                      controller: _shortTextController,
-                      enabled: _canWrite,
-                      decoration: const InputDecoration(
-                        labelText: 'short_text',
                       ),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                    TextField(
-                      controller: _sortOrderController,
-                      enabled: _canWrite,
-                      decoration: const InputDecoration(
-                        labelText: 'sort_order',
+                      if (_canWrite) ...[
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          onPressed: _busy ? null : _manageCategories,
+                          icon: const Icon(Icons.category_outlined),
+                          label: const Text('Категории'),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _titleController,
+                    enabled: _canWrite,
+                    decoration: const InputDecoration(labelText: 'Заголовок'),
+                  ),
+                  TextField(
+                    controller: _iconKeyController,
+                    enabled: _canWrite,
+                    decoration: const InputDecoration(labelText: 'icon_key'),
+                  ),
+                  TextField(
+                    controller: _shortTextController,
+                    enabled: _canWrite,
+                    decoration: const InputDecoration(labelText: 'short_text'),
+                  ),
+                  TextField(
+                    controller: _sortOrderController,
+                    enabled: _canWrite,
+                    decoration: const InputDecoration(labelText: 'sort_order'),
+                  ),
+                  const SizedBox(height: 12),
+                  _ReferenceBlocksEditor(
+                    blocks: _blocks,
+                    enabled: _canWrite,
+                    contentItemId: _selectedArticleId,
+                    onAdd: _addBlock,
+                    onUpdate: _updateBlock,
+                    onRemove: _removeBlock,
+                    onMove: _moveBlock,
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    value: _audienceMode,
+                    decoration: const InputDecoration(labelText: 'Аудитория'),
+                    items: const [
+                      DropdownMenuItem(value: 'all', child: Text('Все')),
+                      DropdownMenuItem(value: 'groups', child: Text('Группы')),
+                      DropdownMenuItem(
+                          value: 'users', child: Text('Пользователи')),
+                      DropdownMenuItem(
+                        value: 'groups_and_users',
+                        child: Text('Группы и пользователи'),
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    _ReferenceBlocksEditor(
-                      blocks: _blocks,
-                      enabled: _canWrite,
-                      contentItemId: _selectedArticleId,
-                      onAdd: _addBlock,
-                      onUpdate: _updateBlock,
-                      onRemove: _removeBlock,
-                      onMove: _moveBlock,
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      value: _audienceMode,
-                      isExpanded: true,
-                      decoration: const InputDecoration(labelText: 'Аудитория'),
-                      items: const [
-                        DropdownMenuItem(value: 'all', child: Text('Все')),
-                        DropdownMenuItem(
-                          value: 'groups',
-                          child: Text('Группы'),
+                    ],
+                    onChanged: _canWrite
+                        ? (value) {
+                            if (value == null) return;
+                            setState(() => _audienceMode = value);
+                          }
+                        : null,
+                  ),
+                  ContentAudienceSelectors(
+                    studentsRepository: _studentsRepository,
+                    audienceMode: _audienceMode,
+                    selectedGroupIds: _groupIds,
+                    selectedUserIds: _userIds,
+                    enabled: _canWrite,
+                    onChanged: ({required groupIds, required userIds}) {
+                      setState(() {
+                        _groupIds = groupIds;
+                        _userIds = userIds;
+                      });
+                    },
+                  ),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      if (_canWrite)
+                        FilledButton(
+                          onPressed: _busy ? null : _saveArticle,
+                          child: const Text('Сохранить'),
                         ),
-                        DropdownMenuItem(
-                          value: 'users',
-                          child: Text('Пользователи'),
+                      if (_canWrite)
+                        OutlinedButton(
+                          onPressed: _busy ? null : _previewAudience,
+                          child: const Text('Preview аудитории'),
                         ),
-                        DropdownMenuItem(
-                          value: 'groups_and_users',
-                          child: Text(
-                            'Группы и пользователи',
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                      if (_canPublish)
+                        FilledButton.tonal(
+                          onPressed: _busy ? null : _publish,
+                          child: const Text('Опубликовать'),
                         ),
-                      ],
-                      onChanged: _canWrite
-                          ? (value) {
-                              if (value == null) return;
-                              setState(() => _audienceMode = value);
-                            }
-                          : null,
+                      if (_canPublish)
+                        OutlinedButton(
+                          onPressed: _busy ? null : _archive,
+                          child: const Text('В архив'),
+                        ),
+                    ],
+                  ),
+                  if (preview != null) ...[
+                    const SizedBox(height: 20),
+                    const Text(
+                      'Preview (shared widget)',
+                      style: TextStyle(fontWeight: FontWeight.bold),
                     ),
-                    ContentAudienceSelectors(
-                      studentsRepository: _studentsRepository,
-                      audienceMode: _audienceMode,
-                      selectedGroupIds: _groupIds,
-                      selectedUserIds: _userIds,
-                      enabled: _canWrite,
-                      onChanged: ({required groupIds, required userIds}) {
-                        setState(() {
-                          _groupIds = groupIds;
-                          _userIds = userIds;
-                        });
-                      },
-                    ),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        if (_canWrite)
-                          FilledButton(
-                            onPressed: _busy ? null : _saveArticle,
-                            child: const Text('Сохранить'),
-                          ),
-                        if (_canWrite)
-                          OutlinedButton(
-                            onPressed: _busy ? null : _previewAudience,
-                            child: const Text('Preview аудитории'),
-                          ),
-                        if (_canPublish)
-                          FilledButton.tonal(
-                            onPressed: _busy ? null : _publish,
-                            child: const Text('Опубликовать'),
-                          ),
-                        if (_canPublish)
-                          OutlinedButton(
-                            onPressed: _busy ? null : _archive,
-                            child: const Text('В архив'),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 24),
-                    Text(
-                      'Обращения об ошибках (${_corrections.length})',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    if (_corrections.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 8),
-                        child: Text('Открытых обращений нет.'),
-                      )
-                    else
-                      for (final correction in _corrections)
-                        ListTile(
-                          title: Text(correction.contentTitle),
-                          subtitle: Text(correction.note),
-                          trailing: Wrap(
-                            spacing: 4,
-                            children: [
-                              TextButton(
-                                onPressed: _busy
-                                    ? null
-                                    : () => _resolveCorrection(
+                    const SizedBox(height: 8),
+                    StudentReferenceArticleCard(article: preview),
+                    StudentReferenceArticleDetail(article: preview),
+                  ],
+                  const SizedBox(height: 24),
+                  Text(
+                    'Обращения об ошибках (${_corrections.length})',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  if (_corrections.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: Text('Открытых обращений нет.'),
+                    )
+                  else
+                    for (final correction in _corrections)
+                      ListTile(
+                        title: Text(correction.contentTitle),
+                        subtitle: Text(correction.note),
+                        trailing: Wrap(
+                          spacing: 4,
+                          children: [
+                            TextButton(
+                              onPressed: _busy
+                                  ? null
+                                  : () => _resolveCorrection(
                                         correction,
                                         'resolve',
                                       ),
-                                child: const Text('Закрыть'),
-                              ),
-                              TextButton(
-                                onPressed: _busy
-                                    ? null
-                                    : () => _resolveCorrection(
+                              child: const Text('Закрыть'),
+                            ),
+                            TextButton(
+                              onPressed: _busy
+                                  ? null
+                                  : () => _resolveCorrection(
                                         correction,
                                         'reject',
                                       ),
-                                child: const Text('Отклонить'),
-                              ),
-                            ],
-                          ),
+                              child: const Text('Отклонить'),
+                            ),
+                          ],
                         ),
-                  ],
-                ),
+                      ),
+                ],
               ),
             ),
-            if (preview != null)
-              Expanded(
-                flex: 3,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const Padding(
-                        padding: EdgeInsets.only(bottom: 8),
-                        child: Text(
-                          'Preview · список справочника',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                      Expanded(
-                        child: AdminStudentPhoneFrame(
-                          showBottomNavigation: true,
-                          navigationIndex: 1,
-                          child: Scaffold(
-                            backgroundColor: const Color(0xFFFAF8FC),
-                            appBar: AppBar(
-                              title: const Text('Справочник'),
-                              backgroundColor: const Color(0xFFFAF8FC),
-                              surfaceTintColor: Colors.transparent,
-                            ),
-                            body: ListView(
-                              padding: const EdgeInsets.all(16),
-                              children: [
-                                Text(
-                                  preview.categoryTitle,
-                                  style: const TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                StudentReferenceArticleCard(article: preview),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -964,16 +902,13 @@ class _ReferenceBlocksEditor extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Wrap(
-          crossAxisAlignment: WrapCrossAlignment.center,
-          alignment: WrapAlignment.spaceBetween,
-          spacing: 8,
-          runSpacing: 4,
+        Row(
           children: [
             Text(
               'Блоки контента',
               style: Theme.of(context).textTheme.titleSmall,
             ),
+            const Spacer(),
             if (enabled)
               PopupMenuButton<String>(
                 onSelected: onAdd,
@@ -1068,9 +1003,7 @@ class _ReferenceBlockTileState extends State<_ReferenceBlockTile> {
     if (itemId == null || itemId.isEmpty || _uploading) return;
     final picked = await FilePicker.pickFiles(
       type: image ? FileType.image : FileType.custom,
-      allowedExtensions: image
-          ? null
-          : const ['pdf', 'png', 'jpg', 'jpeg', 'webp'],
+      allowedExtensions: image ? null : const ['pdf', 'png', 'jpg', 'jpeg', 'webp'],
       withData: true,
     );
     final file = picked?.files.single;
@@ -1080,10 +1013,10 @@ class _ReferenceBlockTileState extends State<_ReferenceBlockTile> {
     final contentType = name.endsWith('.png')
         ? 'image/png'
         : name.endsWith('.webp')
-        ? 'image/webp'
-        : name.endsWith('.pdf')
-        ? 'application/pdf'
-        : 'image/jpeg';
+            ? 'image/webp'
+            : name.endsWith('.pdf')
+                ? 'application/pdf'
+                : 'image/jpeg';
     setState(() => _uploading = true);
     try {
       final assetId = await ContentMediaStore().uploadBytes(
@@ -1186,191 +1119,199 @@ class _ReferenceBlockTileState extends State<_ReferenceBlockTile> {
             const SizedBox(height: 8),
             switch (block) {
               ReferenceTextBlock() => TextField(
-                enabled: widget.enabled,
-                controller: _primary,
-                minLines: 2,
-                maxLines: 6,
-                decoration: const InputDecoration(
-                  labelText: 'text',
-                  alignLabelWithHint: true,
+                  enabled: widget.enabled,
+                  controller: _primary,
+                  minLines: 2,
+                  maxLines: 6,
+                  decoration: const InputDecoration(
+                    labelText: 'text',
+                    alignLabelWithHint: true,
+                  ),
+                  onChanged: (value) =>
+                      widget.onUpdate(ReferenceTextBlock(text: value)),
                 ),
-                onChanged: (value) =>
-                    widget.onUpdate(ReferenceTextBlock(text: value)),
-              ),
               ReferenceImageBlock() => Column(
-                children: [
-                  TextField(
-                    enabled: widget.enabled,
-                    controller: _primary,
-                    decoration: const InputDecoration(labelText: 'asset_id'),
-                    onChanged: (value) => widget.onUpdate(
-                      ReferenceImageBlock(
-                        assetId: value,
-                        caption: _secondary.text.trim().isEmpty
-                            ? null
-                            : _secondary.text.trim(),
+                  children: [
+                    TextField(
+                      enabled: widget.enabled,
+                      controller: _primary,
+                      decoration:
+                          const InputDecoration(labelText: 'asset_id'),
+                      onChanged: (value) => widget.onUpdate(
+                        ReferenceImageBlock(
+                          assetId: value,
+                          caption: _secondary.text.trim().isEmpty
+                              ? null
+                              : _secondary.text.trim(),
+                        ),
                       ),
                     ),
-                  ),
-                  TextField(
-                    enabled: widget.enabled,
-                    controller: _secondary,
-                    decoration: const InputDecoration(
-                      labelText: 'caption (опц.)',
-                    ),
-                    onChanged: (value) => widget.onUpdate(
-                      ReferenceImageBlock(
-                        assetId: _primary.text,
-                        caption: value.trim().isEmpty ? null : value.trim(),
+                    TextField(
+                      enabled: widget.enabled,
+                      controller: _secondary,
+                      decoration: const InputDecoration(
+                        labelText: 'caption (опц.)',
+                      ),
+                      onChanged: (value) => widget.onUpdate(
+                        ReferenceImageBlock(
+                          assetId: _primary.text,
+                          caption:
+                              value.trim().isEmpty ? null : value.trim(),
+                        ),
                       ),
                     ),
-                  ),
-                  if (widget.enabled && widget.contentItemId != null)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton.icon(
-                        onPressed: () => _uploadMedia(
-                          image: true,
-                          onAsset: (id) => widget.onUpdate(
-                            ReferenceImageBlock(
-                              assetId: id,
-                              caption: _secondary.text.trim().isEmpty
-                                  ? null
-                                  : _secondary.text.trim(),
+                    if (widget.enabled && widget.contentItemId != null)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: () => _uploadMedia(
+                            image: true,
+                            onAsset: (id) => widget.onUpdate(
+                              ReferenceImageBlock(
+                                assetId: id,
+                                caption: _secondary.text.trim().isEmpty
+                                    ? null
+                                    : _secondary.text.trim(),
+                              ),
                             ),
                           ),
+                          icon: const Icon(Icons.upload_file),
+                          label: const Text('Загрузить изображение'),
                         ),
-                        icon: const Icon(Icons.upload_file),
-                        label: const Text('Загрузить изображение'),
                       ),
-                    ),
-                ],
-              ),
+                  ],
+                ),
               ReferenceFileBlock() => Column(
-                children: [
-                  TextField(
-                    enabled: widget.enabled,
-                    controller: _primary,
-                    decoration: const InputDecoration(labelText: 'asset_id'),
-                    onChanged: (value) => widget.onUpdate(
-                      ReferenceFileBlock(
-                        assetId: value,
-                        title: _secondary.text.trim().isEmpty
-                            ? null
-                            : _secondary.text.trim(),
+                  children: [
+                    TextField(
+                      enabled: widget.enabled,
+                      controller: _primary,
+                      decoration:
+                          const InputDecoration(labelText: 'asset_id'),
+                      onChanged: (value) => widget.onUpdate(
+                        ReferenceFileBlock(
+                          assetId: value,
+                          title: _secondary.text.trim().isEmpty
+                              ? null
+                              : _secondary.text.trim(),
+                        ),
                       ),
                     ),
-                  ),
-                  TextField(
-                    enabled: widget.enabled,
-                    controller: _secondary,
-                    decoration: const InputDecoration(
-                      labelText: 'title (опц.)',
-                    ),
-                    onChanged: (value) => widget.onUpdate(
-                      ReferenceFileBlock(
-                        assetId: _primary.text,
-                        title: value.trim().isEmpty ? null : value.trim(),
+                    TextField(
+                      enabled: widget.enabled,
+                      controller: _secondary,
+                      decoration:
+                          const InputDecoration(labelText: 'title (опц.)'),
+                      onChanged: (value) => widget.onUpdate(
+                        ReferenceFileBlock(
+                          assetId: _primary.text,
+                          title: value.trim().isEmpty ? null : value.trim(),
+                        ),
                       ),
                     ),
-                  ),
-                  if (widget.enabled && widget.contentItemId != null)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton.icon(
-                        onPressed: () => _uploadMedia(
-                          image: false,
-                          onAsset: (id) => widget.onUpdate(
-                            ReferenceFileBlock(
-                              assetId: id,
-                              title: _secondary.text.trim().isEmpty
-                                  ? null
-                                  : _secondary.text.trim(),
+                    if (widget.enabled && widget.contentItemId != null)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: () => _uploadMedia(
+                            image: false,
+                            onAsset: (id) => widget.onUpdate(
+                              ReferenceFileBlock(
+                                assetId: id,
+                                title: _secondary.text.trim().isEmpty
+                                    ? null
+                                    : _secondary.text.trim(),
+                              ),
                             ),
                           ),
+                          icon: const Icon(Icons.upload_file),
+                          label: const Text('Загрузить файл'),
                         ),
-                        icon: const Icon(Icons.upload_file),
-                        label: const Text('Загрузить файл'),
                       ),
-                    ),
-                ],
-              ),
+                  ],
+                ),
               ReferenceLinkBlock() => Column(
-                children: [
-                  TextField(
-                    enabled: widget.enabled,
-                    controller: _primary,
-                    decoration: const InputDecoration(labelText: 'label'),
-                    onChanged: (value) => widget.onUpdate(
-                      ReferenceLinkBlock(label: value, url: _secondary.text),
-                    ),
-                  ),
-                  TextField(
-                    enabled: widget.enabled,
-                    controller: _secondary,
-                    decoration: const InputDecoration(labelText: 'url'),
-                    onChanged: (value) => widget.onUpdate(
-                      ReferenceLinkBlock(label: _primary.text, url: value),
-                    ),
-                  ),
-                ],
-              ),
-              ReferenceCtaBlock() => Column(
-                children: [
-                  TextField(
-                    enabled: widget.enabled,
-                    controller: _primary,
-                    decoration: const InputDecoration(labelText: 'label'),
-                    onChanged: (value) => widget.onUpdate(
-                      ReferenceCtaBlock(
-                        cta: ReferenceArticleCta(
+                  children: [
+                    TextField(
+                      enabled: widget.enabled,
+                      controller: _primary,
+                      decoration: const InputDecoration(labelText: 'label'),
+                      onChanged: (value) => widget.onUpdate(
+                        ReferenceLinkBlock(
                           label: value,
-                          route: _secondary.text.trim().isEmpty
-                              ? null
-                              : _secondary.text.trim(),
-                          url: _tertiary.text.trim().isEmpty
-                              ? null
-                              : _tertiary.text.trim(),
+                          url: _secondary.text,
                         ),
                       ),
                     ),
-                  ),
-                  TextField(
-                    enabled: widget.enabled,
-                    controller: _secondary,
-                    decoration: const InputDecoration(
-                      labelText: 'route (опц.)',
-                    ),
-                    onChanged: (value) => widget.onUpdate(
-                      ReferenceCtaBlock(
-                        cta: ReferenceArticleCta(
+                    TextField(
+                      enabled: widget.enabled,
+                      controller: _secondary,
+                      decoration: const InputDecoration(labelText: 'url'),
+                      onChanged: (value) => widget.onUpdate(
+                        ReferenceLinkBlock(
                           label: _primary.text,
-                          route: value.trim().isEmpty ? null : value.trim(),
-                          url: _tertiary.text.trim().isEmpty
-                              ? null
-                              : _tertiary.text.trim(),
+                          url: value,
                         ),
                       ),
                     ),
-                  ),
-                  TextField(
-                    enabled: widget.enabled,
-                    controller: _tertiary,
-                    decoration: const InputDecoration(labelText: 'url (опц.)'),
-                    onChanged: (value) => widget.onUpdate(
-                      ReferenceCtaBlock(
-                        cta: ReferenceArticleCta(
-                          label: _primary.text,
-                          route: _secondary.text.trim().isEmpty
-                              ? null
-                              : _secondary.text.trim(),
-                          url: value.trim().isEmpty ? null : value.trim(),
+                  ],
+                ),
+              ReferenceCtaBlock() => Column(
+                  children: [
+                    TextField(
+                      enabled: widget.enabled,
+                      controller: _primary,
+                      decoration: const InputDecoration(labelText: 'label'),
+                      onChanged: (value) => widget.onUpdate(
+                        ReferenceCtaBlock(
+                          cta: ReferenceArticleCta(
+                            label: value,
+                            route: _secondary.text.trim().isEmpty
+                                ? null
+                                : _secondary.text.trim(),
+                            url: _tertiary.text.trim().isEmpty
+                                ? null
+                                : _tertiary.text.trim(),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ],
-              ),
+                    TextField(
+                      enabled: widget.enabled,
+                      controller: _secondary,
+                      decoration:
+                          const InputDecoration(labelText: 'route (опц.)'),
+                      onChanged: (value) => widget.onUpdate(
+                        ReferenceCtaBlock(
+                          cta: ReferenceArticleCta(
+                            label: _primary.text,
+                            route: value.trim().isEmpty ? null : value.trim(),
+                            url: _tertiary.text.trim().isEmpty
+                                ? null
+                                : _tertiary.text.trim(),
+                          ),
+                        ),
+                      ),
+                    ),
+                    TextField(
+                      enabled: widget.enabled,
+                      controller: _tertiary,
+                      decoration:
+                          const InputDecoration(labelText: 'url (опц.)'),
+                      onChanged: (value) => widget.onUpdate(
+                        ReferenceCtaBlock(
+                          cta: ReferenceArticleCta(
+                            label: _primary.text,
+                            route: _secondary.text.trim().isEmpty
+                                ? null
+                                : _secondary.text.trim(),
+                            url: value.trim().isEmpty ? null : value.trim(),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
             },
           ],
         ),

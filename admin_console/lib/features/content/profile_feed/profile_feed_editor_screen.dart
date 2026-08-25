@@ -4,7 +4,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/auth/admin_backend_config.dart';
 import '../../../core/auth/admin_session_controller.dart';
-import '../../../shared/widgets/admin_student_phone_frame.dart';
 import '../../academic/students/students_repository.dart';
 import 'content_audience_selectors.dart';
 import 'profile_feed_item.dart';
@@ -16,7 +15,11 @@ import 'supabase_profile_feed_repository.dart';
 /// Create always sets placement `profile_feed` explicitly.
 /// No news import/copy path.
 class ProfileFeedEditorScreen extends StatefulWidget {
-  const ProfileFeedEditorScreen({super.key, this.repository, this.session});
+  const ProfileFeedEditorScreen({
+    super.key,
+    this.repository,
+    this.session,
+  });
 
   final ProfileFeedRepository? repository;
   final AdminSessionController? session;
@@ -261,9 +264,9 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
     await _run(() async {
       final nextOrigin =
           (selected.origin == ContentOrigin.importSource ||
-              selected.origin == ContentOrigin.userSubmission)
-          ? selected.origin
-          : (ContentOrigin.tryParse(_origin) ?? selected.origin);
+                  selected.origin == ContentOrigin.userSubmission)
+              ? selected.origin
+              : (ContentOrigin.tryParse(_origin) ?? selected.origin);
       var next = selected.copyWith(
         title: payload.title,
         payload: payload,
@@ -411,9 +414,10 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
             children: [
               Text(
                 'Лента профиля',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+                style: Theme.of(context)
+                    .textTheme
+                    .titleLarge
+                    ?.copyWith(fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 8),
               const Text(
@@ -463,96 +467,31 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
                     ],
                     Text(
                       'Preview (тот же виджет, что Mobile)',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w800),
                     ),
                     const SizedBox(height: 8),
                     SizedBox(
-                      height: 560,
-                      child: AdminStudentPhoneFrame(
-                        showBottomNavigation: true,
-                        navigationIndex: 4,
-                        child: Scaffold(
-                          backgroundColor: const Color(0xFFFAF8FC),
-                          body: SafeArea(
-                            bottom: false,
-                            child: ListView(
-                              padding: const EdgeInsets.fromLTRB(
-                                20,
-                                30,
-                                20,
-                                24,
-                              ),
-                              children: [
-                                const Row(
-                                  children: [
-                                    CircleAvatar(
-                                      radius: 30,
-                                      child: Text(
-                                        'А',
-                                        style: TextStyle(
-                                          fontSize: 24,
-                                          fontWeight: FontWeight.w800,
-                                        ),
-                                      ),
-                                    ),
-                                    SizedBox(width: 14),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            'Анна Смирнова',
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: TextStyle(
-                                              fontSize: 20,
-                                              fontWeight: FontWeight.w800,
-                                            ),
-                                          ),
-                                          Text('1-СбПГС-2 · студент'),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 28),
-                                const Text(
-                                  'Лента',
-                                  style: TextStyle(
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                SizedBox(
-                                  height: 180,
-                                  child: StudentProfileFeedCard(
-                                    payload: preview,
-                                    showDemoBadge:
-                                        selected.origin == ContentOrigin.demo,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
+                      height: 160,
+                      child: StudentProfileFeedCard(
+                        payload: preview,
+                        showDemoBadge: selected.origin == ContentOrigin.demo,
                       ),
                     ),
                     const SizedBox(height: 16),
                     TextField(
                       controller: _titleController,
-                      decoration: const InputDecoration(labelText: 'Заголовок'),
+                      decoration:
+                          const InputDecoration(labelText: 'Заголовок'),
                       enabled: _canWrite && draftOnly,
                       onChanged: (_) => setState(() {}),
                     ),
                     TextField(
                       controller: _subtitleController,
-                      decoration: const InputDecoration(
-                        labelText: 'Подзаголовок',
-                      ),
+                      decoration:
+                          const InputDecoration(labelText: 'Подзаголовок'),
                       enabled: _canWrite && draftOnly,
                       onChanged: (_) => setState(() {}),
                     ),
@@ -568,7 +507,6 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
                         labelText: 'Внутренний маршрут',
                       ),
                       enabled: _canWrite && draftOnly,
-                      onChanged: (_) => setState(() {}),
                     ),
                     TextField(
                       controller: _ctaUrlController,
@@ -576,7 +514,6 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
                         labelText: 'Внешняя ссылка',
                       ),
                       enabled: _canWrite && draftOnly,
-                      onChanged: (_) => setState(() {}),
                     ),
                     const SizedBox(height: 8),
                     const InputDecorator(
@@ -600,9 +537,14 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
                     DropdownButtonFormField<String>(
                       key: ValueKey('audience-$_audienceMode'),
                       initialValue: _audienceMode,
-                      decoration: const InputDecoration(labelText: 'Аудитория'),
+                      decoration: const InputDecoration(
+                        labelText: 'Аудитория',
+                      ),
                       items: const [
-                        DropdownMenuItem(value: 'all', child: Text('Все')),
+                        DropdownMenuItem(
+                          value: 'all',
+                          child: Text('Все'),
+                        ),
                         DropdownMenuItem(
                           value: 'groups',
                           child: Text('Группы'),
@@ -633,7 +575,10 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
                       selectedGroupIds: _groupIds,
                       selectedUserIds: _userIds,
                       enabled: _canWrite && draftOnly,
-                      onChanged: ({required groupIds, required userIds}) {
+                      onChanged: ({
+                        required groupIds,
+                        required userIds,
+                      }) {
                         setState(() {
                           _groupIds = groupIds;
                           _userIds = userIds;
@@ -643,7 +588,9 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
                     ),
                     const SizedBox(height: 8),
                     OutlinedButton.icon(
-                      onPressed: _busy ? null : _previewAudience,
+                      onPressed: _busy || selected == null
+                          ? null
+                          : _previewAudience,
                       icon: const Icon(Icons.preview_outlined),
                       label: const Text('Preview аудитории'),
                     ),
@@ -701,8 +648,7 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
                           child: const Text('Сохранить'),
                         ),
                         FilledButton.tonal(
-                          onPressed:
-                              !_canPublish ||
+                          onPressed: !_canPublish ||
                                   _busy ||
                                   selected.status != ProfileFeedStatus.draft
                               ? null
@@ -710,8 +656,7 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
                           child: const Text('Опубликовать'),
                         ),
                         OutlinedButton(
-                          onPressed:
-                              !_canWrite ||
+                          onPressed: !_canWrite ||
                                   _busy ||
                                   selected.status == ProfileFeedStatus.archived
                               ? null

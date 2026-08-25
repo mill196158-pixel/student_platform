@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:student_platform_admin/features/content/vacancies/vacancy_editor_screen.dart';
 import 'package:student_platform_admin/features/content/vacancies/vacancy_item.dart';
 import 'package:student_platform_admin/features/content/vacancies/vacancy_repository.dart';
-import 'package:student_platform_admin/shared/widgets/admin_student_phone_frame.dart';
 import 'package:student_ui/student_ui.dart';
 
 void main() {
@@ -11,17 +10,16 @@ void main() {
 
   Future<void> pumpEditor(
     WidgetTester tester,
-    VacancyRepository repo, [
-    Size size = const Size(1400, 1200),
-  ]) async {
-    await tester.binding.setSurfaceSize(size);
+    VacancyRepository repo,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: SizedBox(
-            width: size.width,
-            height: size.height,
+            width: 1400,
+            height: 1200,
             child: VacancyEditorScreen(repository: repo),
           ),
         ),
@@ -30,46 +28,18 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('lists local vacancies and shows shared preview', (tester) async {
+  testWidgets('lists local vacancies and shows shared preview', (
+    tester,
+  ) async {
     await pumpEditor(tester, LocalVacancyRepository());
 
-    expect(find.text('Вакансии'), findsWidgets);
+    expect(find.text('Вакансии'), findsOneWidget);
     expect(find.text('Junior Flutter Developer'), findsWidgets);
     expect(find.byType(StudentVacancyCard), findsOneWidget);
-    expect(find.byType(AdminStudentPhoneFrame), findsOneWidget);
-    expect(
-      tester
-          .widget<StudentBottomNav>(find.byType(StudentBottomNav))
-          .currentIndex,
-      1,
-    );
     expect(
       find.textContaining('User submission не публикуется'),
       findsOneWidget,
     );
-  });
-
-  testWidgets('title edits update vacancy preview live', (tester) async {
-    await pumpEditor(tester, LocalVacancyRepository());
-    await tester.tap(find.text('Новая вакансия'));
-    await tester.pumpAndSettle();
-    final title = find.byWidgetPredicate(
-      (widget) =>
-          widget is TextField && widget.decoration?.labelText == 'Название',
-    );
-    await tester.enterText(title, 'Стажёр-проектировщик');
-    await tester.pump();
-
-    expect(find.text('Стажёр-проектировщик'), findsWidgets);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('vacancy frame does not overflow at narrow width', (
-    tester,
-  ) async {
-    await pumpEditor(tester, LocalVacancyRepository(), const Size(760, 900));
-    expect(find.byType(AdminStudentPhoneFrame), findsOneWidget);
-    expect(tester.takeException(), isNull);
   });
 
   testWidgets('create draft uses local repository', (tester) async {
@@ -115,9 +85,8 @@ void main() {
 
   test('local moderate approve requires in_moderation', () async {
     final repo = LocalVacancyRepository();
-    final submitted = (await repo.list()).firstWhere(
-      (e) => e.status == VacancyStatus.submitted,
-    );
+    final submitted = (await repo.list())
+        .firstWhere((e) => e.status == VacancyStatus.submitted);
     expect(
       () => repo.moderate(
         id: submitted.id,
@@ -141,9 +110,8 @@ void main() {
 
   test('local moderate approve moves in_moderation to approved', () async {
     final repo = LocalVacancyRepository();
-    final submitted = (await repo.list()).firstWhere(
-      (e) => e.status == VacancyStatus.submitted,
-    );
+    final submitted = (await repo.list())
+        .firstWhere((e) => e.status == VacancyStatus.submitted);
     final inMod = await repo.moderate(
       id: submitted.id,
       action: 'take_in_moderation',
@@ -159,9 +127,8 @@ void main() {
 
   test('local moderate reject requires reason', () async {
     final repo = LocalVacancyRepository();
-    final submitted = (await repo.list()).firstWhere(
-      (e) => e.status == VacancyStatus.submitted,
-    );
+    final submitted = (await repo.list())
+        .firstWhere((e) => e.status == VacancyStatus.submitted);
     expect(
       () => repo.moderate(
         id: submitted.id,
@@ -179,7 +146,7 @@ void main() {
     await tester.tap(find.text('Быстрые деньги без опыта'));
     await tester.pumpAndSettle();
 
-    final scrollable = find.byType(Scrollable).at(1);
+    final scrollable = find.byType(Scrollable).last;
     await tester.scrollUntilVisible(
       find.textContaining('Причина отклонения'),
       200,
@@ -190,23 +157,22 @@ void main() {
     expect(find.textContaining('мошенничество'), findsOneWidget);
   });
 
-  testWidgets('requirements and contacts fields are editable on draft', (
-    tester,
-  ) async {
+  testWidgets('requirements and contacts fields are editable on draft',
+      (tester) async {
     final repo = LocalVacancyRepository();
     await pumpEditor(tester, repo);
 
     await tester.tap(find.text('Новая вакансия'));
     await tester.pumpAndSettle();
 
-    final scrollable = find.byType(Scrollable).at(1);
-    final emailField = find.byWidgetPredicate(
-      (widget) =>
-          widget is TextField && widget.decoration?.labelText == 'Email',
+    final scrollable = find.byType(Scrollable).last;
+    await tester.scrollUntilVisible(
+      find.text('Требования'),
+      200,
+      scrollable: scrollable,
     );
-    await tester.scrollUntilVisible(emailField, 200, scrollable: scrollable);
 
     expect(find.text('Требования'), findsOneWidget);
-    expect(emailField, findsOneWidget);
+    expect(find.text('Email'), findsOneWidget);
   });
 }

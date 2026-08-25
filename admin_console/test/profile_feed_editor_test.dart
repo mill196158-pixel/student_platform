@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:student_platform_admin/features/content/profile_feed/profile_feed_editor_screen.dart';
 import 'package:student_platform_admin/features/content/profile_feed/profile_feed_repository.dart';
-import 'package:student_platform_admin/shared/widgets/admin_student_phone_frame.dart';
 import 'package:student_ui/student_ui.dart';
 
 void main() {
@@ -10,17 +9,16 @@ void main() {
 
   Future<void> pumpEditor(
     WidgetTester tester,
-    ProfileFeedRepository repo, [
-    Size size = const Size(1400, 1200),
-  ]) async {
-    await tester.binding.setSurfaceSize(size);
+    ProfileFeedRepository repo,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: SizedBox(
-            width: size.width,
-            height: size.height,
+            width: 1400,
+            height: 1200,
             child: ProfileFeedEditorScreen(repository: repo),
           ),
         ),
@@ -29,49 +27,17 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('lists local profile feed and shows shared preview', (
-    tester,
-  ) async {
+  testWidgets('lists local profile feed and shows shared preview',
+      (tester) async {
     await pumpEditor(tester, LocalProfileFeedRepository());
 
     expect(find.text('Лента профиля'), findsOneWidget);
     expect(find.text('О нас'), findsWidgets);
     expect(find.byType(StudentProfileFeedCard), findsOneWidget);
-    expect(find.byType(AdminStudentPhoneFrame), findsOneWidget);
     expect(
-      tester
-          .widget<StudentBottomNav>(find.byType(StudentBottomNav))
-          .currentIndex,
-      4,
+      find.textContaining('Новости не копируются'),
+      findsOneWidget,
     );
-    expect(find.textContaining('Новости не копируются'), findsOneWidget);
-  });
-
-  testWidgets('title edits update profile preview live', (tester) async {
-    await pumpEditor(tester, LocalProfileFeedRepository());
-    await tester.tap(find.text('Новая карточка'));
-    await tester.pumpAndSettle();
-    final title = find.byWidgetPredicate(
-      (widget) =>
-          widget is TextField && widget.decoration?.labelText == 'Заголовок',
-    );
-    await tester.enterText(title, 'Новая карточка профиля');
-    await tester.pump();
-
-    expect(find.text('Новая карточка профиля'), findsWidgets);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('profile frame does not overflow at narrow width', (
-    tester,
-  ) async {
-    await pumpEditor(
-      tester,
-      LocalProfileFeedRepository(),
-      const Size(760, 900),
-    );
-    expect(find.byType(AdminStudentPhoneFrame), findsOneWidget);
-    expect(tester.takeException(), isNull);
   });
 
   testWidgets('create draft uses local repository', (tester) async {

@@ -7,7 +7,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/auth/admin_backend_config.dart';
 import '../../../core/auth/admin_session_controller.dart';
-import '../../../shared/widgets/admin_student_phone_frame.dart';
 import '../../academic/students/students_repository.dart';
 import '../profile_feed/content_audience_selectors.dart';
 import 'supabase_vacancy_repository.dart';
@@ -260,30 +259,30 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
               audienceMode: 'all',
             ))
         .copyWith(
-          title: title,
-          companyName: _companyController.text.trim(),
-          summary: summary,
-          description: description,
-          employmentType: _employmentType,
-          workFormat: _workFormat,
-          location: _locationController.text.trim().isEmpty
-              ? null
-              : _locationController.text.trim(),
-          salaryText: _salaryController.text.trim().isEmpty
-              ? null
-              : _salaryController.text.trim(),
-          externalUrl: _urlController.text.trim().isEmpty
-              ? null
-              : _urlController.text.trim(),
-          contacts: _contactsFromFields(),
-          expiresAt: _expiresAt,
-          clearLocation: _locationController.text.trim().isEmpty,
-          clearSalaryText: _salaryController.text.trim().isEmpty,
-          clearExternalUrl: _urlController.text.trim().isEmpty,
-          clearEmploymentType: _employmentType == null,
-          clearWorkFormat: _workFormat == null,
-          clearExpiresAt: _expiresAt == null,
-        );
+      title: title,
+      companyName: _companyController.text.trim(),
+      summary: summary,
+      description: description,
+      employmentType: _employmentType,
+      workFormat: _workFormat,
+      location: _locationController.text.trim().isEmpty
+          ? null
+          : _locationController.text.trim(),
+      salaryText: _salaryController.text.trim().isEmpty
+          ? null
+          : _salaryController.text.trim(),
+      externalUrl: _urlController.text.trim().isEmpty
+          ? null
+          : _urlController.text.trim(),
+      contacts: _contactsFromFields(),
+      expiresAt: _expiresAt,
+      clearLocation: _locationController.text.trim().isEmpty,
+      clearSalaryText: _salaryController.text.trim().isEmpty,
+      clearExternalUrl: _urlController.text.trim().isEmpty,
+      clearEmploymentType: _employmentType == null,
+      clearWorkFormat: _workFormat == null,
+      clearExpiresAt: _expiresAt == null,
+    );
   }
 
   Future<void> _run(Future<void> Function() action) async {
@@ -315,7 +314,9 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
     await _run(() async {
       final origin = ContentOrigin.tryParse(_origin);
       if (origin != ContentOrigin.admin && origin != ContentOrigin.demo) {
-        setState(() => _banner = 'Ручное создание только с origin admin|demo.');
+        setState(
+          () => _banner = 'Ручное создание только с origin admin|demo.',
+        );
         return;
       }
       final created = await _repository.createDraft(
@@ -459,7 +460,10 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
 
   Future<void> _resolveReport(VacancyReportEntry report, String action) async {
     await _run(() async {
-      await _repository.resolveReport(reportId: report.id, action: action);
+      await _repository.resolveReport(
+        reportId: report.id,
+        action: action,
+      );
       await _loadReports();
       if (!mounted) return;
       setState(() => _banner = 'Жалоба обработана.');
@@ -490,7 +494,8 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
                 child: const Text('Отмена'),
               ),
               FilledButton(
-                onPressed: () => Navigator.pop(context, controller.text.trim()),
+                onPressed: () =>
+                    Navigator.pop(context, controller.text.trim()),
                 child: const Text('Отклонить'),
               ),
             ],
@@ -540,8 +545,7 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
     }
 
     final selected = _selected;
-    final preview =
-        _draftFromFields(base: selected)?.previewPayload ??
+    final preview = _draftFromFields(base: selected)?.previewPayload ??
         VacancyCardPayload.demoVacancies.first;
 
     return Row(
@@ -554,9 +558,9 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
             children: [
               Text(
                 'Вакансии',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
               ),
               const SizedBox(height: 8),
               const Text(
@@ -606,44 +610,14 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
                     Text(
                       'Preview (тот же виджет, что Mobile)',
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
+                            fontWeight: FontWeight.w800,
+                          ),
                     ),
                     const SizedBox(height: 8),
-                    SizedBox(
-                      height: 560,
-                      child: AdminStudentPhoneFrame(
-                        showBottomNavigation: true,
-                        navigationIndex: 1,
-                        child: Scaffold(
-                          backgroundColor: const Color(0xFFFAF8FC),
-                          appBar: AppBar(
-                            title: const Text('Вакансии'),
-                            backgroundColor: const Color(0xFFFAF8FC),
-                            surfaceTintColor: Colors.transparent,
-                          ),
-                          body: ListView(
-                            padding: const EdgeInsets.all(16),
-                            children: [
-                              const Text(
-                                'Для студентов',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              StudentVacancyCard(
-                                payload: preview,
-                                showDemoBadge:
-                                    selected.origin == ContentOrigin.demo,
-                                expiresLabel: vacancyExpiresLabel(_expiresAt),
-                                hasContacts: _contactsFromFields().isNotEmpty,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
+                    StudentVacancyCard(
+                      payload: preview,
+                      showDemoBadge: selected.origin == ContentOrigin.demo,
+                      expiresLabel: vacancyExpiresLabel(selected.expiresAt),
                     ),
                     const SizedBox(height: 16),
                     Text(
@@ -657,8 +631,8 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
                       Text(
                         'Причина отклонения: ${selected.rejectionReason}',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
+                              color: Theme.of(context).colorScheme.error,
+                            ),
                       ),
                     ],
                     const SizedBox(height: 12),
@@ -692,7 +666,6 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
                       ),
                       enabled: _canWrite && _draftOnly,
                       maxLines: 4,
-                      onChanged: (_) => setState(() {}),
                     ),
                     TextField(
                       controller: _requirementsController,
@@ -701,7 +674,6 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
                       ),
                       enabled: _canWrite && _draftOnly,
                       maxLines: 3,
-                      onChanged: (_) => setState(() {}),
                     ),
                     DropdownButtonFormField<VacancyEmploymentType?>(
                       key: ValueKey('employment-$_employmentType'),
@@ -753,7 +725,6 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
                         labelText: 'Местоположение (текст)',
                       ),
                       enabled: _canWrite && _draftOnly,
-                      onChanged: (_) => setState(() {}),
                     ),
                     TextField(
                       controller: _salaryController,
@@ -761,40 +732,37 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
                         labelText: 'Зарплата (optional)',
                       ),
                       enabled: _canWrite && _draftOnly,
-                      onChanged: (_) => setState(() {}),
                     ),
                     TextField(
                       controller: _urlController,
-                      decoration: const InputDecoration(labelText: 'Ссылка'),
+                      decoration: const InputDecoration(
+                        labelText: 'Ссылка',
+                      ),
                       enabled: _canWrite && _draftOnly,
-                      onChanged: (_) => setState(() {}),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       'Контакты',
                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                            fontWeight: FontWeight.w700,
+                          ),
                     ),
                     TextField(
                       controller: _contactEmailController,
                       decoration: const InputDecoration(labelText: 'Email'),
                       enabled: _canWrite && _draftOnly,
                       keyboardType: TextInputType.emailAddress,
-                      onChanged: (_) => setState(() {}),
                     ),
                     TextField(
                       controller: _contactPhoneController,
                       decoration: const InputDecoration(labelText: 'Телефон'),
                       enabled: _canWrite && _draftOnly,
                       keyboardType: TextInputType.phone,
-                      onChanged: (_) => setState(() {}),
                     ),
                     TextField(
                       controller: _contactTelegramController,
                       decoration: const InputDecoration(labelText: 'Telegram'),
                       enabled: _canWrite && _draftOnly,
-                      onChanged: (_) => setState(() {}),
                     ),
                     const SizedBox(height: 8),
                     Row(
@@ -808,7 +776,7 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
                               _expiresAt == null
                                   ? '— не указан —'
                                   : vacancyExpiresLabel(_expiresAt!) ??
-                                        _expiresAt!.toLocal().toString(),
+                                      _expiresAt!.toLocal().toString(),
                             ),
                           ),
                         ),
@@ -833,18 +801,15 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
                     if (selected.origin == ContentOrigin.userSubmission ||
                         selected.origin == ContentOrigin.importSource)
                       InputDecorator(
-                        decoration: const InputDecoration(
-                          labelText: 'Источник',
-                        ),
+                        decoration: const InputDecoration(labelText: 'Источник'),
                         child: Text(selected.origin.labelRu),
                       )
                     else
                       DropdownButtonFormField<String>(
                         key: ValueKey('origin-$_origin'),
                         initialValue: _origin,
-                        decoration: const InputDecoration(
-                          labelText: 'Источник',
-                        ),
+                        decoration:
+                            const InputDecoration(labelText: 'Источник'),
                         items: const [
                           DropdownMenuItem(
                             value: 'admin',
@@ -905,7 +870,9 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
                     ),
                     const SizedBox(height: 8),
                     OutlinedButton.icon(
-                      onPressed: _busy ? null : _previewAudience,
+                      onPressed: _busy || selected == null
+                          ? null
+                          : _previewAudience,
                       icon: const Icon(Icons.preview_outlined),
                       label: const Text('Preview аудитории'),
                     ),
@@ -945,9 +912,8 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
                         if (_canModerate &&
                             selected.status == VacancyStatus.inModeration)
                           FilledButton.tonal(
-                            onPressed: _busy
-                                ? null
-                                : () => _moderate('approve'),
+                            onPressed:
+                                _busy ? null : () => _moderate('approve'),
                             child: const Text('Одобрить'),
                           ),
                         if (_canModerate &&
@@ -960,25 +926,19 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
                         if (_canPublish &&
                             selected.status == VacancyStatus.published)
                           OutlinedButton(
-                            onPressed: _busy
-                                ? null
-                                : () => _lifecycle('unpublish'),
+                            onPressed: _busy ? null : () => _lifecycle('unpublish'),
                             child: const Text('Снять с публикации'),
                           ),
                         if (_canPublish &&
                             selected.status == VacancyStatus.published)
                           OutlinedButton(
-                            onPressed: _busy
-                                ? null
-                                : () => _lifecycle('expire'),
+                            onPressed: _busy ? null : () => _lifecycle('expire'),
                             child: const Text('Истекла'),
                           ),
                         if (_canPublish &&
                             selected.status != VacancyStatus.archived)
                           OutlinedButton(
-                            onPressed: _busy
-                                ? null
-                                : () => _lifecycle('archive'),
+                            onPressed: _busy ? null : () => _lifecycle('archive'),
                             child: const Text('В архив'),
                           ),
                         if (_canWrite && _draftOnly)
@@ -1001,8 +961,8 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
                       Text(
                         'Журнал модерации',
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w800,
-                        ),
+                              fontWeight: FontWeight.w800,
+                            ),
                       ),
                       const SizedBox(height: 6),
                       for (final entry in _moderationJournal.take(8))
@@ -1025,8 +985,8 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
                       Text(
                         'Открытые жалобы (${_openReports.length})',
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w800,
-                        ),
+                              fontWeight: FontWeight.w800,
+                            ),
                       ),
                       for (final report in _openReports.take(5))
                         ListTile(
@@ -1036,9 +996,7 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
                             report.vacancyTitle ?? report.vacancyId,
                             style: Theme.of(context).textTheme.bodyMedium,
                           ),
-                          subtitle: Text(
-                            '${report.reasonCode} · ${report.status}',
-                          ),
+                          subtitle: Text('${report.reasonCode} · ${report.status}'),
                           trailing: _canModerate
                               ? Wrap(
                                   spacing: 4,
@@ -1046,19 +1004,13 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
                                     TextButton(
                                       onPressed: _busy
                                           ? null
-                                          : () => _resolveReport(
-                                              report,
-                                              'resolve',
-                                            ),
+                                          : () => _resolveReport(report, 'resolve'),
                                       child: const Text('Resolve'),
                                     ),
                                     TextButton(
                                       onPressed: _busy
                                           ? null
-                                          : () => _resolveReport(
-                                              report,
-                                              'reject',
-                                            ),
+                                          : () => _resolveReport(report, 'reject'),
                                       child: const Text('Reject'),
                                     ),
                                   ],

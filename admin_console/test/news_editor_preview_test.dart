@@ -4,7 +4,6 @@ import 'package:student_platform_admin/features/content/news/admin_image_store.d
 import 'package:student_platform_admin/features/content/news/news_item.dart';
 import 'package:student_platform_admin/features/content/news/news_editor_screen.dart';
 import 'package:student_platform_admin/features/content/news/news_repository.dart';
-import 'package:student_platform_admin/shared/widgets/admin_student_phone_frame.dart';
 import 'package:student_ui/student_ui.dart';
 
 LocalNewsRepository _seedRepo() {
@@ -53,7 +52,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(StudentHomeView), findsOneWidget);
-    expect(find.byType(AdminStudentPhoneFrame), findsOneWidget);
     // Phone preview shows only published schedule-active cards (not drafts).
     expect(find.byType(StudentHomeNewsCard), findsOneWidget);
   });

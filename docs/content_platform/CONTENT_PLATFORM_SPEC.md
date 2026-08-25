@@ -641,13 +641,6 @@ Caveat: FCM/APNs remain external; VPN independence not promised without physical
 
 Same mobile visual language; shared Mobile↔Admin Preview renderer; approved templates only; no raw enum/UUID/JSON in UI; Russian copy; SafeArea; keyboard dismiss; loading/error/empty/success; cache-first; stable images; phone + Admin 1280/1440/1920; a11y; text scale; reduce motion; widget/golden tests for critical templates.
 
-Admin content editors use one presentation-only student phone frame around the
-existing `student_ui` renderers. News, Home Promo, Profile Feed, Vacancies and
-Reference provide honest placement context and live local preview updates;
-Students and Import Studio remain form/data workflows until a real mobile
-renderer exists. Preview UI never adds repository writes, permissions, signed
-media access or unsupported backend behavior.
-
 ---
 
 ## 11. Security contract

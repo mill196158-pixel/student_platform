@@ -85,12 +85,6 @@
   * duplicate decisions are local review intent only, classification-aware,
     unselected by default and reset with preview inputs;
   * student XLSX explicitly updates existing Auth users only.
-* Admin content visual previews are unified and Codex-approved:
-  * News, Home Promo, Profile Feed, Vacancies and Reference use one shared
-    student phone frame and the existing `student_ui` renderers;
-  * represented editor fields update the phone preview immediately;
-  * narrow and wide layouts are covered without inventing previews for
-    Students or Import Studio data workflows.
 
 ## Residuals (not blockers)
 

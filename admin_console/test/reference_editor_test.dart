@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:student_platform_admin/features/content/reference/reference_editor_screen.dart';
 import 'package:student_platform_admin/features/content/reference/reference_item.dart';
 import 'package:student_platform_admin/features/content/reference/reference_repository.dart';
-import 'package:student_platform_admin/shared/widgets/admin_student_phone_frame.dart';
 import 'package:student_ui/student_ui.dart';
 
 void main() {
@@ -11,17 +10,16 @@ void main() {
 
   Future<void> pumpEditor(
     WidgetTester tester,
-    ReferenceRepository repo, [
-    Size size = const Size(1400, 1200),
-  ]) async {
-    await tester.binding.setSurfaceSize(size);
+    ReferenceRepository repo,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: SizedBox(
-            width: size.width,
-            height: size.height,
+            width: 1400,
+            height: 1200,
             child: ReferenceEditorScreen(repository: repo),
           ),
         ),
@@ -35,39 +33,10 @@ void main() {
   ) async {
     await pumpEditor(tester, LocalReferenceRepository());
 
-    expect(find.text('Справочник'), findsWidgets);
+    expect(find.text('Справочник'), findsOneWidget);
     expect(find.text('Как зайти в личный кабинет'), findsWidgets);
     expect(find.byType(StudentReferenceArticleCard), findsOneWidget);
-    expect(find.byType(StudentReferenceArticleDetail), findsNothing);
-    expect(find.byType(AdminStudentPhoneFrame), findsOneWidget);
-    expect(
-      tester
-          .widget<StudentBottomNav>(find.byType(StudentBottomNav))
-          .currentIndex,
-      1,
-    );
     expect(find.textContaining('reference_article_v1'), findsOneWidget);
-  });
-
-  testWidgets('title edits update reference list preview live', (tester) async {
-    await pumpEditor(tester, LocalReferenceRepository());
-    final title = find.byWidgetPredicate(
-      (widget) =>
-          widget is TextField && widget.decoration?.labelText == 'Заголовок',
-    );
-    await tester.enterText(title, 'Новая справочная статья');
-    await tester.pump();
-
-    expect(find.text('Новая справочная статья'), findsWidgets);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('reference frame does not overflow at narrow width', (
-    tester,
-  ) async {
-    await pumpEditor(tester, LocalReferenceRepository(), const Size(760, 900));
-    expect(find.byType(AdminStudentPhoneFrame), findsOneWidget);
-    expect(tester.takeException(), isNull);
   });
 
   testWidgets('create draft uses local repository', (tester) async {
