@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/auth/admin_backend_config.dart';
 import '../../../core/auth/admin_session_controller.dart';
+import '../../../shared/widgets/admin_student_phone_frame.dart';
 import 'home_promo_item.dart';
 import 'home_promo_repository.dart';
 import 'supabase_home_promo_repository.dart';
@@ -12,11 +13,7 @@ import 'supabase_home_promo_repository.dart';
 ///
 /// Preview uses the same [StudentHomePromoCard] as Mobile.
 class HomePromoEditorScreen extends StatefulWidget {
-  const HomePromoEditorScreen({
-    super.key,
-    this.repository,
-    this.session,
-  });
+  const HomePromoEditorScreen({super.key, this.repository, this.session});
 
   final HomePromoRepository? repository;
   final AdminSessionController? session;
@@ -144,7 +141,9 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     _iconController.text = p.iconKey;
     _gradientAController.text = _hex(p.gradientColors.first);
     _gradientBController.text = _hex(
-      p.gradientColors.length > 1 ? p.gradientColors[1] : p.gradientColors.first,
+      p.gradientColors.length > 1
+          ? p.gradientColors[1]
+          : p.gradientColors.first,
     );
     _imageAssetController.text = p.imageAssetId ?? '';
     _reshowController.text = p.reshowAfterHours?.toString() ?? '';
@@ -255,9 +254,9 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     await _run(() async {
       final nextOrigin =
           (selected.origin == ContentOrigin.importSource ||
-                  selected.origin == ContentOrigin.userSubmission)
-              ? selected.origin
-              : (ContentOrigin.tryParse(_origin) ?? selected.origin);
+              selected.origin == ContentOrigin.userSubmission)
+          ? selected.origin
+          : (ContentOrigin.tryParse(_origin) ?? selected.origin);
       if (nextOrigin != ContentOrigin.admin &&
           nextOrigin != ContentOrigin.demo &&
           nextOrigin != selected.origin) {
@@ -370,305 +369,359 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
     final selected = _selected;
     final previewPayload =
         _draftPayload() ?? HomePromoPayload.demoStuckWithAssignment;
+    final phonePreview = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Preview · Главная студента',
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 12),
+        Expanded(
+          child: AdminStudentPhoneFrame(
+            showBottomNavigation: true,
+            navigationIndex: 0,
+            child: StudentHomeView(
+              data: StudentHomeData(
+                profile: const StudentHomeProfile(
+                  name: 'Анна',
+                  groupName: '1-СбПГС-2',
+                ),
+                currentDate: DateTime.now(),
+                lessons: const [],
+                assignments: const [],
+                news: const [],
+                totalLessonsToday: 0,
+                assignmentsCount: 0,
+              ),
+              homePromo: previewPayload,
+              homePromoIsDemo: _origin == 'demo',
+            ),
+          ),
+        ),
+      ],
+    );
 
     return Padding(
       padding: const EdgeInsets.all(20),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 280,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Главная · promo',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleLarge
-                      ?.copyWith(fontWeight: FontWeight.w800),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final wide = constraints.maxWidth >= 1180;
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 280,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'Главная · promo',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    if (_canWrite)
+                      FilledButton.icon(
+                        onPressed: _busy ? null : _create,
+                        icon: const Icon(Icons.add),
+                        label: const Text('Новый черновик'),
+                      ),
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: ListView.separated(
+                        itemCount: _items.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 8),
+                        itemBuilder: (context, index) {
+                          final item = _items[index];
+                          final selectedItem = item.id == _selectedId;
+                          return Material(
+                            color: selectedItem
+                                ? Theme.of(
+                                    context,
+                                  ).colorScheme.primary.withValues(alpha: 0.08)
+                                : Theme.of(context).colorScheme.surface,
+                            borderRadius: BorderRadius.circular(12),
+                            child: ListTile(
+                              title: Text(item.title),
+                              subtitle: Text(
+                                '${homePromoStatusWire(item.status)} · ${item.origin.labelRu}',
+                              ),
+                              onTap: () {
+                                setState(() => _selectedId = item.id);
+                                _bind(item);
+                              },
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 8),
-                if (_canWrite)
-                  FilledButton.icon(
-                    onPressed: _busy ? null : _create,
-                    icon: const Icon(Icons.add),
-                    label: const Text('Новый черновик'),
-                  ),
-                const SizedBox(height: 12),
-                Expanded(
-                  child: ListView.separated(
-                    itemCount: _items.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 8),
-                    itemBuilder: (context, index) {
-                      final item = _items[index];
-                      final selectedItem = item.id == _selectedId;
-                      return Material(
-                        color: selectedItem
-                            ? Theme.of(context)
-                                .colorScheme
-                                .primary
-                                .withValues(alpha: 0.08)
-                            : Theme.of(context).colorScheme.surface,
-                        borderRadius: BorderRadius.circular(12),
-                        child: ListTile(
-                          title: Text(item.title),
-                          subtitle: Text(
-                            '${homePromoStatusWire(item.status)} · ${item.origin.labelRu}',
-                          ),
-                          onTap: () {
-                            setState(() => _selectedId = item.id);
-                            _bind(item);
-                          },
-                        ),
-                      );
-                    },
-                  ),
-                ),
+              ),
+              const SizedBox(width: 20),
+              if (wide) ...[
+                SizedBox(width: 420, child: phonePreview),
+                const SizedBox(width: 20),
               ],
-            ),
-          ),
-          const SizedBox(width: 20),
-          Expanded(
-            child: selected == null
-                ? const Center(child: Text('Выберите или создайте карточку.'))
-                : ListView(
-                    children: [
-                      if (_banner != null) ...[
-                        Text(_banner!),
-                        const SizedBox(height: 12),
-                      ],
-                      Text(
-                        'Preview (тот же renderer, что Mobile)',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w800),
-                      ),
-                      const SizedBox(height: 12),
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 420),
-                        child: StudentHomePromoCard(
-                          payload: previewPayload,
-                          showDemoBadge: _origin == 'demo',
-                          padding: EdgeInsets.zero,
-                          onTap: () {},
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
+              Expanded(
+                child: selected == null
+                    ? const Center(
+                        child: Text('Выберите или создайте карточку.'),
+                      )
+                    : ListView(
                         children: [
-                          if (_canWrite)
-                            FilledButton(
-                              onPressed: _busy ||
+                          if (_banner != null) ...[
+                            Text(_banner!),
+                            const SizedBox(height: 12),
+                          ],
+                          if (!wide) ...[
+                            SizedBox(height: 600, child: phonePreview),
+                            const SizedBox(height: 16),
+                          ],
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              if (_canWrite)
+                                FilledButton(
+                                  onPressed:
+                                      _busy ||
+                                          selected.status !=
+                                              HomePromoStatus.draft
+                                      ? null
+                                      : _save,
+                                  child: const Text('Сохранить черновик'),
+                                ),
+                              if (_canPublish)
+                                FilledButton.tonal(
+                                  onPressed:
+                                      _busy ||
+                                          selected.status !=
+                                              HomePromoStatus.draft
+                                      ? null
+                                      : _publish,
+                                  child: const Text('Опубликовать'),
+                                ),
+                              if (_canPublish)
+                                OutlinedButton(
+                                  onPressed:
+                                      _busy ||
+                                          selected.status ==
+                                              HomePromoStatus.archived
+                                      ? null
+                                      : _archive,
+                                  child: const Text('В архив'),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'Статус: ${homePromoStatusWire(selected.status)} · '
+                            'row_version=${selected.rowVersion}',
+                          ),
+                          const SizedBox(height: 12),
+                          _field(_titleController, 'Заголовок'),
+                          _field(
+                            _subtitleController,
+                            'Подзаголовок',
+                            maxLines: 3,
+                          ),
+                          _field(_iconController, 'Иконка (icon_key)'),
+                          _field(
+                            _gradientAController,
+                            'Градиент цвет 1 (#RRGGBB)',
+                          ),
+                          _field(
+                            _gradientBController,
+                            'Градиент цвет 2 (#RRGGBB)',
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: InputDecorator(
+                              decoration: const InputDecoration(
+                                labelText: 'Иллюстрация (image_asset_id)',
+                                helperText:
+                                    'Поле отключено до signed-URL/media path; '
+                                    'renderer пока не показывает image_asset_id.',
+                              ),
+                              child: Text(
+                                _imageAssetController.text.trim().isEmpty
+                                    ? '— не задано —'
+                                    : _imageAssetController.text.trim(),
+                              ),
+                            ),
+                          ),
+                          _field(_ctaLabelController, 'CTA'),
+                          _field(_ctaRouteController, 'Внутренний маршрут'),
+                          _field(
+                            _ctaUrlController,
+                            'Внешняя ссылка (http/https)',
+                          ),
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('Можно закрыть'),
+                            value: _dismissible,
+                            onChanged: !_canWrite
+                                ? null
+                                : (v) => setState(() => _dismissible = v),
+                          ),
+                          _field(
+                            _reshowController,
+                            'Повторный показ через (часы)',
+                          ),
+                          if (_origin == 'import' ||
+                              _origin == 'user_submission')
+                            InputDecorator(
+                              decoration: const InputDecoration(
+                                labelText: 'Origin (read-only provenance)',
+                                helperText:
+                                    'import/user_submission нельзя назначить вручную.',
+                              ),
+                              child: Text(_origin),
+                            )
+                          else
+                            DropdownButtonFormField<String>(
+                              initialValue: _origin == 'demo'
+                                  ? 'demo'
+                                  : 'admin',
+                              decoration: const InputDecoration(
+                                labelText: 'Origin',
+                              ),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'admin',
+                                  child: Text('admin'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'demo',
+                                  child: Text('demo'),
+                                ),
+                              ],
+                              onChanged:
+                                  !_canWrite ||
                                       selected.status != HomePromoStatus.draft
                                   ? null
-                                  : _save,
-                              child: const Text('Сохранить черновик'),
+                                  : (v) =>
+                                        setState(() => _origin = v ?? 'admin'),
                             ),
-                          if (_canPublish)
-                            FilledButton.tonal(
-                              onPressed: _busy ||
-                                      selected.status != HomePromoStatus.draft
-                                  ? null
-                                  : _publish,
-                              child: const Text('Опубликовать'),
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<String>(
+                            initialValue: _audienceMode,
+                            decoration: const InputDecoration(
+                              labelText: 'Аудитория',
                             ),
-                          if (_canPublish)
-                            OutlinedButton(
-                              onPressed: _busy ||
-                                      selected.status == HomePromoStatus.archived
-                                  ? null
-                                  : _archive,
-                              child: const Text('В архив'),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Статус: ${homePromoStatusWire(selected.status)} · '
-                        'row_version=${selected.rowVersion}',
-                      ),
-                      const SizedBox(height: 12),
-                      _field(_titleController, 'Заголовок'),
-                      _field(_subtitleController, 'Подзаголовок', maxLines: 3),
-                      _field(_iconController, 'Иконка (icon_key)'),
-                      _field(_gradientAController, 'Градиент цвет 1 (#RRGGBB)'),
-                      _field(_gradientBController, 'Градиент цвет 2 (#RRGGBB)'),
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: InputDecorator(
-                          decoration: const InputDecoration(
-                            labelText: 'Иллюстрация (image_asset_id)',
-                            helperText:
-                                'Поле отключено до signed-URL/media path; '
-                                'renderer пока не показывает image_asset_id.',
-                          ),
-                          child: Text(
-                            _imageAssetController.text.trim().isEmpty
-                                ? '— не задано —'
-                                : _imageAssetController.text.trim(),
-                          ),
-                        ),
-                      ),
-                      _field(_ctaLabelController, 'CTA'),
-                      _field(_ctaRouteController, 'Внутренний маршрут'),
-                      _field(
-                        _ctaUrlController,
-                        'Внешняя ссылка (http/https)',
-                      ),
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Можно закрыть'),
-                        value: _dismissible,
-                        onChanged: !_canWrite
-                            ? null
-                            : (v) => setState(() => _dismissible = v),
-                      ),
-                      _field(
-                        _reshowController,
-                        'Повторный показ через (часы)',
-                      ),
-                      if (_origin == 'import' ||
-                          _origin == 'user_submission')
-                        InputDecorator(
-                          decoration: const InputDecoration(
-                            labelText: 'Origin (read-only provenance)',
-                            helperText:
-                                'import/user_submission нельзя назначить вручную.',
-                          ),
-                          child: Text(_origin),
-                        )
-                      else
-                        DropdownButtonFormField<String>(
-                          initialValue:
-                              _origin == 'demo' ? 'demo' : 'admin',
-                          decoration:
-                              const InputDecoration(labelText: 'Origin'),
-                          items: const [
-                            DropdownMenuItem(
-                              value: 'admin',
-                              child: Text('admin'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'demo',
-                              child: Text('demo'),
-                            ),
-                          ],
-                          onChanged: !_canWrite ||
-                                  selected.status != HomePromoStatus.draft
-                              ? null
-                              : (v) =>
-                                  setState(() => _origin = v ?? 'admin'),
-                        ),
-                      const SizedBox(height: 8),
-                      DropdownButtonFormField<String>(
-                        initialValue: _audienceMode,
-                        decoration:
-                            const InputDecoration(labelText: 'Аудитория'),
-                        items: const [
-                          DropdownMenuItem(value: 'all', child: Text('all')),
-                          DropdownMenuItem(
-                            value: 'groups',
-                            child: Text('groups'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'users',
-                            child: Text('users'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'groups_and_users',
-                            child: Text('groups_and_users'),
-                          ),
-                        ],
-                        onChanged: !_canWrite ||
-                                selected.status != HomePromoStatus.draft
-                            ? null
-                            : (v) =>
-                                setState(() => _audienceMode = v ?? 'all'),
-                      ),
-                      _field(
-                        _groupIdsController,
-                        'Group IDs (comma-separated UUID)',
-                      ),
-                      _field(
-                        _userIdsController,
-                        'User IDs (comma-separated UUID)',
-                      ),
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: Text(
-                          'Период с: ${_startsAt?.toLocal().toString().split(' ').first ?? '—'}',
-                        ),
-                        trailing: Wrap(
-                          spacing: 8,
-                          children: [
-                            TextButton(
-                              onPressed: !_canWrite
-                                  ? null
-                                  : () => _pickDate(starts: true),
-                              child: const Text('Выбрать'),
-                            ),
-                            TextButton(
-                              onPressed: !_canWrite
-                                  ? null
-                                  : () => setState(() => _startsAt = null),
-                              child: const Text('Сброс'),
-                            ),
-                          ],
-                        ),
-                      ),
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: Text(
-                          'Период до: ${_endsAt?.toLocal().toString().split(' ').first ?? '—'}',
-                        ),
-                        trailing: Wrap(
-                          spacing: 8,
-                          children: [
-                            TextButton(
-                              onPressed: !_canWrite
-                                  ? null
-                                  : () => _pickDate(starts: false),
-                              child: const Text('Выбрать'),
-                            ),
-                            TextButton(
-                              onPressed: !_canWrite
-                                  ? null
-                                  : () => setState(() => _endsAt = null),
-                              child: const Text('Сброс'),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Row(
-                        children: [
-                          const Text('Порядок'),
-                          const SizedBox(width: 12),
-                          IconButton(
-                            onPressed: !_canWrite
+                            items: const [
+                              DropdownMenuItem(
+                                value: 'all',
+                                child: Text('all'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'groups',
+                                child: Text('groups'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'users',
+                                child: Text('users'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'groups_and_users',
+                                child: Text('groups_and_users'),
+                              ),
+                            ],
+                            onChanged:
+                                !_canWrite ||
+                                    selected.status != HomePromoStatus.draft
                                 ? null
-                                : () => setState(
-                                      () => _sortOrder =
-                                          (_sortOrder - 1).clamp(0, 9999),
-                                    ),
-                            icon: const Icon(Icons.remove),
+                                : (v) => setState(
+                                    () => _audienceMode = v ?? 'all',
+                                  ),
                           ),
-                          Text('$_sortOrder'),
-                          IconButton(
-                            onPressed: !_canWrite
-                                ? null
-                                : () => setState(() => _sortOrder += 1),
-                            icon: const Icon(Icons.add),
+                          _field(
+                            _groupIdsController,
+                            'Group IDs (comma-separated UUID)',
+                          ),
+                          _field(
+                            _userIdsController,
+                            'User IDs (comma-separated UUID)',
+                          ),
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(
+                              'Период с: ${_startsAt?.toLocal().toString().split(' ').first ?? '—'}',
+                            ),
+                            trailing: Wrap(
+                              spacing: 8,
+                              children: [
+                                TextButton(
+                                  onPressed: !_canWrite
+                                      ? null
+                                      : () => _pickDate(starts: true),
+                                  child: const Text('Выбрать'),
+                                ),
+                                TextButton(
+                                  onPressed: !_canWrite
+                                      ? null
+                                      : () => setState(() => _startsAt = null),
+                                  child: const Text('Сброс'),
+                                ),
+                              ],
+                            ),
+                          ),
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(
+                              'Период до: ${_endsAt?.toLocal().toString().split(' ').first ?? '—'}',
+                            ),
+                            trailing: Wrap(
+                              spacing: 8,
+                              children: [
+                                TextButton(
+                                  onPressed: !_canWrite
+                                      ? null
+                                      : () => _pickDate(starts: false),
+                                  child: const Text('Выбрать'),
+                                ),
+                                TextButton(
+                                  onPressed: !_canWrite
+                                      ? null
+                                      : () => setState(() => _endsAt = null),
+                                  child: const Text('Сброс'),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Row(
+                            children: [
+                              const Text('Порядок'),
+                              const SizedBox(width: 12),
+                              IconButton(
+                                onPressed: !_canWrite
+                                    ? null
+                                    : () => setState(
+                                        () => _sortOrder = (_sortOrder - 1)
+                                            .clamp(0, 9999),
+                                      ),
+                                icon: const Icon(Icons.remove),
+                              ),
+                              Text('$_sortOrder'),
+                              IconButton(
+                                onPressed: !_canWrite
+                                    ? null
+                                    : () => setState(() => _sortOrder += 1),
+                                icon: const Icon(Icons.add),
+                              ),
+                            ],
                           ),
                         ],
                       ),
-                    ],
-                  ),
-          ),
-        ],
+              ),
+            ],
+          );
+        },
       ),
     );
   }

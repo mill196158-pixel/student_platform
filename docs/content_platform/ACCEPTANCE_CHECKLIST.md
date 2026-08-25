@@ -692,7 +692,7 @@ academic data was imported.
 
 ## Z. Design contract
 
-- [ ] Тот же визуальный язык, что у mobile Student Platform
+- [x] Тот же визуальный язык, что у mobile Student Platform
 - [x] Общий renderer Mobile ↔ Admin Preview
 - [x] Утверждённые шаблоны вместо свободного конструктора
 - [ ] Нет сырых enum в UI

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -8,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/auth/admin_backend_config.dart';
 import '../../../core/auth/admin_session_controller.dart';
+import '../../../shared/widgets/admin_student_phone_frame.dart';
 import '../../../shared/widgets/publication_status_badge.dart';
 import 'admin_image_picker.dart';
 import 'admin_image_store.dart';
@@ -1116,40 +1116,43 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
                 onDeletePermanently: _deleteArchivedPermanently,
                 normalizedAudienceAvailable:
                     _repository is LocalNewsRepository || _audienceRpcAvailable,
-                onSaveAudience: ({
-                  required mode,
-                  required groupIds,
-                  required userIds,
-                }) async {
-                  final selected = _selected;
-                  if (selected == null) return;
-                  try {
-                    final updated = await _repository.setAudience(
-                      id: selected.id,
-                      mode: mode,
-                      groupIds: groupIds,
-                      userIds: userIds,
-                      expectedVersion: selected.versionNumber,
-                    );
-                    if (!mounted) return;
-                    setState(() {
-                      final idx = _items.indexWhere((e) => e.id == updated.id);
-                      if (idx >= 0) {
-                        _items = [..._items]..[idx] = updated;
+                onSaveAudience:
+                    ({
+                      required mode,
+                      required groupIds,
+                      required userIds,
+                    }) async {
+                      final selected = _selected;
+                      if (selected == null) return;
+                      try {
+                        final updated = await _repository.setAudience(
+                          id: selected.id,
+                          mode: mode,
+                          groupIds: groupIds,
+                          userIds: userIds,
+                          expectedVersion: selected.versionNumber,
+                        );
+                        if (!mounted) return;
+                        setState(() {
+                          final idx = _items.indexWhere(
+                            (e) => e.id == updated.id,
+                          );
+                          if (idx >= 0) {
+                            _items = [..._items]..[idx] = updated;
+                          }
+                          _selectedId = updated.id;
+                          _banner = 'Аудитория сохранена.';
+                        });
+                      } on NewsRepositoryException catch (error) {
+                        if (error.message.contains('RPC недоступен') ||
+                            error.message.contains('local apply')) {
+                          if (mounted) {
+                            setState(() => _audienceRpcAvailable = false);
+                          }
+                        }
+                        rethrow;
                       }
-                      _selectedId = updated.id;
-                      _banner = 'Аудитория сохранена.';
-                    });
-                  } on NewsRepositoryException catch (error) {
-                    if (error.message.contains('RPC недоступен') ||
-                        error.message.contains('local apply')) {
-                      if (mounted) {
-                        setState(() => _audienceRpcAvailable = false);
-                      }
-                    }
-                    rethrow;
-                  }
-                },
+                    },
                 onPreviewAudience: () =>
                     _repository.previewAudience(_selected!.id),
               );
@@ -1590,35 +1593,21 @@ class _PhonePreview extends StatelessWidget {
   final ValueChanged<String> onSelected;
   final ValueChanged<int> onOpenStory;
 
-  static const _designWidth = 390.0;
-  static const _designHeight = 844.0;
-
   @override
   Widget build(BuildContext context) {
     return Card(
       color: const Color(0xFFE9EAF1),
       clipBehavior: Clip.hardEdge,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final availableWidth = math.max(0.0, constraints.maxWidth - 24);
-          final availableHeight = math.max(0.0, constraints.maxHeight - 24);
-          final scale = math
-              .min(
-                availableWidth / _designWidth,
-                availableHeight / _designHeight,
-              )
-              .clamp(0.35, 1.0);
-          final now = DateTime.now();
-          final presentationNews = [
-            for (final item in items)
-              item.toPresentation(bytes: bytesFor(item)),
-          ];
-          final previewData = StudentHomeData(
+      child: AdminStudentPhoneFrame(
+        showBottomNavigation: true,
+        navigationIndex: 0,
+        child: StudentHomeView(
+          data: StudentHomeData(
             profile: const StudentHomeProfile(
               name: 'Минь',
               groupName: '1-См(ВВ)-2',
             ),
-            currentDate: now,
+            currentDate: DateTime.now(),
             lessons: const [
               StudentHomeLesson(
                 subject: 'Базы данных',
@@ -1650,105 +1639,23 @@ class _PhonePreview extends StatelessWidget {
                 status: StudentHomeAssignmentStatus.inProgress,
               ),
             ],
-            news: presentationNews,
+            news: [
+              for (final item in items)
+                item.toPresentation(bytes: bytesFor(item)),
+            ],
             totalLessonsToday: 2,
             assignmentsCount: 2,
-          );
-
-          return Center(
-            child: SizedBox(
-              width: _designWidth * scale,
-              height: _designHeight * scale,
-              child: FittedBox(
-                fit: BoxFit.contain,
-                child: Container(
-                  width: _designWidth,
-                  height: _designHeight,
-                  clipBehavior: Clip.antiAlias,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF7F7FB),
-                    borderRadius: BorderRadius.circular(42),
-                    border: Border.all(
-                      color: const Color(0xFF242536),
-                      width: 8,
-                    ),
-                    boxShadow: const [
-                      BoxShadow(
-                        blurRadius: 24,
-                        color: Color(0x22000000),
-                        offset: Offset(0, 12),
-                      ),
-                    ],
-                  ),
-                  child: Theme(
-                    data: studentPlatformLightTheme(),
-                    child: MediaQuery(
-                      data: MediaQuery.of(context).copyWith(
-                        size: const Size(_designWidth - 16, _designHeight - 16),
-                        padding: const EdgeInsets.only(top: 24),
-                        viewPadding: const EdgeInsets.only(top: 24),
-                        textScaler: TextScaler.noScaling,
-                      ),
-                      child: Stack(
-                        children: [
-                          StudentHomeView(
-                            data: previewData,
-                            notificationCount: 3,
-                            selectedNewsId: selectedId == null
-                                ? null
-                                : 'admin-news-$selectedId',
-                            adminNewsHighlightColor: const Color(0xFF6656D9),
-                            onNewsTap: (index) {
-                              if (index >= 0 && index < items.length) {
-                                onSelected(items[index].id);
-                                onOpenStory(index);
-                              }
-                            },
-                            bottomNavigationBar: StudentBottomNav(
-                              currentIndex: 0,
-                              items: studentBottomNavItems,
-                              onTap: (_) {},
-                            ),
-                          ),
-                          const Positioned(
-                            top: 0,
-                            left: 0,
-                            right: 0,
-                            child: IgnorePointer(child: _PhoneSystemBar()),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _PhoneSystemBar extends StatelessWidget {
-  const _PhoneSystemBar();
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 24,
-      child: Stack(
-        alignment: Alignment.topCenter,
-        children: [
-          Container(
-            width: 108,
-            height: 22,
-            decoration: const BoxDecoration(
-              color: Color(0xFF242536),
-              borderRadius: BorderRadius.vertical(bottom: Radius.circular(14)),
-            ),
           ),
-        ],
+          notificationCount: 3,
+          selectedNewsId: selectedId == null ? null : 'admin-news-$selectedId',
+          adminNewsHighlightColor: const Color(0xFF6656D9),
+          onNewsTap: (index) {
+            if (index >= 0 && index < items.length) {
+              onSelected(items[index].id);
+              onOpenStory(index);
+            }
+          },
+        ),
       ),
     );
   }
@@ -1818,7 +1725,8 @@ class _PropertiesPanel extends StatelessWidget {
     required NewsAudienceMode mode,
     required List<String> groupIds,
     required List<String> userIds,
-  }) onSaveAudience;
+  })
+  onSaveAudience;
   final Future<NewsAudiencePreview> Function() onPreviewAudience;
 
   static const _focusOptions = <(String, Alignment)>[
