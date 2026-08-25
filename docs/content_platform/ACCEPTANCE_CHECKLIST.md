@@ -663,6 +663,17 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Calendar import cannot flip current term or create offerings/chats
 - [ ] Schedule import validates dates against published process periods
 - [ ] Admin presents one chain: plan → annual process calendar → schedule
+- [ ] Program-code aliases and complete group-name aliases are separate
+- [ ] Group semantic identity uses program + admission year + parallel number
+- [ ] Group parser treats left number as parallel and right number as course
+- [ ] Admission year is derived server-side from selected academic year
+- [ ] Unknown/ambiguous group names and programs fail closed
+- [ ] Group preview shows exact, alias, semantic-duplicate and plan conflicts
+- [ ] Group recognition preview is durable, versioned and idempotent
+- [ ] Group-recognition Slice 1 apply remains explicitly disabled
+- [x] Admin Web exposes fast group-name recognition without service_role
+- [ ] Group recognition SQL role-play executed on PostgreSQL
+- [x] Codex APPROVE Stage 19.1b Slice 1
 - [~] Full code + SQL + tests Codex APPROVE for each independent substage
 
 SQL-backed foundation items were runtime-verified on remote PostgreSQL with

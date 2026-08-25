@@ -1107,7 +1107,9 @@ Status: **IN PROGRESS** — identity, document extraction and academic-process
 calendar foundation/Admin dry-run have Codex **APPROVE**; both migrations are
 remote-applied and passed rollback-only PostgreSQL runtime verification.
 Plan v2 persistence is implemented locally and awaits final Codex approval plus
-an owner-authorized PostgreSQL migration/role-play run.
+an owner-authorized PostgreSQL migration/role-play run. Stage 19.1b group-name
+recognition Slice 1 is implemented locally with Codex **APPROVE_WITH_NOTES**
+(no P0/P1); it remains preview-only until PostgreSQL runtime verification.
 
 - [x] First-class `educational_programs` and versioned `curriculum_plans`
   separate direction/profile/study form/admission cohort.
@@ -1134,6 +1136,16 @@ an owner-authorized PostgreSQL migration/role-play run.
   holidays/GIA periods linked to year plus global/program/plan/group audience.
 - [x] Admin calendar workflow: official image/PDF source reference, explicit
   audience, editable periods and apply-disabled server dry-run.
+- [ ] Separate reviewed program-code and complete group-name alias registries.
+- [ ] Durable group identity = program + admission year + parallel; display
+  name and mutable course suffix are not identity.
+- [ ] Deterministic group parser: left number = parallel, middle = reviewed
+  program code, right number = course; no fuzzy match.
+- [ ] Server-derived admission year from selected academic year and course.
+- [ ] Durable preview exposes exact/alias/semantic duplicates, unknown programs,
+  malformed names and ambiguous plans; Slice 1 apply remains disabled.
+- [x] Fast Admin Web group-name preview with focused Dart tests and Codex
+  APPROVE_WITH_NOTES (SQL runtime role-play remains open).
 - [ ] Schedule import/validation against published process-calendar periods.
 
 Remote migrations (`2026-08-25`):

@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/auth/admin_backend_config.dart';
 import '../../core/auth/admin_session_controller.dart';
 import 'academic_process_calendar_review_panel.dart';
+import 'group_recognition_panel.dart';
 import 'import_studio_file_save.dart';
 import 'import_studio_item.dart';
 import 'import_studio_mapping.dart';
@@ -674,6 +675,26 @@ class _ImportSourceStepState extends State<_ImportSourceStep> {
     );
   }
 
+  Future<void> _openGroupRecognition() async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => Dialog(
+        insetPadding: const EdgeInsets.all(24),
+        child: SizedBox(
+          width: 1120,
+          height: 780,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: GroupRecognitionPanel(
+              initialRows: _previewRows,
+              fileName: _fileName ?? 'groups.xlsx',
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   void _loadDemoSample() {
     final rows = parseImportStudioSampleCsv(
       widget.domain.domain,
@@ -739,6 +760,12 @@ class _ImportSourceStepState extends State<_ImportSourceStep> {
                     : _openAcademicProcessCalendarReview,
                 icon: const Icon(Icons.date_range_outlined),
                 label: const Text('График учебного процесса'),
+              ),
+            if (widget.domain.domain == 'groups')
+              FilledButton.tonalIcon(
+                onPressed: widget.busy ? null : _openGroupRecognition,
+                icon: const Icon(Icons.fact_check_outlined),
+                label: const Text('Проверить названия и дубли'),
               ),
           ],
         ),

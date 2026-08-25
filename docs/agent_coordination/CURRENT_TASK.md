@@ -1,12 +1,16 @@
 # CURRENT_TASK
 
 * Status: **IN PROGRESS** — Stage 19.1 multi-format academic ingestion
-* Active Stage: Stage 19.1a plan persistence gate
+* Active Stage: Stage 19.1b deterministic group recognition (Slice 1)
 * Branch: `feature/content-platform`
 * Codex identity-foundation verdict: **APPROVE**
 * Codex document-extraction verdict: **APPROVE**
 * Codex calendar-foundation/Admin-workflow verdict: **APPROVE**
 * Codex plan-persistence verdict: **APPROVE_WITH_NOTES** (no P0/P1)
+* Codex group-recognition architecture verdict: **APPROVE_WITH_NOTES**
+  (no P0/P1)
+* Codex group-recognition implementation verdict: **APPROVE_WITH_NOTES**
+  (no P0/P1; PostgreSQL runtime pending)
 * Remote: `gwdanmwluhrcfxbnplwd`
 * Backup: `/Users/annasuvorova/student_platform_backups/pre_content_platform_20260730_133051/` (outside Git; `0700`/`0600`)
 
@@ -62,6 +66,14 @@
   * stale asynchronous preview responses are discarded
 * Focused Flutter tests pass. PostgreSQL role-play is written but has not run
   because local Docker/PostgreSQL is unavailable.
+* Stage 19.1b Slice 1 is implemented locally and Codex-approved:
+  * separate reviewed program-code aliases and complete group-name aliases;
+  * durable semantic group identity = program + admission year + parallel;
+  * conservative parser reads parallel left, program code middle, course right;
+  * server derives admission year from selected academic year and course;
+  * durable read-only preview shows exact names, aliases, semantic duplicates,
+    plan ambiguity, unknown programs and malformed names;
+  * Admin Web exposes a fast group-name check; apply remains fail-closed.
 
 ## Residuals (not blockers)
 
@@ -74,5 +86,8 @@
 
 1. Execute the migration and rollback-only role-play only with owner
    authorization for remote Supabase.
-2. Continue with explicit group academic-profile binding; do not create
-   offerings, teams or chats as part of plan persistence.
+2. Execute Stage 19.1b migration and rollback-only role-play only with owner
+   authorization; focused Flutter tests and analyze already pass.
+3. In a later approved slice, add explicit duplicate decisions and atomic group
+   academic-profile/plan binding. Do not create Auth users, enrollments,
+   offerings, group spaces, teams or chats in that apply.

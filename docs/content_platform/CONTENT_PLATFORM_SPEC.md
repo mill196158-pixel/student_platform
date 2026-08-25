@@ -558,6 +558,26 @@ Locked identity rules:
   match globally by subject + semester;
 - legacy rows with no plan remain readable and are not inferred/backfilled.
 
+Locked group-recognition rules:
+
+- complete group-name aliases and program-code aliases are separate registries;
+  a program alias maps directly to `educational_programs.id`;
+- durable group identity is educational program + admission year + parallel
+  number + an exceptional discriminator; a display name is not identity;
+- for the approved pattern `1-СбПГС-2`, the left number is the parallel, the
+  middle token is a reviewed program alias, and the right number is the course;
+- the client selects `academic_year_id`; the server derives
+  `admission_year = academic_year.start_year - course_number + 1`;
+- only Unicode case, spaces, dash variants and approved parentheses variants
+  normalize automatically; fuzzy matching and arbitrary letter removal are
+  forbidden;
+- unknown shape/program, semantic duplicate, inactive program, absent plan or
+  multiple reviewed/active plans remain explicit classifications;
+- `group_naming_profiles` is not inference truth and is not auto-backfilled;
+- Stage 19.1b Slice 1 stores a durable idempotent preview and displays it in
+  Admin Web, but cannot create or mutate groups, accounts, enrollments,
+  profiles, plans, offerings, group spaces, teams, chats or schedules.
+
 Locked ingestion rules:
 
 - XLSX, text PDF and scanned image/PDF are separate versioned adapters;
