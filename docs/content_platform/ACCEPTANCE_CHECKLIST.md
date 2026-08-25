@@ -816,10 +816,10 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Material row edits invalidate prior reviewer confirmation
 - [x] Document extraction code + tests Codex APPROVE
 - [x] Full-time and ФБФО plans cannot deduplicate across plan identity
-- [ ] Plan v2 preview is durable, version-bound, expiring and tamper-checked
-- [ ] Explicit apply atomically persists occurrences, workload and controls
-- [ ] Nested semester/workload/control corrections invalidate stale previews
-- [ ] Plan persistence role-play executed on PostgreSQL
+- [x] Plan v2 preview is durable, version-bound, expiring and tamper-checked
+- [x] Explicit apply atomically persists occurrences, workload and controls
+- [x] Nested semester/workload/control corrections invalidate stale previews
+- [x] Plan persistence role-play executed on PostgreSQL
 - [x] Academic-process document/version model
 - [x] Study/session/GIA periods linked to year + program/plan/group audience
 - [x] Calendar import cannot flip current term or create offerings/chats
@@ -834,7 +834,7 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Group recognition preview is durable, versioned and idempotent
 - [x] Legacy Slice 1 apply signature remains explicitly disabled
 - [x] Admin Web exposes fast group-name recognition without service_role
-- [ ] Group recognition SQL role-play executed on PostgreSQL
+- [x] Group recognition SQL role-play executed on PostgreSQL
 - [x] Codex APPROVE Stage 19.1b Slice 1
 - [x] Slice 2 decisions exist only for actionable rows; blocked rows have none
 - [x] Slice 2 decision matrix is validated server-side by classification
@@ -860,7 +860,7 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Input edits and async races invalidate stale UI
 - [x] Repository/widget tests cover durable decisions, apply and candidate switching
 - [x] Rollback-safe Slice 2 SQL role-play and static security/drift assertions are written
-- [ ] Slice 2 migration + role-play executed on PostgreSQL
+- [x] Slice 2 migration + role-play executed on PostgreSQL
 - [x] Codex APPROVE Stage 19.1b Slice 2
 - [x] Import Studio visibly presents plan → groups/students → calendar → schedule
 - [x] Primary academic cards open specialized review panels directly

@@ -1219,11 +1219,10 @@ Codex **APPROVE** 19 completion; remote apply и security review выполне�
 Status: **IN PROGRESS** — identity, document extraction and academic-process
 calendar foundation/Admin dry-run have Codex **APPROVE**; both migrations are
 remote-applied and passed rollback-only PostgreSQL runtime verification.
-Plan v2 persistence is implemented locally and awaits an owner-authorized
-PostgreSQL migration/role-play run. Stage 19.1b group-name recognition Slice 1
-has Codex **APPROVE_WITH_NOTES**; Slice 2 durable decisions and atomic group
-apply have Codex **APPROVE**. Both remain local until PostgreSQL runtime
-verification and owner-authorized remote apply.
+Plan v2 persistence and Stage 19.1b group-name recognition Slices 1–2 are
+remote-applied with owner authorization. Rollback-only PostgreSQL role-plays
+passed **20/20** for plan persistence and **23/23** for group decision/apply;
+no real academic data was imported.
 
 - [x] First-class `educational_programs` and versioned `curriculum_plans`
   separate direction/profile/study form/admission cohort.
@@ -1239,11 +1238,11 @@ verification and owner-authorized remote apply.
   cannot silently clear source ambiguities.
 - [x] Editable extraction draft with source page/region, warnings, aggregate
   disposition and confirmation invalidation after edits.
-- [ ] Durable plan v2 preview bound to the exact plan version, expiry and
+- [x] Durable plan v2 preview bound to the exact plan version, expiry and
   normalized payload hash.
-- [ ] Explicit idempotent apply of subject occurrences, semester workload and
+- [x] Explicit idempotent apply of subject occurrences, semester workload and
   multiple control forms without multiplying aggregate hours/credits.
-- [ ] Editable nested semester/workload/control review with stale-preview
+- [x] Editable nested semester/workload/control review with stale-preview
   invalidation.
 - [x] Image intake fails closed to manual review (Web OCR remains unavailable).
 - [x] Academic-process calendar: immutable versions and study/session/practice/
@@ -1281,15 +1280,15 @@ verification and owner-authorized remote apply.
 
 Remote migrations (`2026-08-25`):
 `20260825102603_academic_ingestion_identity_foundation`,
-`20260825102845_academic_process_calendar_foundation`. Runtime smoke verified
-RLS/FORCE/grants, dry-run fail-closed behavior, plan isolation and immutable
-published periods. Fixtures were rolled back; no real data was imported.
-
-Local-only migration awaiting PostgreSQL runtime and owner authorization:
-`20260825195812_stage19_1b_group_recognition_apply`. Its rollback-safe role-play
-is prepared; Docker/PostgreSQL was unavailable locally. Focused Admin tests
-pass (**28**), changed-file analyze and `git diff --check` pass, Codex verdict
-is **APPROVE**.
+`20260825102845_academic_process_calendar_foundation`,
+`20260825202814_group_identity_recognition_foundation`,
+`20260825202823_stage19_1b_group_recognition_apply`,
+`20260825202929_academic_plan_import_persistence`,
+`20260825203114_group_recognition_refresh_ambiguity_hotfix`. Runtime smoke
+verified RLS/FORCE/grants, durable plan apply, group decision/apply,
+fail-closed drift handling, plan isolation and immutable published periods.
+Fixtures were rolled back; no real data was imported. Focused Admin tests pass,
+Codex verdict is **APPROVE**.
 
 Rules:
 

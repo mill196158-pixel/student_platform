@@ -617,10 +617,11 @@ Stage 19.1b Slice 2 apply contract:
   Edits and stale async responses invalidate the local review. Demo apply is
   disabled.
 
-Slice 2 migration
-`20260825195812_stage19_1b_group_recognition_apply` is local-only with Codex
-**APPROVE**. PostgreSQL migration/rollback-role-play execution remains open
-because local Docker is unavailable and remote apply requires owner approval.
+Slice 2 migrations
+`20260825202823_stage19_1b_group_recognition_apply` and
+`20260825203114_group_recognition_refresh_ambiguity_hotfix` are remote-applied
+with Codex **APPROVE**. The rollback-only group decision/apply role-play passed
+**23/23** on remote PostgreSQL; all fixtures were rolled back.
 
 Locked ingestion rules:
 

@@ -625,7 +625,7 @@ do $$
 begin
   if exists (
     select 1 from academic_plan_persistence_results where not passed
-  ) or (select count(*) from academic_plan_persistence_results) <> 16 then
+  ) or (select count(*) from academic_plan_persistence_results) <> 20 then
     raise exception 'academic_plan_import_persistence_roleplay_failed';
   end if;
 end;

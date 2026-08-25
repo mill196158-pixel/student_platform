@@ -10,9 +10,9 @@
 * Codex group-recognition architecture verdict: **APPROVE_WITH_NOTES**
   (no P0/P1)
 * Codex group-recognition implementation verdict: **APPROVE_WITH_NOTES**
-  (no P0/P1; PostgreSQL runtime pending)
+  (no P0/P1)
 * Codex group-recognition Slice 2 verdict: **APPROVE**
-  (no P0/P1; PostgreSQL runtime pending)
+  (no P0/P1; remote PostgreSQL runtime PASS)
 * Codex unified Admin academic-workflow verdict: **APPROVE**
 * Remote: `gwdanmwluhrcfxbnplwd`
 * Backup: `/Users/annasuvorova/student_platform_backups/pre_content_platform_20260730_133051/` (outside Git; `0700`/`0600`)
@@ -57,6 +57,10 @@
 * Owner-authorized remote apply completed on `2026-08-25`:
   * `20260825102603_academic_ingestion_identity_foundation`
   * `20260825102845_academic_process_calendar_foundation`
+  * `20260825202814_group_identity_recognition_foundation`
+  * `20260825202823_stage19_1b_group_recognition_apply`
+  * `20260825202929_academic_plan_import_persistence`
+  * `20260825203114_group_recognition_refresh_ambiguity_hotfix`
 * PostgreSQL runtime verification PASS on remote:
   * migration compile/apply and RLS/FORCE/grants assertions
   * plan identity isolation and both apply-disabled dry-runs
@@ -64,18 +68,20 @@
   * rollback-only fixtures left all Stage 19.1 domain counts at zero
   * legacy counts unchanged (`group_academic_profiles=2`,
     `curriculum_subjects=37`, all links remain `NULL`)
+  * plan persistence role-play passed **20/20**
+  * group decision/apply role-play passed **23/23**
 
 ## In progress
 
-* Plan-aware v2 persistence is implemented locally and Codex-reviewed:
+* Plan-aware v2 persistence is implemented, remote-applied and Codex-reviewed:
   * durable expiring preview bound to the exact plan row version
   * atomic idempotent apply with stale/owner/hash/confirmation checks
   * aggregate-safe subject storage with per-semester workload and controls
   * editable nested semester, workload and assessment review in Admin Web
   * stale asynchronous preview responses are discarded
-* Focused Flutter tests pass. PostgreSQL role-play is written but has not run
-  because local Docker/PostgreSQL is unavailable.
-* Stage 19.1b Slice 1 is implemented locally and Codex-approved:
+* Focused Flutter tests pass; the rollback-only PostgreSQL role-play passed
+  remotely without preserving fixtures.
+* Stage 19.1b Slice 1 is remote-applied and Codex-approved:
   * separate reviewed program-code aliases and complete group-name aliases;
   * durable semantic group identity = program + admission year + parallel;
   * conservative parser reads parallel left, program code middle, course right;
@@ -83,7 +89,7 @@
   * durable read-only preview shows exact names, aliases, semantic duplicates,
     plan ambiguity, unknown programs and malformed names;
   * Admin Web exposes a fast group-name check; apply remains fail-closed.
-* Stage 19.1b Slice 2 is implemented locally and Codex **APPROVE**:
+* Stage 19.1b Slice 2 is remote-applied and Codex **APPROVE**:
   * durable zero-or-one decisions are stored only for actionable rows;
   * preview v2 stores human candidate labels plus alias/program/identity/
     profile/plan/max-semester drift snapshots;
@@ -114,16 +120,13 @@
 
 ## Residuals (not blockers)
 
-* Local Docker remains unavailable. Slice 2 migration compilation and its new
-  rollback-only role-play have not run on PostgreSQL; static SQL assertions and
-  Codex review pass.
+* Local Docker remains unavailable; owner-authorized remote PostgreSQL
+  migration and rollback-only verification replaced the local runtime gate.
 * No real academic import, current-term transition, or Edge deploy was
   performed.
 
 ## Next (optional)
 
-1. Execute the Stage 19.1b Slice 1 and Slice 2 migrations plus rollback-only
-   role-plays only with owner authorization for remote Supabase.
-2. After PostgreSQL runtime PASS, keep real group import separately
+1. Keep real group/student import separately
    owner-gated. Do not create Auth users, enrollments, offerings, group spaces,
    teams or chats through group recognition.

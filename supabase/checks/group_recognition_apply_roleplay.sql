@@ -1,5 +1,5 @@
 -- Stage 19.1b Slice 2 rollback-safe role-play.
--- Run only after applying 20260825195812 to a disposable/local PostgreSQL.
+-- Run only after applying 20260825202823 to a disposable/local PostgreSQL.
 
 begin;
 
