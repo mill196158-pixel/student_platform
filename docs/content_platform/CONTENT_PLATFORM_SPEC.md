@@ -13,13 +13,23 @@ Acceptance: `ACCEPTANCE_CHECKLIST.md`. Active work: `docs/agent_coordination/CUR
 
 ## 0. Session constraints
 
-Until explicit owner command: no remote migration apply; no Edge deploy; no GitHub push (incl. force); no real-data import; no `service_role` in Flutter Web; no deletion of existing production data; no edits to already-applied migrations; no duplicate roadmap.
+Owner-authorized Stage 14–19 migrations and `content-media`, `subject-media`,
+`vacancy-media` deploys are completed. From this point, no **further** remote
+migration apply, Edge deploy or GitHub push (including force) without an
+explicit owner command; no real-data import; no `service_role` in Flutter Web;
+no deletion of existing production data; no edits to already-applied
+migrations; no duplicate roadmap.
+
+Owner-authorized Stage 19.1 foundation apply completed on `2026-08-25`
+(`20260825102603_academic_ingestion_identity_foundation`,
+`20260825102845_academic_process_calendar_foundation`). No curriculum/calendar
+data was imported; both server dry-runs remain explicitly apply-disabled.
 
 Local commits after Codex **APPROVE** are allowed.
 
 ---
 
-## 1. Read-only audit summary (confirmed)
+## 1. Remote summary (audit baseline + current state)
 
 ### Remote DB (`gwdanmwluhrcfxbnplwd`)
 
@@ -28,7 +38,7 @@ Local commits after Codex **APPROVE** are allowed.
 | News | `news_posts`, `news_versions`, `news_views`, `news_media_cleanup_queue`; audience enum **`all`\|`group`** only |
 | Reviews 13.6 | `entity_reviews`, `review_tags`, `review_reports`, `review_moderation_actions`, `app_feature_flags` |
 | Subject profiles / imports | `subject_student_profiles`, `subject_import_*`, `teacher_import_*` |
-| Absent | `content_items*`, vacancies, points ledger, reference tables, placements/templates |
+| Content Platform Stages 14–19 | Applied: `content_items*`, vacancies, points ledger, reference tables, placements/templates and Import Studio |
 
 ### Live RBAC permission codes (confirmed)
 
@@ -285,7 +295,8 @@ Two different operations — do not mix:
    3. delete item (cascades versions/placements/audience/assets/events/dismissals);
    4. write audit log.
 
-Edge drain of cleanup queue is prepared locally; **not deployed** this session.
+Edge drain of the cleanup queue was subsequently deployed as part of the
+owner-authorized Stage 14–19 rollout.
 
 ### 2.12 RPCs
 
@@ -295,7 +306,8 @@ Mobile: `get_my_content_for_placement`, `dismiss_content_item`, `record_content_
 
 ### 2.13 Storage
 
-Private bucket `content-media`; Edge `content-media` local only; signed upload/download; MIME/size whitelist; path `content/{actor}/{uuid}.ext`.  
+Private bucket `content-media`; Edge `content-media` deployed; signed
+upload/download; MIME/size whitelist; path `content/{actor}/{uuid}.ext`.
 Every signed URL re-checks authorization.
 
 ### 2.14 Demo governance (14.1)
@@ -436,9 +448,12 @@ Additive offering-only keys appear only when the offering has a non-null value; 
 
 ### 16.2 Subject files
 
-Private signed subject media for card images/files. No Base64 in DB. Local Edge may be authored; **deploy remains owner-gated**.
+Private signed subject media for card images/files. No Base64 in DB.
+`subject-media` is deployed; further deploys remain owner-gated.
 
-**Status:** local implementation Codex **APPROVE_WITH_NOTES** (no open P0/P1). Residuals: Storage finalize e2e on apply stack; Edge deploy owner-gated (`verify_jwt=false` for cleanup-secret path).
+**Status:** implementation Codex **APPROVE_WITH_NOTES** (no open P0/P1);
+remote apply and `subject-media` deploy completed. Residual: owner-controlled
+physical Storage finalize e2e.
 
 #### Locked contracts (Codex plan)
 
@@ -496,7 +511,9 @@ Managed reference section on the Info tab. No arbitrary HTML/JS.
 13. **Correction lifecycle (exact):** `content_corrections.content_item_id` becomes **nullable** `ON DELETE SET NULL` with **immutable snapshots** (`item_title`, `template_key`, `schema_version` captured at submit). `admin_safe_delete_content` **rejects** while any **open** correction exists for the item. After all corrections are closed, delete may proceed and journal rows remain (with null `content_item_id` + snapshots).
 14. **Resolve:** reject requires reason; all resolve/lifecycle actions audited.
 
-**Status:** contracts Codex plan **APPROVE**; local implementation in progress (hardening migration + Admin/Mobile/student_ui). Remote apply / Edge deploy / push forbidden. Content-media Edge provides signed download locally; full signed-upload intent/finalize for `content_assets` remains a local follow-up residual if not covered in the same commit.
+**Status:** contracts and implementation Codex **APPROVE**; remote apply and
+`content-media` deploy completed. Further apply/deploy/push remains
+owner-gated; signed-upload intent/finalize residuals stay explicitly tracked.
 
 ---
 
@@ -520,6 +537,57 @@ Cannot moderate own review. Unified Admin Moderation queue.
 
 Admin hub + domain validators; template → map → dry-run → diff → confirm apply → batch id → idempotent re-run → safe rollback where possible.  
 Curriculum chain uses IDs. No auto current-term flip. No Autumn 2026 without owner. Web: RPC/Edge only.
+
+### 7.1 Multi-format academic ingestion
+
+Academic ingestion is one linked flow with three distinct responsibilities:
+
+1. `curriculum_plan`: what subjects and controls belong to each semester;
+2. `academic_process_calendar`: when study, session and GIA periods occur for
+   a year/program/plan/group audience;
+3. `schedule`: concrete lessons and exams inside published process periods.
+
+Locked identity rules:
+
+- `educational_programs` identifies direction + profile + qualification + study
+  form independently of admission year;
+- `curriculum_plans` identifies one admission cohort and source/version of that
+  program;
+- groups link explicitly to a reviewed plan;
+- plan-backed curriculum rows use a stable source occurrence key and never
+  match globally by subject + semester;
+- legacy rows with no plan remain readable and are not inferred/backfilled.
+
+Locked ingestion rules:
+
+- XLSX, text PDF and scanned image/PDF are separate versioned adapters;
+- all extraction output is an editable draft with raw/normalized value,
+  parser version, warning/confidence and source page/region;
+- browser extraction is untrusted; server dry-run owns validation and matching;
+- unsupported/scanned sources fail closed to `manual_required` or
+  `ocr_unavailable`, never to an empty successful import;
+- apply remains disabled until source review and a separately reviewed apply
+  contract;
+- extraction never changes current term, offerings, teams or chats.
+
+Academic-process calendar contract:
+
+- one calendar series belongs to an academic year and exactly one audience
+  shape: global, educational program, reviewed curriculum plan, or confirmed
+  group;
+- versions are append-only in practice; published/archived metadata and periods
+  are immutable at the database boundary, including concurrent edits;
+- course + half-year derive semester server-side; a client semester value is
+  ignored;
+- global/program audiences fail closed if any resolved plan/group would exceed
+  its nominal semesters; no group-name inference is allowed;
+- inclusive period overlaps follow the explicit server matrix; equal types
+  conflict, study/session may overlap practice, and `other` requires a note;
+- browser file hashes are untrusted (`source_verified=false`);
+- Admin accepts an image/PDF as the official review source, but Web OCR is not
+  claimed; periods remain explicitly editable and server dry-run is mandatory;
+- foundation dry-run cannot apply, publish, switch the current term, create
+  offerings, or create teams/chats.
 
 ---
 

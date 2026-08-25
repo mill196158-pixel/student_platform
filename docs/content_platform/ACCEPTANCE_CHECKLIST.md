@@ -1,7 +1,8 @@
 # Content Platform — Acceptance Checklist
 
 Status: **ACTIVE**
-Updated: **2026-07-29** (Stage 14–21 acceptance audit; 14.1/Z residual open)
+Updated: **2026-08-25** (Stage 19.1 foundation remote runtime verified;
+14.1/Z residual open)
 Rule: mark `[x]` only with **code + tests + Codex APPROVE** for that item.
 Docs-only items: Codex APPROVE on the docs package.
 Do **not** merge requirements into vague “готово”.
@@ -285,7 +286,7 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] «Застрял с заданием?» → managed promo
 - [x] Редактируется заголовок
 - [x] Редактируется подзаголовок
-- [ ] Редактируется изображение/иллюстрация *(отключено до signed-URL/media path; Codex 15.1 APPROVE с этим residual)*
+- [~] Редактируется изображение/иллюстрация *(отключено до signed-URL/media path; Codex 15.1 APPROVE с этим residual)*
 - [x] Редактируется градиент
 - [x] Редактируется иконка
 - [x] Редактируется CTA
@@ -628,6 +629,38 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Web Admin без service_role
 - [x] Привилегии только RPC/Edge + RBAC
 - [x] Codex APPROVE 19 foundation (минимум template+dry-run для выбранных доменов) и отдельные APPROVE на расширение доменов
+
+---
+
+## Y1. Stage 19.1 — Multi-format academic ingestion
+
+- [x] `educational_programs`: direction/profile/qualification/study form identity
+- [x] `curriculum_plans`: admission cohort/version/source lineage identity
+- [x] Nullable `group_academic_profiles.curriculum_plan_id` with RESTRICT FK
+- [x] Nullable legacy-compatible `curriculum_subjects.curriculum_plan_id` FK
+- [x] Plan-local immutable occurrence key; no global subject+semester merge
+- [x] Plan-aware server dry-run; apply explicitly disabled
+- [x] Direct authenticated DML blocked; RBAC + audit RPC boundary
+- [x] Identity foundation Codex APPROVE
+- [x] Identity foundation role-play executed on PostgreSQL
+- [x] XLSX adapter produces versioned editable draft rows
+- [x] Text-layer PDF adapter preserves page/region provenance
+- [x] Scanned PDF fails closed to manual/OCR-required review
+- [x] Image intake fails closed to manual/OCR-required review
+- [x] Aggregate/elective parent has explicit occurrence/heading/exclude review
+- [x] Material row edits invalidate prior reviewer confirmation
+- [x] Document extraction code + tests Codex APPROVE
+- [x] Full-time and ФБФО plans cannot deduplicate across plan identity
+- [x] Academic-process document/version model
+- [x] Study/session/GIA periods linked to year + program/plan/group audience
+- [x] Calendar import cannot flip current term or create offerings/chats
+- [ ] Schedule import validates dates against published process periods
+- [ ] Admin presents one chain: plan → annual process calendar → schedule
+- [~] Full code + SQL + tests Codex APPROVE for each independent substage
+
+SQL-backed foundation items were runtime-verified on remote PostgreSQL with
+rollback-only fixtures after owner-authorized apply on `2026-08-25`. No real
+academic data was imported.
 
 ---
 

@@ -15,7 +15,9 @@
 - Codex thread: `019fa373-81f2-7962-a8c9-81d86cb62311`
 - Remote project: `gwdanmwluhrcfxbnplwd`
 - Статус карты: **ACTIVE**
-- Content Platform Stages **14–21 локально закрыты** на `feature/content-platform` (remote apply / Edge deploy / Stage 14.1 residuals — owner-gated)
+- Базовый scope Content Platform Stages **14–19 локально закрыт**; расширение
+  Stage 19.1 остаётся **IN PROGRESS**, а Stages 20–21 — spec/roadmap only
+  (только новые Stage 19.1 apply/deploy и residuals остаются owner-gated)
 - Owner residuals Stage 13 (не блокируют 14–19): PHYSICAL OCR / two-device topic race / controlled push / REAL XLSX
 - Контрольные документы: `docs/content_platform/CONTENT_PLATFORM_SPEC.md`, `docs/content_platform/ACCEPTANCE_CHECKLIST.md`, `docs/agent_coordination/CURRENT_TASK.md`
 
@@ -838,7 +840,9 @@ Remote migration: `20260728165633_stage13_12_group_action_cards_unified_details`
 - [x] не отмечать этап DONE без пользовательского и технического smoke;
 - [x] remote apply Stage 13 + news archive выполнен (owner-authorized 2026-07-27);
 - [x] Edge Functions Stage 13 redeployed; force push по-прежнему запрещён.
-- [ ] Content Platform: локальные commits после Codex APPROVE разрешены; **push / remote apply / Edge deploy запрещены** до отдельной команды владельца.
+- [ ] Content Platform: локальные commits после Codex APPROVE разрешены;
+  **дальнейшие push / remote apply / Edge deploy запрещены** до отдельной
+  команды владельца.
 
 ---
 
@@ -901,7 +905,7 @@ Remote migration: `20260728165633_stage13_12_group_action_cards_unified_details`
 
 ## Stage 14 — Managed Content Platform foundation
 
-Status: **DONE (local)** / Codex **APPROVE** (`2588581`, `691f43e`, `74c779d`) — remote apply pending owner
+Status: **DONE (remote applied)** / Codex **APPROVE** (`2588581`, `691f43e`, `74c779d`) — remote security review PASS
 
 Понятия:
 
@@ -942,7 +946,7 @@ Placements v1:
 - [ ] отсутствие N+1; *(formal evidence residual)*
 - [x] отсутствие сырого JSON в UI;
 - [x] только утверждённые шаблоны + серверная валидация payload/schema_version;
-- [~] RLS / RPC / grants / security review; *(authored/static-reviewed; live psql not run this audit)*
+- [x] RLS / RPC / grants / remote security review PASS;
 - [x] не создавать новые таблицы, пока нельзя безопасно расширить существующие.
 
 ### Stage 14.1 — Demo content governance
@@ -961,39 +965,40 @@ Placements v1:
 
 ## Stage 15 — Главная, новости и профиль
 
-Status: **DONE (local)** / Codex **APPROVE** (`183efc8`, `001e1f0`, `cebfcf5`) — remote apply pending owner
+Status: **DONE (remote applied)** / Codex **APPROVE** (`183efc8`, `001e1f0`, `cebfcf5`) — `content-media` deployed
 
 ### 15.1 Управляемые блоки Главной
 
-- [ ] блоки вроде «Застрял с заданием?» → managed promo-карточки;
-- [ ] редактирование: заголовок, подзаголовок, изображение, градиент, иконка, CTA, маршрут/проверенная внешняя ссылка;
-- [ ] аудитория, период, порядок, возможность закрыть, повторный показ;
-- [ ] статусы draft/published/archived/demo;
-- [ ] общий renderer в `packages/student_ui` для Mobile и Admin Preview.
+- [x] блоки вроде «Застрял с заданием?» → managed promo-карточки;
+- [~] редактирование: заголовок, подзаголовок, градиент, иконка, CTA,
+  маршрут/проверенная внешняя ссылка готовы; изображение остаётся residual;
+- [x] аудитория, период, порядок, возможность закрыть, повторный показ;
+- [x] статусы draft/published/archived/demo;
+- [x] общий renderer в `packages/student_ui` для Mobile и Admin Preview.
 
 ### 15.2 Новости (расширение, не rewrite)
 
-- [ ] аудитория «все»;
-- [ ] несколько групп;
-- [ ] явный набор пользователей;
-- [ ] preview получателей;
-- [ ] сохранить существующие публикации и изображения;
-- [ ] обратная совместимость;
-- [ ] нет утечки скрытых новостей через RPC / кеш / signed URL.
+- [x] аудитория «все»;
+- [x] несколько групп;
+- [x] явный набор пользователей;
+- [x] preview получателей;
+- [x] сохранить существующие публикации и изображения;
+- [x] обратная совместимость;
+- [x] нет утечки скрытых новостей через RPC / кеш / signed URL.
 
 ### 15.3 Лента профиля
 
-- [ ] отдельный placement общей content platform;
-- [ ] контент для всех / групп / отдельных пользователей;
-- [ ] порядок, расписание, preview, Admin;
-- [ ] единый дизайн приложения;
-- [ ] новости не дублируются автоматически — placement выбирает администратор.
+- [x] отдельный placement общей content platform;
+- [x] контент для всех / групп / отдельных пользователей;
+- [x] порядок, расписание, preview, Admin;
+- [x] единый дизайн приложения;
+- [x] новости не дублируются автоматически — placement выбирает администратор.
 
 ---
 
 ## Stage 16 — Предметы и справочник
 
-Status: **16.2 DONE (local)** / Codex **APPROVE_WITH_NOTES**; **16.3 DONE (local)** / Codex **APPROVE** — §S closed; remote apply / Edge deploy pending owner
+Status: **16.2 DONE (remote applied)** / Codex **APPROVE_WITH_NOTES**; **16.3 DONE (remote applied)** / Codex **APPROVE** — §S closed; `subject-media` deployed
 
 ### 16.1 Карточка предмета (Admin visual editor)
 
@@ -1011,7 +1016,8 @@ Status: **16.2 DONE (local)** / Codex **APPROVE_WITH_NOTES**; **16.3 DONE (local
 - [x] private Storage; signed upload/download;
 - [x] whitelist MIME/размера; versioning; cleanup после безопасного удаления;
 - [x] без Base64 в БД.
-- Codex **APPROVE_WITH_NOTES** 16.2 (local commit on `feature/content-platform`; deploy owner-gated).
+- Codex **APPROVE_WITH_NOTES** 16.2; remote apply выполнен,
+  `subject-media` deployed.
 
 ### 16.3 Справочный раздел
 
@@ -1020,28 +1026,32 @@ Status: **16.2 DONE (local)** / Codex **APPROVE_WITH_NOTES**; **16.3 DONE (local
 - [x] Admin Preview + mobile cache-first renderer;
 - [x] «Сообщить об ошибке»;
 - [x] без произвольного HTML/JS.
-- Codex **APPROVE** 16.3 (local commit on `feature/content-platform`; apply/deploy owner-gated).
+- Codex **APPROVE** 16.3; remote apply выполнен.
 
 ---
 
 ## Stage 17 — Вакансии
 
-Status: **DONE (local)** / Codex **APPROVE** — §T closed; remote apply / Edge deploy pending owner
+Status: **DONE (remote applied)** / Codex **APPROVE** — §T closed; `vacancy-media` deployed
 
-- [ ] отдельная доменная модель (не generic content JSON);
-- [ ] создание админом; предложение пользователем через форму; *(local Admin editor + ProposeVacancyScreen scaffold)*
-- [ ] user submission никогда не публикуется сразу; *(enforced in VacancySubmissionService + migration)*
-- [ ] поля: название, организация, описание, формат, локация/удалённо, зарплата, требования, контакты, ссылка, срок, аудитория, медиа, автор, источник, дата проверки;
-- [ ] процесс: `draft/submitted → moderation → approved/published → expired/archived/rejected`;
-- [ ] предпросмотр, срок окончания, жалоба, защита контактов, проверка ссылок, причина отклонения, журнал модерации;
-- [ ] красивые mobile/admin карточки;
-- [ ] demo-вакансии управляются отдельно и не вводят в заблуждение.
+- [x] отдельная доменная модель (не generic content JSON);
+- [x] создание админом; предложение пользователем через форму;
+- [x] user submission никогда не публикуется сразу;
+- [x] поля: название, организация, описание, формат, локация/удалённо,
+  зарплата, требования, контакты, ссылка, срок, аудитория, медиа, автор,
+  источник, дата проверки;
+- [x] процесс:
+  `draft/submitted → moderation → approved/published → expired/archived/rejected`;
+- [x] предпросмотр, срок окончания, жалоба, защита контактов, проверка ссылок,
+  причина отклонения, журнал модерации;
+- [x] красивые mobile/admin карточки;
+- [x] demo-вакансии управляются отдельно и не вводят в заблуждение.
 
 ---
 
 ## Stage 18 — Отзывы, баллы и единая модерация
 
-Status: **DONE (local)** / Codex **APPROVE** — §U–§W closed; remote apply pending owner
+Status: **DONE (remote applied)** / Codex **APPROVE** — §U–§W closed; remote security review PASS
 
 - [x] отзывы для предусмотренных сущностей (преподаватель, предмет; вакансия/работодатель — только после отдельного продуктового решения);
 - [x] 1 одобренный отзыв → 1 внутренний балл (не деньги, не вывод);
@@ -1057,13 +1067,13 @@ Status: **DONE (local)** / Codex **APPROVE** — §U–§W closed; remote apply 
 - [x] фильтры: тип, статус, дата, автор, приоритет, назначенный модератор;
 - [x] действия: принять / отклонить с причиной / запросить уточнение / скрыть / восстановить / история;
 - [x] все действия в audit log.
-Codex **APPROVE** 18 (local commit on `feature/content-platform`; apply/deploy owner-gated).
+Codex **APPROVE** 18; remote apply и security review выполнены.
 
 ---
 
 ## Stage 19 — Import Studio
 
-Status: **DONE (local)** / Codex **APPROVE** — §X/§Y closed; all 9 domains apply; rollback-safe for terms/curriculum/offerings/teacher_links (create-only, drift-checked); remote apply pending owner
+Status: **DONE (remote applied)** / Codex **APPROVE** — §X/§Y closed; all 9 domains apply; rollback-safe for terms/curriculum/offerings/teacher_links (create-only, drift-checked); remote security review PASS
 
 Домены:
 
@@ -1089,7 +1099,45 @@ Status: **DONE (local)** / Codex **APPROVE** — §X/§Y closed; all 9 domains a
 - [x] не переключать текущий семестр автоматически;
 - [x] не создавать осень 2026 без разрешения владельца;
 - [x] Web Admin без service_role; привилегии только через RPC/Edge + RBAC.
-Codex **APPROVE** 19 completion (local commit on `feature/content-platform`; apply/deploy owner-gated).
+Codex **APPROVE** 19 completion; remote apply и security review выполнены.
+
+### 19.1 Multi-format academic ingestion
+
+Status: **IN PROGRESS** — identity, document extraction and academic-process
+calendar foundation/Admin dry-run have Codex **APPROVE**; both migrations are
+remote-applied and passed rollback-only PostgreSQL runtime verification.
+
+- [x] First-class `educational_programs` and versioned `curriculum_plans`
+  separate direction/profile/study form/admission cohort.
+- [x] Nullable backward-compatible group/legacy-curriculum links; plan-local
+  occurrence identity replaces unsafe global subject+semester matching for new
+  imports.
+- [x] Plan-aware dry-run v1 is server-validated and apply-disabled.
+- [x] Document intake: XLSX plus text-layer/scanned PDF diagnosis.
+- [x] Editable extraction draft with source page/region, warnings, aggregate
+  disposition and confirmation invalidation after edits.
+- [x] Image intake fails closed to manual review (Web OCR remains unavailable).
+- [x] Academic-process calendar: immutable versions and study/session/practice/
+  holidays/GIA periods linked to year plus global/program/plan/group audience.
+- [x] Admin calendar workflow: official image/PDF source reference, explicit
+  audience, editable periods and apply-disabled server dry-run.
+- [ ] Schedule import/validation against published process-calendar periods.
+
+Remote migrations (`2026-08-25`):
+`20260825102603_academic_ingestion_identity_foundation`,
+`20260825102845_academic_process_calendar_foundation`. Runtime smoke verified
+RLS/FORCE/grants, dry-run fail-closed behavior, plan isolation and immutable
+published periods. Fixtures were rolled back; no real data was imported.
+
+Rules:
+
+- PDF/OCR output is always a draft; no source document may mutate academic
+  tables without human review + dry-run + explicit apply.
+- Existing legacy curricula with `curriculum_plan_id is null` remain unchanged.
+- Current term, offerings, teams and chats are never changed by document
+  extraction.
+- Full-time `СбПГС` and part-time/extramural `СЗПГС`/`СДПГС` plans must never
+  deduplicate across curriculum-plan identity.
 
 ---
 

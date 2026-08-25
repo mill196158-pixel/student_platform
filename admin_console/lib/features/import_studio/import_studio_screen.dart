@@ -4,12 +4,14 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/auth/admin_backend_config.dart';
 import '../../core/auth/admin_session_controller.dart';
+import 'academic_process_calendar_review_panel.dart';
 import 'import_studio_file_save.dart';
 import 'import_studio_item.dart';
 import 'import_studio_mapping.dart';
 import 'import_studio_repository.dart';
 import 'import_studio_template_service.dart';
 import 'import_studio_workbook_service.dart';
+import 'curriculum_document_review_panel.dart';
 import 'supabase_import_studio_repository.dart';
 
 /// Stage 19 Import Studio hub — XLSX template → upload → mapping → preview → dry-run.
@@ -298,8 +300,10 @@ class _ImportStudioScreenState extends State<ImportStudioScreen> {
           diff: _diff,
           batchKeyController: _batchKeyController,
           busy: _busy,
-          onConfirm: () => setState(() => _step = ImportStudioWorkflowStep.confirm),
-          onBack: () => setState(() => _step = ImportStudioWorkflowStep.template),
+          onConfirm: () =>
+              setState(() => _step = ImportStudioWorkflowStep.confirm),
+          onBack: () =>
+              setState(() => _step = ImportStudioWorkflowStep.template),
         );
       case ImportStudioWorkflowStep.confirm:
         return _ConfirmStep(
@@ -363,11 +367,7 @@ class _ImportStudioScreenState extends State<ImportStudioScreen> {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({
-    required this.isLocal,
-    required this.step,
-    this.onBack,
-  });
+  const _Header({required this.isLocal, required this.step, this.onBack});
 
   final bool isLocal;
   final ImportStudioWorkflowStep step;
@@ -439,7 +439,7 @@ class _DomainHub extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListView.separated(
       itemCount: domains.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      separatorBuilder: (_, _) => const SizedBox(height: 8),
       itemBuilder: (context, index) {
         final domain = domains[index];
         return Card(
@@ -501,7 +501,8 @@ class _ImportSourceStep extends StatefulWidget {
   final Future<void> Function({
     required List<Map<String, dynamic>> rows,
     required String fileName,
-  }) onDryRun;
+  })
+  onDryRun;
   final VoidCallback onBack;
   final ValueChanged<String> onError;
 
@@ -559,9 +560,9 @@ class _ImportSourceStepState extends State<_ImportSourceStep> {
       );
       if (!mounted) return;
       if (saved) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Шаблон сохранён')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Шаблон сохранён')));
       }
     } catch (error) {
       widget.onError('Не удалось создать шаблон: $error');
@@ -639,6 +640,40 @@ class _ImportSourceStepState extends State<_ImportSourceStep> {
     }
   }
 
+  Future<void> _openCurriculumDocumentReview() async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => Dialog(
+        insetPadding: const EdgeInsets.all(24),
+        child: SizedBox(
+          width: 1180,
+          height: 820,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: CurriculumDocumentReviewPanel(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openAcademicProcessCalendarReview() async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => const Dialog(
+        insetPadding: EdgeInsets.all(24),
+        child: SizedBox(
+          width: 1240,
+          height: 860,
+          child: Padding(
+            padding: EdgeInsets.all(20),
+            child: AcademicProcessCalendarReviewPanel(),
+          ),
+        ),
+      ),
+    );
+  }
+
   void _loadDemoSample() {
     final rows = parseImportStudioSampleCsv(
       widget.domain.domain,
@@ -672,7 +707,10 @@ class _ImportSourceStepState extends State<_ImportSourceStep> {
           style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 8),
-        Text(widget.domain.notes, style: const TextStyle(color: Colors.black54)),
+        Text(
+          widget.domain.notes,
+          style: const TextStyle(color: Colors.black54),
+        ),
         const SizedBox(height: 16),
         Wrap(
           spacing: 8,
@@ -688,6 +726,20 @@ class _ImportSourceStepState extends State<_ImportSourceStep> {
               icon: const Icon(Icons.upload_file_outlined),
               label: const Text('Загрузить XLSX'),
             ),
+            if (widget.domain.domain == 'curriculum')
+              FilledButton.tonalIcon(
+                onPressed: widget.busy ? null : _openCurriculumDocumentReview,
+                icon: const Icon(Icons.document_scanner_outlined),
+                label: const Text('Распознать план PDF / XLSX'),
+              ),
+            if (widget.domain.domain == 'terms')
+              FilledButton.tonalIcon(
+                onPressed: widget.busy
+                    ? null
+                    : _openAcademicProcessCalendarReview,
+                icon: const Icon(Icons.date_range_outlined),
+                label: const Text('График учебного процесса'),
+              ),
           ],
         ),
         if (_fileName != null) ...[
@@ -755,7 +807,9 @@ class _ImportSourceStepState extends State<_ImportSourceStep> {
             ),
             const Spacer(),
             FilledButton.icon(
-              onPressed: widget.busy || _previewRows.isEmpty ? null : _startDryRun,
+              onPressed: widget.busy || _previewRows.isEmpty
+                  ? null
+                  : _startDryRun,
               icon: widget.busy
                   ? const SizedBox(
                       width: 16,
@@ -977,7 +1031,11 @@ class _DiffStep extends StatelessWidget {
                 children: [
                   const Row(
                     children: [
-                      Icon(Icons.warning_amber_rounded, size: 18, color: Colors.orange),
+                      Icon(
+                        Icons.warning_amber_rounded,
+                        size: 18,
+                        color: Colors.orange,
+                      ),
                       SizedBox(width: 8),
                       Text(
                         'Предупреждения перед apply',
@@ -1022,7 +1080,10 @@ class _DiffStep extends StatelessWidget {
         ),
         Row(
           children: [
-            OutlinedButton(onPressed: busy ? null : onBack, child: const Text('Назад')),
+            OutlinedButton(
+              onPressed: busy ? null : onBack,
+              child: const Text('Назад'),
+            ),
             const Spacer(),
             if (domain.supportsApply && batch.canConfirmApply)
               FilledButton(
@@ -1102,7 +1163,10 @@ class _ConfirmStep extends StatelessWidget {
         const Spacer(),
         Row(
           children: [
-            OutlinedButton(onPressed: busy ? null : onBack, child: const Text('Назад')),
+            OutlinedButton(
+              onPressed: busy ? null : onBack,
+              child: const Text('Назад'),
+            ),
             const Spacer(),
             FilledButton.icon(
               onPressed: busy ? null : onApply,
@@ -1150,22 +1214,22 @@ class _AppliedStep extends StatelessWidget {
               isRolledBack
                   ? Icons.undo_rounded
                   : isApplied
-                      ? Icons.check_circle_outline
-                      : Icons.info_outline,
+                  ? Icons.check_circle_outline
+                  : Icons.info_outline,
               size: 64,
               color: isRolledBack
                   ? Colors.blueGrey
                   : isApplied
-                      ? Colors.green
-                      : Colors.orange,
+                  ? Colors.green
+                  : Colors.orange,
             ),
             const SizedBox(height: 16),
             Text(
               isRolledBack
                   ? 'Batch откачен'
                   : isApplied
-                      ? 'Batch применён'
-                      : 'Dry-run завершён (validate-only)',
+                  ? 'Batch применён'
+                  : 'Dry-run завершён (validate-only)',
               style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 12),
@@ -1179,7 +1243,9 @@ class _AppliedStep extends StatelessWidget {
                     ? 'Откат доступен: только новые записи, без обновлений.'
                     : 'Откат недоступен для домена ${batch.domain}.',
                 style: TextStyle(
-                  color: batch.rollbackSafe ? Colors.black54 : Colors.deepOrange,
+                  color: batch.rollbackSafe
+                      ? Colors.black54
+                      : Colors.deepOrange,
                 ),
               ),
             ],
@@ -1194,7 +1260,10 @@ class _AppliedStep extends StatelessWidget {
                     icon: const Icon(Icons.undo_rounded),
                     label: const Text('Откатить batch'),
                   ),
-                FilledButton(onPressed: onRestart, child: const Text('К списку доменов')),
+                FilledButton(
+                  onPressed: onRestart,
+                  child: const Text('К списку доменов'),
+                ),
               ],
             ),
           ],
