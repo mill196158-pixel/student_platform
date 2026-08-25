@@ -269,15 +269,177 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Инвентаризация hardcoded/demo элементов записана
 - [x] Демо не удалено до миграции/замены
 - [x] `origin=demo`
-- [ ] Фильтр «Демо» в админке
+- [x] Фильтр «Демо» в админке
 - [x] Архивирование демо через админку
-- [ ] Удаление демо через админку
-- [ ] Замена демо реальным материалом
+- [x] Удаление демо через админку
+- [x] Замена демо реальным материалом
 - [x] Демо не возвращается самопроизвольно после удаления
 - [x] Demo fallback не маскирует ошибку сервера
 - [x] Demo-вакансии: «Пример» или вне production-аудитории
 - [x] Demo-отзывы: «Пример» или вне production-аудитории
-- [ ] Codex APPROVE 14.1
+- [x] Codex APPROVE 14.1 *(APPROVE_WITH_NOTES; media smoke residual)*
+
+---
+
+## M2. Stage 14.1.1 — Visual Editor news-parity + working drafts
+
+- [x] Visual shell: list / real phone / properties (news parity)
+- [x] Responsive list 320–360px; status tabs no wrap; 1280/1440/1920
+- [x] Home preview uses real `StudentHomeView`
+- [x] Reference preview: menu + open article + in-phone navigation
+- [x] Shared mobile screens via `student_ui` (no admin mock copies)
+- [x] Demo/legacy «Редактировать» creates working draft; live stays until publish
+- [x] Publish replaces without duplicate; legacy_key retained
+- [x] Archive / restore / safe delete + tombstone; no fallback resurrection
+- [x] Reference RPC parse + last-good on transient errors
+- [x] Draft media tracking (`draft_asset_ids`) for home/profile/reference
+- [x] Vacancy draft assets server-bound (`working_draft_id`); student-hidden until publish
+- [x] Reference v3 blocks gated (`ADMIN_REFERENCE_V3_BLOCKS` default false)
+- [x] Tests: layout, editors, student_ui, parse fixtures, working-draft flows
+- [x] Builds: Admin Web release, Main Web, Android debug, iOS simulator
+- [x] SQL security review + controlled smoke (counts restored)
+- [x] Codex APPROVE 14.1.1
+- [x] Migrations applied: `20260730155714`, `20260730160328`, `20260730161522`
+
+---
+
+## M3. Stage 14.1.2 — Visual Content Studio
+
+- [x] Shared IconPicker (RU search, categories, clear) — no raw Material key in main UI
+- [x] Color/gradient picker + contrast hint; HEX only in «Дополнительно»
+- [x] ActionPicker allowlist (no chat; HTTPS external; no raw `/help` in main UI)
+- [x] Card variant picker (surface-allowed variants); switch keeps text/image/CTA
+- [x] Home placement slot picker (human labels + miniatures); `home_slot` in payload
+- [x] Home phone = real `StudentHomeView` with real published news + multi-slot promos
+- [x] Profile carousel: list selection ↔ PageController; draft overlay; in-phone detail/back
+- [x] Reference categories: IconPicker, hide/archive, safe-delete (reassign|archive|cancel)
+- [x] Reference articles: real menu→category→article→back; blocks/CTA visual path
+- [x] Vacancies: real list→detail→back; visual fields; no raw enums in main UI
+- [x] Schema v2 draft/save (`target_schema_version=2`); **publish gate default OFF**
+- [x] Publish-blocked UX message when server rejects v2
+- [x] Live preview from local draft (no per-keystroke save); dirty leave dialog
+- [x] Import Studio: docs-only next-stage note (no rewrite)
+- [x] Tests: pickers, carousel sync, home news preview, slot/variant payload, category safety, vacancy nav, tombstone
+- [x] Builds: Admin Web release, Main Web, Android debug, iOS simulator
+- [x] SQL security review + remote smoke (gate OFF; no mass publish)
+- [x] Codex APPROVE_WITH_NOTES 14.1.2
+- [x] Migrations applied: `20260730190415`, `20260730220218`
+- [x] Commit + normal push `origin/refactor/chat-tab` (`4976ee2`)
+
+---
+
+## M4. Stage 14.1.3 — Visual Editor Fidelity & Media Pipeline
+
+- [x] Unified preview precedence: local → WD → published → eligible demo
+- [x] PreviewMode: «С текущими правками» / «Как опубликовано»
+- [x] Local discard restores saved snapshot (not server WD discard RPC)
+- [x] student_ui cardVariant layouts for promo + profile feed
+- [x] ContentIconResolver (builtIn / custom / none / unknown)
+- [x] Media intent states + local bytes in phone preview
+- [x] Home promo imageBytes reach StudentHomeView placements
+- [x] Profile WD image pick + carousel overlay
+- [x] Reference published list overlays liveDraft
+- [x] Vacancy published WD overlay + logo/cover preview bytes
+- [x] Publish gate OFF does not block local preview
+- [x] Vacancy asset role RPC + WD isolation + clear/publish reconcile
+- [x] Stale media resolve generation-safe
+- [x] Tests: variant/media/WD overlay/discard (Codex final package)
+- [x] Builds: Admin/Main Web, Android, iOS
+- [x] Codex APPROVE 14.1.3
+- [x] Commit + normal push `origin/refactor/chat-tab` (`4976ee2`) (feature `b57c315`)
+
+---
+
+## M5. Stage 14.1.4 — Full Visual Parity & Media Reliability
+
+- [x] ContentImageRenderState (notApplicable/loading/ready/missing/failed) on promo + profile cards
+- [x] Image variants never silently fall back to gradient_text
+- [x] Failed image state exposes retry callback
+- [x] Mobile media key: userScope + assetId + contentVersion; single-flight; generation isolation
+- [x] HomePromoService ordered multi-slot placements (all home_slot values)
+- [x] Custom icon bytes end-to-end (PNG/WebP, contain, independent of hero image)
+- [x] Vacancy logo/cover/background typed states; detail forwards bytes; list reuses resolve
+- [x] Admin Home: full StudentHomeView + scroll-to-selected promo + bottom nav
+- [x] Admin Profile: full chrome (header/actions/points/diary/map/reviews) + carousel sync
+- [x] Admin Reference: shared help browse list→article→back (no segmented mock)
+- [x] Admin Vacancy: shared jobs board list→detail→back
+- [x] Published Mobile shows image variants with resolved bytes
+- [x] Tests: rendered overlay/icon/slots/nav/isolation/tombstone (+ goldens where feasible)
+- [x] Builds: Admin/Main Web, Android, iOS
+- [x] Codex APPROVE 14.1.4
+- [x] Commit + normal push `origin/refactor/chat-tab` (`4976ee2`) (`5337037`)
+
+---
+
+## M6. Stage 14.1.5 — Final Visual Preview Integrity
+
+- [x] image_full / image_overlay: invariant outer height (180) in unbounded scroll (ready/loading/missing/failed)
+- [x] HomePromoPayload dual-read: overlay_opacity, focal_x, focal_y, image_fit
+- [x] Admin preview: selected draft + all published; published mode no draft overlay; deterministic sort
+- [x] ensureVisible after select / home slot change / placement rebuild
+- [x] Profile: shared StudentProfileScreenPreview for Admin + Mobile scroll body
+- [x] Vacancy/Reference: human default banners; Stage/schema strings only in «Диагностика»
+- [x] Parameterized variant tests + goldens 390×844 / 430×932
+- [x] Codex APPROVE 14.1.5
+- [x] Commit + normal push `origin/refactor/chat-tab` (`4976ee2`)
+
+---
+
+## M7. Stage 14.2 — Managed Content v2 → main mobile
+
+- [x] Home: schema 1|2 dual-read; all 5 home_slot; all 7 card variants
+- [x] Home: multi promo + order + dismiss + audience/schedule (server) + media focal/overlay/fit/icon/CTA
+- [x] Profile: real chrome retained; managed carousel + detail/back + media + audience/schedule
+- [x] Reference: categories/articles/blocks/files/links/CTA; nav category→article→back; legacy only if empty/network
+- [x] Vacancies: list/detail/logo/cover/background/requirements/format/location/salary/CTA; no draft/moderation for students
+- [x] Media cache-first: memory→disk→single-flight→skeleton→last-good→generation guard; key=user+asset+version (not signed URL)
+- [x] Freshness without restart: pull-to-refresh + app resume + tab reopen (Realtime residual; no reconnect claim)
+- [x] ContentNavIntent whitelist in student_ui; mobile executor (tabs/diary/HTTPS/entity); structured action never falls back to legacy
+- [x] Student READ RPC projects home/profile wire schema_version 2→1 for legacy clients
+- [x] Unknown schema/variant/icon/action fail-safe per row
+- [x] Tests: variants/slots/carousel/reference/vacancy/media/offline/v1-v2/unknown/audience/draft-absent
+- [x] Builds: format, analyze, student_ui + mobile content tests, Admin relevant, Main Web, Android APK, iOS sim; git diff --check; secret scan
+- [x] Codex APPROVE 14.2
+- [x] Controlled remote smoke (v1 still served) + owner gate SQL (no migration enables flag)
+- [x] Commit + normal push `origin/refactor/chat-tab` (`ed94cb9`)
+
+## M7.1 Stage 14.2.1 — content-media upload on published + working draft
+
+- [x] Published item without working draft → upload forbidden (`working_draft_required`)
+- [x] Published item with own working draft → upload allowed and bound to WD
+- [x] Cross-user / non-writer intent → forbidden; finalize actor mismatch → forbidden
+- [x] Finalize attaches asset to `draft_asset_ids`, bumps WD row_version, stores finalize snapshots
+- [x] Idempotent finalize returns snapshots without second RV bump; finalize-after-discard rejected
+- [x] Edge maps business codes to 409/422/403/404 (not HTTP 500 for `draft_only` / `working_draft_required`)
+- [x] Admin Home/Profile/Reference adopt `working_draft_row_version`; preview keeps local bytes until reload
+- [x] Cancel WD preserves published asset; unattached assets remain cleanup-eligible; students see only published payload
+- [x] Tests: roleplay + Admin media/home/profile + mobile content; builds Web/Android/iOS; secret scan; `git diff --check`
+- [x] Codex APPROVE 14.2.1
+- [x] Remote migration `20260731102302` + Edge `content-media` v2 deploy + controlled smoke
+- [x] Commit + normal push `origin/refactor/chat-tab` (`548969f`)
+
+## M7.2 Stage 14.2.2 — reliable Visual Content Studio publish
+
+- [x] Exact remote error identified: `invalid_schema_upgrade` on schema-1 WD save with `target_schema_version=2`
+- [x] Migration allows home_promo_v1 / profile_feed_card_v1 WD 1→2 (publish still gate-checked)
+- [x] Shared publish coordinator: validate → autosave → publish saved RV → refetch; single-flight
+- [x] Home/Profile/Reference/Vacancy wired; Vacancy nested `_run` save skip fixed
+- [x] Business errors mapped to RU messages (not generic «Не удалось выполнить операцию»)
+- [x] UI «Публикуем…» + spinner; destructive/publish actions locked during pipeline
+- [x] Tests: coordinator + serialization + Admin full suite; mobile content; Web/Android/iOS builds
+- [x] Codex APPROVE 14.2.2
+- [x] Controlled remote smoke (no mass publish) + commit + push (`35cb5fb`)
+
+## M7.3 Stage 14.2.3 — home promo schema 3 + chat CTA + in-place edit
+
+- [x] Migration `20260731113816` (home_promo_v1@3, chat RPCs, HTTPS corpus, WD overlay JSON)
+- [x] `ContentNavChat` + mobile executor (`content_resolve_chat_cta` → team chat tab)
+- [x] Admin chat action picker + `admin_list_content_chat_targets` wiring
+- [x] Home promo in-place edit: WD list overlay, auto-resume, schema 3 target, safe-delete confirm
+- [x] `kStudentHomeSectionGap` + multi-promo layout tests
+- [x] Codex final APPROVE 14.2.3
+- [x] Remote migration apply + controlled smoke (no live deletes; placements 2→2)
+- [x] Commit + push `origin/refactor/chat-tab`
 
 ---
 
@@ -692,7 +854,7 @@ academic data was imported.
 
 ## Z. Design contract
 
-- [ ] Тот же визуальный язык, что у mobile Student Platform
+- [x] Тот же визуальный язык, что у mobile Student Platform
 - [x] Общий renderer Mobile ↔ Admin Preview
 - [x] Утверждённые шаблоны вместо свободного конструктора
 - [ ] Нет сырых enum в UI
@@ -807,7 +969,7 @@ academic data was imported.
 
 ## AD. Final stop
 
-- [~] Все технически возможные локальные подэтапы выполнены или заблокированы в CURRENT_TASK *(14.1/Z residuals open)*
+- [x] Все технически возможные локальные подэтапы выполнены или заблокированы в CURRENT_TASK *(14.1/Z: media smoke JWT residual)*
 - [x] Каждый завершённый подэтап имеет Codex APPROVE
 - [x] Roadmap обновлён
 - [x] CURRENT_TASK обновлён

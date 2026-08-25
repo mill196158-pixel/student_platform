@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 /// Approved content placements (server enum). Never show raw values in UI.
@@ -89,6 +91,28 @@ bool? _readBool(Map<String, dynamic> json, String key) {
   return null;
 }
 
+double? _readDouble(Map<String, dynamic> json, List<String> keys) {
+  for (final key in keys) {
+    final value = json[key];
+    if (value == null) continue;
+    if (value is num) return value.toDouble();
+    return double.tryParse(value.toString());
+  }
+  return null;
+}
+
+/// Preserve action presence for fail-closed CTA precedence.
+///
+/// Missing key → null (legacy CTA may apply). Present non-map / null value →
+/// sentinel map that [ContentNavResolver] resolves to [ContentNavDisabled]
+/// without falling back to legacy fields.
+Map<String, dynamic>? _readActionMap(Map<String, dynamic> json) {
+  if (!json.containsKey('action')) return null;
+  final raw = json['action'];
+  if (raw is Map) return Map<String, dynamic>.from(raw);
+  return const <String, dynamic>{'kind': '__malformed__'};
+}
+
 /// Typed home promo payload for template `home_promo_v1`.
 @immutable
 class HomePromoPayload {
@@ -103,6 +127,15 @@ class HomePromoPayload {
     this.ctaRoute,
     this.ctaUrl,
     this.reshowAfterHours,
+    this.homeSlot,
+    this.cardVariant,
+    this.iconAssetId,
+    this.gradientAngle,
+    this.action,
+    this.overlayOpacity,
+    this.focalX,
+    this.focalY,
+    this.imageFit,
   });
 
   final String title;
@@ -115,6 +148,31 @@ class HomePromoPayload {
   final String? ctaRoute;
   final String? ctaUrl;
   final int? reshowAfterHours;
+
+  /// Stage 14.1.2 dual-read (schema v2). Defaults to after_assignments when null.
+  final String? homeSlot;
+
+  /// Stage 14.1.2 dual-read card presentation variant.
+  final String? cardVariant;
+
+  /// Optional custom icon asset (schema v2).
+  final String? iconAssetId;
+
+  /// Gradient direction in degrees (schema v2).
+  final int? gradientAngle;
+
+  /// Structured tap action (schema v2).
+  final Map<String, dynamic>? action;
+
+  /// Image overlay dim (0..1) for image_overlay variant.
+  final double? overlayOpacity;
+
+  /// Focal point for hero image (0..1).
+  final double? focalX;
+  final double? focalY;
+
+  /// Hero image fit: cover | contain (default cover when null).
+  final String? imageFit;
 
   /// Built-in demo matching the historic hardcoded Home help card.
   static const HomePromoPayload demoStuckWithAssignment = HomePromoPayload(
@@ -169,6 +227,38 @@ class HomePromoPayload {
         if (reshow == null || reshow < 1 || reshow > 8760) return null;
       }
 
+      double? overlayOpacity;
+      if (json.containsKey('overlay_opacity') ||
+          json.containsKey('overlayOpacity')) {
+        final raw = _readDouble(json, const [
+          'overlayOpacity',
+          'overlay_opacity',
+        ]);
+        if (raw == null || raw < 0 || raw > 1) return null;
+        overlayOpacity = raw;
+      }
+
+      double? focalX;
+      if (json.containsKey('focal_x') || json.containsKey('focalX')) {
+        final raw = _readDouble(json, const ['focalX', 'focal_x']);
+        if (raw == null || raw < 0 || raw > 1) return null;
+        focalX = raw;
+      }
+
+      double? focalY;
+      if (json.containsKey('focal_y') || json.containsKey('focalY')) {
+        final raw = _readDouble(json, const ['focalY', 'focal_y']);
+        if (raw == null || raw < 0 || raw > 1) return null;
+        focalY = raw;
+      }
+
+      String? imageFit;
+      if (json.containsKey('image_fit') || json.containsKey('imageFit')) {
+        final raw = _readString(json, const ['imageFit', 'image_fit']);
+        if (raw != 'cover' && raw != 'contain') return null;
+        imageFit = raw;
+      }
+
       return HomePromoPayload(
         title: title,
         subtitle: subtitle,
@@ -180,6 +270,18 @@ class HomePromoPayload {
         ctaRoute: ctaRoute,
         ctaUrl: ctaUrl,
         reshowAfterHours: reshow,
+        homeSlot: _readString(json, const ['homeSlot', 'home_slot']),
+        cardVariant: _readString(json, const ['cardVariant', 'card_variant']),
+        iconAssetId: _readString(json, const ['iconAssetId', 'icon_asset_id']),
+        gradientAngle: _readInt(json, const [
+          'gradientAngle',
+          'gradient_angle',
+        ]),
+        action: _readActionMap(json),
+        overlayOpacity: overlayOpacity,
+        focalX: focalX,
+        focalY: focalY,
+        imageFit: imageFit,
       );
     } catch (_) {
       return null;
@@ -187,6 +289,9 @@ class HomePromoPayload {
   }
 
   IconData get iconData => contentIconForKey(iconKey);
+
+  /// Effective home slot for layout (legacy default).
+  String get effectiveHomeSlot => homeSlot ?? 'after_assignments';
 
   /// Wire format for `home_promo_v1` RPCs (snake_case).
   Map<String, dynamic> toWireJson() {
@@ -203,6 +308,15 @@ class HomePromoPayload {
       if (ctaRoute != null) 'cta_route': ctaRoute,
       if (ctaUrl != null) 'cta_url': ctaUrl,
       if (reshowAfterHours != null) 'reshow_after_hours': reshowAfterHours,
+      if (homeSlot != null) 'home_slot': homeSlot,
+      if (cardVariant != null) 'card_variant': cardVariant,
+      if (iconAssetId != null) 'icon_asset_id': iconAssetId,
+      if (gradientAngle != null) 'gradient_angle': gradientAngle,
+      if (action != null) 'action': action,
+      if (overlayOpacity != null) 'overlay_opacity': overlayOpacity,
+      if (focalX != null) 'focal_x': focalX,
+      if (focalY != null) 'focal_y': focalY,
+      if (imageFit != null) 'image_fit': imageFit,
     };
   }
 
@@ -217,10 +331,28 @@ class HomePromoPayload {
     String? ctaRoute,
     String? ctaUrl,
     int? reshowAfterHours,
+    String? homeSlot,
+    String? cardVariant,
+    String? iconAssetId,
+    int? gradientAngle,
+    Map<String, dynamic>? action,
+    double? overlayOpacity,
+    double? focalX,
+    double? focalY,
+    String? imageFit,
     bool clearImageAssetId = false,
     bool clearCtaRoute = false,
     bool clearCtaUrl = false,
     bool clearReshowAfterHours = false,
+    bool clearHomeSlot = false,
+    bool clearCardVariant = false,
+    bool clearIconAssetId = false,
+    bool clearGradientAngle = false,
+    bool clearAction = false,
+    bool clearOverlayOpacity = false,
+    bool clearFocalX = false,
+    bool clearFocalY = false,
+    bool clearImageFit = false,
   }) {
     return HomePromoPayload(
       title: title ?? this.title,
@@ -236,6 +368,17 @@ class HomePromoPayload {
       reshowAfterHours: clearReshowAfterHours
           ? null
           : (reshowAfterHours ?? this.reshowAfterHours),
+      homeSlot: clearHomeSlot ? null : (homeSlot ?? this.homeSlot),
+      cardVariant: clearCardVariant ? null : (cardVariant ?? this.cardVariant),
+      iconAssetId: clearIconAssetId ? null : (iconAssetId ?? this.iconAssetId),
+      gradientAngle:
+          clearGradientAngle ? null : (gradientAngle ?? this.gradientAngle),
+      action: clearAction ? null : (action ?? this.action),
+      overlayOpacity:
+          clearOverlayOpacity ? null : (overlayOpacity ?? this.overlayOpacity),
+      focalX: clearFocalX ? null : (focalX ?? this.focalX),
+      focalY: clearFocalY ? null : (focalY ?? this.focalY),
+      imageFit: clearImageFit ? null : (imageFit ?? this.imageFit),
     );
   }
 
@@ -280,7 +423,9 @@ class ManagedContentCard {
   final HomePromoPayload homePromo;
   final bool showDemoBadge;
 
-  /// Fail-closed parser for `home_promo_v1` / schema_version 1.
+  /// Fail-closed parser for `home_promo_v1` / schema_version 1 or 2.
+  ///
+  /// Unknown schema versions return null so sibling cards still render.
   static ManagedContentCard? tryParseHomePromo(Map<String, dynamic> json) {
     try {
       final id = _readString(json, const ['id']);
@@ -298,7 +443,8 @@ class ManagedContentCard {
         'schema_version',
         'schemaVersion',
       ]);
-      if (schemaVersionRaw == null || schemaVersionRaw != 1) {
+      if (schemaVersionRaw == null ||
+          (schemaVersionRaw != 1 && schemaVersionRaw != 2)) {
         return null;
       }
 
@@ -351,6 +497,15 @@ class ProfileFeedPayload {
     this.imageAssetId,
     this.ctaRoute,
     this.ctaUrl,
+    this.iconKey,
+    this.iconAssetId,
+    this.cardVariant,
+    this.bgMode,
+    this.bgColor,
+    this.gradientColors,
+    this.gradientAngle,
+    this.overlayOpacity,
+    this.action,
   });
 
   final String title;
@@ -359,6 +514,19 @@ class ProfileFeedPayload {
   final String? imageAssetId;
   final String? ctaRoute;
   final String? ctaUrl;
+
+  /// Stage 14.1.2 dual-read (schema v2).
+  final String? iconKey;
+  final String? iconAssetId;
+  final String? cardVariant;
+  final String? bgMode;
+  final Color? bgColor;
+  final List<Color>? gradientColors;
+  final int? gradientAngle;
+  final double? overlayOpacity;
+
+  /// Structured tap action (schema v2).
+  final Map<String, dynamic>? action;
 
   static const List<ProfileFeedPayload> demoFeed = [
     ProfileFeedPayload(
@@ -388,6 +556,39 @@ class ProfileFeedPayload {
       final subtitle = _readString(json, const ['subtitle']);
       final ctaLabel = _readString(json, const ['ctaLabel', 'cta_label']);
       if (title == null || subtitle == null || ctaLabel == null) return null;
+
+      List<Color>? gradientColors;
+      if (json.containsKey('gradientColors') ||
+          json.containsKey('gradient_colors')) {
+        final gradientRaw = json['gradientColors'] ?? json['gradient_colors'];
+        if (gradientRaw is! List) return null;
+        final colors = <Color>[];
+        for (final item in gradientRaw) {
+          final parsed = _parseProfileFeedColor(item);
+          if (parsed == null) return null;
+          colors.add(parsed);
+        }
+        if (colors.length < 2 || colors.length > 4) return null;
+        gradientColors = colors;
+      }
+
+      Color? bgColor;
+      if (json.containsKey('bgColor') || json.containsKey('bg_color')) {
+        final raw = json['bgColor'] ?? json['bg_color'];
+        bgColor = _parseProfileFeedColor(raw);
+        if (bgColor == null) return null;
+      }
+
+      final overlayOpacity = _readDouble(json, const [
+        'overlayOpacity',
+        'overlay_opacity',
+      ]);
+      if ((json.containsKey('overlayOpacity') ||
+              json.containsKey('overlay_opacity')) &&
+          overlayOpacity == null) {
+        return null;
+      }
+
       return ProfileFeedPayload(
         title: title,
         subtitle: subtitle,
@@ -396,11 +597,25 @@ class ProfileFeedPayload {
             _readString(json, const ['imageAssetId', 'image_asset_id']),
         ctaRoute: _readString(json, const ['ctaRoute', 'cta_route']),
         ctaUrl: _readString(json, const ['ctaUrl', 'cta_url']),
+        iconKey: _readString(json, const ['iconKey', 'icon_key']),
+        iconAssetId: _readString(json, const ['iconAssetId', 'icon_asset_id']),
+        cardVariant: _readString(json, const ['cardVariant', 'card_variant']),
+        bgMode: _readString(json, const ['bgMode', 'bg_mode']),
+        bgColor: bgColor,
+        gradientColors: gradientColors,
+        gradientAngle: _readInt(json, const [
+          'gradientAngle',
+          'gradient_angle',
+        ]),
+        overlayOpacity: overlayOpacity,
+        action: _readActionMap(json),
       );
     } catch (_) {
       return null;
     }
   }
+
+  IconData get iconData => contentIconForKey(iconKey ?? 'info');
 
   Map<String, dynamic> toWireJson() => {
         'title': title,
@@ -409,6 +624,18 @@ class ProfileFeedPayload {
         if (imageAssetId != null) 'image_asset_id': imageAssetId,
         if (ctaRoute != null) 'cta_route': ctaRoute,
         if (ctaUrl != null) 'cta_url': ctaUrl,
+        if (iconKey != null) 'icon_key': iconKey,
+        if (iconAssetId != null) 'icon_asset_id': iconAssetId,
+        if (cardVariant != null) 'card_variant': cardVariant,
+        if (bgMode != null) 'bg_mode': bgMode,
+        if (bgColor != null) 'bg_color': _profileFeedColorToHex(bgColor!),
+        if (gradientColors != null)
+          'gradient_colors': [
+            for (final color in gradientColors!) _profileFeedColorToHex(color),
+          ],
+        if (gradientAngle != null) 'gradient_angle': gradientAngle,
+        if (overlayOpacity != null) 'overlay_opacity': overlayOpacity,
+        if (action != null) 'action': action,
       };
 
   ProfileFeedPayload copyWith({
@@ -418,9 +645,27 @@ class ProfileFeedPayload {
     String? imageAssetId,
     String? ctaRoute,
     String? ctaUrl,
+    String? iconKey,
+    String? iconAssetId,
+    String? cardVariant,
+    String? bgMode,
+    Color? bgColor,
+    List<Color>? gradientColors,
+    int? gradientAngle,
+    double? overlayOpacity,
+    Map<String, dynamic>? action,
     bool clearImageAssetId = false,
     bool clearCtaRoute = false,
     bool clearCtaUrl = false,
+    bool clearIconKey = false,
+    bool clearIconAssetId = false,
+    bool clearCardVariant = false,
+    bool clearBgMode = false,
+    bool clearBgColor = false,
+    bool clearGradientColors = false,
+    bool clearGradientAngle = false,
+    bool clearOverlayOpacity = false,
+    bool clearAction = false,
   }) {
     return ProfileFeedPayload(
       title: title ?? this.title,
@@ -430,7 +675,35 @@ class ProfileFeedPayload {
           clearImageAssetId ? null : (imageAssetId ?? this.imageAssetId),
       ctaRoute: clearCtaRoute ? null : (ctaRoute ?? this.ctaRoute),
       ctaUrl: clearCtaUrl ? null : (ctaUrl ?? this.ctaUrl),
+      iconKey: clearIconKey ? null : (iconKey ?? this.iconKey),
+      iconAssetId: clearIconAssetId ? null : (iconAssetId ?? this.iconAssetId),
+      cardVariant: clearCardVariant ? null : (cardVariant ?? this.cardVariant),
+      bgMode: clearBgMode ? null : (bgMode ?? this.bgMode),
+      bgColor: clearBgColor ? null : (bgColor ?? this.bgColor),
+      gradientColors:
+          clearGradientColors ? null : (gradientColors ?? this.gradientColors),
+      gradientAngle:
+          clearGradientAngle ? null : (gradientAngle ?? this.gradientAngle),
+      overlayOpacity:
+          clearOverlayOpacity ? null : (overlayOpacity ?? this.overlayOpacity),
+      action: clearAction ? null : (action ?? this.action),
     );
+  }
+
+  static Color? _parseProfileFeedColor(Object? raw) {
+    if (raw is! String) return null;
+    var hex = raw.trim();
+    if (hex.startsWith('#')) hex = hex.substring(1);
+    if (hex.length == 6) hex = 'FF$hex';
+    if (hex.length != 8) return null;
+    final value = int.tryParse(hex, radix: 16);
+    if (value == null) return null;
+    return Color(value);
+  }
+
+  static String _profileFeedColorToHex(Color color) {
+    final value = color.toARGB32() & 0xFFFFFF;
+    return '#${value.toRadixString(16).padLeft(6, '0').toUpperCase()}';
   }
 }
 
@@ -443,6 +716,9 @@ class ManagedProfileFeedCard {
     required this.priority,
     required this.payload,
     this.showDemoBadge = false,
+    this.imageBytes,
+    this.iconBytes,
+    this.imageLoading = false,
   });
 
   final String id;
@@ -451,6 +727,35 @@ class ManagedProfileFeedCard {
   final int priority;
   final ProfileFeedPayload payload;
   final bool showDemoBadge;
+  final Uint8List? imageBytes;
+  final Uint8List? iconBytes;
+  final bool imageLoading;
+
+  ManagedProfileFeedCard copyWith({
+    String? id,
+    ContentOrigin? origin,
+    int? sortOrder,
+    int? priority,
+    ProfileFeedPayload? payload,
+    bool? showDemoBadge,
+    Uint8List? imageBytes,
+    Uint8List? iconBytes,
+    bool? imageLoading,
+    bool clearImageBytes = false,
+    bool clearIconBytes = false,
+  }) {
+    return ManagedProfileFeedCard(
+      id: id ?? this.id,
+      origin: origin ?? this.origin,
+      sortOrder: sortOrder ?? this.sortOrder,
+      priority: priority ?? this.priority,
+      payload: payload ?? this.payload,
+      showDemoBadge: showDemoBadge ?? this.showDemoBadge,
+      imageBytes: clearImageBytes ? null : (imageBytes ?? this.imageBytes),
+      iconBytes: clearIconBytes ? null : (iconBytes ?? this.iconBytes),
+      imageLoading: imageLoading ?? this.imageLoading,
+    );
+  }
 
   static ManagedProfileFeedCard? tryParse(Map<String, dynamic> json) {
     try {
@@ -465,7 +770,9 @@ class ManagedProfileFeedCard {
         'schema_version',
         'schemaVersion',
       ]);
-      if (schemaVersion != 1) return null;
+      if (schemaVersion == null || (schemaVersion != 1 && schemaVersion != 2)) {
+        return null;
+      }
       if (json.containsKey('placement') || json.containsKey('placements')) {
         final placementRaw = json['placement'];
         if (placementRaw != null &&

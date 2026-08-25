@@ -523,6 +523,8 @@ Dedicated tables: `vacancies`, versions, audience junctions, assets, reports, mo
 Status: `draft → submitted → in_moderation → approved/published → expired|archived|rejected`.  
 User submit never auto-publishes. Demo: `origin=demo` + «Пример» or non-production audience.
 
+**Admin/demo ready-publish (Stage 17.1):** Visual Studio «Опубликовать» on an authored draft (`origin ∈ {admin,demo}` AND `submitted_by IS NULL`) may call `admin_ready_publish_vacancy`, which atomically records `draft → in_moderation → approved → published` (requires `moderation.action|write` + `content.publish`). Any `user_submission` or non-null `submitted_by` stays fail-closed and must use the moderation queue.
+
 ---
 
 ## 6. Stage 18 — Reviews, points, unified moderation
@@ -640,6 +642,11 @@ Caveat: FCM/APNs remain external; VPN independence not promised without physical
 ## 10. Design contract
 
 Same mobile visual language; shared Mobile↔Admin Preview renderer; approved templates only; no raw enum/UUID/JSON in UI; Russian copy; SafeArea; keyboard dismiss; loading/error/empty/success; cache-first; stable images; phone + Admin 1280/1440/1920; a11y; text scale; reduce motion; widget/golden tests for critical templates.
+
+The integrated Admin keeps `VisualEditorShell` as the nontechnical content
+workflow (material list + real student phone preview + plain-language
+properties) while Academic and Import Studio remain reachable in the same
+RBAC-protected navigation.
 
 ---
 

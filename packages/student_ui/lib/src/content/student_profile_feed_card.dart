@@ -1,6 +1,13 @@
+import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
+import 'content_icon_resolver.dart';
+import 'content_image_render_state.dart';
 import 'content_models.dart';
+
+const _kDefaultFeedGradient = [Color(0xFFDCD0FA), Color(0xFFC9B8F3)];
 
 /// Shared Profile feed card renderer (Mobile + Admin Preview).
 ///
@@ -11,86 +18,717 @@ class StudentProfileFeedCard extends StatelessWidget {
     required this.payload,
     this.onTap,
     this.showDemoBadge = false,
-    this.gradientColors = const [Color(0xFFDCD0FA), Color(0xFFC9B8F3)],
+    this.gradientColors,
+    this.imageBytes,
+    this.imageLoading = false,
+    this.imageState,
+    this.iconBytes,
   });
 
   final ProfileFeedPayload payload;
   final VoidCallback? onTap;
   final bool showDemoBadge;
-  final List<Color> gradientColors;
+
+  /// Optional override; when null, [payload.gradientColors] is used.
+  final List<Color>? gradientColors;
+  final Uint8List? imageBytes;
+  final bool imageLoading;
+  final ContentImageRenderState? imageState;
+  final Uint8List? iconBytes;
+
+  ContentImageRenderState get resolvedImageState {
+    if (imageState != null) return imageState!;
+    final usesImage = contentCardVariantUsesImage(
+      effectiveContentCardVariant(payload.cardVariant),
+    );
+    return ContentImageRenderState.fromLegacy(
+      usesImageVariant: usesImage,
+      bytes: imageBytes,
+      loading: imageLoading,
+    );
+  }
+
+  List<Color> get _resolvedGradientColors {
+    final fromPayload = payload.gradientColors;
+    if (fromPayload != null && fromPayload.length >= 2) return fromPayload;
+    if (gradientColors != null && gradientColors!.length >= 2) {
+      return gradientColors!;
+    }
+    return _kDefaultFeedGradient;
+  }
+
+  /// Variant identity comes exclusively from payload — never silent fallback.
+  String get _variant => effectiveContentCardVariant(payload.cardVariant);
 
   @override
   Widget build(BuildContext context) {
-    final colors = gradientColors.length >= 2
-        ? gradientColors
-        : const [Color(0xFFDCD0FA), Color(0xFFC9B8F3)];
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(20),
-        child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 6),
-          decoration: BoxDecoration(
+        child: _buildVariant(context),
+      ),
+    );
+  }
+
+  Widget _buildVariant(BuildContext context) {
+    return switch (_variant) {
+      'image_full' => _FeedImageFullLayout(card: this),
+      'image_overlay' => _FeedImageOverlayLayout(card: this),
+      'image_top_text' => _FeedImageTopTextLayout(card: this),
+      'compact_icon' => _FeedCompactIconLayout(card: this),
+      'accent_info' => _FeedAccentInfoLayout(card: this),
+      'no_image' => _FeedNoImageLayout(card: this),
+      _ => _FeedGradientTextLayout(card: this),
+    };
+  }
+}
+
+class _FeedTheme {
+  _FeedTheme(BuildContext context, StudentProfileFeedCard card)
+      : theme = Theme.of(context),
+        colors = card._resolvedGradientColors,
+        gradient = contentPayloadGradient(
+          colors: card._resolvedGradientColors,
+          angle: card.payload.gradientAngle,
+        ),
+        titleColor = const Color(0xFF111827),
+        bodyColor = const Color(0xFF374151),
+        accent = const Color(0xFF5B21B6),
+        icon = resolveContentIcon(
+          iconKey: card.payload.iconKey,
+          iconAssetId: card.payload.iconAssetId,
+        );
+
+  final ThemeData theme;
+  final List<Color> colors;
+  final LinearGradient gradient;
+  final Color titleColor;
+  final Color bodyColor;
+  final Color accent;
+  final ContentIconResolved icon;
+}
+
+class _FeedCardShell extends StatelessWidget {
+  const _FeedCardShell({
+    required this.card,
+    required this.child,
+    this.padding = const EdgeInsets.all(16),
+    this.decoration,
+    this.clipBehavior = Clip.none,
+  });
+
+  final StudentProfileFeedCard card;
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+  final BoxDecoration? decoration;
+  final Clip clipBehavior;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = _FeedTheme(context, card);
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 6),
+      clipBehavior: clipBehavior,
+      padding: padding,
+      decoration: decoration ??
+          BoxDecoration(
             borderRadius: BorderRadius.circular(20),
-            gradient: LinearGradient(
-              colors: colors,
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
+            gradient: t.gradient,
             boxShadow: [
               BoxShadow(
-                color: colors.last.withValues(alpha: 0.35),
+                color: t.colors.last.withValues(alpha: 0.35),
                 blurRadius: 18,
                 offset: const Offset(0, 8),
               ),
             ],
           ),
-          child: Padding(
+      child: child,
+    );
+  }
+}
+
+class _FeedDemoBadge extends StatelessWidget {
+  const _FeedDemoBadge({required this.theme});
+
+  final ThemeData theme;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      'Пример',
+      style: theme.textTheme.labelMedium?.copyWith(
+        fontWeight: FontWeight.w800,
+        color: const Color(0xFF4C1D95),
+      ),
+    );
+  }
+}
+
+class _FeedImagePlane extends StatelessWidget {
+  const _FeedImagePlane({
+    required this.card,
+    required this.colors,
+    this.borderRadius,
+    this.overlayOpacity = 0,
+    this.height,
+  });
+
+  final StudentProfileFeedCard card;
+  final List<Color> colors;
+  final BorderRadius? borderRadius;
+  final double overlayOpacity;
+  final double? height;
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = borderRadius ?? BorderRadius.zero;
+    final state = card.resolvedImageState;
+    final planeHeight = height ?? 80.0;
+
+    if (state.isLoading) {
+      return _FeedImageSkeleton(
+        height: planeHeight,
+        borderRadius: radius,
+        colors: colors,
+      );
+    }
+
+    final Widget plane;
+    if (state.isReady) {
+      plane = ClipRRect(
+        borderRadius: radius,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.memory(
+              state.bytesOrNull!,
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+            ),
+            if (overlayOpacity > 0)
+              ColoredBox(color: Colors.black.withValues(alpha: overlayOpacity)),
+          ],
+        ),
+      );
+    } else {
+      plane = ClipRRect(
+        borderRadius: radius,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: contentPayloadGradient(
+                  colors: colors,
+                  angle: card.payload.gradientAngle,
+                ),
+              ),
+            ),
+            if (state.isFailed || state.isMissing)
+              Center(
+                child: Icon(
+                  state.isFailed
+                      ? Icons.broken_image_outlined
+                      : Icons.image_outlined,
+                  color: Colors.white.withValues(alpha: 0.9),
+                  size: 22,
+                ),
+              ),
+            if (overlayOpacity > 0)
+              ColoredBox(color: Colors.black.withValues(alpha: overlayOpacity)),
+          ],
+        ),
+      );
+    }
+
+    return SizedBox(height: planeHeight, child: plane);
+  }
+}
+
+class _FeedImageSkeleton extends StatelessWidget {
+  const _FeedImageSkeleton({
+    required this.height,
+    required this.borderRadius,
+    required this.colors,
+  });
+
+  final double height;
+  final BorderRadius borderRadius;
+  final List<Color> colors;
+
+  @override
+  Widget build(BuildContext context) {
+    final base = colors.isNotEmpty ? colors.first : const Color(0xFFE9EAF1);
+    final end = colors.length > 1 ? colors.last : const Color(0xFFD7D9E4);
+    final skeleton = ClipRRect(
+      borderRadius: borderRadius,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color.lerp(base, end, 0.35)!,
+              Color.lerp(end, base, 0.45)!,
+            ],
+          ),
+        ),
+        child: const Center(
+          child: SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      ),
+    );
+    return SizedBox(height: height, child: skeleton);
+  }
+}
+
+class _FeedGradientTextLayout extends StatelessWidget {
+  const _FeedGradientTextLayout({required this.card});
+
+  final StudentProfileFeedCard card;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = _FeedTheme(context, card);
+    return _FeedCardShell(
+      card: card,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (card.showDemoBadge) _FeedDemoBadge(theme: t.theme),
+          if (!t.icon.isNone) ...[
+            contentIconWidget(
+              icon: t.icon,
+              iconBytes: card.iconBytes,
+              color: t.accent,
+              size: 22,
+            ),
+            const SizedBox(height: 8),
+          ],
+          const Spacer(),
+          Text(
+            card.payload.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: t.theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w900,
+              color: t.titleColor,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            card.payload.subtitle,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: t.theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+              color: t.bodyColor,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            card.payload.ctaLabel,
+            style: t.theme.textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: t.accent,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FeedImageFullLayout extends StatelessWidget {
+  const _FeedImageFullLayout({required this.card});
+
+  final StudentProfileFeedCard card;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = _FeedTheme(context, card);
+    return _FeedCardShell(
+      card: card,
+      padding: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: t.colors.last.withValues(alpha: 0.35),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          _FeedImagePlane(
+            card: card,
+            colors: t.colors,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          if (card.payload.title.isNotEmpty)
+            Positioned(
+              left: 12,
+              bottom: 10,
+              right: 12,
+              child: Text(
+                card.payload.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: t.theme.textTheme.labelLarge?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  shadows: const [
+                    Shadow(color: Colors.black54, blurRadius: 6),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FeedImageOverlayLayout extends StatelessWidget {
+  const _FeedImageOverlayLayout({required this.card});
+
+  final StudentProfileFeedCard card;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = _FeedTheme(context, card);
+    final overlay = payloadOverlayOpacity(card.payload.overlayOpacity);
+    return _FeedCardShell(
+      card: card,
+      padding: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: t.colors.last.withValues(alpha: 0.35),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          _FeedImagePlane(
+            card: card,
+            colors: t.colors,
+            borderRadius: BorderRadius.circular(20),
+            overlayOpacity: overlay,
+          ),
+          Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (showDemoBadge)
+                if (card.showDemoBadge) ...[
                   Text(
                     'Пример',
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          color: const Color(0xFF4C1D95),
-                        ),
+                    style: t.theme.textTheme.labelMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white70,
+                    ),
                   ),
+                ],
                 const Spacer(),
                 Text(
-                  payload.title,
+                  card.payload.title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        color: const Color(0xFF111827),
-                      ),
+                  style: t.theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                  ),
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  payload.subtitle,
+                  card.payload.subtitle,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: const Color(0xFF374151),
-                      ),
+                  style: t.theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white.withValues(alpha: 0.88),
+                  ),
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  payload.ctaLabel,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        color: const Color(0xFF5B21B6),
-                      ),
+                  card.payload.ctaLabel,
+                  style: t.theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                  ),
                 ),
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+double payloadOverlayOpacity(double? raw) {
+  if (raw == null) return 0.45;
+  return raw.clamp(0.0, 1.0);
+}
+
+class _FeedImageTopTextLayout extends StatelessWidget {
+  const _FeedImageTopTextLayout({required this.card});
+
+  final StudentProfileFeedCard card;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = _FeedTheme(context, card);
+    return _FeedCardShell(
+      card: card,
+      padding: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: t.colors.last.withValues(alpha: 0.35),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _FeedImagePlane(
+            card: card,
+            colors: t.colors,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+            height: 80,
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (card.showDemoBadge) _FeedDemoBadge(theme: t.theme),
+                  Text(
+                    card.payload.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: t.theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      color: t.titleColor,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    card.payload.ctaLabel,
+                    style: t.theme.textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: t.accent,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FeedCompactIconLayout extends StatelessWidget {
+  const _FeedCompactIconLayout({required this.card});
+
+  final StudentProfileFeedCard card;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = _FeedTheme(context, card);
+    return _FeedCardShell(
+      card: card,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Row(
+        children: [
+          if (!t.icon.isNone)
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: t.accent.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              alignment: Alignment.center,
+              child: contentIconWidget(
+                icon: t.icon,
+                iconBytes: card.iconBytes,
+                color: t.accent,
+                size: 20,
+              ),
+            ),
+          if (!t.icon.isNone) const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (card.showDemoBadge) _FeedDemoBadge(theme: t.theme),
+                Text(
+                  card.payload.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: t.theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: t.titleColor,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            card.payload.ctaLabel,
+            style: t.theme.textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: t.accent,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FeedAccentInfoLayout extends StatelessWidget {
+  const _FeedAccentInfoLayout({required this.card});
+
+  final StudentProfileFeedCard card;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = _FeedTheme(context, card);
+    return _FeedCardShell(
+      card: card,
+      decoration: BoxDecoration(
+        color: const Color(0xFFE8F1FF),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: t.accent.withValues(alpha: 0.45),
+          width: 1.5,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: t.colors.last.withValues(alpha: 0.2),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (card.showDemoBadge) _FeedDemoBadge(theme: t.theme),
+          t.icon.isNone
+              ? Icon(Icons.info_outline_rounded, color: t.accent, size: 24)
+              : contentIconWidget(
+                  icon: t.icon,
+                  iconBytes: card.iconBytes,
+                  color: t.accent,
+                  size: 24,
+                ),
+          const Spacer(),
+          Text(
+            card.payload.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: t.theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w900,
+              color: t.titleColor,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            card.payload.ctaLabel,
+            style: t.theme.textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: t.accent,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FeedNoImageLayout extends StatelessWidget {
+  const _FeedNoImageLayout({required this.card});
+
+  final StudentProfileFeedCard card;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = _FeedTheme(context, card);
+    return _FeedCardShell(
+      card: card,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F5FA),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (card.showDemoBadge) _FeedDemoBadge(theme: t.theme),
+          const Spacer(),
+          Text(
+            card.payload.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: t.theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w900,
+              color: t.titleColor,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            card.payload.subtitle,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: t.theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+              color: t.bodyColor,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            card.payload.ctaLabel,
+            style: t.theme.textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: t.accent,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -103,6 +741,7 @@ class StudentProfileFeedCarousel extends StatefulWidget {
     required this.cards,
     required this.onTap,
     this.onVisibleCard,
+    this.selectedId,
   });
 
   final List<ManagedProfileFeedCard> cards;
@@ -111,6 +750,9 @@ class StudentProfileFeedCarousel extends StatefulWidget {
   /// Fired when a page becomes the primary visible card (incl. first page).
   final ValueChanged<ManagedProfileFeedCard>? onVisibleCard;
 
+  /// When set, animates (or jumps) to the card with this stable [ManagedProfileFeedCard.id].
+  final String? selectedId;
+
   @override
   State<StudentProfileFeedCarousel> createState() =>
       _StudentProfileFeedCarouselState();
@@ -118,18 +760,90 @@ class StudentProfileFeedCarousel extends StatefulWidget {
 
 class _StudentProfileFeedCarouselState
     extends State<StudentProfileFeedCarousel> {
-  late final PageController _controller =
-      PageController(viewportFraction: 0.92);
+  late final PageController _controller;
   int _pageIndex = 0;
   String? _lastVisibleId;
+  bool _suppressNextVisibleNotify = false;
 
-  static const _gradients = <List<Color>>[
-    [Color(0xFFDCD0FA), Color(0xFFC9B8F3)],
-    [Color(0xFFC5EFE5), Color(0xFFAEE3D8)],
-    [Color(0xFFFFE5B9), Color(0xFFDCD0FA)],
-  ];
+  int _indexForId(String id) =>
+      widget.cards.indexWhere((card) => card.id == id);
+
+  int _initialPageIndex() {
+    if (widget.cards.isEmpty) return 0;
+    final selectedId = widget.selectedId;
+    if (selectedId != null) {
+      final index = _indexForId(selectedId);
+      if (index >= 0) return index;
+    }
+    return 0;
+  }
+
+  String? get _currentCardId {
+    if (widget.cards.isEmpty) return null;
+    final index = _pageIndex.clamp(0, widget.cards.length - 1);
+    return widget.cards[index].id;
+  }
+
+  void _clampPage({bool suppressNotify = false}) {
+    if (widget.cards.isEmpty) {
+      _pageIndex = 0;
+      _lastVisibleId = null;
+      return;
+    }
+    if (_pageIndex >= widget.cards.length) {
+      _pageIndex = widget.cards.length - 1;
+      if (suppressNotify) _suppressNextVisibleNotify = true;
+      if (_controller.hasClients) {
+        _controller.jumpToPage(_pageIndex);
+      }
+    }
+  }
+
+  void _goToIndex(int index, {required bool animate}) {
+    if (index < 0 || index >= widget.cards.length) return;
+    if (index == _pageIndex && widget.cards[index].id == _currentCardId) {
+      return;
+    }
+    _suppressNextVisibleNotify = true;
+    _pageIndex = index;
+    _lastVisibleId = widget.cards[index].id;
+    if (!_controller.hasClients) return;
+    if (animate) {
+      unawaited(
+        _controller.animateToPage(
+          index,
+          duration: const Duration(milliseconds: 280),
+          curve: Curves.easeOutCubic,
+        ),
+      );
+    } else {
+      _controller.jumpToPage(index);
+    }
+  }
+
+  void _syncToSelectedId(String? selectedId, {required bool animate}) {
+    if (selectedId == null) {
+      _clampPage(suppressNotify: true);
+      return;
+    }
+    final index = _indexForId(selectedId);
+    if (index < 0) {
+      _clampPage(suppressNotify: true);
+      return;
+    }
+    if (selectedId == _currentCardId) return;
+    _goToIndex(index, animate: animate);
+  }
 
   void _notifyVisible({bool force = false}) {
+    if (_suppressNextVisibleNotify) {
+      _suppressNextVisibleNotify = false;
+      if (widget.cards.isNotEmpty) {
+        final index = _pageIndex.clamp(0, widget.cards.length - 1);
+        _lastVisibleId = widget.cards[index].id;
+      }
+      return;
+    }
     if (widget.cards.isEmpty) {
       _lastVisibleId = null;
       return;
@@ -145,6 +859,11 @@ class _StudentProfileFeedCarouselState
   @override
   void initState() {
     super.initState();
+    _pageIndex = _initialPageIndex();
+    _controller = PageController(
+      viewportFraction: 0.92,
+      initialPage: _pageIndex,
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _notifyVisible(force: true);
@@ -158,18 +877,31 @@ class _StudentProfileFeedCarouselState
       _lastVisibleId = null;
       return;
     }
-    if (_pageIndex >= widget.cards.length) {
-      _pageIndex = widget.cards.length - 1;
-      if (_controller.hasClients) {
-        _controller.jumpToPage(_pageIndex);
-      }
+
+    final selectedChanged = widget.selectedId != oldWidget.selectedId;
+    if (selectedChanged ||
+        (widget.selectedId != null &&
+            widget.selectedId != _currentCardId &&
+            _indexForId(widget.selectedId!) >= 0)) {
+      _syncToSelectedId(
+        widget.selectedId,
+        animate: _controller.hasClients && selectedChanged,
+      );
+    } else if (widget.selectedId != null &&
+        _indexForId(widget.selectedId!) < 0) {
+      _clampPage(suppressNotify: true);
+    } else if (_pageIndex >= widget.cards.length) {
+      _clampPage(suppressNotify: true);
     }
-    final nextId = widget.cards[_pageIndex].id;
-    final oldId = oldWidget.cards.isEmpty ||
-            _pageIndex >= oldWidget.cards.length
-        ? null
-        : oldWidget.cards[_pageIndex].id;
-    if (nextId != oldId || nextId != _lastVisibleId) {
+
+    final nextId =
+        widget.cards[_pageIndex.clamp(0, widget.cards.length - 1)].id;
+    final oldId =
+        oldWidget.cards.isEmpty || _pageIndex >= oldWidget.cards.length
+            ? null
+            : oldWidget.cards[_pageIndex].id;
+    if (!_suppressNextVisibleNotify &&
+        (nextId != oldId || nextId != _lastVisibleId)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         _notifyVisible(force: true);
@@ -200,8 +932,10 @@ class _StudentProfileFeedCarouselState
           return StudentProfileFeedCard(
             payload: card.payload,
             showDemoBadge: card.showDemoBadge,
-            gradientColors: _gradients[index % _gradients.length],
             onTap: () => widget.onTap(card),
+            imageBytes: card.imageBytes,
+            iconBytes: card.iconBytes,
+            imageLoading: card.imageLoading,
           );
         },
       ),

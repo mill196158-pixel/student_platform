@@ -25,10 +25,10 @@ class StudentReferenceArticleCard extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(26),
+        borderRadius: BorderRadius.circular(18),
         child: Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.all(16),
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
@@ -38,29 +38,32 @@ class StudentReferenceArticleCard extends StatelessWidget {
                 const Color(0xFFF8F4FF),
               ],
             ),
-            borderRadius: BorderRadius.circular(26),
+            borderRadius: BorderRadius.circular(18),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.045),
-                blurRadius: 18,
-                offset: const Offset(0, 5),
+                color: Colors.black.withValues(alpha: 0.035),
+                blurRadius: 12,
+                offset: const Offset(0, 3),
               ),
             ],
           ),
           child: Row(
             children: [
               Container(
-                padding: const EdgeInsets.all(10),
+                width: 46,
+                height: 46,
+                alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: const Color(0xFF6A4BBC).withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
                   payload.iconData,
+                  size: 24,
                   color: const Color(0xFF6A4BBC),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -77,24 +80,30 @@ class StudentReferenceArticleCard extends StatelessWidget {
                       article.title,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleMedium?.copyWith(
+                      style: theme.textTheme.titleSmall?.copyWith(
                         color: Colors.black,
                         fontWeight: FontWeight.w900,
+                        height: 1.2,
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 2),
                     Text(
                       payload.shortText,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: Colors.black.withValues(alpha: 0.62),
+                        height: 1.25,
                       ),
                     ),
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right_rounded, color: Colors.black38),
+              const Icon(
+                Icons.chevron_right_rounded,
+                size: 20,
+                color: Colors.black38,
+              ),
             ],
           ),
         ),
@@ -112,6 +121,7 @@ class StudentReferenceArticleDetail extends StatelessWidget {
     this.onOpenAsset,
     this.onOpenUrl,
     this.onOpenCta,
+    this.onBack,
     this.showDemoBadge = false,
   });
 
@@ -126,13 +136,16 @@ class StudentReferenceArticleDetail extends StatelessWidget {
 
   /// Opens the article-level or block CTA destination.
   final ValueChanged<ReferenceArticleCta>? onOpenCta;
+
+  /// Optional back affordance for in-phone Admin/Mobile navigation.
+  final VoidCallback? onBack;
   final bool showDemoBadge;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final payload = article.payload;
-    return SingleChildScrollView(
+    final body = SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -212,6 +225,30 @@ class StudentReferenceArticleDetail extends StatelessWidget {
         ],
       ),
     );
+
+    if (onBack == null) return body;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFFAF8FC),
+      appBar: AppBar(
+        leading: IconButton(
+          tooltip: 'Назад к списку',
+          onPressed: onBack,
+          icon: const Icon(Icons.arrow_back_rounded),
+        ),
+        title: Text(
+          article.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+        backgroundColor: const Color(0xFFFAF8FC),
+        foregroundColor: const Color(0xFF111827),
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+      ),
+      body: body,
+    );
   }
 }
 
@@ -243,7 +280,9 @@ class _ReferenceBlockTile extends StatelessWidget {
             title: caption ?? 'Изображение',
             subtitle: assetId.isEmpty
                 ? 'Медиа не привязано'
-                : (onOpenAsset == null ? 'asset:$assetId' : 'Открыть изображение'),
+                : (onOpenAsset == null
+                    ? 'asset:$assetId'
+                    : 'Открыть изображение'),
             onTap: assetId.isEmpty || onOpenAsset == null
                 ? null
                 : () => onOpenAsset!(assetId),
@@ -272,7 +311,107 @@ class _ReferenceBlockTile extends StatelessWidget {
             cta: cta,
             onOpenCta: onOpenCta,
           ),
+        ReferenceHeadingBlock(:final text, :final level) => Text(
+            text,
+            style: switch (level) {
+              1 => theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w900,
+                ),
+              2 => theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+              _ => theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+            },
+          ),
+        ReferenceInfoBlock(:final text) => _CalloutTile(
+            icon: Icons.info_outline_rounded,
+            text: text,
+            background: const Color(0xFFE8F1FF),
+            accent: const Color(0xFF2563EB),
+          ),
+        ReferenceWarningBlock(:final text) => _CalloutTile(
+            icon: Icons.warning_amber_rounded,
+            text: text,
+            background: const Color(0xFFFFF4E5),
+            accent: const Color(0xFFD97706),
+          ),
+        ReferenceListBlock(:final style, :final items) => Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var i = 0; i < items.length; i++)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        width: 22,
+                        child: Text(
+                          style == 'numbered' ? '${i + 1}.' : '•',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: const Color(0xFF6A4BBC),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(
+                          items[i],
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
       },
+    );
+  }
+}
+
+class _CalloutTile extends StatelessWidget {
+  const _CalloutTile({
+    required this.icon,
+    required this.text,
+    required this.background,
+    required this.accent,
+  });
+
+  final IconData icon;
+  final String text;
+  final Color background;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: accent.withValues(alpha: 0.28)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 20, color: accent),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: Colors.black.withValues(alpha: 0.82),
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -344,7 +483,8 @@ class _IconRow extends StatelessWidget {
           ),
         ),
         if (onTap != null)
-          const Icon(Icons.chevron_right_rounded, size: 18, color: Colors.black38),
+          const Icon(Icons.chevron_right_rounded,
+              size: 18, color: Colors.black38),
       ],
     );
     if (onTap == null) return row;

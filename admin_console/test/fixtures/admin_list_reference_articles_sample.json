@@ -1,0 +1,23 @@
+{
+  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "status": "published",
+  "origin": "admin",
+  "template_key": "reference_article_v1",
+  "schema_version": 2,
+  "title": "Как скачать материалы",
+  "row_version": 3,
+  "audience_mode": "all",
+  "category_id": "cat-materials-001",
+  "legacy_key": "content:reference_article:download_materials",
+  "has_working_draft": false,
+  "payload": {
+    "icon_key": "download",
+    "short_text": "Инструкция по скачиванию материалов",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Откройте раздел «Материалы» и нажмите «Скачать»."
+      }
+    ]
+  }
+}

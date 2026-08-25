@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import 'vacancy_models.dart';
@@ -13,6 +15,9 @@ class StudentVacancyCard extends StatelessWidget {
     this.expiresLabel,
     this.hasContacts = false,
     this.onTap,
+    this.logoBytes,
+    this.coverBytes,
+    this.backgroundBytes,
   });
 
   final VacancyCardPayload payload;
@@ -20,11 +25,18 @@ class StudentVacancyCard extends StatelessWidget {
   final String? expiresLabel;
   final bool hasContacts;
   final VoidCallback? onTap;
+  final Uint8List? logoBytes;
+  final Uint8List? coverBytes;
+
+  /// Optional soft background plane behind the card surface.
+  final Uint8List? backgroundBytes;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Material(
+    final hasBackground =
+        backgroundBytes != null && backgroundBytes!.isNotEmpty;
+    final card = Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
@@ -32,7 +44,7 @@ class StudentVacancyCard extends StatelessWidget {
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
-            color: Colors.white,
+            color: Colors.white.withValues(alpha: hasBackground ? 0.94 : 1),
             border: Border.all(color: const Color(0xFFE5E7EB)),
             boxShadow: [
               BoxShadow(
@@ -61,6 +73,18 @@ class StudentVacancyCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        if (coverBytes != null && coverBytes!.isNotEmpty) ...[
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Image.memory(
+                              coverBytes!,
+                              height: 88,
+                              width: double.infinity,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                        ],
                         if (showDemoBadge)
                           Padding(
                             padding: const EdgeInsets.only(bottom: 6),
@@ -72,14 +96,40 @@ class StudentVacancyCard extends StatelessWidget {
                               ),
                             ),
                           ),
-                        Text(
-                          payload.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w800,
+                        if (logoBytes != null && logoBytes!.isNotEmpty) ...[
+                          Row(
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(10),
+                                child: Image.memory(
+                                  logoBytes!,
+                                  width: 40,
+                                  height: 40,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  payload.title,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                        ),
+                        ] else
+                          Text(
+                            payload.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
                         if (payload.companyName.isNotEmpty) ...[
                           const SizedBox(height: 4),
                           Text(
@@ -166,6 +216,31 @@ class StudentVacancyCard extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+
+    if (!hasBackground) return card;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: Image.memory(
+              backgroundBytes!,
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+            ),
+          ),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.72),
+              ),
+            ),
+          ),
+          card,
+        ],
       ),
     );
   }

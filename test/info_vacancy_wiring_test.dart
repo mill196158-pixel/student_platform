@@ -196,8 +196,8 @@ void main() {
     await pumpJobsSection(tester, vacancyService: service);
     await tester.pumpAndSettle();
 
-    expect(find.text('Предложить вакансию'), findsOneWidget);
-    await tester.tap(find.widgetWithText(FilledButton, 'Предложить вакансию'));
+    expect(find.text('Предложить'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Предложить'));
     await tester.pumpAndSettle();
 
     expect(find.text('Название *'), findsOneWidget);

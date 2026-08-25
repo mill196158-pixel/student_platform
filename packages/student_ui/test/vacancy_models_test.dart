@@ -124,7 +124,8 @@ void main() {
     );
   });
 
-  test('ManagedVacancyCard legacy asset_ids fallback avoids UUID truncation', () {
+  test('ManagedVacancyCard legacy asset_ids fallback avoids UUID truncation',
+      () {
     final card = ManagedVacancyCard.tryParse({
       'id': '11111111-1111-1111-1111-111111111111',
       'title': 'Dev',

@@ -60,4 +60,57 @@ void main() {
     await tester.tap(find.text('Главная стала полезнее'));
     expect(selectedIndex, 0);
   });
+
+  testWidgets('inserts section gaps between promos in same slot',
+      (tester) async {
+    final promo = HomePromoPayload.tryParse({
+      'title': 'Promo A',
+      'subtitle': 'Sub',
+      'icon_key': 'help',
+      'gradient_colors': ['#7367F0', '#B784F7'],
+      'cta_label': 'Go',
+      'dismissible': false,
+      'home_slot': 'after_news',
+    })!;
+    final promoB = HomePromoPayload.tryParse({
+      'title': 'Promo B',
+      'subtitle': 'Sub B',
+      'icon_key': 'help',
+      'gradient_colors': ['#7367F0', '#B784F7'],
+      'cta_label': 'Go',
+      'dismissible': false,
+      'home_slot': 'after_news',
+    })!;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StudentHomeView(
+            data: StudentHomeData(
+              profile: const StudentHomeProfile(name: 'Test', groupName: 'G'),
+              currentDate: DateTime(2026, 7, 21),
+              lessons: const [],
+              assignments: const [],
+              news: const [],
+            ),
+            homePromoPlacements: [
+              StudentHomePromoPlacement(payload: promo, slot: 'after_news'),
+              StudentHomePromoPlacement(payload: promoB, slot: 'after_news'),
+            ],
+            hideHomePromo: false,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Promo A'), findsOneWidget);
+    expect(find.text('Promo B'), findsOneWidget);
+    expect(
+      find.byWidgetPredicate(
+        (w) => w is SizedBox && w.height == kStudentHomeSectionGap,
+      ),
+      findsWidgets,
+    );
+  });
 }

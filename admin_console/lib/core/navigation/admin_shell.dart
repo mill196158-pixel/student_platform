@@ -33,7 +33,7 @@ class AdminShell extends StatelessWidget {
         isVisible: local || caps.canReadContent,
       ),
       _AdminDestination(
-        label: 'Главная promo',
+        label: 'Карточки главной',
         icon: Icons.home_outlined,
         path: '/content/home-promo',
         section: 'Контент',
@@ -78,18 +78,21 @@ class AdminShell extends StatelessWidget {
         label: 'Преподаватели',
         icon: Icons.school_outlined,
         path: '/academic/teachers',
+        section: 'Участники',
         isVisible: local || caps.canReadAcademic,
       ),
       _AdminDestination(
         label: 'Студенты',
         icon: Icons.groups_outlined,
         path: '/academic/students',
+        section: 'Участники',
         isVisible: local || caps.canReadStudents || caps.canWriteGroups,
       ),
       _AdminDestination(
         label: 'Модерация',
         icon: Icons.shield_outlined,
         path: '/moderation',
+        section: 'Модерация',
         isVisible:
             local ||
             caps.can('moderation.read') ||
@@ -207,9 +210,30 @@ class _NavigationPanel extends StatelessWidget {
   final List<_AdminDestination> destinations;
   final ValueChanged<String> onSelected;
 
+  List<Widget> _buildDestinationTiles() {
+    final children = <Widget>[];
+    String? previousSection;
+    for (final destination in destinations) {
+      final section = destination.section;
+      if (section != null && section != previousSection) {
+        children.add(_SectionLabel(label: section));
+        previousSection = section;
+      }
+      children.add(
+        _NavigationTile(
+          destination: destination,
+          isSelected: destination.path == currentPath,
+          onTap: destination.isEnabled && destination.path != null
+              ? () => onSelected(destination.path!)
+              : null,
+        ),
+      );
+    }
+    return children;
+  }
+
   @override
   Widget build(BuildContext context) {
-    String? previousSection;
     return ColoredBox(
       color: const Color(0xFF18172B),
       child: Material(
@@ -246,27 +270,7 @@ class _NavigationPanel extends StatelessWidget {
               Expanded(
                 child: ListView(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
-                  children: [
-                    for (final destination in destinations) ...[
-                      if (destination.section != null &&
-                          destination.section != previousSection)
-                        _SectionLabel(label: destination.section!),
-                      _NavigationTile(
-                        destination: destination,
-                        isSelected: destination.path == currentPath,
-                        onTap: destination.isEnabled && destination.path != null
-                            ? () => onSelected(destination.path!)
-                            : null,
-                      ),
-                      if (destination.section != null)
-                        Builder(
-                          builder: (_) {
-                            previousSection = destination.section;
-                            return const SizedBox.shrink();
-                          },
-                        ),
-                    ],
-                  ],
+                  children: _buildDestinationTiles(),
                 ),
               ),
               const Padding(

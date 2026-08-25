@@ -233,8 +233,7 @@ class SupabaseNewsRepository implements NewsRepository {
       'p_id': id,
       'p_patch': {
         'audience_type': mode == NewsAudienceMode.all ? 'all' : 'group',
-        'audience_group_id':
-            mode == NewsAudienceMode.all ? '' : groupIds.first,
+        'audience_group_id': mode == NewsAudienceMode.all ? '' : groupIds.first,
       },
     });
     return NewsItem.fromJson(_asMap(data));

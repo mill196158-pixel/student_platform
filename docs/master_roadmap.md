@@ -6,7 +6,7 @@
 ## Статус документа
 
 - Дата аудита: **27 июля 2026**
-- Обновлено: **29 июля 2026** (добавлены Content Platform Stages 14–21; Stage 13.0–13.12.8 считаются завершёнными)
+- Updated: **31 июля 2026** (Stage 14.2.3 home promo chat CTA — DONE)
 - Проверенная основная ветка: `refactor/chat-tab` (база)
 - Рабочая ветка контента: `feature/content-platform`
 - Проверенная административная ветка: `feature/admin-console`
@@ -18,6 +18,10 @@
 - Базовый scope Content Platform Stages **14–19 локально закрыт**; расширение
   Stage 19.1 остаётся **IN PROGRESS**, а Stages 20–21 — spec/roadmap only
   (только новые Stage 19.1 apply/deploy и residuals остаются owner-gated)
+- Visual Content Studio Stages **14.1–14.1.5** из `refactor/chat-tab`
+  интегрирован как основной понятный Admin UI вместе со Stage 19.1; Codex
+  **APPROVE**. Media/publish и remote операции сохраняют существующие
+  owner-gated ограничения.
 - Owner residuals Stage 13 (не блокируют 14–19): PHYSICAL OCR / two-device topic race / controlled push / REAL XLSX
 - Контрольные документы: `docs/content_platform/CONTENT_PLATFORM_SPEC.md`, `docs/content_platform/ACCEPTANCE_CHECKLIST.md`, `docs/agent_coordination/CURRENT_TASK.md`
 
@@ -951,15 +955,124 @@ Placements v1:
 
 ### Stage 14.1 — Demo content governance
 
-- [ ] инвентаризация hardcoded/demo элементов;
-- [ ] `origin=demo`;
-- [ ] фильтр «Демо» в админке;
-- [ ] архивирование и удаление через админку;
-- [ ] замена реальным материалом;
-- [ ] демо не возвращается самопроизвольно после удаления;
-- [ ] demo fallback не маскирует ошибку сервера;
-- [ ] demo-вакансии/отзывы явно «Пример» или вне production-аудитории;
-- [ ] текущие демо не удалять до готовой миграции/замены.
+Status: **DONE** / Codex **APPROVE_WITH_NOTES** (2026-07-30) — migration `20260730144804` + bootstrap on `gwdanmwluhrcfxbnplwd`
+
+- [x] инвентаризация hardcoded/demo элементов;
+- [x] `origin=demo`;
+- [x] фильтр «Демо» в админке;
+- [x] архивирование и удаление через админку;
+- [x] замена реальным материалом *(promote demo → managed)*;
+- [x] демо не возвращается самопроизвольно после удаления *(tombstones)*;
+- [x] demo fallback не маскирует ошибку сервера;
+- [x] demo-вакансии/отзывы явно «Пример» или вне production-аудитории;
+- [x] текущие демо не удалять до готовой миграции/замены;
+- [~] authenticated media smoke *(runtime JWT residual)*.
+
+### Stage 14.1.1 — Visual Editor news-parity + working drafts
+
+Status: **DONE** / Codex **APPROVE** (2026-07-30) — migrations `20260730155714`, `20260730160328`, `20260730161522` on `gwdanmwluhrcfxbnplwd`
+
+- [x] visual editors: list / real phone preview / properties (news shell parity);
+- [x] responsive list ≥320–360px; status tabs no wrap; adaptive panes at 1280/1440/1920;
+- [x] Home preview = real `StudentHomeView`; Reference = `StudentReferenceBrowseView` (list + article);
+- [x] demo/legacy «Редактировать» → working draft; live published until publish; no identity loss;
+- [x] archive / restore / safe delete + tombstone; no legacy fallback resurrection;
+- [x] reference server parse / last-good on transient errors; corrections gated by `moderation.read`;
+- [x] vacancy draft assets server-bound (`working_draft_id`); student serializers exclude until publish;
+- [x] Admin v3 reference blocks feature-gated (`ADMIN_REFERENCE_V3_BLOCKS`, default false);
+- [x] tests + Admin/Main Web + Android debug + iOS simulator builds;
+- [x] no Edge deploy required for this substage.
+
+### Stage 14.1.2 — Visual Content Studio
+
+Status: **DONE** / Codex **APPROVE_WITH_NOTES** — migrations `20260730190415` + `20260730220218` on `gwdanmwluhrcfxbnplwd`
+
+- [x] shared IconPicker / Color+Gradient / ActionPicker / Variant / Slot pickers (no raw psychology/HEX/`/help` in main UI);
+- [x] Home preview injects real published news into `StudentHomeView`; multi-slot promo layout in shared UI;
+- [x] Profile carousel `selectedId` sync + draft overlay + in-phone detail;
+- [x] Reference/Vacancy in-phone navigation; category RU labels + IconPicker + safe-delete;
+- [x] schema v2 templates + structured CTA + `home_slot` in payload; **server publish gate default OFF**;
+- [x] Admin/SQL/Mobile legacy CTA routes aligned (`/home`, `/my-diary`, `/help`); category tombstone by `legacy_key`;
+- [x] vacancy_assets.role; reference category description/color/is_hidden; audience lens RPC (UI residual NOTE);
+- [x] Import Studio: docs-only note for next stage (multi-format curriculum audit) — no rewrite in 14.1.2.
+
+### Stage 14.1.3 — Visual Editor Fidelity & Media Pipeline
+
+Status: **DONE** / Codex **APPROVE** — corrective fidelity (14.1.2 history unchanged); gate OFF
+
+- [x] student_ui renders all card variants + ContentIconResolver + imageBytes;
+- [x] PreviewMode effectiveDraft | publishedCanonical; local discard ≠ server WD discard;
+- [x] Home/Profile/Reference/Vacancy overlay live draft; media intent states;
+- [x] Vacancy visual-role WD isolation + snapshot-after-reconcile migration;
+- [x] Codex final-diff APPROVE + commit/push.
+
+### Stage 14.1.4 — Full Visual Parity & Media Reliability
+
+Status: **DONE** / Codex **APPROVE** — M5; gate OFF; HEAD `5337037`; migration `20260731000318_stage14_1_4_vacancy_assets_role_in_get_my` applied
+
+- [x] ContentImageRenderState; no silent image→gradient fallback;
+- [x] Full-screen Admin previews = mobile Profile/Jobs/Help/Home compositions;
+- [x] Mobile multi-slot home + media resolve (assetId+version key);
+- [x] Custom icon end-to-end; vacancy logo/cover/background planes;
+- [x] Codex final APPROVE + commit/push.
+
+### Stage 14.1.5 — Final Visual Preview Integrity
+
+Status: **DONE** / Codex **APPROVE** — M6; gate OFF; feature `4976ee2`; no new migration/Edge
+
+- [x] Promo image_full/overlay fixed bleed height under unbounded scroll;
+- [x] HomePromoPayload overlay/focal/image_fit dual-read;
+- [x] Admin multi-slot preview integrity + profile shared composition;
+- [x] Humanized editor banners + parameterized/golden tests;
+- [x] Codex APPROVE 14.1.5.
+
+### Stage 14.2 — Managed Content v2 → main mobile
+
+Status: **DONE** / Codex **APPROVE** — M7; feature `ed94cb9`; base `be6ac42`; gate ON via owner SQL; migration `20260731122000`
+
+- [x] Home dual-read schema 1|2 (all slots/variants) + media/CTA/audience/schedule/dismiss/order;
+- [x] Profile real chrome + managed carousel/detail/back;
+- [x] Reference category→article→back; Vacancy list/detail (no drafts);
+- [x] Typed ContentNavIntent whitelist (student_ui parse, mobile execute);
+- [x] Info resume + pull/tab freshness (Realtime residual);
+- [x] Student READ RPC projects home/profile wire schema_version 2→1 for legacy clients;
+- [x] Tests/builds + Codex APPROVE + controlled smoke + owner gate flip + push.
+
+### Stage 14.2.1 — content-media upload for published + working draft
+
+Status: **DONE** / Codex **APPROVE** — hotfix `548969f`; migration `20260731102302`; Edge `content-media` v2
+
+- [x] Allow upload only with auth + `content.write` + open WD on the same item (or classic `draft`);
+- [x] Bind intent to WD; finalize → `draft_asset_ids` + WD row_version; no direct published-payload upload;
+- [x] Edge business errors → 409/422 (not 500); Admin adopts WD row_version + local preview bytes;
+- [x] Cancel keeps published asset; publish switches student-visible asset; orphans → cleanup;
+- [x] Roleplay/IDOR checks + Admin/mobile tests + Web/Android/iOS builds + remote smoke + push.
+
+### Stage 14.2.2 — reliable Visual Content Studio publish
+
+Status: **DONE** / Codex **APPROVE** — `35cb5fb`; migration `20260731110419`
+
+- [x] Root cause: `invalid_schema_upgrade` on schema-1 WD save with forced `target_schema_version=2`;
+- [x] Allow home_promo_v1 / profile_feed_card_v1 WD 1→2; publish still uses v2 gate;
+- [x] Shared single-flight publish coordinator (validate → autosave → publish → refetch) for all 4 editors;
+- [x] Mapped RU business errors; «Публикуем…» UI; tests + smoke + push.
+
+### Stage 14.2.3 — home promo schema 3 + chat CTA + in-place edit
+
+Status: **DONE** / Codex **APPROVE** — migration `20260731113816`
+
+- [x] Root cause: WD without admin JSON overlay + locked edit/archive; Create minted second card;
+- [x] `home_promo_v1@3` chat CTA (`target_mode`, optional `target_id`); profile stays schema 2;
+- [x] Mobile `ContentNavChat` + RPC authorize; external HTTPS corpus 2048; fail-closed unknown actions;
+- [x] Admin chat picker + WD overlay list/resume + schema 3 publish target + safe-delete title confirm;
+- [x] Home section gap constant + multi-promo layout tests;
+- [x] Codex final APPROVE + remote apply + smoke (count 2→2, no live deletes) + push.
+
+### Next after 14.1.4 — Import Studio (separate stage)
+
+- [ ] audit several real curriculum file formats (do not force one schema early);
+- [ ] upload sample workbooks; analyze sheets/headers/merged cells;
+- [ ] mapping studio + preview + dry-run + validation + apply + rollback.
 
 ---
 

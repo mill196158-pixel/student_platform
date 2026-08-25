@@ -64,6 +64,42 @@ void main() {
     expect(cached.card?.id, result.card?.id);
   });
 
+  test('dual-reads schema v2 multi-slot promos (wire or stored)', () async {
+    final rows = [
+      {
+        ...sampleRow(),
+        'id': '22222222-2222-2222-2222-222222222222',
+        'schema_version': 2,
+        'sort_order': 0,
+        'payload': {
+          ...sampleRow()['payload'] as Map,
+          'home_slot': 'top',
+          'card_variant': 'image_full',
+          'title': 'Top card',
+        },
+      },
+      {
+        ...sampleRow(),
+        'id': '33333333-3333-3333-3333-333333333333',
+        'schema_version': 1,
+        'sort_order': 1,
+        'payload': {
+          ...sampleRow()['payload'] as Map,
+          'home_slot': 'after_assignments',
+          'card_variant': 'compact_icon',
+          'title': 'Legacy slot',
+        },
+      },
+    ];
+    final rpc = _FakeRpc(response: rows);
+    final service = HomePromoService(rpcClient: rpc);
+    final result = await service.load();
+    expect(result.cards, hasLength(2));
+    expect(result.cards.first.homePromo.effectiveHomeSlot, 'top');
+    expect(result.cards.first.homePromo.cardVariant, 'image_full');
+    expect(result.cards.last.homePromo.cardVariant, 'compact_icon');
+  });
+
   test('empty list hides strip and does not resurrect demo', () async {
     final rpc = _FakeRpc(response: []);
     final service = HomePromoService(rpcClient: rpc);
@@ -101,8 +137,7 @@ void main() {
 
   test('caches the matched parsed row, not a prior malformed row', () async {
     final bad = sampleRow()..['template_key'] = 'nope';
-    final good = sampleRow()
-      ..['id'] = '22222222-2222-2222-2222-222222222222';
+    final good = sampleRow()..['id'] = '22222222-2222-2222-2222-222222222222';
     final rpc = _FakeRpc(response: [bad, good]);
     final service = HomePromoService(rpcClient: rpc);
     final result = await service.load();

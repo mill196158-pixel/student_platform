@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'vacancy_item.dart';
 import 'vacancy_media_store.dart';
 import 'vacancy_repository.dart';
+import '../shared/visual_editor_operation_error.dart';
 
 /// Supabase Admin repository for Stage 17 vacancies domain.
 ///
@@ -40,9 +41,7 @@ class SupabaseVacancyRepository implements VacancyRepository {
     VacancyMediaStore? mediaStore,
   }) : _rpc =
            rpcClient ??
-           SupabaseVacancyAdminRpcClient(
-             client ?? Supabase.instance.client,
-           ),
+           SupabaseVacancyAdminRpcClient(client ?? Supabase.instance.client),
        _mediaStore = mediaStore;
 
   final VacancyAdminRpcClient _rpc;
@@ -57,34 +56,16 @@ class SupabaseVacancyRepository implements VacancyRepository {
   }
 
   VacancyRepositoryException _mapError(PostgrestException error) {
-    final code = error.code ?? '';
-    final message = error.message.toLowerCase();
-    if (code == '42501' || message.contains('forbidden')) {
-      return const VacancyRepositoryException(
-        'Недостаточно прав для этого действия.',
-        isForbidden: true,
-      );
-    }
-    if (code == '28000' || message.contains('not_authenticated')) {
-      return const VacancyRepositoryException(
-        'Требуется вход. Войдите снова.',
-      );
-    }
-    if (code == 'P0002' || message.contains('not_found')) {
-      return const VacancyRepositoryException('Вакансия не найдена.');
-    }
-    if (message.contains('row_version') || message.contains('conflict')) {
-      return const VacancyRepositoryException(
-        'Вакансия изменилась. Обновите список.',
-      );
-    }
-    if (message.contains('could not find the function') || code == 'PGRST202') {
+    final mapped = mapVisualEditorOperationError(error);
+    if ((error.code == 'PGRST202') ||
+        (error.message.toLowerCase().contains('could not find the function'))) {
       return const VacancyRepositoryException(
         'Vacancies RPC ещё не применены на remote (ожидается локальный apply).',
       );
     }
-    return const VacancyRepositoryException(
-      'Не удалось выполнить операцию. Попробуйте ещё раз.',
+    return VacancyRepositoryException(
+      mapped.message,
+      isForbidden: mapped.isForbidden,
     );
   }
 
@@ -104,6 +85,15 @@ class SupabaseVacancyRepository implements VacancyRepository {
   VacancyItem _parseRequired(dynamic data) {
     final map = _asMap(data);
     final item = VacancyItem.tryParse(map);
+    if (item == null) {
+      throw const VacancyRepositoryException('Некорректный ответ сервера.');
+    }
+    return item;
+  }
+
+  VacancyItem _parseWorkingDraftResponse(dynamic data) {
+    final map = _asMap(data);
+    final item = VacancyItem.tryParseWithWorkingDraftOverlay(map);
     if (item == null) {
       throw const VacancyRepositoryException('Некорректный ответ сервера.');
     }
@@ -134,9 +124,7 @@ class SupabaseVacancyRepository implements VacancyRepository {
       try {
         value = jsonDecode(value);
       } catch (_) {
-        throw const VacancyRepositoryException(
-          'Некорректный ответ сервера.',
-        );
+        throw const VacancyRepositoryException('Некорректный ответ сервера.');
       }
     }
     if (value is Map) return Map<String, dynamic>.from(value);
@@ -151,10 +139,9 @@ class SupabaseVacancyRepository implements VacancyRepository {
       'p_limit': 100,
       'p_offset': 0,
     });
-    return _asList(data)
-        .map(VacancyItem.tryParse)
-        .whereType<VacancyItem>()
-        .toList();
+    return _asList(
+      data,
+    ).map(VacancyItem.tryParse).whereType<VacancyItem>().toList();
   }
 
   @override
@@ -219,6 +206,32 @@ class SupabaseVacancyRepository implements VacancyRepository {
   }
 
   @override
+  Future<VacancyItem> readyPublish(String id, int expectedRowVersion) async {
+    final data = await _call('admin_ready_publish_vacancy', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return _parseRequired(data);
+  }
+
+  @override
+  Future<VacancyItem> promoteDemo(String id, int expectedRowVersion) async {
+    final data = await _call('admin_promote_demo_vacancy', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return _parseRequired(data);
+  }
+
+  @override
+  Future<void> safeDelete(String id, int expectedRowVersion) async {
+    await _call('admin_safe_delete_vacancy', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+  }
+
+  @override
   Future<VacancyItem> moderate({
     required String id,
     required String action,
@@ -253,10 +266,9 @@ class SupabaseVacancyRepository implements VacancyRepository {
   @override
   Future<List<VacancyVersionEntry>> listVersions(String id) async {
     final data = await _call('admin_list_vacancy_versions', {'p_id': id});
-    return _asList(data)
-        .map(VacancyVersionEntry.fromJson)
-        .where((e) => e.id.isNotEmpty)
-        .toList();
+    return _asList(
+      data,
+    ).map(VacancyVersionEntry.fromJson).where((e) => e.id.isNotEmpty).toList();
   }
 
   @override
@@ -296,18 +308,85 @@ class SupabaseVacancyRepository implements VacancyRepository {
     required List<int> bytes,
     required String contentType,
     String title = '',
+    String role = 'attachment',
   }) async {
     final store = _mediaStore ?? VacancyMediaStore();
-    return store.uploadBytes(
+    final assetId = await store.uploadBytes(
       vacancyId: vacancyId,
       bytes: Uint8List.fromList(bytes),
       contentType: contentType,
       title: title,
     );
+    if (role != 'attachment') {
+      await setAssetRole(assetId: assetId, role: role);
+    }
+    return assetId;
+  }
+
+  @override
+  Future<void> setAssetRole({
+    required String assetId,
+    required String role,
+  }) async {
+    await _call('admin_set_vacancy_asset_role', {
+      'p_asset_id': assetId,
+      'p_role': role,
+    });
+  }
+
+  @override
+  Future<VacancyItem> clearVisualRole({
+    required String vacancyId,
+    required String role,
+  }) async {
+    final data = await _call('admin_clear_vacancy_visual_role', {
+      'p_vacancy_id': vacancyId,
+      'p_role': role,
+    });
+    return _parseRequired(data);
   }
 
   @override
   Future<void> deleteAsset(String assetId) async {
     await _call('admin_delete_vacancy_asset', {'p_asset_id': assetId});
+  }
+
+  @override
+  Future<VacancyItem> beginEdit(String id) async {
+    final data = await _call('admin_begin_vacancy_edit', {'p_id': id});
+    return _parseWorkingDraftResponse(data);
+  }
+
+  @override
+  Future<VacancyItem> saveWorkingDraft(
+    VacancyItem item, {
+    required int expectedDraftRowVersion,
+  }) async {
+    final data = await _call('admin_save_vacancy_working_draft', {
+      'p_id': item.id,
+      'p_expected_draft_row_version': expectedDraftRowVersion,
+      'p_patch': item.toWorkingDraftPatch(),
+    });
+    return _parseWorkingDraftResponse(data);
+  }
+
+  @override
+  Future<VacancyItem> publishWorkingDraft(
+    String id, {
+    required int expectedDraftRowVersion,
+  }) async {
+    final data = await _call('admin_publish_vacancy_working_draft', {
+      'p_id': id,
+      'p_expected_draft_row_version': expectedDraftRowVersion,
+    });
+    return _parseWorkingDraftResponse(data);
+  }
+
+  @override
+  Future<VacancyItem> discardWorkingDraft(String id) async {
+    final data = await _call('admin_discard_vacancy_working_draft', {
+      'p_id': id,
+    });
+    return _parseWorkingDraftResponse(data);
   }
 }

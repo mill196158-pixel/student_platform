@@ -1,17 +1,18 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:student_ui/student_ui.dart';
 
-import 'package:url_launcher/url_launcher.dart';
-
 import 'package:student_platform/src/services/push/app_notifications_api.dart';
 import 'package:student_platform/src/services/push/in_app_notification_bus.dart';
+import 'package:student_platform/src/ui/content/content_nav_executor.dart';
 import 'package:student_platform/src/ui/home/home_dashboard_service.dart';
 import 'package:student_platform/src/ui/home/home_promo_service.dart';
 import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
+import 'package:student_platform/src/ui/info/content_media_service.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/models/group_action_labels.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/navigation/group_action_deeplink.dart';
 import 'package:student_platform/src/ui/navigation/main_tab_scope.dart';
@@ -27,6 +28,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final HomeDashboardService _service = HomeDashboardService();
   final HomePromoService _promoService = HomePromoService();
+  final ContentMediaService _contentMedia = ContentMediaService();
   final AppNotificationsApi _notificationsApi = AppNotificationsApi();
 
   HomeDashboardData? _data;
@@ -35,7 +37,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _loading = true;
   int _unreadNotificationCount = 0;
   int _promoLoadGeneration = 0;
-  String? _recordedImpressionId;
+  int _promoMediaGeneration = 0;
+  final Set<String> _recordedImpressionIds = {};
+  final Map<String, Uint8List> _promoImageBytes = {};
+  final Map<String, Uint8List> _promoIconBytes = {};
+  final Map<String, ContentImageRenderState> _promoImageStates = {};
   final Set<String> _hiddenDoneAssignmentIds = {};
   final Set<String> _markingDoneAssignmentIds = {};
   StreamSubscription<InAppNotificationEvent>? _inAppSub;
@@ -106,6 +112,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _error = null;
       });
       _maybeRecordPromoImpression(promo);
+      unawaited(_hydratePromoMedia(promo));
     } catch (error) {
       if (!mounted) return;
       // Keep last good dashboard (and images) on refresh failure.
@@ -123,10 +130,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       // Hard errors: last-good cache only. Demo only when RPC is truly missing
       // (handled inside service) — never treat permission/DB failures as demo.
       final cached = await _promoService.loadCached();
-      if (cached.card != null) {
-        return HomePromoLoadResult(card: cached.card, loadError: true);
+      if (cached.cards.isNotEmpty) {
+        return HomePromoLoadResult(cards: cached.cards, loadError: true);
       }
-      return const HomePromoLoadResult(loadError: true, intentionallyEmpty: true);
+      return const HomePromoLoadResult(
+          loadError: true, intentionallyEmpty: true);
     }
   }
 
@@ -239,13 +247,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               final source = _findAssignment(item.id);
               if (source != null) _markAssignmentDone(source);
             },
-            homePromo: _promo.hidePromoStrip
+            homePromo: _promo.hidePromoStrip || _promo.cards.length != 1
                 ? null
                 : (_promo.isDemoFallback ? null : _promo.payload),
-            homePromoIsDemo: _promo.showDemoBadge,
+            homePromoIsDemo: _promo.showDemoBadge && _promo.cards.length <= 1,
             hideHomePromo: _promo.hidePromoStrip,
-            onHelpTap: _onHomePromoTap,
-            onHomePromoDismiss: _onHomePromoDismiss,
+            homePromoPlacements: _promoPlacements(),
+            // Placements carry per-card callbacks; these remain as single-slot fallbacks.
+            onHelpTap: () => _onHomePromoTap(card: _promo.card),
+            onHomePromoDismiss: _promo.card == null
+                ? null
+                : () => _onHomePromoDismiss(_promo.card!),
             hiddenAssignmentIds: _hiddenDoneAssignmentIds,
             markingDoneAssignmentIds: _markingDoneAssignmentIds,
           ),
@@ -620,76 +632,207 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  void _maybeRecordPromoImpression(HomePromoLoadResult promo) {
-    final id = promo.card?.id;
-    if (id == null ||
-        promo.isDemoFallback ||
-        promo.hidePromoStrip ||
-        promo.loadError) {
+  Future<void> _hydratePromoMedia(HomePromoLoadResult promo) async {
+    final generation = ++_promoMediaGeneration;
+    if (promo.hidePromoStrip || promo.isDemoFallback || promo.cards.isEmpty) {
+      if (!mounted || generation != _promoMediaGeneration) return;
+      setState(() {
+        _promoImageBytes.clear();
+        _promoIconBytes.clear();
+        _promoImageStates.clear();
+      });
       return;
     }
-    if (_recordedImpressionId == id) return;
-    _recordedImpressionId = id;
-    unawaited(_promoService.recordEvent(id, 'impression'));
+
+    // Mark image variants as loading until bytes arrive.
+    final loadingStates = <String, ContentImageRenderState>{};
+    for (final card in promo.cards) {
+      final usesImage = contentCardVariantUsesImage(
+        effectiveContentCardVariant(card.homePromo.cardVariant),
+      );
+      if (usesImage) {
+        loadingStates[card.id] = ContentImageRenderState.loading;
+      } else {
+        loadingStates[card.id] = ContentImageRenderState.notApplicable;
+      }
+    }
+    if (mounted && generation == _promoMediaGeneration) {
+      setState(() => _promoImageStates
+        ..clear()
+        ..addAll(loadingStates));
+    }
+
+    for (final card in promo.cards) {
+      final version = '${card.id}|${card.schemaVersion}';
+      final imageId = card.homePromo.imageAssetId?.trim();
+      final iconId = card.homePromo.iconAssetId?.trim();
+      final usesImage = contentCardVariantUsesImage(
+        effectiveContentCardVariant(card.homePromo.cardVariant),
+      );
+
+      if (imageId != null && imageId.isNotEmpty && usesImage) {
+        final bytes = await _contentMedia.fetchBytes(
+          imageId,
+          contentVersion: version,
+        );
+        if (!mounted || generation != _promoMediaGeneration) return;
+        setState(() {
+          if (bytes != null && bytes.isNotEmpty) {
+            _promoImageBytes[card.id] = bytes;
+            _promoImageStates[card.id] = ContentImageReady(bytes);
+          } else {
+            _promoImageBytes.remove(card.id);
+            _promoImageStates[card.id] = const ContentImageFailed();
+          }
+        });
+      } else if (usesImage) {
+        if (!mounted || generation != _promoMediaGeneration) return;
+        setState(() {
+          _promoImageBytes.remove(card.id);
+          _promoImageStates[card.id] = ContentImageRenderState.missing;
+        });
+      }
+
+      if (iconId != null && iconId.isNotEmpty) {
+        final iconBytes = await _contentMedia.fetchBytes(
+          iconId,
+          contentVersion: '$version|icon',
+        );
+        if (!mounted || generation != _promoMediaGeneration) return;
+        if (iconBytes != null && iconBytes.isNotEmpty) {
+          setState(() => _promoIconBytes[card.id] = iconBytes);
+        }
+      } else {
+        if (!mounted || generation != _promoMediaGeneration) return;
+        setState(() => _promoIconBytes.remove(card.id));
+      }
+    }
   }
 
-  Future<void> _onHomePromoTap() async {
-    final managedId = _promo.card?.id;
-    if (managedId != null &&
-        !_promo.isDemoFallback &&
-        !_promo.hidePromoStrip) {
+  List<StudentHomePromoPlacement> _promoPlacements() {
+    if (_promo.hidePromoStrip) return const [];
+    if (_promo.isDemoFallback) {
+      final demo = HomePromoPayload.demoStuckWithAssignment;
+      return [
+        StudentHomePromoPlacement(
+          payload: demo,
+          slot: 'after_assignments',
+          showDemoBadge: true,
+          onTap: () => _onHomePromoTap(payload: demo),
+        ),
+      ];
+    }
+    if (_promo.cards.isEmpty) return const [];
+    return [
+      for (final card in _promo.cards)
+        StudentHomePromoPlacement(
+          payload: card.homePromo,
+          slot: card.homePromo.effectiveHomeSlot,
+          showDemoBadge: card.showDemoBadge,
+          onTap: _promoTapCallback(card),
+          onDismiss: card.homePromo.dismissible
+              ? () => _onHomePromoDismiss(card)
+              : null,
+          imageBytes: _promoImageBytes[card.id],
+          iconBytes: _promoIconBytes[card.id],
+          imageState: _promoImageStates[card.id],
+          imageLoading: _promoImageStates[card.id]?.isLoading == true,
+        ),
+    ];
+  }
+
+  void _maybeRecordPromoImpression(HomePromoLoadResult promo) {
+    if (promo.isDemoFallback || promo.hidePromoStrip || promo.loadError) {
+      return;
+    }
+    for (final card in promo.cards) {
+      final id = card.id;
+      if (!_recordedImpressionIds.add(id)) continue;
+      unawaited(_promoService.recordEvent(id, 'impression'));
+    }
+  }
+
+  VoidCallback? _promoTapCallback(ManagedContentCard card) {
+    final payload = card.homePromo;
+    final intent = ContentNavResolver.resolve(
+      action: payload.action,
+      ctaRoute: payload.ctaRoute,
+      ctaUrl: payload.ctaUrl,
+    );
+    if (intent is ContentNavDisabled) return null;
+    return () => _onHomePromoTap(card: card);
+  }
+
+  Future<void> _onHomePromoTap({
+    ManagedContentCard? card,
+    HomePromoPayload? payload,
+  }) async {
+    final resolved = payload ?? card?.homePromo ?? _promo.payload;
+    final managedId = card?.id;
+    if (managedId != null && !_promo.isDemoFallback && !_promo.hidePromoStrip) {
       await _promoService.recordEvent(managedId, 'click');
     }
 
-    final payload = _promo.payload;
-    final route = payload.ctaRoute?.trim();
-    if (route != null && route.isNotEmpty) {
-      if (route == '/help' || route == '/my-diary') {
-        if (route == '/my-diary') {
-          context.push('/my-diary');
-          return;
-        }
-        _showHelpDetails();
+    final intent = ContentNavResolver.resolve(
+      action: resolved.action,
+      ctaRoute: resolved.ctaRoute,
+      ctaUrl: resolved.ctaUrl,
+    );
+    if (intent is ContentNavNone || intent is ContentNavDisabled) {
+      if (!mounted) return;
+      if (intent is ContentNavDisabled) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Действие недоступно')),
+        );
         return;
       }
-      try {
-        context.push(route);
-        return;
-      } catch (_) {
-        // Fall through to URL / sheet.
-      }
+      _showHelpDetails(resolved);
+      return;
     }
-    final url = payload.ctaUrl?.trim();
-    if (url != null && url.isNotEmpty) {
-      final uri = Uri.tryParse(url);
-      if (uri != null &&
-          (uri.scheme == 'https' || uri.scheme == 'http') &&
-          await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-        return;
-      }
-    }
-    _showHelpDetails();
+    if (!mounted) return;
+    await const ContentNavExecutor().execute(
+      context,
+      intent,
+      onUnavailableMessage: (message) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message)),
+        );
+      },
+      onDisabled: () {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Действие недоступно')),
+        );
+      },
+    );
   }
 
-  Future<void> _onHomePromoDismiss() async {
-    final id = _promo.card?.id;
-    if (id == null || _promo.isDemoFallback) {
+  Future<void> _onHomePromoDismiss(ManagedContentCard card) async {
+    if (_promo.isDemoFallback) {
       setState(() {
         _promo = const HomePromoLoadResult(intentionallyEmpty: true);
       });
       return;
     }
     try {
-      await _promoService.dismiss(id);
+      await _promoService.dismiss(card.id);
       if (!mounted) return;
-      // Optimistic hide; successful empty must not resurrect demo (14.1).
+      // Optimistic: remove only the dismissed card; empty must not resurrect demo.
+      final remaining =
+          _promo.cards.where((c) => c.id != card.id).toList(growable: false);
       setState(() {
-        _promo = const HomePromoLoadResult(intentionallyEmpty: true);
+        _promoImageBytes.remove(card.id);
+        _promoIconBytes.remove(card.id);
+        _promoImageStates.remove(card.id);
+        _promo = remaining.isEmpty
+            ? const HomePromoLoadResult(intentionallyEmpty: true)
+            : HomePromoLoadResult(cards: remaining);
       });
       final refreshed = await _loadPromoSafe();
       if (!mounted) return;
       setState(() => _promo = refreshed);
+      unawaited(_hydratePromoMedia(refreshed));
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -698,14 +841,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  void _showHelpDetails() {
+  void _showHelpDetails(HomePromoPayload payload) {
     _showDetailsSheet(
-      title: _promo.payload.title,
-      icon: _promo.payload.iconData,
+      title: payload.title,
+      icon: payload.iconData,
       accent: const Color(0xFF8A72D8),
       children: [
         Text(
-          _promo.payload.subtitle,
+          payload.subtitle,
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 height: 1.45,
                 color: Theme.of(context)

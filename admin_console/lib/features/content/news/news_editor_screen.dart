@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/auth/admin_backend_config.dart';
 import '../../../core/auth/admin_session_controller.dart';
 import '../../../shared/widgets/publication_status_badge.dart';
+import '../shared/admin_content_backend.dart';
 import 'admin_image_picker.dart';
 import 'admin_image_store.dart';
 import 'news_item.dart';
@@ -91,17 +92,21 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
   }
 
   NewsRepository _defaultRepo() {
-    if (AdminBackendConfig.isDemoMode) return LocalNewsRepository();
-    final client = _tryClient();
-    if (client == null) return LocalNewsRepository();
-    return SupabaseNewsRepository(client: client);
+    return AdminContentBackend.resolveRepository<NewsRepository>(
+      isDemoMode: AdminBackendConfig.isDemoMode,
+      client: _tryClient(),
+      localFactory: LocalNewsRepository.new,
+      supabaseFactory: (client) => SupabaseNewsRepository(client: client),
+    );
   }
 
   AdminImageStore _defaultStore() {
-    if (AdminBackendConfig.isDemoMode) return LocalAdminImageStore();
-    final client = _tryClient();
-    if (client == null) return LocalAdminImageStore();
-    return SupabaseAdminImageStore(client: client);
+    return AdminContentBackend.resolveRepository<AdminImageStore>(
+      isDemoMode: AdminBackendConfig.isDemoMode,
+      client: _tryClient(),
+      localFactory: LocalAdminImageStore.new,
+      supabaseFactory: (client) => SupabaseAdminImageStore(client: client),
+    );
   }
 
   AdminRemoteImageGateway? get _mediaStore {
@@ -1116,40 +1121,43 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
                 onDeletePermanently: _deleteArchivedPermanently,
                 normalizedAudienceAvailable:
                     _repository is LocalNewsRepository || _audienceRpcAvailable,
-                onSaveAudience: ({
-                  required mode,
-                  required groupIds,
-                  required userIds,
-                }) async {
-                  final selected = _selected;
-                  if (selected == null) return;
-                  try {
-                    final updated = await _repository.setAudience(
-                      id: selected.id,
-                      mode: mode,
-                      groupIds: groupIds,
-                      userIds: userIds,
-                      expectedVersion: selected.versionNumber,
-                    );
-                    if (!mounted) return;
-                    setState(() {
-                      final idx = _items.indexWhere((e) => e.id == updated.id);
-                      if (idx >= 0) {
-                        _items = [..._items]..[idx] = updated;
+                onSaveAudience:
+                    ({
+                      required mode,
+                      required groupIds,
+                      required userIds,
+                    }) async {
+                      final selected = _selected;
+                      if (selected == null) return;
+                      try {
+                        final updated = await _repository.setAudience(
+                          id: selected.id,
+                          mode: mode,
+                          groupIds: groupIds,
+                          userIds: userIds,
+                          expectedVersion: selected.versionNumber,
+                        );
+                        if (!mounted) return;
+                        setState(() {
+                          final idx = _items.indexWhere(
+                            (e) => e.id == updated.id,
+                          );
+                          if (idx >= 0) {
+                            _items = [..._items]..[idx] = updated;
+                          }
+                          _selectedId = updated.id;
+                          _banner = 'Аудитория сохранена.';
+                        });
+                      } on NewsRepositoryException catch (error) {
+                        if (error.message.contains('RPC недоступен') ||
+                            error.message.contains('local apply')) {
+                          if (mounted) {
+                            setState(() => _audienceRpcAvailable = false);
+                          }
+                        }
+                        rethrow;
                       }
-                      _selectedId = updated.id;
-                      _banner = 'Аудитория сохранена.';
-                    });
-                  } on NewsRepositoryException catch (error) {
-                    if (error.message.contains('RPC недоступен') ||
-                        error.message.contains('local apply')) {
-                      if (mounted) {
-                        setState(() => _audienceRpcAvailable = false);
-                      }
-                    }
-                    rethrow;
-                  }
-                },
+                    },
                 onPreviewAudience: () =>
                     _repository.previewAudience(_selected!.id),
               );
@@ -1818,7 +1826,8 @@ class _PropertiesPanel extends StatelessWidget {
     required NewsAudienceMode mode,
     required List<String> groupIds,
     required List<String> userIds,
-  }) onSaveAudience;
+  })
+  onSaveAudience;
   final Future<NewsAudiencePreview> Function() onPreviewAudience;
 
   static const _focusOptions = <(String, Alignment)>[

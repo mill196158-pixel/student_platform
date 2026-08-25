@@ -22,6 +22,12 @@
 * Security reviews Stage 14–19 **PASS** on remote (Stage 18 allowlist includes pre-existing `subject_alias_review_queue`)
 * Edge deployed: `content-media`, `subject-media`, `vacancy-media` (v1, `verify_jwt=false`, handler auth)
 * Smoke §11 subset: unauth **401**, bad bearer **401**, anon cleanup **403** — all three functions (**9/9**)
+* Complete `refactor/chat-tab` Visual Content Studio is integrated with the
+  Stage 19.1 academic branch and received Codex **APPROVE**:
+  * nontechnical list + phone preview + properties workflow is restored;
+  * Content, Academic and Import Studio routes remain visible under existing
+    RBAC;
+  * full Admin tests and both Admin/student Web release builds pass.
 * Stage 19.1 identity foundation implemented locally:
   `educational_programs`, `curriculum_plans`, nullable group/legacy links,
   plan-local occurrence identity, apply-disabled dry-run and role-play.

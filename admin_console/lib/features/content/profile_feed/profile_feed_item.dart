@@ -1,6 +1,20 @@
 import 'package:student_ui/student_ui.dart';
 
+import '../shared/content_working_draft.dart';
+
 enum ProfileFeedStatus { draft, published, archived }
+
+extension ProfileFeedStatusLabels on ProfileFeedStatus {
+  String get russianLabel => switch (this) {
+    ProfileFeedStatus.draft => 'Черновик',
+    ProfileFeedStatus.published => 'Опубликован',
+    ProfileFeedStatus.archived => 'В архиве',
+  };
+
+  bool get isDraft => this == ProfileFeedStatus.draft;
+  bool get isPublished => this == ProfileFeedStatus.published;
+  bool get isArchived => this == ProfileFeedStatus.archived;
+}
 
 ProfileFeedStatus? parseProfileFeedStatus(Object? raw) {
   switch (raw?.toString()) {
@@ -26,6 +40,62 @@ String profileFeedStatusWire(ProfileFeedStatus status) {
   }
 }
 
+class ProfileFeedVersionInfo {
+  const ProfileFeedVersionInfo({
+    required this.versionNumber,
+    this.createdAt,
+    this.title = '',
+    this.status,
+  });
+
+  final int versionNumber;
+  final DateTime? createdAt;
+  final String title;
+  final ProfileFeedStatus? status;
+
+  factory ProfileFeedVersionInfo.fromJson(Map<String, dynamic> json) {
+    final snapshot = json['snapshot'];
+    String title = '';
+    ProfileFeedStatus? status;
+    if (snapshot is Map) {
+      title = (snapshot['title'] ?? '').toString();
+      status = parseProfileFeedStatus(snapshot['status']);
+    }
+    return ProfileFeedVersionInfo(
+      versionNumber: ProfileFeedItem._asInt(json['version_number']) ?? 0,
+      createdAt: ProfileFeedItem._asDate(json['created_at']),
+      title: title,
+      status: status,
+    );
+  }
+}
+
+class ProfileFeedDeleteResult {
+  const ProfileFeedDeleteResult({
+    required this.id,
+    this.legacyKey,
+    this.queuedMedia = 0,
+  });
+
+  final String id;
+  final String? legacyKey;
+  final int queuedMedia;
+
+  factory ProfileFeedDeleteResult.fromJson(Map<String, dynamic> json) {
+    return ProfileFeedDeleteResult(
+      id: (json['id'] ?? '').toString(),
+      legacyKey: json['legacy_key']?.toString(),
+      queuedMedia: ProfileFeedItem._asInt(json['queued_media']) ?? 0,
+    );
+  }
+}
+
+extension ProfileFeedItemStatus on ProfileFeedItem {
+  bool get isDraft => status.isDraft;
+  bool get isPublished => status.isPublished;
+  bool get isArchived => status.isArchived;
+}
+
 class ProfileFeedItem {
   const ProfileFeedItem({
     required this.id,
@@ -37,10 +107,15 @@ class ProfileFeedItem {
     required this.priority,
     required this.sortOrder,
     required this.audienceMode,
+    this.legacyKey,
+    this.versionNumber = 1,
+    this.schemaVersion = 1,
     this.startsAt,
     this.endsAt,
     this.audienceGroupIds = const [],
     this.audienceUserIds = const [],
+    this.hasWorkingDraft = false,
+    this.workingDraftRowVersion,
   });
 
   final String id;
@@ -52,10 +127,19 @@ class ProfileFeedItem {
   final int priority;
   final int sortOrder;
   final String audienceMode;
+  final String? legacyKey;
+  final int versionNumber;
+  final int schemaVersion;
   final DateTime? startsAt;
   final DateTime? endsAt;
   final List<String> audienceGroupIds;
   final List<String> audienceUserIds;
+
+  /// True when a server/local working draft exists for this published item.
+  final bool hasWorkingDraft;
+
+  /// Present on begin/save responses; used for optimistic concurrency.
+  final int? workingDraftRowVersion;
 
   static ProfileFeedItem? tryParse(Map<String, dynamic> json) {
     final id = json['id']?.toString();
@@ -64,8 +148,8 @@ class ProfileFeedItem {
     final origin = ContentOrigin.tryParse(json['origin']);
     if (status == null || origin == null) return null;
 
-    final templateKey =
-        (json['template_key'] ?? json['templateKey'])?.toString();
+    final templateKey = (json['template_key'] ?? json['templateKey'])
+        ?.toString();
     if (templateKey != null &&
         templateKey.isNotEmpty &&
         templateKey != 'profile_feed_card_v1') {
@@ -105,14 +189,102 @@ class ProfileFeedItem {
       priority: priority,
       sortOrder: sortOrder,
       audienceMode: (json['audience_mode'] ?? 'all').toString(),
+      legacyKey: json['legacy_key']?.toString(),
+      versionNumber: _asInt(json['version_number']) ?? 1,
+      schemaVersion: _asInt(json['schema_version']) ?? 1,
       startsAt: _asDate(json['starts_at']),
       endsAt: _asDate(json['ends_at']),
       audienceGroupIds: _asIdList(json['audience_group_ids']),
       audienceUserIds: _asIdList(json['audience_user_ids']),
+      hasWorkingDraft: parseHasWorkingDraft(json),
+      workingDraftRowVersion: parseWorkingDraftRowVersion(
+        parseWorkingDraftMap(json),
+      ),
+    );
+  }
+
+  static ProfileFeedItem? tryParseWithWorkingDraftOverlay(
+    Map<String, dynamic> json,
+  ) {
+    final base = tryParse(json);
+    if (base == null) return null;
+    final draft = parseWorkingDraftMap(json);
+    if (draft == null) {
+      return base.copyWith(hasWorkingDraft: parseHasWorkingDraft(json));
+    }
+    final payloadRaw = draft['payload'];
+    ProfileFeedPayload? payload;
+    if (payloadRaw is Map) {
+      payload = ProfileFeedPayload.tryParse(
+        Map<String, dynamic>.from(payloadRaw),
+      );
+    }
+    return base.copyWith(
+      title: (draft['title'] ?? base.title).toString(),
+      payload: payload ?? base.payload,
+      priority: _asInt(draft['priority']) ?? base.priority,
+      sortOrder: _asInt(draft['sort_order']) ?? base.sortOrder,
+      audienceMode: (draft['audience_mode'] ?? base.audienceMode).toString(),
+      startsAt: draft.containsKey('starts_at')
+          ? _asDate(draft['starts_at'])
+          : base.startsAt,
+      endsAt: draft.containsKey('ends_at')
+          ? _asDate(draft['ends_at'])
+          : base.endsAt,
+      clearStartsAt:
+          draft.containsKey('starts_at') && draft['starts_at'] == null,
+      clearEndsAt: draft.containsKey('ends_at') && draft['ends_at'] == null,
+      audienceGroupIds: draft['audience_group_ids'] != null
+          ? _asIdList(draft['audience_group_ids'])
+          : base.audienceGroupIds,
+      audienceUserIds: draft['audience_user_ids'] != null
+          ? _asIdList(draft['audience_user_ids'])
+          : base.audienceUserIds,
+      hasWorkingDraft: true,
+      workingDraftRowVersion: parseWorkingDraftRowVersion(draft),
+    );
+  }
+
+  Map<String, dynamic> toWorkingDraftPatch({bool includeIsHidden = false}) {
+    final imageAssetId = payload.imageAssetId?.trim();
+    final iconAssetId = payload.iconAssetId?.trim();
+    final assetIds = <String>{
+      if (imageAssetId != null && imageAssetId.isNotEmpty) imageAssetId,
+      if (iconAssetId != null && iconAssetId.isNotEmpty) iconAssetId,
+    };
+    final patch = <String, dynamic>{
+      'title': title,
+      'payload': payload.toWireJson(),
+      'priority': priority,
+      'starts_at': startsAt?.toUtc().toIso8601String(),
+      'ends_at': endsAt?.toUtc().toIso8601String(),
+      if (includeIsHidden) 'is_hidden': false,
+      'audience_mode': audienceMode,
+      'audience_group_ids': audienceGroupIds,
+      'audience_user_ids': audienceUserIds,
+      'sort_order': sortOrder,
+      if (assetIds.isNotEmpty) 'draft_asset_ids': assetIds.toList(),
+    };
+    // Visual Studio targets schema 2. Allowed: canonical 2→2 and legacy 1→2.
+    if (schemaVersion == 1 || schemaVersion == 2) {
+      patch['target_schema_version'] = 2;
+    }
+    return patch;
+  }
+
+  ManagedProfileFeedCard toManagedCard({bool? showDemoBadge}) {
+    return ManagedProfileFeedCard(
+      id: id,
+      origin: origin,
+      sortOrder: sortOrder,
+      priority: priority,
+      payload: payload,
+      showDemoBadge: showDemoBadge ?? origin == ContentOrigin.demo,
     );
   }
 
   ProfileFeedItem copyWith({
+    String? id,
     ProfileFeedStatus? status,
     ContentOrigin? origin,
     String? title,
@@ -121,15 +293,22 @@ class ProfileFeedItem {
     int? priority,
     int? sortOrder,
     String? audienceMode,
+    String? legacyKey,
+    int? versionNumber,
+    int? schemaVersion,
     DateTime? startsAt,
     DateTime? endsAt,
     List<String>? audienceGroupIds,
     List<String>? audienceUserIds,
     bool clearStartsAt = false,
     bool clearEndsAt = false,
+    bool clearLegacyKey = false,
+    bool? hasWorkingDraft,
+    int? workingDraftRowVersion,
+    bool clearWorkingDraftRowVersion = false,
   }) {
     return ProfileFeedItem(
-      id: id,
+      id: id ?? this.id,
       status: status ?? this.status,
       origin: origin ?? this.origin,
       title: title ?? this.title,
@@ -138,10 +317,17 @@ class ProfileFeedItem {
       priority: priority ?? this.priority,
       sortOrder: sortOrder ?? this.sortOrder,
       audienceMode: audienceMode ?? this.audienceMode,
+      legacyKey: clearLegacyKey ? null : (legacyKey ?? this.legacyKey),
+      versionNumber: versionNumber ?? this.versionNumber,
+      schemaVersion: schemaVersion ?? this.schemaVersion,
       startsAt: clearStartsAt ? null : (startsAt ?? this.startsAt),
       endsAt: clearEndsAt ? null : (endsAt ?? this.endsAt),
       audienceGroupIds: audienceGroupIds ?? this.audienceGroupIds,
       audienceUserIds: audienceUserIds ?? this.audienceUserIds,
+      hasWorkingDraft: hasWorkingDraft ?? this.hasWorkingDraft,
+      workingDraftRowVersion: clearWorkingDraftRowVersion
+          ? null
+          : (workingDraftRowVersion ?? this.workingDraftRowVersion),
     );
   }
 

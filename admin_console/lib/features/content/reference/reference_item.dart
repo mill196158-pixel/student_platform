@@ -1,5 +1,7 @@
 import 'package:student_ui/student_ui.dart';
 
+import '../shared/content_working_draft.dart';
+
 enum ReferenceArticleStatus { draft, published, archived }
 
 ReferenceArticleStatus? parseReferenceArticleStatus(Object? raw) {
@@ -50,6 +52,7 @@ class ReferenceCategoryItem {
     required this.rowVersion,
     this.key,
     this.status = ReferenceCategoryStatus.published,
+    this.articleCount,
   });
 
   final String id;
@@ -59,6 +62,7 @@ class ReferenceCategoryItem {
   final int sortOrder;
   final int rowVersion;
   final ReferenceCategoryStatus status;
+  final int? articleCount;
 
   static ReferenceCategoryItem? tryParse(Map<String, dynamic>? json) {
     if (json == null) return null;
@@ -75,8 +79,10 @@ class ReferenceCategoryItem {
       iconKey: iconKey,
       sortOrder: _asInt(json['sort_order']) ?? 0,
       rowVersion: _asInt(json['row_version']) ?? 1,
-      status: parseReferenceCategoryStatus(json['status']) ??
+      status:
+          parseReferenceCategoryStatus(json['status']) ??
           ReferenceCategoryStatus.published,
+      articleCount: _asInt(json['article_count']),
     );
   }
 
@@ -86,6 +92,7 @@ class ReferenceCategoryItem {
     int? sortOrder,
     int? rowVersion,
     ReferenceCategoryStatus? status,
+    int? articleCount,
   }) {
     return ReferenceCategoryItem(
       id: id,
@@ -95,6 +102,7 @@ class ReferenceCategoryItem {
       sortOrder: sortOrder ?? this.sortOrder,
       rowVersion: rowVersion ?? this.rowVersion,
       status: status ?? this.status,
+      articleCount: articleCount ?? this.articleCount,
     );
   }
 
@@ -116,9 +124,14 @@ class ReferenceArticleItem {
     required this.rowVersion,
     required this.sortOrder,
     required this.audienceMode,
+    this.schemaVersion = 2,
     this.categoryTitle,
+    this.legacyKey,
     this.audienceGroupIds = const [],
     this.audienceUserIds = const [],
+    this.hasWorkingDraft = false,
+    this.workingDraftRowVersion,
+    this.draftAssetIds = const [],
   });
 
   final String id;
@@ -127,12 +140,80 @@ class ReferenceArticleItem {
   final String title;
   final ReferenceArticlePayload payload;
   final String categoryId;
+  final int schemaVersion;
   final String? categoryTitle;
+
+  /// Stable Stage 14.1 bootstrap identity. It is retained after demo promotion.
+  final String? legacyKey;
   final int rowVersion;
   final int sortOrder;
   final String audienceMode;
   final List<String> audienceGroupIds;
   final List<String> audienceUserIds;
+
+  /// True when a server/local working draft exists for this published item.
+  final bool hasWorkingDraft;
+
+  /// Present on begin/save responses; used for optimistic concurrency.
+  final int? workingDraftRowVersion;
+
+  /// Assets uploaded while editing the working draft (discard cleanup).
+  final List<String> draftAssetIds;
+
+  bool get _payloadNeedsSchemaV3 => payload.blocks.any(
+    (b) => const {'heading', 'info', 'warning', 'list'}.contains(b.type),
+  );
+
+  int get effectiveSchemaVersion => _payloadNeedsSchemaV3 ? 3 : schemaVersion;
+
+  bool get isDraft => status == ReferenceArticleStatus.draft;
+  bool get isPublished => status == ReferenceArticleStatus.published;
+  bool get isArchived => status == ReferenceArticleStatus.archived;
+  bool get isDemo => origin == ContentOrigin.demo;
+
+  static ReferenceArticleItem parseOrThrow(Map<String, dynamic> json) {
+    final id = json['id']?.toString();
+    if (id == null || id.isEmpty) {
+      throw FormatException('Отсутствует id статьи справочника.');
+    }
+    final status = parseReferenceArticleStatus(json['status']);
+    if (status == null) {
+      throw FormatException(
+        'Некорректный status статьи $id: ${json['status']}.',
+      );
+    }
+    final origin = ContentOrigin.tryParse(json['origin']);
+    if (origin == null) {
+      throw FormatException(
+        'Некорректный origin статьи $id: ${json['origin']}.',
+      );
+    }
+    final schemaVersion = _asInt(json['schema_version']) ?? 2;
+    final payloadRaw = json['payload'];
+    if (payloadRaw is! Map) {
+      throw FormatException('Отсутствует payload статьи $id.');
+    }
+    final payload = ReferenceArticlePayload.tryParseForSchema(
+      schemaVersion,
+      Map<String, dynamic>.from(payloadRaw),
+    );
+    if (payload == null) {
+      throw FormatException('Некорректный payload статьи $id.');
+    }
+    final categoryId =
+        (json['category_id'] ??
+                json['reference_category_id'] ??
+                json['referenceCategoryId'])
+            ?.toString();
+    if (categoryId == null || categoryId.isEmpty) {
+      throw FormatException('Отсутствует category_id статьи $id.');
+    }
+    final item = tryParse(json);
+    if (item == null) {
+      throw FormatException('Не удалось разобрать статью $id.');
+    }
+    return item;
+  }
 
   static ReferenceArticleItem? tryParse(Map<String, dynamic>? json) {
     if (json == null) return null;
@@ -150,10 +231,11 @@ class ReferenceArticleItem {
       Map<String, dynamic>.from(payloadRaw),
     );
     if (payload == null) return null;
-    final categoryId = (json['category_id'] ??
-            json['reference_category_id'] ??
-            json['referenceCategoryId'])
-        ?.toString();
+    final categoryId =
+        (json['category_id'] ??
+                json['reference_category_id'] ??
+                json['referenceCategoryId'])
+            ?.toString();
     if (categoryId == null || categoryId.isEmpty) return null;
     final title = (json['title'] ?? payload.shortText).toString();
     var sortOrder = _asInt(json['sort_order']) ?? 0;
@@ -166,20 +248,92 @@ class ReferenceArticleItem {
         }
       }
     }
+    final draft = parseWorkingDraftMap(json);
     return ReferenceArticleItem(
       id: id,
       status: status,
       origin: origin,
       title: title,
       payload: payload,
+      schemaVersion: schemaVersion,
       categoryId: categoryId,
       categoryTitle: json['category_title']?.toString(),
+      legacyKey: json['legacy_key']?.toString(),
       rowVersion: _asInt(json['row_version']) ?? 1,
       sortOrder: sortOrder,
       audienceMode: (json['audience_mode'] ?? 'all').toString(),
       audienceGroupIds: _asIdList(json['audience_group_ids']),
       audienceUserIds: _asIdList(json['audience_user_ids']),
+      hasWorkingDraft: parseHasWorkingDraft(json),
+      workingDraftRowVersion: parseWorkingDraftRowVersion(draft),
+      draftAssetIds: draft == null
+          ? const []
+          : _asIdList(draft['draft_asset_ids']),
     );
+  }
+
+  static ReferenceArticleItem? tryParseWithWorkingDraftOverlay(
+    Map<String, dynamic> json,
+  ) {
+    final base = tryParse(json);
+    if (base == null) return null;
+    final draft = parseWorkingDraftMap(json);
+    if (draft == null) {
+      return base.copyWith(hasWorkingDraft: parseHasWorkingDraft(json));
+    }
+    final draftTarget = _asInt(draft['target_schema_version']);
+    final schemaVersion =
+        draftTarget ?? _asInt(json['schema_version']) ?? base.schemaVersion;
+    final payloadRaw = draft['payload'];
+    ReferenceArticlePayload? payload;
+    if (payloadRaw is Map) {
+      payload = ReferenceArticlePayload.tryParseForSchema(
+        schemaVersion >= 3 ? 3 : schemaVersion,
+        Map<String, dynamic>.from(payloadRaw),
+      );
+      // Fallback: try v3 parse if draft already has new blocks.
+      payload ??= ReferenceArticlePayload.tryParseForSchema(
+        3,
+        Map<String, dynamic>.from(payloadRaw),
+      );
+    }
+    final categoryId =
+        (draft['reference_category_id'] ??
+                draft['category_id'] ??
+                draft['referenceCategoryId'])
+            ?.toString();
+    return base.copyWith(
+      title: (draft['title'] ?? base.title).toString(),
+      payload: payload ?? base.payload,
+      schemaVersion: schemaVersion,
+      categoryId: categoryId ?? base.categoryId,
+      sortOrder: _asInt(draft['sort_order']) ?? base.sortOrder,
+      audienceMode: (draft['audience_mode'] ?? base.audienceMode).toString(),
+      audienceGroupIds: draft['audience_group_ids'] != null
+          ? _asIdList(draft['audience_group_ids'])
+          : base.audienceGroupIds,
+      audienceUserIds: draft['audience_user_ids'] != null
+          ? _asIdList(draft['audience_user_ids'])
+          : base.audienceUserIds,
+      hasWorkingDraft: true,
+      workingDraftRowVersion: parseWorkingDraftRowVersion(draft),
+      draftAssetIds: _asIdList(draft['draft_asset_ids']),
+    );
+  }
+
+  Map<String, dynamic> toWorkingDraftPatch() {
+    final schema = effectiveSchemaVersion;
+    return {
+      'title': title,
+      'payload': payload.toWireJson(schemaVersion: schema),
+      'sort_order': sortOrder,
+      'reference_category_id': categoryId,
+      'audience_mode': audienceMode,
+      'audience_group_ids': audienceGroupIds,
+      'audience_user_ids': audienceUserIds,
+      if (schema >= 3) 'target_schema_version': schema,
+      if (draftAssetIds.isNotEmpty) 'draft_asset_ids': draftAssetIds,
+    };
   }
 
   ReferenceArticleItem copyWith({
@@ -187,13 +341,19 @@ class ReferenceArticleItem {
     ContentOrigin? origin,
     String? title,
     ReferenceArticlePayload? payload,
+    int? schemaVersion,
     String? categoryId,
     String? categoryTitle,
+    String? legacyKey,
     int? rowVersion,
     int? sortOrder,
     String? audienceMode,
     List<String>? audienceGroupIds,
     List<String>? audienceUserIds,
+    List<String>? draftAssetIds,
+    bool? hasWorkingDraft,
+    int? workingDraftRowVersion,
+    bool clearWorkingDraftRowVersion = false,
   }) {
     return ReferenceArticleItem(
       id: id,
@@ -201,13 +361,20 @@ class ReferenceArticleItem {
       origin: origin ?? this.origin,
       title: title ?? this.title,
       payload: payload ?? this.payload,
+      schemaVersion: schemaVersion ?? this.schemaVersion,
       categoryId: categoryId ?? this.categoryId,
       categoryTitle: categoryTitle ?? this.categoryTitle,
+      legacyKey: legacyKey ?? this.legacyKey,
       rowVersion: rowVersion ?? this.rowVersion,
       sortOrder: sortOrder ?? this.sortOrder,
       audienceMode: audienceMode ?? this.audienceMode,
       audienceGroupIds: audienceGroupIds ?? this.audienceGroupIds,
       audienceUserIds: audienceUserIds ?? this.audienceUserIds,
+      draftAssetIds: draftAssetIds ?? this.draftAssetIds,
+      hasWorkingDraft: hasWorkingDraft ?? this.hasWorkingDraft,
+      workingDraftRowVersion: clearWorkingDraftRowVersion
+          ? null
+          : (workingDraftRowVersion ?? this.workingDraftRowVersion),
     );
   }
 

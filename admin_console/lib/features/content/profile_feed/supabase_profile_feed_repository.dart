@@ -1,10 +1,12 @@
 import 'dart:convert';
 
+import 'package:flutter/material.dart';
 import 'package:student_ui/student_ui.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'profile_feed_item.dart';
 import 'profile_feed_repository.dart';
+import '../shared/visual_editor_operation_error.dart';
 
 abstract class ProfileFeedAdminRpcClient {
   Future<dynamic> rpc(String function, {Map<String, dynamic>? params});
@@ -25,10 +27,11 @@ class SupabaseProfileFeedRepository implements ProfileFeedRepository {
   SupabaseProfileFeedRepository({
     SupabaseClient? client,
     ProfileFeedAdminRpcClient? rpcClient,
-  }) : _rpc = rpcClient ??
-            SupabaseProfileFeedAdminRpcClient(
-              client ?? Supabase.instance.client,
-            );
+  }) : _rpc =
+           rpcClient ??
+           SupabaseProfileFeedAdminRpcClient(
+             client ?? Supabase.instance.client,
+           );
 
   final ProfileFeedAdminRpcClient _rpc;
 
@@ -41,34 +44,16 @@ class SupabaseProfileFeedRepository implements ProfileFeedRepository {
   }
 
   ProfileFeedRepositoryException _mapError(PostgrestException error) {
-    final code = error.code ?? '';
-    final message = error.message.toLowerCase();
-    if (code == '42501' || message.contains('forbidden')) {
-      return const ProfileFeedRepositoryException(
-        'Недостаточно прав для этого действия.',
-        isForbidden: true,
-      );
-    }
-    if (code == '28000' || message.contains('not_authenticated')) {
-      return const ProfileFeedRepositoryException(
-        'Требуется вход. Войдите снова.',
-      );
-    }
-    if (code == 'P0002' || message.contains('not_found')) {
-      return const ProfileFeedRepositoryException('Карточка не найдена.');
-    }
-    if (message.contains('row_version') || message.contains('conflict')) {
-      return const ProfileFeedRepositoryException(
-        'Карточка изменилась. Обновите список.',
-      );
-    }
-    if (message.contains('could not find the function') || code == 'PGRST202') {
+    final mapped = mapVisualEditorOperationError(error);
+    if ((error.code == 'PGRST202') ||
+        (error.message.toLowerCase().contains('could not find the function'))) {
       return const ProfileFeedRepositoryException(
         'Managed content RPC ещё не применены на remote (ожидается локальный apply).',
       );
     }
-    return const ProfileFeedRepositoryException(
-      'Не удалось выполнить операцию. Попробуйте ещё раз.',
+    return ProfileFeedRepositoryException(
+      mapped.message,
+      isForbidden: mapped.isForbidden,
     );
   }
 
@@ -88,6 +73,15 @@ class SupabaseProfileFeedRepository implements ProfileFeedRepository {
   ProfileFeedItem _parseRequired(dynamic data) {
     final map = _asMap(data);
     final item = ProfileFeedItem.tryParse(map);
+    if (item == null) {
+      throw const ProfileFeedRepositoryException('Некорректный ответ сервера.');
+    }
+    return item;
+  }
+
+  ProfileFeedItem _parseWorkingDraftResponse(dynamic data) {
+    final map = _asMap(data);
+    final item = ProfileFeedItem.tryParseWithWorkingDraftOverlay(map);
     if (item == null) {
       throw const ProfileFeedRepositoryException('Некорректный ответ сервера.');
     }
@@ -134,23 +128,34 @@ class SupabaseProfileFeedRepository implements ProfileFeedRepository {
       'p_placement': 'profile_feed',
       'p_origin': null,
     });
-    return _asList(data)
-        .map(ProfileFeedItem.tryParse)
-        .whereType<ProfileFeedItem>()
-        .toList();
+    return _asList(
+      data,
+    ).map(ProfileFeedItem.tryParse).whereType<ProfileFeedItem>().toList();
   }
 
   @override
   Future<ProfileFeedItem> createDraft({
-    required ProfileFeedPayload payload,
+    ProfileFeedPayload? payload,
     String? title,
     ContentOrigin origin = ContentOrigin.admin,
   }) async {
+    final basePayload =
+        payload ??
+        ProfileFeedPayload(
+          title: 'Новая карточка',
+          subtitle: 'Краткое описание',
+          ctaLabel: 'Открыть',
+          iconKey: 'info',
+          gradientColors: const [Color(0xFFDCD0FA), Color(0xFFC9B8F3)],
+          cardVariant: 'gradient_text',
+          gradientAngle: 45,
+          ctaRoute: '/profile',
+        );
     final data = await _call('admin_create_content_draft', {
       'p_template_key': 'profile_feed_card_v1',
-      'p_schema_version': 1,
-      'p_title': title ?? payload.title,
-      'p_payload': payload.toWireJson(),
+      'p_schema_version': 2,
+      'p_title': title ?? basePayload.title,
+      'p_payload': basePayload.toWireJson(),
       'p_origin': _originWire(origin),
     });
     final created = _parseRequired(data);
@@ -237,6 +242,74 @@ class SupabaseProfileFeedRepository implements ProfileFeedRepository {
   }
 
   @override
+  Future<ProfileFeedItem> unpublish(String id, int expectedRowVersion) async {
+    final data = await _call('admin_unpublish_content', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return _parseRequired(data);
+  }
+
+  @override
+  Future<ProfileFeedItem> restoreArchived(
+    String id,
+    int expectedRowVersion,
+  ) async {
+    final data = await _call('admin_unarchive_content', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return _parseRequired(data);
+  }
+
+  @override
+  Future<ProfileFeedDeleteResult> safeDelete(
+    String id,
+    int expectedRowVersion,
+  ) async {
+    final data = await _call('admin_safe_delete_content', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return ProfileFeedDeleteResult.fromJson(_asMap(data));
+  }
+
+  @override
+  Future<ProfileFeedItem> duplicate(String id) async {
+    final data = await _call('admin_duplicate_content', {'p_id': id});
+    return _parseRequired(data);
+  }
+
+  @override
+  Future<ProfileFeedItem> promoteDemo(String id, int expectedRowVersion) async {
+    final data = await _call('admin_promote_demo_content', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return _parseRequired(data);
+  }
+
+  @override
+  Future<List<ProfileFeedVersionInfo>> listVersions(String id) async {
+    final data = await _call('admin_list_content_versions', {'p_id': id});
+    return _asList(data).map(ProfileFeedVersionInfo.fromJson).toList();
+  }
+
+  @override
+  Future<ProfileFeedItem> restoreVersion(
+    String id,
+    int versionNumber,
+    int expectedRowVersion,
+  ) async {
+    final data = await _call('admin_restore_content_version', {
+      'p_id': id,
+      'p_version_number': versionNumber,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return _parseRequired(data);
+  }
+
+  @override
   Future<void> reorder(
     List<String> orderedIds,
     List<int> expectedRowVersions,
@@ -246,5 +319,44 @@ class SupabaseProfileFeedRepository implements ProfileFeedRepository {
       'p_ordered_ids': orderedIds,
       'p_expected_row_versions': expectedRowVersions,
     });
+  }
+
+  @override
+  Future<ProfileFeedItem> beginEdit(String id) async {
+    final data = await _call('admin_begin_content_edit', {'p_id': id});
+    return _parseWorkingDraftResponse(data);
+  }
+
+  @override
+  Future<ProfileFeedItem> saveWorkingDraft(
+    ProfileFeedItem item, {
+    required int expectedDraftRowVersion,
+  }) async {
+    final data = await _call('admin_save_content_working_draft', {
+      'p_id': item.id,
+      'p_expected_draft_row_version': expectedDraftRowVersion,
+      'p_patch': item.toWorkingDraftPatch(),
+    });
+    return _parseWorkingDraftResponse(data);
+  }
+
+  @override
+  Future<ProfileFeedItem> publishWorkingDraft(
+    String id, {
+    required int expectedDraftRowVersion,
+  }) async {
+    final data = await _call('admin_publish_content_working_draft', {
+      'p_id': id,
+      'p_expected_draft_row_version': expectedDraftRowVersion,
+    });
+    return _parseWorkingDraftResponse(data);
+  }
+
+  @override
+  Future<ProfileFeedItem> discardWorkingDraft(String id) async {
+    final data = await _call('admin_discard_content_working_draft', {
+      'p_id': id,
+    });
+    return _parseWorkingDraftResponse(data);
   }
 }

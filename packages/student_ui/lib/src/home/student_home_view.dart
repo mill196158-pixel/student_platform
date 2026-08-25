@@ -1,11 +1,49 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
+import '../content/content_image_render_state.dart';
 import '../content/content_models.dart';
 import '../content/student_home_promo_card.dart';
 import 'home_preview_models.dart';
+import 'student_home_layout.dart';
 import 'widgets/student_home_news_card.dart';
 
+/// One managed promo placed into a safe home slot (Stage 14.1.2).
+@immutable
+class StudentHomePromoPlacement {
+  const StudentHomePromoPlacement({
+    required this.payload,
+    this.slot = 'after_assignments',
+    this.showDemoBadge = false,
+    this.onTap,
+    this.onDismiss,
+    this.imageBytes,
+    this.imageLoading = false,
+    this.imageState,
+    this.iconBytes,
+    this.anchorKey,
+  });
+
+  final HomePromoPayload payload;
+  final String slot;
+  final bool showDemoBadge;
+  final VoidCallback? onTap;
+  final VoidCallback? onDismiss;
+  final Uint8List? imageBytes;
+  final bool imageLoading;
+  final ContentImageRenderState? imageState;
+  final Uint8List? iconBytes;
+
+  /// Optional key for Admin scroll-into-view of the selected promo.
+  final Key? anchorKey;
+}
+
 class StudentHomeView extends StatelessWidget {
+  static const Widget _sectionSpacer = SliverToBoxAdapter(
+    child: SizedBox(height: kStudentHomeSectionGap),
+  );
+
   const StudentHomeView({
     required this.data,
     this.notificationCount = 0,
@@ -23,6 +61,7 @@ class StudentHomeView extends StatelessWidget {
     this.homePromo,
     this.homePromoIsDemo = false,
     this.hideHomePromo = false,
+    this.homePromoPlacements = const [],
     this.hiddenAssignmentIds = const {},
     this.markingDoneAssignmentIds = const {},
     this.selectedNewsId,
@@ -53,11 +92,62 @@ class StudentHomeView extends StatelessWidget {
 
   /// Successful empty server list — do not resurrect demo (Stage 14.1).
   final bool hideHomePromo;
+
+  /// Multi-slot promos (Stage 14.1.2). When non-empty, overrides single [homePromo].
+  final List<StudentHomePromoPlacement> homePromoPlacements;
   final Set<String> hiddenAssignmentIds;
   final Set<String> markingDoneAssignmentIds;
   final String? selectedNewsId;
   final Color? adminNewsHighlightColor;
   final Widget? bottomNavigationBar;
+
+  List<StudentHomePromoPlacement> _resolvedPlacements() {
+    if (homePromoPlacements.isNotEmpty) return homePromoPlacements;
+    if (hideHomePromo) return const [];
+    return [
+      StudentHomePromoPlacement(
+        payload: homePromo ?? HomePromoPayload.demoStuckWithAssignment,
+        slot: (homePromo?.effectiveHomeSlot) ?? 'after_assignments',
+        showDemoBadge: homePromoIsDemo || (homePromo == null && !hideHomePromo),
+        onTap: onHelpTap,
+        onDismiss: onHomePromoDismiss,
+      ),
+    ];
+  }
+
+  List<Widget> _promoSliversFor(
+    String slot, {
+    required Duration delay,
+  }) {
+    final cards = _resolvedPlacements()
+        .where((p) =>
+            p.slot == slot || (p.slot.isEmpty && slot == 'after_assignments'))
+        .toList();
+    if (cards.isEmpty) return const [];
+    return [
+      for (var i = 0; i < cards.length; i++) ...[
+        SliverToBoxAdapter(
+          child: _AnimatedEntry(
+            delay: delay + Duration(milliseconds: i * 20),
+            child: KeyedSubtree(
+              key: cards[i].anchorKey,
+              child: StudentHomePromoCard(
+                payload: cards[i].payload,
+                onTap: cards[i].onTap ?? onHelpTap,
+                onDismiss: cards[i].onDismiss ?? onHomePromoDismiss,
+                showDemoBadge: cards[i].showDemoBadge,
+                imageBytes: cards[i].imageBytes,
+                imageLoading: cards[i].imageLoading,
+                imageState: cards[i].imageState,
+                iconBytes: cards[i].iconBytes,
+              ),
+            ),
+          ),
+        ),
+        _sectionSpacer,
+      ],
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -73,23 +163,39 @@ class StudentHomeView extends StatelessWidget {
             onNotificationsTap: onNotificationsTap,
           ),
         ),
-        SliverToBoxAdapter(
-          child: _AnimatedEntry(
-            delay: const Duration(milliseconds: 20),
-            child: StudentHomeNewsFeed(
-              news: data.news,
-              onNewsTap: onNewsTap,
-              selectedNewsId: selectedNewsId,
-              adminHighlightColor: adminNewsHighlightColor,
+        _sectionSpacer,
+        // System block: news (immovable).
+        if (data.news.isNotEmpty) ...[
+          SliverToBoxAdapter(
+            child: _AnimatedEntry(
+              delay: const Duration(milliseconds: 20),
+              child: StudentHomeNewsFeed(
+                news: data.news,
+                onNewsTap: onNewsTap,
+                selectedNewsId: selectedNewsId,
+                adminHighlightColor: adminNewsHighlightColor,
+              ),
             ),
           ),
+          _sectionSpacer,
+        ],
+        ..._promoSliversFor(
+          'after_news',
+          delay: const Duration(milliseconds: 40),
         ),
+        // System block: day summary (immovable).
         SliverToBoxAdapter(
           child: _AnimatedEntry(
             delay: const Duration(milliseconds: 70),
             child: _TodaySummaryCard(data: data, onTap: onSummaryTap),
           ),
         ),
+        _sectionSpacer,
+        ..._promoSliversFor(
+          'after_day_summary',
+          delay: const Duration(milliseconds: 90),
+        ),
+        // System block: assignments (immovable).
         SliverToBoxAdapter(
           child: _AnimatedEntry(
             delay: const Duration(milliseconds: 120),
@@ -105,19 +211,19 @@ class StudentHomeView extends StatelessWidget {
             ),
           ),
         ),
-        if (!hideHomePromo)
-          SliverToBoxAdapter(
-            child: _AnimatedEntry(
-              delay: const Duration(milliseconds: 170),
-              child: StudentHomePromoCard(
-                payload: homePromo ?? HomePromoPayload.demoStuckWithAssignment,
-                onTap: onHelpTap,
-                onDismiss: onHomePromoDismiss,
-                showDemoBadge:
-                    homePromoIsDemo || (homePromo == null && !hideHomePromo),
-              ),
-            ),
-          ),
+        _sectionSpacer,
+        ..._promoSliversFor(
+          'after_assignments',
+          delay: const Duration(milliseconds: 170),
+        ),
+        ..._promoSliversFor(
+          'before_bottom_info',
+          delay: const Duration(milliseconds: 190),
+        ),
+        ..._promoSliversFor(
+          'end_of_page',
+          delay: const Duration(milliseconds: 210),
+        ),
         const SliverToBoxAdapter(child: SizedBox(height: 96)),
       ],
     );
@@ -169,7 +275,7 @@ class _HomeHeader extends StatelessWidget {
     ].join(' · ');
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
       child: Row(
         children: [
           Expanded(
@@ -410,7 +516,7 @@ class _TodaySummaryCard extends StatelessWidget {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 14),
+                      const SizedBox(height: 10),
                       Text(
                         title,
                         style: theme.textTheme.titleLarge?.copyWith(
@@ -419,18 +525,18 @@ class _TodaySummaryCard extends StatelessWidget {
                           height: 1.08,
                         ),
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 4),
                       Text(
                         subtitle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: mutedForeground,
-                          height: 1.35,
+                          height: 1.3,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 10),
                       // Day summary = pairs/schedule only. Group actions
                       // (topic / collection) belong under «Ближайшие дела».
                       if (data.lessons.isEmpty)
@@ -657,21 +763,26 @@ class _NoLessonsPreview extends StatelessWidget {
     final foreground = isDark ? Colors.white : const Color(0xFF1F2937);
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
+      constraints: const BoxConstraints(minHeight: 40),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: isDark ? 0.14 : 0.62),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
         children: [
-          Icon(Icons.weekend_rounded, color: foreground, size: 20),
-          const SizedBox(width: 10),
+          Icon(Icons.weekend_rounded, color: foreground, size: 18),
+          const SizedBox(width: 8),
           Expanded(
             child: Text(
               text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: foreground.withValues(alpha: 0.82),
                 fontWeight: FontWeight.w800,
+                fontSize: 13,
+                height: 1.15,
               ),
             ),
           ),
@@ -732,8 +843,9 @@ class _AssignmentsSection extends StatelessWidget {
     final subtitle = _upcomingSubtitle(capped);
 
     // Section title sits outside the tinted card (not trapped in an oval).
+    // Vertical gap to neighbors is owned by [kStudentHomeSectionGap].
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1011,45 +1123,6 @@ class _DoneCheckButton extends StatelessWidget {
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _Pill extends StatelessWidget {
-  const _Pill({required this.icon, required this.text, required this.color});
-
-  final IconData icon;
-  final String text;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 220),
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 13, color: color),
-          const SizedBox(width: 5),
-          Flexible(
-            child: Text(
-              text,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: color,
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }

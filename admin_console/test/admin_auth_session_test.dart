@@ -252,6 +252,7 @@ void main() {
   });
 
   testWidgets('news editor still works locally', (tester) async {
+    AdminBackendConfig.debugDemoModeOverride = true;
     tester.view.physicalSize = const Size(1440, 1000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);

@@ -179,6 +179,117 @@ void main() {
       expect(wire['cta_url'], 'https://example.com/help');
     });
 
+    test('v3 parses heading/info/warning/list blocks', () {
+      final raw = validV2Payload()
+        ..['blocks'] = [
+          {'type': 'heading', 'text': 'Section', 'level': 2},
+          {'type': 'info', 'text': 'Useful tip'},
+          {'type': 'warning', 'text': 'Be careful'},
+          {
+            'type': 'list',
+            'style': 'bullet',
+            'items': ['One', 'Two'],
+          },
+          {
+            'type': 'list',
+            'style': 'numbered',
+            'items': ['First', 'Second'],
+          },
+          {'type': 'text', 'text': 'Body'},
+        ];
+      final payload = ReferenceArticlePayload.tryParseV3(raw);
+      expect(payload?.blocks, hasLength(6));
+      expect(payload!.blocks[0], isA<ReferenceHeadingBlock>());
+      expect((payload.blocks[0] as ReferenceHeadingBlock).level, 2);
+      expect(payload.blocks[1], isA<ReferenceInfoBlock>());
+      expect(payload.blocks[2], isA<ReferenceWarningBlock>());
+      expect(payload.blocks[3], isA<ReferenceListBlock>());
+      expect((payload.blocks[3] as ReferenceListBlock).style, 'bullet');
+      expect((payload.blocks[4] as ReferenceListBlock).isNumbered, isTrue);
+      expect(
+        ReferenceArticlePayload.tryParseForSchema(3, raw)?.blocks,
+        hasLength(6),
+      );
+    });
+
+    test('v3 heading defaults level to 1', () {
+      final block = ReferenceBlock.tryParse({
+        'type': 'heading',
+        'text': 'Title',
+      });
+      expect(block, isA<ReferenceHeadingBlock>());
+      expect((block! as ReferenceHeadingBlock).level, 1);
+    });
+
+    test('v3 rejects invalid heading level and empty list', () {
+      expect(
+        ReferenceBlock.tryParse({
+          'type': 'heading',
+          'text': 'Title',
+          'level': 4,
+        }),
+        isNull,
+      );
+      expect(
+        ReferenceBlock.tryParse({
+          'type': 'list',
+          'style': 'bullet',
+          'items': <String>[],
+        }),
+        isNull,
+      );
+      expect(
+        ReferenceBlock.tryParse({
+          'type': 'list',
+          'style': 'checklist',
+          'items': ['A'],
+        }),
+        isNull,
+      );
+      expect(
+        ReferenceBlock.tryParse({'type': 'info'}),
+        isNull,
+      );
+    });
+
+    test('v3 toWireJson emits new block keys', () {
+      final payload = ReferenceArticlePayload(
+        iconKey: 'help',
+        shortText: 'Summary',
+        blocks: const [
+          ReferenceHeadingBlock(text: 'H', level: 3),
+          ReferenceInfoBlock(text: 'Info'),
+          ReferenceWarningBlock(text: 'Warn'),
+          ReferenceListBlock(style: 'numbered', items: ['A', 'B']),
+        ],
+      );
+      expect(payload.toWireJson(schemaVersion: 3)['blocks'], [
+        {'type': 'heading', 'text': 'H', 'level': 3},
+        {'type': 'info', 'text': 'Info'},
+        {'type': 'warning', 'text': 'Warn'},
+        {
+          'type': 'list',
+          'style': 'numbered',
+          'items': ['A', 'B'],
+        },
+      ]);
+    });
+
+    test('v3 still rejects unknown block type', () {
+      final raw = validV2Payload()
+        ..['blocks'] = [
+          {'type': 'html', 'text': '<b>x</b>'},
+        ];
+      expect(ReferenceArticlePayload.tryParseV3(raw), isNull);
+    });
+
+    test('v3 rejects client category field like v2', () {
+      expect(
+        ReferenceArticlePayload.tryParseV3(validV1Payload()),
+        isNull,
+      );
+    });
+
     test('parses flat top-level cta keys', () {
       final raw = validV2Payload()
         ..addAll({
@@ -214,14 +325,104 @@ void main() {
       expect(ManagedReferenceArticle.tryParse(raw), isNull);
     });
 
+    test('parses v3 article row with new blocks', () {
+      final article = ManagedReferenceArticle.tryParse(
+        sampleArticle(
+          schemaVersion: 3,
+          payload: validV2Payload()
+            ..['blocks'] = [
+              {'type': 'heading', 'text': 'How to', 'level': 1},
+              {'type': 'info', 'text': 'Tip'},
+              {
+                'type': 'list',
+                'style': 'bullet',
+                'items': ['Step'],
+              },
+            ],
+        ),
+      );
+      expect(article?.schemaVersion, 3);
+      expect(article?.payload.blocks, hasLength(3));
+    });
+
     test('rejects unsupported schema version', () {
-      final raw = sampleArticle(schemaVersion: 3);
+      final raw = sampleArticle(schemaVersion: 4);
       expect(ManagedReferenceArticle.tryParse(raw), isNull);
     });
   });
 
+  group('StudentReferenceBrowseView', () {
+    testWidgets('renders AppBar title and article cards', (tester) async {
+      final bundle = ReferenceBundle(
+        categories: [ReferenceCategory.tryParse(sampleCategory())!],
+        articles: [ManagedReferenceArticle.tryParse(sampleArticle())!],
+      );
+      ManagedReferenceArticle? tapped;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SizedBox(
+            width: 390,
+            height: 844,
+            child: StudentReferenceBrowseView(
+              bundle: bundle,
+              selectedArticleId: 'art-1',
+              onArticleTap: (article) => tapped = article,
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('Справочник'), findsOneWidget);
+      expect(find.text('Article title'), findsOneWidget);
+      expect(find.text('Доступы'), findsWidgets);
+      expect(find.byType(StudentReferenceArticleCard), findsOneWidget);
+
+      await tester.tap(find.byType(StudentReferenceArticleCard));
+      await tester.pump();
+      expect(tapped?.id, 'art-1');
+    });
+  });
+
+  group('StudentReferenceArticleDetail v3 blocks', () {
+    testWidgets('renders heading info warning and list', (tester) async {
+      final article = ManagedReferenceArticle.tryParse(
+        sampleArticle(
+          schemaVersion: 3,
+          payload: validV2Payload()
+            ..['blocks'] = [
+              {'type': 'heading', 'text': 'Heading block', 'level': 2},
+              {'type': 'info', 'text': 'Info callout'},
+              {'type': 'warning', 'text': 'Warning callout'},
+              {
+                'type': 'list',
+                'style': 'bullet',
+                'items': ['Bullet one'],
+              },
+            ],
+        ),
+      )!;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: StudentReferenceArticleDetail(article: article),
+          ),
+        ),
+      );
+
+      expect(find.text('Heading block'), findsOneWidget);
+      expect(find.text('Info callout'), findsOneWidget);
+      expect(find.text('Warning callout'), findsOneWidget);
+      expect(find.text('Bullet one'), findsOneWidget);
+      expect(find.byIcon(Icons.info_outline_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.warning_amber_rounded), findsOneWidget);
+    });
+  });
+
   group('StudentReferenceArticleDetail media callbacks', () {
-    testWidgets('invokes onOpenAsset for image and file blocks', (tester) async {
+    testWidgets('invokes onOpenAsset for image and file blocks',
+        (tester) async {
       final opened = <String>[];
       final article = ManagedReferenceArticle.tryParse(
         sampleArticle(

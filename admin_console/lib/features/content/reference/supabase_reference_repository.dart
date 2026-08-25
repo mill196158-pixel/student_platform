@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'reference_item.dart';
 import 'reference_repository.dart';
+import '../shared/visual_editor_operation_error.dart';
 
 /// Supabase Admin repository for reference articles/categories.
 ///
@@ -37,10 +38,9 @@ class SupabaseReferenceRepository implements ReferenceRepository {
   SupabaseReferenceRepository({
     SupabaseClient? client,
     ReferenceAdminRpcClient? rpcClient,
-  }) : _rpc = rpcClient ??
-            SupabaseReferenceAdminRpcClient(
-              client ?? Supabase.instance.client,
-            );
+  }) : _rpc =
+           rpcClient ??
+           SupabaseReferenceAdminRpcClient(client ?? Supabase.instance.client);
 
   final ReferenceAdminRpcClient _rpc;
 
@@ -53,32 +53,16 @@ class SupabaseReferenceRepository implements ReferenceRepository {
   }
 
   ReferenceRepositoryException _mapError(PostgrestException error) {
-    final code = error.code ?? '';
-    final message = error.message.toLowerCase();
-    if (code == '42501' || message.contains('forbidden')) {
-      return const ReferenceRepositoryException(
-        'Недостаточно прав для этого действия.',
-        isForbidden: true,
-      );
-    }
-    if (code == '28000' || message.contains('not_authenticated')) {
-      return const ReferenceRepositoryException('Требуется вход. Войдите снова.');
-    }
-    if (code == 'P0002' || message.contains('not_found')) {
-      return const ReferenceRepositoryException('Запись не найдена.');
-    }
-    if (message.contains('row_version') || message.contains('conflict')) {
-      return const ReferenceRepositoryException(
-        'Данные изменились. Обновите список.',
-      );
-    }
-    if (message.contains('could not find the function') || code == 'PGRST202') {
+    final mapped = mapVisualEditorOperationError(error);
+    if ((error.code == 'PGRST202') ||
+        (error.message.toLowerCase().contains('could not find the function'))) {
       return const ReferenceRepositoryException(
         'Reference RPC ещё не применены на remote (ожидается локальный apply).',
       );
     }
-    return const ReferenceRepositoryException(
-      'Не удалось выполнить операцию. Попробуйте ещё раз.',
+    return ReferenceRepositoryException(
+      mapped.message,
+      isForbidden: mapped.isForbidden,
     );
   }
 
@@ -127,7 +111,22 @@ class SupabaseReferenceRepository implements ReferenceRepository {
   }
 
   ReferenceArticleItem _parseArticleRequired(dynamic data) {
-    final item = ReferenceArticleItem.tryParse(_asMap(data));
+    try {
+      return ReferenceArticleItem.parseOrThrow(_asMap(data));
+    } on FormatException catch (error) {
+      throw ReferenceRepositoryException(error.message);
+    }
+  }
+
+  ReferenceArticleItem _parseWorkingDraftResponse(dynamic data) {
+    final map = _asMap(data);
+    try {
+      // Validate hard fields, then overlay working_draft when present.
+      ReferenceArticleItem.parseOrThrow(map);
+    } on FormatException catch (error) {
+      throw ReferenceRepositoryException(error.message);
+    }
+    final item = ReferenceArticleItem.tryParseWithWorkingDraftOverlay(map);
     if (item == null) {
       throw const ReferenceRepositoryException('Некорректный ответ сервера.');
     }
@@ -182,6 +181,22 @@ class SupabaseReferenceRepository implements ReferenceRepository {
   }
 
   @override
+  Future<void> safeDeleteCategory({
+    required String id,
+    required int expectedRowVersion,
+    required String mode,
+    String? reassignToId,
+  }) async {
+    await _call('admin_safe_delete_reference_category', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+      'p_mode': mode,
+      if (reassignToId != null && reassignToId.isNotEmpty)
+        'p_reassign_to': reassignToId,
+    });
+  }
+
+  @override
   Future<void> reorderCategories(
     List<String> orderedIds,
     List<int> expectedRowVersions,
@@ -206,7 +221,9 @@ class SupabaseReferenceRepository implements ReferenceRepository {
         'reference_category_id': categoryId,
         'template_key': 'reference_article_v1',
         'schema_version': 2,
-        'payload': payload.toWireJson(schemaVersion: 2),
+        'payload': payload.toWireJson(
+          schemaVersion: 2,
+        ), // create path default v2
         'sort_order': 0,
       },
     });
@@ -224,7 +241,9 @@ class SupabaseReferenceRepository implements ReferenceRepository {
         'title': item.title,
         'origin': _originWire(item.origin),
         'reference_category_id': item.categoryId,
-        'payload': item.payload.toWireJson(schemaVersion: 2),
+        'payload': item.payload.toWireJson(
+          schemaVersion: item.effectiveSchemaVersion,
+        ),
         'sort_order': item.sortOrder,
       },
     });
@@ -268,7 +287,9 @@ class SupabaseReferenceRepository implements ReferenceRepository {
     for (final article in listed) {
       if (article.id == id) return article;
     }
-    throw StateError('Reference audience save succeeded but article $id missing');
+    throw StateError(
+      'Reference audience save succeeded but article $id missing',
+    );
   }
 
   @override
@@ -278,7 +299,10 @@ class SupabaseReferenceRepository implements ReferenceRepository {
   }
 
   @override
-  Future<ReferenceArticleItem> publish(String id, int expectedRowVersion) async {
+  Future<ReferenceArticleItem> publish(
+    String id,
+    int expectedRowVersion,
+  ) async {
     final data = await _call('admin_publish_content', {
       'p_id': id,
       'p_expected_row_version': expectedRowVersion,
@@ -287,9 +311,76 @@ class SupabaseReferenceRepository implements ReferenceRepository {
   }
 
   @override
-  Future<ReferenceArticleItem> archive(String id, int expectedRowVersion) async {
+  Future<ReferenceArticleItem> unpublish(
+    String id,
+    int expectedRowVersion,
+  ) async {
+    final data = await _call('admin_unpublish_content', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return _parseArticleRequired(data);
+  }
+
+  @override
+  Future<ReferenceArticleItem> archive(
+    String id,
+    int expectedRowVersion,
+  ) async {
     final data = await _call('admin_archive_content', {
       'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return _parseArticleRequired(data);
+  }
+
+  @override
+  Future<ReferenceArticleItem> unarchive(
+    String id,
+    int expectedRowVersion,
+  ) async {
+    final data = await _call('admin_unarchive_content', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return _parseArticleRequired(data);
+  }
+
+  @override
+  Future<void> safeDelete(String id, int expectedRowVersion) async {
+    await _call('admin_safe_delete_content', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+  }
+
+  @override
+  Future<ReferenceArticleItem> promoteDemo(
+    String id,
+    int expectedRowVersion,
+  ) async {
+    final data = await _call('admin_promote_demo_content', {
+      'p_id': id,
+      'p_expected_row_version': expectedRowVersion,
+    });
+    return _parseArticleRequired(data);
+  }
+
+  @override
+  Future<List<ReferenceVersionInfo>> listVersions(String id) async {
+    final data = await _call('admin_list_content_versions', {'p_id': id});
+    return _asList(data).map(ReferenceVersionInfo.fromJson).toList();
+  }
+
+  @override
+  Future<ReferenceArticleItem> restoreVersion(
+    String id,
+    int versionNumber,
+    int expectedRowVersion,
+  ) async {
+    final data = await _call('admin_restore_content_version', {
+      'p_id': id,
+      'p_version_number': versionNumber,
       'p_expected_row_version': expectedRowVersion,
     });
     return _parseArticleRequired(data);
@@ -319,5 +410,44 @@ class SupabaseReferenceRepository implements ReferenceRepository {
       'p_action': action,
       'p_reason': reason,
     });
+  }
+
+  @override
+  Future<ReferenceArticleItem> beginEdit(String id) async {
+    final data = await _call('admin_begin_content_edit', {'p_id': id});
+    return _parseWorkingDraftResponse(data);
+  }
+
+  @override
+  Future<ReferenceArticleItem> saveWorkingDraft(
+    ReferenceArticleItem item, {
+    required int expectedDraftRowVersion,
+  }) async {
+    final data = await _call('admin_save_content_working_draft', {
+      'p_id': item.id,
+      'p_expected_draft_row_version': expectedDraftRowVersion,
+      'p_patch': item.toWorkingDraftPatch(),
+    });
+    return _parseWorkingDraftResponse(data);
+  }
+
+  @override
+  Future<ReferenceArticleItem> publishWorkingDraft(
+    String id, {
+    required int expectedDraftRowVersion,
+  }) async {
+    final data = await _call('admin_publish_content_working_draft', {
+      'p_id': id,
+      'p_expected_draft_row_version': expectedDraftRowVersion,
+    });
+    return _parseWorkingDraftResponse(data);
+  }
+
+  @override
+  Future<ReferenceArticleItem> discardWorkingDraft(String id) async {
+    final data = await _call('admin_discard_content_working_draft', {
+      'p_id': id,
+    });
+    return _parseWorkingDraftResponse(data);
   }
 }

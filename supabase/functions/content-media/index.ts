@@ -1,4 +1,4 @@
-// Stage 16.3 local content-media Edge (deploy owner-gated).
+// Stage 16.3 / 14.2.1 content-media Edge (deploy owner-gated).
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 type UserClient = SupabaseClient<any, "public", any>;
@@ -16,9 +16,34 @@ const UPLOAD_EXPIRES = 15 * 60;
 const DOWNLOAD_EXPIRES = 60 * 60;
 const CLEANUP_BATCH_MAX = 25;
 
-class AuthError extends Error {}
-class ForbiddenError extends Error {}
-class InputError extends Error {}
+class AuthError extends Error {
+  constructor(message = "Unauthorized") {
+    super(message);
+    this.name = "AuthError";
+  }
+}
+class ForbiddenError extends Error {
+  constructor(message = "forbidden") {
+    super(message);
+    this.name = "ForbiddenError";
+  }
+}
+class InputError extends Error {
+  constructor(message = "invalid_input") {
+    super(message);
+    this.name = "InputError";
+  }
+}
+class BusinessError extends Error {
+  readonly code: string;
+  readonly status: number;
+  constructor(code: string, status: number) {
+    super(code);
+    this.name = "BusinessError";
+    this.code = code;
+    this.status = status;
+  }
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -111,7 +136,7 @@ Deno.serve(async (req) => {
         },
       );
       if (intentError || !intent) {
-        throw new Error(intentError?.message ?? "Failed to create upload intent");
+        throw mapRpcError(intentError);
       }
       const intentId = asUuid(intent.intent_id);
       if (!intentId) throw new Error("Upload intent missing intent_id");
@@ -124,7 +149,7 @@ Deno.serve(async (req) => {
         { p_intent_id: intentId },
       );
       if (targetError || !target) {
-        throw new Error(targetError?.message ?? "Failed to resolve upload path");
+        throw mapRpcError(targetError, "Failed to resolve upload path");
       }
       const path = asTrimmedString(target.storage_path);
       const bucket = asTrimmedString(target.storage_bucket) || BUCKET;
@@ -156,7 +181,7 @@ Deno.serve(async (req) => {
           p_title: asTrimmedString(body.title),
         },
       );
-      if (error) throw new Error(error.message);
+      if (error) throw mapRpcError(error);
       return jsonResponse({ action: "finalizeUpload", asset: data });
     }
 
@@ -196,6 +221,9 @@ Deno.serve(async (req) => {
 
     throw new InputError("Unknown action");
   } catch (error) {
+    if (error instanceof BusinessError) {
+      return jsonResponse({ error: error.code }, error.status);
+    }
     const message = error instanceof Error ? error.message : "Unexpected error";
     const status = error instanceof AuthError
       ? 401
@@ -204,9 +232,77 @@ Deno.serve(async (req) => {
       : error instanceof InputError
       ? 400
       : 500;
-    return jsonResponse({ error: message }, status);
+    // Never leak raw DB diagnostics for unexpected 500s.
+    const safe = status === 500 ? "internal_error" : normalizeBusinessCode(message);
+    return jsonResponse({ error: safe }, status);
   }
 });
+
+function mapRpcError(
+  error: { message?: string; code?: string } | null | undefined,
+  fallback = "rpc_failed",
+): Error {
+  const raw = asTrimmedString(error?.message) || fallback;
+  const code = normalizeBusinessCode(raw);
+  const status = statusForBusinessCode(code);
+  if (status != null) return new BusinessError(code, status);
+  if (error?.code === "42501" || /forbidden|permission/i.test(raw)) {
+    return new ForbiddenError("forbidden");
+  }
+  return new Error(fallback);
+}
+
+function normalizeBusinessCode(message: string): string {
+  const lower = message.toLowerCase();
+  const known = [
+    "working_draft_required",
+    "draft_only",
+    "archived_immutable",
+    "row_version_conflict",
+    "intent_expired",
+    "intent_already_finalized",
+    "invalid_mime",
+    "mime_mismatch",
+    "invalid_byte_size",
+    "storage_mime_missing",
+    "storage_object_missing",
+    "invalid_storage_path",
+    "not_found",
+    "forbidden",
+  ];
+  for (const code of known) {
+    if (lower.includes(code)) return code;
+  }
+  // PostgREST often prefixes: "working_draft_required"
+  const first = message.split(/[\s:]+/)[0]?.trim().toLowerCase() ?? "";
+  if (known.includes(first)) return first;
+  return message.length > 80 ? "rpc_failed" : message;
+}
+
+function statusForBusinessCode(code: string): number | null {
+  switch (code) {
+    case "working_draft_required":
+    case "draft_only":
+    case "archived_immutable":
+    case "row_version_conflict":
+    case "intent_expired":
+    case "intent_already_finalized":
+      return 409;
+    case "invalid_mime":
+    case "mime_mismatch":
+    case "invalid_byte_size":
+    case "storage_mime_missing":
+    case "invalid_storage_path":
+      return 422;
+    case "forbidden":
+      return 403;
+    case "not_found":
+    case "storage_object_missing":
+      return 404;
+    default:
+      return null;
+  }
+}
 
 function assertTrustedCleanupCaller(req: Request): void {
   const cleanupSecret = Deno.env.get("CLEANUP_DISPATCH_SECRET")?.trim();

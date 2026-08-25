@@ -1,11 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -15,6 +13,8 @@ import 'package:student_ui/student_ui.dart';
 import '../../core/auth_session.dart';
 import '../../data/academic_context_service.dart';
 import '../../services/auth_service.dart';
+import '../content/content_deep_link_bus.dart';
+import '../content/content_nav_executor.dart';
 import 'content_media_service.dart';
 import 'info_subjects_cache.dart';
 import 'subject_attachment_open.dart';
@@ -35,6 +35,290 @@ enum _UsefulSection { subjects, help, jobs }
 
 BoxConstraints _fullWidthSheetConstraints(BuildContext context) {
   return BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width);
+}
+
+Future<void> _openManagedExternalUrl(BuildContext context, String url) async {
+  final uri = ContentNavResolver.tryParseSafeHttpsUri(url);
+  if (uri == null) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Ссылка недоступна')),
+    );
+    return;
+  }
+  final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+  if (!ok && context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Не удалось открыть ссылку')),
+    );
+  }
+}
+
+Future<void> _openManagedCta(
+  BuildContext context,
+  ReferenceArticleCta cta,
+) async {
+  final intent = cta.navIntent;
+  if (intent is ContentNavNone) return;
+  if (intent is ContentNavDisabled) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Действие недоступно')),
+    );
+    return;
+  }
+  if (intent is ContentNavExternalHttps) {
+    await _openManagedExternalUrl(context, intent.uri.toString());
+    return;
+  }
+  if (!context.mounted) return;
+  await const ContentNavExecutor().execute(
+    context,
+    intent,
+    onUnavailable: () {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Контент недоступен')),
+      );
+    },
+    onDisabled: () {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Действие недоступно')),
+      );
+    },
+  );
+}
+
+void _showReferenceArticleSheet(
+  BuildContext context, {
+  required ManagedReferenceArticle article,
+  required ReferenceLoadResult reference,
+  required ReferenceService referenceService,
+  required ContentMediaService mediaService,
+}) {
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    constraints: _fullWidthSheetConstraints(context),
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    builder: (sheetContext) => DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.72,
+      minChildSize: 0.4,
+      maxChildSize: 0.95,
+      builder: (sheetContext, scrollController) => SingleChildScrollView(
+        controller: scrollController,
+        child: StudentReferenceArticleDetail(
+          article: article,
+          showDemoBadge: reference.isDemoFallback || article.showDemoBadge,
+          onReportError: article.isManaged
+              ? () => _reportReferenceArticleError(
+                    sheetContext,
+                    article: article,
+                    referenceService: referenceService,
+                  )
+              : null,
+          onOpenAsset: article.isManaged
+              ? (assetId) => _openReferenceAsset(
+                    sheetContext,
+                    assetId: assetId,
+                    mediaService: mediaService,
+                  )
+              : null,
+          onOpenUrl: (url) => _openManagedExternalUrl(sheetContext, url),
+          onOpenCta: (cta) => _openManagedCta(sheetContext, cta),
+        ),
+      ),
+    ),
+  );
+}
+
+Future<void> _openReferenceAsset(
+  BuildContext context, {
+  required String assetId,
+  required ContentMediaService mediaService,
+}) async {
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    final download = await mediaService.resolveDownload(assetId);
+    if (!context.mounted) return;
+    if (download == null) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Файл недоступен')),
+      );
+      return;
+    }
+    final mime = (download.mimeType ?? 'application/octet-stream').trim();
+    final ext = mime.contains('png')
+        ? 'png'
+        : mime.contains('webp')
+            ? 'webp'
+            : mime.contains('pdf')
+                ? 'pdf'
+                : mime.contains('jpeg') || mime.contains('jpg')
+                    ? 'jpg'
+                    : 'bin';
+    final fileName =
+        'content_${assetId.replaceAll('-', '').substring(0, 8)}.$ext';
+    if (kIsWeb) {
+      await openSubjectAttachmentBytes(
+        bytes: Uint8List(0),
+        fileName: fileName,
+        mimeType: mime,
+        signedUrl: download.signedUrl,
+      );
+      return;
+    }
+    final bytes = await mediaService.fetchBytes(assetId);
+    if (!context.mounted) return;
+    if (bytes == null) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Файл недоступен')),
+      );
+      return;
+    }
+    await openSubjectAttachmentBytes(
+      bytes: bytes,
+      fileName: fileName,
+      mimeType: mime,
+      signedUrl: download.signedUrl,
+    );
+  } catch (error) {
+    if (!context.mounted) return;
+    messenger.showSnackBar(
+      SnackBar(content: Text('Не удалось открыть файл: $error')),
+    );
+  }
+}
+
+Future<void> _reportReferenceArticleError(
+  BuildContext context, {
+  required ManagedReferenceArticle article,
+  required ReferenceService referenceService,
+}) async {
+  final note = await showDialog<String>(
+    context: context,
+    builder: (dialogContext) {
+      final controller = TextEditingController();
+      return AlertDialog(
+        title: const Text('Сообщить об ошибке'),
+        content: TextField(
+          controller: controller,
+          maxLines: 4,
+          maxLength: 1000,
+          decoration: const InputDecoration(
+            hintText: 'Опишите, что не так в этой статье',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(dialogContext, controller.text.trim());
+            },
+            child: const Text('Отправить'),
+          ),
+        ],
+      );
+    },
+  );
+  if (note == null || note.isEmpty || !context.mounted) return;
+  try {
+    await referenceService.submitCorrection(
+      contentItemId: article.id,
+      note: note,
+    );
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Сообщение отправлено модераторам')),
+    );
+    Navigator.of(context).pop();
+  } catch (error) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Не удалось отправить: $error')),
+    );
+  }
+}
+
+void _showVacancyDetailSheet(
+  BuildContext context, {
+  required ManagedVacancyCard card,
+  required bool sectionDemoFallback,
+  required VacancyService vacancyService,
+  required VacancyMediaService vacancyMediaService,
+}) {
+  final isDemo = sectionDemoFallback || card.showDemoBadge;
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    constraints: _fullWidthSheetConstraints(context),
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    builder: (sheetContext) => DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.75,
+      minChildSize: 0.4,
+      maxChildSize: 0.95,
+      builder: (sheetContext, scrollController) => SingleChildScrollView(
+        controller: scrollController,
+        child: StudentVacancyDetailSheet(
+          card: card,
+          showDemoBadge: isDemo,
+          logoBytes: card.logoBytes == null
+              ? null
+              : Uint8List.fromList(card.logoBytes!),
+          coverBytes: card.coverBytes == null
+              ? null
+              : Uint8List.fromList(card.coverBytes!),
+          backgroundBytes: card.backgroundBytes == null
+              ? null
+              : Uint8List.fromList(card.backgroundBytes!),
+          onOpenExternalUrl: isDemo
+              ? null
+              : (url) async {
+                  final uri = ContentNavResolver.tryParseSafeHttpsUri(url);
+                  if (uri == null) return;
+                  if (await canLaunchUrl(uri)) {
+                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  }
+                },
+          onRevealContacts: isDemo || !card.hasContacts
+              ? null
+              : () => vacancyService.fetchContacts(card.id),
+          onOpenAsset: isDemo
+              ? null
+              : (assetId) async {
+                  final url = await vacancyMediaService.openAsset(assetId);
+                  if (url == null) return;
+                  final uri = ContentNavResolver.tryParseSafeHttpsUri(url) ??
+                      Uri.tryParse(url);
+                  if (uri == null) return;
+                  if (uri.scheme != 'https') return;
+                  if (await canLaunchUrl(uri)) {
+                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  }
+                },
+          onReport: isDemo
+              ? null
+              : (reason, note) => vacancyService.reportVacancy(
+                    vacancyId: card.id,
+                    reason: reason,
+                    note: note,
+                  ),
+        ),
+      ),
+    ),
+  );
 }
 
 class InfoScreen extends StatefulWidget {
@@ -87,7 +371,7 @@ class InfoScreen extends StatefulWidget {
   State<InfoScreen> createState() => _InfoScreenState();
 }
 
-class _InfoScreenState extends State<InfoScreen> {
+class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
   // In-memory (RAM) layer of the cache. Survives across screen re-creations
   // within one app session, so re-opening the tab is instant with no spinner.
   // The SharedPreferences layer keeps data across app restarts.
@@ -109,14 +393,13 @@ class _InfoScreenState extends State<InfoScreen> {
   ReferenceLoadResult _reference =
       const ReferenceLoadResult(isDemoFallback: true);
   int _referenceLoadGeneration = 0;
-  bool _referenceLoadInFlight = false;
+  Future<void>? _referenceLoadFuture;
   late final VacancyService _vacancyService;
   late final VacancySubmissionService _vacancySubmissionService;
   late final VacancyMediaService _vacancyMediaService;
-  VacancyLoadResult _vacancies =
-      const VacancyLoadResult(isDemoFallback: true);
+  VacancyLoadResult _vacancies = const VacancyLoadResult(isDemoFallback: true);
   int _vacancyLoadGeneration = 0;
-  bool _vacancyLoadInFlight = false;
+  Future<void>? _vacancyLoadFuture;
 
   UsefulSubjectsRepository get _subjectsRepository =>
       widget.subjectsRepository ?? UsefulSubjectsRepository();
@@ -129,6 +412,8 @@ class _InfoScreenState extends State<InfoScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    ContentDeepLinkBus.instance.pending.addListener(_onDeepLinkPending);
     _vacancyService = widget.vacancyService ??
         VacancyService(
           currentUserId: () =>
@@ -172,81 +457,246 @@ class _InfoScreenState extends State<InfoScreen> {
     }
     unawaited(_loadReference());
     unawaited(_loadVacancies());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_consumeDeepLink());
+    });
   }
 
-  Future<void> _loadVacancies() async {
-    if (_vacancyLoadInFlight) return;
-    final generation = ++_vacancyLoadGeneration;
-    _vacancyLoadInFlight = true;
-    try {
-      final cached = await _vacancyService.loadCached();
-      if (!mounted || generation != _vacancyLoadGeneration) return;
-      if (cached.cards.isNotEmpty) {
-        setState(() => _vacancies = cached);
-      }
-      try {
-        final next = await _vacancyService.load();
-        if (!mounted || generation != _vacancyLoadGeneration) return;
-        setState(() => _vacancies = next);
-      } catch (error) {
-        debugPrint('[info] vacancies load failed: $error');
-        if (!mounted || generation != _vacancyLoadGeneration) return;
-        if (_vacancies.cards.isNotEmpty) {
-          setState(
-            () => _vacancies = VacancyLoadResult(
-              cards: _vacancies.cards,
-              loadError: true,
-            ),
-          );
-        } else {
-          setState(
-            () => _vacancies = const VacancyLoadResult(loadError: true),
-          );
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    if (!mounted) return;
+    unawaited(AuthSession.ensureFreshSession(Supabase.instance.client));
+    unawaited(_loadReference());
+    unawaited(_loadVacancies());
+    unawaited(_reloadQuietly());
+  }
+
+  void _onDeepLinkPending() {
+    unawaited(_consumeDeepLink());
+  }
+
+  Future<void> _consumeDeepLink() async {
+    final intent = ContentDeepLinkBus.instance.take();
+    if (intent == null || !mounted) return;
+    await _openDeepLinkIntent(intent);
+  }
+
+  Future<void> _openDeepLinkIntent(ContentNavIntent intent) async {
+    if (!mounted) return;
+    switch (intent) {
+      case ContentNavReferenceArticle(:final targetId):
+        setState(() => _section = _UsefulSection.help);
+        await _loadReference();
+        if (!mounted) return;
+        ManagedReferenceArticle? article;
+        for (final item in _reference.bundle?.articles ?? const []) {
+          if (item.id == targetId) {
+            article = item;
+            break;
+          }
         }
-      }
-    } finally {
-      _vacancyLoadInFlight = false;
+        if (article == null) {
+          _showContentUnavailable();
+          return;
+        }
+        _showReferenceArticleSheet(
+          context,
+          article: article,
+          reference: _reference,
+          referenceService: _referenceService,
+          mediaService: ContentMediaService(
+            currentUserId: () =>
+                widget.debugUserId ??
+                Supabase.instance.client.auth.currentUser?.id,
+          ),
+        );
+      case ContentNavVacancy(:final targetId):
+        setState(() => _section = _UsefulSection.jobs);
+        await _loadVacancies();
+        if (!mounted) return;
+        ManagedVacancyCard? card;
+        for (final item in _vacancies.cards) {
+          if (item.id == targetId) {
+            card = item;
+            break;
+          }
+        }
+        if (card == null) {
+          _showContentUnavailable();
+          return;
+        }
+        _showVacancyDetailSheet(
+          context,
+          card: card,
+          sectionDemoFallback: _vacancies.isDemoFallback,
+          vacancyService: _vacancyService,
+          vacancyMediaService: _vacancyMediaService,
+        );
+      case ContentNavSubject(:final targetId):
+        setState(() => _section = _UsefulSection.subjects);
+        await _reloadQuietly();
+        if (!mounted) return;
+        final subjects = _latestState?.subjects ?? const <UsefulSubject>[];
+        UsefulSubject? match;
+        for (final item in subjects) {
+          if (item.id == targetId ||
+              item.subjectId == targetId ||
+              item.teamId == targetId) {
+            match = item;
+            break;
+          }
+        }
+        if (match == null) {
+          _showContentUnavailable();
+          return;
+        }
+        await _openSubjectAndRefresh(match);
+      default:
+        break;
     }
   }
 
-  Future<void> _loadReference() async {
-    if (_referenceLoadInFlight) return;
-    final generation = ++_referenceLoadGeneration;
-    _referenceLoadInFlight = true;
+  void _showContentUnavailable() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Контент недоступен')),
+    );
+  }
+
+  int _vacancyMediaGeneration = 0;
+
+  Future<void> _loadVacancies() {
+    final existing = _vacancyLoadFuture;
+    if (existing != null) return existing;
+    final future = _loadVacanciesBody();
+    _vacancyLoadFuture = future;
+    return future.whenComplete(() {
+      if (identical(_vacancyLoadFuture, future)) {
+        _vacancyLoadFuture = null;
+      }
+    });
+  }
+
+  Future<void> _loadVacanciesBody() async {
+    final generation = ++_vacancyLoadGeneration;
+    final cached = await _vacancyService.loadCached();
+    if (!mounted || generation != _vacancyLoadGeneration) return;
+    if (cached.cards.isNotEmpty) {
+      setState(() => _vacancies = cached);
+      unawaited(_hydrateVacancyMedia(cached));
+    }
     try {
-      final cached = await _referenceService.loadCached();
+      final next = await _vacancyService.load();
+      if (!mounted || generation != _vacancyLoadGeneration) return;
+      setState(() => _vacancies = next);
+      unawaited(_hydrateVacancyMedia(next));
+    } catch (error) {
+      debugPrint('[info] vacancies load failed: $error');
+      if (!mounted || generation != _vacancyLoadGeneration) return;
+      if (_vacancies.cards.isNotEmpty) {
+        setState(
+          () => _vacancies = VacancyLoadResult(
+            cards: _vacancies.cards,
+            loadError: true,
+          ),
+        );
+      } else {
+        setState(
+          () => _vacancies = const VacancyLoadResult(loadError: true),
+        );
+      }
+    }
+  }
+
+  Future<void> _hydrateVacancyMedia(VacancyLoadResult result) async {
+    final generation = ++_vacancyMediaGeneration;
+    if (result.cards.isEmpty) return;
+    final hydrated = <ManagedVacancyCard>[];
+    for (final card in result.cards) {
+      if (!mounted || generation != _vacancyMediaGeneration) return;
+      final version = card.publishedAt?.toUtc().toIso8601String() ?? card.id;
+      Future<List<int>?> bytesFor(String role) async {
+        final asset = card.assetForRole(role);
+        if (asset == null) return null;
+        final bytes = await _vacancyMediaService.fetchBytes(
+          asset.id,
+          contentVersion: '$version|$role',
+        );
+        return bytes;
+      }
+
+      final logo = await bytesFor('logo');
+      final cover = await bytesFor('cover');
+      final background = await bytesFor('background');
+      hydrated.add(
+        card.copyWith(
+          logoBytes: logo,
+          coverBytes: cover,
+          backgroundBytes: background,
+        ),
+      );
+    }
+    if (!mounted || generation != _vacancyMediaGeneration) return;
+    final currentIds = _vacancies.cards.map((c) => c.id).join('|');
+    final sourceIds = result.cards.map((c) => c.id).join('|');
+    if (currentIds != sourceIds && _vacancies.cards.isNotEmpty) return;
+    setState(() {
+      _vacancies = VacancyLoadResult(
+        cards: hydrated,
+        isDemoFallback: result.isDemoFallback,
+        intentionallyEmpty: result.intentionallyEmpty,
+        loadError: result.loadError,
+        rpcUnavailable: result.rpcUnavailable,
+      );
+    });
+  }
+
+  Future<void> _loadReference() {
+    final existing = _referenceLoadFuture;
+    if (existing != null) return existing;
+    final future = _loadReferenceBody();
+    _referenceLoadFuture = future;
+    return future.whenComplete(() {
+      if (identical(_referenceLoadFuture, future)) {
+        _referenceLoadFuture = null;
+      }
+    });
+  }
+
+  Future<void> _loadReferenceBody() async {
+    final generation = ++_referenceLoadGeneration;
+    final cached = await _referenceService.loadCached();
+    if (!mounted || generation != _referenceLoadGeneration) return;
+    if (cached.bundle != null && cached.bundle!.articles.isNotEmpty) {
+      setState(() => _reference = cached);
+    }
+    try {
+      final next = await _referenceService.load();
       if (!mounted || generation != _referenceLoadGeneration) return;
-      if (cached.bundle != null && cached.bundle!.articles.isNotEmpty) {
-        setState(() => _reference = cached);
+      setState(() => _reference = next);
+    } catch (error) {
+      debugPrint('[info] reference load failed: $error');
+      if (!mounted || generation != _referenceLoadGeneration) return;
+      if (_reference.bundle != null && _reference.bundle!.articles.isNotEmpty) {
+        setState(
+          () => _reference = ReferenceLoadResult(
+            bundle: _reference.bundle,
+            loadError: true,
+          ),
+        );
+      } else {
+        setState(
+          () => _reference = const ReferenceLoadResult(loadError: true),
+        );
       }
-      try {
-        final next = await _referenceService.load();
-        if (!mounted || generation != _referenceLoadGeneration) return;
-        setState(() => _reference = next);
-      } catch (error) {
-        debugPrint('[info] reference load failed: $error');
-        if (!mounted || generation != _referenceLoadGeneration) return;
-        if (_reference.bundle != null &&
-            _reference.bundle!.articles.isNotEmpty) {
-          setState(
-            () => _reference = ReferenceLoadResult(
-              bundle: _reference.bundle,
-              loadError: true,
-            ),
-          );
-        } else {
-          setState(
-            () => _reference = const ReferenceLoadResult(loadError: true),
-          );
-        }
-      }
-    } finally {
-      _referenceLoadInFlight = false;
     }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    ContentDeepLinkBus.instance.pending.removeListener(_onDeepLinkPending);
     InfoSubjectsCache.revision.removeListener(_onSubjectsCacheInvalidated);
     InfoSubjectsCache.detachMemoryClear(clearMemoryCache);
     super.dispose();
@@ -2264,11 +2714,12 @@ class _HelpSummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(18),
         gradient: LinearGradient(
           colors: [
             primary.withValues(alpha: 0.88),
@@ -2279,44 +2730,55 @@ class _HelpSummaryCard extends StatelessWidget {
         ),
         boxShadow: [
           BoxShadow(
-            color: primary.withValues(alpha: 0.20),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
+            color: primary.withValues(alpha: 0.16),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
       child: Row(
         children: [
           Container(
-            width: 42,
-            height: 42,
+            width: 40,
+            height: 40,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: 0.16),
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(Icons.help_outline_rounded, color: Colors.white),
+            child: const Icon(
+              Icons.help_outline_rounded,
+              color: Colors.white,
+              size: 22,
+            ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   'Справочная информация',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w900,
-                      ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                    height: 1.15,
+                  ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 2),
                 Text(
                   showLegacyDemoBadge
-                      ? 'Пример — managed RPC ещё не применён'
+                      ? 'Пример справочных материалов'
                       : 'Доступы, документы, программы, карта и частые вопросы',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Colors.white.withValues(alpha: 0.88),
-                      ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: Colors.white.withValues(alpha: 0.88),
+                    height: 1.25,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ],
             ),
@@ -2425,7 +2887,7 @@ class _HelpSection extends StatelessWidget {
       return Column(
         children: [
           const _HelpSummaryCard(),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           const _EmptyState(
             text: 'Справочник пока пуст',
             compact: true,
@@ -2438,7 +2900,7 @@ class _HelpSection extends StatelessWidget {
       return Column(
         children: [
           const _HelpSummaryCard(),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           _EmptyState(
             text: 'Не удалось обновить справочник',
             compact: true,
@@ -2462,7 +2924,7 @@ class _HelpSection extends StatelessWidget {
     return Column(
       children: [
         _HelpSummaryCard(showLegacyDemoBadge: showRpcBadge),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         if (articles.isEmpty)
           const _EmptyState(
             text: 'По запросу ничего не найдено',
@@ -2476,183 +2938,20 @@ class _HelpSection extends StatelessWidget {
                 for (final article in entry.value)
                   StudentReferenceArticleCard(
                     article: article,
-                    showDemoBadge: reference.isDemoFallback ||
-                        article.showDemoBadge,
-                    onTap: () => _openArticle(context, article),
+                    showDemoBadge:
+                        reference.isDemoFallback || article.showDemoBadge,
+                    onTap: () => _showReferenceArticleSheet(
+                      context,
+                      article: article,
+                      reference: reference,
+                      referenceService: referenceService,
+                      mediaService: _mediaService,
+                    ),
                   ),
               ],
             ),
       ],
     );
-  }
-
-  void _openArticle(BuildContext context, ManagedReferenceArticle article) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      constraints: _fullWidthSheetConstraints(context),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.72,
-        minChildSize: 0.4,
-        maxChildSize: 0.95,
-        builder: (context, scrollController) => SingleChildScrollView(
-          controller: scrollController,
-          child: StudentReferenceArticleDetail(
-            article: article,
-            showDemoBadge:
-                reference.isDemoFallback || article.showDemoBadge,
-            onReportError: article.isManaged
-                ? () => _reportError(context, article)
-                : null,
-            onOpenAsset: article.isManaged
-                ? (assetId) => _openAsset(context, assetId)
-                : null,
-            onOpenUrl: (url) => _openExternalUrl(context, url),
-            onOpenCta: (cta) => _openCta(context, cta),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _openAsset(BuildContext context, String assetId) async {
-    final messenger = ScaffoldMessenger.of(context);
-    try {
-      final download = await _mediaService.resolveDownload(assetId);
-      if (!context.mounted) return;
-      if (download == null) {
-        messenger.showSnackBar(
-          const SnackBar(content: Text('Файл недоступен')),
-        );
-        return;
-      }
-      final mime = (download.mimeType ?? 'application/octet-stream').trim();
-      final ext = mime.contains('png')
-          ? 'png'
-          : mime.contains('webp')
-              ? 'webp'
-              : mime.contains('pdf')
-                  ? 'pdf'
-                  : mime.contains('jpeg') || mime.contains('jpg')
-                      ? 'jpg'
-                      : 'bin';
-      final fileName =
-          'content_${assetId.replaceAll('-', '').substring(0, 8)}.$ext';
-      if (kIsWeb) {
-        await openSubjectAttachmentBytes(
-          bytes: Uint8List(0),
-          fileName: fileName,
-          mimeType: mime,
-          signedUrl: download.signedUrl,
-        );
-        return;
-      }
-      final bytes = await _mediaService.fetchBytes(assetId);
-      if (!context.mounted) return;
-      if (bytes == null) {
-        messenger.showSnackBar(
-          const SnackBar(content: Text('Файл недоступен')),
-        );
-        return;
-      }
-      await openSubjectAttachmentBytes(
-        bytes: bytes,
-        fileName: fileName,
-        mimeType: mime,
-        signedUrl: download.signedUrl,
-      );
-    } catch (error) {
-      if (!context.mounted) return;
-      messenger.showSnackBar(
-        SnackBar(content: Text('Не удалось открыть файл: $error')),
-      );
-    }
-  }
-
-  Future<void> _openExternalUrl(BuildContext context, String url) async {
-    final uri = Uri.tryParse(url.trim());
-    if (uri == null || !(uri.isScheme('https') || uri.isScheme('http'))) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Ссылка недоступна')),
-      );
-      return;
-    }
-    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!ok && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Не удалось открыть ссылку')),
-      );
-    }
-  }
-
-  Future<void> _openCta(BuildContext context, ReferenceArticleCta cta) async {
-    final route = (cta.route ?? '').trim();
-    if (route.startsWith('/')) {
-      context.push(route);
-      return;
-    }
-    final url = (cta.url ?? '').trim();
-    if (url.isNotEmpty) {
-      await _openExternalUrl(context, url);
-    }
-  }
-
-  Future<void> _reportError(
-    BuildContext context,
-    ManagedReferenceArticle article,
-  ) async {
-    final note = await showDialog<String>(
-      context: context,
-      builder: (context) {
-        final controller = TextEditingController();
-        return AlertDialog(
-          title: const Text('Сообщить об ошибке'),
-          content: TextField(
-            controller: controller,
-            maxLines: 4,
-            maxLength: 1000,
-            decoration: const InputDecoration(
-              hintText: 'Опишите, что не так в этой статье',
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Отмена'),
-            ),
-            FilledButton(
-              onPressed: () {
-                Navigator.pop(context, controller.text.trim());
-              },
-              child: const Text('Отправить'),
-            ),
-          ],
-        );
-      },
-    );
-    if (note == null || note.isEmpty || !context.mounted) return;
-    try {
-      await referenceService.submitCorrection(
-        contentItemId: article.id,
-        note: note,
-      );
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Сообщение отправлено модераторам')),
-      );
-      Navigator.of(context).pop();
-    } catch (error) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось отправить: $error')),
-      );
-    }
   }
 }
 
@@ -2680,9 +2979,7 @@ class _JobsSection extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _JobsHeroCard(submissionService: submissionService),
-          const SizedBox(height: 12),
-          const _JobBoardStats(),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           const _EmptyState(
             text: 'Вакансии пока пусты',
             compact: true,
@@ -2696,9 +2993,7 @@ class _JobsSection extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _JobsHeroCard(submissionService: submissionService),
-          const SizedBox(height: 12),
-          const _JobBoardStats(),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           _EmptyState(
             text: 'Не удалось обновить вакансии',
             compact: true,
@@ -2713,7 +3008,6 @@ class _JobsSection extends StatelessWidget {
         .where((card) => card.matchesQuery(query))
         .toList();
     final showRpcBadge = vacancies.rpcUnavailable && vacancies.isDemoFallback;
-    final activeCount = vacancies.displayCards.length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2722,9 +3016,7 @@ class _JobsSection extends StatelessWidget {
           showLegacyDemoBadge: showRpcBadge,
           submissionService: submissionService,
         ),
-        const SizedBox(height: 12),
-        _JobBoardStats(activeCount: activeCount),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         if (cards.isEmpty)
           const _EmptyState(
             text: 'По запросу ничего не найдено',
@@ -2752,13 +3044,21 @@ class _JobsHeroCard extends StatelessWidget {
     required this.submissionService,
   });
 
+  static const _minTouch = 40.0;
+
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
+    final actionStyle = theme.textTheme.labelLarge?.copyWith(
+      fontWeight: FontWeight.w800,
+      fontSize: 12,
+      height: 1.1,
+    );
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(26),
+        borderRadius: BorderRadius.circular(16),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -2769,9 +3069,9 @@ class _JobsHeroCard extends StatelessWidget {
         ),
         boxShadow: [
           BoxShadow(
-            color: primary.withValues(alpha: 0.22),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
+            color: primary.withValues(alpha: 0.16),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
           ),
         ],
       ),
@@ -2779,69 +3079,101 @@ class _JobsHeroCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 44,
-                height: 44,
+                width: 32,
+                height: 32,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: const Icon(
                   Icons.work_outline_rounded,
                   color: Colors.white,
+                  size: 18,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
               Expanded(
-                child: Text(
-                  'Доска вакансий',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Доска вакансий',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall?.copyWith(
                         color: Colors.white,
                         fontWeight: FontWeight.w900,
+                        height: 1.15,
                       ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      showLegacyDemoBadge
+                          ? 'Пример вакансий для просмотра'
+                          : 'Подработки, стажировки и проектные задачи.',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: Colors.white.withValues(alpha: 0.88),
+                        height: 1.25,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          Text(
-            showLegacyDemoBadge
-                ? 'Пример — managed RPC ещё не применён'
-                : 'Здесь студенты смогут искать подработки, стажировки и проектные задачи. Публикацию и правила модерации подключим отдельным шагом.',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Colors.white.withValues(alpha: 0.88),
-                  height: 1.35,
-                ),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: () => _openProposeVacancy(context),
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('Предложить вакансию'),
-              style: FilledButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: primary,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-            ),
-          ),
           const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: () => _openMyVacancySubmissions(context),
-              icon: const Icon(Icons.inbox_outlined),
-              label: const Text('Мои заявки'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white,
-                side: const BorderSide(color: Colors.white70),
-                padding: const EdgeInsets.symmetric(vertical: 12),
+          Row(
+            children: [
+              Expanded(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: _minTouch),
+                  child: Tooltip(
+                    message: 'Предложить вакансию',
+                    child: FilledButton.icon(
+                      onPressed: () => _openProposeVacancy(context),
+                      icon: const Icon(Icons.add_rounded, size: 16),
+                      label: const Text('Предложить'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: primary,
+                        minimumSize: const Size(0, _minTouch),
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        visualDensity: VisualDensity.compact,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        textStyle: actionStyle,
+                      ),
+                    ),
+                  ),
+                ),
               ),
-            ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: _minTouch),
+                  child: OutlinedButton.icon(
+                    onPressed: () => _openMyVacancySubmissions(context),
+                    icon: const Icon(Icons.inbox_outlined, size: 16),
+                    label: const Text('Мои заявки'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Colors.white70),
+                      minimumSize: const Size(0, _minTouch),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      visualDensity: VisualDensity.compact,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      textStyle: actionStyle,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -2869,101 +3201,6 @@ class _JobsHeroCard extends StatelessWidget {
   }
 }
 
-class _JobBoardStats extends StatelessWidget {
-  final int? activeCount;
-
-  const _JobBoardStats({this.activeCount});
-
-  @override
-  Widget build(BuildContext context) {
-    final activeLabel = activeCount?.toString() ?? '3';
-    return Row(
-      children: [
-        Expanded(
-          child: _JobStatPill(
-            icon: Icons.flash_on_rounded,
-            title: activeLabel,
-            subtitle: 'активные',
-          ),
-        ),
-        const SizedBox(width: 10),
-        const Expanded(
-          child: _JobStatPill(
-            icon: Icons.verified_user_outlined,
-            title: 'скоро',
-            subtitle: 'модерация',
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _JobStatPill extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-
-  const _JobStatPill({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 34,
-            height: 34,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: primary.withValues(alpha: 0.10),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, color: primary, size: 19),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: Colors.black,
-                        fontWeight: FontWeight.w900,
-                      ),
-                ),
-                Text(
-                  subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: Colors.black54,
-                        fontWeight: FontWeight.w700,
-                      ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _JobsGroupSection extends StatelessWidget {
   final String title;
   final List<ManagedVacancyCard> cards;
@@ -2982,17 +3219,17 @@ class _JobsGroupSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 2),
+      padding: const EdgeInsets.fromLTRB(10, 10, 10, 2),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
+            padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
             child: Row(
               children: [
                 const Icon(
@@ -3004,10 +3241,10 @@ class _JobsGroupSection extends StatelessWidget {
                 Expanded(
                   child: Text(
                     title,
-                    style: const TextStyle(
-                      color: Colors.black87,
-                      fontWeight: FontWeight.w900,
-                    ),
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          color: Colors.black87,
+                          fontWeight: FontWeight.w900,
+                        ),
                   ),
                 ),
                 Text(
@@ -3022,74 +3259,31 @@ class _JobsGroupSection extends StatelessWidget {
           ),
           for (final card in cards)
             Padding(
-              padding: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.only(bottom: 10),
               child: StudentVacancyCard(
                 payload: card.payload,
                 showDemoBadge: showDemoBadge || card.showDemoBadge,
                 expiresLabel: vacancyExpiresLabel(card.expiresAt),
                 hasContacts: card.hasContacts,
-                onTap: () => _openVacancy(context, card, showDemoBadge),
+                logoBytes: card.logoBytes == null
+                    ? null
+                    : Uint8List.fromList(card.logoBytes!),
+                coverBytes: card.coverBytes == null
+                    ? null
+                    : Uint8List.fromList(card.coverBytes!),
+                backgroundBytes: card.backgroundBytes == null
+                    ? null
+                    : Uint8List.fromList(card.backgroundBytes!),
+                onTap: () => _showVacancyDetailSheet(
+                  context,
+                  card: card,
+                  sectionDemoFallback: showDemoBadge,
+                  vacancyService: vacancyService,
+                  vacancyMediaService: vacancyMediaService,
+                ),
               ),
             ),
         ],
-      ),
-    );
-  }
-
-  void _openVacancy(
-    BuildContext context,
-    ManagedVacancyCard card,
-    bool sectionDemoFallback,
-  ) {
-    final isDemo = sectionDemoFallback || card.showDemoBadge;
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      constraints: _fullWidthSheetConstraints(context),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.75,
-        minChildSize: 0.4,
-        maxChildSize: 0.95,
-        builder: (context, scrollController) => SingleChildScrollView(
-          controller: scrollController,
-          child: StudentVacancyDetailSheet(
-            card: card,
-            showDemoBadge: isDemo,
-            onOpenExternalUrl: isDemo
-                ? null
-                : (url) async {
-                    final uri = Uri.parse(url);
-                    if (await canLaunchUrl(uri)) {
-                      await launchUrl(uri, mode: LaunchMode.externalApplication);
-                    }
-                  },
-            onRevealContacts: isDemo || !card.hasContacts
-                ? null
-                : () => vacancyService.fetchContacts(card.id),
-            onOpenAsset: isDemo
-                ? null
-                : (assetId) async {
-                    final url = await vacancyMediaService.openAsset(assetId);
-                    if (url == null) return;
-                    final uri = Uri.parse(url);
-                    if (await canLaunchUrl(uri)) {
-                      await launchUrl(uri, mode: LaunchMode.externalApplication);
-                    }
-                  },
-            onReport: isDemo
-                ? null
-                : (reason, note) => vacancyService.reportVacancy(
-                      vacancyId: card.id,
-                      reason: reason,
-                      note: note,
-                    ),
-          ),
-        ),
       ),
     );
   }
@@ -3107,24 +3301,24 @@ class _HelpGroupSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 2),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.fromLTRB(10, 10, 10, 2),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
+            padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
             child: Text(
               title,
-              style: const TextStyle(
-                color: Colors.black87,
-                fontWeight: FontWeight.w900,
-              ),
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: Colors.black87,
+                    fontWeight: FontWeight.w900,
+                  ),
             ),
           ),
           ...cards,
@@ -3408,26 +3602,34 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: EdgeInsets.all(compact ? 16 : 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              text,
-              style: const TextStyle(fontSize: 14, color: Colors.grey),
-              textAlign: TextAlign.center,
+    return Padding(
+      padding: EdgeInsets.fromLTRB(8, compact ? 8 : 16, 8, compact ? 8 : 16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            text,
+            style: TextStyle(
+              fontSize: compact ? 13 : 14,
+              color: Colors.black54,
+              fontWeight: FontWeight.w600,
             ),
-            if (actionLabel != null && onAction != null) ...[
-              const SizedBox(height: 16),
-              FilledButton(
+            textAlign: TextAlign.center,
+          ),
+          if (actionLabel != null && onAction != null) ...[
+            const SizedBox(height: 10),
+            ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 44),
+              child: FilledButton(
                 onPressed: onAction,
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(0, 44),
+                ),
                 child: Text(actionLabel!),
               ),
-            ],
+            ),
           ],
-        ),
+        ],
       ),
     );
   }
