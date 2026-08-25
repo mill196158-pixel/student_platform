@@ -212,69 +212,72 @@ class _NavigationPanel extends StatelessWidget {
     String? previousSection;
     return ColoredBox(
       color: const Color(0xFF18172B),
-      child: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(22, 22, 22, 26),
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    backgroundColor: Color(0xFF7C6EF2),
-                    child: Icon(
-                      Icons.admin_panel_settings,
-                      color: Colors.white,
-                    ),
-                  ),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      'Student Platform\nAdmin',
-                      style: TextStyle(
+      child: Material(
+        type: MaterialType.transparency,
+        child: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(22, 22, 22, 26),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      backgroundColor: Color(0xFF7C6EF2),
+                      child: Icon(
+                        Icons.admin_panel_settings,
                         color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                        height: 1.25,
                       ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                children: [
-                  for (final destination in destinations) ...[
-                    if (destination.section != null &&
-                        destination.section != previousSection)
-                      _SectionLabel(label: destination.section!),
-                    _NavigationTile(
-                      destination: destination,
-                      isSelected: destination.path == currentPath,
-                      onTap: destination.isEnabled && destination.path != null
-                          ? () => onSelected(destination.path!)
-                          : null,
-                    ),
-                    if (destination.section != null)
-                      Builder(
-                        builder: (_) {
-                          previousSection = destination.section;
-                          return const SizedBox.shrink();
-                        },
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Student Platform\nAdmin',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          height: 1.25,
+                        ),
                       ),
+                    ),
                   ],
-                ],
+                ),
               ),
-            ),
-            const Padding(
-              padding: EdgeInsets.all(18),
-              child: Text(
-                'Права проверяются на сервере',
-                style: TextStyle(color: Colors.white54, fontSize: 12),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  children: [
+                    for (final destination in destinations) ...[
+                      if (destination.section != null &&
+                          destination.section != previousSection)
+                        _SectionLabel(label: destination.section!),
+                      _NavigationTile(
+                        destination: destination,
+                        isSelected: destination.path == currentPath,
+                        onTap: destination.isEnabled && destination.path != null
+                            ? () => onSelected(destination.path!)
+                            : null,
+                      ),
+                      if (destination.section != null)
+                        Builder(
+                          builder: (_) {
+                            previousSection = destination.section;
+                            return const SizedBox.shrink();
+                          },
+                        ),
+                    ],
+                  ],
+                ),
               ),
-            ),
-          ],
+              const Padding(
+                padding: EdgeInsets.all(18),
+                child: Text(
+                  'Права проверяются на сервере',
+                  style: TextStyle(color: Colors.white54, fontSize: 12),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
