@@ -1106,6 +1106,8 @@ Codex **APPROVE** 19 completion; remote apply и security review выполне�
 Status: **IN PROGRESS** — identity, document extraction and academic-process
 calendar foundation/Admin dry-run have Codex **APPROVE**; both migrations are
 remote-applied and passed rollback-only PostgreSQL runtime verification.
+Plan v2 persistence is implemented locally and awaits final Codex approval plus
+an owner-authorized PostgreSQL migration/role-play run.
 
 - [x] First-class `educational_programs` and versioned `curriculum_plans`
   separate direction/profile/study form/admission cohort.
@@ -1114,8 +1116,19 @@ remote-applied and passed rollback-only PostgreSQL runtime verification.
   imports.
 - [x] Plan-aware dry-run v1 is server-validated and apply-disabled.
 - [x] Document intake: XLSX plus text-layer/scanned PDF diagnosis.
+- [x] Coordinate-aware PDF parser v2 auto-fills aggregate credits/hours,
+  semester occurrences and typed multiple assessment forms without duplicating
+  one source subject.
+- [x] Section headings and unresolved assessment markers fail closed; review
+  cannot silently clear source ambiguities.
 - [x] Editable extraction draft with source page/region, warnings, aggregate
   disposition and confirmation invalidation after edits.
+- [ ] Durable plan v2 preview bound to the exact plan version, expiry and
+  normalized payload hash.
+- [ ] Explicit idempotent apply of subject occurrences, semester workload and
+  multiple control forms without multiplying aggregate hours/credits.
+- [ ] Editable nested semester/workload/control review with stale-preview
+  invalidation.
 - [x] Image intake fails closed to manual review (Web OCR remains unavailable).
 - [x] Academic-process calendar: immutable versions and study/session/practice/
   holidays/GIA periods linked to year plus global/program/plan/group audience.

@@ -1,5 +1,5 @@
-const curriculumDocumentContractVersion = 'curriculum-document-v1';
-const curriculumDocumentParserVersion = 'local-layout-v1';
+const curriculumDocumentContractVersion = 'curriculum-document-v2';
+const curriculumDocumentParserVersion = 'local-layout-v2';
 const academicDocumentMaxBytes = 20 * 1024 * 1024;
 const academicDocumentMaxPages = 500;
 
@@ -31,6 +31,21 @@ enum CurriculumRowDisposition {
 
   const CurriculumRowDisposition(this.label);
 
+  final String label;
+}
+
+enum CurriculumAssessmentType {
+  exam('exam', 'Экзамен'),
+  credit('credit', 'Зачёт'),
+  gradedCredit('graded_credit', 'Зачёт с оценкой'),
+  courseProject('course_project', 'Курсовой проект'),
+  courseWork('course_work', 'Курсовая работа'),
+  controlWork('control_work', 'Контрольная работа'),
+  unknown('unknown', 'Неизвестная форма');
+
+  const CurriculumAssessmentType(this.wire, this.label);
+
+  final String wire;
   final String label;
 }
 
@@ -131,6 +146,84 @@ class CurriculumDraftMetadata {
   }
 }
 
+class CurriculumDraftAssessment {
+  const CurriculumDraftAssessment({
+    required this.type,
+    required this.semesterNumber,
+    required this.rawValue,
+    required this.sourcePage,
+    required this.sourceRegion,
+    this.reviewerConfirmed = false,
+    this.warnings = const [],
+  });
+
+  final CurriculumAssessmentType type;
+  final int? semesterNumber;
+  final String rawValue;
+  final int sourcePage;
+  final AcademicSourceRegion? sourceRegion;
+  final bool reviewerConfirmed;
+  final List<String> warnings;
+
+  CurriculumDraftAssessment copyWith({
+    CurriculumAssessmentType? type,
+    int? semesterNumber,
+    bool clearSemesterNumber = false,
+    bool? reviewerConfirmed,
+    List<String>? warnings,
+  }) {
+    return CurriculumDraftAssessment(
+      type: type ?? this.type,
+      semesterNumber: clearSemesterNumber
+          ? null
+          : (semesterNumber ?? this.semesterNumber),
+      rawValue: rawValue,
+      sourcePage: sourcePage,
+      sourceRegion: sourceRegion,
+      reviewerConfirmed: reviewerConfirmed ?? this.reviewerConfirmed,
+      warnings: warnings ?? this.warnings,
+    );
+  }
+}
+
+class CurriculumDraftOccurrence {
+  const CurriculumDraftOccurrence({
+    required this.semesterNumber,
+    required this.sourcePage,
+    required this.sourceRegion,
+    this.workload = const {},
+    this.assessments = const [],
+    this.reviewerConfirmed = false,
+    this.warnings = const [],
+  });
+
+  final int semesterNumber;
+  final int sourcePage;
+  final AcademicSourceRegion? sourceRegion;
+  final Map<String, num> workload;
+  final List<CurriculumDraftAssessment> assessments;
+  final bool reviewerConfirmed;
+  final List<String> warnings;
+
+  CurriculumDraftOccurrence copyWith({
+    int? semesterNumber,
+    Map<String, num>? workload,
+    List<CurriculumDraftAssessment>? assessments,
+    bool? reviewerConfirmed,
+    List<String>? warnings,
+  }) {
+    return CurriculumDraftOccurrence(
+      semesterNumber: semesterNumber ?? this.semesterNumber,
+      sourcePage: sourcePage,
+      sourceRegion: sourceRegion,
+      workload: workload ?? this.workload,
+      assessments: assessments ?? this.assessments,
+      reviewerConfirmed: reviewerConfirmed ?? this.reviewerConfirmed,
+      warnings: warnings ?? this.warnings,
+    );
+  }
+}
+
 class CurriculumDraftRow {
   const CurriculumDraftRow({
     required this.candidateKey,
@@ -138,10 +231,11 @@ class CurriculumDraftRow {
     required this.subjectName,
     required this.sourcePage,
     required this.sourceRegion,
-    this.semesterNumber,
+    this.subjectId,
     this.hoursTotal,
     this.credits,
-    this.controlForm,
+    this.occurrences = const [],
+    this.unresolvedAssessments = const [],
     this.blockName,
     this.rawText = '',
     this.blockingIssues = const [],
@@ -153,12 +247,13 @@ class CurriculumDraftRow {
 
   /// Temporary review key only. It is never a final source occurrence key.
   final String candidateKey;
+  final String? subjectId;
   final String subjectIndex;
   final String subjectName;
-  final int? semesterNumber;
+  final List<CurriculumDraftOccurrence> occurrences;
+  final List<CurriculumDraftAssessment> unresolvedAssessments;
   final int? hoursTotal;
   final num? credits;
-  final String? controlForm;
   final String? blockName;
   final int sourcePage;
   final AcademicSourceRegion? sourceRegion;
@@ -174,20 +269,30 @@ class CurriculumDraftRow {
       disposition == CurriculumRowDisposition.undecided ||
       subjectName.trim().isEmpty ||
       (disposition == CurriculumRowDisposition.occurrence &&
-          semesterNumber == null) ||
+          occurrences.isEmpty) ||
+      (disposition == CurriculumRowDisposition.occurrence &&
+          occurrences.any(
+            (occurrence) =>
+                !occurrence.reviewerConfirmed ||
+                occurrence.assessments.any(
+                  (assessment) => !assessment.reviewerConfirmed,
+                ),
+          )) ||
+      (disposition == CurriculumRowDisposition.occurrence &&
+          unresolvedAssessments.isNotEmpty) ||
       blockingIssues.isNotEmpty;
 
   CurriculumDraftRow copyWith({
     String? subjectIndex,
     String? subjectName,
-    int? semesterNumber,
-    bool clearSemesterNumber = false,
+    String? subjectId,
+    bool clearSubjectId = false,
+    List<CurriculumDraftOccurrence>? occurrences,
+    List<CurriculumDraftAssessment>? unresolvedAssessments,
     int? hoursTotal,
     bool clearHoursTotal = false,
     num? credits,
     bool clearCredits = false,
-    String? controlForm,
-    bool clearControlForm = false,
     String? blockName,
     List<String>? blockingIssues,
     List<String>? warnings,
@@ -197,14 +302,14 @@ class CurriculumDraftRow {
   }) {
     return CurriculumDraftRow(
       candidateKey: candidateKey,
+      subjectId: clearSubjectId ? null : (subjectId ?? this.subjectId),
       subjectIndex: subjectIndex ?? this.subjectIndex,
       subjectName: subjectName ?? this.subjectName,
-      semesterNumber: clearSemesterNumber
-          ? null
-          : (semesterNumber ?? this.semesterNumber),
+      occurrences: occurrences ?? this.occurrences,
+      unresolvedAssessments:
+          unresolvedAssessments ?? this.unresolvedAssessments,
       hoursTotal: clearHoursTotal ? null : (hoursTotal ?? this.hoursTotal),
       credits: clearCredits ? null : (credits ?? this.credits),
-      controlForm: clearControlForm ? null : (controlForm ?? this.controlForm),
       blockName: blockName ?? this.blockName,
       sourcePage: sourcePage,
       sourceRegion: sourceRegion,

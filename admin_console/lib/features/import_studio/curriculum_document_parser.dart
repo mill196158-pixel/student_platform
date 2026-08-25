@@ -15,7 +15,17 @@ class CurriculumDocumentParser {
       lines.addAll(_groupLines(page));
     }
 
-    final candidateRows = _parseCandidateRows(lines);
+    final layoutRows = pages
+        .expand(
+          (page) => _parseCoordinateTable(
+            page,
+            nominalSemesters: metadata.nominalSemesters ?? 8,
+          ),
+        )
+        .toList(growable: false);
+    final candidateRows = layoutRows.isEmpty
+        ? _parseCandidateRows(lines)
+        : layoutRows;
     final allIndexes = candidateRows.map((row) => row.subjectIndex).toSet();
     final rows = candidateRows
         .map((row) {
@@ -225,6 +235,307 @@ class CurriculumDocumentParser {
     return rows;
   }
 
+  List<CurriculumDraftRow> _parseCoordinateTable(
+    AcademicTextPage page, {
+    required int nominalSemesters,
+  }) {
+    if (!_hasSupportedTableHeader(page, nominalSemesters)) return const [];
+
+    final anchors = page.fragments.where((fragment) {
+      final centerX = _centerX(fragment) / page.width;
+      return centerX < 0.04 &&
+          _subjectIndexOnlyPattern.hasMatch(fragment.text.trim());
+    }).toList()..sort((a, b) => _centerY(b).compareTo(_centerY(a)));
+    if (anchors.isEmpty) return const [];
+
+    final rows = <CurriculumDraftRow>[];
+    for (var index = 0; index < anchors.length; index++) {
+      final anchor = anchors[index];
+      final anchorY = _centerY(anchor);
+      final nextY = index + 1 < anchors.length
+          ? _centerY(anchors[index + 1])
+          : 0.0;
+      final sectionBoundaryY = page.fragments
+          .where((fragment) {
+            final y = _centerY(fragment);
+            final x = _centerX(fragment) / page.width;
+            return y < anchorY &&
+                y > nextY &&
+                x < 0.04 &&
+                _sectionBoundaryPattern.hasMatch(fragment.text.trim());
+          })
+          .map(_centerY)
+          .fold<double?>(null, (current, y) {
+            return current == null || y > current ? y : current;
+          });
+      final lowerY = sectionBoundaryY ?? nextY;
+      final rowFragments = page.fragments.where((fragment) {
+        final y = _centerY(fragment);
+        return y <= anchorY + 2.5 && y > lowerY + 2.5;
+      }).toList();
+      final subjectIndex = anchor.text.trim();
+      final nameFragments = rowFragments.where((fragment) {
+        final x = _centerX(fragment) / page.width;
+        final text = fragment.text.trim();
+        return x >= 0.039 &&
+            x < 0.102 &&
+            text.isNotEmpty &&
+            !_subjectIndexOnlyPattern.hasMatch(text);
+      }).toList()..sort(_readingOrder);
+      final subjectName = nameFragments
+          .map((fragment) => fragment.text.trim())
+          .join(' ')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+      if (subjectName.isEmpty) continue;
+
+      final credits = _singleNumberInRange(
+        rowFragments,
+        page.width,
+        0.163,
+        0.174,
+      );
+      final hours = _singleNumberInRange(
+        rowFragments,
+        page.width,
+        0.174,
+        0.185,
+      );
+      final assessments = <CurriculumDraftAssessment>[];
+      final unresolvedAssessments = <CurriculumDraftAssessment>[];
+      final blockers = <String>[];
+      for (final column in _assessmentColumns) {
+        final cells = _fragmentsInRange(
+          rowFragments,
+          page.width,
+          column.left,
+          column.right,
+        );
+        for (final cell in cells) {
+          final raw = cell.text.trim();
+          if (raw.isEmpty || raw == '-') continue;
+          final semesters = _decodeCompactSemesters(raw, nominalSemesters);
+          if (semesters == null) {
+            blockers.add(
+              'assessment_semester_unresolved:${column.type.wire}:$raw',
+            );
+            unresolvedAssessments.add(
+              CurriculumDraftAssessment(
+                type: column.type,
+                semesterNumber: null,
+                rawValue: raw,
+                sourcePage: page.page,
+                sourceRegion: cell.region,
+                warnings: const [
+                  'Не удалось однозначно определить семестр формы контроля.',
+                ],
+              ),
+            );
+            continue;
+          }
+          for (final semester in semesters) {
+            final duplicate = assessments.any(
+              (assessment) =>
+                  assessment.type == column.type &&
+                  assessment.semesterNumber == semester,
+            );
+            if (duplicate) {
+              blockers.add(
+                'duplicate_assessment:${column.type.wire}:$semester',
+              );
+              continue;
+            }
+            assessments.add(
+              CurriculumDraftAssessment(
+                type: column.type,
+                semesterNumber: semester,
+                rawValue: raw,
+                sourcePage: page.page,
+                sourceRegion: cell.region,
+              ),
+            );
+          }
+        }
+      }
+
+      final occurrenceFragments = <int, List<AcademicTextFragment>>{};
+      for (var semester = 1; semester <= nominalSemesters; semester++) {
+        final range = _semesterRange(semester, nominalSemesters);
+        final cells = _fragmentsInRange(
+          rowFragments,
+          page.width,
+          range.$1,
+          range.$2,
+        ).where((fragment) => _parseNumber(fragment.text) != null).toList();
+        if (cells.isNotEmpty) occurrenceFragments[semester] = cells;
+      }
+      for (final assessment in assessments) {
+        final semester = assessment.semesterNumber;
+        if (semester != null) {
+          occurrenceFragments.putIfAbsent(semester, () => []);
+        }
+      }
+
+      final occurrences = occurrenceFragments.entries.map((entry) {
+        final semester = entry.key;
+        final cells = entry.value;
+        final range = _semesterRange(semester, nominalSemesters);
+        final workload = <String, num>{};
+        for (final cell in cells) {
+          final value = _parseNumber(cell.text);
+          if (value == null) continue;
+          final relative =
+              ((_centerX(cell) / page.width) - range.$1) /
+              (range.$2 - range.$1);
+          final slot = (relative * 10).floor().clamp(0, 9) + 1;
+          workload['source_column_$slot'] = value;
+        }
+        final occurrenceAssessments = assessments
+            .where((assessment) => assessment.semesterNumber == semester)
+            .toList(growable: false);
+        final evidence = <AcademicTextFragment>[
+          ...cells,
+          for (final assessment in occurrenceAssessments)
+            if (assessment.sourceRegion != null)
+              AcademicTextFragment(
+                page: assessment.sourcePage,
+                text: assessment.rawValue,
+                region: assessment.sourceRegion!,
+              ),
+        ];
+        return CurriculumDraftOccurrence(
+          semesterNumber: semester,
+          sourcePage: page.page,
+          sourceRegion: _mergeRegions(evidence),
+          workload: workload,
+          assessments: occurrenceAssessments,
+        );
+      }).toList()..sort((a, b) => a.semesterNumber.compareTo(b.semesterNumber));
+
+      rows.add(
+        CurriculumDraftRow(
+          candidateKey: 'candidate-p${page.page}-${rows.length + 1}',
+          subjectIndex: subjectIndex,
+          subjectName: subjectName,
+          sourcePage: page.page,
+          sourceRegion: _mergeRegions(rowFragments),
+          hoursTotal: hours?.round(),
+          credits: credits,
+          occurrences: occurrences,
+          unresolvedAssessments: unresolvedAssessments,
+          rawText: (rowFragments..sort(_readingOrder))
+              .map((fragment) => fragment.text.trim())
+              .where((value) => value.isNotEmpty)
+              .join(' '),
+          blockingIssues: [
+            if (occurrences.isEmpty) 'semester_required',
+            ...blockers,
+            'review_confirmation_required',
+          ],
+          warnings: const [
+            'Семестры, нагрузка и формы контроля извлечены по координатам таблицы.',
+          ],
+        ),
+      );
+    }
+    return rows;
+  }
+
+  bool _hasSupportedTableHeader(AcademicTextPage page, int nominalSemesters) {
+    final text = page.fullText.replaceAll(RegExp(r'\s+'), ' ');
+    const required = [
+      'Индекс',
+      'Наименование',
+      'Экза',
+      'Зачет',
+      'КП',
+      'КР',
+      'Контр.',
+      'Итого',
+      'акад.часов',
+    ];
+    if (required.any((header) => !text.contains(header))) return false;
+    for (var semester = 1; semester <= nominalSemesters; semester++) {
+      if (!RegExp(
+        'Семестр\\s+$semester',
+        caseSensitive: false,
+      ).hasMatch(text)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  List<AcademicTextFragment> _fragmentsInRange(
+    List<AcademicTextFragment> fragments,
+    double width,
+    double left,
+    double right,
+  ) {
+    return fragments
+        .where((fragment) {
+          final x = _centerX(fragment) / width;
+          return x >= left && x < right;
+        })
+        .toList(growable: false);
+  }
+
+  num? _singleNumberInRange(
+    List<AcademicTextFragment> fragments,
+    double width,
+    double left,
+    double right,
+  ) {
+    final values = _fragmentsInRange(
+      fragments,
+      width,
+      left,
+      right,
+    ).map((fragment) => _parseNumber(fragment.text)).whereType<num>();
+    return values.length == 1 ? values.single : null;
+  }
+
+  List<int>? _decodeCompactSemesters(String raw, int nominalSemesters) {
+    final normalized = raw.replaceAll(RegExp(r'\s+'), '');
+    if (!RegExp(r'^\d+$').hasMatch(normalized)) return null;
+    final exact = int.parse(normalized);
+    // A zero cannot represent a one-digit semester, so "10" is the
+    // unambiguous marker for semester 10. Other multi-digit values such as
+    // "12" remain compact semester lists (1 and 2) instead of being guessed.
+    if (normalized.contains('0') && exact >= 10 && exact <= nominalSemesters) {
+      return [exact];
+    }
+    final values = normalized.split('').map(int.parse).toList(growable: false);
+    if (values.any((value) => value < 1 || value > nominalSemesters)) {
+      return null;
+    }
+    return values.toSet().toList(growable: false);
+  }
+
+  (double, double) _semesterRange(int semester, int total) {
+    if (total == 8) return _pgsSemesterRanges[semester - 1];
+    const left = 0.229;
+    const right = 0.932;
+    final width = (right - left) / total;
+    return (left + (semester - 1) * width, left + semester * width);
+  }
+
+  num? _parseNumber(String raw) {
+    final normalized = raw.trim().replaceAll(',', '.');
+    return num.tryParse(normalized);
+  }
+
+  double _centerX(AcademicTextFragment fragment) =>
+      (fragment.region.left + fragment.region.right) / 2;
+
+  double _centerY(AcademicTextFragment fragment) =>
+      (fragment.region.top + fragment.region.bottom) / 2;
+
+  int _readingOrder(AcademicTextFragment a, AcademicTextFragment b) {
+    final y = _centerY(b).compareTo(_centerY(a));
+    return y == 0 ? a.region.left.compareTo(b.region.left) : y;
+  }
+
   AcademicSourceRegion? _mergeRegions(List<AcademicTextFragment> fragments) {
     if (fragments.isEmpty) return null;
     var left = fragments.first.region.left;
@@ -403,6 +714,43 @@ class _LayoutLine {
 final _subjectIndexPattern = RegExp(
   r'^\s*((?:Б[123](?:\.[А-ЯA-Z0-9()]+)+|ФТД(?:\.[А-ЯA-Z0-9()]+)+))\s+(.+)$',
 );
+
+final _subjectIndexOnlyPattern = RegExp(
+  r'^(?:Б[123](?:\.[А-ЯA-Z0-9()]+)+|ФТД(?:\.[А-ЯA-Z0-9()]+)+)$',
+);
+
+final _sectionBoundaryPattern = RegExp(
+  r'^(?:Блок\b|Обязательная\b|Часть,|ФТД\.Факультативные\b)',
+  caseSensitive: false,
+);
+
+const _assessmentColumns = [
+  _AssessmentColumn(0.102, 0.112, CurriculumAssessmentType.exam),
+  _AssessmentColumn(0.112, 0.122, CurriculumAssessmentType.credit),
+  _AssessmentColumn(0.122, 0.1325, CurriculumAssessmentType.gradedCredit),
+  _AssessmentColumn(0.1325, 0.1425, CurriculumAssessmentType.courseProject),
+  _AssessmentColumn(0.1425, 0.152, CurriculumAssessmentType.courseWork),
+  _AssessmentColumn(0.152, 0.163, CurriculumAssessmentType.controlWork),
+];
+
+const _pgsSemesterRanges = [
+  (0.229, 0.322),
+  (0.322, 0.411),
+  (0.411, 0.501),
+  (0.501, 0.591),
+  (0.591, 0.672),
+  (0.672, 0.762),
+  (0.762, 0.842),
+  (0.842, 0.932),
+];
+
+class _AssessmentColumn {
+  const _AssessmentColumn(this.left, this.right, this.type);
+
+  final double left;
+  final double right;
+  final CurriculumAssessmentType type;
+}
 
 final _numericToken = RegExp(r'^\d+(?:[.,]\d+)?$');
 

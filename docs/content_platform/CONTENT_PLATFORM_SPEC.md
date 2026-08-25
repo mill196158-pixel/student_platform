@@ -563,11 +563,24 @@ Locked ingestion rules:
 - XLSX, text PDF and scanned image/PDF are separate versioned adapters;
 - all extraction output is an editable draft with raw/normalized value,
   parser version, warning/confidence and source page/region;
+- coordinate-aware PDF adapters group one source subject with one or more
+  semester occurrences and typed assessment records (`exam`, `credit`,
+  `graded_credit`, `course_project`, `course_work`, `control_work`);
+- aggregate source hours/credits remain subject-level and are never multiplied
+  across semester occurrences;
+- semester, workload and typed controls remain editable; each material edit
+  clears review confirmation and invalidates any prior server preview;
+- section headings terminate source row bands; unresolved or duplicate
+  assessment markers remain visible blockers and cannot be cleared by ordinary
+  review confirmation;
 - browser extraction is untrusted; server dry-run owns validation and matching;
 - unsupported/scanned sources fail closed to `manual_required` or
   `ocr_unavailable`, never to an empty successful import;
-- apply remains disabled until source review and a separately reviewed apply
-  contract;
+- plan v2 apply consumes only a durable, unexpired preview owned by the caller
+  and bound to the exact draft-plan row version and normalized payload hash;
+- apply requires source review plus exact plan-code confirmation, is atomic and
+  idempotent, never deletes omitted occurrences, and rejects archived subject
+  matches;
 - extraction never changes current term, offerings, teams or chats.
 
 Academic-process calendar contract:

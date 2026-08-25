@@ -61,6 +61,46 @@ void main() {
       draft.rows.map((row) => row.subjectIndex).toSet().length,
       draft.rows.length,
     );
+    final physicalCulture = draft.rows.firstWhere(
+      (row) => row.subjectIndex == 'Б1.О.01',
+    );
+    expect(physicalCulture.credits, 2);
+    expect(physicalCulture.hoursTotal, 72);
+    expect(physicalCulture.occurrences.map((row) => row.semesterNumber), [5]);
+    expect(
+      physicalCulture.occurrences.single.assessments.single.type,
+      CurriculumAssessmentType.credit,
+    );
+    final mathematics = draft.rows.firstWhere(
+      (row) => row.subjectIndex == 'Б1.О.09',
+    );
+    expect(mathematics.occurrences.map((row) => row.semesterNumber), [1, 2, 3]);
+    expect(
+      mathematics.occurrences
+          .expand((row) => row.assessments)
+          .where(
+            (assessment) => assessment.type == CurriculumAssessmentType.exam,
+          )
+          .map((assessment) => assessment.semesterNumber),
+      [1, 3],
+    );
+    expect(
+      draft.rows.where((row) => row.occurrences.isEmpty),
+      isEmpty,
+      reason: 'Every included source subject must have semester evidence.',
+    );
+    expect(
+      draft.rows
+          .firstWhere((row) => row.subjectIndex == 'Б1.О.34')
+          .subjectName,
+      'Техническая эксплуатация зданий и сооружений',
+    );
+    expect(
+      draft.rows
+          .firstWhere((row) => row.subjectIndex == 'Б2.О.06(П)')
+          .subjectName,
+      'Проектная практика',
+    );
     expect(draft.unresolvedRowCount, draft.rows.length);
     expect(draft.canContinue, isFalse);
   });

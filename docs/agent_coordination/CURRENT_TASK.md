@@ -1,11 +1,12 @@
 # CURRENT_TASK
 
 * Status: **IN PROGRESS** — Stage 19.1 multi-format academic ingestion
-* Active Stage: schedule boundary after Stage 19.1 foundation rollout
+* Active Stage: Stage 19.1a plan persistence gate
 * Branch: `feature/content-platform`
 * Codex identity-foundation verdict: **APPROVE**
 * Codex document-extraction verdict: **APPROVE**
 * Codex calendar-foundation/Admin-workflow verdict: **APPROVE**
+* Codex plan-persistence verdict: **APPROVE_WITH_NOTES** (no P0/P1)
 * Remote: `gwdanmwluhrcfxbnplwd`
 * Backup: `/Users/annasuvorova/student_platform_backups/pre_content_platform_20260730_133051/` (outside Git; `0700`/`0600`)
 
@@ -25,6 +26,9 @@
   * XLSX + text/scanned PDF diagnosis
   * self-hosted pinned PDFium Web runtime
   * editable metadata/row draft with page/rectangle provenance
+  * coordinate parser v2 auto-fills aggregate hours/credits, semester
+    occurrences and typed multiple controls while retaining one source subject
+  * section boundaries and unresolved-control blockers fail closed
   * explicit aggregate occurrence/heading/exclude review
   * supplied PDF passes native + compiled Chrome smoke
 * Academic-process calendar foundation and Admin workflow implemented with
@@ -48,6 +52,17 @@
   * legacy counts unchanged (`group_academic_profiles=2`,
     `curriculum_subjects=37`, all links remain `NULL`)
 
+## In progress
+
+* Plan-aware v2 persistence is implemented locally and Codex-reviewed:
+  * durable expiring preview bound to the exact plan row version
+  * atomic idempotent apply with stale/owner/hash/confirmation checks
+  * aggregate-safe subject storage with per-semester workload and controls
+  * editable nested semester, workload and assessment review in Admin Web
+  * stale asynchronous preview responses are discarded
+* Focused Flutter tests pass. PostgreSQL role-play is written but has not run
+  because local Docker/PostgreSQL is unavailable.
+
 ## Residuals (not blockers)
 
 * Local Docker remains unavailable, but the SQL foundation was verified on
@@ -57,7 +72,7 @@
 
 ## Next (optional)
 
-1. Review the new Admin curriculum-document and process-calendar workflows.
-2. Design schedule import validation against published calendar periods.
-3. Keep curriculum/calendar apply disabled until their apply contracts receive
-   a separate code + tests + Codex gate.
+1. Execute the migration and rollback-only role-play only with owner
+   authorization for remote Supabase.
+2. Continue with explicit group academic-profile binding; do not create
+   offerings, teams or chats as part of plan persistence.

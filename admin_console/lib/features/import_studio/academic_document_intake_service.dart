@@ -123,7 +123,7 @@ class AcademicDocumentIntakeService {
       warnings: const [
         'SHA-256 вычислен локально; сервером не подтверждён.',
         'Источник не загружен, происхождение документа не подтверждено.',
-        'Семестры, часы и формы контроля требуют ручной проверки.',
+        'Автоматически извлечённые семестры, часы и формы контроля требуют подтверждения.',
       ],
     );
   }
@@ -168,15 +168,36 @@ class AcademicDocumentIntakeService {
         'форма контроля',
         'контроль',
       ]);
+      final assessments = semester == null
+          ? const <CurriculumDraftAssessment>[]
+          : _assessmentTypes(control)
+                .map(
+                  (type) => CurriculumDraftAssessment(
+                    type: type,
+                    semesterNumber: semester,
+                    rawValue: control,
+                    sourcePage: 1,
+                    sourceRegion: null,
+                  ),
+                )
+                .toList(growable: false);
       rows.add(
         CurriculumDraftRow(
           candidateKey: 'candidate-${sheet.name}-${index + 2}',
           subjectIndex: subjectIndex,
           subjectName: subjectName,
-          semesterNumber: semester,
           hoursTotal: hours,
           credits: credits,
-          controlForm: control.isEmpty ? null : control,
+          occurrences: semester == null
+              ? const []
+              : [
+                  CurriculumDraftOccurrence(
+                    semesterNumber: semester,
+                    sourcePage: 1,
+                    sourceRegion: null,
+                    assessments: assessments,
+                  ),
+                ],
           sourcePage: 1,
           sourceRegion: null,
           rawText: source.values.join(' | '),
@@ -220,5 +241,28 @@ class AcademicDocumentIntakeService {
       if (aliases.contains(key)) return entry.value.trim();
     }
     return '';
+  }
+
+  List<CurriculumAssessmentType> _assessmentTypes(String raw) {
+    if (raw.trim().isEmpty) return const [];
+    final normalized = raw.toLowerCase().replaceAll('ё', 'е');
+    final values = <CurriculumAssessmentType>[
+      if (normalized.contains('экзамен')) CurriculumAssessmentType.exam,
+      if (normalized.contains('зачет с оцен') ||
+          normalized.contains('дифференцирован'))
+        CurriculumAssessmentType.gradedCredit
+      else if (normalized.contains('зачет'))
+        CurriculumAssessmentType.credit,
+      if (normalized.contains('курсовой проект') ||
+          RegExp(r'\bкп\b').hasMatch(normalized))
+        CurriculumAssessmentType.courseProject,
+      if (normalized.contains('курсовая работа') ||
+          RegExp(r'\bкр\b').hasMatch(normalized))
+        CurriculumAssessmentType.courseWork,
+      if (normalized.contains('контрольная') ||
+          RegExp(r'\bконтр').hasMatch(normalized))
+        CurriculumAssessmentType.controlWork,
+    ];
+    return values.isEmpty ? const [CurriculumAssessmentType.unknown] : values;
   }
 }

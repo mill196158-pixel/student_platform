@@ -645,12 +645,19 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Identity foundation role-play executed on PostgreSQL
 - [x] XLSX adapter produces versioned editable draft rows
 - [x] Text-layer PDF adapter preserves page/region provenance
+- [x] PDF parser auto-fills semester occurrences plus aggregate hours/credits
+- [x] One source subject retains multiple typed assessment forms by semester
+- [x] Section headings and unresolved controls cannot be silently accepted
 - [x] Scanned PDF fails closed to manual/OCR-required review
 - [x] Image intake fails closed to manual/OCR-required review
 - [x] Aggregate/elective parent has explicit occurrence/heading/exclude review
 - [x] Material row edits invalidate prior reviewer confirmation
 - [x] Document extraction code + tests Codex APPROVE
 - [x] Full-time and ФБФО plans cannot deduplicate across plan identity
+- [ ] Plan v2 preview is durable, version-bound, expiring and tamper-checked
+- [ ] Explicit apply atomically persists occurrences, workload and controls
+- [ ] Nested semester/workload/control corrections invalidate stale previews
+- [ ] Plan persistence role-play executed on PostgreSQL
 - [x] Academic-process document/version model
 - [x] Study/session/GIA periods linked to year + program/plan/group audience
 - [x] Calendar import cannot flip current term or create offerings/chats

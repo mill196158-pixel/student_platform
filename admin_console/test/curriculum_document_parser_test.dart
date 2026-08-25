@@ -82,7 +82,7 @@ void main() {
     expect(result.rows[1].rawText, contains('цифровой трансформации'));
     expect(result.rows[1].sourceRegion?.top, 480);
     expect(result.rows[1].sourceRegion?.bottom, 458);
-    expect(result.rows.every((row) => row.semesterNumber == null), isTrue);
+    expect(result.rows.every((row) => row.occurrences.isEmpty), isTrue);
     expect(result.rows.every((row) => row.requiresReview), isTrue);
   });
 
@@ -125,5 +125,166 @@ void main() {
       result.rows.first.blockingIssues,
       contains('aggregate_parent_decision_required'),
     );
+  });
+
+  test('maps coordinate columns to occurrences and typed controls', () {
+    const page = AcademicTextPage(
+      page: 2,
+      width: 1000,
+      height: 700,
+      fullText:
+          'Индекс Наименование Экзамен Зачет Зачет с оц. КП КР Контр. '
+          'Итого акад.часов Семестр 1 Семестр 2 Семестр 3 Семестр 4 '
+          'Семестр 5 Семестр 6 Семестр 7 Семестр 8',
+      fragments: [
+        AcademicTextFragment(
+          page: 2,
+          text: 'Б1.О.01',
+          region: AcademicSourceRegion(
+            left: 15,
+            top: 500,
+            right: 30,
+            bottom: 490,
+          ),
+        ),
+        AcademicTextFragment(
+          page: 2,
+          text: 'Физическая культура и спорт',
+          region: AcademicSourceRegion(
+            left: 45,
+            top: 500,
+            right: 100,
+            bottom: 490,
+          ),
+        ),
+        AcademicTextFragment(
+          page: 2,
+          text: '5',
+          region: AcademicSourceRegion(
+            left: 114,
+            top: 500,
+            right: 119,
+            bottom: 490,
+          ),
+        ),
+        AcademicTextFragment(
+          page: 2,
+          text: 'X',
+          region: AcademicSourceRegion(
+            left: 103,
+            top: 500,
+            right: 107,
+            bottom: 490,
+          ),
+        ),
+        AcademicTextFragment(
+          page: 2,
+          text: '2',
+          region: AcademicSourceRegion(
+            left: 165,
+            top: 500,
+            right: 170,
+            bottom: 490,
+          ),
+        ),
+        AcademicTextFragment(
+          page: 2,
+          text: '72',
+          region: AcademicSourceRegion(
+            left: 176,
+            top: 500,
+            right: 182,
+            bottom: 490,
+          ),
+        ),
+        AcademicTextFragment(
+          page: 2,
+          text: '36',
+          region: AcademicSourceRegion(
+            left: 600,
+            top: 500,
+            right: 608,
+            bottom: 490,
+          ),
+        ),
+      ],
+    );
+
+    final row = parser.parsePdfPages([page]).rows.single;
+
+    expect(row.credits, 2);
+    expect(row.hoursTotal, 72);
+    expect(row.occurrences.map((value) => value.semesterNumber), [5]);
+    expect(
+      row.occurrences.single.assessments.single.type,
+      CurriculumAssessmentType.credit,
+    );
+    expect(row.occurrences.single.assessments.single.semesterNumber, 5);
+    expect(
+      row.unresolvedAssessments.single.type,
+      CurriculumAssessmentType.exam,
+    );
+    expect(
+      row.blockingIssues,
+      contains('assessment_semester_unresolved:exam:X'),
+    );
+  });
+
+  test('keeps semester 10 as one assessment semester', () {
+    final headers = [
+      for (var semester = 1; semester <= 10; semester++) 'Семестр $semester',
+    ].join(' ');
+    final row = parser
+        .parsePdfPages([
+          AcademicTextPage(
+            page: 1,
+            width: 1000,
+            height: 700,
+            fullText:
+                'Индекс Наименование Экзамен Зачет Зачет с оц. КП КР '
+                'Контр. Итого акад.часов $headers',
+            fragments: const [
+              AcademicTextFragment(
+                page: 1,
+                text: 'Б1.О.10',
+                region: AcademicSourceRegion(
+                  left: 15,
+                  top: 500,
+                  right: 30,
+                  bottom: 490,
+                ),
+              ),
+              AcademicTextFragment(
+                page: 1,
+                text: 'Дисциплина десятого семестра',
+                region: AcademicSourceRegion(
+                  left: 45,
+                  top: 500,
+                  right: 100,
+                  bottom: 490,
+                ),
+              ),
+              AcademicTextFragment(
+                page: 1,
+                text: '10',
+                region: AcademicSourceRegion(
+                  left: 103,
+                  top: 500,
+                  right: 108,
+                  bottom: 490,
+                ),
+              ),
+            ],
+          ),
+        ])
+        .rows
+        .single;
+
+    expect(row.occurrences.map((value) => value.semesterNumber), [10]);
+    expect(
+      row.occurrences.single.assessments.single.type,
+      CurriculumAssessmentType.exam,
+    );
+    expect(row.unresolvedAssessments, isEmpty);
   });
 }

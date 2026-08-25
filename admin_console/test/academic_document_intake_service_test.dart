@@ -78,9 +78,12 @@ void main() {
     expect(draft.contractVersion, curriculumDocumentContractVersion);
     expect(draft.rows, isNotEmpty);
     expect(draft.rows.first.subjectName, 'Математика');
-    expect(draft.rows.first.semesterNumber, 1);
+    expect(draft.rows.first.occurrences.single.semesterNumber, 1);
     expect(draft.rows.first.hoursTotal, 144);
-    expect(draft.rows.first.controlForm, 'экзамен');
+    expect(
+      draft.rows.first.occurrences.single.assessments.single.type,
+      CurriculumAssessmentType.exam,
+    );
     expect(draft.rows.first.requiresReview, isTrue);
     expect(draft.canContinue, isFalse);
   });
