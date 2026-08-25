@@ -1219,10 +1219,11 @@ Codex **APPROVE** 19 completion; remote apply и security review выполне�
 Status: **IN PROGRESS** — identity, document extraction and academic-process
 calendar foundation/Admin dry-run have Codex **APPROVE**; both migrations are
 remote-applied and passed rollback-only PostgreSQL runtime verification.
-Plan v2 persistence is implemented locally and awaits final Codex approval plus
-an owner-authorized PostgreSQL migration/role-play run. Stage 19.1b group-name
-recognition Slice 1 is implemented locally with Codex **APPROVE_WITH_NOTES**
-(no P0/P1); it remains preview-only until PostgreSQL runtime verification.
+Plan v2 persistence is implemented locally and awaits an owner-authorized
+PostgreSQL migration/role-play run. Stage 19.1b group-name recognition Slice 1
+has Codex **APPROVE_WITH_NOTES**; Slice 2 durable decisions and atomic group
+apply have Codex **APPROVE**. Both remain local until PostgreSQL runtime
+verification and owner-authorized remote apply.
 
 - [x] First-class `educational_programs` and versioned `curriculum_plans`
   separate direction/profile/study form/admission cohort.
@@ -1249,14 +1250,14 @@ recognition Slice 1 is implemented locally with Codex **APPROVE_WITH_NOTES**
   holidays/GIA periods linked to year plus global/program/plan/group audience.
 - [x] Admin calendar workflow: official image/PDF source reference, explicit
   audience, editable periods and apply-disabled server dry-run.
-- [ ] Separate reviewed program-code and complete group-name alias registries.
-- [ ] Durable group identity = program + admission year + parallel; display
+- [x] Separate reviewed program-code and complete group-name alias registries.
+- [x] Durable group identity = program + admission year + parallel; display
   name and mutable course suffix are not identity.
-- [ ] Deterministic group parser: left number = parallel, middle = reviewed
+- [x] Deterministic group parser: left number = parallel, middle = reviewed
   program code, right number = course; no fuzzy match.
-- [ ] Server-derived admission year from selected academic year and course.
-- [ ] Durable preview exposes exact/alias/semantic duplicates, unknown programs,
-  malformed names and ambiguous plans; Slice 1 apply remains disabled.
+- [x] Server-derived admission year from selected academic year and course.
+- [x] Durable preview exposes exact/alias/semantic duplicates, unknown programs,
+  malformed names and ambiguous plans.
 - [x] Fast Admin Web group-name preview with focused Dart tests and Codex
   APPROVE_WITH_NOTES (SQL runtime role-play remains open).
 - [x] Unified `/import-studio` academic chain visibly separates plan review,
@@ -1265,6 +1266,15 @@ recognition Slice 1 is implemented locally with Codex **APPROVE_WITH_NOTES**
   structured XLSX domains remain available as clearly secondary imports.
 - [x] Duplicate review intent is local-only and fail-closed until candidate
   selection, discriminator/reason, audit and server resolution are implemented.
+- [x] Slice 2 stores one durable reviewed decision per actionable row, binds it
+  to preview/hash/revision and rejects decisions for blocked rows.
+- [x] Slice 2 apply directly creates or safely reuses only group identity,
+  alias and academic-profile records; it never creates accounts, enrollments,
+  offerings, spaces, teams or chats.
+- [x] Existing compatible group profiles are retained, a null plan may be bound,
+  and an existing different plan is never replaced.
+- [x] Immutable per-row apply results and exact idempotent replay are exposed in
+  plain-language Admin UI; local demo apply stays disabled.
 - [x] Student XLSX clearly states that it only updates existing Auth users;
   schedule validation/apply remains disabled and is not presented as ready.
 - [ ] Schedule import/validation against published process-calendar periods.
@@ -1274,6 +1284,12 @@ Remote migrations (`2026-08-25`):
 `20260825102845_academic_process_calendar_foundation`. Runtime smoke verified
 RLS/FORCE/grants, dry-run fail-closed behavior, plan isolation and immutable
 published periods. Fixtures were rolled back; no real data was imported.
+
+Local-only migration awaiting PostgreSQL runtime and owner authorization:
+`20260825195812_stage19_1b_group_recognition_apply`. Its rollback-safe role-play
+is prepared; Docker/PostgreSQL was unavailable locally. Focused Admin tests
+pass (**28**), changed-file analyze and `git diff --check` pass, Codex verdict
+is **APPROVE**.
 
 Rules:
 

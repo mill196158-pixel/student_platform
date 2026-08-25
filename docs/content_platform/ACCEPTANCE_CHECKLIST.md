@@ -825,17 +825,43 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Calendar import cannot flip current term or create offerings/chats
 - [ ] Schedule import validates dates against published process periods
 - [ ] Admin presents one chain: plan → annual process calendar → schedule
-- [ ] Program-code aliases and complete group-name aliases are separate
-- [ ] Group semantic identity uses program + admission year + parallel number
-- [ ] Group parser treats left number as parallel and right number as course
-- [ ] Admission year is derived server-side from selected academic year
-- [ ] Unknown/ambiguous group names and programs fail closed
-- [ ] Group preview shows exact, alias, semantic-duplicate and plan conflicts
-- [ ] Group recognition preview is durable, versioned and idempotent
-- [ ] Group-recognition Slice 1 apply remains explicitly disabled
+- [x] Program-code aliases and complete group-name aliases are separate
+- [x] Group semantic identity uses program + admission year + parallel number
+- [x] Group parser treats left number as parallel and right number as course
+- [x] Admission year is derived server-side from selected academic year
+- [x] Unknown/ambiguous group names and programs fail closed
+- [x] Group preview shows exact, alias, semantic-duplicate and plan conflicts
+- [x] Group recognition preview is durable, versioned and idempotent
+- [x] Legacy Slice 1 apply signature remains explicitly disabled
 - [x] Admin Web exposes fast group-name recognition without service_role
 - [ ] Group recognition SQL role-play executed on PostgreSQL
 - [x] Codex APPROVE Stage 19.1b Slice 1
+- [x] Slice 2 decisions exist only for actionable rows; blocked rows have none
+- [x] Slice 2 decision matrix is validated server-side by classification
+- [x] Duplicate decision IDs reject the whole replacement
+- [x] Decision replacement is owner-scoped, `groups.write`, atomic and audited
+- [x] Decision revision/hash increment and bind exact confirmation
+- [x] Candidate snapshots include group/alias/program/identity/profile/plan/max term
+- [x] Candidate labels include program, study form, admission, version, status and nominal duration
+- [x] Apply revalidates preview row version, payload hash, decision revision/hash and current facts
+- [x] Reuse inserts missing identity/profile and only binds a null or same plan
+- [x] Reuse blocks identity/profile/admission/nominal/plan/max-term conflicts
+- [x] New group profile is explicitly active
+- [x] Group creation directly inserts `groups`; `admin_upsert_group` is never called
+- [x] Group recognition creates no accounts, enrollments, offerings, spaces, teams or chats
+- [x] Per-row apply result is immutable and exact replay is idempotent
+- [x] Slice 2 decision/result tables have RLS + FORCE RLS and no authenticated DML
+- [x] Slice 2 RPCs are `SECURITY DEFINER`, `search_path=''`, RBAC checked
+- [x] Dart repository exposes typed candidates, decisions, save and apply
+- [x] Local demo decision/apply is disabled
+- [x] Admin uses candidate group/plan selectors and durable decision save
+- [x] Admin confirmation is bound to exact preview/decision revision
+- [x] Admin shows plain-Russian review and apply result without account/team claims
+- [x] Input edits and async races invalidate stale UI
+- [x] Repository/widget tests cover durable decisions, apply and candidate switching
+- [x] Rollback-safe Slice 2 SQL role-play and static security/drift assertions are written
+- [ ] Slice 2 migration + role-play executed on PostgreSQL
+- [x] Codex APPROVE Stage 19.1b Slice 2
 - [x] Import Studio visibly presents plan → groups/students → calendar → schedule
 - [x] Primary academic cards open specialized review panels directly
 - [x] All nine legacy XLSX domains remain reachable as advanced imports
@@ -945,14 +971,14 @@ academic data was imported.
 
 > Копировать в CURRENT_TASK при закрытии каждого code-подэтапа.
 
-- [ ] `dart format` затронутых файлов
-- [ ] Focused `dart analyze` clean
-- [ ] Flutter focused tests PASS
-- [ ] Admin tests PASS (если Admin затронут)
+- [x] `dart format` затронутых файлов
+- [x] Focused `dart analyze` clean
+- [x] Flutter focused tests PASS
+- [x] Admin tests PASS (если Admin затронут)
 - [ ] Shared renderer tests PASS (если шаблоны затронуты)
-- [ ] SQL security review PASS (если SQL)
+- [x] SQL security review PASS (если SQL)
 - [ ] SQL behavioral role-play + rollback PASS (если SQL)
-- [ ] RLS/FORCE/grants assertions записаны
+- [x] RLS/FORCE/grants assertions записаны
 - [ ] Migration preflight local Supabase PASS (если миграции)
 - [ ] Deno check изменённых Edge PASS (если Edge)
 - [ ] Android debug build PASS (если mobile)
@@ -961,9 +987,9 @@ academic data was imported.
 - [ ] Main Web build PASS (если main web)
 - [ ] Cache/error/empty tests PASS (если UI выдача)
 - [ ] No-N+1 evidence записан (если списки)
-- [ ] `git diff --check` clean
+- [x] `git diff --check` clean
 - [ ] Secret scan clean
-- [ ] Codex APPROVE slice
+- [x] Codex APPROVE slice
 
 ---
 

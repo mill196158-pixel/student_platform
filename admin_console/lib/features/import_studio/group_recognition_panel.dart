@@ -4,8 +4,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/auth/admin_backend_config.dart';
 import 'group_recognition_repository.dart';
 
-enum GroupDuplicateReviewIntent { reuseGroup, addAlias }
-
 class GroupRecognitionPanel extends StatefulWidget {
   const GroupRecognitionPanel({
     super.key,
@@ -30,12 +28,14 @@ class _GroupRecognitionPanelState extends State<GroupRecognitionPanel> {
   List<GroupRecognitionAcademicYear> _years = const [];
   GroupRecognitionAcademicYear? _selectedYear;
   GroupRecognitionPreview? _preview;
+  final Map<String, GroupRecognitionDecision> _drafts = {};
+  final Map<String, TextEditingController> _discriminators = {};
+  final Map<String, TextEditingController> _reasons = {};
   bool _loadingYears = true;
   bool _busy = false;
   String? _error;
-  int _revision = 0;
+  int _inputRevision = 0;
   int _request = 0;
-  final Map<String, GroupDuplicateReviewIntent> _reviewIntents = {};
 
   GroupRecognitionRepository _defaultRepository() {
     if (AdminBackendConfig.isDemoMode) {
@@ -67,15 +67,27 @@ class _GroupRecognitionPanelState extends State<GroupRecognitionPanel> {
     _namesController
       ..removeListener(_invalidatePreview)
       ..dispose();
+    for (final controller in [..._discriminators.values, ..._reasons.values]) {
+      controller.dispose();
+    }
     super.dispose();
+  }
+
+  void _clearReview() {
+    _drafts.clear();
+    for (final controller in [..._discriminators.values, ..._reasons.values]) {
+      controller.dispose();
+    }
+    _discriminators.clear();
+    _reasons.clear();
   }
 
   void _invalidatePreview() {
     if (_busy) return;
     setState(() {
-      _revision++;
+      _inputRevision++;
       _preview = null;
-      _reviewIntents.clear();
+      _clearReview();
       _error = null;
     });
   }
@@ -118,20 +130,20 @@ class _GroupRecognitionPanelState extends State<GroupRecognitionPanel> {
   Future<void> _startPreview() async {
     final year = _selectedYear;
     final rows = _buildRows();
-    if (year == null) {
-      setState(() => _error = 'Выберите учебный год.');
+    if (year == null || rows.isEmpty) {
+      setState(() {
+        _error = year == null
+            ? 'Выберите учебный год.'
+            : 'Добавьте хотя бы одно название группы.';
+      });
       return;
     }
-    if (rows.isEmpty) {
-      setState(() => _error = 'Добавьте хотя бы одно название группы.');
-      return;
-    }
-    final revision = _revision;
+    final revision = _inputRevision;
     final request = ++_request;
     setState(() {
       _busy = true;
       _preview = null;
-      _reviewIntents.clear();
+      _clearReview();
       _error = null;
     });
     try {
@@ -140,20 +152,211 @@ class _GroupRecognitionPanelState extends State<GroupRecognitionPanel> {
         rows: rows,
         fileName: widget.fileName,
       );
-      if (!mounted || revision != _revision || request != _request) return;
-      setState(() => _preview = preview);
+      if (!mounted || revision != _inputRevision || request != _request) return;
+      setState(() {
+        _preview = preview;
+        _adoptSavedDecisions(preview);
+      });
     } catch (error) {
-      if (!mounted || revision != _revision || request != _request) return;
+      if (!mounted || revision != _inputRevision || request != _request) return;
       setState(() => _error = '$error');
     } finally {
-      if (mounted && request == _request) {
-        setState(() => _busy = false);
+      if (mounted && request == _request) setState(() => _busy = false);
+    }
+  }
+
+  void _adoptSavedDecisions(GroupRecognitionPreview preview) {
+    _clearReview();
+    for (final item in preview.items) {
+      final decision = item.decision;
+      if (decision == null) continue;
+      _drafts[item.rowId] = decision;
+      _discriminators[item.rowId] = TextEditingController(
+        text: decision.distinctDiscriminator,
+      );
+      _reasons[item.rowId] = TextEditingController(
+        text: decision.distinctReason ?? '',
+      );
+    }
+  }
+
+  void _setDecision(
+    GroupRecognitionItem item,
+    GroupRecognitionDecisionAction? action,
+  ) {
+    if (action == null) {
+      setState(() => _drafts.remove(item.rowId));
+      return;
+    }
+    final current = _drafts[item.rowId];
+    final groupId = action == GroupRecognitionDecisionAction.createGroup
+        ? null
+        : current?.selectedGroupId ??
+              (item.candidateGroupIds.length == 1
+                  ? item.candidateGroupIds.single
+                  : null);
+    final fixedPlanId = item.candidateGroups
+        .where((candidate) => candidate.id == groupId)
+        .map(
+          (candidate) => candidate.profile?['curriculum_plan_id']?.toString(),
+        )
+        .whereType<String>()
+        .firstOrNull;
+    final planId =
+        fixedPlanId ??
+        current?.selectedPlanId ??
+        (item.candidatePlanIds.length == 1
+            ? item.candidatePlanIds.single
+            : null);
+    setState(() {
+      _drafts[item.rowId] = GroupRecognitionDecision(
+        previewRowId: item.rowId,
+        action: action,
+        selectedGroupId: groupId,
+        selectedPlanId: planId,
+        distinctDiscriminator: _discriminators[item.rowId]?.text.trim() ?? '',
+        distinctReason: _reasons[item.rowId]?.text.trim(),
+      );
+    });
+  }
+
+  void _updateDecision(
+    GroupRecognitionItem item, {
+    String? groupId,
+    String? planId,
+  }) {
+    final current = _drafts[item.rowId];
+    if (current == null) return;
+    final selectedGroupId = groupId ?? current.selectedGroupId;
+    final fixedPlanId = item.candidateGroups
+        .where((candidate) => candidate.id == selectedGroupId)
+        .map(
+          (candidate) => candidate.profile?['curriculum_plan_id']?.toString(),
+        )
+        .whereType<String>()
+        .firstOrNull;
+    final selectedCandidate = item.candidateGroups
+        .where((candidate) => candidate.id == selectedGroupId)
+        .firstOrNull;
+    final profileNominal =
+        (selectedCandidate?.profile?['nominal_semesters'] as num?)?.toInt();
+    final compatiblePlanIds = item.candidatePlans
+        .where(
+          (plan) =>
+              plan.nominalSemesters >=
+                  (selectedCandidate?.maxTermSemester ?? 0) &&
+              (profileNominal == null ||
+                  plan.nominalSemesters == profileNominal),
+        )
+        .map((plan) => plan.id)
+        .toList(growable: false);
+    final requestedPlanId = fixedPlanId ?? planId ?? current.selectedPlanId;
+    final selectedPlanId = compatiblePlanIds.contains(requestedPlanId)
+        ? requestedPlanId
+        : compatiblePlanIds.length == 1
+        ? compatiblePlanIds.single
+        : null;
+    setState(() {
+      _drafts[item.rowId] = GroupRecognitionDecision(
+        previewRowId: item.rowId,
+        action: current.action,
+        selectedGroupId: selectedGroupId,
+        selectedPlanId: selectedPlanId,
+        distinctDiscriminator: _discriminators[item.rowId]?.text.trim() ?? '',
+        distinctReason: _reasons[item.rowId]?.text.trim(),
+      );
+    });
+  }
+
+  Future<void> _saveDecisions() async {
+    final preview = _preview;
+    if (preview == null) return;
+    final request = ++_request;
+    final inputRevision = _inputRevision;
+    final decisions = [
+      for (final item in preview.items)
+        if (_drafts[item.rowId] case final decision?)
+          GroupRecognitionDecision(
+            previewRowId: item.rowId,
+            action: decision.action,
+            selectedGroupId: decision.selectedGroupId,
+            selectedPlanId: decision.selectedPlanId,
+            distinctDiscriminator:
+                _discriminators[item.rowId]?.text.trim() ?? '',
+            distinctReason: _reasons[item.rowId]?.text.trim(),
+          ),
+    ];
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final saved = await _repository.saveDecisions(
+        preview: preview,
+        decisions: decisions,
+      );
+      if (!mounted || request != _request || inputRevision != _inputRevision) {
+        return;
       }
+      setState(() {
+        _preview = saved;
+        _adoptSavedDecisions(saved);
+      });
+    } catch (error) {
+      if (mounted && request == _request) setState(() => _error = '$error');
+    } finally {
+      if (mounted && request == _request) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _confirmApply() async {
+    final preview = _preview;
+    if (preview == null || !preview.applyEnabled) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Применить проверенные группы?'),
+        content: Text(
+          'Будут применены ${preview.items.length} проверенных решений '
+          '(версия ${preview.decisionRevision}). Создаются только группы и '
+          'их учебные связи. Аккаунты, зачисления, предметные команды и чаты '
+          'не создаются.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Применить эти решения'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final request = ++_request;
+    final inputRevision = _inputRevision;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final applied = await _repository.apply(preview: preview);
+      if (!mounted || request != _request || inputRevision != _inputRevision) {
+        return;
+      }
+      setState(() => _preview = applied);
+    } catch (error) {
+      if (mounted && request == _request) setState(() => _error = '$error');
+    } finally {
+      if (mounted && request == _request) setState(() => _busy = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final preview = _preview;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -163,11 +366,11 @@ class _GroupRecognitionPanelState extends State<GroupRecognitionPanel> {
         ),
         const SizedBox(height: 6),
         const Text(
-          'Система читает номер параллели слева, код программы в середине '
-          'и курс справа. Год поступления вычисляется на сервере.',
+          'Система читает параллель слева, код программы в середине и курс '
+          'справа. Год поступления вычисляется на сервере.',
           style: TextStyle(color: Colors.black54),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
         if (_loadingYears)
           const LinearProgressIndicator()
         else
@@ -193,16 +396,15 @@ class _GroupRecognitionPanelState extends State<GroupRecognitionPanel> {
                 : (year) {
                     setState(() {
                       _selectedYear = year;
-                      _revision++;
+                      _inputRevision++;
                       _preview = null;
-                      _reviewIntents.clear();
-                      _error = null;
+                      _clearReview();
                     });
                   },
           ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         SizedBox(
-          height: 112,
+          height: 96,
           child: TextField(
             controller: _namesController,
             enabled: !_busy,
@@ -211,37 +413,39 @@ class _GroupRecognitionPanelState extends State<GroupRecognitionPanel> {
             decoration: const InputDecoration(
               labelText: 'По одной группе в строке',
               hintText: '1-СбПГС-2\n2-СДПГС-2',
-              alignLabelWithHint: true,
               border: OutlineInputBorder(),
             ),
           ),
         ),
-        const SizedBox(height: 12),
-        Row(
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 10,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             FilledButton.icon(
               onPressed: _busy || _loadingYears ? null : _startPreview,
-              icon: _busy
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.fact_check_outlined),
-              label: const Text('Быстрая проверка'),
+              icon: const Icon(Icons.fact_check_outlined),
+              label: const Text('Проверить'),
             ),
-            const SizedBox(width: 12),
-            const Expanded(
-              child: Text(
-                'Сохранение пока отключено: это безопасный preview без '
-                'изменения групп и аккаунтов.',
-                style: TextStyle(color: Colors.black54),
+            if (preview != null && preview.results.isEmpty)
+              OutlinedButton.icon(
+                onPressed: _busy ? null : _saveDecisions,
+                icon: const Icon(Icons.save_outlined),
+                label: const Text('Сохранить решения'),
               ),
-            ),
+            if (preview?.applyEnabled == true && preview!.results.isEmpty)
+              FilledButton.icon(
+                onPressed: _busy ? null : _confirmApply,
+                icon: const Icon(Icons.check_circle_outline),
+                label: const Text('Применить после подтверждения'),
+              ),
+            if (AdminBackendConfig.isDemoMode)
+              const Chip(label: Text('Демо: применение отключено')),
           ],
         ),
         if (_error != null) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           MaterialBanner(
             content: Text(_error!),
             actions: [
@@ -252,31 +456,25 @@ class _GroupRecognitionPanelState extends State<GroupRecognitionPanel> {
             ],
           ),
         ],
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         Expanded(
-          child: _preview == null
+          child: preview == null
               ? const Center(
                   child: Text(
-                    'Нажмите «Быстрая проверка», чтобы увидеть курс, '
-                    'год поступления, программу, план и дубликаты.',
+                    'Проверьте список, затем выберите и сохраните решение '
+                    'для каждой строки без ошибок.',
                     textAlign: TextAlign.center,
                   ),
                 )
+              : preview.results.isNotEmpty
+              ? _ApplySummary(preview: preview)
               : _RecognitionResults(
-                  preview: _preview!,
-                  reviewIntents: _reviewIntents,
-                  onIntentChanged: (item, intent) {
-                    final preview = _preview;
-                    if (preview == null) return;
-                    final key = '${preview.previewId}:${item.sourceRowKey}';
-                    setState(() {
-                      if (intent == null) {
-                        _reviewIntents.remove(key);
-                      } else {
-                        _reviewIntents[key] = intent;
-                      }
-                    });
-                  },
+                  preview: preview,
+                  decisions: _drafts,
+                  discriminators: _discriminators,
+                  reasons: _reasons,
+                  onAction: _setDecision,
+                  onSelection: _updateDecision,
                 ),
         ),
       ],
@@ -287,36 +485,38 @@ class _GroupRecognitionPanelState extends State<GroupRecognitionPanel> {
 class _RecognitionResults extends StatelessWidget {
   const _RecognitionResults({
     required this.preview,
-    required this.reviewIntents,
-    required this.onIntentChanged,
+    required this.decisions,
+    required this.discriminators,
+    required this.reasons,
+    required this.onAction,
+    required this.onSelection,
   });
 
   final GroupRecognitionPreview preview;
-  final Map<String, GroupDuplicateReviewIntent> reviewIntents;
-  final void Function(
-    GroupRecognitionItem item,
-    GroupDuplicateReviewIntent? intent,
-  )
-  onIntentChanged;
+  final Map<String, GroupRecognitionDecision> decisions;
+  final Map<String, TextEditingController> discriminators;
+  final Map<String, TextEditingController> reasons;
+  final void Function(GroupRecognitionItem, GroupRecognitionDecisionAction?)
+  onAction;
+  final void Function(GroupRecognitionItem, {String? groupId, String? planId})
+  onSelection;
 
   @override
   Widget build(BuildContext context) {
-    final summary = preview.summary;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Wrap(
           spacing: 8,
-          runSpacing: 8,
           children: [
-            Chip(label: Text('Всего: ${summary['total'] ?? 0}')),
-            Chip(label: Text('Найдены: ${summary['exact'] ?? 0}')),
-            Chip(label: Text('Новые: ${summary['new_candidate'] ?? 0}')),
-            Chip(label: Text('Нужна проверка: ${summary['blocked'] ?? 0}')),
-            const Chip(
-              avatar: Icon(Icons.lock_outline, size: 18),
-              label: Text('Только preview'),
+            Chip(label: Text('Всего: ${preview.summary['total'] ?? 0}')),
+            Chip(
+              label: Text(
+                'Нужны решения: ${preview.summary['needs_decision'] ?? 0}',
+              ),
             ),
+            Chip(label: Text('Ошибки: ${preview.summary['blocked'] ?? 0}')),
+            Chip(label: Text('Сохранено: ${preview.decisionRevision}')),
           ],
         ),
         const SizedBox(height: 8),
@@ -326,47 +526,68 @@ class _RecognitionResults extends StatelessWidget {
             separatorBuilder: (_, _) => const SizedBox(height: 6),
             itemBuilder: (context, index) {
               final item = preview.items[index];
-              final intentKey = '${preview.previewId}:${item.sourceRowKey}';
               return Card(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    ListTile(
-                      leading: Icon(
-                        item.isBlocked
-                            ? Icons.warning_amber_rounded
-                            : Icons.check_circle_outline,
-                        color: item.isBlocked ? Colors.orange : Colors.green,
-                      ),
-                      title: Text(item.rawGroupName),
-                      subtitle: Text(
-                        'Параллель: ${item.parallelNumber ?? '—'} · '
-                        'код: ${item.programAliasKey ?? '—'} · '
-                        'курс: ${item.courseNumber ?? '—'} · '
-                        'поступление: ${item.derivedAdmissionYear ?? '—'}\n'
-                        '${_classificationLabel(item.classification)}'
-                        '${item.warnings.isEmpty ? '' : ' · ${item.warnings.join(', ')}'}',
-                      ),
-                      isThreeLine: true,
-                      trailing: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.end,
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
                         children: [
-                          Text('групп: ${item.candidateGroupIds.length}'),
-                          Text('планов: ${item.candidatePlanIds.length}'),
+                          Icon(
+                            item.isBlocked
+                                ? Icons.warning_amber_rounded
+                                : Icons.check_circle_outline,
+                            color: item.isBlocked
+                                ? Colors.orange
+                                : Colors.green,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              item.rawGroupName,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          Text(_classificationLabel(item.classification)),
                         ],
                       ),
-                    ),
-                    if (_showsDuplicateReview(item))
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-                        child: _DuplicateIntentReview(
-                          item: item,
-                          value: reviewIntents[intentKey],
-                          onChanged: (intent) => onIntentChanged(item, intent),
-                        ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Параллель ${item.parallelNumber ?? '—'} · '
+                        'курс ${item.courseNumber ?? '—'} · '
+                        'поступление ${item.derivedAdmissionYear ?? '—'}',
+                        style: const TextStyle(color: Colors.black54),
                       ),
-                  ],
+                      if (item.warnings.isNotEmpty) ...[
+                        const SizedBox(height: 5),
+                        Text(
+                          _warningText(item.warnings),
+                          style: const TextStyle(color: Color(0xFF8B5A00)),
+                        ),
+                      ],
+                      if (item.isActionable) ...[
+                        const Divider(height: 22),
+                        _DecisionEditor(
+                          item: item,
+                          decision: decisions[item.rowId],
+                          discriminator: discriminators.putIfAbsent(
+                            item.rowId,
+                            TextEditingController.new,
+                          ),
+                          reason: reasons.putIfAbsent(
+                            item.rowId,
+                            TextEditingController.new,
+                          ),
+                          onAction: (value) => onAction(item, value),
+                          onGroup: (value) => onSelection(item, groupId: value),
+                          onPlan: (value) => onSelection(item, planId: value),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               );
             },
@@ -375,123 +596,235 @@ class _RecognitionResults extends StatelessWidget {
       ],
     );
   }
-
-  bool _showsDuplicateReview(GroupRecognitionItem item) {
-    return const {
-      'exact_group',
-      'exact_alias',
-      'semantic_duplicate',
-      'ambiguous_plan',
-    }.contains(item.classification);
-  }
-
-  String _classificationLabel(String value) {
-    return switch (value) {
-      'exact_group' => 'Точная существующая группа',
-      'exact_alias' => 'Найдена по подтверждённому варианту названия',
-      'semantic_duplicate' => 'Найден смысловой дубликат',
-      'new_candidate' => 'Можно создать после подтверждения',
-      'ambiguous_plan' => 'Нужно выбрать версию учебного плана',
-      'no_plan' => 'Подходящий проверенный план не найден',
-      'program_unregistered' => 'Код программы ещё не подтверждён',
-      'parser_blocked' => 'Формат названия не распознан',
-      _ => 'Конфликт: требуется ручная проверка',
-    };
-  }
 }
 
-class _DuplicateIntentReview extends StatelessWidget {
-  const _DuplicateIntentReview({
+class _DecisionEditor extends StatelessWidget {
+  const _DecisionEditor({
     required this.item,
-    required this.value,
-    required this.onChanged,
+    required this.decision,
+    required this.discriminator,
+    required this.reason,
+    required this.onAction,
+    required this.onGroup,
+    required this.onPlan,
   });
 
   final GroupRecognitionItem item;
-  final GroupDuplicateReviewIntent? value;
-  final ValueChanged<GroupDuplicateReviewIntent?> onChanged;
+  final GroupRecognitionDecision? decision;
+  final TextEditingController discriminator;
+  final TextEditingController reason;
+  final ValueChanged<GroupRecognitionDecisionAction?> onAction;
+  final ValueChanged<String?> onGroup;
+  final ValueChanged<String?> onPlan;
 
-  bool get _hasUniqueCandidate => item.candidateGroupIds.length == 1;
-  bool get _canReuse =>
-      _hasUniqueCandidate &&
-      const {
-        'exact_group',
-        'exact_alias',
-        'semantic_duplicate',
-      }.contains(item.classification);
-  bool get _canAddAlias =>
-      _hasUniqueCandidate && item.classification == 'semantic_duplicate';
+  List<GroupRecognitionDecisionAction> get _actions =>
+      switch (item.classification) {
+        'exact_group' ||
+        'exact_alias' => const [GroupRecognitionDecisionAction.reuseGroup],
+        'semantic_duplicate' => GroupRecognitionDecisionAction.values,
+        _ => const [GroupRecognitionDecisionAction.createGroup],
+      };
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF8E7),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE8D7A9)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Предлагаемое решение по дублю',
-              style: TextStyle(fontWeight: FontWeight.w700),
+    final action = decision?.action;
+    final needsGroup =
+        action == GroupRecognitionDecisionAction.reuseGroup ||
+        action == GroupRecognitionDecisionAction.addAlias;
+    final needsDistinct =
+        item.classification == 'semantic_duplicate' &&
+        action == GroupRecognitionDecisionAction.createGroup;
+    final selectedCandidate = item.candidateGroups
+        .where((candidate) => candidate.id == decision?.selectedGroupId)
+        .firstOrNull;
+    final profileNominal =
+        (selectedCandidate?.profile?['nominal_semesters'] as num?)?.toInt();
+    final availablePlans = item.candidatePlans
+        .where((plan) {
+          if (plan.nominalSemesters <
+              (selectedCandidate?.maxTermSemester ?? 0)) {
+            return false;
+          }
+          return profileNominal == null ||
+              plan.nominalSemesters == profileNominal;
+        })
+        .toList(growable: false);
+    final fixedPlanId = item.candidateGroups
+        .where((candidate) => candidate.id == decision?.selectedGroupId)
+        .map(
+          (candidate) => candidate.profile?['curriculum_plan_id']?.toString(),
+        )
+        .whereType<String>()
+        .firstOrNull;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        DropdownButtonFormField<GroupRecognitionDecisionAction>(
+          initialValue: action,
+          decoration: const InputDecoration(
+            labelText: 'Решение',
+            border: OutlineInputBorder(),
+          ),
+          items: [
+            for (final value in _actions)
+              DropdownMenuItem(value: value, child: Text(_actionLabel(value))),
+          ],
+          onChanged: onAction,
+        ),
+        if (needsGroup) ...[
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            initialValue: decision?.selectedGroupId,
+            decoration: const InputDecoration(
+              labelText: 'Существующая группа',
+              border: OutlineInputBorder(),
             ),
-            const SizedBox(height: 4),
-            const Text(
-              'Локальная пометка для проверки — не сохраняется и не '
-              'применяется. После изменения списка или года выбор сбросится.',
-              style: TextStyle(color: Colors.black54, fontSize: 12),
-            ),
-            const SizedBox(height: 8),
-            if (!_hasUniqueCandidate)
-              Text(
-                item.classification == 'ambiguous_plan'
-                    ? 'Сначала нужно выбрать версию учебного плана; решение '
-                          'по группе недоступно.'
-                    : 'Нельзя выбрать действие: сервер не нашёл ровно одну '
-                          'группу-кандидата.',
-                style: const TextStyle(color: Color(0xFF8B5A00)),
-              ),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                ChoiceChip(
-                  label: const Text('Использовать найденную группу'),
-                  selected: value == GroupDuplicateReviewIntent.reuseGroup,
-                  onSelected: _canReuse
-                      ? (selected) => onChanged(
-                          selected
-                              ? GroupDuplicateReviewIntent.reuseGroup
-                              : null,
-                        )
-                      : null,
-                ),
-                ChoiceChip(
-                  label: const Text('Добавить это название как вариант'),
-                  selected: value == GroupDuplicateReviewIntent.addAlias,
-                  onSelected: _canAddAlias
-                      ? (selected) => onChanged(
-                          selected ? GroupDuplicateReviewIntent.addAlias : null,
-                        )
-                      : null,
-                ),
-                const Tooltip(
-                  message:
-                      'Нужны дискриминатор, причина, аудит и server apply.',
-                  child: Chip(
-                    avatar: Icon(Icons.lock_outline, size: 16),
-                    label: Text('Создать отдельную — недоступно'),
+            items: [
+              for (final id in item.candidateGroupIds)
+                DropdownMenuItem(
+                  value: id,
+                  child: Text(
+                    item.candidateGroups
+                            .where((value) => value.id == id)
+                            .map((value) => value.label)
+                            .firstOrNull ??
+                        'Группа-кандидат',
                   ),
                 ),
-              ],
+            ],
+            onChanged: onGroup,
+          ),
+        ],
+        if (action != null &&
+            item.classification != 'exact_group' &&
+            item.classification != 'exact_alias' &&
+            fixedPlanId == null &&
+            (item.candidatePlanIds.length > 1 ||
+                item.classification == 'ambiguous_plan')) ...[
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            initialValue: decision?.selectedPlanId,
+            decoration: const InputDecoration(
+              labelText: 'Учебный план',
+              border: OutlineInputBorder(),
             ),
-          ],
-        ),
-      ),
+            items: [
+              for (final plan in availablePlans)
+                DropdownMenuItem(value: plan.id, child: Text(plan.label)),
+            ],
+            onChanged: onPlan,
+          ),
+        ],
+        if (needsDistinct) ...[
+          const SizedBox(height: 8),
+          TextField(
+            controller: discriminator,
+            decoration: const InputDecoration(
+              labelText: 'Чем группа отличается',
+              hintText: 'Например: целевой набор',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: reason,
+            decoration: const InputDecoration(
+              labelText: 'Почему нужна отдельная группа',
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
+
+class _ApplySummary extends StatelessWidget {
+  const _ApplySummary({required this.preview});
+  final GroupRecognitionPreview preview;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      children: [
+        const ListTile(
+          leading: Icon(Icons.check_circle, color: Colors.green),
+          title: Text('Решения применены'),
+          subtitle: Text(
+            'Созданы или связаны только группы, названия и учебные профили.',
+          ),
+        ),
+        for (final result in preview.results)
+          ListTile(
+            title: Text(result.groupName),
+            subtitle: Text(
+              '${_actionWireLabel(result.action)} · ${result.planLabel}\n'
+              'Название: ${_outcomeLabel(result.aliasOutcome)} · '
+              'идентичность: ${_outcomeLabel(result.identityOutcome)} · '
+              'профиль: ${_outcomeLabel(result.profileOutcome)}',
+            ),
+            isThreeLine: true,
+          ),
+      ],
+    );
+  }
+}
+
+String _classificationLabel(String value) => switch (value) {
+  'exact_group' => 'Точное совпадение',
+  'exact_alias' => 'Подтверждённый вариант',
+  'semantic_duplicate' => 'Возможный дубликат',
+  'new_candidate' => 'Новая группа',
+  'ambiguous_plan' => 'Нужно выбрать план',
+  'no_plan' => 'Нет подходящего плана',
+  'program_unregistered' => 'Код программы не подтверждён',
+  'parser_blocked' => 'Название не распознано',
+  _ => 'Конфликт данных',
+};
+
+String _warningText(List<String> warnings) => warnings
+    .map((value) {
+      return switch (value) {
+        'multiple_plan_versions_require_choice' =>
+          'Выберите одну подтверждённую версию учебного плана.',
+        'matching_reviewed_plan_not_found' =>
+          'Для этого года поступления нет подтверждённого плана.',
+        'group_identity_conflict' =>
+          'Учебная идентичность найденной группы не совпадает.',
+        'group_profile_conflict' =>
+          'Учебный профиль найденной группы несовместим.',
+        'group_plan_conflict' => 'У группы уже указан другой учебный план.',
+        'group_nominal_semesters_conflict' =>
+          'Продолжительность обучения группы и плана различается.',
+        'group_semester_exceeds_plan' =>
+          'У группы есть семестр за пределами выбранного плана.',
+        'semantic_candidates_incompatible' =>
+          'Найденные похожие группы имеют несовместимый учебный профиль или план.',
+        _ => 'Строку нельзя применить без дополнительной проверки.',
+      };
+    })
+    .join(' ');
+
+String _actionLabel(GroupRecognitionDecisionAction value) => switch (value) {
+  GroupRecognitionDecisionAction.reuseGroup =>
+    'Использовать существующую группу',
+  GroupRecognitionDecisionAction.addAlias =>
+    'Использовать группу и сохранить это название',
+  GroupRecognitionDecisionAction.createGroup => 'Создать отдельную группу',
+};
+
+String _actionWireLabel(String value) => switch (value) {
+  'reuse_group' => 'Использована существующая группа',
+  'add_alias' => 'Сохранён новый вариант названия',
+  'create_group' => 'Создана новая группа',
+  _ => 'Решение применено',
+};
+
+String _outcomeLabel(String value) => switch (value) {
+  'created' => 'создано',
+  'existing' => 'уже было',
+  'retained' => 'сохранён',
+  'plan_bound' => 'план привязан',
+  'not_requested' => 'без изменений',
+  _ => value,
+};

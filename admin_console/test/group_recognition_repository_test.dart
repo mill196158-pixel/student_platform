@@ -19,13 +19,37 @@ class _RecordingRpcClient implements GroupRecognitionRpcClient {
         },
       ];
     }
+    final isApplied = function == 'admin_group_recognition_apply';
     return {
       'preview_id': 'preview-1',
+      'payload_hash': 'payload-hash',
+      'row_version': function == 'admin_group_recognition_save_decisions'
+          ? 2
+          : 1,
+      'decision_revision':
+          function == 'admin_group_recognition_save_decisions' ||
+              function == 'admin_group_recognition_apply'
+          ? 1
+          : 0,
+      'decision_hash': 'decision-hash',
+      'confirmation_token': 'confirmation-token',
       'summary': {'total': 1, 'exact': 0, 'new_candidate': 1, 'blocked': 0},
-      'apply_enabled': false,
-      'apply_blocker': 'group_recognition_foundation_preview_only',
+      'apply_enabled': function == 'admin_group_recognition_save_decisions',
+      'results': isApplied
+          ? [
+              {
+                'action': 'create_group',
+                'group_name': '1-СбПГС-2',
+                'alias_outcome': 'created',
+                'identity_outcome': 'created',
+                'profile_outcome': 'created',
+                'plan_label': 'ПГС · 8 сем.',
+              },
+            ]
+          : <Map<String, dynamic>>[],
       'items': [
         {
+          'row_id': 'row-1',
           'source_row_key': '1',
           'raw_group_name': '1-СбПГС-2',
           'normalized_group_name': '1-сбпгс-2',
@@ -72,6 +96,24 @@ void main() {
     ]);
     expect(rpc.lastParams?['p_academic_year_id'], 'year-2026');
     expect(rpc.lastParams?['p_idempotency_key'], 'batch-1');
+
+    final saved = await repository.saveDecisions(
+      preview: preview,
+      decisions: const [
+        GroupRecognitionDecision(
+          previewRowId: 'row-1',
+          action: GroupRecognitionDecisionAction.createGroup,
+          selectedPlanId: 'plan-1',
+        ),
+      ],
+    );
+    expect(saved.decisionRevision, 1);
+    expect(saved.applyEnabled, isTrue);
+    expect(rpc.lastParams?['p_expected_payload_hash'], 'payload-hash');
+
+    final applied = await repository.apply(preview: saved);
+    expect(applied.results.single.groupName, '1-СбПГС-2');
+    expect(rpc.lastParams?['p_confirmation'], 'confirmation-token');
   });
 
   test('local parser treats right suffix as course', () async {
@@ -100,5 +142,15 @@ void main() {
     expect(preview.items[3].classification, 'parser_blocked');
     expect(preview.items[4].classification, 'parser_blocked');
     expect(preview.items[5].classification, 'parser_blocked');
+    await expectLater(
+      () => repository.apply(preview: preview),
+      throwsA(
+        isA<GroupRecognitionException>().having(
+          (error) => error.code,
+          'code',
+          'local_apply_disabled',
+        ),
+      ),
+    );
   });
 }

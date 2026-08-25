@@ -1,7 +1,7 @@
 # CURRENT_TASK
 
 * Status: **IN PROGRESS** — Stage 19.1 multi-format academic ingestion
-* Active Stage: Stage 19.1b deterministic group recognition (Slice 1)
+* Active Stage: Stage 19.1b deterministic group recognition (Slice 2)
 * Branch: `feature/content-platform`
 * Codex identity-foundation verdict: **APPROVE**
 * Codex document-extraction verdict: **APPROVE**
@@ -10,6 +10,8 @@
 * Codex group-recognition architecture verdict: **APPROVE_WITH_NOTES**
   (no P0/P1)
 * Codex group-recognition implementation verdict: **APPROVE_WITH_NOTES**
+  (no P0/P1; PostgreSQL runtime pending)
+* Codex group-recognition Slice 2 verdict: **APPROVE**
   (no P0/P1; PostgreSQL runtime pending)
 * Codex unified Admin academic-workflow verdict: **APPROVE**
 * Remote: `gwdanmwluhrcfxbnplwd`
@@ -81,6 +83,24 @@
   * durable read-only preview shows exact names, aliases, semantic duplicates,
     plan ambiguity, unknown programs and malformed names;
   * Admin Web exposes a fast group-name check; apply remains fail-closed.
+* Stage 19.1b Slice 2 is implemented locally and Codex **APPROVE**:
+  * durable zero-or-one decisions are stored only for actionable rows;
+  * preview v2 stores human candidate labels plus alias/program/identity/
+    profile/plan/max-semester drift snapshots;
+  * owner-scoped `groups.write` decision replacement is atomic and
+    revision/hash bound;
+  * apply is bound to preview row version, payload hash, decision revision/hash
+    and an exact confirmation token;
+  * reused groups follow the insert/retain/bind-only compatibility matrix;
+    existing plans are never replaced;
+  * new groups are inserted directly, without `admin_upsert_group`, so no
+    accounts, enrollments, offerings, spaces, teams or chats are created;
+  * immutable row results support exact idempotent replay;
+  * Admin Web saves durable decisions, uses candidate-specific group/plan
+    selectors, confirms the exact revision and shows a plain-language result;
+  * local demo apply remains disabled;
+  * changed-file analyze and all seven focused academic/group test files pass
+    (**28 tests**); `git diff --check` passes.
 * Unified Admin academic workflow UI is implemented locally and Codex-approved:
   * `/import-studio` starts with plan → group/student matching → annual
     process calendar → schedule/readiness cards;
@@ -94,17 +114,16 @@
 
 ## Residuals (not blockers)
 
-* Local Docker remains unavailable, but the SQL foundation was verified on
-  remote PostgreSQL with rollback-only fixtures.
+* Local Docker remains unavailable. Slice 2 migration compilation and its new
+  rollback-only role-play have not run on PostgreSQL; static SQL assertions and
+  Codex review pass.
 * No real academic import, current-term transition, or Edge deploy was
   performed.
 
 ## Next (optional)
 
-1. Execute the migration and rollback-only role-play only with owner
-   authorization for remote Supabase.
-2. Execute Stage 19.1b migration and rollback-only role-play only with owner
-   authorization; focused Flutter tests and analyze already pass.
-3. In a later approved slice, add persisted duplicate decisions and atomic group
-   academic-profile/plan binding. Do not create Auth users, enrollments,
-   offerings, group spaces, teams or chats in that apply.
+1. Execute the Stage 19.1b Slice 1 and Slice 2 migrations plus rollback-only
+   role-plays only with owner authorization for remote Supabase.
+2. After PostgreSQL runtime PASS, keep real group import separately
+   owner-gated. Do not create Auth users, enrollments, offerings, group spaces,
+   teams or chats through group recognition.

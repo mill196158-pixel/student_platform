@@ -1,12 +1,12 @@
 # Content Platform Spec (Stages 14–21)
 
-Date: **2026-07-29**  
-Branch: `feature/content-platform` (base `origin/refactor/chat-tab`)  
-Worktree: `/Users/annasuvorova/student_platform_content`  
-Remote Supabase (read-only confirmed): `gwdanmwluhrcfxbnplwd`  
+Date: **2026-07-29**
+Branch: `feature/content-platform` (base `origin/refactor/chat-tab`)
+Worktree: `/Users/annasuvorova/student_platform_content`
+Remote Supabase (read-only confirmed): `gwdanmwluhrcfxbnplwd`
 Codex thread: `019fa373-81f2-7962-a8c9-81d86cb62311`
 
-Implementation contract. Does **not** replace `docs/master_roadmap.md`.  
+Implementation contract. Does **not** replace `docs/master_roadmap.md`.
 Acceptance: `ACCEPTANCE_CHECKLIST.md`. Active work: `docs/agent_coordination/CURRENT_TASK.md`.
 
 ---
@@ -76,7 +76,7 @@ content item · approved template · placement · audience · asset · version �
 
 ### 2.2 Stage 14 permission scope
 
-Stage 14 RPCs use **only** live keys: `content.read` / `content.write` / `content.publish` via `private.require_admin_permission(...)`.  
+Stage 14 RPCs use **only** live keys: `content.read` / `content.write` / `content.publish` via `private.require_admin_permission(...)`.
 No new permission codes in Stage 14.
 
 ### 2.3 Tables
@@ -201,9 +201,9 @@ Every table: `ENABLE` + `FORCE` RLS; `REVOKE ALL` from PUBLIC/anon/authenticated
 
 Mobile/admin lists for a placement sort by:
 
-1. `content_item_placements.sort_order` ASC  
-2. `content_items.priority` DESC  
-3. `published_at` DESC NULLS LAST  
+1. `content_item_placements.sort_order` ASC
+2. `content_items.priority` DESC
+3. `published_at` DESC NULLS LAST
 
 `admin_reorder_content_placement(
   p_placement text,
@@ -226,14 +226,14 @@ Sort order is stored only on placement rows; item `row_version` changes only as 
 | `users` | ≥1 user; groups empty | explicit user row |
 | `groups_and_users` | ≥1 group and ≥1 user | OR of group membership and explicit user |
 
-Publish rejects empty targeted audience (resolved count = 0).  
-Setter is transactional: replace junctions + set mode + bump `row_version`.  
+Publish rejects empty targeted audience (resolved count = 0).
+Setter is transactional: replace junctions + set mode + bump `row_version`.
 Single helper `private.content_item_visible_to_user(item_id, user_id)` shared by mobile list and admin preview count.
 
 ### 2.6 Optimistic concurrency
 
-Mutating admin RPCs that touch an existing item take `p_expected_row_version int` (single-item) or `p_expected_row_versions int[]` (reorder). Mismatch → conflict error and full rollback. Success increments `row_version`.  
-Applies to: update draft, set placements, set audience, publish, unpublish, archive, restore version, reorder.  
+Mutating admin RPCs that touch an existing item take `p_expected_row_version int` (single-item) or `p_expected_row_versions int[]` (reorder). Mismatch → conflict error and full rollback. Success increments `row_version`.
+Applies to: update draft, set placements, set audience, publish, unpublish, archive, restore version, reorder.
 Exception: `admin_create_content_draft` has no prior row_version.
 
 ### 2.7 Payload validation (fail-closed; no pg_jsonschema)
@@ -242,9 +242,9 @@ Remote has **no** `pg_jsonschema`. Runtime validator:
 
 `private.validate_content_payload(template_key, schema_version, payload) returns void`
 
-Implemented as **versioned PL/pgSQL** per-template field checks (required keys, types, max lengths, enums, CTA allowlist).  
-This is **not** a JSON Schema engine. `schema_doc` is UI documentation only — never executed as a schema engine.  
-Unknown template / inactive / wrong schema_version / extra unknown keys → exception.  
+Implemented as **versioned PL/pgSQL** per-template field checks (required keys, types, max lengths, enums, CTA allowlist).
+This is **not** a JSON Schema engine. `schema_doc` is UI documentation only — never executed as a schema engine.
+Unknown template / inactive / wrong schema_version / extra unknown keys → exception.
 Publish re-validates.
 
 **Asset-in-payload invariant (publish + restore):** every `*_asset_id` / asset ref inside payload/blocks must:
@@ -273,7 +273,7 @@ Placement must be ∈ `allowed_placements`.
 
 ### 2.9 Version snapshot + restore
 
-Snapshot JSON includes: payload, template_key, schema_version, schedule, priority, is_hidden, audience_mode, placements[], audience_group_ids[], audience_user_ids[], asset_ids[].  
+Snapshot JSON includes: payload, template_key, schema_version, schedule, priority, is_hidden, audience_mode, placements[], audience_group_ids[], audience_user_ids[], asset_ids[].
 Restore creates a **new** `version_number`, writes draft fields from snapshot, bumps `row_version`; does **not** auto-publish. Missing referenced asset → loud failure.
 
 ### 2.10 Events / privacy
@@ -424,7 +424,7 @@ Lookups/writes use `subject_id` / `subject_catalog_id` / `subject_offering_id` �
 
 **Section order:** fixed allowlist of keys (shared Dart + SQL). Reject unknown keys and duplicates. Omitted supported keys append in default order.
 
-Default allowlist (order):  
+Default allowlist (order):
 `short_description`, `description`, `learning_outcomes`, `what_to_expect`, `how_to_pass`, `requirements`, `useful_materials_note`, `useful_links`, `common_pitfalls`, `teachers`, `hours_credits`, `relevance_date`, `teacher_specific_note`, `assessment_note`, `workload_note`.
 
 Additive offering-only keys appear only when the offering has a non-null value; if omitted from a stored order they append after `relevance_date` in the default relative order above.
@@ -519,8 +519,8 @@ owner-gated; signed-upload intent/finalize residuals stay explicitly tracked.
 
 ## 5. Stage 17 — Vacancies
 
-Dedicated tables: `vacancies`, versions, audience junctions, assets, reports, moderation actions.  
-Status: `draft → submitted → in_moderation → approved/published → expired|archived|rejected`.  
+Dedicated tables: `vacancies`, versions, audience junctions, assets, reports, moderation actions.
+Status: `draft → submitted → in_moderation → approved/published → expired|archived|rejected`.
 User submit never auto-publishes. Demo: `origin=demo` + «Пример» or non-production audience.
 
 **Admin/demo ready-publish (Stage 17.1):** Visual Studio «Опубликовать» on an authored draft (`origin ∈ {admin,demo}` AND `submitted_by IS NULL`) may call `admin_ready_publish_vacancy`, which atomically records `draft → in_moderation → approved → published` (requires `moderation.action|write` + `content.publish`). Any `user_submission` or non-null `submitted_by` stays fail-closed and must use the moderation queue.
@@ -529,15 +529,15 @@ User submit never auto-publishes. Demo: `origin=demo` + «Пример» or non-
 
 ## 6. Stage 18 — Reviews, points, unified moderation
 
-Extend 13.6 with moderation statuses for publish-after-approve.  
-`student_points_ledger`: +1 on approve, unique per `review_id`, compensating −1 on violation removal; not money.  
+Extend 13.6 with moderation statuses for publish-after-approve.
+`student_points_ledger`: +1 on approve, unique per `review_id`, compensating −1 on violation removal; not money.
 Cannot moderate own review. Unified Admin Moderation queue.
 
 ---
 
 ## 7. Stage 19 — Import Studio
 
-Admin hub + domain validators; template → map → dry-run → diff → confirm apply → batch id → idempotent re-run → safe rollback where possible.  
+Admin hub + domain validators; template → map → dry-run → diff → confirm apply → batch id → idempotent re-run → safe rollback where possible.
 Curriculum chain uses IDs. No auto current-term flip. No Autumn 2026 without owner. Web: RPC/Edge only.
 
 ### 7.1 Multi-format academic ingestion
@@ -579,6 +579,48 @@ Locked group-recognition rules:
 - Stage 19.1b Slice 1 stores a durable idempotent preview and displays it in
   Admin Web, but cannot create or mutate groups, accounts, enrollments,
   profiles, plans, offerings, group spaces, teams, chats or schedules.
+
+Stage 19.1b Slice 2 apply contract:
+
+- only actionable preview rows may have zero or one durable decision; parser,
+  unknown-program, no-plan and conflict rows cannot have a decision;
+- exact name/alias is group-selection evidence only; parser, active reviewed
+  program, identity, profile, selected plan and maximum existing semester are
+  independently snapshotted and revalidated;
+- exact/alias requires reuse of its unique group; semantic duplicate allows
+  reuse, add-alias, or exceptional create with a normalized discriminator and
+  meaningful reason; new candidate requires create with its unique plan;
+  ambiguous plan requires create with an explicitly selected candidate plan;
+- owner + `groups.write` replaces decisions atomically under deterministic
+  locks; duplicate row IDs reject the whole request; preview decision revision,
+  decision hash and row version increment and the operation is audited;
+- apply requires exact preview ID/row version/payload hash/decision
+  revision/hash and a server-derived confirmation token bound to those facts;
+- apply locks and revalidates alias/program/identity/profile/plan/max-semester
+  snapshots; missing or changed facts fail stale without partial writes;
+- reuse may insert an absent identity/profile, retain a compatible active
+  profile, or bind a null plan. It never replaces a different plan and blocks
+  admission, nominal duration, identity, discriminator or max-semester drift;
+- new groups are inserted directly into `groups`, then alias, identity and
+  active academic profile are added. `admin_upsert_group` is forbidden because
+  it creates group spaces;
+- this flow never creates accounts, enrollments, offerings, spaces, teams,
+  chats or schedules;
+- immutable per-row results record action/group/alias/identity/profile/plan.
+  An applied retry succeeds only for the same owner, permission, hashes,
+  revision and confirmation and returns the stored result;
+- decision/result tables use RLS + FORCE RLS, service-role-only table access,
+  and authenticated RPC execution only. Mutating RPCs are `SECURITY DEFINER`
+  with `search_path=''` and internal permission checks;
+- Admin uses human candidate labels, durable save, candidate-specific
+  group/plan selectors, exact-revision confirmation and a plain-Russian result.
+  Edits and stale async responses invalidate the local review. Demo apply is
+  disabled.
+
+Slice 2 migration
+`20260825195812_stage19_1b_group_recognition_apply` is local-only with Codex
+**APPROVE**. PostgreSQL migration/rollback-role-play execution remains open
+because local Docker is unavailable and remote apply requires owner approval.
 
 Locked ingestion rules:
 
@@ -634,7 +676,7 @@ File later: `AI_ASSISTANTS_SPEC.md`. Draft-only; human publish; kill-switch; min
 
 ## 9. Stage 21 — RF infra (roadmap only)
 
-File later: `RF_INFRA_MIGRATION_ROADMAP.md`.  
+File later: `RF_INFRA_MIGRATION_ROADMAP.md`.
 Caveat: FCM/APNs remain external; VPN independence not promised without physical network test.
 
 ---
