@@ -217,11 +217,11 @@ begin
       )
       and (
         select bool_and(plan ? 'label')
-        from jsonb_array_elements(v_preview -> 'items')
+        from jsonb_array_elements(v_preview -> 'items') item(value)
         cross join lateral jsonb_array_elements(
-          value -> 'evidence' -> 'candidate_snapshot' -> 'plans'
-        ) plan
-        where value ->> 'source_row_key' = 'new'
+          item.value -> 'evidence' -> 'candidate_snapshot' -> 'plans'
+        ) plans(plan)
+        where item.value ->> 'source_row_key' = 'new'
       )
   );
 
