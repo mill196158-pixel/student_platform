@@ -211,14 +211,16 @@ begin
       and (
         select jsonb_array_length(
           value -> 'evidence' -> 'candidate_snapshot' -> 'plans'
-        ) = 1
+        ) = 2
         from jsonb_array_elements(v_preview -> 'items')
         where value ->> 'source_row_key' = 'new'
       )
       and (
-        select value -> 'evidence' -> 'candidate_snapshot' -> 'plans'
-          -> 0 ? 'label'
+        select bool_and(plan ? 'label')
         from jsonb_array_elements(v_preview -> 'items')
+        cross join lateral jsonb_array_elements(
+          value -> 'evidence' -> 'candidate_snapshot' -> 'plans'
+        ) plan
         where value ->> 'source_row_key' = 'new'
       )
   );
@@ -660,8 +662,12 @@ begin
   perform pg_temp.ga_assert(
     'security definer functions pin empty search path',
     (
-      select bool_and(coalesce(proconfig, '{}') @> array['search_path='])
-      from pg_proc
+      select bool_and(exists (
+        select 1
+        from unnest(coalesce(p.proconfig, '{}')) config
+        where config in ('search_path=', 'search_path=""')
+      ))
+      from pg_proc p
       where oid in (
         'public.admin_group_recognition_save_decisions(uuid,integer,text,jsonb)'
           ::regprocedure,
