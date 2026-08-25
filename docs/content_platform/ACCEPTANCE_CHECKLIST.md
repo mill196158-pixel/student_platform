@@ -870,6 +870,18 @@ Legend: `[ ]` open · `[x]` accepted · `[~]` partial · `[blocked]` blocked (se
 - [x] Duplicate intent is local-only, classification-aware and preview-scoped
 - [x] Schedule validation/apply is visibly unavailable and cannot be triggered
 - [x] Codex APPROVE unified Admin academic workflow
+- [ ] Student import requires a selected academic year before a group can appear
+- [ ] Student-sourced group identity stays program + admission year + parallel
+- [ ] Record-book prefix usually confirms admission year; mismatch fails closed
+- [ ] Rare current-year second-course intake is not merged into the other cohort
+- [ ] First matching student can create the group; the next student reuses it
+- [ ] Missing plan, unknown program or year-conflicting name stay blocked
+- [ ] Student import creates no Auth accounts and does not call `admin_upsert_group`
+- [ ] Failed student row does not leave a new empty group
+- [ ] Student import idempotency hash includes academic year
+- [ ] Admin explains academic year, record book and the rare second-course case
+- [ ] Stage 19.1c SQL role-play executed on PostgreSQL
+- [ ] Codex APPROVE Stage 19.1c
 - [~] Full code + SQL + tests Codex APPROVE for each independent substage
 
 SQL-backed foundation items were runtime-verified on remote PostgreSQL with

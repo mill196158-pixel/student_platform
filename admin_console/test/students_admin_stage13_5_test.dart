@@ -58,11 +58,24 @@ void main() {
     final repo = LocalStudentsRepository();
     final dry = await repo.importDryRun(rows);
     final items = dry['items'] as List;
-    expect(items[0]['classification'], 'update');
+    expect(items[0]['error_text'], 'academic_year_required');
     expect(items[1]['classification'], 'error');
-    final apply = await repo.importApply(rows);
+    expect(items[1]['error_text'], 'auth_user_missing');
+    final withYear = await repo.importDryRun(rows, academicYearId: 'y2026');
+    final yearItems = withYear['items'] as List;
+    expect(yearItems[0]['error_text'], 'group_name_shape_unrecognized');
+    expect(yearItems[1]['error_text'], 'auth_user_missing');
+    final profileOnly = await repo.importDryRun([
+      {'login': 'ivanov', 'name': 'Иван', 'surname': 'Иванов'},
+    ]);
+    expect(profileOnly['items'][0]['classification'], 'update');
+    final apply = await repo.importApply([
+      {'login': 'ivanov', 'name': 'Иван', 'surname': 'Иванов'},
+    ]);
     expect(apply['updated'], 1);
-    final replay = await repo.importApply(rows);
+    final replay = await repo.importApply([
+      {'login': 'ivanov', 'name': 'Иван', 'surname': 'Иванов'},
+    ]);
     expect(replay['idempotent_replay'], isTrue);
   });
 

@@ -570,6 +570,10 @@ Locked group-recognition rules:
   middle token is a reviewed program alias, and the right number is the course;
 - the client selects `academic_year_id`; the server derives
   `admission_year = academic_year.start_year - course_number + 1`;
+- a student record book / login that starts with `26` usually confirms
+  admission year 2026; if that prefix disagrees with the course-derived
+  year (rare: admitted onto course 2 in the current year), the row fails
+  closed and is never merged into the other cohort;
 - only Unicode case, spaces, dash variants and approved parentheses variants
   normalize automatically; fuzzy matching and arbitrary letter removal are
   forbidden;
@@ -622,6 +626,23 @@ Slice 2 migrations
 `20260825203114_group_recognition_refresh_ambiguity_hotfix` are remote-applied
 with Codex **APPROVE**. The rollback-only group decision/apply role-play passed
 **23/23** on remote PostgreSQL; all fixtures were rolled back.
+
+Stage 19.1c student-sourced group contract:
+
+- a group appears when a real existing Auth student is imported with a
+  parseable group name and a selected `academic_year_id`;
+- schedule apply stays disabled and will reuse the same recognition later;
+- identity remains program + admission year + parallel; display names of
+  different admission years never merge;
+- the usual admission year is `academic_year.start_year - course + 1`;
+- a record-book/login prefix `YY` usually confirms `2000+YY`; agreement
+  binds, disagreement (`record_book_admission_mismatch`) fails closed;
+- `students.write` is always required; `groups.write` is required to create
+  alias/identity/profile/plan bind; DEFINER does not grant extra rights;
+- apply creates groups directly, never via `admin_upsert_group`; spaces
+  appear only through the existing enroll path; Auth accounts are not created;
+- each student row is an atomic subtransaction: failed enroll must not leave
+  a new empty group; idempotency hash includes the academic year.
 
 Locked ingestion rules:
 

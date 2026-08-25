@@ -6,6 +6,7 @@ import '../../../core/auth/admin_backend_config.dart';
 import '../../../core/auth/admin_session_controller.dart';
 import '../teachers/teacher_import_service.dart';
 import 'group_space_organizer_dialog.dart';
+import 'student_import_admission.dart';
 import 'students_repository.dart';
 
 class StudentsScreen extends StatefulWidget {
@@ -25,12 +26,14 @@ class _StudentsScreenState extends State<StudentsScreen> {
   List<StudentItem> _items = const [];
   List<GroupItem> _groups = const [];
   List<TermItem> _terms = const [];
+  List<AcademicYearItem> _academicYears = const [];
   final Set<String> _selected = {};
   bool _loading = true;
   String _query = '';
   bool? _activeFilter = true;
   String? _groupFilter;
   String? _termFilter;
+  String? _importYearId;
 
   @override
   void initState() {
@@ -49,10 +52,15 @@ class _StudentsScreenState extends State<StudentsScreen> {
         ),
         _repository.listGroups(),
         _repository.listTerms(),
+        _repository.listAcademicYears(),
       ]);
       _items = results[0] as List<StudentItem>;
       _groups = results[1] as List<GroupItem>;
       _terms = results[2] as List<TermItem>;
+      _academicYears = results[3] as List<AcademicYearItem>;
+      _importYearId ??=
+          _academicYears.where((year) => year.isCurrent).firstOrNull?.id ??
+          _academicYears.firstOrNull?.id;
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -101,8 +109,10 @@ class _StudentsScreenState extends State<StudentsScreen> {
                   title: const Text('Активен'),
                 ),
                 const Text(
-                  'Создание auth-пользователя в Web Admin недоступно '
-                  '(без service_role). Импорт обновляет только существующих.',
+                  'Новые логины здесь не создаются. Группа появляется из '
+                  'студента только после выбора учебного года: зачётка обычно '
+                  'начинается с года поступления, а редкий перевод на 2 курс '
+                  'нельзя смешать с другой группой того же названия.',
                   style: TextStyle(fontSize: 12),
                 ),
               ],
@@ -135,6 +145,18 @@ class _StudentsScreenState extends State<StudentsScreen> {
   }
 
   Future<void> _import() async {
+    if (_importYearId == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Сначала выберите учебный год. Одинаковые названия групп '
+            'у разных годов поступления — это разные группы.',
+          ),
+        ),
+      );
+      return;
+    }
     final picked = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: const ['xlsx'],
@@ -146,15 +168,18 @@ class _StudentsScreenState extends State<StudentsScreen> {
     final sheet = TeacherImportService().readFirstSheet(bytes);
     final mapping = suggestStudentHeaderMapping(sheet.headers);
     final rows = [for (final raw in sheet.rows) mapImportRow(raw, mapping)];
-    final dry = await _repository.importDryRun(rows);
+    final dry = await _repository.importDryRun(
+      rows,
+      academicYearId: _importYearId,
+    );
     if (!mounted) return;
     final apply = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Dry-run студентов'),
+        title: const Text('Проверка студентов и групп'),
         content: SizedBox(
-          width: 520,
-          height: 320,
+          width: 560,
+          height: 360,
           child: ListView(
             children: [
               for (final item in (dry['items'] as List? ?? const []))
@@ -163,7 +188,21 @@ class _StudentsScreenState extends State<StudentsScreen> {
                   title: Text(
                     '${item['classification']} · ${item['payload']?['login'] ?? ''}',
                   ),
-                  subtitle: Text(item['error_text']?.toString() ?? ''),
+                  subtitle: Text(
+                    [
+                      studentImportErrorLabel(item['error_text']?.toString()),
+                      if (item['group_resolution'] is Map) ...[
+                        if ((item['group_resolution']
+                                as Map)['admission_year'] !=
+                            null)
+                          'приём ${(item['group_resolution'] as Map)['admission_year']}',
+                        if ((item['group_resolution']
+                                as Map)['record_book_admission_year'] !=
+                            null)
+                          'зачётка ${(item['group_resolution'] as Map)['record_book_admission_year']}',
+                      ],
+                    ].where((part) => part.toString().trim().isNotEmpty).join(' · '),
+                  ),
                 ),
             ],
           ),
@@ -181,7 +220,10 @@ class _StudentsScreenState extends State<StudentsScreen> {
       ),
     );
     if (apply != true) return;
-    final result = await _repository.importApply(rows);
+    final result = await _repository.importApply(
+      rows,
+      academicYearId: _importYearId,
+    );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -366,7 +408,10 @@ class _StudentsScreenState extends State<StudentsScreen> {
         ),
         const SizedBox(height: 6),
         const Text(
-          'Управление профилями, группами и организаторами пространства. Учебные периоды — в разделе Система.',
+          'Группа появляется после добавления студента. Одинаковые названия '
+          'у разных годов поступления — разные группы. Зачётка обычно '
+          'начинается с года поступления; редкий перевод сразу на 2 курс '
+          'нельзя смешать автоматически.',
         ),
         const SizedBox(height: 16),
         Wrap(
@@ -415,6 +460,22 @@ class _StudentsScreenState extends State<StudentsScreen> {
                 _load();
               },
             ),
+            if (canWrite && _academicYears.isNotEmpty)
+              DropdownButton<String>(
+                key: const Key('students-import-year'),
+                value: _importYearId,
+                hint: const Text('Учебный год для импорта'),
+                items: [
+                  for (final year in _academicYears)
+                    DropdownMenuItem(
+                      value: year.id,
+                      child: Text(
+                        '${year.name}${year.isCurrent ? ' · текущий' : ''}',
+                      ),
+                    ),
+                ],
+                onChanged: (v) => setState(() => _importYearId = v),
+              ),
             if (canWrite)
               OutlinedButton.icon(
                 onPressed: _import,

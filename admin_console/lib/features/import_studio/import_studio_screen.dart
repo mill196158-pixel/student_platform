@@ -535,120 +535,125 @@ class _DomainHub extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      children: [
-        const Text(
-          'Академическая цепочка',
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 6),
-        const Text(
-          'Проходите этапы слева направо: что изучают → кто учится → '
-          'когда идут периоды → когда стоят конкретные пары.',
-          style: TextStyle(color: Colors.black54),
-        ),
-        const SizedBox(height: 16),
-        _AcademicChainCard(
-          step: 1,
-          icon: Icons.account_tree_outlined,
-          title: 'Учебный план',
-          status: 'Review + server preview',
-          statusColor: const Color(0xFF3157C8),
-          description:
-              'Загрузите PDF или XLSX, проверьте предметы, семестры, часы '
-              'и формы контроля. Здесь же выбираются программа, форма '
-              'обучения и год поступления.',
-          primaryLabel: 'Открыть проверку плана',
-          onPrimary: onOpenCurriculum,
-          footer:
-              'PDF/XLSX принимаются специализированной проверкой; сохранение '
-              'возможно только после server preview и подтверждения.',
-        ),
-        const _ChainConnector(),
-        _AcademicChainCard(
-          step: 2,
-          icon: Icons.groups_outlined,
-          title: 'Группы и студенты',
-          status: 'Matching preview',
-          statusColor: Color(0xFF8B5A00),
-          description:
-              'Сначала распознайте группу: слева номер параллели, справа '
-              'курс; сервер вычислит год поступления и найдёт план. Затем '
-              'проверяйте список студентов.',
-          primaryLabel: 'Проверить группы и дубли',
-          onPrimary: onOpenGroups,
-          secondaryLabel: 'Existing students XLSX',
-          onSecondary: onOpenStudents,
-          footer:
-              'Импорт студентов сейчас только обновляет существующих Auth '
-              'пользователей и не создаёт аккаунты.',
-        ),
-        const _ChainConnector(),
-        _AcademicChainCard(
-          step: 3,
-          icon: Icons.date_range_outlined,
-          title: 'График учебного процесса',
-          status: 'Review + server preview',
-          statusColor: Color(0xFF3157C8),
-          description:
-              'Загрузите официальный PDF или изображение и вручную проверьте '
-              'периоды занятий, сессии, практики и ГИА для учебного года.',
-          primaryLabel: 'Открыть годовой график',
-          onPrimary: onOpenCalendar,
-          footer:
-              'Это годовой график с периодами. Он не меняет глобальные '
-              'academic_terms и не переключает текущий семестр.',
-        ),
-        const _ChainConnector(),
-        const _AcademicChainCard(
-          step: 4,
-          icon: Icons.event_busy_outlined,
-          title: 'Расписание и готовность',
-          status: 'Не реализовано',
-          statusColor: Color(0xFF6B7280),
-          description:
-              'Будущий этап проверит даты пар и экзаменов по опубликованному '
-              'графику и покажет конфликты до сохранения.',
-          primaryLabel: 'Проверка расписания недоступна',
-          footer:
-              'Валидация и apply расписания отсутствуют. Текущий семестр, '
-              'offering, команды и чаты здесь не создаются.',
-        ),
-        const SizedBox(height: 20),
-        const _AcademicReadinessStrip(),
-        const SizedBox(height: 28),
-        const Text(
-          'Расширенные импорты XLSX',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 6),
-        const Text(
-          'Все прежние домены сохранены. Это структурированные XLSX-потоки '
-          'с dry-run/diff/apply. PDF и изображения используйте только в '
-          'специализированных проверках плана и годового графика выше.',
-          style: TextStyle(color: Colors.black54),
-        ),
-        const SizedBox(height: 12),
-        for (final domain in domains) ...[
-          Card(
-            child: ListTile(
-              leading: Icon(_domainIcon(domain.domain)),
-              title: Text(domain.label),
-              subtitle: Text(
-                '${_advancedDomainHint(domain.domain)}\n'
-                '${importStudioDomainStateLabel(domain.domainState)} · '
-                '${domain.applyPermission}',
-              ),
-              isThreeLine: true,
-              trailing: domain.canDryRun
-                  ? const Icon(Icons.chevron_right_rounded)
-                  : const Chip(label: Text('Скоро')),
-              onTap: domain.canDryRun ? () => onSelect(domain) : null,
-            ),
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'Академическая цепочка',
+            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
+          const Text(
+            'Проходите этапы слева направо: что изучают → кто учится → '
+            'когда идут периоды → когда стоят конкретные пары.',
+            style: TextStyle(color: Colors.black54),
+          ),
+          const SizedBox(height: 16),
+          _AcademicChainCard(
+            step: 1,
+            icon: Icons.account_tree_outlined,
+            title: 'Учебный план',
+            status: 'Review + server preview',
+            statusColor: const Color(0xFF3157C8),
+            description:
+                'Загрузите PDF или XLSX, проверьте предметы, семестры, часы '
+                'и формы контроля. Здесь же выбираются программа, форма '
+                'обучения и год поступления.',
+            primaryLabel: 'Открыть проверку плана',
+            onPrimary: onOpenCurriculum,
+            footer:
+                'PDF/XLSX принимаются специализированной проверкой; сохранение '
+                'возможно только после server preview и подтверждения.',
+          ),
+          const _ChainConnector(),
+          _AcademicChainCard(
+            step: 2,
+            icon: Icons.groups_outlined,
+            title: 'Группы и студенты',
+            status: 'Matching preview',
+            statusColor: Color(0xFF8B5A00),
+            description:
+                'Группа появляется из студента или позже из расписания. '
+                'Слева параллель, справа курс; сервер считает год поступления. '
+                'Зачётка обычно начинается с этого года; редкий перевод на '
+                '2 курс нельзя смешать с другой группой того же названия.',
+            primaryLabel: 'Проверить группы и дубли',
+            onPrimary: onOpenGroups,
+            secondaryLabel: 'Existing students XLSX',
+            onSecondary: onOpenStudents,
+            footer:
+                'Студенческий XLSX обновляет существующих Auth-пользователей '
+                'и не создаёт аккаунты. Нужен учебный год: одинаковые названия '
+                'разных лет поступления не сливаются.',
+          ),
+          const _ChainConnector(),
+          _AcademicChainCard(
+            step: 3,
+            icon: Icons.date_range_outlined,
+            title: 'График учебного процесса',
+            status: 'Review + server preview',
+            statusColor: Color(0xFF3157C8),
+            description:
+                'Загрузите официальный PDF или изображение и вручную проверьте '
+                'периоды занятий, сессии, практики и ГИА для учебного года.',
+            primaryLabel: 'Открыть годовой график',
+            onPrimary: onOpenCalendar,
+            footer:
+                'Это годовой график с периодами. Он не меняет глобальные '
+                'academic_terms и не переключает текущий семестр.',
+          ),
+          const _ChainConnector(),
+          const _AcademicChainCard(
+            step: 4,
+            icon: Icons.event_busy_outlined,
+            title: 'Расписание и готовность',
+            status: 'Не реализовано',
+            statusColor: Color(0xFF6B7280),
+            description:
+                'Будущий этап проверит даты пар и экзаменов по опубликованному '
+                'графику и покажет конфликты до сохранения.',
+            primaryLabel: 'Проверка расписания недоступна',
+            footer:
+                'Валидация и apply расписания отсутствуют. Текущий семестр, '
+                'offering, команды и чаты здесь не создаются.',
+          ),
+          const SizedBox(height: 20),
+          const _AcademicReadinessStrip(),
+          const SizedBox(height: 28),
+          const Text(
+            'Расширенные импорты XLSX',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Все прежние домены сохранены. Это структурированные XLSX-потоки '
+            'с dry-run/diff/apply. PDF и изображения используйте только в '
+            'специализированных проверках плана и годового графика выше.',
+            style: TextStyle(color: Colors.black54),
+          ),
+          const SizedBox(height: 12),
+          for (final domain in domains) ...[
+            Card(
+              child: ListTile(
+                leading: Icon(_domainIcon(domain.domain)),
+                title: Text(domain.label),
+                subtitle: Text(
+                  '${_advancedDomainHint(domain.domain)}\n'
+                  '${importStudioDomainStateLabel(domain.domainState)} · '
+                  '${domain.applyPermission}',
+                ),
+                isThreeLine: true,
+                trailing: domain.canDryRun
+                    ? const Icon(Icons.chevron_right_rounded)
+                    : const Chip(label: Text('Скоро')),
+                onTap: domain.canDryRun ? () => onSelect(domain) : null,
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
         ],
-      ],
+      ),
     );
   }
 
@@ -1140,8 +1145,10 @@ class _ImportSourceStepState extends State<_ImportSourceStep> {
             icon: Icons.person_search_outlined,
             text:
                 'Этот XLSX-поток только обновляет существующих '
-                'Auth-пользователей. Новые аккаунты и временные пароли '
-                'здесь не создаются.',
+                'Auth-пользователей. Новые аккаунты здесь не создаются. '
+                'Группа из студента появляется только с выбранным учебным '
+                'годом: зачётка обычно подтверждает год поступления, а '
+                'редкий перевод на 2 курс не смешивается автоматически.',
           ),
         ],
         if (widget.domain.domain == 'terms') ...[

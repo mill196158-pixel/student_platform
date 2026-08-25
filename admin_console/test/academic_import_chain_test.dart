@@ -43,9 +43,10 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.textContaining('только обновляет существующих Auth'),
+      find.textContaining('обновляет существующих Auth-пользователей'),
       findsOneWidget,
     );
+    expect(find.textContaining('редкий перевод на 2 курс'), findsOneWidget);
     expect(
       find.textContaining('не меняет глобальные academic_terms'),
       findsOneWidget,

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'group_space_organizer_models.dart';
+import 'student_import_admission.dart';
 
 class StudentItem {
   const StudentItem({
@@ -39,15 +40,40 @@ class GroupItem {
     required this.id,
     required this.name,
     this.membersCount = 0,
+    this.admissionYear,
   });
   final String id;
   final String name;
   final int membersCount;
+  final int? admissionYear;
   factory GroupItem.fromJson(Map<String, dynamic> json) => GroupItem(
     id: '${json['id'] ?? ''}',
     name: '${json['name'] ?? ''}',
     membersCount: int.tryParse('${json['members_count'] ?? 0}') ?? 0,
+    admissionYear: int.tryParse('${json['admission_year'] ?? ''}'),
   );
+}
+
+class AcademicYearItem {
+  const AcademicYearItem({
+    required this.id,
+    required this.name,
+    required this.startYear,
+    this.isCurrent = false,
+  });
+
+  final String id;
+  final String name;
+  final int startYear;
+  final bool isCurrent;
+
+  factory AcademicYearItem.fromJson(Map<String, dynamic> json) =>
+      AcademicYearItem(
+        id: '${json['id'] ?? ''}',
+        name: '${json['name'] ?? ''}',
+        startYear: int.tryParse('${json['start_year'] ?? 0}') ?? 0,
+        isCurrent: json['is_current'] == true,
+      );
 }
 
 class TermItem {
@@ -74,6 +100,7 @@ abstract class StudentsRepository {
   });
   Future<List<GroupItem>> listGroups();
   Future<List<TermItem>> listTerms();
+  Future<List<AcademicYearItem>> listAcademicYears();
   Future<void> updateStudent({
     required String id,
     String? name,
@@ -81,8 +108,14 @@ abstract class StudentsRepository {
     bool? isActive,
   });
   Future<void> assignGroup({required String userId, required String groupId});
-  Future<Map<String, dynamic>> importDryRun(List<Map<String, dynamic>> rows);
-  Future<Map<String, dynamic>> importApply(List<Map<String, dynamic>> rows);
+  Future<Map<String, dynamic>> importDryRun(
+    List<Map<String, dynamic>> rows, {
+    String? academicYearId,
+  });
+  Future<Map<String, dynamic>> importApply(
+    List<Map<String, dynamic>> rows, {
+    String? academicYearId,
+  });
   Future<Map<String, dynamic>> prepareTermDryRun(String termId);
   Future<Map<String, dynamic>> prepareTermApply({
     required String termId,
@@ -131,8 +164,35 @@ class LocalStudentsRepository implements StudentsRepository {
           primaryGroupId: 'g1',
           groupName: 'ИВТ-21',
         ),
+        const StudentItem(
+          id: 's4',
+          login: '2510001',
+          name: 'Мария',
+          surname: 'Вторая',
+        ),
+        const StudentItem(
+          id: 's5',
+          login: '2510002',
+          name: 'Игорь',
+          surname: 'Второй',
+        ),
+        const StudentItem(
+          id: 's6',
+          login: '2610001',
+          name: 'Редкий',
+          surname: 'Перевод',
+        ),
       ],
       _groups = [const GroupItem(id: 'g1', name: 'ИВТ-21', membersCount: 3)],
+      _academicYears = const [
+        AcademicYearItem(
+          id: 'y2026',
+          name: '2026/2027',
+          startYear: 2026,
+          isCurrent: true,
+        ),
+        AcademicYearItem(id: 'y2025', name: '2025/2026', startYear: 2025),
+      ],
       _terms = [
         const TermItem(id: 't1', label: '2025/2026 · 2', isCurrent: true),
         const TermItem(id: 't2', label: '2026/2027 · 1'),
@@ -143,6 +203,7 @@ class LocalStudentsRepository implements StudentsRepository {
 
   final List<StudentItem> _students;
   final List<GroupItem> _groups;
+  final List<AcademicYearItem> _academicYears;
   final List<TermItem> _terms;
   final Set<String> _hashes = {};
   final Set<String> _subjectTeamOrganizers;
@@ -167,6 +228,9 @@ class LocalStudentsRepository implements StudentsRepository {
 
   @override
   Future<List<GroupItem>> listGroups() async => _groups;
+
+  @override
+  Future<List<AcademicYearItem>> listAcademicYears() async => _academicYears;
 
   @override
   Future<List<TermItem>> listTerms() async => _terms;
@@ -212,17 +276,31 @@ class LocalStudentsRepository implements StudentsRepository {
     );
   }
 
+  AcademicYearItem? _yearById(String? id) {
+    if (id == null || id.isEmpty) return null;
+    for (final year in _academicYears) {
+      if (year.id == id) return year;
+    }
+    return null;
+  }
+
   @override
   Future<Map<String, dynamic>> importDryRun(
-    List<Map<String, dynamic>> rows,
-  ) async {
+    List<Map<String, dynamic>> rows, {
+    String? academicYearId,
+  }) async {
+    final year = _yearById(academicYearId);
     final items = <Map<String, dynamic>>[];
     final seen = <String>{};
+    final pendingKeys = <String>{};
     for (var i = 0; i < rows.length; i++) {
       final login = (rows[i]['login'] ?? '').toString().trim().toLowerCase();
+      final groupName = (rows[i]['group_name'] ?? '').toString().trim();
       String classification;
       String? matched;
       String? error;
+      Map<String, dynamic>? resolution;
+      var warnings = <String>[];
       if (login.isEmpty) {
         classification = 'error';
         error = 'login_required';
@@ -234,6 +312,62 @@ class LocalStudentsRepository implements StudentsRepository {
         if (existing.isEmpty) {
           classification = 'error';
           error = 'auth_user_missing';
+        } else if (groupName.isNotEmpty && year == null) {
+          classification = 'error';
+          error = 'academic_year_required';
+          matched = existing.first.id;
+        } else if (groupName.isNotEmpty) {
+          matched = existing.first.id;
+          final resolved = resolveStudentImportGroup(
+            academicYearStart: year!.startYear,
+            groupName: groupName,
+            login: login,
+          );
+          warnings = resolved.warnings;
+          resolution = {
+            'ok': resolved.ok,
+            'error': resolved.error,
+            'normalized_group_name': resolved.normalizedGroupName,
+            'derived_admission_year': resolved.derivedAdmissionYear,
+            'record_book_admission_year': resolved.recordBookAdmissionYear,
+            'admission_year': resolved.admissionYear,
+            'will_create': resolved.willCreate,
+            'group_action': resolved.groupAction,
+            'same_file_pending_create':
+                resolved.ok &&
+                resolved.willCreate &&
+                resolved.cacheKey != null &&
+                pendingKeys.contains(resolved.cacheKey),
+          };
+          if (!resolved.ok) {
+            classification = 'error';
+            error = resolved.error;
+          } else {
+            final sameName = _groups.where((g) {
+              return normalizeStudentImportGroupName(g.name) ==
+                  resolved.normalizedGroupName;
+            }).toList();
+            if (sameName.length > 1) {
+              classification = 'error';
+              error = 'group_alias_collision';
+            } else if (sameName.length == 1 &&
+                sameName.first.admissionYear != null &&
+                sameName.first.admissionYear != resolved.admissionYear) {
+              classification = 'error';
+              error = 'group_admission_year_conflict';
+            } else {
+              classification = 'update';
+              if (resolved.willCreate &&
+                  resolved.cacheKey != null &&
+                  pendingKeys.add(resolved.cacheKey!)) {
+                resolution['will_create'] = true;
+              } else if (resolved.cacheKey != null &&
+                  pendingKeys.contains(resolved.cacheKey)) {
+                resolution['will_create'] = false;
+                resolution['same_file_pending_create'] = sameName.isEmpty;
+              }
+            }
+          }
         } else {
           classification = 'update';
           matched = existing.first.id;
@@ -245,21 +379,30 @@ class LocalStudentsRepository implements StudentsRepository {
         'matched_user_id': matched,
         'error_text': error,
         'payload': rows[i],
+        'warnings': warnings,
+        'group_resolution': resolution,
       });
     }
-    return {'rows': rows.length, 'items': items};
+    return {
+      'rows': rows.length,
+      'items': items,
+      'academic_year_id': academicYearId,
+    };
   }
 
   @override
   Future<Map<String, dynamic>> importApply(
-    List<Map<String, dynamic>> rows,
-  ) async {
-    final hash = jsonEncode(rows);
+    List<Map<String, dynamic>> rows, {
+    String? academicYearId,
+  }) async {
+    final hash = jsonEncode([academicYearId, rows]);
     if (_hashes.contains(hash)) {
       return {'idempotent_replay': true, 'updated': 0};
     }
-    final dry = await importDryRun(rows);
+    final dry = await importDryRun(rows, academicYearId: academicYearId);
     var updated = 0;
+    var created = 0;
+    var reused = 0;
     for (final item in (dry['items'] as List)) {
       if (item['classification'] != 'update') continue;
       final payload = Map<String, dynamic>.from(item['payload'] as Map);
@@ -268,10 +411,48 @@ class LocalStudentsRepository implements StudentsRepository {
         name: payload['name']?.toString(),
         surname: payload['surname']?.toString(),
       );
+      final groupName = payload['group_name']?.toString().trim() ?? '';
+      if (groupName.isNotEmpty) {
+        final year = _yearById(academicYearId);
+        final resolved = resolveStudentImportGroup(
+          academicYearStart: year!.startYear,
+          groupName: groupName,
+          login: payload['login']?.toString() ?? '',
+        );
+        var group = _groups.cast<GroupItem?>().firstWhere(
+          (g) =>
+              normalizeStudentImportGroupName(g!.name) ==
+                  resolved.normalizedGroupName &&
+              (g.admissionYear == null ||
+                  g.admissionYear == resolved.admissionYear),
+          orElse: () => null,
+        );
+        if (group == null) {
+          group = GroupItem(
+            id: 'g-${resolved.cacheKey}',
+            name: groupName,
+            membersCount: 0,
+            admissionYear: resolved.admissionYear,
+          );
+          _groups.add(group);
+          created++;
+        } else {
+          reused++;
+        }
+        await assignGroup(
+          userId: '${item['matched_user_id']}',
+          groupId: group.id,
+        );
+      }
       updated++;
     }
     _hashes.add(hash);
-    return {'idempotent_replay': false, 'updated': updated};
+    return {
+      'idempotent_replay': false,
+      'updated': updated,
+      'groups_created': created,
+      'groups_reused': reused,
+    };
   }
 
   @override
@@ -455,6 +636,19 @@ class SupabaseStudentsRepository implements StudentsRepository {
   }
 
   @override
+  Future<List<AcademicYearItem>> listAcademicYears() async {
+    final result = await _client.rpc(
+      'admin_group_recognition_list_academic_years',
+    );
+    final decoded = result is String ? jsonDecode(result) : result;
+    return (decoded as List)
+        .map(
+          (e) => AcademicYearItem.fromJson(Map<String, dynamic>.from(e as Map)),
+        )
+        .toList();
+  }
+
+  @override
   Future<void> updateStudent({
     required String id,
     String? name,
@@ -485,24 +679,36 @@ class SupabaseStudentsRepository implements StudentsRepository {
 
   @override
   Future<Map<String, dynamic>> importDryRun(
-    List<Map<String, dynamic>> rows,
-  ) async {
-    final result = await _client.rpc(
-      'admin_student_import_dry_run',
-      params: {'p_rows': rows},
-    );
+    List<Map<String, dynamic>> rows, {
+    String? academicYearId,
+  }) async {
+    final result = academicYearId == null || academicYearId.isEmpty
+        ? await _client.rpc(
+            'admin_student_import_dry_run',
+            params: {'p_rows': rows},
+          )
+        : await _client.rpc(
+            'admin_student_import_dry_run',
+            params: {'p_academic_year_id': academicYearId, 'p_rows': rows},
+          );
     final decoded = result is String ? jsonDecode(result) : result;
     return Map<String, dynamic>.from(decoded as Map);
   }
 
   @override
   Future<Map<String, dynamic>> importApply(
-    List<Map<String, dynamic>> rows,
-  ) async {
-    final result = await _client.rpc(
-      'admin_student_import_apply',
-      params: {'p_rows': rows},
-    );
+    List<Map<String, dynamic>> rows, {
+    String? academicYearId,
+  }) async {
+    final result = academicYearId == null || academicYearId.isEmpty
+        ? await _client.rpc(
+            'admin_student_import_apply',
+            params: {'p_rows': rows},
+          )
+        : await _client.rpc(
+            'admin_student_import_apply',
+            params: {'p_academic_year_id': academicYearId, 'p_rows': rows},
+          );
     final decoded = result is String ? jsonDecode(result) : result;
     return Map<String, dynamic>.from(decoded as Map);
   }

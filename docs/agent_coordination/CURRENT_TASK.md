@@ -1,7 +1,7 @@
 # CURRENT_TASK
 
 * Status: **IN PROGRESS** — Stage 19.1 multi-format academic ingestion
-* Active Stage: Stage 19.1b deterministic group recognition (Slice 2)
+* Active Stage: Stage 19.1c student-sourced groups with admission-year isolation
 * Branch: `feature/content-platform`
 * Codex identity-foundation verdict: **APPROVE**
 * Codex document-extraction verdict: **APPROVE**
@@ -54,6 +54,10 @@
   * apply-disabled dry-run; retry does not duplicate draft versions
 * Image curriculum intake fails closed to `manualRequired`; Web OCR is not
   presented as successful recognition.
+* Remote 19.1c functions verified on `2026-08-26` without leftover writes:
+  record-book `26`/`25` parse, rare second-course mismatch fails closed,
+  usual rows stop on unreviewed program alias. Counts unchanged
+  (`users=34`, `groups=2`, `group_academic_identities=0`).
 * Owner-authorized remote apply completed on `2026-08-25`:
   * `20260825102603_academic_ingestion_identity_foundation`
   * `20260825102845_academic_process_calendar_foundation`
@@ -71,7 +75,28 @@
   * plan persistence role-play passed **20/20**
   * group decision/apply role-play passed **23/23**
 
-## In progress
+## In progress — Stage 19.1c
+
+* Student import now requires `academic_year_id` before a group can appear.
+* Usual admission year = selected academic year + course in the group name.
+* Record book / login `26…` usually confirms admission 2026.
+* Rare case (admitted onto course 2 in the current year) fails closed as
+  `record_book_admission_mismatch` and is never merged into the other cohort.
+* Owner-authorized remote apply completed on `2026-08-26`:
+  * `stage19_1c_student_sourced_groups`
+  * `stage19_1c_student_import_resolve`
+  * `stage19_1c_student_import_apply_rpcs`
+  * `stage19_1c_student_import_apply_v2`
+  * `stage19_1c_student_import_legacy_guards`
+* New Auth accounts are still not created from Admin.
+* Schedule apply stays disabled. Existing parser
+  `mill196158-pixel/student_schedule_sync` last changed 2025-09-11: it writes
+  `groups`/`lessons` by display name with `service_role` and would merge
+  admission years. Do not reconnect it as-is; reuse HTML parse later through
+  the new group identity.
+* Codex implementation APPROVE is still pending. Checklist items stay open.
+
+## Previous in progress notes
 
 * Plan-aware v2 persistence is implemented, remote-applied and Codex-reviewed:
   * durable expiring preview bound to the exact plan row version
