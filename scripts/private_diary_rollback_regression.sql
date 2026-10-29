@@ -1,0 +1,25 @@
+begin;
+do $$ declare entry uuid; fid uuid; k text:='chats/51323a32-d2b7-4717-9d7d-e9c9ff908ecf/files/475888d2-fbef-43c0-8cc6-30d5857b7d85/rollback-diary.txt'; begin
+ perform set_config('request.jwt.claims','{"sub":"475888d2-fbef-43c0-8cc6-30d5857b7d85","role":"service_role"}',true);
+ insert into public.subject_diary_entries(team_id,author_id,entry_date,text) values('b284a723-cc71-4b42-a85b-454eda180392','475888d2-fbef-43c0-8cc6-30d5857b7d85',current_date,'E2E rollback') returning id into entry;
+ perform public.begin_chat_file_upload(k,'51323a32-d2b7-4717-9d7d-e9c9ff908ecf','475888d2-fbef-43c0-8cc6-30d5857b7d85','diary.txt','text/plain',7,'https://studentsplatform.storage.yandexcloud.net/'||k);
+ perform public.confirm_chat_file_upload(k,'475888d2-fbef-43c0-8cc6-30d5857b7d85');
+ perform set_config('request.jwt.claims','{"sub":"475888d2-fbef-43c0-8cc6-30d5857b7d85","role":"authenticated"}',true);
+ fid:=public.add_subject_diary_file(entry,k,'forged','fake/mime',999,'https://evil.invalid');
+ if fid<>public.add_subject_diary_file(entry,k,'x','x',1,null) then raise exception 'TEST FAILED duplicate diary';end if;
+ if not exists(select 1 from public.subject_diary_files where id=fid and size_bytes=7 and mime='text/plain' and thumb_url is null) then raise exception 'TEST FAILED diary canonical';end if;
+ begin perform public.save_chat_file('51323a32-d2b7-4717-9d7d-e9c9ff908ecf','x',k,'x','x',1);raise exception 'TEST FAILED dualbinding';exception when insufficient_privilege then null;end;
+ if public.discard_unattached_chat_upload(k) then raise exception 'TEST FAILED diary discard';end if;
+ perform public.resolve_chat_file_access(k);
+ perform set_config('request.jwt.claims','{"sub":"49323ae4-1409-4993-9969-12b2ae573f8c","role":"authenticated"}',true);
+ begin perform public.resolve_chat_file_access(k);raise exception 'TEST FAILED diary peer';exception when insufficient_privilege then null;end;
+ perform set_config('request.jwt.claims','{"sub":"475888d2-fbef-43c0-8cc6-30d5857b7d85","role":"authenticated"}',true);
+ perform public.delete_subject_diary_entry(entry);
+ if exists(select 1 from private.chat_file_objects where file_key=k and diary_file_id is not null) then raise exception 'TEST FAILED dangling registry';end if;
+ begin perform public.resolve_chat_file_access(k);raise exception 'TEST FAILED deleted diary';exception when insufficient_privilege then null;end;
+ update private.chat_file_objects set expires_at=now()-interval '1 second' where file_key=k;
+ perform set_config('request.jwt.claims','{"sub":"475888d2-fbef-43c0-8cc6-30d5857b7d85","role":"service_role"}',true);
+ if not exists(select 1 from public.claim_chat_upload_cleanup(25) q where q.file_key=k) then raise exception 'TEST FAILED diary cleanup claim';end if;
+end $$;
+select 'PASS diary canonical/idempotent/owner-only/dual-binding/discard/delete/cleanup' as result;
+rollback;

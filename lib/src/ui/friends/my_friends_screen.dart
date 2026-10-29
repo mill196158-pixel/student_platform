@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:characters/characters.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -341,7 +340,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
           .select('group_id')
           .eq('user_id', uid)
           .limit(1);
-      if (rows is List && rows.isNotEmpty) {
+      if (rows.isNotEmpty) {
         return (rows.first['group_id'] ?? '').toString();
       }
     } catch (_) {}
@@ -362,7 +361,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
           .filter('ended_at', 'is', null)
           .limit(150);
 
-      if (enrollments is List && enrollments.isEmpty) {
+      if (enrollments.isEmpty) {
         enrollments = await _sb
             .from('student_enrollments')
             .select('user_id')
@@ -380,7 +379,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
       final users = await _sb
           .from('users')
           .select(
-              'id, name, surname, avatar_url, status, university, city, group_name, primary_group_id')
+              'id, name, surname, avatar_url, status, university, group_name, primary_group_id')
           .inFilter('id', ids.toList())
           .order('surname', ascending: true);
 
@@ -401,7 +400,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
       final users = await _sb
           .from('users')
           .select(
-              'id, name, surname, avatar_url, status, university, city, group_name, primary_group_id')
+              'id, name, surname, avatar_url, status, university, group_name, primary_group_id')
           .eq('group_name', groupName)
           .neq('id', uid)
           .order('surname', ascending: true)
@@ -792,10 +791,10 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
               decoration: InputDecoration(
                 hintText: 'Поиск',
                 hintStyle: TextStyle(
-                    color: theme.colorScheme.onSurface.withOpacity(.6)),
+                    color: theme.colorScheme.onSurface.withValues(alpha: .6)),
                 prefixIcon: Icon(Icons.search,
                     size: 20,
-                    color: theme.colorScheme.onSurface.withOpacity(.9)),
+                    color: theme.colorScheme.onSurface.withValues(alpha: .9)),
                 isDense: true,
                 contentPadding:
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
@@ -968,7 +967,7 @@ class _FriendsTabSwitch extends StatelessWidget {
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color:
-                  selected ? cs.primary.withOpacity(.12) : Colors.transparent,
+                  selected ? cs.primary.withValues(alpha: .12) : Colors.transparent,
               borderRadius: BorderRadius.circular(14),
             ),
             child: Text(
@@ -986,7 +985,7 @@ class _FriendsTabSwitch extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: cs.surfaceVariant.withOpacity(.45),
+        color: cs.surfaceContainerHighest.withValues(alpha: .45),
         borderRadius: BorderRadius.circular(18),
       ),
       child: Row(
@@ -1318,7 +1317,7 @@ class _BubbleAvatar extends StatelessWidget {
           borderRadius: BorderRadius.circular(22),
           boxShadow: [
             BoxShadow(
-                color: Colors.black.withOpacity(.06),
+                color: Colors.black.withValues(alpha: .06),
                 blurRadius: 6,
                 offset: const Offset(0, 2))
           ],
@@ -1373,9 +1372,7 @@ class _BubbleAvatar extends StatelessWidget {
 
 class _SectionHeader extends StatelessWidget {
   final String title;
-  final String? actionText;
-  final VoidCallback? onAction;
-  const _SectionHeader({required this.title, this.actionText, this.onAction});
+  const _SectionHeader({required this.title});
 
   @override
   Widget build(BuildContext context) {
@@ -1388,16 +1385,7 @@ class _SectionHeader extends StatelessWidget {
               style: theme.textTheme.titleMedium
                   ?.copyWith(fontWeight: FontWeight.w700)),
           const Spacer(),
-          if (actionText != null)
-            TextButton(
-              onPressed: onAction,
-              style: TextButton.styleFrom(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  minimumSize: Size.zero),
-              child: Text(actionText!,
-                  style: const TextStyle(fontWeight: FontWeight.w600)),
-            ),
+
         ],
       ),
     );
@@ -1413,7 +1401,7 @@ class _ThinDivider extends StatelessWidget {
       child: Divider(
           height: 0,
           thickness: .6,
-          color: Theme.of(context).dividerColor.withOpacity(.28)),
+          color: Theme.of(context).dividerColor.withValues(alpha: .28)),
     );
   }
 }

@@ -1,3 +1,4 @@
+import 'package:student_platform/src/services/chat_file_access.dart';
 // =============================
 // FILE: lib/src/ui/learning/tabs/chat/unified_task_details_screen.dart
 // =============================
@@ -898,7 +899,7 @@ class _UnifiedTaskDetailsScreenState extends State<UnifiedTaskDetailsScreen> {
   }
 
   Future<void> _openProofUrl(String url) async {
-    final uri = Uri.tryParse(url);
+    final uri = Uri.tryParse(await ChatFileAccess.resolve(url));
     if (uri == null) return;
     await launchUrl(uri, mode: LaunchMode.externalApplication);
   }

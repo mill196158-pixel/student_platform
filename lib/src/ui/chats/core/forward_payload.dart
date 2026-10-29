@@ -107,11 +107,37 @@ class ForwardPayload {
 
   String encodeForText() => '__FG__:${jsonEncode(toJson())}';
 
+  List<ForwardFileRef> allFiles([int depth = 0]) {
+    if (depth > 8) throw StateError('Слишком много вложенных пересылок.');
+    return [for (final item in items) ...[
+      ...item.files,
+      if (isForwardText(item.text)) ...?tryParse(item.text)?.allFiles(depth+1),
+    ]];
+  }
+
+  /// A cross-chat forward owns independent uploads in the destination chat.
+  /// Never retain source-only URLs in the visible forward payload.
+  ForwardPayload withCopiedFiles(Map<String, ForwardFileRef> copies, [int depth = 0]) {
+    if (depth > 8) throw StateError('Слишком много вложенных пересылок.');
+    return ForwardPayload(fromChatId: fromChatId, caption: caption, items: items.map((item) {
+      final nested = isForwardText(item.text) ? tryParse(item.text) : null;
+      return ForwardItem(messageId:item.messageId,authorId:item.authorId,
+        authorName:item.authorName,authorAvatarUrl:item.authorAvatarUrl,at:item.at,
+        text:nested == null ? item.text : nested.withCopiedFiles(copies,depth+1).encodeForText(),
+        files:item.files.map((file) {
+          final copy=copies[file.url];
+          if(copy==null) throw StateError('Не все вложения готовы к пересылке.');
+          return copy;
+        }).toList());
+    }).toList());
+  }
+
   static bool isForwardText(String text) => text.startsWith('__FG__:');
 
   static ForwardPayload? tryParse(String? text) {
     if (text == null || !isForwardText(text)) return null;
 
+    try {
     final raw = text.substring('__FG__:'.length);
     final json = jsonDecode(raw) as Map<String, dynamic>;
     final items = (json['items'] as List? ?? const [])
@@ -125,5 +151,6 @@ class ForwardPayload {
       caption: caption,
       items: items,
     );
+    } catch (_) { return null; }
   }
 }

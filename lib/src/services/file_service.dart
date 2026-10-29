@@ -1,3 +1,7 @@
+import 'chat_file_access.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:crypto/crypto.dart' as crypto;
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:dio/dio.dart';
@@ -315,6 +319,11 @@ class FileService {
         ),
         onSendProgress: onProgress,
       );
+      final confirmation = await _supabase.functions.invoke('chat-file-access',
+          body: {'action': 'confirm', 'key': upload.fileKey});
+      if (confirmation.data is! Map || confirmation.data['confirmed'] != true) {
+        throw Exception('Не удалось подтвердить загрузку файла. Повторите попытку.');
+      }
     } on DioException catch (e) {
       if (e.type == DioExceptionType.cancel) {
         throw Exception('Загрузка отменена');
@@ -366,10 +375,20 @@ class FileService {
     required String fileKey,
     required String fileName,
   }) async {
-    return FileDownloadResult(
-      success: false,
-      error: 'Прямое скачивание по Yandex fileKey отключено в Flutter-клиенте',
-    );
+    try {
+      final url = Uri.https(ChatFileAccess.storageHost, '/$fileKey').toString();
+      final bytes = await ChatFileAccess.readBytes(url);
+      final root = await getApplicationCacheDirectory();
+      final digest = crypto.sha256.convert(utf8.encode('${ChatFileAccess.userId}:$fileKey'));
+      final dir = Directory('${root.path}/downloaded_chat_files');
+      await dir.create(recursive:true);
+      final cleanName = _fileNameFromPath(fileName);
+      final file = File('${dir.path}/${digest}_$cleanName');
+      await file.writeAsBytes(bytes,flush:true);
+      return FileDownloadResult(success:true,file:file,fileName:cleanName);
+    } catch (_) {
+      return FileDownloadResult(success:false,error:'Не удалось открыть файл. Проверьте подключение и права доступа.');
+    }
   }
 
   void dispose() {

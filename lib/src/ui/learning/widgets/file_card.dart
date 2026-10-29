@@ -1,4 +1,4 @@
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:student_platform/src/ui/learning/widgets/authorized_file_image.dart';
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
 
@@ -263,13 +263,15 @@ class _AppNetworkImagePreviewState extends State<AppNetworkImagePreview> {
 
   void _resolveImage() {
     _removeListener();
-    final provider = CachedNetworkImageProvider(widget.imageUrl);
+    final provider = AuthorizedFileImageProvider(widget.imageUrl);
     final stream = provider.resolve(const ImageConfiguration());
     final listener = ImageStreamListener((info, _) {
       final width = info.image.width.toDouble();
       final height = info.image.height.toDouble();
       if (width <= 0 || height <= 0 || !mounted) return;
       setState(() => _aspectRatio = width / height);
+    }, onError: (Object error, StackTrace? stack) {
+      // The visible image widget renders its own access/error placeholder.
     });
     _imageStream = stream;
     _imageListener = listener;
@@ -345,7 +347,7 @@ class _AppNetworkImagePreviewState extends State<AppNetworkImagePreview> {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      CachedNetworkImage(
+                      AuthorizedFileImage(
                         imageUrl: widget.imageUrl,
                         fit: widget.fit,
                         placeholder: (context, url) => _ImageState(

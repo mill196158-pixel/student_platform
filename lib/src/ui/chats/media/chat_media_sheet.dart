@@ -1,3 +1,4 @@
+import 'package:student_platform/src/services/chat_file_access.dart';
 // FILE: lib/src/ui/chats/media/chat_media_sheet.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -5,7 +6,7 @@ import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/learning/models/chat_file.dart';
 import 'package:student_platform/src/ui/learning/widgets/file_card.dart';
 import 'package:student_platform/src/ui/learning/widgets/fullscreen_image.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:student_platform/src/ui/learning/widgets/authorized_file_image.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class ChatMediaSheet extends StatefulWidget {
@@ -141,7 +142,7 @@ class _ImagesGrid extends StatelessWidget {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                CachedNetworkImage(
+                AuthorizedFileImage(
                   imageUrl: f.fileUrl,
                   fit: BoxFit.cover,
                   placeholder: (_, __) => ColoredBox(
@@ -201,7 +202,7 @@ class _DocsList extends StatelessWidget {
           onTap: () async {
             final url = f.fileUrl;
             if (url.isNotEmpty) {
-              final uri = Uri.parse(url);
+              final uri = Uri.parse(await ChatFileAccess.resolve(url));
               if (await canLaunchUrl(uri))
                 await launchUrl(uri, mode: LaunchMode.externalApplication);
             }

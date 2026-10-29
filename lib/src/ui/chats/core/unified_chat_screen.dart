@@ -1,3 +1,5 @@
+import 'package:student_platform/src/ui/learning/widgets/authorized_file_image.dart';
+import 'package:student_platform/src/services/chat_file_access.dart';
 // FILE: lib/src/ui/chats/core/unified_chat_screen.dart
 // ignore_for_file: unnecessary_import, unused_import, unused_field, unused_element, dead_null_aware_expression, invalid_null_aware_operator, deprecated_member_use
 
@@ -137,14 +139,17 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   final Set<String> _selectedIds = {};
 
   bool _forwardPackageAttached = false;
+  bool _preparingForward = false;
+  bool _forwardPreparationFailed = false;
+  int _forwardPreparationGeneration = 0;
   final List<String> _forwardSelectedIds = [];
   final List<String> _stagedForwardFileIds = [];
   ForwardPayload? _stagedForward;
 
   // Блокировка повторных отправок и индикатор фоновых загрузок
   bool _isSending = false;
-  bool get _isUploadingAttachments => _att.hasActiveUploads;
-  bool get _hasFailedAttachments => _att.hasFailedUploads;
+  bool get _isUploadingAttachments => _preparingForward || _att.hasActiveUploads;
+  bool get _hasFailedAttachments => _forwardPreparationFailed || _att.hasFailedUploads;
 
   // DM block relationship (one RPC on open; no realtime on user_blocks)
   bool _dmComposerReady = false;
@@ -571,7 +576,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         if ((chatFile.fileType).startsWith('image/') &&
             chatFile.fileUrl.isNotEmpty) {
           // ignore: discarded_futures
-          precacheImage(CachedNetworkImageProvider(chatFile.fileUrl), context);
+          precacheImage(AuthorizedFileImageProvider(chatFile.fileUrl), context);
         }
       }
     } catch (_) {}
@@ -621,8 +626,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
   // ---------- Forward Outbox ----------
   Future<void> _consumeForwardOutboxIfAny(String chatId) async {
+    final uid=ChatFileAccess.userId, epoch=ChatFileAccess.generation;
     final data = await ForwardOutbox.tryTakeForChat(chatId);
-    if (data == null) return;
+    if (data == null || !mounted || uid!=ChatFileAccess.userId || epoch!=ChatFileAccess.generation) return;
     final raw = data.text ?? '';
     if (!ForwardPayload.isForwardText(raw)) return;
     final payload = ForwardPayload.tryParse(raw);
@@ -632,7 +638,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
   Future<void> _stageForwardPayload(ForwardPayload payload,
       List<String> fileUrls, List<String> fileIds, String chatId) async {
-    if (!mounted) return;
+    final uid=ChatFileAccess.userId, epoch=ChatFileAccess.generation;
+    bool sameSession()=>uid!=null && uid==ChatFileAccess.userId && epoch==ChatFileAccess.generation;
+    if (!mounted || !sameSession()) return;
 
     final sameChat = (payload.fromChatId == chatId);
 
@@ -667,68 +675,55 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       return;
     }
 
-    final uniqueIds = fileIds.where((id) => id.isNotEmpty).toSet().toList();
-    if (uniqueIds.isNotEmpty) {
-      setState(() {
-        _forwardPackageAttached = true;
-        _stagedForward = payload;
-        _forwardSelectedIds.clear();
-        _stagedForwardFileIds
-          ..clear()
-          ..addAll(uniqueIds);
-      });
-      return;
-    }
-
-    final uniqueUrls = fileUrls.where((u) => u.isNotEmpty).toSet();
-    if (uniqueUrls.isEmpty) {
-      setState(() {
-        _forwardPackageAttached = true;
-        _stagedForward = payload;
-        _forwardSelectedIds.clear();
-        _stagedForwardFileIds.clear();
-      });
-      return;
-    }
-
+    final preparation = ++_forwardPreparationGeneration;
     setState(() {
       _forwardPackageAttached = true;
       _stagedForward = payload;
       _forwardSelectedIds.clear();
       _stagedForwardFileIds.clear();
+      _preparingForward = true;
+      _forwardPreparationFailed = false;
     });
-
-    for (final url in uniqueUrls) {
-      try {
+    try {
+      final refs = {for (final ref in payload.allFiles()) ref.url:ref};
+      final urls = {...fileUrls.where((u)=>u.isNotEmpty), ...refs.keys};
+      final copies = <String,ForwardFileRef>{};
+      for (final url in urls) {
+        if(!sameSession()) return;
         final tmp = await _downloadToTemp(url);
-        final attach = LocalAttach(
-          path: tmp.path,
-          name: tmp.path.split('/').last,
-          mimeType: _guessMime(tmp.path),
-          size: await tmp.length(),
-          isImage: _isImagePath(tmp.path),
-        );
-        if (!mounted) return;
-        _att.add(attach);
-        // ignore: unawaited_futures
-        _att.upload(attach, teamId: null, chatId: chatId);
-      } catch (e) {
-        if (kDebugMode) debugPrint('[Forward/stage DM] $e');
+        if (!mounted || !sameSession() || preparation != _forwardPreparationGeneration) { await ChatFileAccess.releaseForwardTemp(tmp.path); return; }
+        final size=await tmp.length();
+        if(!sameSession()) { await ChatFileAccess.releaseForwardTemp(tmp.path); return; }
+        final source = refs[url];
+        final attach = LocalAttach(path:tmp.path,
+          name:source?.name ?? tmp.path.split(RegExp(r'[\\/]')).last,
+          mimeType:source?.type ?? _guessMime(tmp.path),size:size,
+          isImage:source?.type.startsWith('image/') ?? _isImagePath(tmp.path));
+        if (!_att.add(attach)) { await ChatFileAccess.releaseForwardTemp(tmp.path); throw StateError('Слишком много вложений для одной пересылки.'); }
+        await _att.upload(attach,chatId:chatId);
+        if (!mounted || !sameSession() || preparation != _forwardPreparationGeneration) return;
+        final ready = _att.pending.where((f)=>f.localId==attach.localId).firstOrNull;
+        if (ready?.uploadedFileId == null) throw StateError('Не удалось подготовить вложение.');
+        final row = await Supabase.instance.client.from('chat_files').select().eq('id',ready!.uploadedFileId!).single();
+        final copied = ChatFile.fromJson(row);
+        copies[url] = ForwardFileRef(id:copied.id,url:copied.fileUrl,
+            name:copied.fileName,type:copied.fileType,size:copied.fileSize);
       }
+      if (mounted && sameSession() && preparation == _forwardPreparationGeneration) {
+        setState(() => _stagedForward = payload.withCopiedFiles(copies));
+      }
+    } catch (_) {
+      if (mounted && sameSession() && preparation == _forwardPreparationGeneration) {
+        setState(() => _forwardPreparationFailed = true);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content:Text('Не удалось подготовить все вложения. Отмените пересылку и повторите.')));
+      }
+    } finally {
+      if (mounted && sameSession() && preparation == _forwardPreparationGeneration) setState(() => _preparingForward=false);
     }
   }
 
-  Future<File> _downloadToTemp(String url) async {
-    final http = HttpClient();
-    final req = await http.getUrl(Uri.parse(url));
-    final resp = await req.close();
-    final bytes = await consolidateHttpClientResponseBytes(resp);
-    final dir = await Directory.systemTemp.createTemp('sp_forward_');
-    final name = url.split('?').first.split('/').last;
-    final f = File('${dir.path}/$name');
-    await f.writeAsBytes(bytes, flush: true);
-    return f;
-  }
+  Future<File> _downloadToTemp(String url) => ChatFileAccess.forwardTemp(url);
 
   // ---------- Forward helpers ----------
   Future<List<String>> _waitUploads(List<String> paths,
@@ -765,6 +760,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     setState(() {
       _replyTo = null;
       _forwardPackageAttached = false;
+      _forwardPreparationGeneration++;
+      _preparingForward = false;
+      _forwardPreparationFailed = false;
       _stagedForward = null;
     });
     FocusScope.of(context).unfocus();
@@ -1127,6 +1125,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       _editingMessage = m;
       _replyTo = null;
       _forwardPackageAttached = false;
+      _forwardPreparationGeneration++;
+      _preparingForward = false;
+      _forwardPreparationFailed = false;
       _stagedForward = null;
       _forwardSelectedIds.clear();
       _stagedForwardFileIds.clear();
@@ -1257,6 +1258,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         setState(() {
           _replyTo = null;
           _forwardPackageAttached = false;
+      _forwardPreparationGeneration++;
+      _preparingForward = false;
+      _forwardPreparationFailed = false;
           _stagedForward = null;
           _forwardSelectedIds.clear();
           _stagedForwardFileIds.clear();
@@ -1322,6 +1326,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         setState(() {
           _replyTo = null;
           _forwardPackageAttached = false;
+      _forwardPreparationGeneration++;
+      _preparingForward = false;
+      _forwardPreparationFailed = false;
           _forwardSelectedIds.clear();
         });
         FocusScope.of(context).unfocus();
@@ -1489,6 +1496,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
     setState(() {
       _forwardPackageAttached = false;
+      _forwardPreparationGeneration++;
+      _preparingForward = false;
+      _forwardPreparationFailed = false;
       _stagedForward = null;
       _forwardSelectedIds.clear();
       _stagedForwardFileIds.clear();
@@ -1916,6 +1926,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                                 onCancelForward: () {
                                   setState(() {
                                     _forwardPackageAttached = false;
+      _forwardPreparationGeneration++;
+      _preparingForward = false;
+      _forwardPreparationFailed = false;
                                     _stagedForward = null;
                                     _forwardSelectedIds.clear();
                                     _stagedForwardFileIds.clear();
@@ -1959,6 +1972,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                                   if (ui.path == '__FG__') {
                                     setState(() {
                                       _forwardPackageAttached = false;
+      _forwardPreparationGeneration++;
+      _preparingForward = false;
+      _forwardPreparationFailed = false;
                                       _stagedForward = null;
                                       _forwardSelectedIds.clear();
                                       _stagedForwardFileIds.clear();
@@ -2049,6 +2065,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                                 onCancelForward: () {
                                   setState(() {
                                     _forwardPackageAttached = false;
+      _forwardPreparationGeneration++;
+      _preparingForward = false;
+      _forwardPreparationFailed = false;
                                     _stagedForward = null;
                                     _forwardSelectedIds.clear();
                                     _stagedForwardFileIds.clear();
@@ -2089,6 +2108,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                                   if (ui.path == '__FG__') {
                                     setState(() {
                                       _forwardPackageAttached = false;
+      _forwardPreparationGeneration++;
+      _preparingForward = false;
+      _forwardPreparationFailed = false;
                                       _stagedForward = null;
                                       _forwardSelectedIds.clear();
                                       _stagedForwardFileIds.clear();

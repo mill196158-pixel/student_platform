@@ -1,4 +1,4 @@
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:student_platform/src/ui/learning/widgets/authorized_file_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:student_platform/src/ui/learning/models/chat_file.dart';
@@ -33,7 +33,7 @@ void main() {
         ),
       ),
     ));
-    expect(find.byType(CachedNetworkImage), findsOneWidget);
+    expect(find.byType(AuthorizedFileImage), findsOneWidget);
     expect(find.byType(AppFileCard), findsOneWidget);
     expect(find.text('notes.pdf'), findsOneWidget);
     expect(tester.takeException(), isNull);

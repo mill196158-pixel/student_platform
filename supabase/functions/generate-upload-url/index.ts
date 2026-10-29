@@ -79,6 +79,17 @@ Deno.serve(async (req) => {
       expiresIn,
     });
 
+    const intent = await fetch(`${Deno.env.get("SUPABASE_URL")}/rest/v1/rpc/begin_chat_file_upload`, {
+      method: "POST", headers: {
+        apikey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+        Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({p_key:fileKey,p_chat:input.chatId,p_actor:user.id,
+        p_name:input.fileName,p_type:input.contentType,p_size:input.fileSize,p_url:presigned.fileUrl}),
+    });
+    if (!intent.ok) return jsonResponse({error:"Unable to prepare upload"},500);
+
     return jsonResponse({
       uploadUrl: presigned.uploadUrl,
       fileKey,

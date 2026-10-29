@@ -81,9 +81,25 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Upload URLs have expired before these tombstones become eligible.
+    // Unsent uploads cannot be reattached after claim marks their file deleted.
+    const {data: abandoned, error: abandonedError} = await supabase.rpc('claim_chat_upload_cleanup', {p_limit:20});
+    let uploadsDeleted = 0;
+    if (!abandonedError) {
+      for (const item of abandoned ?? []) {
+        const result = await deleteYandexObject({config:yandex,key:item.file_key});
+        if (result.ok || result.status === 404) {
+          const {error} = await supabase.rpc('complete_chat_upload_cleanup',{p_key:item.file_key});
+          if (!error) uploadsDeleted++;
+        }
+      }
+    }
+
     return jsonResponse({
       ok: true,
       claimed: rows.length,
+      uploadsDeleted,
+      uploadCleanupFailed: !!abandonedError,
       deleted,
       skipped,
       failed,
@@ -283,15 +299,16 @@ async function deleteYandexObject(input: {
   const dateStamp = amzDate.slice(0, 8);
   const credentialScope = `${dateStamp}/${config.region}/s3/aws4_request`;
   const canonicalUri = `/${encodeS3Key(key)}`;
-  const signedHeaders = "host";
-  const canonicalHeaders = `host:${host}\n`;
+  const payloadHash = await sha256Hex("");
+  const signedHeaders = "host;x-amz-content-sha256;x-amz-date";
+  const canonicalHeaders = `host:${host}\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${amzDate}\n`;
   const canonicalRequest = [
     "DELETE",
     canonicalUri,
     "",
     canonicalHeaders,
     signedHeaders,
-    "UNSIGNED-PAYLOAD",
+    payloadHash,
   ].join("\n");
   const stringToSign = [
     "AWS4-HMAC-SHA256",
@@ -312,7 +329,7 @@ async function deleteYandexObject(input: {
     headers: {
       Host: host,
       "X-Amz-Date": amzDate,
-      "X-Amz-Content-Sha256": "UNSIGNED-PAYLOAD",
+      "X-Amz-Content-Sha256": payloadHash,
       Authorization: authorization,
     },
   });

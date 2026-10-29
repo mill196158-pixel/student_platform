@@ -1,3 +1,4 @@
+import 'package:student_platform/src/services/chat_file_access.dart';
 // lib/src/ui/learning/tabs/chat/actions/chat_actions.dart
 import 'dart:convert';
 import 'dart:io';
@@ -9,7 +10,6 @@ import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter/services.dart' as services;
-import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:super_clipboard/super_clipboard.dart';
@@ -160,7 +160,8 @@ class ChatActions {
     required String fileName,
   }) async {
     final cleanName = FileUiUtils.cleanFileName(fileName);
-    final digest = crypto.sha1.convert(utf8.encode(url)).toString();
+    await ChatFileAccess.authorize(url);
+    final digest = crypto.sha1.convert(utf8.encode('${ChatFileAccess.userId}:$url')).toString();
     final dir = await getApplicationCacheDirectory();
     final filesDir =
         Directory('${dir.path}${Platform.pathSeparator}chat_files');
@@ -173,11 +174,8 @@ class ChatActions {
     final cached = File(path);
     if (await cached.exists() && await cached.length() > 0) return cached;
 
-    final resp = await http.get(Uri.parse(url));
-    if (resp.statusCode != 200) {
-      throw Exception('HTTP ${resp.statusCode}');
-    }
-    await cached.writeAsBytes(resp.bodyBytes, flush: true);
+    final bytes = await ChatFileAccess.readBytes(url);
+    await cached.writeAsBytes(bytes, flush: true);
     return cached;
   }
 

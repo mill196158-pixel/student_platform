@@ -12,29 +12,14 @@ class SubjectDiaryRepositorySupabase implements SubjectDiaryRepository {
   final Map<String, String> _cachedTeamIdBySubject = <String, String>{};
   final Map<String, _DiaryOfferingContext> _cachedOfferingContext =
       <String, _DiaryOfferingContext>{};
-  S3Client? _s3;
-
-  SubjectDiaryRepositorySupabase() {
-    if (YandexStorageConfig.isConfigured) {
-      _s3 = S3Client(
-        accessKey: YandexStorageConfig.accessKey,
-        secretKey: YandexStorageConfig.secretKey,
-        bucketName: YandexStorageConfig.bucketName,
-        region: YandexStorageConfig.region,
-        endpoint: YandexStorageConfig.endpoint,
-      );
-    }
-  }
-
-  S3Client? get _legacyS3Client {
-    if (!YandexStorageConfig.isConfigured) return null;
-    return _s3 ??= S3Client(
-      accessKey: YandexStorageConfig.accessKey,
-      secretKey: YandexStorageConfig.secretKey,
-      bucketName: YandexStorageConfig.bucketName,
-      region: YandexStorageConfig.region,
-      endpoint: YandexStorageConfig.endpoint,
-    );
+  String? _cacheUser;
+  final _pendingUploads = <String, FileUploadResult>{};
+  SubjectDiaryRepositorySupabase();
+  void _checkCacheSession() {
+    final uid=_sb.auth.currentUser?.id;
+    if(uid==_cacheUser)return;
+    _cacheUser=uid; _thumbs.clear(); _files.clear(); _pendingUploads.clear();
+    _cachedTeamId=null; _cachedTeamIdBySubject.clear(); _cachedOfferingContext.clear();
   }
 
   // ===== SubjectDiaryRepository API =====
@@ -310,7 +295,7 @@ class SubjectDiaryRepositorySupabase implements SubjectDiaryRepository {
           .limit(200);
 
       final list = <SubjectDiaryEntry>[];
-      if (rows is List) {
+      {
         for (final it in rows) {
           final m = Map<String, dynamic>.from(it as Map);
           final entry = _mapEntryRow(m, fallbackSubjectKey: args.displayTitle);
@@ -338,34 +323,15 @@ class SubjectDiaryRepositorySupabase implements SubjectDiaryRepository {
 
   @override
   Future<void> deleteEntry(String id) async {
-    try {
-      // Перед удалением записи удалим объекты в S3
-      try {
-        final files = await _sb
-            .from('subject_diary_files')
-            .select('yandex_key')
-            .eq('entry_id', id);
-        if (files is List && files.isNotEmpty) {
-          final s3 = _legacyS3Client;
-          for (final row in files) {
-            final m = Map<String, dynamic>.from(row as Map);
-            final key = (m['yandex_key'] ?? '').toString();
-            if (s3 != null && key.isNotEmpty) {
-              await s3.deleteObject(key: key);
-            }
-          }
-        }
-      } catch (_) {}
-
-      await _sb.rpc('delete_subject_diary_entry', params: {'p_entry_id': id});
-    } catch (_) {}
+    await _sb.rpc('delete_subject_diary_entry', params: {'p_entry_id':id});
+    _thumbs.clear();_files.clear();_pendingUploads.clear();
   }
 
   @override
-  Uint8List? getLocalThumb(String url) => _thumbs[url];
+  Uint8List? getLocalThumb(String url) { _checkCacheSession();return _thumbs[url]; }
 
   @override
-  Uint8List? getFileBytes(String url) => _files[url];
+  Uint8List? getFileBytes(String url) { _checkCacheSession();return _files[url]; }
 
   @override
   Future<SubjectDiaryEntry> updateTextEntry({
@@ -392,52 +358,13 @@ class SubjectDiaryRepositorySupabase implements SubjectDiaryRepository {
     required String entryId,
     required String fileUrl,
   }) async {
-    try {
-      // 1) Получим файлы записи и найдём точный объект
-      final files = await _listFiles(entryId);
-      final file = files.firstWhere(
-        (f) => f.url == fileUrl,
-        orElse: () =>
-            const SubjectDiaryFile(name: '', size: 0, mime: '', url: ''),
-      );
-      if (file.url.isEmpty) return null;
-
-      // 2) Удалим файл в S3 (по yandex_key — нужно получить его через отдельный RPC)
-      try {
-        final meta = await _sb
-            .from('subject_diary_files')
-            .select('id,yandex_key')
-            .eq('file_url', fileUrl)
-            .limit(1);
-        if (meta is List && meta.isNotEmpty) {
-          final m = Map<String, dynamic>.from(meta.first as Map);
-          final key = (m['yandex_key'] ?? '').toString();
-          final s3 = _legacyS3Client;
-          if (s3 != null && key.isNotEmpty) {
-            await s3.deleteObject(key: key);
-          }
-        }
-      } catch (_) {}
-
-      // 3) Удалим запись файла через RPC (по id)
-      try {
-        final meta = await _sb
-            .from('subject_diary_files')
-            .select('id')
-            .eq('file_url', fileUrl)
-            .limit(1);
-        if (meta is List && meta.isNotEmpty) {
-          final m = Map<String, dynamic>.from(meta.first as Map);
-          final fileId = (m['id'] ?? '').toString();
-          if (fileId.isNotEmpty) {
-            await _sb.rpc('remove_subject_diary_file',
-                params: {'p_file_id': fileId});
-          }
-        }
-      } catch (_) {}
-    } catch (_) {}
+    final rows=await _sb.from('subject_diary_files').select('id').eq('entry_id',entryId).eq('file_url',fileUrl);
+    for(final row in rows) {
+      await _sb.rpc('remove_subject_diary_file',params:{'p_file_id':row['id']});
+    }
 
     // Обновим локальные кэши (на всякий случай)
+    _pendingUploads.clear();
     _thumbs.remove(fileUrl);
     _files.remove(fileUrl);
 
@@ -474,95 +401,26 @@ class SubjectDiaryRepositorySupabase implements SubjectDiaryRepository {
   }
 
   @override
-  Future<void> removeAllFilesForEntry(
-      {required String entryId, required bool alsoDeleteEntryIfNoText}) async {
-    try {
-      final files = await _sb
-          .from('subject_diary_files')
-          .select('id,yandex_key')
-          .eq('entry_id', entryId);
-      final s3 = _legacyS3Client;
-      if (files is List) {
-        for (final row in files) {
-          final m = Map<String, dynamic>.from(row as Map);
-          final fid = (m['id'] ?? '').toString();
-          final key = (m['yandex_key'] ?? '').toString();
-          if (s3 != null && key.isNotEmpty) {
-            await s3.deleteObject(key: key);
-          }
-          if (fid.isNotEmpty) {
-            await _sb
-                .rpc('remove_subject_diary_file', params: {'p_file_id': fid});
-          }
-        }
-      }
-      if (alsoDeleteEntryIfNoText) {
-        final row = await _sb
-            .from('subject_diary_entries')
-            .select('text')
-            .eq('id', entryId)
-            .maybeSingle();
-        if (row != null) {
-          final m = Map<String, dynamic>.from(row as Map);
-          final text = (m['text'] ?? '').toString();
-          if (text.trim().isEmpty) {
-            await _sb.rpc('delete_subject_diary_entry',
-                params: {'p_entry_id': entryId});
-          }
-        }
-      }
-    } catch (_) {}
+  Future<void> removeAllFilesForEntry({required String entryId,required bool alsoDeleteEntryIfNoText}) async {
+    final rows=await _sb.from('subject_diary_files').select('id').eq('entry_id',entryId);
+    for(final row in rows) { await _sb.rpc('remove_subject_diary_file',params:{'p_file_id':row['id']}); }
+    _thumbs.clear();_files.clear();_pendingUploads.clear();
+    if(alsoDeleteEntryIfNoText) {
+      final row=await _sb.from('subject_diary_entries').select('text').eq('id',entryId).maybeSingle();
+      if(row!=null && (row['text']??'').toString().trim().isEmpty) await deleteEntry(entryId);
+    }
   }
-
   @override
-  Future<void> deleteEntryCascade({required String entryId}) async {
-    try {
-      final files = await _sb
-          .from('subject_diary_files')
-          .select('id,yandex_key')
-          .eq('entry_id', entryId);
-      final s3 = _legacyS3Client;
-      if (files is List) {
-        for (final row in files) {
-          final m = Map<String, dynamic>.from(row as Map);
-          final key = (m['yandex_key'] ?? '').toString();
-          if (s3 != null && key.isNotEmpty) {
-            await s3.deleteObject(key: key);
-          }
-        }
-      }
-      await _sb
-          .rpc('delete_subject_diary_entry', params: {'p_entry_id': entryId});
-    } catch (_) {}
-  }
-
+  Future<void> deleteEntryCascade({required String entryId}) => deleteEntry(entryId);
   @override
-  Future<void> removeFilesForEntry(
-      {required String entryId, required bool images}) async {
-    try {
-      // Выберем файлы этой записи и отфильтруем по mime (image/* или !image/*)
-      final rows = await _sb
-          .from('subject_diary_files')
-          .select('id,yandex_key,mime')
-          .eq('entry_id', entryId);
-      if (rows is! List) return;
-      final s3 = _legacyS3Client;
-      for (final row in rows) {
-        final m = Map<String, dynamic>.from(row as Map);
-        final mime = (m['mime'] ?? '').toString();
-        final isImg = mime.startsWith('image/');
-        if (isImg != images) continue; // оставим «чужие» типы
-        final key = (m['yandex_key'] ?? '').toString();
-        final fid = (m['id'] ?? '').toString();
-        if (s3 != null && key.isNotEmpty) {
-          await s3.deleteObject(key: key);
-        }
-        if (fid.isNotEmpty) {
-          await _sb
-              .rpc('remove_subject_diary_file', params: {'p_file_id': fid});
-        }
+  Future<void> removeFilesForEntry({required String entryId,required bool images}) async {
+    final rows=await _sb.from('subject_diary_files').select('id,mime').eq('entry_id',entryId);
+    for(final row in rows) {
+      if((row['mime']??'').toString().startsWith('image/')==images) {
+        await _sb.rpc('remove_subject_diary_file',params:{'p_file_id':row['id']});
       }
-    } catch (_) {}
+    }
+    _thumbs.clear();_files.clear();_pendingUploads.clear();
   }
 
   // ===== Helpers =====
@@ -643,19 +501,14 @@ class SubjectDiaryRepositorySupabase implements SubjectDiaryRepository {
     return const [];
   }
 
-  Future<void> _prefetchUrl(String url, {required bool isImage}) async {
-    if (url.isEmpty) return;
-    if (_files.containsKey(url) || _thumbs.containsKey(url)) return;
+  Future<void> _prefetchUrl(String url,{required bool isImage}) async {
+    _checkCacheSession();final uid=_cacheUser;
+    if(url.isEmpty)return;
     try {
-      final resp = await http.get(Uri.parse(url));
-      if (resp.statusCode == 200) {
-        final bytes = resp.bodyBytes;
-        _files[url] = bytes;
-        if (isImage) {
-          _thumbs[url] = bytes; // без отдельного превью используем сам файл
-        }
-      }
-    } catch (_) {}
+      final bytes=await ChatFileAccess.readBytes(url);
+      if(uid!=_sb.auth.currentUser?.id)return;
+      _files[url]=bytes;if(isImage)_thumbs[url]=bytes;
+    } catch (_) { _files.remove(url);_thumbs.remove(url); }
   }
 
   Future<String> _ensureEntryFor(
@@ -790,6 +643,7 @@ class SubjectDiaryRepositorySupabase implements SubjectDiaryRepository {
 
   Future<_DiaryOfferingContext> _resolveOfferingContext(
       SubjectDiaryArgs args) async {
+    _checkCacheSession();
     final offeringId = args.subjectOfferingId?.trim() ?? '';
     if (offeringId.isEmpty) {
       return _DiaryOfferingContext(
@@ -848,6 +702,7 @@ class SubjectDiaryRepositorySupabase implements SubjectDiaryRepository {
       a.year == b.year && a.month == b.month && a.day == b.day;
 
   Future<String> _ensureTeamId() async {
+    _checkCacheSession();
     if ((_cachedTeamId ?? '').isNotEmpty) return _cachedTeamId!;
     try {
       // Используем тот же RPC, что и в разделе «Команды»
@@ -864,7 +719,7 @@ class SubjectDiaryRepositorySupabase implements SubjectDiaryRepository {
     // Фолбэк: берём последнюю команду из team_members
     try {
       final data = await _sb.from('team_members').select('team_id').limit(1);
-      if (data is List && data.isNotEmpty) {
+      if (data.isNotEmpty) {
         final id = (data.first['team_id'] ?? '').toString();
         if (id.isNotEmpty) {
           _cachedTeamId = id;
@@ -876,6 +731,7 @@ class SubjectDiaryRepositorySupabase implements SubjectDiaryRepository {
   }
 
   Future<String> _ensureTeamIdForSubject(String subjectKey) async {
+    _checkCacheSession();
     // Кэш по предмету
     final cached = _cachedTeamIdBySubject[subjectKey.trim()];
     if ((cached ?? '').isNotEmpty) return cached!;
@@ -922,7 +778,7 @@ class SubjectDiaryRepositorySupabase implements SubjectDiaryRepository {
                 .select('id,name,group_name')
                 .eq('group_name', groupName)
                 .limit(50);
-            if (q is List) {
+            {
               for (final row in q) {
                 final rm = Map<String, dynamic>.from(row as Map);
                 final tName = (rm['name'] ?? '').toString();
@@ -1006,49 +862,40 @@ class SubjectDiaryRepositorySupabase implements SubjectDiaryRepository {
     String? teamId,
     required List<_UploadPayload> files,
   }) async {
-    if (_s3 == null) {
-      throw Exception('Yandex Storage не настроен');
-    }
-    final String resolvedTeamId = (teamId ?? '').isNotEmpty
-        ? teamId!
-        : await _ensureTeamId();
-    final String userId = _sb.auth.currentUser?.id ?? 'anon';
-    final String day =
-        '${date.year.toString().padLeft(4, '0')}${date.month.toString().padLeft(2, '0')}${date.day.toString().padLeft(2, '0')}';
-
-    for (final f in files) {
-      final ext = _extensionFromMimeOrName(mime: f.mime, name: f.name);
-      final safeName = _safeFileName(f.name, fallbackExt: ext);
-      // Сохраняем оригинальное имя в конце ключа (для отображения по URL)
-      final key =
-          'diaries/$resolvedTeamId/$userId/$day/${_randomId()}_${safeName}';
-      final upload = await _s3!.putObject(
-        key: key,
-        body: f.bytes,
-        contentType: f.mime,
-      );
-      if (!(upload.success)) {
-        // пропускаем неуспешные
-        continue;
+    _checkCacheSession();
+    final uid=_sb.auth.currentUser?.id;
+    if(uid==null)throw StateError('Войдите, чтобы сохранить файл.');
+    final resolvedTeamId=teamId ?? await _ensureTeamId();
+    final chat=await _sb.from('chats').select('id').eq('team_id',resolvedTeamId).eq('type','team_main').single();
+    final service=FileService(supabase:_sb);
+    try {
+      for(final f in files) {
+        final identity='$uid:$entryId:${crypto.sha256.convert(f.bytes)}:${f.name}';
+        var uploaded=_pendingUploads[identity];
+        if(uploaded==null) {
+          final dir=await getTemporaryDirectory();
+          final temp=io.File('${dir.path}/diary_${_randomId()}');
+          try {
+            await temp.writeAsBytes(f.bytes,flush:true);
+            uploaded=await service.uploadFile(file:temp,chatId:chat['id'] as String,customFileName:f.name);
+          } finally { if(await temp.exists())await temp.delete(); }
+          if(!uploaded.success)throw StateError(uploaded.error??'Не удалось загрузить файл.');
+          _pendingUploads[identity]=uploaded;
+        }
+        if(uid!=_sb.auth.currentUser?.id)throw StateError('Сессия изменилась.');
+        try {
+          await _sb.rpc('add_subject_diary_file',params:{'p_entry_id':entryId,'p_yandex_key':uploaded.fileKey,
+            'p_file_url':uploaded.fileUrl,'p_mime':uploaded.fileType,'p_size':uploaded.fileSize,'p_thumb_url':null});
+        } on PostgrestException {
+          _pendingUploads.remove(identity);
+          unawaited(_sb.rpc('discard_unattached_chat_upload',params:{'p_key':uploaded.fileKey}).then<void>((_) {}).catchError((_) {}));
+          rethrow;
+        }
+        if(uid!=_sb.auth.currentUser?.id)throw StateError('Сессия изменилась.');
+        _files[uploaded.fileUrl!]=f.bytes;
+        if(f.mime.startsWith('image/'))_thumbs[uploaded.fileUrl!]=f.bytes;
       }
-      final fileUrl = upload.fileUrl ?? '';
-      try {
-        await _sb.rpc('add_subject_diary_file', params: {
-          'p_entry_id': entryId,
-          'p_yandex_key': key,
-          'p_file_url': fileUrl,
-          'p_mime': f.mime,
-          'p_size': f.bytes.length,
-          'p_thumb_url': null,
-        });
-      } catch (_) {}
-
-      // Положим в кэш, чтобы UI сразу показал
-      _files[fileUrl] = f.bytes;
-      if (f.mime.startsWith('image/')) {
-        _thumbs[fileUrl] = f.bytes;
-      }
-    }
+    } finally { service.dispose(); }
   }
 
   String _extensionFromMimeOrName(
@@ -1091,23 +938,7 @@ class SubjectDiaryRepositorySupabase implements SubjectDiaryRepository {
     return fromMime() ?? (name.contains('.') ? '.${name.split('.').last}' : '');
   }
 
-  String _safeFileName(String rawName, {required String fallbackExt}) {
-    String base = rawName.trim();
-    if (base.isEmpty) base = 'file$fallbackExt';
-    // Уберём каталоги
-    if (base.contains('/')) base = base.split('/').last;
-    if (base.contains('\\')) base = base.split('\\').last;
-    // Если нет расширения — добавим
-    if (!base.contains('.')) base = '$base$fallbackExt';
-    // Санитайз
-    base = base.replaceAll(RegExp(r"[^A-Za-z0-9._-]"), '_');
-    if (base.length > 80) {
-      final ext = '.${base.split('.').last}';
-      final stem = base.substring(0, 80 - ext.length);
-      base = '$stem$ext';
-    }
-    return base;
-  }
+
 }
 
 class _UploadPayload {

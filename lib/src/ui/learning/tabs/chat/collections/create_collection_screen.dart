@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'package:uuid/uuid.dart';
 import 'dart:ui' as ui;
 
 import 'package:file_picker/file_picker.dart';
@@ -37,6 +39,8 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
   bool _showLink = false;
   bool _pickingFile = false;
   bool _saving = false;
+  bool _published = false;
+  final String _clientKey = const Uuid().v4();
   String? _error;
   final List<Map<String, String>> _files = [];
 
@@ -61,6 +65,12 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
 
   @override
   void dispose() {
+    if (!_published) {
+      for (final file in _files) {
+        final key = file['_key'];
+        if (key != null) unawaited(_repo.discardCollectionUpload(key).catchError((_) {}));
+      }
+    }
     _titleCtrl.dispose();
     _descCtrl.dispose();
     _purposeCtrl.dispose();
@@ -144,12 +154,16 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
   }
 
   Future<void> _pickAttachments() async {
-    if (_pickingFile) return;
+    if (_pickingFile || _saving) return;
     KeyboardDismissScope.unfocus(context);
     setState(() => _pickingFile = true);
     try {
       final result = await FilePicker.platform.pickFiles(allowMultiple: true);
       if (result == null || result.files.isEmpty || !mounted) return;
+      if (_files.length + result.files.length > 10) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Можно прикрепить до 10 файлов')));
+        return;
+      }
       for (final file in result.files) {
         final name = (file.name).trim();
         final path = (file.path ?? '').trim();
@@ -178,18 +192,12 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
   Future<void> _submit() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     if (!_canSubmit) return;
-    if (_files.isNotEmpty) {
-      const message = 'Вложения к сбору пока не поддерживаются. '
-          'Уберите выбранные файлы; их можно отправить отдельным сообщением в чат.';
-      setState(() => _error = message);
-      return;
-    }
     KeyboardDismissScope.unfocus(context);
     HapticFeedback.lightImpact();
 
     final amount =
         double.tryParse(_amountCtrl.text.trim().replaceAll(',', '.'));
-    // The link is preserved in instructions. Never silently discard files.
+    // Links remain in instructions; files are attached atomically to the card.
     final link = _linkCtrl.text.trim();
     var instructions = _instructionsCtrl.text.trim();
     if (link.isNotEmpty) {
@@ -203,7 +211,21 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
       _error = null;
     });
     try {
+      for (final file in _files) {
+        if (file['_id'] != null) continue;
+        final path = file['path'];
+        if (path == null || path.isEmpty) throw StateError('Файл недоступен. Выберите его заново.');
+        final uploaded = await _repo.uploadCollectionFile(path, file['name']!);
+        file['_id'] = uploaded['id']!;
+        file['_key'] = uploaded['key']!;
+        if (!mounted) {
+          await _repo.discardCollectionUpload(uploaded['key']!);
+          return;
+        }
+      }
       await _repo.createCollection(
+        clientKey:_clientKey,
+        fileIds:_files.map((file)=>file['_id']!).toList(),
         title: _titleCtrl.text.trim(),
         purpose: _purposeCtrl.text.trim(),
         description: _descCtrl.text.trim(),
@@ -214,6 +236,7 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
         instructions: instructions,
         paymentDetails: _paymentCtrl.text.trim(),
       );
+      _published = true;
       if (!mounted) return;
       Navigator.of(context).pop(true);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -526,7 +549,7 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
                               ? 'Квитанция, скрин, документ — по желанию'
                               : 'Файлов: ${_files.length}',
                           busy: _pickingFile,
-                          onTap: _pickingFile ? null : _pickAttachments,
+                          onTap: _pickingFile || _saving ? null : _pickAttachments,
                         ),
                         if (_files.isNotEmpty) ...[
                           const SizedBox(height: 10),
@@ -536,8 +559,12 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
                               child: _AttachmentTile(
                                 name: _files[i]['name'] ?? 'Файл',
                                 path: _files[i]['path'] ?? '',
-                                onRemove: () =>
-                                    setState(() => _files.removeAt(i)),
+                                onRemove: () {
+                                  if (_saving) return;
+                                  final key = _files[i]['_key'];
+                                  if (key != null) unawaited(_repo.discardCollectionUpload(key).catchError((_) {}));
+                                  setState(() => _files.removeAt(i));
+                                },
                               ),
                             ),
                         ],

@@ -1,7 +1,8 @@
+import 'package:student_platform/src/services/chat_file_access.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:student_platform/src/ui/learning/widgets/authorized_file_image.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -14,7 +15,6 @@ import '../../../services/file_service.dart';
 import '../widgets/fullscreen_image.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:http/http.dart' as http;
 
 enum _FilesSection { images, documents }
 
@@ -407,7 +407,7 @@ class _FilesTabState extends State<FilesTab>
             child: Stack(
               fit: StackFit.expand,
               children: [
-                CachedNetworkImage(
+                AuthorizedFileImage(
                   imageUrl: f.fileUrl,
                   fit: BoxFit.cover,
                   placeholder: (_, __) => ColoredBox(
@@ -665,7 +665,7 @@ class _FilesTabState extends State<FilesTab>
         }
       }
       // Фолбэк — открыть URL в браузере
-      final uri = Uri.parse(f.fileUrl);
+      final uri = Uri.parse(await ChatFileAccess.resolve(f.fileUrl));
       if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
         _showError('Не удалось открыть файл');
       }
@@ -842,24 +842,9 @@ class _FilesTabState extends State<FilesTab>
     try {
       final dir = await getApplicationDocumentsDirectory();
       for (final f in files) {
-        final name = f.fileName;
+        final name = FileUiUtils.cleanFileName(f.fileName);
         final path = '${dir.path}/$name';
-        // Пытаемся скачать байты через FileService, иначе по URL
-        final service = _fileService ??= _tryCreateFileService();
-        late final List<int> bytes;
-        if (service != null && f.fileKey.isNotEmpty) {
-          final res =
-              await service.downloadFile(fileKey: f.fileKey, fileName: name);
-          if (res.success && res.file != null) {
-            bytes = await res.file!.readAsBytes();
-          } else {
-            final resp = await http.get(Uri.parse(f.fileUrl));
-            bytes = resp.bodyBytes;
-          }
-        } else {
-          final resp = await http.get(Uri.parse(f.fileUrl));
-          bytes = resp.bodyBytes;
-        }
+        final bytes = await ChatFileAccess.readBytes(f.fileUrl);
         final out = File(path);
         await out.writeAsBytes(bytes, flush: true);
       }

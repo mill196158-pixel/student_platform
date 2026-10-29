@@ -708,9 +708,7 @@ class SupabaseLearningRepository implements LearningRepository {
 
       // Вместо удаления файлов — отвязываем их от сообщения (message_id = null),
       // чтобы файлы оставались доступны во вкладке "Файлы".
-      await _sb
-          .from('chat_files')
-          .update({'message_id': null}).eq('message_id', messageId);
+      await _sb.rpc('detach_my_message_files', params: {'p_message_id': messageId});
 
       debugPrint('[deleteMessage] связанные файлы отвязаны (message_id=null)');
 

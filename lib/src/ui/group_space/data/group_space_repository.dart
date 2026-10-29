@@ -202,23 +202,8 @@ class GroupSpaceRepository {
     if (!upload.success) {
       throw StateError(upload.error ?? 'proof_upload_failed');
     }
-    // Mark sensitive on insert so an orphan (if upsert fails later) is not
-    // listed in normal chat attachment feeds.
-    final inserted = await _client
-        .from('chat_files')
-        .insert({
-          'chat_id': chatId,
-          'file_name': upload.fileName,
-          'file_key': upload.fileKey,
-          'file_url': upload.fileUrl,
-          'file_type': upload.fileType,
-          'file_size': upload.fileSize,
-          'uploaded_by': uid,
-          'is_sensitive': true,
-        })
-        .select('id')
-        .single();
-    final id = inserted['id']?.toString() ?? '';
+    final id = (await _client.rpc('save_collection_proof_upload',
+        params: {'p_key': upload.fileKey})).toString();
     if (id.isEmpty) throw StateError('proof_file_missing');
     return id;
   }

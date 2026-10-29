@@ -1,5 +1,6 @@
+import 'package:student_platform/src/services/chat_file_access.dart';
 import 'package:flutter/material.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:student_platform/src/ui/learning/widgets/authorized_file_image.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:student_platform/src/utils/safe_debug_log.dart';
 import '../../models/chat_file.dart';
@@ -64,7 +65,7 @@ class AttachmentWidget extends StatelessWidget {
       borderRadius: BorderRadius.circular(8),
       child: Stack(
         children: [
-          CachedNetworkImage(
+          AuthorizedFileImage(
             imageUrl: file.fileUrl,
             fit: BoxFit.cover,
             width: double.infinity,
@@ -131,7 +132,7 @@ class AttachmentWidget extends StatelessWidget {
 
   Future<void> _openFile(ChatFile file) async {
     try {
-      final url = Uri.parse(file.fileUrl);
+      final url = Uri.parse(await ChatFileAccess.resolve(file.fileUrl));
       if (await canLaunchUrl(url)) {
         await launchUrl(url, mode: LaunchMode.externalApplication);
       }

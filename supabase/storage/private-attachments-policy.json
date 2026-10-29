@@ -1,0 +1,29 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ExistingPublicReads",
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::studentsplatform/*"
+    },
+    {
+      "Sid": "StorageService",
+      "Effect": "Allow",
+      "Principal": { "CanonicalUser": "aje8n9m3aq8qfalq46hm" },
+      "Action": "s3:*",
+      "Resource": ["arn:aws:s3:::studentsplatform", "arn:aws:s3:::studentsplatform/*"]
+    },
+    {
+      "Sid": "PrivateChatFiles",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:GetObject",
+      "Resource": ["arn:aws:s3:::studentsplatform/chats/*", "arn:aws:s3:::studentsplatform/diaries/*"],
+      "Condition": {
+        "StringNotEqualsIfExists": { "aws:userid": "aje8n9m3aq8qfalq46hm" }
+      }
+    }
+  ]
+}

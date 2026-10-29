@@ -1,3 +1,4 @@
+import '../../services/chat_file_access.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -608,7 +609,7 @@ class _CollectionDetailScreenState extends State<_CollectionDetailScreen> {
                         IconButton(
                           tooltip: 'Открыть подтверждение',
                           onPressed: () async {
-                            final uri = Uri.tryParse(proofUrl);
+                            final uri = Uri.tryParse(await ChatFileAccess.resolve(proofUrl));
                             if (uri == null) return;
                             await launchUrl(
                               uri,

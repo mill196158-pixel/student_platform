@@ -171,6 +171,41 @@ def cleanup(f):
         code,auth=request('/auth/v1/admin/users/'+user['id'],admin=True)
         if code!=200 or auth.get('user_metadata',{}).get('test_run')!=f['run']:
             raise RuntimeError('Cleanup identity check failed')
+    academic=f.get('academic')
+    if academic and not academic.get('cleaned'):
+        code,rows=request('/rest/v1/groups?id=eq.'+academic['group']+'&select=name',admin=True)
+        if code!=200 or (rows and rows[0]['name']!='E2E-'+f['run']):
+            raise RuntimeError('Academic fixture identity mismatch')
+        for team_id in filter(None, [academic['team'], academic.get('subject_team')]):
+            code,members=request('/rest/v1/team_members?team_id=eq.'+team_id+'&select=user_id',admin=True)
+            if code!=200 or not set(r['user_id'] for r in members).issubset({u['id'] for u in f['users']}):
+                raise RuntimeError('Unexpected academic participant')
+        if academic.get('offering'):
+            code,rows=request('/rest/v1/subject_offerings?id=eq.'+academic['offering']+'&select=group_id,subject_id',admin=True)
+            if code!=200 or (rows and (rows[0]['group_id']!=academic['group'] or rows[0]['subject_id']!=academic['subject'])):
+                raise RuntimeError('Offering fixture relation mismatch')
+            code,uses=request('/rest/v1/subject_offerings?subject_id=eq.'+academic['subject']+'&select=id',admin=True)
+            if code!=200 or any(row['id']!=academic['offering'] for row in uses):
+                raise RuntimeError('Subject has other offerings; cleanup stopped')
+        if academic.get('subject_team'):
+            code,rows=request('/rest/v1/teams?id=eq.'+academic['subject_team']+'&select=group_id,subject_id,subject_offering_id',admin=True)
+            if code!=200 or (rows and (rows[0]['group_id']!=academic['group'] or rows[0]['subject_id']!=academic['subject'] or rows[0]['subject_offering_id']!=academic['offering'])):
+                raise RuntimeError('Subject team fixture relation mismatch')
+        for team_id in filter(None, [academic['team'], academic.get('subject_team')]):
+            for table in ['group_collections', 'group_topic_selections']:
+                code,_=request('/rest/v1/'+table+'?team_id=eq.'+team_id,method='DELETE',admin=True)
+                if code>=300: raise RuntimeError('Academic activity cleanup failed: '+table)
+        for user in f['users']:
+            code,_=request('/rest/v1/users?id=eq.'+user['id']+'&primary_group_id=eq.'+academic['group'],{'primary_group_id':None},method='PATCH',admin=True)
+            if code>=300: raise RuntimeError('Synthetic user group cleanup failed')
+        for table,identity in [('teams',academic.get('subject_team')),('subject_offerings',academic.get('offering')),('subject_catalog',academic.get('subject'))]:
+            if identity:
+                code,_=request('/rest/v1/'+table+'?id=eq.'+identity,method='DELETE',admin=True)
+                if code>=300: raise RuntimeError('Subject cleanup failed: '+table)
+        for table,field,identity in [('teams','id',academic['team']),('student_enrollments','group_id',academic['group']),('groups','id',academic['group'])]:
+            code,_=request('/rest/v1/'+table+'?'+field+'=eq.'+identity,method='DELETE',admin=True)
+            if code>=300: raise RuntimeError('Academic cleanup failed: '+table)
+        academic['cleaned']=True;save(f)
     for chat in f['chats']:
         if chat in f.get('cleaned_chats',[]): continue
         uuid.UUID(chat)

@@ -1,3 +1,5 @@
+import 'package:student_platform/src/ui/learning/widgets/authorized_file_image.dart';
+import 'package:student_platform/src/services/chat_file_access.dart';
 // ignore_for_file: unnecessary_import, unused_import, unused_field, unused_element, dead_null_aware_expression, invalid_null_aware_operator, unused_local_variable, deprecated_member_use, unnecessary_null_comparison
 
 import 'dart:async';
@@ -180,6 +182,9 @@ class _ChatTabState extends State<ChatTab> {
   String? _trackedChatId;
   // флаг и чип превью «пакет сообщений» в композере
   bool _forwardPackageAttached = false;
+  bool _preparingForward = false;
+  bool _forwardPreparationFailed = false;
+  int _forwardPreparationGeneration = 0;
   final List<String> _forwardSelectedIds = [];
   final List<String> _stagedForwardFileIds = [];
   final _capsRepo = ChatComposerCapabilitiesRepository();
@@ -349,8 +354,8 @@ class _ChatTabState extends State<ChatTab> {
 
   // Блокировка повторных отправок и индикатор фоновых загрузок
   bool _isSending = false;
-  bool get _isUploadingAttachments => _att.hasActiveUploads;
-  bool get _hasFailedAttachments => _att.hasFailedUploads;
+  bool get _isUploadingAttachments => _preparingForward || _att.hasActiveUploads;
+  bool get _hasFailedAttachments => _forwardPreparationFailed || _att.hasFailedUploads;
 
   // Файлы в чате
   final FileService _fileService = FileService();
@@ -716,7 +721,7 @@ class _ChatTabState extends State<ChatTab> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       for (final url in urls) {
-        precacheImage(CachedNetworkImageProvider(url), context);
+        precacheImage(AuthorizedFileImageProvider(url), context);
       }
     });
   }
@@ -1359,6 +1364,9 @@ class _ChatTabState extends State<ChatTab> {
         await _sendMessageWithFilesAndRefresh(teamId, forwardText, fileIds);
         setState(() {
           _forwardPackageAttached = false;
+      _forwardPreparationGeneration++;
+      _preparingForward = false;
+      _forwardPreparationFailed = false;
           _stagedForward = null;
           _forwardSelectedIds.clear();
           _stagedForwardFileIds.clear();
@@ -1420,6 +1428,9 @@ class _ChatTabState extends State<ChatTab> {
 
         setState(() {
           _forwardPackageAttached = false;
+      _forwardPreparationGeneration++;
+      _preparingForward = false;
+      _forwardPreparationFailed = false;
           _forwardSelectedIds.clear();
           _stagedForwardFileIds.clear();
           _att.pending.removeWhere((x) => x.path == '__FG__');
@@ -1551,38 +1562,11 @@ class _ChatTabState extends State<ChatTab> {
       final teamId = context.read<TeamCubit>().state.team.id;
       final chatId = await _getChatIdForTeam(teamId);
 
-      // Создаем метаданные файла
-      final chatFile = ChatFile(
-        id: '',
-        chatId: chatId,
-        messageId: messageId, // Используем переданный messageId
-        fileName: _baseName(file.path),
-        fileKey: '',
-        fileUrl: '',
-        fileType: 'application/octet-stream',
-        fileSize: await file.length(),
-        uploadedBy: user.id,
-        uploadedAt: DateTime.now(),
-      );
-
-      // Сохраняем файл в БД и получаем его ID
-      final savedChatFile = await _saveChatFileToDatabase(chatFile, user.id);
-
-      // Загружаем файл в Yandex Storage
       final uploadResult = await _fileService.uploadFileToChat(
-        file: file,
-        chatId: chatId,
-        messageId: messageId ?? '', // Используем переданный messageId
-        uploadedBy: user.id,
+        file: file, chatId: chatId, messageId: messageId ?? '', uploadedBy: user.id,
       );
-
-      // Обновляем chat_file с результатами загрузки
-      await Supabase.instance.client.from('chat_files').update({
-        'file_key': uploadResult.fileKey,
-        'file_url': uploadResult.fileUrl,
-        'file_type': uploadResult.fileType,
-        'file_size': uploadResult.fileSize,
-      }).eq('id', savedChatFile.id);
+      final savedChatFile = await _saveChatFileToDatabase(
+          uploadResult.copyWith(messageId: messageId), user.id);
 
       safeDebugLog(
           '[ChatTab] uploaded file metadata saved id=${maskDebugId(savedChatFile.id)}');
@@ -2003,6 +1987,9 @@ class _ChatTabState extends State<ChatTab> {
                       ? () {
                           setState(() {
                             _forwardPackageAttached = false;
+      _forwardPreparationGeneration++;
+      _preparingForward = false;
+      _forwardPreparationFailed = false;
                             _stagedForward = null;
                             _forwardSelectedIds.clear();
                             _stagedForwardFileIds.clear();
@@ -2075,6 +2062,9 @@ class _ChatTabState extends State<ChatTab> {
                     if (ui.path == '__FG__') {
                       setState(() {
                         _forwardPackageAttached = false;
+      _forwardPreparationGeneration++;
+      _preparingForward = false;
+      _forwardPreparationFailed = false;
                         _stagedForward = null;
                         _forwardSelectedIds.clear();
                         _att.pending.removeWhere((x) => x.path == '__FG__');
@@ -2365,8 +2355,9 @@ class _ChatTabState extends State<ChatTab> {
   }
 
   Future<void> _consumeForwardOutboxIfAny(String chatId) async {
+    final uid=ChatFileAccess.userId, epoch=ChatFileAccess.generation;
     final data = await ForwardOutbox.tryTakeForChat(chatId);
-    if (data == null) return;
+    if (data == null || !mounted || uid!=ChatFileAccess.userId || epoch!=ChatFileAccess.generation) return;
     final raw = data.text ?? '';
     if (!ForwardPayload.isForwardText(raw)) {
       if (raw.isNotEmpty) {
@@ -2383,7 +2374,9 @@ class _ChatTabState extends State<ChatTab> {
 
   Future<void> _stageForwardPayload(
       ForwardPayload payload, List<String> fileUrls, String chatId) async {
-    if (!mounted) return;
+    final uid=ChatFileAccess.userId, epoch=ChatFileAccess.generation;
+    bool sameSession()=>uid!=null && uid==ChatFileAccess.userId && epoch==ChatFileAccess.generation;
+    if (!mounted || !sameSession()) return;
     final sameChat = payload.fromChatId == chatId;
 
     if (!_att.pending.any((x) => x.path == '__FG__')) {
@@ -2421,40 +2414,55 @@ class _ChatTabState extends State<ChatTab> {
       _forwardSelectedIds.clear();
     });
 
-    final uniqueUrls = fileUrls.where((u) => u.isNotEmpty).toSet();
-    for (final url in uniqueUrls) {
-      try {
+    final preparation = ++_forwardPreparationGeneration;
+    setState(() {
+      _forwardPackageAttached = true;
+      _stagedForward = payload;
+      _forwardSelectedIds.clear();
+      _stagedForwardFileIds.clear();
+      _preparingForward = true;
+      _forwardPreparationFailed = false;
+    });
+    try {
+      final refs = {for (final ref in payload.allFiles()) ref.url:ref};
+      final urls = {...fileUrls.where((u)=>u.isNotEmpty), ...refs.keys};
+      final copies = <String,ForwardFileRef>{};
+      for (final url in urls) {
+        if(!sameSession()) return;
         final tmp = await _downloadToTemp(url);
-        final attach = LocalAttach(
-          path: tmp.path,
-          name: tmp.path.split('/').last,
-          mimeType: _guessMime(tmp.path),
-          size: await tmp.length(),
-          isImage: _isImagePath(tmp.path),
-        );
-        if (!mounted) return;
-        _att.add(attach);
-        // ignore: unawaited_futures
-        _att.upload(attach,
-            teamId: context.read<TeamCubit>().state.team.id, chatId: chatId);
-      } catch (e) {
-        if (kDebugMode) debugPrint('[ChatTab] stageForward error: $e');
+        if (!mounted || !sameSession() || preparation != _forwardPreparationGeneration) { await ChatFileAccess.releaseForwardTemp(tmp.path); return; }
+        final size=await tmp.length();
+        if(!sameSession()) { await ChatFileAccess.releaseForwardTemp(tmp.path); return; }
+        final source = refs[url];
+        final attach = LocalAttach(path:tmp.path,
+          name:source?.name ?? tmp.path.split(RegExp(r'[\\/]')).last,
+          mimeType:source?.type ?? _guessMime(tmp.path),size:size,
+          isImage:source?.type.startsWith('image/') ?? _isImagePath(tmp.path));
+        if (!_att.add(attach)) { await ChatFileAccess.releaseForwardTemp(tmp.path); throw StateError('Слишком много вложений для одной пересылки.'); }
+        await _att.upload(attach,chatId:chatId);
+        if (!mounted || !sameSession() || preparation != _forwardPreparationGeneration) return;
+        final ready = _att.pending.where((f)=>f.localId==attach.localId).firstOrNull;
+        if (ready?.uploadedFileId == null) throw StateError('Не удалось подготовить вложение.');
+        final row = await Supabase.instance.client.from('chat_files').select().eq('id',ready!.uploadedFileId!).single();
+        final copied = ChatFile.fromJson(row);
+        copies[url] = ForwardFileRef(id:copied.id,url:copied.fileUrl,
+            name:copied.fileName,type:copied.fileType,size:copied.fileSize);
       }
+      if (mounted && sameSession() && preparation == _forwardPreparationGeneration) {
+        setState(() => _stagedForward = payload.withCopiedFiles(copies));
+      }
+    } catch (_) {
+      if (mounted && sameSession() && preparation == _forwardPreparationGeneration) {
+        setState(() => _forwardPreparationFailed = true);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content:Text('Не удалось подготовить все вложения. Отмените пересылку и повторите.')));
+      }
+    } finally {
+      if (mounted && sameSession() && preparation == _forwardPreparationGeneration) setState(() => _preparingForward=false);
     }
   }
 
-  // вспомогательное — как в UnifiedChatScreen
-  Future<File> _downloadToTemp(String url) async {
-    final http = HttpClient();
-    final req = await http.getUrl(Uri.parse(url));
-    final resp = await req.close();
-    final bytes = await consolidateHttpClientResponseBytes(resp);
-    final dir = await Directory.systemTemp.createTemp('sp_forward_');
-    final name = url.split('?').first.split('/').last;
-    final f = File('${dir.path}/$name');
-    await f.writeAsBytes(bytes, flush: true);
-    return f;
-  }
+  Future<File> _downloadToTemp(String url) => ChatFileAccess.forwardTemp(url);
 
   String _guessMime(String path) {
     final p = path.toLowerCase();
@@ -2601,7 +2609,7 @@ class _ChatTabState extends State<ChatTab> {
                 _prefetchedImageUrls.add(chatFile.fileUrl);
                 // ignore: unawaited_futures
                 precacheImage(
-                    CachedNetworkImageProvider(chatFile.fileUrl), context);
+                    AuthorizedFileImageProvider(chatFile.fileUrl), context);
               }
             }
             safeDebugLog(

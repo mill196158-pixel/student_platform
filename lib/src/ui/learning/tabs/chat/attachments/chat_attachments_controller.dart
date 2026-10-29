@@ -1,3 +1,5 @@
+import '../../../../../services/chat_file_access.dart';
+import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -19,7 +21,7 @@ class ChatAttachmentsController extends ChangeNotifier {
   ChatAttachmentsController(this.fileService, this.cache, this.supabase);
 
   bool add(LocalAttach file) {
-    if (pending.length >= maxFiles) {
+    if (pending.where((f)=>f.path!='__FG__').length >= maxFiles) {
       // мягко отказываем
       return false;
     }
@@ -44,6 +46,7 @@ class ChatAttachmentsController extends ChangeNotifier {
     final index = pending.indexWhere((f) => f.localId == file.localId);
     if (index != -1) {
       final removed = pending.removeAt(index);
+      unawaited(ChatFileAccess.releaseForwardTemp(removed.path));
       _cancelTokens.remove(removed.localId)?.cancel('attachment removed');
       if (removed.uploadedFileId != null) {
         deleteUploaded(removed.uploadedFileId!);
@@ -61,7 +64,10 @@ class ChatAttachmentsController extends ChangeNotifier {
       progress: 0,
       clearError: true,
     );
+    final uploadedId = pending[index].uploadedFileId;
+    if (uploadedId != null) unawaited(deleteUploaded(uploadedId));
     _cancelTokens.remove(file.localId)?.cancel('attachment canceled');
+    unawaited(ChatFileAccess.releaseForwardTemp(pending[index].path));
     pending.removeAt(index);
     notifyListeners();
   }
@@ -95,6 +101,9 @@ class ChatAttachmentsController extends ChangeNotifier {
     final existingIndex = pending.indexWhere((f) => f.localId == file.localId);
     if (existingIndex == -1) return;
 
+    final owner=ChatFileAccess.userId, epoch=ChatFileAccess.generation;
+    bool sameSession()=>owner!=null && owner==ChatFileAccess.userId && epoch==ChatFileAccess.generation;
+    if(!sameSession()) return;
     final uploadToken = CancelToken();
     _cancelTokens[file.localId]?.cancel('attachment retry');
     _cancelTokens[file.localId] = uploadToken;
@@ -136,8 +145,10 @@ class ChatAttachmentsController extends ChangeNotifier {
         },
       );
 
+      if(!sameSession()) return;
       final current = _findPending(file.localId);
       if (current == null || current.isCanceled || uploadToken.isCancelled) {
+        await supabase.rpc('discard_unattached_chat_upload',params:{'p_key':uploadedChatFile.fileKey});
         return;
       }
 
@@ -152,6 +163,7 @@ class ChatAttachmentsController extends ChangeNotifier {
         uploadedBy: supabase.auth.currentUser!.id,
         messageId: messageId,
       );
+      if(!sameSession()) return;
       await cache.cacheFile(savedId, uploadedChatFile.copyWith(id: savedId));
 
       // Обновляем файл в списке, если не был удалён во время загрузки
@@ -164,6 +176,8 @@ class ChatAttachmentsController extends ChangeNotifier {
           clearError: true,
         );
         notifyListeners();
+      } else {
+        await deleteUploaded(savedId);
       }
     } catch (e) {
       if (uploadToken.isCancelled) {
@@ -189,10 +203,8 @@ class ChatAttachmentsController extends ChangeNotifier {
 
   Future<void> deleteUploaded(String fileId) async {
     try {
-      // Note: FileService doesn't have a deleteFile method yet
-      // This would need to be implemented in FileService
-      safeDebugLog(
-          '[ChatAttachments] deleteUploaded not implemented id=${maskDebugId(fileId)}');
+      final row = await supabase.from('chat_files').select('file_key').eq('id',fileId).maybeSingle();
+      if (row != null) await supabase.rpc('discard_unattached_chat_upload',params:{'p_key':row['file_key']});
     } catch (e) {
       safeDebugLog('[ChatAttachments] deleteUploaded failed: ${e.runtimeType}');
     }
@@ -224,6 +236,7 @@ class ChatAttachmentsController extends ChangeNotifier {
 
   void clear() {
     for (final file in pending) {
+      unawaited(ChatFileAccess.releaseForwardTemp(file.path));
       _cancelTokens.remove(file.localId)?.cancel('attachments cleared');
       if (file.uploadedFileId != null) {
         deleteUploaded(file.uploadedFileId!);

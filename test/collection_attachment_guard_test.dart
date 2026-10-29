@@ -27,6 +27,16 @@ class TestPicker extends FilePicker {
 class RecordingRepository extends ChatGroupActionsRepository {
   RecordingRepository(SupabaseClient client) : super(client: client);
   int calls = 0;
+  int uploads = 0;
+  final keys = <String?>[];
+  final attachments = <List<String>>[];
+  final discarded = <String>[];
+  @override
+  Future<Map<String,String>> uploadCollectionFile(String path,String name) async {
+    uploads++; return {'id':'fixture-id','key':'fixture-key'};
+  }
+  @override
+  Future<void> discardCollectionUpload(String key) async { discarded.add(key); }
   @override
   Future<String> createCollection(
       {required String title,
@@ -37,15 +47,15 @@ class RecordingRepository extends ChatGroupActionsRepository {
       double? amountOptional,
       double? amountTotal,
       String instructions = '',
-      String paymentDetails = ''}) async {
-    calls++;
+      String paymentDetails = '', String? clientKey, List<String> fileIds = const []}) async {
+    calls++; keys.add(clientKey); attachments.add(fileIds);
     // Keep the form open, so test can inspect the attempted publication.
     throw StateError('test repository');
   }
 }
 
 void main() {
-  testWidgets('collection cannot silently publish without its selected file',
+  testWidgets('collection retries atomic publication with same key and uploaded attachment',
       (tester) async {
     FilePicker? previous;
     try {
@@ -66,20 +76,37 @@ void main() {
     await tester.tap(find.text('Прикрепить файл или фото'));
     await tester.pumpAndSettle(const Duration(milliseconds: 100),
         EnginePhase.sendSemanticsUpdate, const Duration(seconds: 5));
-    await tester.tap(find.text('Создать сбор'));
-    await tester.pumpAndSettle(const Duration(milliseconds: 100),
-        EnginePhase.sendSemanticsUpdate, const Duration(seconds: 5));
-    expect(repository.calls, 0);
-    expect(find.textContaining('Вложения к сбору пока не поддерживаются'),
-        findsWidgets);
-    expect(find.text('fixture.txt'), findsWidgets);
-    await tester.ensureVisible(find.byTooltip('Удалить'));
-    await tester.tap(find.byTooltip('Удалить'));
-    await tester.pumpAndSettle(const Duration(milliseconds: 100),
-        EnginePhase.sendSemanticsUpdate, const Duration(seconds: 5));
+    ScaffoldMessenger.of(tester.element(find.byType(CreateCollectionScreen))).clearSnackBars();
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Создать сбор'));
     await tester.tap(find.text('Создать сбор'));
     await tester.pumpAndSettle(const Duration(milliseconds: 100),
         EnginePhase.sendSemanticsUpdate, const Duration(seconds: 5));
     expect(repository.calls, 1);
+    expect(repository.uploads, 1);
+    expect(repository.attachments.single, ['fixture-id']);
+    ScaffoldMessenger.of(tester.element(find.byType(CreateCollectionScreen))).clearSnackBars();
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Создать сбор'));
+    await tester.tap(find.text('Создать сбор'));
+    await tester.pumpAndSettle();
+    expect(repository.calls, 2);
+    expect(repository.uploads, 1);
+    expect(repository.keys[0], isNotNull);
+    expect(repository.keys[1], repository.keys[0]);
+    expect(repository.attachments[1], ['fixture-id']);
+    await tester.ensureVisible(find.byTooltip('Удалить'));
+    await tester.tap(find.byTooltip('Удалить'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100),
+        EnginePhase.sendSemanticsUpdate, const Duration(seconds: 5));
+    ScaffoldMessenger.of(tester.element(find.byType(CreateCollectionScreen))).clearSnackBars();
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Создать сбор'));
+    await tester.tap(find.text('Создать сбор'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100),
+        EnginePhase.sendSemanticsUpdate, const Duration(seconds: 5));
+    expect(repository.calls, 3);
+    expect(repository.attachments.last, isEmpty);
+    expect(repository.discarded, ['fixture-key']);
   });
 }

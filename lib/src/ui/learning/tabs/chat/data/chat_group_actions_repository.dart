@@ -1,3 +1,5 @@
+import 'dart:io';
+import '../../../../../services/file_service.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -221,6 +223,25 @@ class ChatGroupActionsRepository {
     await prefs.setString(_pendingPicksKey, jsonEncode(next));
   }
 
+  Future<Map<String,String>> uploadCollectionFile(String path, String name) async {
+    final chat = (await _client.rpc('get_collection_upload_context')).toString();
+    final service = FileService(supabase:_client);
+    try {
+      final upload = await service.uploadFile(file:File(path),chatId:chat,customFileName:name);
+      if (!upload.success) throw StateError(upload.error ?? 'Загрузка не удалась');
+      final id = await _client.rpc('save_chat_file',params:{
+        'p_chat_id':chat,'p_file_name':upload.fileName,'p_file_key':upload.fileKey,
+        'p_file_url':upload.fileUrl,'p_file_type':upload.fileType,'p_file_size':upload.fileSize,
+        'p_uploaded_by':_userId,'p_message_id':null,
+      });
+      return {'id':id.toString(),'key':upload.fileKey!};
+    } finally { service.dispose(); }
+  }
+
+  Future<void> discardCollectionUpload(String key) async {
+    await _client.rpc('discard_unattached_chat_upload',params:{'p_key':key});
+  }
+
   Future<String> createCollection({
     required String title,
     String description = '',
@@ -231,11 +252,15 @@ class ChatGroupActionsRepository {
     double? amountTotal,
     String instructions = '',
     String paymentDetails = '',
+    String? clientKey,
+    List<String> fileIds = const [],
   }) async {
     final mode = amountMode.trim().toLowerCase();
     final id = await _client.rpc(
-      'create_group_collection',
+      clientKey == null ? 'create_group_collection' : 'create_group_collection_with_files',
       params: {
+        if (clientKey != null) 'p_client_key':clientKey,
+        if (clientKey != null) 'p_file_ids':fileIds,
         'p_title': title,
         'p_description': description,
         'p_purpose': purpose,

@@ -1,3 +1,4 @@
+import 'chat_file_access.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -32,6 +33,7 @@ class AuthService {
             await PushNotificationService.instance.onLogout();
           },
           () async {
+            await ChatFileAccess.clear();
             await DmApi.clearSessionState();
           },
           () async {

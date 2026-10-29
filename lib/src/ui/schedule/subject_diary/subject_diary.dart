@@ -1,7 +1,6 @@
 library subject_diary;
 
 import 'dart:async';
-import 'dart:typed_data';
 import 'dart:convert' as convert;
 import 'dart:io' as io;
 import 'dart:ui' as ui;
@@ -15,9 +14,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:lottie/lottie.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:http/http.dart' as http;
-import 'package:student_platform/src/config/yandex_storage_config.dart';
-import 'package:student_platform/src/services/s3_client.dart';
+import 'package:crypto/crypto.dart' as crypto;
+import '../../../services/file_service.dart';
+import '../../../services/chat_file_access.dart';
 
 part 'models.dart';
 part 'repo.dart';

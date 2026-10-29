@@ -1,8 +1,9 @@
+import 'package:student_platform/src/ui/learning/widgets/authorized_file_image.dart';
+import 'package:student_platform/src/services/chat_file_access.dart';
 import 'package:flutter/material.dart';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -19,7 +20,8 @@ Future<File> _downloadRemoteFileToCache({
   required String fileName,
 }) async {
   final cleanName = FileUiUtils.cleanFileName(fileName);
-  final digest = crypto.sha1.convert(utf8.encode(url)).toString();
+  await ChatFileAccess.authorize(url);
+  final digest = crypto.sha1.convert(utf8.encode('${ChatFileAccess.userId}:$url')).toString();
   final dir = await getApplicationCacheDirectory();
   final filesDir = Directory('${dir.path}${Platform.pathSeparator}chat_files');
   if (!await filesDir.exists()) {
@@ -32,11 +34,8 @@ Future<File> _downloadRemoteFileToCache({
     return cached;
   }
 
-  final resp = await http.get(Uri.parse(url));
-  if (resp.statusCode != 200) {
-    throw Exception('HTTP ${resp.statusCode}');
-  }
-  await cached.writeAsBytes(resp.bodyBytes, flush: true);
+  final bytes = await ChatFileAccess.readBytes(url);
+  await cached.writeAsBytes(bytes, flush: true);
   return cached;
 }
 
@@ -383,8 +382,8 @@ class _FullscreenImageState extends State<FullscreenImage> {
       child: InteractiveViewer(
         minScale: 0.7,
         maxScale: 4,
-        child: Image.network(
-          _currentUrl,
+        child: Image(
+          image: AuthorizedFileImageProvider(_currentUrl),
           fit: BoxFit.contain,
           loadingBuilder: (context, child, loadingProgress) {
             if (loadingProgress == null) return child;
@@ -426,7 +425,7 @@ class _FullscreenImageState extends State<FullscreenImage> {
         builder: (context, index) {
           final url = urls[index];
           return PhotoViewGalleryPageOptions(
-            imageProvider: NetworkImage(url),
+            imageProvider: AuthorizedFileImageProvider(url),
             minScale: PhotoViewComputedScale.contained,
             maxScale: PhotoViewComputedScale.covered * 2,
           );
