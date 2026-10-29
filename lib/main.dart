@@ -29,6 +29,7 @@ import 'src/ui/notifications/push_session_host.dart';
 import 'src/ui/notifications/in_app_toast_host.dart';
 import 'src/config/supabase_config.dart';
 import 'src/core/session_keeper.dart';
+import 'src/core/password_policy.dart';
 import 'src/services/push/push_notification_service.dart';
 import 'src/navigation/root_nav.dart';
 import 'router_observer.dart';
@@ -43,6 +44,14 @@ final GoRouter appRouter = GoRouter(
   navigatorKey: rootNavigatorKey,
   initialLocation: '/splash',
   observers: [routeObserver],
+  redirect: (_, state) {
+    final client = Supabase.instance.client;
+    return authRouteRedirect(
+      path: state.uri.path,
+      hasSession: client.auth.currentSession != null,
+      passwordChangeRequired: () => loadPasswordChangeRequired(client),
+    );
+  },
   routes: [
     GoRoute(
       path: '/splash',

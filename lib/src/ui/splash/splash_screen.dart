@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -7,7 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:student_platform/src/core/auth_session.dart';
 import 'package:student_platform/src/core/session.dart';
-import 'package:student_platform/src/ui/authentication/screens/change_password_screen.dart';
+import 'package:student_platform/src/core/password_policy.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -25,41 +23,41 @@ class _SplashScreenState extends State<SplashScreen> {
 
   Future<void> _bootstrap() async {
     await Future.delayed(const Duration(milliseconds: 600));
+    try {
+      final client = Supabase.instance.client;
+      final prefs = await SharedPreferences.getInstance();
 
-    final client = Supabase.instance.client;
-    final prefs = await SharedPreferences.getInstance();
-    final loggedIn = prefs.getBool('loggedIn') ?? false;
-    final userJson = prefs.getString('user');
-    final decodedUser = userJson == null ? null : jsonDecode(userJson);
-    final hasUser = decodedUser is Map;
-    final mustChangePassword =
-        decodedUser is Map && decodedUser['must_change_password'] == true;
+      final sessionOk = await AuthSession.tryRestoreSession(client);
 
-    final sessionOk = await AuthSession.tryRestoreSession(client);
+      if (sessionOk) {
+        final mustChangePassword = await loadPasswordChangeRequired(client);
+        if (!mounted) return;
+        if (mustChangePassword) {
+          context.go('/change-password');
+          return;
+        }
+        await AppSession.loadFromServer();
+      }
 
-    if (sessionOk) {
-      await AppSession.loadFromServer();
-    }
+      if (!mounted) return;
 
-    if (!mounted) return;
-
-    if (sessionOk) {
-      if (mustChangePassword) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const ChangePasswordScreen()),
-        );
+      if (sessionOk) {
+        context.go('/home');
         return;
       }
-      context.go('/home');
-      return;
-    }
 
-    if (loggedIn && hasUser) {
       await prefs.remove('loggedIn');
       await prefs.remove('user');
-    }
 
-    context.go('/login');
+      if (mounted) context.go('/login');
+    } catch (_) {
+      if (!mounted) return;
+      context.go('/login');
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text(
+            'Не удалось проверить вход. Проверьте соединение и повторите попытку.'),
+      ));
+    }
   }
 
   @override

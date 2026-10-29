@@ -157,23 +157,6 @@ class SupabaseLearningRepository implements LearningRepository {
     }
   }
 
-  Future<String?> _currentLogin() async {
-    final user = _sb.auth.currentUser;
-    if (user == null) return null;
-    try {
-      final rows =
-          await _sb.from('users').select('login').eq('id', user.id).limit(1);
-      if (rows.isNotEmpty) {
-        final m = Map<String, dynamic>.from(rows.first as Map);
-        final login = (m['login'] ?? '').toString();
-        return login.isEmpty ? null : login;
-      }
-      return null;
-    } catch (_) {
-      return null;
-    }
-  }
-
   Future<String?> _getTeamMainChatId(String teamId) async {
     if (_chatIdByTeam.containsKey(teamId)) return _chatIdByTeam[teamId];
     final rows = await _sb
@@ -682,24 +665,7 @@ class SupabaseLearningRepository implements LearningRepository {
       messageId = result?.toString();
     } catch (e, st) {
       debugPrint('[saveChat] send_chat_message error: $e\n$st');
-      try {
-        final login = await _currentLogin();
-        if (login != null && login.isNotEmpty) {
-          final result = await _sb.rpc('send_chat_message_for_login', params: {
-            'p_team_id': teamId,
-            'p_login': login,
-            'p_text': last.text,
-            'p_type': typeStr,
-            'p_reply_to': replyTo,
-            'p_attachment_url': attachment,
-            'p_assignment_id': last.assignmentId,
-            'p_file_id': last.fileId,
-          });
-          messageId = result?.toString();
-        }
-      } catch (e2, st2) {
-        debugPrint('[saveChat] send_chat_message_for_login error: $e2\n$st2');
-      }
+      rethrow;
     }
 
     await _saveChatLocal(teamId, messages);

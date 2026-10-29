@@ -12,6 +12,7 @@ import '../chats/data/chat_warm_coordinator.dart';
 import '../../services/presence/user_presence.dart';
 import '../../themes/theme_service.dart';
 import 'main_tab_scope.dart';
+import 'visited_tab.dart';
 
 class NavigationScreen extends StatefulWidget {
   const NavigationScreen({super.key});
@@ -30,7 +31,6 @@ class _NavigationScreenState extends State<NavigationScreen> {
     const _KeepAlive(storageKey: 'tab_info', child: InfoScreen()),
     const _KeepAlive(storageKey: 'tab_learning', child: LearningScreen()),
     const _KeepAlive(storageKey: 'tab_schedule', child: ScheduleScreen()),
-    const _KeepAlive(storageKey: 'tab_profile', child: ProfileScreen()),
   ];
 
   @override
@@ -69,13 +69,17 @@ class _NavigationScreenState extends State<NavigationScreen> {
             child: IndexedStack(
               index: _currentIndex,
               children: [
-                _tab(active: _currentIndex == 0, child: _tabs[0]),
-                _tab(active: _currentIndex == 1, child: _tabs[1]),
-                _tab(active: _currentIndex == 2, child: _tabs[2]),
-                _tab(active: _currentIndex == 3, child: _tabs[3]),
-                _tab(
+                VisitedTab(
+                    active: _currentIndex == 0, builder: (_) => _tabs[0]),
+                VisitedTab(
+                    active: _currentIndex == 1, builder: (_) => _tabs[1]),
+                VisitedTab(
+                    active: _currentIndex == 2, builder: (_) => _tabs[2]),
+                VisitedTab(
+                    active: _currentIndex == 3, builder: (_) => _tabs[3]),
+                VisitedTab(
                   active: _currentIndex == 4,
-                  child: _KeepAlive(
+                  builder: (_) => _KeepAlive(
                     storageKey: 'tab_profile',
                     child: ProfileScreen(activeListenable: _profileActive),
                   ),
@@ -91,16 +95,6 @@ class _NavigationScreenState extends State<NavigationScreen> {
             },
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _tab({required bool active, required Widget child}) {
-    return Offstage(
-      offstage: !active,
-      child: TickerMode(
-        enabled: active,
-        child: child,
       ),
     );
   }

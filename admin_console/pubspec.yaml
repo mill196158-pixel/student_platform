@@ -98,3 +98,8 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+# Compatibility fix for nullable capture on Windows; see package PATCH.md.
+dependency_overrides:
+  pdfrx_engine:
+    path: ../packages/pdfrx_engine_compat

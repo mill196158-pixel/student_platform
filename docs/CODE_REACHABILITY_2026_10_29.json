@@ -1,0 +1,2703 @@
+{
+  "note": "Static runtime graph including conditional imports; external entrypoints require manual review.",
+  "dart_files": 247,
+  "files": [
+    {
+      "path": "lib/firebase_options.dart",
+      "runtime_reachable": true,
+      "lines": 68,
+      "screen_classes": [],
+      "imports": [
+        "lib/firebase_options.dart"
+      ]
+    },
+    {
+      "path": "lib/main.dart",
+      "runtime_reachable": true,
+      "lines": 184,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/global_cache.dart",
+        "lib/src/themes/themes.dart",
+        "lib/src/themes/theme_service.dart",
+        "lib/src/ui/splash/splash_screen.dart",
+        "lib/src/ui/authentication/authenticate_screen.dart",
+        "lib/src/ui/authentication/screens/change_password_screen.dart",
+        "lib/src/ui/navigation/navigation_screen.dart",
+        "lib/src/ui/profile/profile_screen.dart",
+        "lib/src/ui/profile/edit_profile_screen.dart",
+        "lib/src/ui/profile/personal_diary_screen.dart",
+        "lib/src/ui/profile/my_reviews_screen.dart",
+        "lib/src/ui/exams/exams_screen.dart",
+        "lib/src/ui/schedule/subject_diary/subject_diary.dart",
+        "lib/src/ui/notifications/notification_settings_screen.dart",
+        "lib/src/ui/notifications/push_session_host.dart",
+        "lib/src/ui/notifications/in_app_toast_host.dart",
+        "lib/src/config/supabase_config.dart",
+        "lib/src/core/session_keeper.dart",
+        "lib/src/core/password_policy.dart",
+        "lib/src/services/push/push_notification_service.dart",
+        "lib/src/navigation/root_nav.dart",
+        "lib/router_observer.dart",
+        "lib/src/ui/learning/state/team_cubit.dart",
+        "lib/src/ui/learning/models/team.dart",
+        "lib/src/ui/chats/core/chat_message_cache_store.dart",
+        "lib/src/ui/chats/data/chat_summaries_cache.dart",
+        "lib/src/ui/friends/data/friends_snapshot_cache.dart"
+      ]
+    },
+    {
+      "path": "lib/router_observer.dart",
+      "runtime_reachable": true,
+      "lines": 11,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/config/auth_email_adapter.dart",
+      "runtime_reachable": true,
+      "lines": 15,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/config/supabase_config.dart",
+      "runtime_reachable": true,
+      "lines": 21,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/config/yandex_storage_config.dart",
+      "runtime_reachable": true,
+      "lines": 27,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/core/auth_session.dart",
+      "runtime_reachable": true,
+      "lines": 53,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/core/logout_cleanup.dart",
+      "runtime_reachable": true,
+      "lines": 25,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/core/password_policy.dart",
+      "runtime_reachable": true,
+      "lines": 41,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/core/session.dart",
+      "runtime_reachable": true,
+      "lines": 40,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/core/session_keeper.dart",
+      "runtime_reachable": true,
+      "lines": 58,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/core/auth_session.dart"
+      ]
+    },
+    {
+      "path": "lib/src/data/academic_context_service.dart",
+      "runtime_reachable": true,
+      "lines": 334,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/core/auth_session.dart"
+      ]
+    },
+    {
+      "path": "lib/src/data/personal_diary_service.dart",
+      "runtime_reachable": true,
+      "lines": 1449,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/data/academic_context_service.dart",
+        "lib/src/ui/learning/tabs/chat/data/chat_group_actions_repository.dart",
+        "lib/src/ui/learning/tabs/chat/models/chat_group_actions.dart",
+        "lib/src/ui/learning/tabs/chat/models/group_action_labels.dart",
+        "lib/src/ui/schedule/subject_diary/subject_diary.dart"
+      ]
+    },
+    {
+      "path": "lib/src/data/subject_diary_repository_supabase.dart",
+      "runtime_reachable": true,
+      "lines": 1140,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/navigation/root_nav.dart",
+      "runtime_reachable": true,
+      "lines": 6,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/services/auth_service.dart",
+      "runtime_reachable": true,
+      "lines": 112,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/core/session.dart",
+        "lib/src/core/logout_cleanup.dart",
+        "lib/src/services/push/push_notification_service.dart",
+        "lib/src/ui/chats/core/chat_message_cache_store.dart",
+        "lib/src/ui/chats/data/dm_api.dart",
+        "lib/src/ui/home/home_dashboard_service.dart",
+        "lib/src/ui/home/news_image_disk_cache.dart",
+        "lib/src/ui/learning/state/team_cubit.dart",
+        "lib/src/ui/info/subject_card_service.dart",
+        "lib/src/ui/info/content_media_service.dart",
+        "lib/src/ui/info/subject_media_service.dart",
+        "lib/src/ui/info/reference_service.dart",
+        "lib/src/ui/info/vacancy_service.dart",
+        "lib/src/ui/info/vacancy_media_service.dart",
+        "lib/src/ui/profile/profile_feed_service.dart",
+        "lib/src/ui/profile/student_review_service.dart"
+      ]
+    },
+    {
+      "path": "lib/src/services/file_service.dart",
+      "runtime_reachable": true,
+      "lines": 428,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/utils/safe_debug_log.dart",
+        "lib/src/ui/learning/models/chat_file.dart"
+      ]
+    },
+    {
+      "path": "lib/src/services/image_cache_service.dart",
+      "runtime_reachable": true,
+      "lines": 30,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/services/presence/user_presence.dart",
+      "runtime_reachable": true,
+      "lines": 107,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/utils/safe_debug_log.dart"
+      ]
+    },
+    {
+      "path": "lib/src/services/push/active_chat_tracker.dart",
+      "runtime_reachable": true,
+      "lines": 37,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/services/push/app_notifications_api.dart",
+      "runtime_reachable": true,
+      "lines": 133,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/services/push/in_app_notification_bus.dart"
+      ]
+    },
+    {
+      "path": "lib/src/services/push/in_app_notification_bus.dart",
+      "runtime_reachable": true,
+      "lines": 50,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/services/push/push_payload.dart"
+      ]
+    },
+    {
+      "path": "lib/src/services/push/notification_preferences_api.dart",
+      "runtime_reachable": true,
+      "lines": 129,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/services/push/push_background_handler.dart",
+      "runtime_reachable": true,
+      "lines": 26,
+      "screen_classes": [],
+      "imports": [
+        "lib/firebase_options.dart"
+      ]
+    },
+    {
+      "path": "lib/src/services/push/push_navigation.dart",
+      "runtime_reachable": true,
+      "lines": 343,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/navigation/root_nav.dart",
+        "lib/src/services/push/push_payload.dart",
+        "lib/src/ui/chats/direct_chat_screen.dart",
+        "lib/src/ui/chats/dm_title.dart",
+        "lib/src/ui/friends/friend_profile_screen.dart",
+        "lib/src/ui/friends/my_friends_screen.dart",
+        "lib/src/ui/learning/models/team.dart",
+        "lib/src/ui/learning/tabs/chat/navigation/group_action_deeplink.dart",
+        "lib/src/ui/learning/team_details_screen.dart",
+        "lib/src/ui/navigation/main_tab_scope.dart"
+      ]
+    },
+    {
+      "path": "lib/src/services/push/push_notification_service.dart",
+      "runtime_reachable": true,
+      "lines": 501,
+      "screen_classes": [],
+      "imports": [
+        "lib/firebase_options.dart",
+        "lib/src/navigation/root_nav.dart",
+        "lib/src/services/push/active_chat_tracker.dart",
+        "lib/src/services/push/in_app_notification_bus.dart",
+        "lib/src/services/push/push_background_handler.dart",
+        "lib/src/services/push/push_navigation.dart",
+        "lib/src/services/push/push_payload.dart",
+        "lib/src/ui/chats/data/chat_warm_coordinator.dart",
+        "lib/src/ui/notifications/push_permission_prompt.dart"
+      ]
+    },
+    {
+      "path": "lib/src/services/push/push_payload.dart",
+      "runtime_reachable": true,
+      "lines": 143,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/services/s3_client.dart",
+      "runtime_reachable": true,
+      "lines": 206,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/utils/safe_debug_log.dart"
+      ]
+    },
+    {
+      "path": "lib/src/themes/app_colors.dart",
+      "runtime_reachable": true,
+      "lines": 78,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/themes/app_decorations.dart",
+      "runtime_reachable": false,
+      "lines": 37,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/themes/app_colors.dart"
+      ]
+    },
+    {
+      "path": "lib/src/themes/font_family.dart",
+      "runtime_reachable": false,
+      "lines": 7,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/themes/theme_service.dart",
+      "runtime_reachable": true,
+      "lines": 61,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/themes/themes.dart",
+      "runtime_reachable": true,
+      "lines": 74,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/themes/app_colors.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/authentication/authenticate_screen.dart",
+      "runtime_reachable": true,
+      "lines": 30,
+      "screen_classes": [
+        "AuthenticateScreen"
+      ],
+      "imports": [
+        "lib/src/ui/authentication/screens/login_screen.dart",
+        "lib/src/ui/authentication/screens/register_screen.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/authentication/screens/change_password_screen.dart",
+      "runtime_reachable": true,
+      "lines": 206,
+      "screen_classes": [
+        "ChangePasswordScreen"
+      ],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/authentication/screens/login_screen.dart",
+      "runtime_reachable": true,
+      "lines": 295,
+      "screen_classes": [
+        "LoginScreen"
+      ],
+      "imports": [
+        "lib/src/config/auth_email_adapter.dart",
+        "lib/src/core/password_policy.dart",
+        "lib/src/ui/authentication/screens/change_password_screen.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/authentication/screens/register_screen.dart",
+      "runtime_reachable": true,
+      "lines": 25,
+      "screen_classes": [
+        "RegisterScreen"
+      ],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/chats/archive_screen.dart",
+      "runtime_reachable": true,
+      "lines": 640,
+      "screen_classes": [
+        "ArchiveScreen"
+      ],
+      "imports": [
+        "lib/src/ui/chats/data/chat_archive_api.dart",
+        "lib/src/ui/chats/direct_chat_screen.dart",
+        "lib/src/ui/learning/models/team.dart",
+        "lib/src/ui/learning/state/team_cubit.dart",
+        "lib/src/ui/learning/team_details_screen.dart",
+        "lib/src/utils/safe_debug_log.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/chats/core/chat_message_cache_store.dart",
+      "runtime_reachable": true,
+      "lines": 535,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/chats/core/chat_messages_load_state.dart",
+        "lib/src/ui/learning/models/message.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/chats/core/chat_message_memory_cache.dart",
+      "runtime_reachable": true,
+      "lines": 66,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/chats/core/chat_message_cache_store.dart",
+        "lib/src/ui/learning/models/message.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/chats/core/chat_messages_load_state.dart",
+      "runtime_reachable": true,
+      "lines": 113,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/message.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/chats/core/dm_chat_service.dart",
+      "runtime_reachable": true,
+      "lines": 299,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/message.dart",
+        "lib/src/ui/learning/models/local_attach.dart",
+        "lib/src/ui/learning/models/chat_file.dart",
+        "lib/src/ui/chats/core/chat_message_cache_store.dart",
+        "lib/src/ui/chats/core/chat_messages_load_state.dart",
+        "lib/src/ui/chats/data/dm_api.dart",
+        "lib/src/ui/chats/data/blocks_api.dart",
+        "lib/src/ui/chats/core/i_chat_service.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/chats/core/dm_composer_bar.dart",
+      "runtime_reachable": true,
+      "lines": 364,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/message.dart",
+        "lib/src/ui/learning/tabs/chat/typing_line.dart",
+        "lib/src/ui/learning/tabs/chat/composer.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/chats/core/forward_payload.dart",
+      "runtime_reachable": true,
+      "lines": 129,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/chats/core/i_chat_service.dart",
+      "runtime_reachable": true,
+      "lines": 69,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/message.dart",
+        "lib/src/ui/learning/models/local_attach.dart",
+        "lib/src/ui/learning/models/chat_file.dart",
+        "lib/src/ui/chats/core/chat_messages_load_state.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/chats/core/team_chat_service.dart",
+      "runtime_reachable": false,
+      "lines": 157,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/services/file_service.dart",
+        "lib/src/ui/learning/models/message.dart",
+        "lib/src/ui/learning/models/local_attach.dart",
+        "lib/src/ui/learning/models/chat_file.dart",
+        "lib/src/ui/learning/state/team_cubit.dart",
+        "lib/src/ui/learning/tabs/chat/data/chat_repository.dart",
+        "lib/src/ui/chats/core/chat_messages_load_state.dart",
+        "lib/src/ui/chats/core/i_chat_service.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/chats/core/unified_chat_screen.dart",
+      "runtime_reachable": true,
+      "lines": 2526,
+      "screen_classes": [
+        "UnifiedChatScreen"
+      ],
+      "imports": [
+        "lib/src/ui/learning/models/message.dart",
+        "lib/src/ui/learning/models/chat_file.dart",
+        "lib/src/ui/learning/models/local_attach.dart",
+        "lib/src/ui/learning/state/team_cubit.dart",
+        "lib/src/ui/learning/tabs/chat/actions/chat_actions.dart",
+        "lib/src/ui/learning/tabs/chat/edit_message_dialog.dart",
+        "lib/src/ui/learning/tabs/chat/widgets.dart",
+        "lib/src/ui/learning/tabs/chat/search/chat_search_controller.dart",
+        "lib/src/ui/learning/tabs/chat/search/inline_search_bar.dart",
+        "lib/src/ui/learning/tabs/chat/selection_bars.dart",
+        "lib/src/ui/learning/tabs/chat/composer.dart",
+        "lib/src/ui/learning/tabs/chat/topics/create_topic_selection_screen.dart",
+        "lib/src/ui/learning/tabs/chat/collections/create_collection_screen.dart",
+        "lib/src/ui/learning/tabs/chat/data/chat_composer_capabilities_repository.dart",
+        "lib/src/ui/learning/tabs/chat/models/chat_composer_capabilities.dart",
+        "lib/src/ui/learning/data/supabase_learning_repository.dart",
+        "lib/src/services/file_service.dart",
+        "lib/src/services/push/active_chat_tracker.dart",
+        "lib/src/services/push/app_notifications_api.dart",
+        "lib/src/ui/learning/global_cache.dart",
+        "lib/src/services/image_cache_service.dart",
+        "lib/src/ui/chats/media/chat_media_sheet.dart",
+        "lib/src/ui/chats/forward/forward_picker.dart",
+        "lib/src/ui/chats/forward/forward_pick_nav.dart",
+        "lib/src/ui/chats/core/forward_payload.dart",
+        "lib/src/ui/chats/forward/forward_outbox.dart",
+        "lib/src/ui/chats/data/dm_api.dart",
+        "lib/src/ui/chats/data/blocks_api.dart",
+        "lib/src/ui/chats/dm_title.dart",
+        "lib/src/ui/chats/core/i_chat_service.dart",
+        "lib/src/ui/chats/core/dm_chat_service.dart",
+        "lib/src/ui/chats/core/chat_messages_load_state.dart",
+        "lib/src/ui/chats/core/dm_composer_bar.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/chats/data/blocks_api.dart",
+      "runtime_reachable": true,
+      "lines": 113,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/chats/data/chat_archive_api.dart",
+      "runtime_reachable": true,
+      "lines": 40,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/chats/core/chat_message_memory_cache.dart",
+        "lib/src/ui/chats/data/dm_api.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/chats/data/chat_preload_service.dart",
+      "runtime_reachable": true,
+      "lines": 172,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/services/push/active_chat_tracker.dart",
+        "lib/src/ui/chats/core/chat_message_cache_store.dart",
+        "lib/src/ui/chats/data/dm_api.dart",
+        "lib/src/utils/safe_debug_log.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/chats/data/chat_summaries_cache.dart",
+      "runtime_reachable": true,
+      "lines": 56,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/chats/data/chat_sync_realtime_gate.dart",
+      "runtime_reachable": true,
+      "lines": 113,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/chats/data/chat_warm_coordinator.dart",
+      "runtime_reachable": true,
+      "lines": 263,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/services/image_cache_service.dart",
+        "lib/src/ui/chats/data/chat_preload_service.dart",
+        "lib/src/ui/chats/data/chat_summaries_cache.dart",
+        "lib/src/ui/chats/dm_title.dart",
+        "lib/src/ui/learning/tabs/chat/models/chat_card_envelope.dart",
+        "lib/src/utils/safe_debug_log.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/chats/data/dm_api.dart",
+      "runtime_reachable": true,
+      "lines": 1253,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/message.dart",
+        "lib/src/ui/learning/models/chat_file.dart",
+        "lib/src/ui/learning/models/local_attach.dart",
+        "lib/src/ui/chats/core/chat_message_cache_store.dart",
+        "lib/src/ui/chats/core/chat_message_memory_cache.dart",
+        "lib/src/ui/chats/core/chat_messages_load_state.dart",
+        "lib/src/utils/safe_debug_log.dart",
+        "lib/src/ui/chats/data/blocks_api.dart",
+        "lib/src/ui/chats/data/chat_sync_realtime_gate.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/chats/direct_chat_info_screen.dart",
+      "runtime_reachable": true,
+      "lines": 370,
+      "screen_classes": [
+        "DirectChatInfoScreen"
+      ],
+      "imports": [
+        "lib/src/ui/friends/friend_profile_screen.dart",
+        "lib/src/ui/chats/dm_title.dart",
+        "lib/src/ui/chats/core/i_chat_service.dart",
+        "lib/src/ui/chats/media/chat_media_sheet.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/chats/direct_chat_screen.dart",
+      "runtime_reachable": true,
+      "lines": 98,
+      "screen_classes": [
+        "DirectChatScreen"
+      ],
+      "imports": [
+        "lib/src/ui/chats/core/unified_chat_screen.dart",
+        "lib/src/ui/learning/state/team_cubit.dart",
+        "lib/src/ui/chats/core/dm_chat_service.dart",
+        "lib/src/services/push/push_navigation.dart",
+        "lib/src/ui/chats/dm_title.dart",
+        "lib/src/ui/chats/direct_chat_info_screen.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/chats/dm_title.dart",
+      "runtime_reachable": true,
+      "lines": 19,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/chats/forward/forward_outbox.dart",
+      "runtime_reachable": true,
+      "lines": 45,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/chats/forward/forward_pick_nav.dart",
+      "runtime_reachable": true,
+      "lines": 9,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/chats/forward/forward_picker.dart",
+        "lib/src/ui/chats/my_chats_screen.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/chats/forward/forward_picker.dart",
+      "runtime_reachable": true,
+      "lines": 195,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/chats/core/i_chat_service.dart",
+        "lib/src/ui/chats/direct_chat_screen.dart",
+        "lib/src/ui/learning/state/team_cubit.dart",
+        "lib/src/ui/learning/team_details_screen.dart",
+        "lib/src/ui/learning/models/team.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/chats/media/chat_media_sheet.dart",
+      "runtime_reachable": true,
+      "lines": 217,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/message.dart",
+        "lib/src/ui/learning/models/chat_file.dart",
+        "lib/src/ui/learning/widgets/file_card.dart",
+        "lib/src/ui/learning/widgets/fullscreen_image.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/chats/my_chats_screen.dart",
+      "runtime_reachable": true,
+      "lines": 2246,
+      "screen_classes": [
+        "MyChatsScreen"
+      ],
+      "imports": [
+        "lib/src/ui/learning/data/supabase_learning_repository.dart",
+        "lib/src/ui/learning/models/team.dart",
+        "lib/src/ui/learning/team_details_screen.dart",
+        "lib/src/services/push/active_chat_tracker.dart",
+        "lib/src/services/push/app_notifications_api.dart",
+        "lib/src/services/push/push_navigation.dart",
+        "lib/src/ui/chats/archive_screen.dart",
+        "lib/src/ui/chats/direct_chat_screen.dart",
+        "lib/src/ui/chats/dm_title.dart",
+        "lib/src/ui/chats/core/i_chat_service.dart",
+        "lib/src/ui/chats/forward/forward_picker.dart",
+        "lib/src/ui/chats/data/chat_archive_api.dart",
+        "lib/src/ui/chats/data/dm_api.dart",
+        "lib/src/ui/chats/data/chat_summaries_cache.dart",
+        "lib/src/ui/chats/core/chat_message_cache_store.dart",
+        "lib/src/ui/learning/tabs/chat/widgets.dart",
+        "lib/src/ui/learning/tabs/chat/models/chat_card_envelope.dart",
+        "lib/src/ui/learning/models/message.dart",
+        "lib/src/ui/learning/state/team_cubit.dart",
+        "lib/src/utils/safe_debug_log.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/common/friendly_empty_state.dart",
+      "runtime_reachable": true,
+      "lines": 126,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/common/keyboard_dismiss_scope.dart",
+      "runtime_reachable": true,
+      "lines": 112,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/content/content_deep_link_bus.dart",
+      "runtime_reachable": true,
+      "lines": 29,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/content/content_nav_executor.dart",
+      "runtime_reachable": true,
+      "lines": 165,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/team.dart",
+        "lib/src/ui/learning/team_details_screen.dart",
+        "lib/src/ui/navigation/main_tab_scope.dart",
+        "lib/src/ui/content/content_deep_link_bus.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/exams/exams_screen.dart",
+      "runtime_reachable": true,
+      "lines": 2615,
+      "screen_classes": [
+        "ExamsScreen"
+      ],
+      "imports": [
+        "lib/src/ui/learning/models/team.dart",
+        "lib/src/ui/learning/team_details_screen.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/friends/data/friends_snapshot_cache.dart",
+      "runtime_reachable": true,
+      "lines": 53,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/friends/friend_profile_screen.dart",
+      "runtime_reachable": true,
+      "lines": 1592,
+      "screen_classes": [
+        "FriendProfileScreen"
+      ],
+      "imports": [
+        "lib/src/services/image_cache_service.dart",
+        "lib/src/ui/chats/data/blocks_api.dart",
+        "lib/src/ui/chats/direct_chat_screen.dart",
+        "lib/src/ui/learning/state/team_cubit.dart",
+        "lib/src/services/presence/user_presence.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/friends/my_friends_screen.dart",
+      "runtime_reachable": true,
+      "lines": 1455,
+      "screen_classes": [
+        "MyFriendsScreen"
+      ],
+      "imports": [
+        "lib/src/services/image_cache_service.dart",
+        "lib/src/ui/friends/data/friends_snapshot_cache.dart",
+        "lib/src/ui/friends/friend_profile_screen.dart",
+        "lib/src/ui/chats/direct_chat_screen.dart",
+        "lib/src/ui/learning/state/team_cubit.dart",
+        "lib/src/services/presence/user_presence.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/group_space/data/group_space_repository.dart",
+      "runtime_reachable": true,
+      "lines": 357,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/services/file_service.dart",
+        "lib/src/ui/group_space/models/group_space.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/group_space/group_space_screen.dart",
+      "runtime_reachable": false,
+      "lines": 865,
+      "screen_classes": [
+        "GroupSpaceScreen",
+        "_CollectionDetailScreen",
+        "_TopicDetailScreen"
+      ],
+      "imports": [
+        "lib/src/ui/learning/models/team.dart",
+        "lib/src/ui/learning/team_details_screen.dart",
+        "lib/src/ui/group_space/data/group_space_repository.dart",
+        "lib/src/ui/group_space/models/group_space.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/group_space/models/group_space.dart",
+      "runtime_reachable": true,
+      "lines": 147,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/home/home_dashboard_service.dart",
+      "runtime_reachable": true,
+      "lines": 685,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/home/models/home_dashboard_data.dart",
+        "lib/src/ui/learning/tabs/chat/data/chat_group_actions_repository.dart",
+        "lib/src/ui/learning/tabs/chat/models/chat_group_actions.dart",
+        "lib/src/ui/home/news_image_disk_cache.dart",
+        "lib/src/ui/learning/data/supabase_learning_repository.dart",
+        "lib/src/ui/learning/models/team.dart",
+        "lib/src/ui/schedule/models/lesson.dart",
+        "lib/src/ui/schedule/schedule_screen.dart",
+        "lib/src/ui/schedule/utils/msk_date.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/home/home_promo_service.dart",
+      "runtime_reachable": true,
+      "lines": 223,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/home/home_screen.dart",
+      "runtime_reachable": true,
+      "lines": 1101,
+      "screen_classes": [
+        "HomeScreen"
+      ],
+      "imports": [
+        "lib/src/services/push/app_notifications_api.dart",
+        "lib/src/services/push/in_app_notification_bus.dart",
+        "lib/src/ui/content/content_nav_executor.dart",
+        "lib/src/ui/home/home_dashboard_service.dart",
+        "lib/src/ui/home/home_promo_service.dart",
+        "lib/src/ui/home/models/home_dashboard_data.dart",
+        "lib/src/ui/info/content_media_service.dart",
+        "lib/src/ui/learning/tabs/chat/models/group_action_labels.dart",
+        "lib/src/ui/learning/tabs/chat/navigation/group_action_deeplink.dart",
+        "lib/src/ui/navigation/main_tab_scope.dart",
+        "lib/src/ui/notifications/notification_center_sheet.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/home/models/home_dashboard_data.dart",
+      "runtime_reachable": true,
+      "lines": 237,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/assignment.dart",
+        "lib/src/ui/schedule/models/lesson.dart",
+        "lib/src/ui/schedule/utils/msk_date.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/home/news_image_disk_cache.dart",
+      "runtime_reachable": true,
+      "lines": 258,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/info/content_media_service.dart",
+      "runtime_reachable": true,
+      "lines": 257,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/info/entity_review_screen.dart",
+      "runtime_reachable": true,
+      "lines": 576,
+      "screen_classes": [
+        "EntityReviewScreen"
+      ],
+      "imports": [
+        "lib/src/ui/profile/student_review_service.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/info/info_screen.dart",
+      "runtime_reachable": true,
+      "lines": 3636,
+      "screen_classes": [
+        "InfoScreen"
+      ],
+      "imports": [
+        "lib/src/core/auth_session.dart",
+        "lib/src/data/academic_context_service.dart",
+        "lib/src/services/auth_service.dart",
+        "lib/src/ui/content/content_deep_link_bus.dart",
+        "lib/src/ui/content/content_nav_executor.dart",
+        "lib/src/ui/info/content_media_service.dart",
+        "lib/src/ui/info/info_subjects_cache.dart",
+        "lib/src/ui/info/subject_attachment_open.dart",
+        "lib/src/ui/info/subject_difficulty.dart",
+        "lib/src/ui/info/reference_service.dart",
+        "lib/src/ui/info/my_vacancy_submissions_screen.dart",
+        "lib/src/ui/info/propose_vacancy_screen.dart",
+        "lib/src/ui/info/vacancy_media_service.dart",
+        "lib/src/ui/info/vacancy_service.dart",
+        "lib/src/ui/info/vacancy_submission_service.dart",
+        "lib/src/ui/info/subject_info_screen.dart",
+        "lib/src/ui/info/useful_subject.dart",
+        "lib/src/ui/info/useful_subjects_repository.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/info/info_subjects_cache.dart",
+      "runtime_reachable": true,
+      "lines": 62,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/info/my_vacancy_submissions_screen.dart",
+      "runtime_reachable": true,
+      "lines": 117,
+      "screen_classes": [
+        "MyVacancySubmissionsScreen"
+      ],
+      "imports": [
+        "lib/src/ui/info/propose_vacancy_screen.dart",
+        "lib/src/ui/info/vacancy_submission_service.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/info/propose_vacancy_screen.dart",
+      "runtime_reachable": true,
+      "lines": 356,
+      "screen_classes": [
+        "ProposeVacancyScreen"
+      ],
+      "imports": [
+        "lib/src/ui/info/vacancy_submission_service.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/info/reference_service.dart",
+      "runtime_reachable": true,
+      "lines": 268,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/info/subject_attachment_open.dart",
+      "runtime_reachable": true,
+      "lines": 20,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/info/subject_attachment_open_stub.dart",
+        "lib/src/ui/info/subject_attachment_open_io.dart",
+        "lib/src/ui/info/subject_attachment_open_web.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/info/subject_attachment_open_io.dart",
+      "runtime_reachable": true,
+      "lines": 16,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/info/subject_attachment_open_stub.dart",
+      "runtime_reachable": true,
+      "lines": 10,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/info/subject_attachment_open_web.dart",
+      "runtime_reachable": true,
+      "lines": 20,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/info/subject_card_service.dart",
+      "runtime_reachable": true,
+      "lines": 214,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/info/subject_difficulty.dart",
+      "runtime_reachable": true,
+      "lines": 137,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/info/subject_hero_load.dart",
+      "runtime_reachable": true,
+      "lines": 7,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/info/subject_info_screen.dart",
+      "runtime_reachable": true,
+      "lines": 1999,
+      "screen_classes": [
+        "SubjectInfoScreen"
+      ],
+      "imports": [
+        "lib/src/ui/learning/models/team.dart",
+        "lib/src/ui/learning/team_details_screen.dart",
+        "lib/src/ui/schedule/subject_diary/subject_diary.dart",
+        "lib/src/ui/schedule/subject_diary_screen.dart",
+        "lib/src/ui/info/info_subjects_cache.dart",
+        "lib/src/ui/info/subject_attachment_open.dart",
+        "lib/src/ui/info/subject_card_service.dart",
+        "lib/src/ui/info/subject_difficulty.dart",
+        "lib/src/ui/info/subject_hero_load.dart",
+        "lib/src/ui/info/subject_media_service.dart",
+        "lib/src/ui/info/entity_review_screen.dart",
+        "lib/src/ui/info/teacher_profile_screen.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/info/subject_media_service.dart",
+      "runtime_reachable": true,
+      "lines": 265,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/info/teacher_profile_screen.dart",
+      "runtime_reachable": true,
+      "lines": 1268,
+      "screen_classes": [
+        "TeacherProfileScreen"
+      ],
+      "imports": [
+        "lib/src/ui/info/entity_review_screen.dart",
+        "lib/src/ui/profile/student_review_service.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/info/useful_subject.dart",
+      "runtime_reachable": true,
+      "lines": 196,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/info/subject_difficulty.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/info/useful_subjects_repository.dart",
+      "runtime_reachable": true,
+      "lines": 99,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/info/useful_subject.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/info/vacancy_media_service.dart",
+      "runtime_reachable": true,
+      "lines": 226,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/info/vacancy_service.dart",
+      "runtime_reachable": true,
+      "lines": 561,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/info/vacancy_submission_service.dart",
+      "runtime_reachable": true,
+      "lines": 495,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/assignment_details_screen.dart",
+      "runtime_reachable": true,
+      "lines": 876,
+      "screen_classes": [
+        "AssignmentDetailsScreen"
+      ],
+      "imports": [
+        "lib/src/ui/learning/state/team_cubit.dart",
+        "lib/src/ui/learning/models/assignment.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/data/learning_repository.dart",
+      "runtime_reachable": true,
+      "lines": 48,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/team.dart",
+        "lib/src/ui/learning/models/message.dart",
+        "lib/src/ui/learning/models/file_item.dart",
+        "lib/src/ui/learning/models/assignment.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/data/supabase_learning_repository.dart",
+      "runtime_reachable": true,
+      "lines": 912,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/data/learning_repository.dart",
+        "lib/src/ui/learning/models/team.dart",
+        "lib/src/ui/learning/models/message.dart",
+        "lib/src/ui/learning/tabs/chat/models/chat_card_envelope.dart",
+        "lib/src/ui/learning/models/file_item.dart",
+        "lib/src/ui/learning/models/assignment.dart",
+        "lib/src/ui/learning/models/chat_file.dart",
+        "lib/src/utils/safe_debug_log.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/global_cache.dart",
+      "runtime_reachable": true,
+      "lines": 176,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/utils/safe_debug_log.dart",
+        "lib/src/ui/learning/models/chat_file.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/learning_screen.dart",
+      "runtime_reachable": true,
+      "lines": 965,
+      "screen_classes": [
+        "LearningScreen"
+      ],
+      "imports": [
+        "lib/src/data/academic_context_service.dart",
+        "lib/src/ui/learning/state/learning_cubit.dart",
+        "lib/src/ui/learning/state/learning_state.dart",
+        "lib/src/ui/learning/team_details_screen.dart",
+        "lib/src/ui/learning/models/team.dart",
+        "lib/src/ui/learning/widgets/team_avatar.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/manage/manage_teams_screen.dart",
+      "runtime_reachable": false,
+      "lines": 144,
+      "screen_classes": [
+        "ManageTeamsScreen"
+      ],
+      "imports": [
+        "lib/src/ui/learning/state/learning_cubit.dart",
+        "lib/src/ui/learning/state/learning_state.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/models/assignment.dart",
+      "runtime_reachable": true,
+      "lines": 162,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/models/chat_file.dart",
+      "runtime_reachable": true,
+      "lines": 163,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/models/file_item.dart",
+      "runtime_reachable": true,
+      "lines": 12,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/models/local_attach.dart",
+      "runtime_reachable": true,
+      "lines": 72,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/models/message.dart",
+      "runtime_reachable": true,
+      "lines": 392,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/chat_file.dart",
+        "lib/src/ui/learning/tabs/chat/models/chat_card_envelope.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/models/team.dart",
+      "runtime_reachable": true,
+      "lines": 126,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/state/learning_cubit.dart",
+      "runtime_reachable": true,
+      "lines": 86,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/data/learning_repository.dart",
+        "lib/src/ui/learning/data/supabase_learning_repository.dart",
+        "lib/src/ui/learning/state/learning_state.dart",
+        "lib/src/ui/learning/models/team.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/state/learning_state.dart",
+      "runtime_reachable": true,
+      "lines": 34,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/team.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/state/team_cubit.dart",
+      "runtime_reachable": true,
+      "lines": 1370,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/data/learning_repository.dart",
+        "lib/src/ui/learning/data/supabase_learning_repository.dart",
+        "lib/src/ui/learning/models/assignment.dart",
+        "lib/src/ui/learning/models/file_item.dart",
+        "lib/src/ui/learning/models/message.dart",
+        "lib/src/ui/learning/models/team.dart",
+        "lib/src/ui/chats/core/chat_message_cache_store.dart",
+        "lib/src/ui/chats/core/chat_message_memory_cache.dart",
+        "lib/src/utils/safe_debug_log.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/assignments/view_mode.dart",
+      "runtime_reachable": true,
+      "lines": 7,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/assignments_tab.dart",
+      "runtime_reachable": true,
+      "lines": 891,
+      "screen_classes": [
+        "AssignmentsTab"
+      ],
+      "imports": [
+        "lib/src/ui/common/friendly_empty_state.dart",
+        "lib/src/ui/learning/state/team_cubit.dart",
+        "lib/src/ui/learning/models/assignment.dart",
+        "lib/src/ui/learning/models/team.dart",
+        "lib/src/ui/learning/assignment_details_screen.dart",
+        "lib/src/ui/learning/tabs/chat/assignments/assignment_form_dialog.dart",
+        "lib/src/ui/learning/tabs/chat/data/chat_action_cards_cache.dart",
+        "lib/src/ui/learning/tabs/chat/data/chat_group_actions_repository.dart",
+        "lib/src/ui/learning/tabs/chat/models/chat_group_actions.dart",
+        "lib/src/ui/learning/tabs/chat/unified_task_details_screen.dart",
+        "lib/src/ui/learning/tabs/assignments/view_mode.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/actions/chat_actions.dart",
+      "runtime_reachable": true,
+      "lines": 1341,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/message.dart",
+        "lib/src/ui/learning/models/assignment.dart",
+        "lib/src/ui/learning/models/chat_file.dart",
+        "lib/src/ui/learning/state/team_cubit.dart",
+        "lib/src/ui/learning/utils/chat_copied_file_cache.dart",
+        "lib/src/ui/learning/widgets/file_card.dart",
+        "lib/src/ui/learning/tabs/chat/message_builder.dart",
+        "lib/src/ui/learning/tabs/chat/models/chat_card_envelope.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/assignment_bubble.dart",
+      "runtime_reachable": true,
+      "lines": 726,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/state/team_cubit.dart",
+        "lib/src/ui/learning/models/message.dart",
+        "lib/src/ui/learning/models/assignment.dart",
+        "lib/src/ui/learning/assignment_details_screen.dart",
+        "lib/src/ui/learning/widgets/file_card.dart",
+        "lib/src/ui/learning/widgets/fullscreen_image.dart",
+        "lib/src/ui/learning/tabs/chat/assignments/assignment_form_dialog.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/assignments/assignment_form_dialog.dart",
+      "runtime_reachable": true,
+      "lines": 927,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/common/keyboard_dismiss_scope.dart",
+        "lib/src/ui/learning/models/assignment.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/assignments/edit_assignment_dialog.dart",
+      "runtime_reachable": true,
+      "lines": 11,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/assignment.dart",
+        "lib/src/ui/learning/tabs/chat/assignments/assignment_form_dialog.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/attachment_widget.dart",
+      "runtime_reachable": true,
+      "lines": 152,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/utils/safe_debug_log.dart",
+        "lib/src/ui/learning/models/chat_file.dart",
+        "lib/src/ui/learning/widgets/file_card.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/attachments/chat_attachments_controller.dart",
+      "runtime_reachable": true,
+      "lines": 263,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/utils/safe_debug_log.dart",
+        "lib/src/services/file_service.dart",
+        "lib/src/ui/learning/global_cache.dart",
+        "lib/src/ui/learning/models/local_attach.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/chat_list.dart",
+      "runtime_reachable": true,
+      "lines": 39,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/scroll_to_bottom_button.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/collections/create_collection_screen.dart",
+      "runtime_reachable": true,
+      "lines": 1103,
+      "screen_classes": [
+        "CreateCollectionScreen"
+      ],
+      "imports": [
+        "lib/src/ui/common/keyboard_dismiss_scope.dart",
+        "lib/src/ui/learning/tabs/chat/data/chat_group_actions_repository.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/composer/chat_composer_bar.dart",
+      "runtime_reachable": true,
+      "lines": 271,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/message.dart",
+        "lib/src/ui/learning/tabs/chat/composer.dart",
+        "lib/src/ui/learning/tabs/chat/models/chat_card_envelope.dart",
+        "lib/src/ui/learning/tabs/chat/typing_line.dart",
+        "lib/src/ui/learning/tabs/chat/assignments/assignment_form_dialog.dart",
+        "lib/src/ui/learning/tabs/chat/composer/chat_plus_menu.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/composer/chat_plus_menu.dart",
+      "runtime_reachable": true,
+      "lines": 215,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/composer.dart",
+      "runtime_reachable": true,
+      "lines": 765,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/local_attach.dart",
+        "lib/src/ui/learning/widgets/file_card.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/data/chat_action_cards_cache.dart",
+      "runtime_reachable": true,
+      "lines": 828,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/message.dart",
+        "lib/src/ui/learning/tabs/chat/models/chat_group_actions.dart",
+        "lib/src/ui/learning/tabs/chat/data/chat_group_actions_repository.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/data/chat_composer_capabilities_repository.dart",
+      "runtime_reachable": true,
+      "lines": 159,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/models/chat_composer_capabilities.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/data/chat_group_actions_repository.dart",
+      "runtime_reachable": true,
+      "lines": 731,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/models/chat_group_actions.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/data/chat_repository.dart",
+      "runtime_reachable": true,
+      "lines": 157,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/utils/safe_debug_log.dart",
+        "lib/src/services/file_service.dart",
+        "lib/src/ui/learning/models/chat_file.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/date_separator.dart",
+      "runtime_reachable": true,
+      "lines": 69,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/edit_message_dialog.dart",
+      "runtime_reachable": true,
+      "lines": 165,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/message.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/emoji_sheet.dart",
+      "runtime_reachable": false,
+      "lines": 76,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/file_message_bubble.dart",
+      "runtime_reachable": true,
+      "lines": 358,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/chat_file.dart",
+        "lib/src/ui/learning/widgets/fullscreen_image.dart",
+        "lib/src/ui/learning/widgets/file_card.dart",
+        "lib/src/ui/learning/tabs/chat/profile_avatar.dart",
+        "lib/src/ui/friends/friend_profile_screen.dart",
+        "lib/src/ui/learning/tabs/chat/message_receipt.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/file_upload_sheet.dart",
+      "runtime_reachable": false,
+      "lines": 244,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/services/file_service.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/forward_group_bubble.dart",
+      "runtime_reachable": true,
+      "lines": 595,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/chat_file.dart",
+        "lib/src/ui/learning/models/message.dart",
+        "lib/src/ui/learning/widgets/fullscreen_image.dart",
+        "lib/src/ui/learning/tabs/chat/profile_avatar.dart",
+        "lib/src/ui/friends/friend_profile_screen.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/keyboard_capture.dart",
+      "runtime_reachable": false,
+      "lines": 57,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/message_bubble.dart",
+      "runtime_reachable": true,
+      "lines": 519,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/message.dart",
+        "lib/src/ui/learning/models/chat_file.dart",
+        "lib/src/ui/learning/widgets/file_card.dart",
+        "lib/src/ui/learning/tabs/chat/profile_avatar.dart",
+        "lib/src/ui/learning/tabs/chat/multi_file_bubble.dart",
+        "lib/src/ui/friends/friend_profile_screen.dart",
+        "lib/src/ui/learning/tabs/chat/forward_group_bubble.dart",
+        "lib/src/ui/learning/tabs/chat/message_receipt.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/message_builder.dart",
+      "runtime_reachable": true,
+      "lines": 337,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/message.dart",
+        "lib/src/ui/learning/models/chat_file.dart",
+        "lib/src/ui/learning/widgets/fullscreen_image.dart",
+        "lib/src/ui/learning/tabs/chat/assignment_bubble.dart",
+        "lib/src/ui/learning/tabs/chat/file_message_bubble.dart",
+        "lib/src/ui/learning/tabs/chat/multi_file_bubble.dart",
+        "lib/src/ui/learning/tabs/chat/message_bubble.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_selection_card.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/message_receipt.dart",
+      "runtime_reachable": true,
+      "lines": 40,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/messages/chat_message_list.dart",
+      "runtime_reachable": true,
+      "lines": 1914,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/message.dart",
+        "lib/src/ui/learning/tabs/chat/date_separator.dart",
+        "lib/src/ui/learning/tabs/chat/swipe_to_reply.dart",
+        "lib/src/ui/learning/tabs/chat/search/chat_search_controller.dart",
+        "lib/src/ui/learning/tabs/chat/search/search_highlight.dart",
+        "lib/src/ui/learning/tabs/chat/message_builder.dart",
+        "lib/src/ui/learning/tabs/chat/message_receipt.dart",
+        "lib/src/ui/learning/tabs/chat/models/chat_card_envelope.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/models/chat_card_envelope.dart",
+      "runtime_reachable": true,
+      "lines": 293,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/message.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/models/chat_composer_capabilities.dart",
+      "runtime_reachable": true,
+      "lines": 229,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/models/chat_group_actions.dart",
+      "runtime_reachable": true,
+      "lines": 222,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/models/group_action_labels.dart",
+      "runtime_reachable": true,
+      "lines": 94,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/multi_file_bubble.dart",
+      "runtime_reachable": true,
+      "lines": 514,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/chat_file.dart",
+        "lib/src/ui/learning/widgets/file_card.dart",
+        "lib/src/ui/learning/tabs/chat/profile_avatar.dart",
+        "lib/src/ui/friends/friend_profile_screen.dart",
+        "lib/src/ui/learning/widgets/fullscreen_image.dart",
+        "lib/src/ui/learning/tabs/chat/message_receipt.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/navigation/group_action_deeplink.dart",
+      "runtime_reachable": true,
+      "lines": 218,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/team.dart",
+        "lib/src/ui/learning/team_details_screen.dart",
+        "lib/src/ui/learning/tabs/chat/data/chat_action_cards_cache.dart",
+        "lib/src/ui/learning/tabs/chat/unified_task_details_screen.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/pinned_assignment_bar.dart",
+      "runtime_reachable": false,
+      "lines": 72,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/state/team_cubit.dart",
+        "lib/src/ui/learning/assignment_details_screen.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/pinned_strip.dart",
+      "runtime_reachable": true,
+      "lines": 165,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/pins/pin_controller.dart",
+      "runtime_reachable": true,
+      "lines": 103,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/assignment.dart",
+        "lib/src/ui/learning/state/team_cubit.dart",
+        "lib/src/ui/learning/tabs/chat/models/chat_card_envelope.dart",
+        "lib/src/ui/learning/tabs/chat/pinned_strip.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/pins/pinned_strip_container.dart",
+      "runtime_reachable": true,
+      "lines": 92,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/pinned_strip.dart",
+        "lib/src/ui/learning/tabs/chat/pins/pin_controller.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/plus_button.dart",
+      "runtime_reachable": true,
+      "lines": 297,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/services/file_service.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/profile_avatar.dart",
+      "runtime_reachable": true,
+      "lines": 57,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/reply_preview.dart",
+      "runtime_reachable": true,
+      "lines": 65,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/message.dart",
+        "lib/src/ui/learning/tabs/chat/models/chat_card_envelope.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/scroll_controller.dart",
+      "runtime_reachable": true,
+      "lines": 138,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/scroll_to_bottom_button.dart",
+      "runtime_reachable": true,
+      "lines": 25,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/search/chat_search_controller.dart",
+      "runtime_reachable": true,
+      "lines": 86,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/message.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/search/chat_search_sheet.dart",
+      "runtime_reachable": true,
+      "lines": 88,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/search/chat_search_controller.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/search/inline_search_bar.dart",
+      "runtime_reachable": true,
+      "lines": 105,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/search/chat_search_controller.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/search/search_highlight.dart",
+      "runtime_reachable": true,
+      "lines": 44,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/selection_bars.dart",
+      "runtime_reachable": true,
+      "lines": 293,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/swipe_to_reply.dart",
+      "runtime_reachable": true,
+      "lines": 30,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/team/team_chat_notice.dart",
+      "runtime_reachable": true,
+      "lines": 1027,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/friends/friend_profile_screen.dart",
+        "lib/src/ui/learning/tabs/chat/team/team_roster_pdf_service.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/team/team_roster_pdf_export_io.dart",
+      "runtime_reachable": true,
+      "lines": 35,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/team/team_roster_pdf_export_stub.dart",
+      "runtime_reachable": true,
+      "lines": 9,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/team/team_roster_pdf_export_web.dart",
+      "runtime_reachable": true,
+      "lines": 23,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/team/team_roster_pdf_font_io.dart",
+      "runtime_reachable": true,
+      "lines": 31,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/team/team_roster_pdf_font_stub.dart",
+      "runtime_reachable": true,
+      "lines": 11,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/team/team_roster_pdf_font_web.dart",
+      "runtime_reachable": true,
+      "lines": 11,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/team/team_roster_pdf_service.dart",
+      "runtime_reachable": true,
+      "lines": 224,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/team/team_roster_pdf_export_stub.dart",
+        "lib/src/ui/learning/tabs/chat/team/team_roster_pdf_export_io.dart",
+        "lib/src/ui/learning/tabs/chat/team/team_roster_pdf_export_web.dart",
+        "lib/src/ui/learning/tabs/chat/team/team_roster_pdf_font_stub.dart",
+        "lib/src/ui/learning/tabs/chat/team/team_roster_pdf_font_io.dart",
+        "lib/src/ui/learning/tabs/chat/team/team_roster_pdf_font_web.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/composite_topic_ocr_adapter.dart",
+      "runtime_reachable": false,
+      "lines": 100,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/topics/topic_list_parser.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/create_topic_selection_screen.dart",
+      "runtime_reachable": true,
+      "lines": 1345,
+      "screen_classes": [
+        "CreateTopicSelectionScreen"
+      ],
+      "imports": [
+        "lib/src/services/file_service.dart",
+        "lib/src/ui/common/keyboard_dismiss_scope.dart",
+        "lib/src/ui/learning/models/chat_file.dart",
+        "lib/src/ui/learning/tabs/chat/data/chat_repository.dart",
+        "lib/src/ui/learning/tabs/chat/models/chat_group_actions.dart",
+        "lib/src/ui/learning/tabs/chat/topics/mlkit_topic_ocr_adapter.dart",
+        "lib/src/ui/learning/tabs/chat/topics/pdfrx_topic_pdf_page_renderer.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_extraction_service.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_image_preprocess.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_list_models.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_list_parser.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_list_review_screen.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_ocr_ui_helpers.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/mlkit_topic_ocr_adapter.dart",
+      "runtime_reachable": true,
+      "lines": 1,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/topics/topic_ocr_adapter.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/mlkit_topic_ocr_impl.dart",
+      "runtime_reachable": false,
+      "lines": 23,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/topics/topic_list_parser.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/mlkit_topic_ocr_impl_stub.dart",
+      "runtime_reachable": false,
+      "lines": 19,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/topics/topic_list_parser.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/pdfrx_topic_pdf_page_renderer.dart",
+      "runtime_reachable": true,
+      "lines": 78,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/topics/topic_list_models.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_pdf_page_renderer.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/tesseract_topic_ocr_impl.dart",
+      "runtime_reachable": true,
+      "lines": 119,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/topics/topic_list_models.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_list_parser.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/tesseract_topic_ocr_impl_stub.dart",
+      "runtime_reachable": true,
+      "lines": 6,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/topics/topic_list_parser.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/topic_extraction_service.dart",
+      "runtime_reachable": true,
+      "lines": 58,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/topics/topic_list_models.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_list_parser.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_pdf_page_renderer.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/topic_image_preprocess.dart",
+      "runtime_reachable": true,
+      "lines": 28,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/topics/topic_image_preprocess_stub.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_image_preprocess_io.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_image_preprocess_stub.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_image_preprocess_io.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/topic_image_preprocess_io.dart",
+      "runtime_reachable": true,
+      "lines": 71,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/topics/topic_image_preprocess.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_image_rotate.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/topic_image_preprocess_stub.dart",
+      "runtime_reachable": true,
+      "lines": 23,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/topics/topic_image_preprocess.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_image_rotate.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/topic_image_rotate.dart",
+      "runtime_reachable": true,
+      "lines": 66,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/topic_list_models.dart",
+      "runtime_reachable": true,
+      "lines": 144,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/models/chat_group_actions.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/topic_list_normalizer.dart",
+      "runtime_reachable": true,
+      "lines": 132,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/topics/topic_list_models.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/topic_list_parser.dart",
+      "runtime_reachable": true,
+      "lines": 652,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/topics/topic_list_models.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_list_normalizer.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_pdf_page_renderer.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/topic_list_review_controller.dart",
+      "runtime_reachable": true,
+      "lines": 168,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/topics/topic_list_models.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/topic_list_review_screen.dart",
+      "runtime_reachable": true,
+      "lines": 1277,
+      "screen_classes": [
+        "TopicListReviewScreen"
+      ],
+      "imports": [
+        "lib/src/ui/common/keyboard_dismiss_scope.dart",
+        "lib/src/ui/learning/tabs/chat/data/chat_group_actions_repository.dart",
+        "lib/src/ui/learning/tabs/chat/models/chat_group_actions.dart",
+        "lib/src/ui/learning/tabs/chat/topics/pdfrx_topic_pdf_page_renderer.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_image_preprocess.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_list_models.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_list_parser.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_list_review_controller.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_ocr_adapter.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_ocr_ui_helpers.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_option_edit_sheet.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/topic_ocr_adapter.dart",
+      "runtime_reachable": true,
+      "lines": 2,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/topics/topic_ocr_adapter_stub.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_ocr_adapter_io.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/topic_ocr_adapter_io.dart",
+      "runtime_reachable": true,
+      "lines": 21,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/topics/tesseract_topic_ocr_impl_stub.dart",
+        "lib/src/ui/learning/tabs/chat/topics/tesseract_topic_ocr_impl.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_list_parser.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/topic_ocr_adapter_stub.dart",
+      "runtime_reachable": true,
+      "lines": 6,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/topics/topic_list_parser.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/topic_ocr_ui_helpers.dart",
+      "runtime_reachable": true,
+      "lines": 158,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/topics/topic_list_models.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/topic_option_edit_sheet.dart",
+      "runtime_reachable": true,
+      "lines": 226,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/common/keyboard_dismiss_scope.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/topic_options_editor_screen.dart",
+      "runtime_reachable": true,
+      "lines": 1405,
+      "screen_classes": [
+        "TopicOptionsEditorScreen"
+      ],
+      "imports": [
+        "lib/src/ui/common/keyboard_dismiss_scope.dart",
+        "lib/src/ui/learning/tabs/chat/data/chat_group_actions_repository.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_option_edit_sheet.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/topic_pdf_page_renderer.dart",
+      "runtime_reachable": true,
+      "lines": 35,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/topics/topic_list_models.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/topic_selection_card.dart",
+      "runtime_reachable": true,
+      "lines": 736,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/data/personal_diary_service.dart",
+        "lib/src/ui/learning/models/message.dart",
+        "lib/src/ui/learning/state/team_cubit.dart",
+        "lib/src/ui/learning/tabs/chat/data/chat_action_cards_cache.dart",
+        "lib/src/ui/learning/tabs/chat/data/chat_composer_capabilities_repository.dart",
+        "lib/src/ui/learning/tabs/chat/data/chat_group_actions_repository.dart",
+        "lib/src/ui/learning/tabs/chat/models/group_action_labels.dart",
+        "lib/src/ui/learning/tabs/chat/navigation/group_action_deeplink.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/topics/topic_selection_detail_screen.dart",
+      "runtime_reachable": false,
+      "lines": 1338,
+      "screen_classes": [
+        "TopicSelectionDetailScreen"
+      ],
+      "imports": [
+        "lib/src/data/personal_diary_service.dart",
+        "lib/src/ui/common/keyboard_dismiss_scope.dart",
+        "lib/src/ui/learning/tabs/chat/data/chat_action_cards_cache.dart",
+        "lib/src/ui/learning/tabs/chat/data/chat_group_actions_repository.dart",
+        "lib/src/ui/learning/tabs/chat/models/chat_group_actions.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/typing_line.dart",
+      "runtime_reachable": true,
+      "lines": 32,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/unified_task_details_screen.dart",
+      "runtime_reachable": true,
+      "lines": 1879,
+      "screen_classes": [
+        "UnifiedTaskDetailsScreen"
+      ],
+      "imports": [
+        "lib/src/data/personal_diary_service.dart",
+        "lib/src/ui/learning/assignment_details_screen.dart",
+        "lib/src/ui/learning/state/team_cubit.dart",
+        "lib/src/ui/group_space/data/group_space_repository.dart",
+        "lib/src/ui/learning/tabs/chat/data/chat_action_cards_cache.dart",
+        "lib/src/ui/learning/tabs/chat/data/chat_group_actions_repository.dart",
+        "lib/src/ui/learning/tabs/chat/models/group_action_labels.dart",
+        "lib/src/ui/learning/tabs/chat/topics/topic_options_editor_screen.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat/widgets.dart",
+      "runtime_reachable": true,
+      "lines": 38,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/composer.dart",
+        "lib/src/ui/learning/tabs/chat/message_bubble.dart",
+        "lib/src/ui/learning/tabs/chat/file_message_bubble.dart",
+        "lib/src/ui/learning/tabs/chat/multi_file_bubble.dart",
+        "lib/src/ui/learning/tabs/chat/assignment_bubble.dart",
+        "lib/src/ui/learning/tabs/chat/pinned_strip.dart",
+        "lib/src/ui/learning/tabs/chat/scroll_to_bottom_button.dart",
+        "lib/src/ui/learning/tabs/chat/swipe_to_reply.dart",
+        "lib/src/ui/learning/tabs/chat/typing_line.dart",
+        "lib/src/ui/learning/tabs/chat/date_separator.dart",
+        "lib/src/ui/learning/tabs/chat/plus_button.dart",
+        "lib/src/ui/learning/tabs/chat/composer/chat_composer_bar.dart",
+        "lib/src/ui/learning/tabs/chat/scroll_controller.dart",
+        "lib/src/ui/learning/tabs/chat/search/chat_search_controller.dart",
+        "lib/src/ui/learning/tabs/chat/search/chat_search_sheet.dart",
+        "lib/src/ui/learning/tabs/chat/pins/pin_controller.dart",
+        "lib/src/ui/learning/tabs/chat/attachments/chat_attachments_controller.dart",
+        "lib/src/ui/learning/tabs/chat/search/search_highlight.dart",
+        "lib/src/ui/learning/tabs/chat/pins/pinned_strip_container.dart",
+        "lib/src/ui/learning/tabs/chat/attachment_widget.dart",
+        "lib/src/ui/learning/tabs/chat/actions/chat_actions.dart",
+        "lib/src/ui/learning/tabs/chat/reply_preview.dart",
+        "lib/src/ui/learning/tabs/chat/chat_list.dart",
+        "lib/src/ui/learning/tabs/chat/message_builder.dart",
+        "lib/src/ui/learning/tabs/chat/messages/chat_message_list.dart",
+        "lib/src/ui/learning/tabs/chat/assignments/edit_assignment_dialog.dart",
+        "lib/src/ui/learning/tabs/chat/data/chat_repository.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/chat_tab.dart",
+      "runtime_reachable": true,
+      "lines": 3030,
+      "screen_classes": [
+        "ChatTab"
+      ],
+      "imports": [
+        "lib/src/ui/learning/state/team_cubit.dart",
+        "lib/src/ui/learning/models/message.dart",
+        "lib/src/ui/learning/models/assignment.dart",
+        "lib/src/ui/learning/models/chat_file.dart",
+        "lib/src/ui/learning/models/local_attach.dart",
+        "lib/src/ui/learning/assignment_details_screen.dart",
+        "lib/src/services/file_service.dart",
+        "lib/src/ui/learning/tabs/chat/data/chat_repository.dart",
+        "lib/src/ui/learning/tabs/chat/actions/chat_actions.dart",
+        "lib/src/ui/learning/tabs/chat/edit_message_dialog.dart",
+        "lib/src/ui/learning/global_cache.dart",
+        "lib/src/services/image_cache_service.dart",
+        "lib/src/ui/learning/tabs/chat/widgets.dart",
+        "lib/src/ui/learning/tabs/chat/search/inline_search_bar.dart",
+        "lib/src/ui/learning/tabs/chat/assignments/assignment_form_dialog.dart",
+        "lib/src/ui/learning/tabs/chat/assignments/edit_assignment_dialog.dart",
+        "lib/src/ui/learning/tabs/chat/selection_bars.dart",
+        "lib/src/ui/learning/tabs/chat/topics/create_topic_selection_screen.dart",
+        "lib/src/ui/learning/tabs/chat/collections/create_collection_screen.dart",
+        "lib/src/ui/learning/tabs/chat/data/chat_action_cards_cache.dart",
+        "lib/src/ui/learning/tabs/chat/data/chat_composer_capabilities_repository.dart",
+        "lib/src/ui/learning/tabs/chat/models/chat_composer_capabilities.dart",
+        "lib/src/ui/learning/tabs/chat/models/chat_card_envelope.dart",
+        "lib/src/ui/chats/core/forward_payload.dart",
+        "lib/src/ui/chats/data/blocks_api.dart",
+        "lib/src/ui/chats/forward/forward_outbox.dart",
+        "lib/src/ui/chats/forward/forward_picker.dart",
+        "lib/src/ui/chats/forward/forward_pick_nav.dart",
+        "lib/src/services/push/active_chat_tracker.dart",
+        "lib/src/services/push/app_notifications_api.dart",
+        "lib/src/utils/safe_debug_log.dart",
+        "lib/src/ui/learning/utils/chat_copied_file_cache.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/tabs/files_tab.dart",
+      "runtime_reachable": true,
+      "lines": 874,
+      "screen_classes": [
+        "FilesTab"
+      ],
+      "imports": [
+        "lib/src/ui/common/friendly_empty_state.dart",
+        "lib/src/ui/learning/models/chat_file.dart",
+        "lib/src/ui/learning/models/message.dart",
+        "lib/src/ui/learning/state/team_cubit.dart",
+        "lib/src/ui/learning/widgets/file_card.dart",
+        "lib/src/services/file_service.dart",
+        "lib/src/ui/learning/widgets/fullscreen_image.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/team_details_screen.dart",
+      "runtime_reachable": true,
+      "lines": 649,
+      "screen_classes": [
+        "TeamDetailsScreen",
+        "_MiniTab"
+      ],
+      "imports": [
+        "lib/src/ui/learning/models/team.dart",
+        "lib/src/ui/learning/state/team_cubit.dart",
+        "lib/src/ui/learning/tabs/assignments_tab.dart",
+        "lib/src/ui/learning/tabs/chat_tab.dart",
+        "lib/src/ui/learning/tabs/chat/team/team_chat_notice.dart",
+        "lib/src/ui/learning/tabs/files_tab.dart",
+        "lib/src/ui/learning/tabs/assignments/view_mode.dart",
+        "lib/src/ui/learning/widgets/team_avatar.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/utils/chat_copied_file_cache.dart",
+      "runtime_reachable": true,
+      "lines": 145,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/widgets/file_card.dart",
+      "runtime_reachable": true,
+      "lines": 445,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/learning/widgets/file_message_bubble.dart",
+      "runtime_reachable": false,
+      "lines": 107,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/chat_file.dart",
+        "lib/src/ui/learning/widgets/file_card.dart",
+        "lib/src/ui/learning/widgets/fullscreen_image.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/widgets/fullscreen_image.dart",
+      "runtime_reachable": true,
+      "lines": 777,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/utils/chat_copied_file_cache.dart",
+        "lib/src/ui/learning/widgets/file_card.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/learning/widgets/team_avatar.dart",
+      "runtime_reachable": true,
+      "lines": 101,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/navigation/main_tab_scope.dart",
+      "runtime_reachable": true,
+      "lines": 31,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/navigation/navigation_screen.dart",
+      "runtime_reachable": true,
+      "lines": 136,
+      "screen_classes": [
+        "NavigationScreen"
+      ],
+      "imports": [
+        "lib/src/ui/home/home_screen.dart",
+        "lib/src/ui/info/info_screen.dart",
+        "lib/src/ui/learning/learning_screen.dart",
+        "lib/src/ui/schedule/schedule_screen.dart",
+        "lib/src/ui/profile/profile_screen.dart",
+        "lib/src/ui/chats/data/chat_warm_coordinator.dart",
+        "lib/src/services/presence/user_presence.dart",
+        "lib/src/themes/theme_service.dart",
+        "lib/src/ui/navigation/main_tab_scope.dart",
+        "lib/src/ui/navigation/visited_tab.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/navigation/visited_tab.dart",
+      "runtime_reachable": true,
+      "lines": 27,
+      "screen_classes": [
+        "VisitedTab"
+      ],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/notifications/in_app_toast_host.dart",
+      "runtime_reachable": true,
+      "lines": 268,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/services/push/in_app_notification_bus.dart",
+        "lib/src/services/push/push_navigation.dart",
+        "lib/src/services/push/push_payload.dart",
+        "lib/src/ui/notifications/notification_center_sheet.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/notifications/notification_center_sheet.dart",
+      "runtime_reachable": true,
+      "lines": 626,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/navigation/root_nav.dart",
+        "lib/src/services/push/app_notifications_api.dart",
+        "lib/src/services/push/push_navigation.dart",
+        "lib/src/services/push/push_payload.dart",
+        "lib/src/ui/chats/dm_title.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/notifications/notification_settings_screen.dart",
+      "runtime_reachable": true,
+      "lines": 462,
+      "screen_classes": [
+        "NotificationSettingsScreen"
+      ],
+      "imports": [
+        "lib/src/services/push/notification_preferences_api.dart",
+        "lib/src/services/push/push_notification_service.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/notifications/push_permission_prompt.dart",
+      "runtime_reachable": true,
+      "lines": 74,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/notifications/push_session_host.dart",
+      "runtime_reachable": true,
+      "lines": 109,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/services/push/active_chat_tracker.dart",
+        "lib/src/services/push/in_app_notification_bus.dart",
+        "lib/src/services/push/push_navigation.dart",
+        "lib/src/services/push/push_notification_service.dart",
+        "lib/src/services/push/push_payload.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/profile/edit_profile_screen.dart",
+      "runtime_reachable": true,
+      "lines": 986,
+      "screen_classes": [
+        "EditProfileScreen"
+      ],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/profile/my_reviews_screen.dart",
+      "runtime_reachable": true,
+      "lines": 131,
+      "screen_classes": [
+        "MyReviewsScreen"
+      ],
+      "imports": [
+        "lib/src/ui/info/entity_review_screen.dart",
+        "lib/src/ui/profile/student_review_service.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/profile/personal_diary_screen.dart",
+      "runtime_reachable": true,
+      "lines": 3346,
+      "screen_classes": [
+        "PersonalDiaryScreen"
+      ],
+      "imports": [
+        "lib/src/data/personal_diary_service.dart",
+        "lib/src/ui/learning/tabs/chat/navigation/group_action_deeplink.dart",
+        "lib/src/ui/schedule/subject_diary/subject_diary.dart",
+        "lib/src/ui/schedule/subject_diary_screen.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/profile/profile_feed_service.dart",
+      "runtime_reachable": true,
+      "lines": 226,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/profile/profile_repository.dart",
+      "runtime_reachable": false,
+      "lines": 47,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/profile/profile_screen.dart",
+      "runtime_reachable": true,
+      "lines": 959,
+      "screen_classes": [
+        "ProfileScreen",
+        "MapSpbgasuScreen"
+      ],
+      "imports": [
+        "lib/router_observer.dart",
+        "lib/src/core/auth_session.dart",
+        "lib/src/services/auth_service.dart",
+        "lib/src/ui/chats/my_chats_screen.dart",
+        "lib/src/ui/friends/my_friends_screen.dart",
+        "lib/src/ui/content/content_nav_executor.dart",
+        "lib/src/ui/info/content_media_service.dart",
+        "lib/src/ui/profile/profile_feed_service.dart",
+        "lib/src/ui/profile/student_points_service.dart",
+        "lib/src/ui/profile/my_reviews_screen.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/profile/student_points_service.dart",
+      "runtime_reachable": true,
+      "lines": 140,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/profile/student_review_service.dart",
+      "runtime_reachable": true,
+      "lines": 1224,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/schedule/diary_entry_details_screen.dart",
+      "runtime_reachable": false,
+      "lines": 539,
+      "screen_classes": [
+        "DiaryEntryDetailsScreen",
+        "AllConspectsGalleryScreen",
+        "AllFilesScreen"
+      ],
+      "imports": [
+        "lib/src/ui/schedule/subject_diary/subject_diary.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/schedule/lesson_details_screen.dart",
+      "runtime_reachable": true,
+      "lines": 789,
+      "screen_classes": [
+        "LessonDetailsScreen",
+        "_MapSpbgasuInlineScreen"
+      ],
+      "imports": [
+        "lib/src/ui/info/subject_info_screen.dart",
+        "lib/src/ui/info/teacher_profile_screen.dart",
+        "lib/src/ui/schedule/models/lesson.dart",
+        "lib/src/ui/schedule/subject_diary/subject_diary.dart",
+        "lib/src/ui/schedule/subject_diary_screen.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/schedule/models/lesson.dart",
+      "runtime_reachable": true,
+      "lines": 161,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/schedule/utils/msk_date.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/schedule/models/schedule_calendar_item.dart",
+      "runtime_reachable": false,
+      "lines": 53,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/models/assignment.dart",
+        "lib/src/ui/schedule/models/schedule_group_action_event.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/schedule/models/schedule_group_action_event.dart",
+      "runtime_reachable": true,
+      "lines": 78,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/models/chat_group_actions.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/schedule/models/schedule_group_action_mapper.dart",
+      "runtime_reachable": true,
+      "lines": 20,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/learning/tabs/chat/models/chat_group_actions.dart",
+        "lib/src/ui/schedule/models/schedule_group_action_event.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/schedule/schedule_screen.dart",
+      "runtime_reachable": true,
+      "lines": 2107,
+      "screen_classes": [
+        "ScheduleScreen",
+        "_AssignmentOpenErrorScreen"
+      ],
+      "imports": [
+        "lib/src/ui/learning/assignment_details_screen.dart",
+        "lib/src/ui/learning/models/team.dart",
+        "lib/src/ui/learning/state/team_cubit.dart",
+        "lib/src/data/personal_diary_service.dart",
+        "lib/src/ui/learning/tabs/chat/data/chat_action_cards_cache.dart",
+        "lib/src/ui/learning/tabs/chat/data/chat_group_actions_repository.dart",
+        "lib/src/ui/learning/tabs/chat/navigation/group_action_deeplink.dart",
+        "lib/src/ui/schedule/models/lesson.dart",
+        "lib/src/ui/schedule/models/schedule_group_action_event.dart",
+        "lib/src/ui/schedule/models/schedule_group_action_mapper.dart",
+        "lib/src/ui/schedule/lesson_details_screen.dart",
+        "lib/src/ui/schedule/widgets/lesson_card.dart",
+        "lib/src/ui/schedule/widgets/mini_calendar.dart",
+        "lib/src/ui/schedule/widgets/calendar_icon_button.dart",
+        "lib/src/ui/schedule/utils/msk_date.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/schedule/subject_diary/models.dart",
+      "runtime_reachable": true,
+      "lines": 126,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/schedule/subject_diary/repo.dart",
+      "runtime_reachable": true,
+      "lines": 351,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/schedule/subject_diary/screens/photo_conspect_screen.dart",
+      "runtime_reachable": true,
+      "lines": 278,
+      "screen_classes": [
+        "SubjectPhotoConspectScreen"
+      ],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/schedule/subject_diary/screens/quick_note_screen.dart",
+      "runtime_reachable": true,
+      "lines": 835,
+      "screen_classes": [
+        "SubjectQuickNoteScreen"
+      ],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/schedule/subject_diary/subject_diary.dart",
+      "runtime_reachable": true,
+      "lines": 31,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/config/yandex_storage_config.dart",
+        "lib/src/services/s3_client.dart",
+        "lib/src/ui/schedule/subject_diary/models.dart",
+        "lib/src/ui/schedule/subject_diary/repo.dart",
+        "lib/src/ui/schedule/subject_diary/widgets.dart",
+        "lib/src/ui/schedule/subject_diary/screens/quick_note_screen.dart",
+        "lib/src/ui/schedule/subject_diary/screens/photo_conspect_screen.dart",
+        "lib/src/data/subject_diary_repository_supabase.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/schedule/subject_diary/widgets.dart",
+      "runtime_reachable": true,
+      "lines": 671,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/schedule/subject_diary_screen.dart",
+      "runtime_reachable": true,
+      "lines": 2286,
+      "screen_classes": [
+        "SubjectDiaryScreen",
+        "AllConspectsGalleryScreen",
+        "AllFilesScreen",
+        "AllNotesScreen"
+      ],
+      "imports": [
+        "lib/src/ui/schedule/subject_diary/subject_diary.dart",
+        "lib/src/data/personal_diary_service.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/schedule/utils/msk_date.dart",
+      "runtime_reachable": true,
+      "lines": 70,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/schedule/widgets/calendar_icon_button.dart",
+      "runtime_reachable": true,
+      "lines": 402,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/schedule/widgets/lesson_card.dart",
+      "runtime_reachable": true,
+      "lines": 284,
+      "screen_classes": [],
+      "imports": [
+        "lib/src/ui/schedule/models/lesson.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/schedule/widgets/mini_calendar.dart",
+      "runtime_reachable": true,
+      "lines": 232,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/ui/splash/splash_screen.dart",
+      "runtime_reachable": true,
+      "lines": 86,
+      "screen_classes": [
+        "SplashScreen"
+      ],
+      "imports": [
+        "lib/src/core/auth_session.dart",
+        "lib/src/core/session.dart",
+        "lib/src/core/password_policy.dart"
+      ]
+    },
+    {
+      "path": "lib/src/ui/widgets/loading_widget.dart",
+      "runtime_reachable": false,
+      "lines": 35,
+      "screen_classes": [],
+      "imports": []
+    },
+    {
+      "path": "lib/src/utils/safe_debug_log.dart",
+      "runtime_reachable": true,
+      "lines": 14,
+      "screen_classes": [],
+      "imports": []
+    }
+  ]
+}

@@ -141,7 +141,7 @@ void main() {
           .pump(); // sheet open; avoid settle (loading spinner animates)
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('Создать задание'), findsOneWidget);
-      expect(find.text('Выбор темы'), findsOneWidget);
+      expect(find.text('Создать список тем'), findsOneWidget);
       expect(find.text('Скинуться'), findsNothing);
       expect(find.textContaining('Проверяем'), findsNothing);
     });
@@ -185,7 +185,7 @@ void main() {
           'entity_id': 'c1',
           'title': 'Скинуться на подарок преподавателю',
           'occurs_at': '2026-08-02T12:00:00Z',
-          'status': 'weird_raw_status',
+          'status': 'open',
         }),
       ]);
       expect(events[0].title, 'Выбрать тему доклада');

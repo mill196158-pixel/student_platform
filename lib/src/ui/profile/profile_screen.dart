@@ -7,7 +7,6 @@ import 'package:go_router/go_router.dart';
 import 'package:student_platform/router_observer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:collection/collection.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import 'package:student_ui/student_ui.dart';
@@ -16,7 +15,6 @@ import 'package:student_platform/src/core/auth_session.dart';
 import 'package:student_platform/src/services/auth_service.dart';
 import 'package:student_platform/src/ui/chats/my_chats_screen.dart';
 import 'package:student_platform/src/ui/friends/my_friends_screen.dart';
-import 'package:student_platform/src/ui/learning/data/supabase_learning_repository.dart';
 import 'package:student_platform/src/ui/content/content_nav_executor.dart';
 import 'package:student_platform/src/ui/info/content_media_service.dart';
 import 'package:student_platform/src/ui/profile/profile_feed_service.dart';
@@ -39,7 +37,6 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   // ----- deps -----
   final SupabaseClient _sb = Supabase.instance.client;
-  final _repo = SupabaseLearningRepository();
   final ProfileFeedService _feedService = ProfileFeedService();
   final ContentMediaService _contentMedia = ContentMediaService();
   ProfileFeedLoadResult _feed =
@@ -62,18 +59,14 @@ class _ProfileScreenState extends State<ProfileScreen>
   // ----- polling -----
   Timer? _pollTimer;
   static const Duration _pollEvery = Duration(seconds: 20);
-  static const Duration _chatIdsCacheTtl = Duration(minutes: 3);
   bool _pollInFlight = false;
   bool _repollPending = false;
   DateTime? _lastPollStartedAt;
-  Future<void>? _chatIdsPrepareFuture;
-  DateTime? _chatIdsPreparedAt;
 
   // ----- visibility gate -----
   bool _wasVisible = false;
 
   // chat ids для суммирования unread
-  List<String> _chatIds = const [];
 
   String? get _uid => _sb.auth.currentUser?.id ?? (_user?['id'] as String?);
 
@@ -201,8 +194,8 @@ class _ProfileScreenState extends State<ProfileScreen>
           imageBytes: imageBytes,
           iconBytes: iconBytes,
           imageLoading: false,
-          clearImageBytes: needsImage &&
-              (imageBytes == null || imageBytes.isEmpty),
+          clearImageBytes:
+              needsImage && (imageBytes == null || imageBytes.isEmpty),
         ),
       );
     }
@@ -552,73 +545,6 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   // realtime disabled — polling only
 
-  // подготовка chat ids (разово и при смене группы)
-  Future<void> _ensureChatIdsPrepared() async {
-    final preparedAt = _chatIdsPreparedAt;
-    if (_chatIds.isNotEmpty &&
-        preparedAt != null &&
-        DateTime.now().difference(preparedAt) < _chatIdsCacheTtl) {
-      return;
-    }
-
-    final inFlight = _chatIdsPrepareFuture;
-    if (inFlight != null) {
-      await inFlight;
-      return;
-    }
-
-    final future = _prepareChatIds();
-    _chatIdsPrepareFuture = future;
-    try {
-      await future;
-    } finally {
-      if (identical(_chatIdsPrepareFuture, future)) {
-        _chatIdsPrepareFuture = null;
-      }
-    }
-  }
-
-  Future<void> _prepareChatIds() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString('user');
-      String group = '';
-      if (raw != null && raw.isNotEmpty) {
-        final m = jsonDecode(raw) as Map<String, dynamic>;
-        group = (m['group_name'] ?? '') as String;
-      }
-      if (group.isEmpty) {
-        _chatIds = const [];
-        _chatIdsPreparedAt = DateTime.now();
-        return;
-      }
-
-      debugPrint('${_ts()} [Profile] loadTeams("$group")');
-      final teams = await _repo.loadTeams(group);
-      final ids = <String>[];
-      for (final t in teams) {
-        try {
-          final chatId = await _repo
-              .getMainChatId(t.id)
-              .timeout(const Duration(seconds: 20));
-          if (chatId.isNotEmpty) ids.add(chatId);
-        } catch (e) {
-          debugPrint('${_ts()} [Profile] getMainChatId skipped: $e');
-        }
-      }
-      final changed = const ListEquality().equals(_chatIds, ids) == false;
-      _chatIds = ids;
-      _chatIdsPreparedAt = DateTime.now();
-      debugPrint(
-          '${_ts()} [Profile] chatIds prepared: ${_chatIds.length} -> $_chatIds (changed=$changed)');
-    } catch (e) {
-      debugPrint('${_ts()} [Profile] ensureChatIdsPrepared error: $e');
-      if (_chatIds.isEmpty) {
-        _chatIds = const [];
-      }
-    }
-  }
-
   // ===== ручной refresh =====
   Future<void> _refreshFromServer() async {
     try {
@@ -640,9 +566,6 @@ class _ProfileScreenState extends State<ProfileScreen>
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('user', jsonEncode(mapFresh));
         setState(() {}); // обновим шапку
-        _chatIds = const [];
-        _chatIdsPreparedAt = null;
-        await _ensureChatIdsPrepared();
       }
 
       await _pollOnce(); // подтянуть бейджи сразу
@@ -656,13 +579,13 @@ class _ProfileScreenState extends State<ProfileScreen>
   // ===== logout =====
   Future<void> _logout() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('loggedIn');
-      await prefs.remove('user');
-      // Centralized path clears news + profile-feed caches (Stage 15.2/15.3).
-      if (!mounted) return;
       await AuthService.signOut(context);
-    } catch (_) {}
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Не удалось завершить выход. Повторите попытку.'),
+      ));
+    }
   }
 
   // ===== UI =====
@@ -724,7 +647,6 @@ class _ProfileScreenState extends State<ProfileScreen>
             await context.push('/edit-profile');
             await _loadLocal();
             await _ensureSession();
-            await _ensureChatIdsPrepared();
             await _pollOnce(); // форс-опрос после возвращения
           },
         ),

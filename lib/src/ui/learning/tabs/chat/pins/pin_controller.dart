@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../../models/message.dart';
 import '../../../models/assignment.dart';
 import '../../../state/team_cubit.dart';
 import '../models/chat_card_envelope.dart';

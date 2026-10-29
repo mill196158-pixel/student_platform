@@ -196,7 +196,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('Создать задание'), findsOneWidget);
-      expect(find.text('Выбор темы'), findsOneWidget);
+      expect(find.text('Создать список тем'), findsOneWidget);
       expect(find.textContaining('Проверяем'), findsNothing);
       expect(find.textContaining('Определяем доступ'), findsNothing);
       expect(find.byType(CircularProgressIndicator), findsWidgets);

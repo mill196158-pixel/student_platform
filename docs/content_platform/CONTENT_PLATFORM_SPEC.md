@@ -755,3 +755,19 @@ Each slice: focused diff → tests → Codex review → fix P0/P1 → APPROVE �
 ## 14. Non-goals this session
 
 Remote apply/deploy/push; full demo production migration; paid AI; RF cutover; rewriting Stage 13 chat/group-actions/news-archive/RBAC without confirmed need.
+
+## 15. Owner direction — 2026-10-28 (proposal under review)
+
+Owner confirmed compliance with Russian law as a mandatory launch constraint.
+Proposed entry product: useful educational examples, materials and tools before
+optional personal schedule/diary/chat capabilities. No existing feature removal
+or public access to current personal-context APIs is approved by this note.
+Guest mode and a separate public content projection still require design and
+implementation. Hiding a tab never replaces server authorization.
+
+Current targeted audit and evidence:
+`docs/SECURITY_AND_PRODUCT_REVIEW_2026_10_28.md`.
+Confirmed anonymous grants on non-RLS tables are a launch blocker; the local
+app hardening does not resolve production database permissions. Stage 21 remains
+planning only, not proof of RF localization. Existing stage checkboxes and
+remote apply/deploy/push approval requirements remain unchanged.

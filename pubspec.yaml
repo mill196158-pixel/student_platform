@@ -94,3 +94,8 @@ flutter:
     - family: DancingScript
       fonts:
         - asset: assets/fonts/DancingScript.ttf
+
+# Compatibility fix for nullable capture; see package PATCH.md.
+dependency_overrides:
+  pdfrx_engine:
+    path: packages/pdfrx_engine_compat

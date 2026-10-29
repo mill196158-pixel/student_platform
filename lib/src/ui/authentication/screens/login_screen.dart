@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:student_platform/src/config/auth_email_adapter.dart';
+import 'package:student_platform/src/core/password_policy.dart';
 import 'change_password_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -63,16 +64,7 @@ class _LoginScreenState extends State<LoginScreen> {
         data = Map<String, dynamic>.from(row as Map);
       }
 
-      final uid = _sb.auth.currentUser?.id;
-      if (uid != null && !data.containsKey('must_change_password')) {
-        final passwordFlag = await _sb
-            .from('users')
-            .select('must_change_password')
-            .eq('id', uid)
-            .maybeSingle();
-        data['must_change_password'] =
-            passwordFlag?['must_change_password'] == true;
-      }
+      data['must_change_password'] = await loadPasswordChangeRequired(_sb);
 
       // 3) Сохраняем локально и идём на /home
       final prefs = await SharedPreferences.getInstance();
@@ -95,8 +87,12 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     } on AuthException catch (e) {
       if (!mounted) return;
+      final serverTimeout = e.statusCode == '504' ||
+          e.message.toLowerCase().contains('timeout');
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.message)));
+          .showSnackBar(SnackBar(content: Text(serverTimeout
+              ? 'Сервер входа не ответил вовремя. Повторите попытку позже.'
+              : e.message)));
     } catch (e) {
       if (!mounted) return;
       // Показываем исходную ошибку, чтобы ловить серверные проблемы

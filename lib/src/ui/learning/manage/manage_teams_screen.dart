@@ -4,7 +4,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../state/learning_cubit.dart';
 import '../state/learning_state.dart';
-import '../models/team.dart';
 
 class ManageTeamsScreen extends StatefulWidget {
   final String groupCode;
