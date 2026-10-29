@@ -771,3 +771,14 @@ Confirmed anonymous grants on non-RLS tables are a launch blocker; the local
 app hardening does not resolve production database permissions. Stage 21 remains
 planning only, not proof of RF localization. Existing stage checkboxes and
 remote apply/deploy/push approval requirements remain unchanged.
+
+## 16. Owner direction — 2026-10-29
+
+Owner prefers one build with useful guest functionality and optional account
+features, initially tested with a limited group. Guest entry and public content
+projection are not implemented yet; existing personal features stay in scope.
+Server-side beta access is required; hiding client UI does not authorize access.
+No claim that no-registration or closed beta exempts actual personal-data handling
+from Russian law. Full user-flow testing requires an isolated backend with synthetic
+accounts; owner confirms only production Supabase currently exists.
+See `docs/E2E_TESTING_2026_10_29.md` for scenarios and measured test results.
