@@ -248,8 +248,7 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
       if (assignments > 0) '$assignments зад.',
       if (topics > 0) '$topics тем.',
       if (collections > 0) '$collections сбор.',
-      if (personal > 0 || upcoming.isEmpty)
-        '$personal личн.',
+      if (personal > 0 || upcoming.isEmpty) '$personal личн.',
     ];
     if (parts.isEmpty) {
       return '${data.personalTasksActive} личных активных';
@@ -2407,31 +2406,36 @@ class _CollapsibleTasksSection extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(top: 4, bottom: 8),
       decoration: _cardDecoration(),
-      child: Theme(
-        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
-          initiallyExpanded: initiallyExpanded,
-          tilePadding: const EdgeInsets.symmetric(horizontal: 14),
-          childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
-          leading: Icon(
-            icon,
-            color: const Color(0xFF7C63D8),
+      child: Material(
+        type: MaterialType.transparency,
+        borderRadius: BorderRadius.circular(18),
+        clipBehavior: Clip.antiAlias,
+        child: Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            initiallyExpanded: initiallyExpanded,
+            tilePadding: const EdgeInsets.symmetric(horizontal: 14),
+            childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+            leading: Icon(
+              icon,
+              color: const Color(0xFF7C63D8),
+            ),
+            title: Text(
+              title,
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: Colors.black87,
+                  ),
+            ),
+            subtitle: Text(
+              subtitle,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: Colors.black54),
+            ),
+            children: items.map(itemBuilder).toList(),
           ),
-          title: Text(
-            title,
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: Colors.black87,
-                ),
-          ),
-          subtitle: Text(
-            subtitle,
-            style: Theme.of(context)
-                .textTheme
-                .bodySmall
-                ?.copyWith(color: Colors.black54),
-          ),
-          children: items.map(itemBuilder).toList(),
         ),
       ),
     );
@@ -2450,8 +2454,7 @@ class _GroupActionDiaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final done = action.isCompleted;
-    final accent =
-        done ? const Color(0xFF2F9D84) : const Color(0xFF7C63D8);
+    final accent = done ? const Color(0xFF2F9D84) : const Color(0xFF7C63D8);
     final listHint = action.isTopic &&
             (action.myPickText ?? '').trim().isNotEmpty &&
             action.title.trim().isNotEmpty
@@ -2503,13 +2506,11 @@ class _GroupActionDiaryCard extends StatelessWidget {
                           action.displayTitle,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(
-                                fontWeight: FontWeight.w900,
-                                color: Colors.black,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w900,
+                                    color: Colors.black,
+                                  ),
                         ),
                         const SizedBox(height: 4),
                         Text(
@@ -2593,41 +2594,46 @@ class _CollapsibleSubjectsSection extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(top: 4, bottom: 8),
       decoration: _cardDecoration(),
-      child: Theme(
-        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
-          tilePadding: const EdgeInsets.symmetric(horizontal: 14),
-          childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
-          leading: Icon(icon, color: const Color(0xFF7C63D8)),
-          title: Text(
-            title,
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: Colors.black87,
-                ),
-          ),
-          subtitle: Text(
-            subtitle,
-            style: Theme.of(context)
-                .textTheme
-                .bodySmall
-                ?.copyWith(color: Colors.black54),
-          ),
-          children: subjects.isEmpty
-              ? [
-                  const Padding(
-                    padding: EdgeInsets.only(bottom: 8),
-                    child: _EmptyCard(text: 'Пока пусто.'),
+      child: Material(
+        type: MaterialType.transparency,
+        borderRadius: BorderRadius.circular(18),
+        clipBehavior: Clip.antiAlias,
+        child: Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            tilePadding: const EdgeInsets.symmetric(horizontal: 14),
+            childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+            leading: Icon(icon, color: const Color(0xFF7C63D8)),
+            title: Text(
+              title,
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: Colors.black87,
                   ),
-                ]
-              : subjects
-                  .map(
-                    (subject) => _SubjectCard(
-                      subject: subject,
-                      onTap: () => onTap(subject),
+            ),
+            subtitle: Text(
+              subtitle,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: Colors.black54),
+            ),
+            children: subjects.isEmpty
+                ? [
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 8),
+                      child: _EmptyCard(text: 'Пока пусто.'),
                     ),
-                  )
-                  .toList(),
+                  ]
+                : subjects
+                    .map(
+                      (subject) => _SubjectCard(
+                        subject: subject,
+                        onTap: () => onTap(subject),
+                      ),
+                    )
+                    .toList(),
+          ),
         ),
       ),
     );

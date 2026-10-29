@@ -23,6 +23,7 @@ class _MyReviewsScreenState extends State<MyReviewsScreen> {
   late final StudentReviewService _service;
   MyEntityReviewsResult _result = const MyEntityReviewsResult();
   bool _loading = true;
+  bool _loadFailed = false;
 
   @override
   void initState() {
@@ -32,13 +33,19 @@ class _MyReviewsScreenState extends State<MyReviewsScreen> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
-    final result = await _service.loadMyReviews();
-    if (!mounted) return;
     setState(() {
-      _result = result;
-      _loading = false;
+      _loading = true;
+      _loadFailed = false;
     });
+    try {
+      final result = await _service.loadMyReviews();
+      if (!mounted) return;
+      setState(() => _result = result);
+    } catch (_) {
+      if (mounted) setState(() => _loadFailed = true);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   void _openReview(MyEntityReviewItem item) {
@@ -64,68 +71,80 @@ class _MyReviewsScreenState extends State<MyReviewsScreen> {
       appBar: AppBar(title: const Text('Мои отзывы')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _load,
-              child: ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  Text(
-                    'Отзывы о преподавателях и предметах',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
-                        ),
+          : _loadFailed
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('Не удалось загрузить отзывы'),
+                      TextButton(
+                          onPressed: _load, child: const Text('Повторить')),
+                    ],
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'После модерации одобренного отзыва начисляется 1 балл.',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: const Color(0xFF6B7280),
+                )
+              : RefreshIndicator(
+                  onRefresh: _load,
+                  child: ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      Text(
+                        'Отзывы о преподавателях и предметах',
+                        style:
+                            Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'После модерации одобренного отзыва начисляется 1 балл.',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: const Color(0xFF6B7280),
+                            ),
+                      ),
+                      const SizedBox(height: 16),
+                      if (items.isEmpty && !showDemoFallback)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 24),
+                          child: Center(
+                            child: Text('Вы ещё не оставляли отзывов'),
+                          ),
                         ),
+                      for (final item in items)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: StudentReviewCard(
+                            payload: item.toCardPayload(),
+                            onTap: () => _openReview(item),
+                          ),
+                        ),
+                      if (showDemoFallback) ...[
+                        StudentReviewCard(
+                          payload: StudentReviewCardPayload.demoPending,
+                          showDemoBadge: true,
+                          onTap: () => _openReview(
+                            MyEntityReviewItem(
+                              reviewId: 'demo-subject',
+                              entityType: ReviewEntityType.subject,
+                              entityId: _demoEntityId,
+                              entityLabel: StudentReviewCardPayload
+                                  .demoPending.entityLabel,
+                              tagScores: StudentReviewCardPayload
+                                  .demoPending.tagScores,
+                              bodyPreview: StudentReviewCardPayload
+                                  .demoPending.bodyPreview,
+                              moderationStatus: ReviewModerationStatus.pending,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        StudentReviewCard(
+                          payload: StudentReviewCardPayload.demoTeacher,
+                          showDemoBadge: true,
+                        ),
+                      ],
+                    ],
                   ),
-                  const SizedBox(height: 16),
-                  if (items.isEmpty && !showDemoFallback)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 24),
-                      child: Center(
-                        child: Text('Вы ещё не оставляли отзывов'),
-                      ),
-                    ),
-                  for (final item in items)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: StudentReviewCard(
-                        payload: item.toCardPayload(),
-                        onTap: () => _openReview(item),
-                      ),
-                    ),
-                  if (showDemoFallback) ...[
-                    StudentReviewCard(
-                      payload: StudentReviewCardPayload.demoPending,
-                      showDemoBadge: true,
-                      onTap: () => _openReview(
-                        MyEntityReviewItem(
-                          reviewId: 'demo-subject',
-                          entityType: ReviewEntityType.subject,
-                          entityId: _demoEntityId,
-                          entityLabel:
-                              StudentReviewCardPayload.demoPending.entityLabel,
-                          tagScores:
-                              StudentReviewCardPayload.demoPending.tagScores,
-                          bodyPreview:
-                              StudentReviewCardPayload.demoPending.bodyPreview,
-                          moderationStatus: ReviewModerationStatus.pending,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    StudentReviewCard(
-                      payload: StudentReviewCardPayload.demoTeacher,
-                      showDemoBadge: true,
-                    ),
-                  ],
-                ],
-              ),
-            ),
+                ),
     );
   }
 }

@@ -17,11 +17,19 @@ void main() {
     required Size surfaceSize,
     required Widget child,
   }) async {
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetDevicePixelRatio);
     await tester.binding.setSurfaceSize(surfaceSize);
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       MaterialApp(
-        theme: studentPlatformLightTheme(),
+        builder: (context, child) => MediaQuery(
+          data:
+              MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
+          child: child!,
+        ),
+        theme: studentPlatformLightTheme()
+            .copyWith(platform: TargetPlatform.android),
         home: Scaffold(body: child),
       ),
     );
@@ -70,12 +78,20 @@ void main() {
       });
 
       testWidgets('home end_of_page promo $tag', (tester) async {
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetDevicePixelRatio);
         final now = DateTime(2026, 7, 21);
         await tester.binding.setSurfaceSize(size);
         addTearDown(() => tester.binding.setSurfaceSize(null));
         await tester.pumpWidget(
           MaterialApp(
-            theme: studentPlatformLightTheme(),
+            builder: (context, child) => MediaQuery(
+              data: MediaQuery.of(context)
+                  .copyWith(textScaler: TextScaler.noScaling),
+              child: child!,
+            ),
+            theme: studentPlatformLightTheme()
+                .copyWith(platform: TargetPlatform.android),
             home: StudentHomeView(
               data: StudentHomeData(
                 profile: const StudentHomeProfile(
@@ -147,6 +163,11 @@ void main() {
           ),
         );
         // after compact layout
+        final propose = tester.getRect(find.text('Предложить'));
+        final submissions = tester.getRect(find.text('Мои заявки'));
+        expect((propose.center.dy - submissions.center.dy).abs(), lessThan(2));
+        expect(propose.right, lessThan(submissions.left));
+        expect(tester.takeException(), isNull);
         await expectLater(
           find.byType(Scaffold),
           matchesGoldenFile('goldens/jobs_board_$tag.png'),
