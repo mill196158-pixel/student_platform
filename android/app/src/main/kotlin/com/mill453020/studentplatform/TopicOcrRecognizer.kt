@@ -30,12 +30,28 @@ object TopicOcrRecognizer {
         if (!imageFile.exists()) {
             throw IllegalArgumentException("Файл изображения не найден.")
         }
-        val bitmap = BitmapFactory.decodeFile(imagePath)
-            ?: throw IllegalArgumentException("Не удалось открыть изображение.")
-
-        val dataPath = ensureTessdata(context)
-        val api = TessBaseAPI()
+        if (imageFile.length() > 8L * 1024 * 1024) {
+            throw IllegalArgumentException("Изображение слишком большое. Максимум 8 МБ.")
+        }
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(imagePath, bounds)
+        val pixels = bounds.outWidth.toLong() * bounds.outHeight.toLong()
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            throw IllegalArgumentException("Не удалось открыть изображение.")
+        }
+        if (pixels > 50_000_000L) {
+            throw IllegalArgumentException("Слишком большое разрешение изображения. Максимум 50 мегапикселей.")
+        }
+        var sample = 1
+        while (bounds.outWidth / sample > 4096 || bounds.outHeight / sample > 4096 ||
+            pixels / (sample.toLong() * sample) > 12_000_000L) { sample *= 2 }
+        val bitmap = BitmapFactory.decodeFile(imagePath, BitmapFactory.Options().apply {
+            inSampleSize = sample
+        }) ?: throw IllegalArgumentException("Не удалось открыть изображение.")
+        var api: TessBaseAPI? = null
         try {
+            val dataPath = ensureTessdata(context)
+            api = TessBaseAPI()
             if (!api.init(dataPath, languages)) {
                 throw IllegalStateException("Не удалось инициализировать OCR.")
             }
@@ -48,7 +64,7 @@ object TopicOcrRecognizer {
             }
             return text
         } finally {
-            api.recycle()
+            api?.recycle()
             bitmap.recycle()
         }
     }

@@ -161,6 +161,10 @@ def run(f):
     sys.exit(0 if all(x['passed'] for x in results) else 1)
 
 def cleanup(f):
+    # Object storage is independent of database cascades. Never erase the
+    # cleanup manifest/owners while a synthetic upload is still outstanding.
+    if any(not item.get('object_deleted') for item in f.get('files', [])):
+        raise RuntimeError('Remove and verify synthetic storage objects before database cleanup')
     # Only manifest IDs are touched; verify ownership marker before delete.
     for user in f['users']:
         if user.get('cleaned'): continue

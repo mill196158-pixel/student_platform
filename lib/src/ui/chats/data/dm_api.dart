@@ -10,7 +10,6 @@ import 'package:student_platform/src/ui/chats/core/chat_message_cache_store.dart
 import 'package:student_platform/src/ui/chats/core/chat_message_memory_cache.dart';
 import 'package:student_platform/src/ui/chats/core/chat_messages_load_state.dart';
 import 'package:student_platform/src/utils/safe_debug_log.dart';
-import 'blocks_api.dart';
 import 'chat_sync_realtime_gate.dart';
 
 class ChatSyncResult {
@@ -41,6 +40,7 @@ class ChatSyncResult {
 }
 
 class DmApi {
+  static int _sessionGeneration = 0;
   static final SupabaseClient _sb = Supabase.instance.client;
   static final Map<String, List<Message>> _streamMessages = {};
   static final Map<String, StreamController<List<Message>>> _streamControllers =
@@ -158,6 +158,7 @@ class DmApi {
       _clearedAtByChat[chatId] = null;
       return null;
     }
+    final generation = _sessionGeneration;
     try {
       final row = await _sb
           .from('chat_user_settings')
@@ -168,11 +169,17 @@ class DmApi {
       final cleared = row == null
           ? null
           : DateTime.tryParse((row['cleared_at'] ?? '').toString());
+      if (_sb.auth.currentUser?.id != me || _sessionGeneration != generation) {
+        throw StateError('Session changed while reading chat settings');
+      }
       _clearedAtByChat[chatId] = cleared;
       return cleared;
     } catch (_) {
-      _clearedAtByChat[chatId] = null;
-      return null;
+      if (_sb.auth.currentUser?.id != me || _sessionGeneration != generation)
+        rethrow;
+      // A failed fetch is not evidence that history has never been cleared.
+      // Keep the persisted floor and retry the server on the next request.
+      return ChatMessageCacheStore.peek(chatId, userId: me).clearedAt;
     }
   }
 
@@ -533,39 +540,15 @@ class DmApi {
     return (messages: older, hasMore: page.hasMore);
   }
 
-  static Future<void> _publishMessageById({
-    required String chatId,
-    required String messageId,
-    String? clientId,
-  }) async {
-    if (messageId.isEmpty) return;
-
-    final message = await loadMessageById(chatId: chatId, messageId: messageId);
-    if (message == null) return;
-
-    final snap = await ChatMessageCacheStore.reconcileUpsert(
-      chatId,
-      message,
-      clientId: clientId,
-    );
-    _emitView(
-      chatId,
-      ChatMessagesViewState(
-        phase: ChatMessagesLoadPhase.ready,
-        messages: snap.messages,
-        hasSnapshot: true,
-        hasMoreBefore: snap.hasMoreBefore,
-      ),
-    );
-  }
-
   static String _publishOptimisticMessage({
     required String chatId,
     required String userId,
     required String text,
     String? replyToId,
+    String? existingClientId,
+    List<String> fileIds = const [],
   }) {
-    final clientId =
+    final clientId = existingClientId ??
         'local_${DateTime.now().microsecondsSinceEpoch}_${Random().nextInt(999)}';
     final local = Message(
       id: clientId,
@@ -576,6 +559,7 @@ class DmApi {
       text: text,
       at: DateTime.now(),
       replyToId: replyToId,
+      outboundFileIds: List.unmodifiable(fileIds),
       clientId: clientId,
       deliveryStatus: MessageDeliveryStatus.sending,
     );
@@ -885,6 +869,7 @@ class DmApi {
 
   /// Stop realtime, clear in-memory streams/maps, clear clearedAt cache.
   static Future<void> clearSessionState() async {
+    _sessionGeneration++;
     for (final ch in _channels.values) {
       try {
         await ch.unsubscribe();
@@ -922,141 +907,101 @@ class DmApi {
     required String text,
     String? replyToId,
     List<String>? fileIds,
+    String? clientKey,
   }) async {
     final uid = _sb.auth.currentUser?.id;
-    if (uid == null) {
-      throw Exception('Not authenticated');
-    }
-    final hasFiles = (fileIds != null && fileIds.isNotEmpty);
-    // Always show the outgoing bubble immediately (Telegram-style).
+    if (uid == null) throw Exception('Not authenticated');
+    final generation = _sessionGeneration;
+    bool isCurrentSession() =>
+        generation == _sessionGeneration && _sb.auth.currentUser?.id == uid;
+    final ids = List<String>.unmodifiable(fileIds ?? const []);
     final optimisticId = _publishOptimisticMessage(
       chatId: chatId,
       userId: uid,
       text: text,
       replyToId: replyToId,
+      existingClientId: clientKey,
+      fileIds: ids,
     );
-
+    final optimistic = ChatMessageCacheStore.messagesSync(chatId, userId: uid)
+        .firstWhere((m) => m.id == optimisticId);
+    // Persist the original key and payload before the request can commit remotely.
+    await ChatMessageCacheStore.upsert(chatId, optimistic, userId: uid);
+    if (!isCurrentSession()) throw StateError('Session changed before send');
+    late final String mid;
     try {
-      final res = await _sb.rpc('send_message_in_chat_with_files', params: {
+      final result = await _sb.rpc('send_dm_message_once', params: {
         'p_chat_id': chatId,
+        'p_client_key': optimisticId,
         'p_text': text,
         'p_reply_to': replyToId,
-        'p_file_ids': hasFiles ? fileIds : <String>[],
+        'p_file_ids': ids,
       });
-      if (res is Map && res['id'] != null) {
-        final id = res['id'].toString();
-        await _publishMessageById(
-          chatId: chatId,
-          messageId: id,
-          clientId: optimisticId,
-        );
-        return id;
+      if (result is! String || result.isEmpty) {
+        throw StateError('Invalid send acknowledgement');
       }
-      if (res is String && res.isNotEmpty) {
-        await _publishMessageById(
-          chatId: chatId,
-          messageId: res,
-          clientId: optimisticId,
-        );
-        return res;
-      }
-      if (res is List && res.isNotEmpty) {
-        final m = Map<String, dynamic>.from(res.first as Map);
-        if (m['id'] != null) {
-          final id = m['id'].toString();
-          await _publishMessageById(
-            chatId: chatId,
-            messageId: id,
-            clientId: optimisticId,
-          );
-          return id;
-        }
-      }
-    } catch (e) {
-      if (BlocksApi.isDmBlockedError(e)) {
-        _markOptimisticFailed(chatId: chatId, clientId: optimisticId);
-        rethrow;
-      }
-      // fallback below
-    }
-
-    late final dynamic inserted;
-    try {
-      inserted = await _sb
-          .from('messages')
-          .insert({
-            'chat_id': chatId,
-            'author_id': uid,
-            'content': text,
-            'body': text,
-            'msg_type': hasFiles ? 'file' : 'text',
-            'reply_to_id': replyToId,
-            'attachments': <dynamic>[],
-            'reactions': <String, int>{},
-          })
-          .select('id')
-          .single();
+      mid = result;
     } catch (_) {
-      _markOptimisticFailed(chatId: chatId, clientId: optimisticId);
+      if (isCurrentSession())
+        _markOptimisticFailed(chatId: chatId, clientId: optimisticId);
       rethrow;
     }
-
-    final mid = Map<String, dynamic>.from(inserted as Map)['id'].toString();
-    if (kDebugMode) {
-      debugPrint(
-          '[DM] sent message=${maskDebugId(mid)} files=${fileIds?.length ?? 0}');
+    if (!isCurrentSession()) return mid;
+    // The write is acknowledged. Hydration must never trigger another send.
+    Message? hydrated;
+    try {
+      hydrated = debugLoadMessageById != null
+          ? await debugLoadMessageById!(chatId: chatId, messageId: mid)
+          : await loadMessageById(chatId: chatId, messageId: mid);
+    } catch (_) {}
+    if (!isCurrentSession()) return mid;
+    final confirmed = hydrated ??
+        optimistic.copyWith(
+          id: mid,
+          deliveryStatus: MessageDeliveryStatus.sent,
+        );
+    try {
+      await ChatMessageCacheStore.reconcileUpsert(chatId, confirmed,
+          clientId: optimisticId, userId: uid);
+      if (!isCurrentSession()) return mid;
+      _emitView(
+          chatId,
+          ChatMessagesViewState(
+            phase: ChatMessagesLoadPhase.ready,
+            messages: ChatMessageCacheStore.messagesSync(chatId, userId: uid),
+            hasSnapshot: true,
+            hasMoreBefore: ChatMessageCacheStore.peek(chatId).hasMoreBefore,
+          ));
+    } catch (e) {
+      safeDebugLog(
+          '[DM] acknowledged message cache update failed: ${e.runtimeType}');
     }
-
-    if (hasFiles) {
-      await _sb
-          .from('chat_files')
-          .update({'message_id': mid})
-          .inFilter('id', fileIds)
-          .eq('chat_id', chatId);
-    }
-
-    await _publishMessageById(
-      chatId: chatId,
-      messageId: mid,
-      clientId: optimisticId,
-    );
     return mid;
   }
 
-  /// Drop a failed local bubble and resend (optimistic again).
+  /// Retry with the persisted key and payload; the server acknowledges once.
   static Future<String> retryFailedText({
     required String chatId,
     required Message message,
   }) async {
     if (!message.isFailed) return '';
-    final text = message.text.trim();
+    final text = message.text;
     final replyToId = message.replyToId;
-    final fileIds = (message.attachments ?? const <ChatFile>[])
-        .map((f) => f.id)
-        .where((id) => id.isNotEmpty)
-        .toList();
+    final fileIds = message.outboundFileIds.isNotEmpty
+        ? message.outboundFileIds
+        : (message.attachments ?? const <ChatFile>[])
+            .map((f) => f.id)
+            .where((id) => id.isNotEmpty)
+            .toList();
     if (text.isEmpty && fileIds.isEmpty) return '';
 
     final clientKey = message.clientId ?? message.id;
-    await ChatMessageCacheStore.remove(chatId, message.id);
-    if (clientKey.isNotEmpty && clientKey != message.id) {
-      await ChatMessageCacheStore.remove(chatId, clientKey);
-    }
-    final merged = ChatMessageCacheStore.messagesSync(chatId);
-    _emitView(
-      chatId,
-      ChatMessagesViewState(
-        phase: ChatMessagesLoadPhase.ready,
-        messages: merged,
-        hasSnapshot: true,
-        hasMoreBefore: ChatMessageCacheStore.peek(chatId).hasMoreBefore,
-      ),
-    );
     return sendText(
       chatId: chatId,
       text: text,
       replyToId: replyToId,
       fileIds: fileIds.isEmpty ? null : fileIds,
+      clientKey: clientKey,
     );
   }
 

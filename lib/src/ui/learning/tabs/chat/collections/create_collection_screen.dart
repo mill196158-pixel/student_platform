@@ -178,13 +178,18 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
   Future<void> _submit() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     if (!_canSubmit) return;
+    if (_files.isNotEmpty) {
+      const message = 'Вложения к сбору пока не поддерживаются. '
+          'Уберите выбранные файлы; их можно отправить отдельным сообщением в чат.';
+      setState(() => _error = message);
+      return;
+    }
     KeyboardDismissScope.unfocus(context);
     HapticFeedback.lightImpact();
 
     final amount =
         double.tryParse(_amountCtrl.text.trim().replaceAll(',', '.'));
-    // Optional link / attachments are stored locally for a future repository
-    // pass-through; payment instructions stay the source of truth for now.
+    // The link is preserved in instructions. Never silently discard files.
     final link = _linkCtrl.text.trim();
     var instructions = _instructionsCtrl.text.trim();
     if (link.isNotEmpty) {

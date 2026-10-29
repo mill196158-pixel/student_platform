@@ -109,6 +109,7 @@ class Message {
   final Map<String, int>? reactions; // emoji -> count
   final List<String>? userReactions; // emojis current user reacted with
   final ForwardPayloadModel? forward; // payload пересылки
+  final List<String> outboundFileIds;
   final String? clientId; // локальный id optimistic-сообщения
   final MessageDeliveryStatus deliveryStatus;
   final String? cardKind; // topic_selection | collection
@@ -134,6 +135,7 @@ class Message {
     this.reactions,
     this.userReactions,
     this.forward,
+    this.outboundFileIds = const [],
     this.clientId,
     this.deliveryStatus = MessageDeliveryStatus.sent,
     this.cardKind,
@@ -174,6 +176,7 @@ class Message {
     Map<String, int>? reactions,
     List<String>? userReactions,
     ForwardPayloadModel? forward,
+    List<String>? outboundFileIds,
     String? clientId,
     MessageDeliveryStatus? deliveryStatus,
     String? cardKind,
@@ -199,6 +202,7 @@ class Message {
       reactions: reactions ?? this.reactions,
       userReactions: userReactions ?? this.userReactions,
       forward: forward ?? this.forward,
+      outboundFileIds: outboundFileIds ?? this.outboundFileIds,
       clientId: clientId ?? this.clientId,
       deliveryStatus: deliveryStatus ?? this.deliveryStatus,
       cardKind: cardKind ?? this.cardKind,
@@ -224,6 +228,7 @@ class Message {
         'attachments': attachments?.map((e) => e.toJson()).toList(),
         'is_pinned': isPinned,
         'reactions': reactions,
+        'outbound_file_ids': outboundFileIds,
         'client_id': clientId,
         'delivery_status': deliveryStatus.name,
         'card_kind': cardKind,
@@ -316,6 +321,9 @@ class Message {
       reactions: _parseReactions(j['reactions']),
       userReactions: _parseUserReactions(j['user_reactions']),
       forward: fwd,
+      outboundFileIds: (j['outbound_file_ids'] as List? ?? const [])
+          .map((e) => e.toString())
+          .toList(),
       clientId: (j['client_id'] ?? j['clientId'])?.toString(),
       deliveryStatus: _parseDeliveryStatus(j['delivery_status']),
       cardKind: (j['card_kind'] ?? cardKind)?.toString(),

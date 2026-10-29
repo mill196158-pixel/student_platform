@@ -10,6 +10,16 @@ import '../ui/learning/models/chat_file.dart';
 typedef UploadProgressCallback = void Function(int sentBytes, int totalBytes);
 
 class FileService {
+  static const maxUploadBytes = 100 * 1024 * 1024;
+
+  Future<Uint8List> _readUploadBytes(File file) async {
+    final size = await file.length();
+    if (size <= 0 || size > maxUploadBytes) {
+      throw Exception('Выберите непустой файл размером не больше 100 МБ.');
+    }
+    return file.readAsBytes();
+  }
+
   final SupabaseClient _supabase;
   final Dio _dio;
   final bool _ownsDio;
@@ -56,7 +66,7 @@ class FileService {
     try {
       final fileName = _fileNameFromPath(customFileName ?? file.path);
       final contentType = _getContentType(fileName);
-      final bytes = await file.readAsBytes();
+      final bytes = await _readUploadBytes(file);
 
       final upload = await _createPresignedUpload(
         chatId: chatId,
@@ -99,7 +109,7 @@ class FileService {
     try {
       final fileName = _fileNameFromPath(customFileName ?? file.path);
       final contentType = _getContentType(fileName);
-      final bytes = await file.readAsBytes();
+      final bytes = await _readUploadBytes(file);
 
       final upload = await _createPresignedUpload(
         chatId: chatId,

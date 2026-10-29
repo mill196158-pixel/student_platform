@@ -26,17 +26,18 @@ class AttachmentWidget extends StatelessWidget {
     final isAllDocuments = files.every((f) => !f.isImage);
 
     if (isAllImages && files.length <= 4) {
-      return _buildImageGrid(context, theme);
+      return _buildImageGrid(context, theme, files);
     } else if (isAllDocuments) {
-      return _buildDocumentList(context, theme);
+      return _buildDocumentList(context, theme, files);
     } else {
       return _buildMixedContent(context, theme);
     }
   }
 
-  Widget _buildImageGrid(BuildContext context, ThemeData theme) {
-    final crossAxisCount = files.length == 1 ? 1 : 2;
-    final aspectRatio = files.length == 1 ? 16 / 9 : 1.0;
+  Widget _buildImageGrid(
+      BuildContext context, ThemeData theme, List<ChatFile> images) {
+    final crossAxisCount = images.length == 1 ? 1 : 2;
+    final aspectRatio = images.length == 1 ? 16 / 9 : 1.0;
 
     return Container(
       margin: const EdgeInsets.only(top: 8),
@@ -49,9 +50,9 @@ class AttachmentWidget extends StatelessWidget {
           mainAxisSpacing: 4,
           childAspectRatio: aspectRatio,
         ),
-        itemCount: files.length,
+        itemCount: images.length,
         itemBuilder: (context, index) {
-          final file = files[index];
+          final file = images[index];
           return _buildImagePreview(file, theme, index);
         },
       ),
@@ -77,30 +78,18 @@ class AttachmentWidget extends StatelessWidget {
               child: const Icon(Icons.broken_image),
             ),
           ),
-          if (files.length > 4 && index == 3)
-            Container(
-              color: Colors.black.withValues(alpha: 0.6),
-              child: Center(
-                child: Text(
-                  '+${files.length - 4}',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ),
         ],
       ),
     );
   }
 
-  Widget _buildDocumentList(BuildContext context, ThemeData theme) {
+  Widget _buildDocumentList(
+      BuildContext context, ThemeData theme, List<ChatFile> documents) {
     return Container(
       margin: const EdgeInsets.only(top: 8),
       child: Column(
-        children: files.map((file) => _buildDocumentItem(file, theme)).toList(),
+        children:
+            documents.map((file) => _buildDocumentItem(file, theme)).toList(),
       ),
     );
   }
@@ -132,8 +121,9 @@ class AttachmentWidget extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (images.isNotEmpty) _buildImageGrid(context, theme),
-          if (documents.isNotEmpty) _buildDocumentList(context, theme),
+          if (images.isNotEmpty) _buildImageGrid(context, theme, images),
+          if (documents.isNotEmpty)
+            _buildDocumentList(context, theme, documents),
         ],
       ),
     );
