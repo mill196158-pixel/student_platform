@@ -1,3 +1,4 @@
+import '../shared/student_section_headers.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ui' as ui;
@@ -1017,8 +1018,9 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
             children: [
               SizedBox(
                 height: headerHeight,
-                child: _UsefulHeader(
-                  selectedSection: _section,
+                child: StudentInfoHeader(
+                  subtitle: _sectionSubtitle(_section),
+                  sectionIcon: _sectionIcon(_section),
                   onSectionTap: () => _showSectionSheet(context),
                   onInfoTap: () => _showInfoSheet(context),
                 ),
@@ -1436,153 +1438,7 @@ IconData _sectionIcon(_UsefulSection section) {
   }
 }
 
-class _UsefulHeader extends StatelessWidget {
-  final _UsefulSection selectedSection;
-  final VoidCallback onSectionTap;
-  final VoidCallback onInfoTap;
 
-  const _UsefulHeader({
-    required this.selectedSection,
-    required this.onSectionTap,
-    required this.onInfoTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final compact = MediaQuery.sizeOf(context).height < 760;
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Colors.white,
-                theme.colorScheme.primary.withValues(alpha: 0.06),
-                theme.colorScheme.primary.withValues(alpha: 0.12),
-              ],
-              stops: const [0.0, 0.62, 1.0],
-            ),
-          ),
-        ),
-        IgnorePointer(
-          child: Stack(
-            children: [
-              Positioned(
-                left: -40,
-                top: -20,
-                child: _GlowCircle(
-                  diameter: 140,
-                  color: theme.colorScheme.primary.withValues(alpha: 0.10),
-                ),
-              ),
-              Positioned(
-                right: -30,
-                bottom: -30,
-                child: _GlowCircle(
-                  diameter: 160,
-                  color: Colors.white.withValues(alpha: 0.55),
-                ),
-              ),
-            ],
-          ),
-        ),
-        SafeArea(
-          bottom: false,
-          child: SizedBox.expand(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(16, compact ? 4 : 8, 16, 6),
-              child: Align(
-                alignment: Alignment(-1, compact ? 0.08 : 0.18),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Container(
-                      padding: EdgeInsets.all(compact ? 10 : 12),
-                      decoration: BoxDecoration(
-                        color:
-                            theme.colorScheme.primary.withValues(alpha: 0.10),
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.06),
-                            blurRadius: 12,
-                            offset: const Offset(0, 4),
-                          ),
-                          BoxShadow(
-                            color: Colors.white.withValues(alpha: 0.85),
-                            blurRadius: 8,
-                            offset: const Offset(-2, -2),
-                          ),
-                        ],
-                      ),
-                      child: Icon(
-                        Icons.lightbulb_outline_rounded,
-                        color: theme.colorScheme.primary,
-                        size: compact ? 26 : 28,
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'База',
-                            style: theme.textTheme.headlineSmall?.copyWith(
-                              fontSize: compact ? 30 : null,
-                              fontWeight: FontWeight.w800,
-                              color: Colors.black,
-                              height: 1.05,
-                              shadows: [
-                                Shadow(
-                                  color: Colors.black.withValues(alpha: 0.05),
-                                  offset: const Offset(0, 2),
-                                  blurRadius: 3,
-                                ),
-                              ],
-                            ),
-                          ),
-                          SizedBox(height: compact ? 2 : 4),
-                          Text(
-                            _sectionSubtitle(selectedSection),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: (compact
-                                    ? theme.textTheme.bodySmall
-                                    : theme.textTheme.bodyMedium)
-                                ?.copyWith(
-                              color: Colors.black.withValues(alpha: 0.64),
-                              height: 1.12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    _HeaderActionButton(
-                      icon: Icons.info_outline_rounded,
-                      onTap: onInfoTap,
-                    ),
-                    const SizedBox(width: 8),
-                    _HeaderActionButton(
-                      icon: _sectionIcon(selectedSection),
-                      onTap: onSectionTap,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
 
 class _InfoSheetHeader extends StatelessWidget {
   const _InfoSheetHeader();
@@ -1663,40 +1519,7 @@ class _InfoSheetPoint extends StatelessWidget {
   }
 }
 
-class _HeaderActionButton extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
 
-  const _HeaderActionButton({
-    required this.icon,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return InkWell(
-      onTap: onTap,
-      customBorder: const CircleBorder(),
-      child: Container(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surface.withValues(alpha: 0.86),
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.06),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Icon(icon, color: theme.colorScheme.primary),
-      ),
-    );
-  }
-}
 
 class _SectionChoiceTile extends StatelessWidget {
   final IconData icon;
@@ -3331,12 +3154,16 @@ class _HelpGroupSection extends StatelessWidget {
 /// Public subject card used by Info tab (exported for focused widget tests).
 class InfoSubjectCard extends StatelessWidget {
   final UsefulSubject item;
+  final Widget? details;
+  final Widget? trailing;
   final ValueChanged<UsefulSubject>? onOpen;
 
   const InfoSubjectCard({
     super.key,
     required this.item,
     this.onOpen,
+    this.details,
+    this.trailing,
   });
 
   @override
@@ -3398,10 +3225,11 @@ class InfoSubjectCard extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (trailing != null) trailing!,
               ],
             ),
             const SizedBox(height: 12),
-            Wrap(
+            details ?? Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
@@ -3560,32 +3388,7 @@ class _SubjectDifficultyPill extends StatelessWidget {
   }
 }
 
-class _GlowCircle extends StatelessWidget {
-  final double diameter;
-  final Color color;
 
-  const _GlowCircle({
-    required this.diameter,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipOval(
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-        child: Container(
-          width: diameter,
-          height: diameter,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: color,
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 class _EmptyState extends StatelessWidget {
   final String text;

@@ -1,8 +1,13 @@
 import 'dart:convert';
-import 'package:lottie/lottie.dart';
 import 'package:student_ui/student_ui.dart';
 import 'guest_surface.dart';
+import '../shared/student_section_headers.dart';
+import '../info/info_screen.dart' show InfoSubjectCard;
+import '../info/useful_subject.dart';
+import '../learning/learning_screen.dart' show StudentTeamTile;
+import '../learning/models/team.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../navigation/main_tab_scope.dart';
@@ -20,11 +25,13 @@ class GuestWorkspace extends StatefulWidget {
 class _GuestWorkspaceState extends State<GuestWorkspace> {
   static const storageKey = 'guest_workspace_v1';
   final _search = TextEditingController();
+  final _notesKey = GlobalKey();
   List<Map<String, dynamic>> _notes = [], _plans = [];
   Set<String> _favorites = {};
   DateTime _day = DateUtils.dateOnly(DateTime.now());
   bool _ready = false;
   bool _favoritesOnly = false;
+  bool _weekMode = false;
   bool _saving = false;
   static const materials = <String, String>{
     'Производная: правило произведения':
@@ -238,11 +245,19 @@ class _GuestWorkspaceState extends State<GuestWorkspace> {
             (!favoritesOnly || _favorites.contains(e.key)) &&
             (!applySearch ||
                 e.key.toLowerCase().contains(_search.text.toLowerCase()))))
-          _card(entry.key, 'Материал · без сети', Icons.menu_book_outlined,
-              () => _article(entry.key),
-              colors: materials.keys.first == entry.key
-                  ? const [Color(0xFFE4F0FF), Color(0xFFDCEAFF)]
-                  : const [Color(0xFFEDE5FC), Color(0xFFF2ECFC)],
+          InfoSubjectCard(
+              item: UsefulSubject(
+                  id: entry.key,
+                  title: entry.key,
+                  controlForm: '',
+                  description: entry.value,
+                  teacherName: '',
+                  teamName: '',
+                  teamIcon: '',
+                  teamGroupName: ''),
+              onOpen: (_) => _article(entry.key),
+              details: const Text('Материал · без сети',
+                  style: TextStyle(fontSize: 12, color: Color(0xFF676575))),
               trailing: IconButton(
                   tooltip: 'В избранное',
                   icon: Icon(
@@ -266,99 +281,42 @@ class _GuestWorkspaceState extends State<GuestWorkspace> {
               child: Text('Материалы не найдены. Попробуй другой запрос.')),
       ];
 
-  Widget _home() =>
-      Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
-            child: Row(children: [
-              Expanded(
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                    const Text('Привет! 👋',
-                        style: TextStyle(
-                            fontSize: 25, fontWeight: FontWeight.w800)),
-                    const SizedBox(height: 4),
-                    const Text('Без регистрации',
-                        style: TextStyle(color: Color(0xFF747581))),
-                  ])),
-              IconButton.filledTonal(
-                  tooltip: 'Твоё пространство',
-                  onPressed: () => _tab(MainTab.profile),
-                  style: IconButton.styleFrom(backgroundColor: Colors.white),
-                  icon: const Icon(Icons.person_outline, color: guestPurple)),
-            ])),
-        StudentHomeNewsFeed(
+  Widget _home() => StudentHomeView(
+        guest: true,
+        hideHomePromo: true,
+        data: StudentHomeData(
+            profile: const StudentHomeProfile(name: '', groupName: ''),
+            currentDate: DateTime.now(),
+            lessons: const [],
+            scheduleStatus: 'Расписание твоей группы',
+            assignmentsStatus: 'Добавь дела в свой план — они появятся здесь.',
+            assignments: [
+              for (final plan in _plans)
+                StudentHomeAssignment(
+                    id: plan['id'] as String,
+                    title: plan['title'] as String,
+                    subject: 'Мой план',
+                    deadline:
+                        '${DateTime.parse(plan['date'] as String).day}.${DateTime.parse(plan['date'] as String).month}',
+                    dueAt: DateTime.parse(plan['date'] as String))
+            ],
             news: const [
               StudentHomeNews(
                   id: 'guest-welcome',
-                  title: 'Твоя учёба',
-                  subtitle: 'Начни здесь',
+                  title: 'Новое приложение',
+                  subtitle: 'Добро пожаловать',
                   body: '',
                   icon: Icons.auto_stories_rounded,
                   gradientColors: [Color(0xFFE6DCFF), Color(0xFFC8E8E4)])
-            ],
-            onNewsTap: (_) => _info('Добро пожаловать',
-                'Открывай материалы в Базе, сохраняй избранное и веди заметки на устройстве. Команды, задания и чаты предметов появятся после входа.')),
-        Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-            child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  GuestPanel(
-                      colors: guestBlend,
-                      child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Row(children: [
-                              Icon(Icons.auto_awesome, color: guestPurple),
-                              SizedBox(width: 12),
-                              Text('Сводка дня',
-                                  style: TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      color: Color(0xFF676575)))
-                            ]),
-                            const SizedBox(height: 14),
-                            const Text('Учись в своём ритме',
-                                style: TextStyle(
-                                    fontSize: 22, fontWeight: FontWeight.w800)),
-                            const SizedBox(height: 4),
-                            const Text(
-                                'Материалы, заметки и твой план — под рукой.',
-                                style: TextStyle(fontSize: 13)),
-                            const SizedBox(height: 12),
-                            _card(
-                                'Мой план',
-                                'Запланируй подготовку на сегодня',
-                                Icons.calendar_today_outlined,
-                                () => _tab(MainTab.schedule)),
-                          ])),
-                  const SizedBox(height: 14),
-                  _heading('Полезное для учёбы',
-                      subtitle: 'Открытые материалы'),
-                  GuestPanel(
-                      colors: const [Color(0xFFFFF3DC), Color(0xFFE4F5EF)],
-                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 2),
-                      child: Column(children: [
-                        _card(
-                            'Конспекты и примеры',
-                            'Формулы и разборы задач',
-                            Icons.description_outlined,
-                            () => _tab(MainTab.info)),
-                        _card(
-                            'Как подготовить конспект',
-                            'Короткая памятка',
-                            Icons.school_outlined,
-                            () => _article('Как подготовить конспект')),
-                      ])),
-                  const SizedBox(height: 14),
-                  _card('Мои заметки', 'Сохраняй важное на этом устройстве',
-                      Icons.edit_note, () => _tab(MainTab.profile),
-                      colors: guestBlend),
-                  _loginStrip('Учись вместе с группой',
-                      'Команды и чаты предметов после входа'),
-                ])),
-      ]);
+            ]),
+        onNotificationsTap: _login,
+        onNewsTap: (_) => _info('Добро пожаловать',
+            'Материалы, заметки и личный план доступны без входа. Команды и чаты предметов — после авторизации.'),
+        onSummaryTap: () => _tab(MainTab.schedule),
+        onAssignmentsOpen: () => _tab(MainTab.schedule),
+        onAssignmentTap: (item) => _edit(
+            plan: true, entry: _plans.firstWhere((p) => p['id'] == item.id)),
+      );
 
   Widget _base() => Padding(
       padding: const EdgeInsets.all(16),
@@ -411,61 +369,60 @@ class _GuestWorkspaceState extends State<GuestWorkspace> {
       ]));
 
   Widget _learning() => Padding(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        GuestPanel(
-            colors: guestBlend,
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Icon(Icons.forum_outlined, color: guestPurple, size: 36),
-              const SizedBox(height: 16),
-              const Text('Твоя группа — рядом',
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
-              const SizedBox(height: 8),
-              const Text('Войди, чтобы открыть свои команды и чаты предметов.',
-                  style: TextStyle(height: 1.5)),
-              const SizedBox(height: 16),
-              SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                      onPressed: _login,
-                      icon: const Icon(Icons.login),
-                      label: const Text('Войти в команды'))),
-            ])),
-        const SizedBox(height: 18),
-        _heading('После входа'),
-        _card('Команды', 'Учебные группы и совместная работа',
-            Icons.groups_outlined, _login),
-        _card('Чаты предметов', 'Обсуждения и вложения в одном месте',
-            Icons.chat_bubble_outline, _login),
-        _card('Задания', 'Сроки, темы и задачи твоих команд',
-            Icons.assignment_outlined, _login),
-        const SizedBox(height: 8),
+        for (final item in const [
+          ('Войти в команды', 'Твои учебные группы после входа', 'КМ'),
+          ('Чаты предметов', 'Обсуждения и вложения после входа', 'ЧП'),
+          ('Задания', 'Задачи и сроки твоих команд после входа', 'ЗД'),
+        ]) ...[
+          StudentTeamTile(
+              Team(
+                  id: 'guest-gate',
+                  name: item.$1,
+                  teacher: item.$2,
+                  groupCode: '',
+                  icon: item.$3),
+              onTap: _login),
+          const SizedBox(height: 12),
+        ],
         TextButton(
             onPressed: () => _tab(MainTab.info),
             child: const Text('Материалы без входа — в Базе')),
       ]));
 
-  Widget _schedule() {
+  Widget _calendar() {
     final monday = _day.subtract(Duration(days: _day.weekday - 1));
-    final plans =
-        _plans.where((p) => p['date'] == _day.toIso8601String()).toList();
+    return MiniCalendar(
+        weekDays: List.generate(7, (i) => monday.add(Duration(days: i))),
+        selectedDay: _day,
+        weekMode: _weekMode,
+        weekLabel:
+            "${monday.day}.${monday.month}–${monday.add(const Duration(days: 6)).day}.${monday.add(const Duration(days: 6)).month}",
+        weekYearLabel: "${_day.year}",
+        eventColors: (d) => _plans.any((p) => p['date'] == d.toIso8601String())
+            ? [guestPurple]
+            : [],
+        onPrevWeek: () =>
+            setState(() => _day = _day.subtract(const Duration(days: 7))),
+        onNextWeek: () =>
+            setState(() => _day = _day.add(const Duration(days: 7))),
+        onSelect: (d) => setState(() => _day = d));
+  }
+
+  Widget _schedule() {
+    final plans = _plans.where((p) {
+      final date = DateTime.parse(p['date'] as String);
+      final monday = _day.subtract(Duration(days: _day.weekday - 1));
+      return _weekMode
+          ? !date.isBefore(monday) &&
+              date.isBefore(monday.add(const Duration(days: 7)))
+          : p['date'] == _day.toIso8601String();
+    }).toList();
     return Padding(
         padding: const EdgeInsets.all(16),
         child:
             Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          MiniCalendar(
-              weekDays: List.generate(7, (i) => monday.add(Duration(days: i))),
-              selectedDay: _day,
-              eventColors: (d) =>
-                  _plans.any((p) => p['date'] == d.toIso8601String())
-                      ? [guestPurple]
-                      : [],
-              onPrevWeek: () =>
-                  setState(() => _day = _day.subtract(const Duration(days: 7))),
-              onNextWeek: () =>
-                  setState(() => _day = _day.add(const Duration(days: 7))),
-              onSelect: (d) => setState(() => _day = d)),
           const SizedBox(height: 16),
           Row(children: [
             Expanded(
@@ -486,16 +443,10 @@ class _GuestWorkspaceState extends State<GuestWorkspace> {
                     icon: const Icon(Icons.delete_outline),
                     onPressed: () => _change(() => _plans.remove(plan)))),
           if (plans.isEmpty) ...[
-            Lottie.asset('assets/lottie/cat_sleeping.json',
-                height: 150, animate: false),
-            const Center(
-                child: Text('На этот день планов нет.',
-                    style: TextStyle(fontWeight: FontWeight.w700))),
-            const SizedBox(height: 6),
-            const Center(
-                child: Text('Можно отдохнуть или наметить подготовку.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 13, color: Color(0xFF747581)))),
+            SizedBox(
+                height: 240,
+                child: StudentScheduleEmptyState(
+                    message: _weekMode ? 'На этой неделе планов нет.' : 'На этот день планов нет.', animate: false)),
             const SizedBox(height: 28),
           ],
           _loginStrip('Расписание группы',
@@ -503,114 +454,164 @@ class _GuestWorkspaceState extends State<GuestWorkspace> {
         ]));
   }
 
-  Widget _profile() => Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Align(
-            alignment: Alignment.centerLeft,
-            child: IconButton(
+  Widget _profile() => Scaffold(
+        backgroundColor: const Color(0xFFFAF8FC),
+        extendBodyBehindAppBar: true,
+        appBar: AppBar(
+            systemOverlayStyle: const SystemUiOverlayStyle(
+              statusBarColor: Colors.transparent,
+              statusBarBrightness: Brightness.light,
+              statusBarIconBrightness: Brightness.dark,
+            ),
+            backgroundColor: Colors.transparent,
+            surfaceTintColor: Colors.transparent,
+            elevation: 0,
+            scrolledUnderElevation: 0,
+            leading: IconButton(
                 tooltip: 'О гостевом режиме',
                 icon: const Icon(Icons.tune),
                 onPressed: () => _info('На этом устройстве',
-                    'Избранное, заметки и план сохраняются только здесь. После удаления приложения они могут быть потеряны. С аккаунтом автоматически не объединяются.'))),
-        const Center(
-            child: CircleAvatar(
-                radius: 42,
-                backgroundColor: Color(0xFFE2D9F7),
-                child: Icon(Icons.person, size: 54, color: guestPurple))),
-        const SizedBox(height: 12),
-        const Text('Гостевой режим',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 23, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 4),
-        const Text('Без аккаунта',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Color(0xFF747581))),
-        const SizedBox(height: 16),
-        FilledButton(onPressed: _login, child: const Text('Войти')),
-        const SizedBox(height: 6),
-        OutlinedButton(
-            onPressed: _login, child: const Text('Вход и регистрация')),
-        const SizedBox(height: 16),
-        GuestPanel(
-            colors: const [Color(0xFFFFF3DC), Color(0xFFE0F3EF)],
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Твоё пространство',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-              const SizedBox(height: 6),
-              const Text('Сохраняй полезное и готовься к занятиям.'),
-              TextButton(
-                  onPressed: () => _tab(MainTab.info),
-                  child: const Text('Открыть материалы')),
-            ])),
-        const SizedBox(height: 14),
-        _heading('На этом устройстве',
-            subtitle: 'Без синхронизации с аккаунтом'),
-        _card('Мой план', 'Дела и подготовка к занятиям',
-            Icons.calendar_month_outlined, () => _tab(MainTab.schedule),
-            colors: guestBlend),
-        _card('Добавить заметку', 'Запиши идею или разбор задачи',
-            Icons.edit_note, () => _edit(),
-            colors: guestBlend),
-        for (final note in _notes)
-          _card(note['title'] as String, note['body'] as String, Icons.notes,
-              () => _edit(entry: note),
-              trailing: IconButton(
-                  tooltip: 'Удалить заметку',
-                  icon: const Icon(Icons.delete_outline),
-                  onPressed: () => _change(() => _notes.remove(note)))),
-        _heading('Избранное'),
-        ..._catalog(favoritesOnly: true, applySearch: false),
-      ]));
+                    'Избранное, заметки и план сохраняются только на этом устройстве. С аккаунтом автоматически не объединяются.')),
+            actions: [
+              IconButton(
+                  tooltip: 'Обновить',
+                  icon: const Icon(Icons.refresh),
+                  onPressed: _load),
+              IconButton(
+                  tooltip: 'Войти',
+                  icon: const Icon(Icons.logout),
+                  onPressed: _login)
+            ]),
+        body: StudentProfileScreenPreview(
+            guest: true,
+            displayName: 'Гостевой режим',
+            groupLabel: '',
+            statusLabel: 'Без регистрации',
+            padding: EdgeInsets.fromLTRB(
+                16,
+                MediaQuery.paddingOf(context).top + kToolbarHeight - 16,
+                16,
+                24),
+            onMessagesTap: _login,
+            onFriendsTap: _login,
+            onReviewsTap: _login,
+            onMapTap: _login,
+            onDiaryTap: () {
+              final c = _notesKey.currentContext;
+              if (c != null)
+                Scrollable.ensureVisible(c,
+                    duration: const Duration(milliseconds: 200));
+            },
+            footer: Column(
+                key: _notesKey,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _heading('На этом устройстве',
+                      subtitle: 'Без синхронизации с аккаунтом'),
+                  _card('Добавить заметку', 'Запиши идею или разбор задачи',
+                      Icons.edit_note, () => _edit(),
+                      colors: guestBlend),
+                  for (final note in _notes)
+                    _card(note['title'] as String, note['body'] as String,
+                        Icons.notes, () => _edit(entry: note),
+                        trailing: IconButton(
+                            tooltip: 'Удалить заметку',
+                            icon: const Icon(Icons.delete_outline),
+                            onPressed: () =>
+                                _change(() => _notes.remove(note)))),
+                  _heading('Избранное'),
+                  ..._catalog(favoritesOnly: true, applySearch: false),
+                  TextButton(onPressed: _login, child: const Text('Войти')),
+                ])),
+      );
 
   @override
   Widget build(BuildContext context) {
-    final headers = <(String, String, IconData)>[
-      ('', '', Icons.home),
-      ('База', 'Открытые материалы', Icons.lightbulb_outline_rounded),
-      ('Команды', 'Чаты и задания', Icons.groups_outlined),
-      ('Расписание', 'Личный план', Icons.calendar_month_outlined),
+    final height =
+        (MediaQuery.paddingOf(context).top + 86.0).clamp(128.0, 150.0);
+    const months = [
+      'Январь',
+      'Февраль',
+      'Март',
+      'Апрель',
+      'Май',
+      'Июнь',
+      'Июль',
+      'Август',
+      'Сентябрь',
+      'Октябрь',
+      'Ноябрь',
+      'Декабрь'
     ];
-    final theme = Theme.of(context);
-    return Theme(
-        data: theme.copyWith(
-          brightness: Brightness.light,
-          colorScheme: ColorScheme.fromSeed(seedColor: guestPurple),
-          textTheme: theme.textTheme
-              .apply(bodyColor: guestInk, displayColor: guestInk),
-        ),
-        child: AbsorbPointer(
-            absorbing: _saving,
-            child: ColoredBox(
-                color: const Color(0xFFFAF8FC),
-                child: SafeArea(
-                    child: ListView(
-                        key: ValueKey(widget.tab),
-                        padding: EdgeInsets.zero,
-                        children: [
-                      if (widget.tab > 0 && widget.tab < 4)
-                        GuestSectionHeader(
-                            title: headers[widget.tab].$1,
-                            subtitle: headers[widget.tab].$2,
-                            icon: headers[widget.tab].$3,
-                            onInfo: () => _info(
-                                headers[widget.tab].$1,
-                                widget.tab == 1
-                                    ? 'Стартовые материалы доступны без регистрации и интернета. Сохраняй нужное в избранное.'
-                                    : widget.tab == 2
-                                        ? 'Команды, чаты и задания относятся к твоему аккаунту и доступны после входа.'
-                                        : 'Здесь можно вести личный план на устройстве. Расписание учебной группы доступно после входа.')),
-                      if (!_ready)
-                        const LinearProgressIndicator()
-                      else
-                        switch (widget.tab) {
-                          0 => _home(),
-                          1 => _base(),
-                          2 => _learning(),
-                          3 => _schedule(),
-                          _ => _profile()
-                        },
-                    ])))));
+    final Widget body;
+    if (!_ready) {
+      body = const Center(child: CircularProgressIndicator());
+    } else if (widget.tab == 0) {
+      body = _home();
+    } else if (widget.tab == 4) {
+      body = _profile();
+    } else {
+      final header = switch (widget.tab) {
+        1 => StudentInfoHeader(
+            subtitle: 'Открытые материалы',
+            onInfoTap: () => _info('База',
+                'Стартовые материалы доступны без сети. Сохраняй нужное в избранное.'),
+            onSectionTap: _login),
+        2 => StudentLearningHeader(
+              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+            IconButton(
+                tooltip: 'О командах',
+                icon: const Icon(Icons.info_outline, color: Colors.black87),
+                onPressed: () => _info('Команды',
+                    'Войди, чтобы открыть команды, чаты и задания своей группы.')),
+            IconButton(
+                tooltip: 'Команды после входа',
+                icon:
+                    const Icon(Icons.grid_view_rounded, color: Colors.black87),
+                onPressed: _login),
+          ])),
+        _ => StudentScheduleHeader(
+            title: 'Расписание',
+            subtitle: '${months[_day.month - 1]} ${_day.year}',
+            day: _day,
+            eventColors: (d) => _plans.any(
+                    (p) => p['date'] == DateUtils.dateOnly(d).toIso8601String())
+                ? [guestPurple]
+                : [],
+            onDatePicked: (d) => setState(() => _day = DateUtils.dateOnly(d)),
+            menuBuilder: (_) => StudentScheduleMenu(
+                weekMode: _weekMode,
+                onSelected: (v) => setState(() {
+                      if (v == 'today')
+                        _day = DateUtils.dateOnly(DateTime.now());
+                      if (v == 'view_week') _weekMode = true;
+                      if (v == 'view_day') _weekMode = false;
+                    }))),
+      };
+      body = Scaffold(
+          backgroundColor: widget.tab == 1 ? const Color(0xFFF7F7FB) : null,
+          body:
+              Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            SizedBox(height: height, child: header),
+            if (widget.tab == 3) ...[
+              const SizedBox(height: 12),
+              _calendar(),
+              CalendarLegend(items: {guestPurple: 'Мой план'}),
+              const Divider(height: 1),
+            ],
+            Expanded(
+                child: ListView(
+                    key: ValueKey(widget.tab),
+                    padding: EdgeInsets.zero,
+                    children: [
+                  switch (widget.tab) {
+                    1 => _base(),
+                    2 => _learning(),
+                    _ => _schedule()
+                  }
+                ])),
+          ]));
+    }
+    return AbsorbPointer(absorbing: _saving, child: body);
   }
 }

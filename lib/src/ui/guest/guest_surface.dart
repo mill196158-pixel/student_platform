@@ -27,59 +27,6 @@ class GuestPanel extends StatelessWidget {
       );
 }
 
-class GuestSectionHeader extends StatelessWidget {
-  const GuestSectionHeader(
-      {super.key,
-      required this.title,
-      required this.subtitle,
-      required this.icon,
-      required this.onInfo});
-  final String title, subtitle;
-  final IconData icon;
-  final VoidCallback onInfo;
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.fromLTRB(20, 28, 16, 24),
-        decoration: const BoxDecoration(
-            gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFFAF8FC), Color(0xFFE8E1F5), Color(0xFFF4F0FA)],
-        )),
-        child: Row(children: [
-          Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: guestPurple.withValues(alpha: .10),
-                  boxShadow: const [
-                    BoxShadow(color: Colors.white, blurRadius: 12)
-                  ]),
-              child: Icon(icon, color: guestPurple, size: 28)),
-          const SizedBox(width: 14),
-          Expanded(
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                Text(title,
-                    style: const TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.w800,
-                        height: 1.1)),
-                const SizedBox(height: 5),
-                Text(subtitle,
-                    style:
-                        const TextStyle(fontSize: 13, color: Color(0xFF676575)))
-              ])),
-          IconButton.filledTonal(
-              tooltip: 'О разделе',
-              onPressed: onInfo,
-              style: IconButton.styleFrom(backgroundColor: Colors.white),
-              icon: const Icon(Icons.info_outline_rounded, color: guestPurple)),
-        ]),
-      );
-}
-
 class GuestActionTile extends StatelessWidget {
   const GuestActionTile(
       {super.key,

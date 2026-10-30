@@ -47,6 +47,7 @@ class StudentHomeView extends StatelessWidget {
   const StudentHomeView({
     required this.data,
     this.notificationCount = 0,
+    this.guest = false,
     this.onRefresh,
     this.onNotificationsTap,
     this.onNewsTap,
@@ -70,6 +71,7 @@ class StudentHomeView extends StatelessWidget {
     super.key,
   });
 
+  final bool guest;
   final StudentHomeData data;
   final int notificationCount;
   final Future<void> Function()? onRefresh;
@@ -152,6 +154,7 @@ class StudentHomeView extends StatelessWidget {
         SliverToBoxAdapter(
           child: _HomeHeader(
             profile: data.profile,
+            guest: guest,
             currentDate: data.currentDate,
             notificationCount: notificationCount,
             onNotificationsTap: onNotificationsTap,
@@ -178,7 +181,8 @@ class StudentHomeView extends StatelessWidget {
         SliverToBoxAdapter(
           child: _AnimatedEntry(
             delay: const Duration(milliseconds: 70),
-            child: _TodaySummaryCard(data: data, onTap: onSummaryTap),
+            child: _TodaySummaryCard(
+                data: data, onTap: onSummaryTap, guest: guest),
           ),
         ),
         _sectionSpacer,
@@ -235,11 +239,13 @@ class StudentHomeView extends StatelessWidget {
 class _HomeHeader extends StatelessWidget {
   const _HomeHeader({
     required this.profile,
+    this.guest = false,
     required this.currentDate,
     required this.notificationCount,
     required this.onNotificationsTap,
   });
 
+  final bool guest;
   final StudentHomeProfile profile;
   final DateTime currentDate;
   final int notificationCount;
@@ -262,7 +268,7 @@ class _HomeHeader extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Привет, ${profile.displayName} 👋',
+                  guest ? 'Привет! 👋' : 'Привет, ${profile.displayName} 👋',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.headlineSmall?.copyWith(
@@ -273,7 +279,7 @@ class _HomeHeader extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  subtitle,
+                  guest ? 'Без регистрации' : subtitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodyMedium?.copyWith(
@@ -394,7 +400,9 @@ class _NotificationBadge extends StatelessWidget {
 }
 
 class _TodaySummaryCard extends StatelessWidget {
-  const _TodaySummaryCard({required this.data, required this.onTap});
+  const _TodaySummaryCard(
+      {required this.data, required this.onTap, this.guest = false});
+  final bool guest;
 
   final StudentHomeData data;
   final VoidCallback? onTap;
@@ -410,17 +418,21 @@ class _TodaySummaryCard extends StatelessWidget {
             : data.lessonsFinishedForToday
                 ? 'Пары закончились'
                 : 'Сегодня выходной');
-    final subtitle = data.scheduleStatus != null
-        ? 'Расписание на выбранный день'
-        : count > 0
-            ? 'Кратко по расписанию на день'
-            : data.lessonsFinishedForToday
-                ? 'На сегодня больше ничего нет'
-                : 'Пар нет, можно закрыть задания или отдохнуть';
-    final emptyText = data.scheduleStatus ??
-        (data.lessonsFinishedForToday
-            ? 'Пары на сегодня закончились'
-            : 'Сегодня пар нет');
+    final subtitle = guest
+        ? 'Войди, чтобы видеть расписание своей группы'
+        : data.scheduleStatus != null
+            ? 'Расписание на выбранный день'
+            : count > 0
+                ? 'Кратко по расписанию на день'
+                : data.lessonsFinishedForToday
+                    ? 'На сегодня больше ничего нет'
+                    : 'Пар нет, можно закрыть задания или отдохнуть';
+    final emptyText = guest
+        ? 'Открыть расписание'
+        : data.scheduleStatus ??
+            (data.lessonsFinishedForToday
+                ? 'Пары на сегодня закончились'
+                : 'Сегодня пар нет');
     final foreground = isDark ? Colors.white : const Color(0xFF1F2937);
     final mutedForeground = foreground.withValues(alpha: isDark ? 0.78 : 0.68);
     final accent = isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C63D8);

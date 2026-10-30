@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'package:student_ui/student_ui.dart';
+import 'package:student_platform/src/ui/shared/student_section_headers.dart';
 import 'dart:async';
 import 'package:student_platform/src/ui/guest/guest_workspace.dart';
 import 'package:flutter/material.dart';
@@ -29,11 +31,17 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     for (final tab in [0, 1, 2, 3, 4]) {
       await tester.pumpWidget(
-          MaterialApp(theme: ThemeData.dark(), home: Scaffold(body: GuestWorkspace(tab: tab))));
+          MaterialApp(home: Scaffold(body: GuestWorkspace(tab: tab))));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull, reason: 'tab $tab at 320px');
-      expect(Theme.of(tester.element(find.byType(ListView).first)).brightness,
-          Brightness.light);
+      final shared = [
+        StudentHomeView,
+        StudentInfoHeader,
+        StudentLearningHeader,
+        StudentScheduleHeader,
+        StudentProfileScreenPreview
+      ][tab];
+      expect(find.byType(shared), findsOneWidget);
     }
     await tester.pumpWidget(
         const MaterialApp(home: Scaffold(body: GuestWorkspace(tab: 1))));
@@ -41,9 +49,11 @@ void main() {
     await tester.tap(find.byTooltip('В избранное').first);
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.byTooltip('В избранное').at(1));
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('В избранное').at(1));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Избранное'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Избранное'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.byType(TextField));

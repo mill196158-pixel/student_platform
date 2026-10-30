@@ -1,8 +1,9 @@
+import '../shared/student_section_headers.dart';
 // =============================
 // FILE: lib/src/ui/learning/learning_screen.dart
 // =============================
 
-import 'dart:ui' as ui; // для мягких свечений
+ // для мягких свечений
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -119,7 +120,7 @@ class _BodyState extends State<_Body> {
             children: [
               SizedBox(
                 height: headerHeight,
-                child: _LandingHeader(
+                child: StudentLearningHeader(
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -204,7 +205,7 @@ class _BodyState extends State<_Body> {
                           );
                         }
                         final idx = groupChat != null ? i - 1 : i;
-                        return _TeamTile(items[idx]);
+                        return StudentTeamTile(items[idx]);
                       },
                     );
                   },
@@ -404,15 +405,16 @@ class _GroupChatGridCard extends StatelessWidget {
   }
 }
 
-class _TeamTile extends StatelessWidget {
+class StudentTeamTile extends StatelessWidget {
   final Team team;
-  const _TeamTile(this.team);
+  const StudentTeamTile(this.team, {this.onTap});
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return InkWell(
-      onTap: () => Navigator.of(context).push(
+      onTap: onTap ?? () => Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => TeamDetailsScreen(team: team)),
       ),
       borderRadius: BorderRadius.circular(18),
@@ -618,163 +620,9 @@ class _UnreadBadge extends StatelessWidget {
   }
 }
 
-class _LandingHeader extends StatelessWidget {
-  final Widget? trailing;
-  const _LandingHeader({this.trailing});
 
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final compact = MediaQuery.sizeOf(context).height < 760;
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Colors.white,
-                theme.colorScheme.primary.withOpacity(0.06),
-                theme.colorScheme.primary.withOpacity(0.12),
-              ],
-              stops: const [0.0, 0.62, 1.0],
-            ),
-          ),
-        ),
-        IgnorePointer(
-          child: Stack(
-            children: [
-              Positioned(
-                left: -40,
-                top: -20,
-                child: _GlowCircle(
-                  diameter: 140,
-                  color: theme.colorScheme.primary.withOpacity(0.10),
-                ),
-              ),
-              Positioned(
-                right: -30,
-                bottom: -30,
-                child: _GlowCircle(
-                  diameter: 160,
-                  color: Colors.white.withOpacity(0.55),
-                ),
-              ),
-            ],
-          ),
-        ),
-        SafeArea(
-          bottom: false,
-          child: SizedBox.expand(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(16, compact ? 4 : 8, 16, 6),
-              child: Align(
-                alignment: Alignment(-1, compact ? 0.08 : 0.18),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Container(
-                      padding: EdgeInsets.all(compact ? 10 : 12),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.primary.withOpacity(0.10),
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.06),
-                            blurRadius: 12,
-                            offset: const Offset(0, 4),
-                          ),
-                          BoxShadow(
-                            color: Colors.white.withOpacity(0.85),
-                            blurRadius: 8,
-                            offset: const Offset(-2, -2),
-                          ),
-                        ],
-                      ),
-                      child: Icon(
-                        Icons.groups_rounded,
-                        color: theme.colorScheme.primary,
-                        size: compact ? 26 : 28,
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            'Команды',
-                            style: theme.textTheme.headlineSmall?.copyWith(
-                              fontSize: compact ? 30 : null,
-                              fontWeight: FontWeight.w800,
-                              color: Colors.black,
-                              height: 1.05,
-                              shadows: [
-                                Shadow(
-                                  color: Colors.black.withOpacity(0.05),
-                                  offset: const Offset(0, 2),
-                                  blurRadius: 3,
-                                ),
-                              ],
-                            ),
-                          ),
-                          SizedBox(height: compact ? 2 : 4),
-                          Text(
-                            'Чат и задания',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: (compact
-                                    ? theme.textTheme.bodySmall
-                                    : theme.textTheme.bodyMedium)
-                                ?.copyWith(
-                              color: Colors.black.withOpacity(0.64),
-                              height: 1.12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (trailing != null) ...[
-                      const SizedBox(width: 8),
-                      trailing!,
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
 
-class _GlowCircle extends StatelessWidget {
-  final double diameter;
-  final Color color;
-  const _GlowCircle({required this.diameter, required this.color});
 
-  @override
-  Widget build(BuildContext context) {
-    return ClipOval(
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-        child: Container(
-          width: diameter,
-          height: diameter,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: color,
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 class _AcademicContextInfoButton extends StatelessWidget {
   final AcademicContext? contextData;

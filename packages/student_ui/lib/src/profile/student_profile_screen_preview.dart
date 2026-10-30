@@ -14,6 +14,8 @@ class StudentProfileScreenPreview extends StatelessWidget {
     required this.groupLabel,
     this.universityLabel,
     this.statusLabel,
+    this.guest = false,
+    this.footer,
     this.avatarBytes,
     this.avatarUrl,
     this.avatarImage,
@@ -37,6 +39,8 @@ class StudentProfileScreenPreview extends StatelessWidget {
     this.padding = const EdgeInsets.fromLTRB(16, 20, 16, 24),
   });
 
+  final bool guest;
+  final Widget? footer;
   final String displayName;
   final String groupLabel;
   final String? universityLabel;
@@ -93,6 +97,7 @@ class StudentProfileScreenPreview extends StatelessWidget {
           children: [
             _SoftHeader(
               displayName: displayName,
+              guest: guest,
               groupLabel: groupLabel,
               universityLabel: universityLabel,
               statusLabel: statusLabel,
@@ -143,8 +148,9 @@ class StudentProfileScreenPreview extends StatelessWidget {
               const SizedBox(height: sectionGap),
               _StudyBanner(
                 title: 'Мой дневник',
-                subtitle:
-                    'Записи, конспекты и файлы по предметам текущего семестра',
+                subtitle: guest
+                    ? 'Заметки и конспекты на этом устройстве'
+                    : 'Записи, конспекты и файлы по предметам текущего семестра',
                 icon: Icons.menu_book_outlined,
                 iconColor: _accent,
                 colors: const [Color(0xFFDCD0FA), Color(0xFFC5EFE5)],
@@ -166,6 +172,10 @@ class StudentProfileScreenPreview extends StatelessWidget {
               icon: const Icon(Icons.rate_review_outlined),
               label: const Text('Мои отзывы'),
             ),
+            if (footer != null) ...[
+              const SizedBox(height: sectionGap),
+              footer!
+            ],
           ],
         ),
       ),
@@ -267,6 +277,7 @@ class _ProfileFeedDetailView extends StatelessWidget {
 
 class _SoftHeader extends StatelessWidget {
   const _SoftHeader({
+    this.guest = false,
     required this.displayName,
     required this.groupLabel,
     this.universityLabel,
@@ -276,6 +287,7 @@ class _SoftHeader extends StatelessWidget {
     this.avatarImage,
   });
 
+  final bool guest;
   final String displayName;
   final String groupLabel;
   final String? universityLabel;
@@ -325,7 +337,11 @@ class _SoftHeader extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          subtitle.isEmpty ? 'Данные профиля не заполнены' : subtitle,
+          guest
+              ? 'Без аккаунта'
+              : subtitle.isEmpty
+                  ? 'Данные профиля не заполнены'
+                  : subtitle,
           style: text.bodyMedium?.copyWith(
             color: StudentProfileScreenPreview._title,
           ),
@@ -498,7 +514,11 @@ class _StudyBanner extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(16),
         child: Ink(
-          height: compact ? 64 : null,
+          height: compact &&
+                  MediaQuery.sizeOf(context).width >= 360 &&
+                  MediaQuery.textScalerOf(context).scale(16) <= 16
+              ? 64
+              : null,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
             gradient: LinearGradient(
