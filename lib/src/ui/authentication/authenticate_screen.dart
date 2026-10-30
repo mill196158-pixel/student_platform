@@ -5,14 +5,15 @@ import 'screens/register_screen.dart';
 /// Обёртка, которая ТОЛЬКО переключает экраны логина/регистрации.
 /// Никаких запросов к БД здесь нет — весь красивый UI в LoginScreen как у тебя.
 class AuthenticateScreen extends StatefulWidget {
-  const AuthenticateScreen({super.key});
+  const AuthenticateScreen({super.key, this.initialRegister = false});
+  final bool initialRegister;
 
   @override
   State<AuthenticateScreen> createState() => _AuthenticateScreenState();
 }
 
 class _AuthenticateScreenState extends State<AuthenticateScreen> {
-  bool _showLogin = true;
+  late bool _showLogin = !widget.initialRegister;
 
   void _toggle() {
     setState(() => _showLogin = !_showLogin);
@@ -24,7 +25,8 @@ class _AuthenticateScreenState extends State<AuthenticateScreen> {
       duration: const Duration(milliseconds: 200),
       child: _showLogin
           ? LoginScreen(key: const ValueKey('login'), toggleView: _toggle)
-          : RegisterScreen(key: const ValueKey('register'), toggleView: _toggle),
+          : RegisterScreen(
+              key: const ValueKey('register'), toggleView: _toggle),
     );
   }
 }

@@ -62,7 +62,10 @@ final GoRouter appRouter = GoRouter(
     ),
     GoRoute(
       path: '/login',
-      builder: (_, __) => AuthenticateScreen(),
+      builder: (_, state) => AuthenticateScreen(
+        key: ValueKey(state.uri.queryParameters['mode']),
+        initialRegister: state.uri.queryParameters['mode'] == 'register',
+      ),
     ),
     GoRoute(
       path: '/guest',

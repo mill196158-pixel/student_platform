@@ -201,6 +201,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Войти').first);
     await tester.pumpAndSettle();
+    expect(find.text('Больше возможностей'), findsOneWidget);
+    await tester.ensureVisible(find.text('Войти').last);
+    await tester.tap(find.text('Войти').last);
+    await tester.pumpAndSettle();
     expect(find.text('Login target'), findsOneWidget);
     expect(network.calls, 0);
   });

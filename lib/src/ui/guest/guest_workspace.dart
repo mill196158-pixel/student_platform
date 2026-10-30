@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:student_ui/student_ui.dart';
 import 'guest_surface.dart';
+import 'guest_account_screen.dart';
 import '../shared/student_section_headers.dart';
 import '../info/info_screen.dart' show InfoSubjectCard;
 import '../info/useful_subject.dart';
@@ -8,7 +9,7 @@ import '../learning/learning_screen.dart' show StudentTeamTile;
 import '../learning/models/team.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:go_router/go_router.dart';
+
 import 'package:shared_preferences/shared_preferences.dart';
 import '../navigation/main_tab_scope.dart';
 import '../schedule/widgets/mini_calendar.dart';
@@ -114,7 +115,17 @@ class _GuestWorkspaceState extends State<GuestWorkspace> {
     }
   }
 
-  void _login() => context.go('/login');
+  bool _accountScreenOpen = false;
+  Future<void> _login() async {
+    if (_accountScreenOpen) return;
+    _accountScreenOpen = true;
+    try {
+      await GuestAccountScreen.open(context);
+    } finally {
+      _accountScreenOpen = false;
+    }
+  }
+
   void _tab(MainTab tab) => MainTabScope.switchToTab(context, tab);
   Widget _card(String title, String subtitle, IconData icon, VoidCallback tap,
           {Widget? trailing, List<Color>? colors}) =>
@@ -446,7 +457,10 @@ class _GuestWorkspaceState extends State<GuestWorkspace> {
             SizedBox(
                 height: 240,
                 child: StudentScheduleEmptyState(
-                    message: _weekMode ? 'На этой неделе планов нет.' : 'На этот день планов нет.', animate: false)),
+                    message: _weekMode
+                        ? 'На этой неделе планов нет.'
+                        : 'На этот день планов нет.',
+                    animate: false)),
             const SizedBox(height: 28),
           ],
           _loginStrip('Расписание группы',
