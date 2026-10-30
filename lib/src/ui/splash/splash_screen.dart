@@ -4,11 +4,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:student_platform/src/core/auth_session.dart';
-import 'package:student_platform/src/core/session.dart';
-import 'package:student_platform/src/core/password_policy.dart';
 
 class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
+  const SplashScreen({super.key, this.restoreSession});
+  final Future<bool> Function()? restoreSession;
 
   @override
   State<SplashScreen> createState() => _SplashScreenState();
@@ -23,21 +22,12 @@ class _SplashScreenState extends State<SplashScreen> {
 
   Future<void> _bootstrap() async {
     try {
-      final client = Supabase.instance.client;
       final prefs = await SharedPreferences.getInstance();
 
-      final sessionOk = await AuthSession.tryRestoreSession(client);
-
-      if (sessionOk) {
-        final mustChangePassword = await loadPasswordChangeRequired(client);
-        if (!mounted) return;
-        if (mustChangePassword) {
-          context.go('/change-password');
-          return;
-        }
-        await AppSession.loadFromServer();
-      }
-
+      final sessionOk = await (widget.restoreSession?.call() ??
+          AuthSession.tryRestoreSession(Supabase.instance.client));
+      // GoRouter awaits the live password policy before building /home.
+      // Do not repeat that network request or populate unused legacy state here.
       if (!mounted) return;
 
       if (sessionOk) {

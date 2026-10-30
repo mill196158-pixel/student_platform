@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kReleaseMode;
+import 'package:flutter/foundation.dart'
+    show kReleaseMode, kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -101,15 +102,21 @@ final GoRouter appRouter = GoRouter(
 Future<void> main() async {
   final startup = Stopwatch()..start();
   void stage(String name) {
-    if (!kReleaseMode)
+    if (!kReleaseMode || const bool.fromEnvironment('STARTUP_TRACE'))
       debugPrint('[startup-perf] $name ${startup.elapsedMilliseconds}ms');
   }
 
   WidgetsFlutterBinding.ensureInitialized();
+  stage('binding-ready');
 
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-  ]);
+  // Android's manifest already locks MainActivity to portrait. Waiting for
+  // the duplicate platform-channel request delays the first frame.
+  if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+    ]);
+  }
+  stage('orientation-ready');
 
   // Временно отключаем GetStorage для избежания ошибок
   // await GetStorage.init('student_platform');

@@ -4,6 +4,9 @@ import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Bundle
+import android.os.SystemClock
+import android.util.Log
 import android.os.Build
 import android.provider.Settings
 import android.text.InputType
@@ -25,12 +28,33 @@ import java.io.File
 import java.io.FileOutputStream
 
 class MainActivity : FlutterActivity() {
+    private val startupOrigin = SystemClock.elapsedRealtime()
+
+    private fun startupTrace(stage: String) {
+        if (intent?.getBooleanExtra("startupTrace", false) == true) {
+            Log.i("StartupTrace", "$stage elapsed=${SystemClock.elapsedRealtime() - startupOrigin}ms uptime=${SystemClock.elapsedRealtime()}ms")
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        startupTrace("activity-onCreate-start")
+        super.onCreate(savedInstanceState)
+        startupTrace("activity-onCreate-end")
+    }
+
+    override fun onFlutterUiDisplayed() {
+        super.onFlutterUiDisplayed()
+        startupTrace("flutter-ui-displayed")
+    }
+
 
     private lateinit var channel: MethodChannel
     private var captureView: CommitEditText? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        startupTrace("plugins-start")
         super.configureFlutterEngine(flutterEngine)
+        startupTrace("plugins-end")
         channel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "keyboard_image_channel"

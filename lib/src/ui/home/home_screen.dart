@@ -142,7 +142,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 if (!mounted ||
                     promoGeneration != _promoLoadGeneration ||
                     _service.currentUserId != userId) return;
-                if (!reportedFirstContent && !kReleaseMode) {
+                if (!reportedFirstContent &&
+                    (!kReleaseMode ||
+                        const bool.fromEnvironment('STARTUP_TRACE'))) {
                   reportedFirstContent = true;
                   debugPrint(
                       '[home-perf] first partial data ${firstContentClock.elapsedMilliseconds}ms');
