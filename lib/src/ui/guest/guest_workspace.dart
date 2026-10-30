@@ -9,8 +9,7 @@ import 'guest_account_screen.dart';
 import 'guest_public_service.dart';
 import '../home/home_dashboard_service.dart' show mapPublishedNews;
 import '../shared/student_section_headers.dart';
-import '../info/info_screen.dart' show InfoSubjectCard;
-import '../info/useful_subject.dart';
+import '../info/info_screen.dart' show GuestInfoScreen;
 import '../profile/profile_screen.dart' show MapSpbgasuScreen;
 import '../navigation/main_tab_scope.dart';
 import '../schedule/widgets/mini_calendar.dart';
@@ -26,7 +25,6 @@ class GuestWorkspace extends StatefulWidget {
 class _GuestWorkspaceState extends State<GuestWorkspace> {
   late final GuestPublicService _service =
       widget.service ?? GuestPublicService();
-  final _search = TextEditingController();
   bool _ready = false, _weekMode = false, _accountScreenOpen = false;
   bool _newsFailed = false, _lessonsLoading = false;
   String? _lessonsError;
@@ -36,15 +34,6 @@ class _GuestWorkspaceState extends State<GuestWorkspace> {
   final Map<String, Uint8List> _images = {};
   int _lessonRequest = 0;
   int _newsRequest = 0;
-  static const materials = <String, String>{
-    'Производная: правило произведения':
-        'Если u(x) и v(x) дифференцируемы, (uv)′ = u′v + uv′.\n\nПример: f(x) = x² sin x. Тогда f′(x) = 2x sin x + x² cos x.\n\nПроверь себя: найди производную x³ cos x. Ответ: 3x² cos x − x³ sin x.',
-    'Единицы давления':
-        '1 Па = 1 Н/м².\n1 кПа = 1 000 Па.\n1 МПа = 1 000 000 Па.\n1 бар = 100 000 Па.\n\nПример: 250 кПа = 0,25 МПа = 2,5 бар. Перед подстановкой в формулу приведи все величины к согласованной системе единиц.',
-    'Как подготовить конспект':
-        '1. Сформулируй вопрос темы.\n2. Запиши определения и условия применения формул.\n3. Разбери один пример по шагам.\n4. Отметь непонятные места.\n5. Закрой конспект и воспроизведи решение самостоятельно.\n\nЛичный дневник и заметки доступны с аккаунтом.',
-  };
-
   @override
   void initState() {
     super.initState();
@@ -55,7 +44,6 @@ class _GuestWorkspaceState extends State<GuestWorkspace> {
   @override
   void dispose() {
     _service.dispose();
-    _search.dispose();
     super.dispose();
   }
 
@@ -264,33 +252,6 @@ class _GuestWorkspaceState extends State<GuestWorkspace> {
         publishedAt: n.publishedAt);
   }
 
-  Widget _base() => Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        TextField(
-            controller: _search,
-            onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.search), hintText: 'Найти материал')),
-        const SizedBox(height: 16),
-        for (final e in materials.entries.where(
-            (e) => e.key.toLowerCase().contains(_search.text.toLowerCase())))
-          InfoSubjectCard(
-              item: UsefulSubject(
-                  id: e.key,
-                  title: e.key,
-                  controlForm: '',
-                  description: e.value,
-                  teacherName: '',
-                  teamName: '',
-                  teamIcon: '',
-                  teamGroupName: ''),
-              onOpen: (_) => _info(e.key, e.value),
-              details: const Text('Материал · без сети'),
-              trailing: const Icon(Icons.chevron_right)),
-        _loginStrip(
-            'Учебный план после входа', 'Твои дисциплины, зачёты и прогресс'),
-      ]));
   Widget _learning() => Padding(
       padding: const EdgeInsets.all(20),
       child: GuestPanel(
@@ -418,15 +379,12 @@ class _GuestWorkspaceState extends State<GuestWorkspace> {
       body = const Center(child: CircularProgressIndicator());
     } else if (widget.tab == 0) {
       body = _home();
+    } else if (widget.tab == 1) {
+      body = GuestInfoScreen(onAccountInfo: _login);
     } else if (widget.tab == 4) {
       body = _profile();
     } else {
       final header = switch (widget.tab) {
-        1 => StudentInfoHeader(
-            subtitle: 'Открытые материалы',
-            onInfoTap: () =>
-                _info('База', 'Стартовые материалы доступны без сети. '),
-            onSectionTap: _login),
         2 => StudentLearningHeader(
               trailing: Row(mainAxisSize: MainAxisSize.min, children: [
             IconButton(
@@ -472,11 +430,7 @@ class _GuestWorkspaceState extends State<GuestWorkspace> {
                     key: ValueKey(widget.tab),
                     padding: EdgeInsets.zero,
                     children: [
-                  switch (widget.tab) {
-                    1 => _base(),
-                    2 => _learning(),
-                    _ => _schedule()
-                  }
+                  switch (widget.tab) { 2 => _learning(), _ => _schedule() }
                 ])),
           ]));
     }

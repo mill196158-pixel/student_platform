@@ -1193,63 +1193,7 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _showSectionSheet(BuildContext context) async {
-    final selected = await showModalBottomSheet<_UsefulSection>(
-      context: context,
-      showDragHandle: true,
-      constraints: _fullWidthSheetConstraints(context),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (sheetContext) {
-        return SizedBox(
-          width: double.infinity,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 22),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Раздел',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: Colors.black,
-                        fontWeight: FontWeight.w900,
-                      ),
-                ),
-                const SizedBox(height: 10),
-                _SectionChoiceTile(
-                  icon: Icons.school_outlined,
-                  title: 'Предметы',
-                  subtitle: 'Учебный план',
-                  selected: _section == _UsefulSection.subjects,
-                  onTap: () {
-                    Navigator.of(sheetContext).pop(_UsefulSection.subjects);
-                  },
-                ),
-                _SectionChoiceTile(
-                  icon: Icons.help_outline_rounded,
-                  title: 'Справочный раздел',
-                  subtitle: 'Инструкции, документы и ответы на учебные вопросы',
-                  selected: _section == _UsefulSection.help,
-                  onTap: () {
-                    Navigator.of(sheetContext).pop(_UsefulSection.help);
-                  },
-                ),
-                _SectionChoiceTile(
-                  icon: Icons.work_outline_rounded,
-                  title: 'Вакансии',
-                  subtitle: 'Работа и стажировки',
-                  selected: _section == _UsefulSection.jobs,
-                  onTap: () {
-                    Navigator.of(sheetContext).pop(_UsefulSection.jobs);
-                  },
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
+    final selected = await _showInfoSectionPicker(context, _section);
     if (!mounted || selected == null || selected == _section) return;
     setState(() => _section = selected);
     if (selected == _UsefulSection.help) {
@@ -1438,8 +1382,6 @@ IconData _sectionIcon(_UsefulSection section) {
   }
 }
 
-
-
 class _InfoSheetHeader extends StatelessWidget {
   const _InfoSheetHeader();
 
@@ -1518,8 +1460,6 @@ class _InfoSheetPoint extends StatelessWidget {
     );
   }
 }
-
-
 
 class _SectionChoiceTile extends StatelessWidget {
   final IconData icon;
@@ -3229,17 +3169,18 @@ class InfoSubjectCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
-            details ?? Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _MiniControlPill(text: controlText, color: accent),
-                _SubjectDifficultyPill(
-                  difficulty: item.difficulty,
-                  color: accent,
+            details ??
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _MiniControlPill(text: controlText, color: accent),
+                    _SubjectDifficultyPill(
+                      difficulty: item.difficulty,
+                      color: accent,
+                    ),
+                  ],
                 ),
-              ],
-            ),
           ],
         ),
       ),
@@ -3388,8 +3329,6 @@ class _SubjectDifficultyPill extends StatelessWidget {
   }
 }
 
-
-
 class _EmptyState extends StatelessWidget {
   final String text;
   final bool compact;
@@ -3436,4 +3375,128 @@ class _EmptyState extends StatelessWidget {
       ),
     );
   }
+}
+
+Future<_UsefulSection?> _showInfoSectionPicker(
+    BuildContext context, _UsefulSection selected) {
+  return showModalBottomSheet<_UsefulSection>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    constraints: _fullWidthSheetConstraints(context),
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    builder: (sheetContext) {
+      return SizedBox(
+        width: double.infinity,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 22),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Раздел',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: Colors.black,
+                      fontWeight: FontWeight.w900,
+                    ),
+              ),
+              const SizedBox(height: 10),
+              _SectionChoiceTile(
+                icon: Icons.school_outlined,
+                title: 'Предметы',
+                subtitle: 'Учебный план',
+                selected: selected == _UsefulSection.subjects,
+                onTap: () {
+                  Navigator.of(sheetContext).pop(_UsefulSection.subjects);
+                },
+              ),
+              _SectionChoiceTile(
+                icon: Icons.help_outline_rounded,
+                title: 'Справочный раздел',
+                subtitle: 'Инструкции, документы и ответы на учебные вопросы',
+                selected: selected == _UsefulSection.help,
+                onTap: () {
+                  Navigator.of(sheetContext).pop(_UsefulSection.help);
+                },
+              ),
+              _SectionChoiceTile(
+                icon: Icons.work_outline_rounded,
+                title: 'Вакансии',
+                subtitle: 'Работа и стажировки',
+                selected: selected == _UsefulSection.jobs,
+                onTap: () {
+                  Navigator.of(sheetContext).pop(_UsefulSection.jobs);
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}
+
+/// Same Base header and selector as the authenticated screen, without touching
+/// account caches or pretending that unpublished content is a public catalog.
+class GuestInfoScreen extends StatefulWidget {
+  const GuestInfoScreen({super.key, required this.onAccountInfo});
+  final VoidCallback onAccountInfo;
+  @override
+  State<GuestInfoScreen> createState() => _GuestInfoScreenState();
+}
+
+class _GuestInfoScreenState extends State<GuestInfoScreen> {
+  _UsefulSection _section = _UsefulSection.subjects;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final saved = PageStorage.maybeOf(context)
+        ?.readState(context, identifier: 'guest_base_section');
+    if (saved is _UsefulSection) _section = saved;
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        backgroundColor: const Color(0xFFF7F7FB),
+        body: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          SizedBox(
+            height:
+                (MediaQuery.paddingOf(context).top + 86.0).clamp(128.0, 150.0),
+            child: StudentInfoHeader(
+              subtitle: _sectionSubtitle(_section),
+              sectionIcon: _sectionIcon(_section),
+              onInfoTap: widget.onAccountInfo,
+              onSectionTap: () async {
+                final selected =
+                    await _showInfoSectionPicker(context, _section);
+                if (mounted && selected != null) {
+                  PageStorage.maybeOf(context)?.writeState(context, selected,
+                      identifier: 'guest_base_section');
+                  setState(() => _section = selected);
+                }
+              },
+            ),
+          ),
+          Expanded(
+              child: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                  children: [
+                _EmptyState(
+                  text: switch (_section) {
+                    _UsefulSection.subjects =>
+                      'Войди, чтобы открыть предметы своего учебного плана',
+                    _UsefulSection.help =>
+                      'Справочный раздел пока доступен пользователям с аккаунтом',
+                    _UsefulSection.jobs =>
+                      'Вакансии пока доступны пользователям с аккаунтом',
+                  },
+                  actionLabel: 'Возможности аккаунта',
+                  onAction: widget.onAccountInfo,
+                ),
+              ])),
+        ]),
+      );
 }
