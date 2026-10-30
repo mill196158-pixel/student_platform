@@ -1,5 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
+import 'package:student_ui/student_ui.dart';
+import 'package:student_platform/src/ui/home/news_image_disk_cache.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -67,8 +70,90 @@ Future<void> signIn(SupabaseClient client, String id) async {
   }));
 }
 
+class GatedImages extends NewsImageDiskCache {
+  final gates = List.generate(8, (_) => Completer<Uint8List?>());
+  final started = <int>[];
+  int prunes = 0;
+  @override
+  Future<Uint8List?> peek(NewsImageCacheKey key) async => null;
+  @override
+  Future<Uint8List?> getOrFetch(
+      NewsImageCacheKey key, Future<Uint8List?> Function() fetch) {
+    final i = int.parse(key.path);
+    started.add(i);
+    return gates[i].future;
+  }
+
+  @override
+  Future<void> pruneOtherVersions(String path, String version) async {
+    prunes++;
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test(
+      'covers publish individually beyond six, do not gate dashboard, reject old account',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final rows = List.generate(
+        8,
+        (i) => {
+              'id': '$i',
+              'title': 'News $i',
+              'image_path': '$i',
+              'variant': 'imageOverlay',
+              'updated_at': '2026-10-30T00:00:00Z',
+            });
+    final client = SupabaseClient('https://example.test', 'test',
+        authOptions: const AuthClientOptions(autoRefreshToken: false),
+        httpClient: MockClient((r) async => http.Response(
+            jsonEncode(
+                r.url.path.endsWith('get_my_published_news') ? rows : []),
+            200,
+            request: r,
+            headers: {'content-type': 'application/json'})));
+    addTearDown(client.dispose);
+    await signIn(client, 'a');
+    final schedule = Schedule()..result.complete([]);
+    final learning = Learning();
+    for (final gate in learning.gates) {
+      gate.complete([]);
+    }
+    final images = GatedImages();
+    final updates = <HomeDashboardData>[];
+    final service = HomeDashboardService(
+        client: client,
+        scheduleRepository: schedule,
+        learningRepository: learning,
+        imageCache: images);
+    final result = await service.load(onUpdate: updates.add);
+    expect(result.news, hasLength(8));
+    expect(images.started, [0, 1, 2, 3, 4, 5]);
+    images.gates[1].complete(Uint8List.fromList([1]));
+    await Future<void>.delayed(Duration.zero);
+    expect(updates.last.news[0].imageBytes, isNull);
+    expect(updates.last.news[1].imageBytes, [1]);
+    expect(images.started.last, 6);
+    final early = updates.last;
+    images.gates[6].complete(Uint8List.fromList([6]));
+    await Future<void>.delayed(Duration.zero);
+    expect(updates.last.news[6].imageBytes, [6]);
+    expect(early.news[6].imageBytes, isNull);
+    expect(images.started.last, 7);
+    images.gates[7].complete(Uint8List.fromList([7]));
+    await Future<void>.delayed(Duration.zero);
+    expect(updates.last.news[7].imageBytes, [7]);
+    final count = updates.length;
+    await signIn(client, 'b');
+    for (var i = 0; i < 6; i++) {
+      if (!images.gates[i].isCompleted)
+        images.gates[i].complete(Uint8List.fromList([i]));
+    }
+    await Future<void>.delayed(Duration.zero);
+    expect(updates.length, count);
+    expect(images.prunes, 0);
+  });
   test(
       'cached first paint, independent sections, four parallel assignment requests, account isolation',
       () async {

@@ -188,7 +188,12 @@ class HomeDashboardService {
       final merged =
           _mergeKeepingImages(previous: cachedWithImages, next: fresh);
       onMetadata?.call(merged);
-      return await _resolveNewsImages(merged, prefetchStory: true);
+      // Media owns its own deadlines; the dashboard timeout must not discard
+      // a successful cover arriving after other sections have finished.
+      unawaited(_resolveNewsImages(merged, onImage: (items) {
+        if (_sb.auth.currentUser?.id == newsUser) onMetadata?.call(items);
+      }));
+      return merged;
     } catch (e) {
       debugPrint('[home] published news failed: $e');
       if (cachedWithImages.isNotEmpty) {
@@ -236,42 +241,30 @@ class HomeDashboardService {
 
   Future<List<HomeNewsItem>> _resolveNewsImages(
     List<HomeNewsItem> items, {
-    bool prefetchStory = false,
+    void Function(List<HomeNewsItem>)? onImage,
   }) async {
-    final priority = <int>{};
-    for (var i = 0; i < items.length && i < 6; i++) {
-      priority.add(i);
-    }
-    if (prefetchStory && items.isNotEmpty) {
-      priority.add(0);
-      if (items.length > 1) priority.add(1);
-    }
-
     final resolved = List<HomeNewsItem>.from(items);
-    final futures = <Future<void>>[];
-    for (final index in priority) {
-      futures.add(() async {
+    var next = 0;
+    Future<void> worker() async {
+      while (next < resolved.length) {
+        final index = next++;
         final item = resolved[index];
         final key = item.imageCacheKey;
-        if (key == null || item.imageBytes != null) return;
-        final bytes = await _fetchNewsImage(key);
-        if (bytes != null) {
+        if (key == null || item.imageBytes != null) continue;
+        try {
+          final bytes = await _fetchNewsImage(key);
+          if (bytes == null || bytes.isEmpty) continue;
           resolved[index] = item.copyWith(imageBytes: bytes);
-          // Best-effort cleanup of older versions for the same path.
-          unawaited(_imageCache.pruneOtherVersions(key.path, key.version));
+          onImage?.call(List<HomeNewsItem>.unmodifiable(resolved));
+          // Versioned entries expire through the bounded cache eviction.
+          // A late old refresh must never prune a newer cover version.
+        } catch (error) {
+          debugPrint('[home] news cover failed type=${error.runtimeType}');
         }
-      }());
+      }
     }
-    await Future.wait(futures);
 
-    // Warm the rest in the background without blocking first paint.
-    for (var i = 0; i < resolved.length; i++) {
-      if (priority.contains(i)) continue;
-      final item = resolved[i];
-      final key = item.imageCacheKey;
-      if (key == null || item.imageBytes != null) continue;
-      unawaited(_fetchNewsImage(key));
-    }
+    await Future.wait(List.generate(items.length.clamp(0, 6), (_) => worker()));
     return resolved;
   }
 
@@ -314,7 +307,7 @@ class HomeDashboardService {
       }
       final download = await _http
           .get(Uri.parse(signedUrl))
-          .timeout(const Duration(seconds: 10));
+          .timeout(const Duration(seconds: 45));
       if (download.statusCode != 200) {
         debugPrint(
           '[home] news image bytes status=${download.statusCode}',
