@@ -81,7 +81,7 @@ class _EntityReviewScreenState extends State<EntityReviewScreen> {
         entityId: widget.entityId,
         entityLabel: widget.entityLabel,
         tagScores: Map<String, int>.from(_tagScores),
-        bodyText: _bodyController.text,
+        bodyText: _summary.summary?.textEnabled == true ? _bodyController.text : '',
       );
       if (!mounted) return;
       if (!result.ok) {
@@ -98,7 +98,7 @@ class _EntityReviewScreenState extends State<EntityReviewScreen> {
         entityType: widget.entityType,
         entityLabel: widget.entityLabel,
         tagScores: Map<String, int>.from(_tagScores),
-        bodyPreview: _bodyController.text.trim().isEmpty
+        bodyPreview: _summary.summary?.textEnabled != true || _bodyController.text.trim().isEmpty
             ? null
             : _bodyController.text.trim(),
         moderationStatus: result.moderationStatus,
@@ -161,7 +161,7 @@ class _EntityReviewScreenState extends State<EntityReviewScreen> {
                       ),
                 ),
                 const SizedBox(height: 8),
-                TextField(
+                if (_summary.summary?.textEnabled == true) TextField(
                   controller: _bodyController,
                   maxLines: 4,
                   maxLength: 1000,

@@ -86,12 +86,12 @@ class AppNotificationsApi {
     await _sb.rpc('mark_notification_read', params: {
       'p_notification_id': id,
     });
-    InAppNotificationBus.instance.requestBadgeRefresh();
+    InAppNotificationBus.instance.dismissNotifications({id});
   }
 
   Future<void> markAllRead() async {
     await _sb.rpc('mark_all_notifications_read');
-    InAppNotificationBus.instance.requestBadgeRefresh();
+    InAppNotificationBus.instance.dismissNotifications();
   }
 
   /// Keeps the notification-center badge in sync with the chat read cursor.
@@ -121,13 +121,13 @@ class AppNotificationsApi {
         ),
       ),
     );
-    InAppNotificationBus.instance.requestBadgeRefresh();
+    InAppNotificationBus.instance.dismissNotifications(ids);
   }
 
   Future<void> hide(String id) async {
     await _sb.rpc('hide_notification_for_me', params: {
       'p_notification_id': id,
     });
-    InAppNotificationBus.instance.requestBadgeRefresh();
+    InAppNotificationBus.instance.dismissNotifications({id});
   }
 }

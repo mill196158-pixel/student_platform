@@ -5,10 +5,30 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'state/team_cubit.dart';
 import 'models/assignment.dart';
 
-class AssignmentDetailsScreen extends StatelessWidget {
+class AssignmentDetailsScreen extends StatefulWidget {
   final String assignmentId;
   const AssignmentDetailsScreen({super.key, required this.assignmentId});
 
+  @override
+  State<AssignmentDetailsScreen> createState() => _AssignmentDetailsScreenState();
+}
+class _AssignmentDetailsScreenState extends State<AssignmentDetailsScreen> {
+  bool _saving = false;
+  String get assignmentId => widget.assignmentId;
+  Future<void> _save(Future<void> Function() action, {String? success, bool close = false}) async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      await action();
+      if (!mounted) return;
+      if (success != null) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(success)));
+      if (close) Navigator.of(context).pop();
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Не удалось сохранить. Повторите.')));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -43,6 +63,7 @@ class AssignmentDetailsScreen extends StatelessWidget {
         builder: (context, state) {
           final st = state;
           final a = _pickAssignment(st, assignmentId);
+          if (a == null) return const Center(child: Text('Задание недоступно'));
           final isDraft = st.pending?.id == a.id;
           final isDone = context.read<TeamCubit>().isAssignmentDone(a.id);
           final link = _findLink(a);
@@ -103,6 +124,7 @@ class AssignmentDetailsScreen extends StatelessWidget {
         builder: (context, state) {
           final st = state;
           final a = _pickAssignment(st, assignmentId);
+          if (a == null) return const SizedBox.shrink();
           final isDraft = st.pending?.id == a.id;
           final isDone = context.read<TeamCubit>().isAssignmentDone(a.id);
 
@@ -129,13 +151,7 @@ class AssignmentDetailsScreen extends StatelessWidget {
                           label: 'Опубликовать',
                           gradient: const LinearGradient(
                               colors: [Color(0xFF6FA894), Color(0xFF8BB8A8)]),
-                          onPressed: () {
-                            context.read<TeamCubit>().publishPendingManually();
-                            ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                    content: Text('Задание опубликовано')));
-                            Navigator.of(context).pop();
-                          },
+                          onPressed: _saving ? null : () => _save(() => context.read<TeamCubit>().publishAssignment(a.id), success: 'Задание опубликовано', close: true),
                         ),
                       ),
                     if (isDraft && !st.isStarosta)
@@ -145,8 +161,7 @@ class AssignmentDetailsScreen extends StatelessWidget {
                           label: 'Голосовать «за»',
                           gradient: const LinearGradient(
                               colors: [Color(0xFFC4A36A), Color(0xFFD4BE90)]),
-                          onPressed: () =>
-                              context.read<TeamCubit>().voteFor(a.id),
+                          onPressed: _saving ? null : () => _save(() => context.read<TeamCubit>().voteFor(a.id, propagateError: true)),
                         ),
                       ),
                     if (!isDraft)
@@ -172,10 +187,7 @@ class AssignmentDetailsScreen extends StatelessWidget {
                                       .primary
                                       .withValues(alpha: 0.72),
                                 ]),
-                          onPressed: () {
-                            context.read<TeamCubit>().toggleCompleted(a.id);
-                            Navigator.of(context).pop();
-                          },
+                          onPressed: _saving ? null : () => _save(() => context.read<TeamCubit>().toggleCompleted(a.id), close: true),
                         ),
                       ),
                   ],
@@ -188,12 +200,11 @@ class AssignmentDetailsScreen extends StatelessWidget {
     );
   }
 
-  Assignment _pickAssignment(TeamState st, String id) {
-    return (st.assignments).firstWhere(
-      (x) => x.id == id,
-      orElse: () =>
-          st.published.isNotEmpty ? st.published.last : st.assignments.first,
-    );
+  Assignment? _pickAssignment(TeamState st, String id) {
+    for (final assignment in st.assignments) {
+      if (assignment.id == id) return assignment;
+    }
+    return null;
   }
 
   String? _findLink(Assignment a) {
@@ -753,7 +764,7 @@ class _ModernAttachmentTile extends StatelessWidget {
 }
 
 class _ModernBigButton extends StatelessWidget {
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
   final String label;
   final IconData icon;
   final Gradient gradient;

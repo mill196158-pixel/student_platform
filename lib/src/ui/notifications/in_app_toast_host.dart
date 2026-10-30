@@ -48,6 +48,21 @@ class _InAppToastHostState extends State<InAppToastHost>
   }
 
   void _onEvent(InAppNotificationEvent event) {
+    if (event.type == '_session_reset' || event.type == '_dismiss') {
+      if (event.type == '_session_reset') {
+        _seenNotificationIds.clear();
+        _lastDedupe = null;
+        _lastAt = null;
+      }
+      if (event.type == '_session_reset' ||
+          event.dismissedIds == null ||
+          event.dismissedIds!.contains(_event?.payload?.notificationId)) {
+        _hideTimer?.cancel();
+        _anim.stop();
+        setState(() => _event = null);
+      }
+      return;
+    }
     final show = event.isChatMessage ||
         event.type == 'friend_request' ||
         event.type == 'friend_accept';
@@ -75,20 +90,28 @@ class _InAppToastHostState extends State<InAppToastHost>
     _hideTimer?.cancel();
     setState(() => _event = event);
     _anim.forward(from: 0);
-    _hideTimer = Timer(const Duration(seconds: 4), _dismiss);
+    _hideTimer = Timer(const Duration(seconds: 4), () {
+      _dismiss();
+    });
   }
 
-  Future<void> _dismiss() async {
+  Future<bool> _dismiss() async {
+    final dismissedEvent = _event;
     _hideTimer?.cancel();
-    await _anim.reverse();
-    if (!mounted) return;
+    try {
+      await _anim.reverse().orCancel;
+    } on TickerCanceled {
+      return false;
+    }
+    if (!mounted || !identical(_event, dismissedEvent)) return false;
     setState(() => _event = null);
+    return true;
   }
 
   Future<void> _open() async {
     final event = _event;
-    await _dismiss();
-    if (!mounted || event == null) return;
+    final dismissed = await _dismiss();
+    if (!dismissed || !mounted || event == null) return;
     final payload = event.payload;
     if (payload != null) {
       await PushNavigation.handle(context, payload, force: true);

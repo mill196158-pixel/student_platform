@@ -311,6 +311,7 @@ class PersonalDiaryService {
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(key);
+      if (_sb.auth.currentUser?.id != userId) return null;
       if (raw == null || raw.trim().isEmpty) return null;
       final decoded = jsonDecode(raw);
       if (decoded is! Map) return null;
@@ -323,7 +324,9 @@ class PersonalDiaryService {
   }
 
   Future<PersonalDiaryData> loadAndCache({int? semesterNumber}) async {
+    final userId = _sb.auth.currentUser?.id;
     final data = await load(semesterNumber: semesterNumber);
+    if (_sb.auth.currentUser?.id != userId) throw StateError('Session changed');
     await saveCached(data, semesterNumber: semesterNumber);
     return data;
   }
@@ -332,13 +335,13 @@ class PersonalDiaryService {
     PersonalDiaryData data, {
     int? semesterNumber,
   }) async {
-    final userId =
-        _sb.auth.currentUser?.id ?? data.academicContext.userId ?? '';
-    if (userId.isEmpty) return;
+    final userId = _sb.auth.currentUser?.id ?? '';
+    if (userId.isEmpty || data.academicContext.userId != userId) return;
     final key = _cacheKey(userId, semesterNumber);
     _memoryCache[key] = data;
     try {
       final prefs = await SharedPreferences.getInstance();
+      if (_sb.auth.currentUser?.id != userId) return;
       await prefs.setString(key, jsonEncode(_dataToJson(data)));
     } catch (_) {}
   }

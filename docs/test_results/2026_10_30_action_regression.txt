@@ -1,0 +1,37 @@
+Action audit evidence, 2026-10-30
+Synthetic fixtures only; no credentials included.
+Native suites were run in separate passes; see report for initial failures and fixes.
+
+remaining-actions-native.txt
+ACTION PASS review submit/edit/moderation/aggregate
+
+remaining-four-native.txt
+ACTION PASS vacancy submit/clarify/edit/resubmit/approve
+ACTION PASS archive history/restore/outsider
+ACTION PASS assignment draft/vote/publish/complete/undo/edit/delete/ACL
+
+academic-actions-final.txt
+ACTION PASS assignment draft/vote/publish/complete/undo/edit/delete/ACL
+ACTION PASS topics publish/edit/UIchoose/capacity/cancel/reassign/release/close/delete/ACL
+01:02 +2: All tests passed!
+
+action-full-tests.txt
+00:40 +327: All tests passed!
+
+actions-final-widget.txt
+00:04 +25: All tests passed!
+
+assignment-grants-live.txt
+PASS direct REST writes blocked
+PASS outsider and anonymous RPC mutations blocked
+PASS RPC create/vote idempotency/publish/done/undo/author edit/delete and member SELECT preserved
+
+actions-final-analyze.txt
+No issues found!
+
+academic-final-analyze.txt
+No issues found!
+
+actions-cleanup.txt
+Synthetic live fixture removed
+Action fixtures and temporary roles removed and verified

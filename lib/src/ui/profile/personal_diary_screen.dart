@@ -6,17 +6,20 @@ import '../schedule/subject_diary/subject_diary.dart';
 import '../schedule/subject_diary_screen.dart';
 
 class PersonalDiaryScreen extends StatefulWidget {
-  const PersonalDiaryScreen({super.key});
+  const PersonalDiaryScreen({super.key, this.service});
+  final PersonalDiaryService? service;
 
   @override
   State<PersonalDiaryScreen> createState() => _PersonalDiaryScreenState();
 }
 
 class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
-  final _service = PersonalDiaryService();
+  late final _service = widget.service ?? PersonalDiaryService();
   final _searchController = TextEditingController();
   final _assignmentDoneOverrides = <String, bool>{};
   final _taskStatusOverrides = <String, String>{};
+  final _pendingMutations = <String>{};
+  int _refreshGeneration = 0;
   late Future<PersonalDiaryData> _future;
 
   @override
@@ -43,15 +46,20 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
   }
 
   Future<void> _refresh() async {
-    setState(() => _future = _service.loadAndCache());
-    await _future;
+    final generation = ++_refreshGeneration;
+    final assignmentsToReconcile = _assignmentDoneOverrides.keys.where((id) => !_pendingMutations.contains('assignment:$id')).toSet();
+    final tasksToReconcile = _taskStatusOverrides.keys.where((id) => !_pendingMutations.contains('task:$id')).toSet();
+    final fresh = await _service.loadAndCache();
+    if (!mounted || generation != _refreshGeneration) return;
+    setState(() {
+      _assignmentDoneOverrides.removeWhere((id, _) => assignmentsToReconcile.contains(id) && !_pendingMutations.contains('assignment:$id'));
+      _taskStatusOverrides.removeWhere((id, _) => tasksToReconcile.contains(id) && !_pendingMutations.contains('task:$id'));
+      _future = Future<PersonalDiaryData>.value(fresh);
+    });
   }
 
   void _refreshSilently() {
-    _service.loadAndCache().then((fresh) {
-      if (!mounted) return;
-      setState(() => _future = Future<PersonalDiaryData>.value(fresh));
-    });
+    _refresh().catchError((Object _) {});
   }
 
   @override
@@ -69,7 +77,7 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
       body: FutureBuilder<PersonalDiaryData>(
         future: _future,
         builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
+          if (!snapshot.hasData && snapshot.connectionState != ConnectionState.done) {
             return const Center(child: CircularProgressIndicator());
           }
 
@@ -427,38 +435,39 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
   }
 
   Future<void> _toggleAssignmentDone(PersonalDiaryAssignment assignment) async {
-    final nextDone = !_assignmentDone(assignment);
-    setState(() => _assignmentDoneOverrides[assignment.id] = nextDone);
+    final key = 'assignment:${assignment.id}';
+    if (!_pendingMutations.add(key)) return;
+    ++_refreshGeneration;
+    final previous = _assignmentDone(assignment);
+    setState(() => _assignmentDoneOverrides[assignment.id] = !previous);
     try {
-      await _service.setAssignmentDone(
-        assignmentId: assignment.id,
-        done: nextDone,
-      );
-      if (!mounted) return;
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-      if (mounted) await _refresh();
+      await _service.setAssignmentDone(assignmentId: assignment.id, done: !previous);
     } catch (_) {
-      if (!mounted) return;
-      await Future<void>.delayed(const Duration(milliseconds: 700));
-      if (mounted) await _refresh();
-    }
+      if (mounted) {
+        setState(() => _assignmentDoneOverrides[assignment.id] = previous);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Не удалось сохранить статус. Повторите.')));
+      }
+      return;
+    } finally { _pendingMutations.remove(key); }
+    _refreshSilently();
   }
 
-  Future<void> _setPersonalTaskStatus(
-    PersonalDiaryTask task,
-    String status,
-  ) async {
+  Future<void> _setPersonalTaskStatus(PersonalDiaryTask task, String status) async {
+    final key = 'task:${task.id}';
+    if (!_pendingMutations.add(key)) return;
+    ++_refreshGeneration;
+    final previous = _taskStatus(task);
     setState(() => _taskStatusOverrides[task.id] = status);
     try {
       await _service.updatePersonalTaskStatus(taskId: task.id, status: status);
-      if (!mounted) return;
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-      if (mounted) await _refresh();
     } catch (_) {
-      if (!mounted) return;
-      await Future<void>.delayed(const Duration(milliseconds: 700));
-      if (mounted) await _refresh();
-    }
+      if (mounted) {
+        setState(() => _taskStatusOverrides[task.id] = previous);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Не удалось сохранить статус. Повторите.')));
+      }
+      return;
+    } finally { _pendingMutations.remove(key); }
+    _refreshSilently();
   }
 
   Future<void> _openAssignmentDetails(

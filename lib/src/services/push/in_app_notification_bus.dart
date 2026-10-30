@@ -10,12 +10,14 @@ class InAppNotificationEvent {
     required this.title,
     required this.body,
     this.payload,
+    this.dismissedIds,
   });
 
   final String type;
   final String title;
   final String body;
   final PushPayload? payload;
+  final Set<String>? dismissedIds;
 
   bool get isChatMessage =>
       type == 'dm_message' || type == 'team_message' || type == 'team_reply';
@@ -46,5 +48,16 @@ class InAppNotificationBus {
         body: '',
       ),
     );
+  }
+
+  void dismissNotifications([Set<String>? ids]) {
+    emit(InAppNotificationEvent(
+        type: '_dismiss', title: '', body: '', dismissedIds: ids));
+    requestBadgeRefresh();
+  }
+
+  void resetSession() {
+    emit(const InAppNotificationEvent(
+        type: '_session_reset', title: '', body: ''));
   }
 }

@@ -47,7 +47,7 @@ class _PushSessionHostState extends State<PushSessionHost> {
     _notificationChannel = Supabase.instance.client
         .channel('app-notifications-$uid')
         .onPostgresChanges(
-          event: PostgresChangeEvent.insert,
+          event: PostgresChangeEvent.all,
           schema: 'public',
           table: 'app_notifications',
           filter: PostgresChangeFilter(
@@ -57,6 +57,18 @@ class _PushSessionHostState extends State<PushSessionHost> {
           ),
           callback: (payload) {
             final row = payload.newRecord;
+            if (payload.eventType != PostgresChangeEvent.insert) {
+              final id = (row['id'] ?? payload.oldRecord['id'])?.toString();
+              if (row['read_at'] != null ||
+                  row['deleted_at'] != null ||
+                  payload.eventType == PostgresChangeEvent.delete) {
+                if (id != null)
+                  InAppNotificationBus.instance.dismissNotifications({id});
+              }
+              InAppNotificationBus.instance.requestBadgeRefresh();
+              return;
+            }
+            if (row['read_at'] != null || row['deleted_at'] != null) return;
             final type = (row['event_type'] ?? '').toString();
             final title = (row['title'] ?? 'Уведомление').toString();
             final body = (row['body'] ?? '').toString();
@@ -71,8 +83,7 @@ class _PushSessionHostState extends State<PushSessionHost> {
                 type == 'team_reply';
 
             if (ActiveChatTracker.instance.isActive(parsed?.chatId) ||
-                (isChatEvent &&
-                    ActiveChatTracker.instance.isViewingMessages)) {
+                (isChatEvent && ActiveChatTracker.instance.isViewingMessages)) {
               InAppNotificationBus.instance.requestBadgeRefresh();
               return;
             }
@@ -96,6 +107,7 @@ class _PushSessionHostState extends State<PushSessionHost> {
 
   @override
   void dispose() {
+    InAppNotificationBus.instance.resetSession();
     final channel = _notificationChannel;
     _notificationChannel = null;
     if (channel != null) {

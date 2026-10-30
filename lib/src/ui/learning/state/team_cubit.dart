@@ -1075,11 +1075,11 @@ class TeamCubit extends Cubit<TeamState> {
   }
 
   // 👇 новая публичная прокладка
-  Future<void> voteFor(String assignmentId) async {
-    await _voteAssignment(assignmentId);
+  Future<void> voteFor(String assignmentId, {bool propagateError = false}) async {
+    await _voteAssignment(assignmentId, propagateError: propagateError);
   }
 
-  Future<void> _voteAssignment(String assignmentId) async {
+  Future<void> _voteAssignment(String assignmentId, {bool propagateError = false}) async {
     final sb = Supabase.instance.client;
     final uid = sb.auth.currentUser?.id;
     if (uid == null || uid.isEmpty) return;
@@ -1095,6 +1095,7 @@ class TeamCubit extends Cubit<TeamState> {
     } catch (e) {
       safeDebugLog(
           '[TeamCubit] vote failed assignment=${maskDebugId(assignmentId)} error=${e.runtimeType}');
+      if (propagateError) rethrow;
     }
   }
 
@@ -1164,7 +1165,9 @@ class TeamCubit extends Cubit<TeamState> {
 
   // ---------------------- ВНУТРЕННЕЕ ----------------------
   Future<void> _reloadAssignments() async {
+    if (isClosed) return;
     final ass = await repo.loadAssignments(state.team.id);
+    if (isClosed) return;
     _rememberAssignments(ass);
     unawaited(_persistAssignmentsSnapshot(ass));
     emit(state.copyWith(
@@ -1177,9 +1180,11 @@ class TeamCubit extends Cubit<TeamState> {
   }
 
   Future<void> _reloadChatFromServer({String? preferMessageId}) async {
+    if (isClosed) return;
     try {
       final chatId = await _resolveMainChatId();
       final fresh = await repo.loadChat(state.team.id);
+      if (isClosed) return;
       var reconciled = chatId == null
           ? _dedupeAndSort(fresh)
           : ChatMessageCacheStore.reconcileLatestPage(
@@ -1203,6 +1208,7 @@ class TeamCubit extends Cubit<TeamState> {
           reconciled = _mergeCachedChat([...reconciled, message]);
         }
       }
+      if (isClosed) return;
       _rememberTeamChat(reconciled, allowEmpty: true);
       emit(state.copyWith(
         chat: reconciled,
@@ -1233,7 +1239,7 @@ class TeamCubit extends Cubit<TeamState> {
   // Never invent assignmentId by title; new assignment bubbles must come from
   // messages.assignment_id returned by Supabase.
   Future<void> _hydrateAssignmentIdsInChat() async {
-    if (state.chat.isEmpty) return;
+    if (isClosed || state.chat.isEmpty) return;
 
     bool changed = false;
     final chat = [...state.chat];
