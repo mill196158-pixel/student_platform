@@ -425,19 +425,23 @@ class _TodaySummaryCard extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final count = data.lessons.length;
-    final title = count > 0
-        ? 'Сегодня $count ${_lessonWord(count)}'
-        : data.lessonsFinishedForToday
-            ? 'Пары закончились'
-            : 'Сегодня выходной';
-    final subtitle = count > 0
-        ? 'Кратко по расписанию на день'
-        : data.lessonsFinishedForToday
-            ? 'На сегодня больше ничего нет'
-            : 'Пар нет, можно закрыть задания или отдохнуть';
-    final emptyText = data.lessonsFinishedForToday
-        ? 'Пары на сегодня закончились'
-        : 'Сегодня пар нет';
+    final title = data.scheduleStatus ??
+        (count > 0
+            ? 'Сегодня $count ${_lessonWord(count)}'
+            : data.lessonsFinishedForToday
+                ? 'Пары закончились'
+                : 'Сегодня выходной');
+    final subtitle = data.scheduleStatus != null
+        ? 'Расписание на выбранный день'
+        : count > 0
+            ? 'Кратко по расписанию на день'
+            : data.lessonsFinishedForToday
+                ? 'На сегодня больше ничего нет'
+                : 'Пар нет, можно закрыть задания или отдохнуть';
+    final emptyText = data.scheduleStatus ??
+        (data.lessonsFinishedForToday
+            ? 'Пары на сегодня закончились'
+            : 'Сегодня пар нет');
     final foreground = isDark ? Colors.white : const Color(0xFF1F2937);
     final mutedForeground = foreground.withValues(alpha: isDark ? 0.78 : 0.68);
     final accent = isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C63D8);
@@ -913,7 +917,7 @@ class _AssignmentsSection extends StatelessWidget {
               child: Padding(
                 padding: const EdgeInsets.all(12),
                 child: capped.isEmpty
-                    ? const _EmptyAssignments()
+                    ? _EmptyAssignments(status: data.assignmentsStatus)
                     : Column(
                         children: [
                           for (var i = 0; i < capped.length; i++)
@@ -1129,7 +1133,8 @@ class _DoneCheckButton extends StatelessWidget {
 }
 
 class _EmptyAssignments extends StatelessWidget {
-  const _EmptyAssignments();
+  const _EmptyAssignments({this.status});
+  final String? status;
 
   @override
   Widget build(BuildContext context) {
@@ -1150,14 +1155,16 @@ class _EmptyAssignments extends StatelessWidget {
             size: 36,
           ),
           const SizedBox(height: 10),
-          const Text(
-            'Пока нет ближайших заданий',
+          Text(
+            status ?? 'Пока нет ближайших заданий',
             textAlign: TextAlign.center,
             style: TextStyle(fontWeight: FontWeight.w900),
           ),
           const SizedBox(height: 6),
           Text(
-            'Если староста добавит задание в чат, оно появится здесь',
+            status != null
+                ? 'Можно пользоваться остальными разделами'
+                : 'Если староста добавит задание в чат, оно появится здесь',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: theme.colorScheme.onSurface.withValues(alpha: 0.62),

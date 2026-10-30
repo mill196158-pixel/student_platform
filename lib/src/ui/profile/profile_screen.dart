@@ -18,6 +18,7 @@ import 'package:student_platform/src/ui/friends/my_friends_screen.dart';
 import 'package:student_platform/src/ui/content/content_nav_executor.dart';
 import 'package:student_platform/src/ui/info/content_media_service.dart';
 import 'package:student_platform/src/ui/profile/profile_feed_service.dart';
+import 'package:student_platform/src/ui/profile/profile_card_media_loader.dart';
 import 'package:student_platform/src/ui/profile/student_points_service.dart';
 import 'package:student_platform/src/ui/profile/my_reviews_screen.dart';
 
@@ -38,7 +39,8 @@ class _ProfileScreenState extends State<ProfileScreen>
   // ----- deps -----
   final SupabaseClient _sb = Supabase.instance.client;
   final ProfileFeedService _feedService = ProfileFeedService();
-  final ContentMediaService _contentMedia = ContentMediaService();
+  final ContentMediaService _contentMedia =
+      ContentMediaService(persistBytes: true);
   ProfileFeedLoadResult _feed =
       const ProfileFeedLoadResult(isDemoFallback: true);
   final StudentPointsService _pointsService = StudentPointsService();
@@ -150,6 +152,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   Future<void> _hydrateFeedMedia(ProfileFeedLoadResult feed) async {
     final generation = ++_feedMediaGeneration;
+    final mediaUser = _sb.auth.currentUser?.id;
     if (feed.hideFeed || feed.isDemoFallback || feed.cards.isEmpty) return;
 
     // Mark image variants as loading until bytes arrive (home promo parity).
@@ -166,53 +169,46 @@ class _ProfileScreenState extends State<ProfileScreen>
       });
     }
 
-    final hydrated = <ManagedProfileFeedCard>[];
-    for (final card in loadingCards) {
-      if (!mounted || generation != _feedMediaGeneration) return;
-      final version = '${card.id}|${card.sortOrder}';
-      Uint8List? imageBytes = card.imageBytes;
-      Uint8List? iconBytes = card.iconBytes;
-      final imageId = card.payload.imageAssetId?.trim();
-      final iconId = card.payload.iconAssetId?.trim();
-      final needsImage = profileFeedCardNeedsImageFetch(card);
-      if (needsImage && imageId != null && imageId.isNotEmpty) {
-        imageBytes = await _contentMedia.fetchBytes(
-          imageId,
-          contentVersion: version,
+    final hydrated = List<ManagedProfileFeedCard>.from(loadingCards);
+    void publish() {
+      if (!mounted ||
+          generation != _feedMediaGeneration ||
+          _sb.auth.currentUser?.id != mediaUser) return;
+      // Keep last-good if a newer feed load already replaced the set.
+      final currentIds = _feed.cards.map((c) => c.id).join('|');
+      final sourceIds = feed.cards.map((c) => c.id).join('|');
+      if (currentIds != sourceIds && _feed.cards.isNotEmpty) return;
+      setState(() {
+        _feed = ProfileFeedLoadResult(
+          cards: List.of(hydrated),
+          isDemoFallback: feed.isDemoFallback,
+          intentionallyEmpty: feed.intentionallyEmpty,
+          loadError: feed.loadError,
+          rpcUnavailable: feed.rpcUnavailable,
         );
-      }
-      if ((iconBytes == null || iconBytes.isEmpty) &&
-          iconId != null &&
-          iconId.isNotEmpty) {
-        iconBytes = await _contentMedia.fetchBytes(
-          iconId,
-          contentVersion: '$version|icon',
-        );
-      }
-      hydrated.add(
-        card.copyWith(
-          imageBytes: imageBytes,
-          iconBytes: iconBytes,
-          imageLoading: false,
-          clearImageBytes:
-              needsImage && (imageBytes == null || imageBytes.isEmpty),
-        ),
-      );
+      });
     }
-    if (!mounted || generation != _feedMediaGeneration) return;
-    // Keep last-good if a newer feed load already replaced the set.
-    final currentIds = _feed.cards.map((c) => c.id).join('|');
-    final sourceIds = feed.cards.map((c) => c.id).join('|');
-    if (currentIds != sourceIds && _feed.cards.isNotEmpty) return;
-    setState(() {
-      _feed = ProfileFeedLoadResult(
-        cards: hydrated,
-        isDemoFallback: feed.isDemoFallback,
-        intentionallyEmpty: feed.intentionallyEmpty,
-        loadError: feed.loadError,
-        rpcUnavailable: feed.rpcUnavailable,
-      );
-    });
+
+    Future<void> hydrate(int index) async {
+      final card = loadingCards[index];
+      if (!mounted ||
+          generation != _feedMediaGeneration ||
+          _sb.auth.currentUser?.id != mediaUser) return;
+      await hydrateProfileCardMedia(card,
+          fetch: (id, version) =>
+              _contentMedia.fetchBytes(id, contentVersion: version),
+          onUpdate: (updated) {
+            hydrated[index] = updated;
+            publish();
+          });
+    }
+
+    for (var start = 0; start < loadingCards.length; start += 2) {
+      await Future.wait([
+        for (var i = start; i < loadingCards.length && i < start + 2; i++)
+          hydrate(i),
+      ]);
+    }
   }
 
   void _recordVisibleFeedImpression(ManagedProfileFeedCard card) {
@@ -332,8 +328,8 @@ class _ProfileScreenState extends State<ProfileScreen>
     // 1) локальный пользователь (для шапки/группы)
     await _loadLocal();
     // 2) гарантируем валидную сессию
-    await _ensureSession();
     if (mounted) setState(() => _loading = false);
+    await _ensureSession();
     // 3) первый тик — только если вкладка активна. Не блокируем профиль
     // подготовкой chat ids: unread_total считает серверный RPC.
     if (mounted && (widget.activeListenable?.value ?? true)) {
@@ -381,7 +377,11 @@ class _ProfileScreenState extends State<ProfileScreen>
       final prefs = await SharedPreferences.getInstance();
       final s = prefs.getString('user');
       if (s != null && s.isNotEmpty) {
-        _user = jsonDecode(s) as Map<String, dynamic>;
+        final candidate = jsonDecode(s) as Map<String, dynamic>;
+        _user = _sb.auth.currentUser?.id != null &&
+                candidate['id'] == _sb.auth.currentUser?.id
+            ? candidate
+            : null;
       }
     } catch (_) {}
   }

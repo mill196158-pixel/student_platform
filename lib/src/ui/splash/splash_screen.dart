@@ -22,7 +22,6 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _bootstrap() async {
-    await Future.delayed(const Duration(milliseconds: 600));
     try {
       final client = Supabase.instance.client;
       final prefs = await SharedPreferences.getInstance();

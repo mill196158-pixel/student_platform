@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 class StudentHomeData {
   const StudentHomeData({
+    this.scheduleStatus,
+    this.assignmentsStatus,
     required this.profile,
     required this.currentDate,
     required this.lessons,
@@ -15,6 +17,8 @@ class StudentHomeData {
     this.lessonsFinishedForToday = false,
   });
 
+  final String? scheduleStatus;
+  final String? assignmentsStatus;
   final StudentHomeProfile profile;
   final DateTime currentDate;
   final List<StudentHomeLesson> lessons;

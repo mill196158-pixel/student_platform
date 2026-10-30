@@ -804,3 +804,15 @@ Validation: test/home_promo_loading_test.dart exercises cached hydration while d
 Экран администратора «Предметы → Из расписания» позволяет явно выбрать канонический предмет без учебного плана. Ошибка сохраняет строку и допускает повтор; неполное сопоставление не выдаётся за полный успех. Успешный алиас действует на последующие импорты.
 
 Чат создаётся только для назначенного текущего academic term, с членством через active enrollment/group_id. Старые чаты не переназначаются. Периоды 2026/27 добавлены по согласованным номинальным границам Sep1/Feb1, с is_current=false и auto_activation_enabled=false. Исторический календарь не изменяется. Прямые SQL/REST-вставки занятий вне официального импорта требуют отдельного запуска admin_sync_schedule_subjects; новый row-trigger не добавлен.
+
+
+### 2026-10-30: progressive Home/Profile loading
+
+Home no longer waits for an aggregate dashboard before painting. Profile, schedule, group deadlines, news and assignment/team requests start independently; cached profile is accepted only for the current non-null auth UID. Up to four assignment requests run concurrently. Each completed section updates a single accumulated snapshot; previously rendered data remains during refresh. Pending/error labels distinguish unknown data from confirmed empty schedule/tasks. News metadata is emitted before images finish.
+
+Home refreshes coalesce within an account only, with an 18-second attempt deadline and generation invalidation. A stuck attempt releases retry; news/profile/promo reads have 12-second limits, schedule/assignment/deadline work 15 seconds. These are upper bounds on stalled work, not normal display delays. Late callbacks from old attempts/accounts cannot replace current content. Optional strict repository reads keep the Home error state instead of treating a failed fetch as empty.
+
+Profile paints its validated local header before session refresh finishes; authentication and password policy remain in the outer auth flow. Two profile cards hydrate concurrently; each card starts image and icon requests together and paints each asset independently. Profile opts into the existing account/asset/version-scoped persistent media cache with unchanged grant expiry checks. No database permissions or server schema changes are part of this performance fix.
+
+
+Startup follow-up: Firebase and local-notification initialization is scheduled after the first frame and shared through a single-flight initializer; handled failures release the flight and reset PushSessionHost for resume retry. Authenticated push still waits for initialization before initial-message capture. Captured-session checks guard delayed initialization and initial-message stash. Splash no longer includes a fixed 600 ms delay. Auth/password checks and disk-cache preparation remain before protected content. Profile/debug instrumentation measures Dart startup stages separately from Android process startup.

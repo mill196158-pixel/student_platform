@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:student_ui/student_ui.dart';
@@ -94,7 +95,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } catch (_) {}
   }
 
-  Future<void> _load() async {
+  Future<void>? _loadInFlight;
+  String? _loadUserId;
+  Future<void> _load() {
+    final userId = _service.currentUserId;
+    if (_loadInFlight != null && _loadUserId == userId) return _loadInFlight!;
+    if (_loadUserId != userId) {
+      _data = null;
+      _error = null;
+    }
+    _loadUserId = userId;
+    final work = _loadDashboard();
+    _loadInFlight = work;
+    void release() {
+      if (identical(_loadInFlight, work)) _loadInFlight = null;
+    }
+
+    unawaited(work.then<void>((_) => release(),
+        onError: (Object _, StackTrace __) => release()));
+    return work;
+  }
+
+  Future<void> _loadDashboard() async {
+    final firstContentClock = Stopwatch()..start();
+    var reportedFirstContent = false;
+    final userId = _service.currentUserId;
     final hadData = _data != null;
     if (mounted && !hadData) {
       setState(() {
@@ -103,35 +128,64 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       });
     }
 
-    // Cache-first: paint previously saved news image bytes ASAP.
-    unawaited(_paintCachedNews());
-
     final promoGeneration = ++_promoLoadGeneration;
+    // Cache-first, scoped to this account and refresh attempt.
+    unawaited(_paintCachedNews(promoGeneration, userId));
     // Promo metadata/media must not wait for schedule, news or badge queries.
-    final promoWork = _refreshPromo(promoGeneration);
+    unawaited(_refreshPromo(promoGeneration));
     unawaited(_refreshUnreadBadge());
     try {
-      final next = await _service.load();
-      if (!mounted || promoGeneration != _promoLoadGeneration) return;
+      final next = await _service
+          .load(
+              previous: _data,
+              onUpdate: (partial) {
+                if (!mounted ||
+                    promoGeneration != _promoLoadGeneration ||
+                    _service.currentUserId != userId) return;
+                if (!reportedFirstContent && !kReleaseMode) {
+                  reportedFirstContent = true;
+                  debugPrint(
+                      '[home-perf] first partial data ${firstContentClock.elapsedMilliseconds}ms');
+                }
+                setState(() {
+                  _data = _mergeDashboardNewsImages(_data, partial);
+                  _error = null;
+                });
+              })
+          .timeout(const Duration(seconds: 18));
+      if (!mounted ||
+          promoGeneration != _promoLoadGeneration ||
+          _service.currentUserId != userId) return;
       setState(() {
         _data = _mergeDashboardNewsImages(_data, next);
         _error = null;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted ||
+          _service.currentUserId != userId ||
+          promoGeneration != _promoLoadGeneration) return;
+      if (error is TimeoutException) {
+        ++_promoLoadGeneration; // Ignore late updates from this attempt.
+        setState(() {
+          _loading = false;
+          _error = error;
+        });
+      }
       // Keep last good dashboard (and images) on refresh failure.
       if (!hadData) setState(() => _error = error);
     } finally {
       if (mounted && promoGeneration == _promoLoadGeneration)
         setState(() => _loading = false);
     }
-    await promoWork;
   }
 
   Future<void> _refreshPromo(int generation) async {
+    final userId = _service.currentUserId;
     await _paintCachedPromo(generation);
     final promo = await _loadPromoSafe();
-    if (!mounted || generation != _promoLoadGeneration) return;
+    if (!mounted ||
+        generation != _promoLoadGeneration ||
+        userId != _service.currentUserId) return;
     setState(() => _promo = promo);
     _maybeRecordPromoImpression(promo);
     await _hydratePromoMedia(promo);
@@ -139,7 +193,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<HomePromoLoadResult> _loadPromoSafe() async {
     try {
-      return await _promoService.load();
+      return await _promoService.load().timeout(const Duration(seconds: 12));
     } catch (error) {
       debugPrint('[home] promo load failed: $error');
       // Hard errors: last-good cache only. Demo only when RPC is truly missing
@@ -166,14 +220,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } catch (_) {}
   }
 
-  Future<void> _paintCachedNews() async {
+  Future<void> _paintCachedNews(int generation, String? userId) async {
     try {
       final cached = await _service.loadCachedNews();
-      if (!mounted || cached.isEmpty || _data == null) return;
+      if (!mounted ||
+          generation != _promoLoadGeneration ||
+          userId != _service.currentUserId ||
+          cached.isEmpty ||
+          _data == null) return;
       setState(() {
         _data = _mergeDashboardNewsImages(
           _data,
           HomeDashboardData(
+            scheduleStatus: _data!.scheduleStatus,
+            assignmentsStatus: _data!.assignmentsStatus,
             profile: _data!.profile,
             scheduleDate: _data!.scheduleDate,
             todayLessons: _data!.todayLessons,
@@ -205,6 +265,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           item,
     ];
     return HomeDashboardData(
+      scheduleStatus: next.scheduleStatus,
+      assignmentsStatus: next.assignmentsStatus,
       profile: next.profile,
       scheduleDate: next.scheduleDate,
       todayLessons: next.todayLessons,
@@ -242,6 +304,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     return Column(
       children: [
+        if (_error != null)
+          TextButton(
+              onPressed: _load,
+              child: const Text('Не всё удалось обновить. Повторить')),
+        if (_loading)
+          const LinearProgressIndicator(
+              minHeight: 2, semanticsLabel: 'Обновляем данные'),
         Expanded(
           child: StudentHomeView(
             data: _toPresentationData(data),
@@ -308,6 +377,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   StudentHomeData _toPresentationData(HomeDashboardData data) {
     return StudentHomeData(
+      scheduleStatus: data.scheduleStatus,
+      assignmentsStatus: data.assignmentsStatus,
       profile: StudentHomeProfile(
         name: data.profile.displayName,
         groupName: data.profile.groupName,
@@ -649,9 +720,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _hydratePromoMedia(HomePromoLoadResult promo) async {
+    final mediaUser = _service.currentUserId;
     final generation = ++_promoMediaGeneration;
     if (promo.hidePromoStrip || promo.isDemoFallback || promo.cards.isEmpty) {
-      if (!mounted || generation != _promoMediaGeneration) return;
+      if (!mounted ||
+          generation != _promoMediaGeneration ||
+          mediaUser != _service.currentUserId) return;
       setState(() {
         _promoImageBytes.clear();
         _promoIconBytes.clear();
@@ -701,7 +775,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           imageId,
           contentVersion: version,
         );
-        if (!mounted || generation != _promoMediaGeneration) return;
+        if (!mounted ||
+            generation != _promoMediaGeneration ||
+            mediaUser != _service.currentUserId) return;
         setState(() {
           if (bytes != null && bytes.isNotEmpty) {
             _promoImageBytes[card.id] = bytes;
@@ -712,7 +788,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           }
         });
       } else if (usesImage) {
-        if (!mounted || generation != _promoMediaGeneration) return;
+        if (!mounted ||
+            generation != _promoMediaGeneration ||
+            mediaUser != _service.currentUserId) return;
         setState(() {
           _promoImageBytes.remove(card.id);
           _promoImageStates[card.id] = ContentImageRenderState.missing;
@@ -724,18 +802,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           iconId,
           contentVersion: '$version|icon',
         );
-        if (!mounted || generation != _promoMediaGeneration) return;
+        if (!mounted ||
+            generation != _promoMediaGeneration ||
+            mediaUser != _service.currentUserId) return;
         if (iconBytes != null && iconBytes.isNotEmpty) {
           setState(() => _promoIconBytes[card.id] = iconBytes);
         }
       } else {
-        if (!mounted || generation != _promoMediaGeneration) return;
+        if (!mounted ||
+            generation != _promoMediaGeneration ||
+            mediaUser != _service.currentUserId) return;
         setState(() => _promoIconBytes.remove(card.id));
       }
     }
 
     for (var offset = 0; offset < promo.cards.length; offset += 2) {
-      if (!mounted || generation != _promoMediaGeneration) return;
+      if (!mounted ||
+          generation != _promoMediaGeneration ||
+          mediaUser != _service.currentUserId) return;
       await Future.wait(promo.cards.skip(offset).take(2).map(hydrate));
     }
   }

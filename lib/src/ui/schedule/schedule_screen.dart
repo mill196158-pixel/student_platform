@@ -34,7 +34,8 @@ class ScheduleRepository {
     return loadRange(first, days: days);
   }
 
-  Future<List<Lesson>> loadRange(DateTime from, {required int days}) async {
+  Future<List<Lesson>> loadRange(DateTime from,
+      {required int days, bool strict = false}) async {
     try {
       final start = MskDate.calendarDate(from);
 
@@ -57,6 +58,7 @@ class ScheduleRepository {
     } catch (e, st) {
       // ignore: avoid_print
       print('RPC get_my_lessons error: $e\n$st');
+      if (strict) rethrow;
       return [];
     }
   }
@@ -593,7 +595,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   List<_ScheduleDueEntry> _dueEntriesForDay(DateTime day) {
     final entries = <_ScheduleDueEntry>[
       for (final a in _assignmentsForDay(day)) _ScheduleDueEntry.assignment(a),
-      for (final g in _groupActionsForDay(day)) _ScheduleDueEntry.groupAction(g),
+      for (final g in _groupActionsForDay(day))
+        _ScheduleDueEntry.groupAction(g),
     ]..sort((a, b) => a.occursAt.compareTo(b.occursAt));
     return entries;
   }

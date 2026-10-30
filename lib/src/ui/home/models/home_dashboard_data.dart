@@ -8,6 +8,8 @@ import 'package:student_platform/src/ui/schedule/models/lesson.dart';
 import 'package:student_platform/src/ui/schedule/utils/msk_date.dart';
 
 class HomeDashboardData {
+  final String? scheduleStatus;
+  final String? assignmentsStatus;
   final HomeUserProfile profile;
   final DateTime scheduleDate;
   final List<Lesson> todayLessons;
@@ -19,6 +21,8 @@ class HomeDashboardData {
   final List<HomeGroupActionPreview> groupActions;
 
   const HomeDashboardData({
+    this.scheduleStatus,
+    this.assignmentsStatus,
     required this.profile,
     required this.scheduleDate,
     required this.todayLessons,
@@ -146,8 +150,7 @@ class HomeGroupActionPreview {
   bool get isCollection => eventType == 'collection_deadline';
 
   /// Card type label — not the list title (e.g. «Доклад» is a list name).
-  String get kindLabel =>
-      isTopic ? 'Тема' : (isCollection ? 'Сбор' : '');
+  String get kindLabel => isTopic ? 'Тема' : (isCollection ? 'Сбор' : '');
 }
 
 class HomeNewsItem {

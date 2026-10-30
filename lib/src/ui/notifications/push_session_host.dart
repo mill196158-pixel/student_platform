@@ -61,6 +61,12 @@ class _PushSessionHostState extends State<PushSessionHost>
     try {
       await PushNotificationService.instance.onAuthenticated(context);
       if (!mounted) return;
+      if (PushNotificationService.instance.isSupportedPlatform &&
+          !PushNotificationService.instance.isFirebaseReady) {
+        _started =
+            false; // A handled Firebase failure must still retry on resume.
+        return;
+      }
       await PushNavigation.flushPending(context);
     } catch (_) {
       _started = false; // Retry on resume after a transient startup failure.

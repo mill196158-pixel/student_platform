@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -97,6 +99,12 @@ final GoRouter appRouter = GoRouter(
 );
 
 Future<void> main() async {
+  final startup = Stopwatch()..start();
+  void stage(String name) {
+    if (!kReleaseMode)
+      debugPrint('[startup-perf] $name ${startup.elapsedMilliseconds}ms');
+  }
+
   WidgetsFlutterBinding.ensureInitialized();
 
   await SystemChrome.setPreferredOrientations([
@@ -115,9 +123,10 @@ Future<void> main() async {
     ),
   );
 
-  // Mobile-only Firebase bootstrap (no-op on Windows/desktop / missing config).
+  stage('supabase-ready');
+  // Firebase/local notification setup must not hold back the first frame.
+  // Authenticated push startup still awaits the same single-flight initializer.
   PushNotificationService.instance.bindNavigatorKey(rootNavigatorKey);
-  await PushNotificationService.instance.bootstrapFirebase();
 
   // Поднимаем локальные данные до первого кадра: после холодного старта чаты
   // и друзья сразу рисуются из дискового кэша, сеть обновляет их в фоне.
@@ -131,7 +140,12 @@ Future<void> main() async {
   // Подключаем серверную реализацию дневника предмета
   SubjectDiaryRepository.instance = SubjectDiaryRepositorySupabase();
 
+  stage('local-cache-ready');
   runApp(const StudentPlatformApp());
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    stage('first-frame');
+    unawaited(PushNotificationService.instance.bootstrapFirebase());
+  });
 }
 
 class StudentPlatformApp extends StatelessWidget {

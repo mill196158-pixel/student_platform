@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:student_platform/src/core/single_flight_initialization.dart';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -50,10 +51,13 @@ class PushNotificationService {
     // Kept for call-site compatibility; navigation uses [rootNavigatorKey].
   }
 
-  Future<void> bootstrapFirebase() async {
-    if (!isSupportedPlatform) return;
-    if (_firebaseReady) return;
+  final _firebaseBootstrap = SingleFlightInitialization();
+  Future<void> bootstrapFirebase() {
+    if (!isSupportedPlatform || _firebaseReady) return Future.value();
+    return _firebaseBootstrap.run(_initializeFirebase);
+  }
 
+  Future<void> _initializeFirebase() async {
     try {
       if (Firebase.apps.isEmpty) {
         await Firebase.initializeApp(
@@ -74,22 +78,30 @@ class PushNotificationService {
 
   Future<void> onAuthenticated(BuildContext? context) async {
     if (!isSupportedPlatform) return;
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+    bool sameSession() =>
+        _sessionActive &&
+        Supabase.instance.client.auth.currentUser?.id == userId;
     _sessionActive = true;
     PushNavigation.markReady();
 
     await bootstrapFirebase();
-    if (!_firebaseReady) return;
+    if (!_firebaseReady || !sameSession()) return;
 
     await _ensureInstallationId();
+    if (!sameSession()) return;
     await _attachListeners();
-    await _handleInitialMessage();
+    if (!sameSession()) return;
+    await _handleInitialMessage(sameSession);
+    if (!sameSession()) return;
 
     if (context != null && context.mounted) {
       await maybeShowPermissionPrompt(context);
     }
 
     final settings = await FirebaseMessaging.instance.getNotificationSettings();
-    if (_isAuthorized(settings.authorizationStatus)) {
+    if (sameSession() && _isAuthorized(settings.authorizationStatus)) {
       await _registerCurrentToken();
     }
   }
@@ -213,9 +225,9 @@ class PushNotificationService {
     });
   }
 
-  Future<void> _handleInitialMessage() async {
+  Future<void> _handleInitialMessage(bool Function() sameSession) async {
     final initial = await FirebaseMessaging.instance.getInitialMessage();
-    if (initial == null) return;
+    if (initial == null || !sameSession()) return;
     final payload = PushPayload.tryParse(initial.data);
     if (payload == null) return;
     PushNavigation.stash(payload);
@@ -243,12 +255,14 @@ class PushNotificationService {
             .eq('id', payload!.notificationId!)
             .eq('recipient_id', uid)
             .maybeSingle();
-        if (row == null || row['read_at'] != null || row['deleted_at'] != null) return;
+        if (row == null || row['read_at'] != null || row['deleted_at'] != null)
+          return;
       } catch (_) {
         // Realtime can still deliver fresh events; do not display an unverifiable delayed push.
         return;
       }
-      if (!_sessionActive || Supabase.instance.client.auth.currentUser?.id != uid ||
+      if (!_sessionActive ||
+          Supabase.instance.client.auth.currentUser?.id != uid ||
           InAppNotificationBus.instance.wasDismissed(payload.notificationId) ||
           ActiveChatTracker.instance.isActive(chatId)) return;
     }

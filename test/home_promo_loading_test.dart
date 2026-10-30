@@ -11,9 +11,14 @@ import 'package:student_platform/src/ui/info/content_media_service.dart';
 import 'package:student_platform/src/services/push/app_notifications_api.dart';
 
 class Dashboard implements HomeDashboardService {
+  @override
+  String? get currentUserId => 'fixture';
   final pending = Completer<HomeDashboardData>();
   @override
-  Future<HomeDashboardData> load() => pending.future;
+  Future<HomeDashboardData> load(
+          {void Function(HomeDashboardData)? onUpdate,
+          HomeDashboardData? previous}) =>
+      pending.future;
   @override
   Future<List<HomeNewsItem>> loadCachedNews() async => [];
   @override
@@ -72,7 +77,111 @@ class Media implements ContentMediaService {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+class ProgressiveDashboard implements HomeDashboardService {
+  String user = 'a';
+  @override
+  String? get currentUserId => user;
+  final updates = <void Function(HomeDashboardData)>[];
+  final requests = <Completer<HomeDashboardData>>[];
+  @override
+  Future<HomeDashboardData> load(
+      {void Function(HomeDashboardData)? onUpdate,
+      HomeDashboardData? previous}) {
+    updates.add(onUpdate!);
+    final request = Completer<HomeDashboardData>();
+    requests.add(request);
+    return request.future;
+  }
+
+  @override
+  Future<List<HomeNewsItem>> loadCachedNews() async => [];
+  @override
+  dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
+}
+
+HomeDashboardData partial(String id, String name) => HomeDashboardData(
+    profile: HomeUserProfile(id: id, name: name),
+    scheduleDate: DateTime.now(),
+    todayLessons: const [],
+    assignments: const [],
+    news: const [],
+    scheduleStatus: 'Загружаем расписание…',
+    assignmentsStatus: 'Загружаем ближайшие дела…');
+
 void main() {
+  testWidgets(
+      'deadline releases coalescing and late attempt cannot overwrite retry',
+      (t) async {
+    final dashboard = ProgressiveDashboard();
+    final promo = Promo();
+    final notifications = Notifications();
+    await t.pumpWidget(MaterialApp(
+        home: HomeScreen(
+            dashboardService: dashboard,
+            promoService: promo,
+            notificationsApi: notifications,
+            contentMedia: Media())));
+    await t.pump();
+    dashboard.updates[0](partial('a', 'Initial'));
+    await t.pump();
+    await t.pump(const Duration(seconds: 19));
+    await t.pump();
+    expect(find.text('Не всё удалось обновить. Повторить'), findsOneWidget);
+    await t.tap(find.text('Не всё удалось обновить. Повторить'));
+    await t.pump();
+    expect(dashboard.requests, hasLength(2));
+    dashboard.updates[1](partial('a', 'Retry'));
+    dashboard.updates[0](partial('a', 'Obsolete'));
+    await t.pump();
+    expect(find.textContaining('Obsolete'), findsNothing);
+    dashboard.requests[1].complete(partial('a', 'Retry'));
+    dashboard.requests[0].complete(partial('a', 'Obsolete'));
+    promo.pending.complete(const HomePromoLoadResult(intentionallyEmpty: true));
+    notifications.pending.complete(0);
+    await t.pumpAndSettle();
+    expect(t.takeException(), isNull);
+  });
+
+  testWidgets(
+      'partial dashboard visible before completion; coalesce and reject old account updates',
+      (t) async {
+    final dashboard = ProgressiveDashboard();
+    final promo = Promo();
+    final notifications = Notifications();
+    await t.pumpWidget(MaterialApp(
+        home: HomeScreen(
+            dashboardService: dashboard,
+            promoService: promo,
+            notificationsApi: notifications,
+            contentMedia: Media())));
+    await t.pump();
+    dashboard.updates[0](partial('a', 'Alice'));
+    await t.pump();
+    expect(find.byType(StudentHomeView), findsOneWidget);
+    expect(find.text('Сегодня выходной'), findsNothing);
+    expect(find.text('Пока нет ближайших заданий'), findsNothing);
+    t.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    t.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await t.pump();
+    expect(dashboard.requests, hasLength(1));
+    dashboard.user = 'b';
+    t.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    t.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await t.pump();
+    expect(dashboard.requests, hasLength(2));
+    dashboard.updates[1](partial('b', 'Bob'));
+    await t.pump();
+    dashboard.updates[0](partial('a', 'Wrong old account'));
+    await t.pump();
+    expect(find.textContaining('Wrong old account'), findsNothing);
+    dashboard.requests[0].complete(partial('a', 'Wrong old account'));
+    dashboard.requests[1].complete(partial('b', 'Bob'));
+    promo.pending.complete(const HomePromoLoadResult(intentionallyEmpty: true));
+    notifications.pending.complete(0);
+    await t.pumpAndSettle();
+    expect(t.takeException(), isNull);
+  });
+
   testWidgets(
       'cached promo hydration does not wait for dashboard, badge or promo RPC',
       (t) async {

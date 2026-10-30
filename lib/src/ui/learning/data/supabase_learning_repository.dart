@@ -29,7 +29,7 @@ class SupabaseLearningRepository implements LearningRepository {
   // -------------------- Команды --------------------
 
   @override
-  Future<List<Team>> loadTeams(String groupCode) async {
+  Future<List<Team>> loadTeams(String groupCode, {bool strict = false}) async {
     try {
       debugPrint('[loadTeams] calling get_my_teams');
       final res = await _sb.rpc('get_my_teams');
@@ -42,6 +42,7 @@ class SupabaseLearningRepository implements LearningRepository {
       return list;
     } catch (e, st) {
       debugPrint('[loadTeams] error: $e\n$st');
+      if (strict) rethrow;
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_kTeamsCache);
       if (raw == null || raw.isEmpty) return [];
@@ -708,7 +709,8 @@ class SupabaseLearningRepository implements LearningRepository {
 
       // Вместо удаления файлов — отвязываем их от сообщения (message_id = null),
       // чтобы файлы оставались доступны во вкладке "Файлы".
-      await _sb.rpc('detach_my_message_files', params: {'p_message_id': messageId});
+      await _sb
+          .rpc('detach_my_message_files', params: {'p_message_id': messageId});
 
       debugPrint('[deleteMessage] связанные файлы отвязаны (message_id=null)');
 
@@ -846,7 +848,8 @@ class SupabaseLearningRepository implements LearningRepository {
   }
 
   @override
-  Future<List<Assignment>> loadAssignments(String teamId) async {
+  Future<List<Assignment>> loadAssignments(String teamId,
+      {bool strict = false}) async {
     try {
       final res =
           await _sb.rpc('get_team_assignments', params: {'p_team_id': teamId});
@@ -862,6 +865,7 @@ class SupabaseLearningRepository implements LearningRepository {
       return list;
     } catch (e, st) {
       debugPrint('[loadAssignments] error: $e\n$st');
+      if (strict) rethrow;
       // оффлайн-кэш
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString('$_assignPrefix$teamId');

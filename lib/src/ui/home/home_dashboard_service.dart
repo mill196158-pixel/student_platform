@@ -38,6 +38,8 @@ class HomeDashboardService {
         _imageCache = imageCache ?? NewsImageDiskCache(),
         _http = httpClient ?? http.Client();
 
+  String? get currentUserId => _sb.auth.currentUser?.id;
+
   final SupabaseClient _sb;
   final ScheduleRepository _scheduleRepository;
   final SupabaseLearningRepository _learningRepository;
@@ -53,33 +55,99 @@ class HomeDashboardService {
     return _hydrateImagesFromDisk(cached);
   }
 
-  Future<HomeDashboardData> load() async {
+  Future<HomeDashboardData> load({
+    void Function(HomeDashboardData)? onUpdate,
+    HomeDashboardData? previous,
+  }) async {
+    final userId = _sb.auth.currentUser?.id;
     final scheduleDate = MskDate.today();
-    final profile = await _loadProfile();
-    final results = await Future.wait<dynamic>([
-      _loadTodayLessons(scheduleDate),
-      _loadAssignments(profile.groupName),
-      _loadReadNotificationIds(),
-      _loadPublishedNews(),
-      _loadGroupActionDeadlines(),
+    final validPrevious =
+        previous?.profile.id == userId && userId != null ? previous : null;
+    var profile = validPrevious?.profile ?? const HomeUserProfile();
+    var lessons = validPrevious?.isScheduleForToday == true
+        ? validPrevious!.todayLessons
+        : <Lesson>[];
+    var assignments = validPrevious?.assignments ?? <HomeAssignmentPreview>[];
+    var reads = validPrevious?.readNotificationIds ?? <String>{};
+    var news = validPrevious?.news ?? <HomeNewsItem>[];
+    var actions = validPrevious?.groupActions ?? <HomeGroupActionPreview>[];
+    String? scheduleStatus = 'Загружаем расписание…';
+    String? assignmentsStatus = 'Загружаем ближайшие дела…';
+    var assignmentsReady = false;
+    var actionsReady = false;
+    void updateAssignmentStatus() {
+      if (assignmentsReady && actionsReady) assignmentsStatus = null;
+    }
+
+    HomeDashboardData snapshot() => HomeDashboardData(
+        scheduleStatus: scheduleStatus,
+        assignmentsStatus: assignmentsStatus,
+        profile: profile,
+        scheduleDate: scheduleDate,
+        todayLessons: lessons,
+        assignments: assignments.take(4).toList(),
+        news: news,
+        readNotificationIds: reads,
+        groupActions: actions.take(4).toList());
+    void publish() {
+      if (_sb.auth.currentUser?.id == userId) onUpdate?.call(snapshot());
+    }
+
+    // Independent work starts before the remote profile. Media never gates
+    // schedule or assignments; each completed section is painted immediately.
+    final profileWork = _loadProfile(onCached: (cached) {
+      profile = cached;
+      publish();
+    }).then((value) {
+      profile = value;
+      publish();
+    });
+    final assignmentsWork =
+        _loadAssignments().timeout(const Duration(seconds: 15)).then((value) {
+      assignments = value;
+      assignmentsReady = true;
+      updateAssignmentStatus();
+      publish();
+    }, onError: (Object error) {
+      assignmentsStatus = 'Не удалось обновить задания';
+      publish();
+    });
+    await Future.wait<void>([
+      profileWork,
+      assignmentsWork,
+      _loadTodayLessons(scheduleDate).timeout(const Duration(seconds: 15)).then(
+          (value) {
+        lessons = value;
+        scheduleStatus = null;
+        publish();
+      }, onError: (Object error) {
+        scheduleStatus = 'Не удалось обновить расписание';
+        publish();
+      }),
+      _loadReadNotificationIds().then((value) {
+        reads = value;
+        publish();
+      }),
+      _loadPublishedNews(onMetadata: (value) {
+        news = value;
+        publish();
+      }).then((value) {
+        news = value;
+        publish();
+      }),
+      _loadGroupActionDeadlines().timeout(const Duration(seconds: 15)).then(
+          (value) {
+        actions = value;
+        actionsReady = true;
+        updateAssignmentStatus();
+        publish();
+      }, onError: (Object error) {
+        assignmentsStatus = 'Не удалось обновить ближайшие дела';
+        publish();
+      }),
     ]);
-
-    final lessons = results[0] as List<Lesson>;
-    final assignments = results[1] as List<HomeAssignmentPreview>;
-    final readNotificationIds = results[2] as Set<String>;
-    final news = results[3] as List<HomeNewsItem>;
-    final groupActions = results[4] as List<HomeGroupActionPreview>;
-
-    return HomeDashboardData(
-      profile: profile,
-      scheduleDate: scheduleDate,
-      todayLessons: lessons,
-      assignments: assignments.take(4).toList(),
-      news: news,
-      readNotificationIds: readNotificationIds,
-      unreadMessagesCount: 0,
-      groupActions: groupActions.take(4).toList(),
-    );
+    if (_sb.auth.currentUser?.id != userId) throw StateError('session_changed');
+    return snapshot();
   }
 
   /// Marks a published news post as seen (and optionally closed) for the user.
@@ -102,17 +170,25 @@ class HomeDashboardService {
   /// - Fresh metadata comes from `get_my_published_news`.
   /// - On network failure the feed + last good images are kept.
   /// - Refresh never clears working image bytes for an unchanged cache key.
-  Future<List<HomeNewsItem>> _loadPublishedNews() async {
+  Future<List<HomeNewsItem>> _loadPublishedNews({
+    void Function(List<HomeNewsItem>)? onMetadata,
+  }) async {
+    final newsUser = _sb.auth.currentUser?.id;
     final cached = await _newsCache.read();
     final cachedWithImages = await _hydrateImagesFromDisk(cached);
+    if (cachedWithImages.isNotEmpty) onMetadata?.call(cachedWithImages);
     try {
-      final response = await _sb.rpc('get_my_published_news');
+      final response = await _sb
+          .rpc('get_my_published_news')
+          .timeout(const Duration(seconds: 12));
       final rows = _asMapList(response);
+      if (_sb.auth.currentUser?.id != newsUser) return const [];
       await _newsCache.write(rows);
       final fresh = rows.map(mapPublishedNews).toList();
       final merged =
           _mergeKeepingImages(previous: cachedWithImages, next: fresh);
-      return _resolveNewsImages(merged, prefetchStory: true);
+      onMetadata?.call(merged);
+      return await _resolveNewsImages(merged, prefetchStory: true);
     } catch (e) {
       debugPrint('[home] published news failed: $e');
       if (cachedWithImages.isNotEmpty) {
@@ -218,7 +294,7 @@ class HomeDashboardService {
       final response = await _sb.functions.invoke(
         'news-media',
         body: {'action': 'createDownload', 'path': path},
-      );
+      ).timeout(const Duration(seconds: 10));
       if (response.status >= 400) {
         debugPrint(
           '[home] news image createDownload status=${response.status}',
@@ -236,7 +312,9 @@ class HomeDashboardService {
         debugPrint('[home] news image createDownload empty url');
         return null;
       }
-      final download = await _http.get(Uri.parse(signedUrl));
+      final download = await _http
+          .get(Uri.parse(signedUrl))
+          .timeout(const Duration(seconds: 10));
       if (download.statusCode != 200) {
         debugPrint(
           '[home] news image bytes status=${download.statusCode}',
@@ -322,28 +400,41 @@ class HomeDashboardService {
         ..sort((a, b) => a.occursAt.compareTo(b.occursAt));
     } catch (e) {
       debugPrint('[home] group action deadlines failed: $e');
-      return const [];
+      rethrow;
     }
   }
 
-  Future<HomeUserProfile> _loadProfile() async {
+  Future<HomeUserProfile> _loadProfile(
+      {void Function(HomeUserProfile)? onCached}) async {
+    final userId = _sb.auth.currentUser?.id;
     Map<String, dynamic>? cached;
 
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString('user');
       if (raw != null && raw.isNotEmpty) {
-        cached = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+        final candidate = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+        if (userId != null &&
+            candidate['id'] == userId &&
+            _sb.auth.currentUser?.id == userId) {
+          cached = candidate;
+          onCached?.call(HomeUserProfile.fromMap(candidate));
+        }
       }
     } catch (e) {
       debugPrint('[home] local profile read failed: $e');
     }
 
     try {
-      final rows = await _sb.rpc('get_my_profile') as List?;
+      final rows = await _sb
+          .rpc('get_my_profile')
+          .timeout(const Duration(seconds: 12)) as List?;
       if (rows != null && rows.isNotEmpty) {
         final fresh = Map<String, dynamic>.from(rows.first as Map);
         final prefs = await SharedPreferences.getInstance();
+        if (_sb.auth.currentUser?.id != userId || fresh['id'] != userId) {
+          throw StateError('session_changed');
+        }
         await prefs.setString('user', jsonEncode(fresh));
         return HomeUserProfile.fromMap(fresh);
       }
@@ -364,7 +455,8 @@ class HomeDashboardService {
       final rows = await _sb
           .from('home_notification_reads')
           .select('notification_id')
-          .eq('user_id', userId);
+          .eq('user_id', userId)
+          .timeout(const Duration(seconds: 12));
       return rows
           .map((row) => (row['notification_id'] ?? '').toString().trim())
           .where((id) => id.isNotEmpty)
@@ -377,39 +469,44 @@ class HomeDashboardService {
 
   Future<List<Lesson>> _loadTodayLessons(DateTime today) async {
     try {
-      final todayLessons = await _scheduleRepository.loadRange(today, days: 1);
+      final todayLessons =
+          await _scheduleRepository.loadRange(today, days: 1, strict: true);
       return todayLessons
           .where((lesson) => MskDate.isSameCalendarDate(lesson.date, today))
           .toList()
         ..sort(_compareLessons);
     } catch (e) {
       debugPrint('[home] today lessons failed: $e');
-      return [];
+      rethrow;
     }
   }
 
-  Future<List<HomeAssignmentPreview>> _loadAssignments(String groupName) async {
-    if (groupName.trim().isEmpty) return [];
-
+  Future<List<HomeAssignmentPreview>> _loadAssignments() async {
     try {
-      final teams = await _learningRepository.loadTeams(groupName);
+      final teams = await _learningRepository.loadTeams('', strict: true);
       final previews = <HomeAssignmentPreview>[];
 
-      for (final team in teams.take(8)) {
-        previews.addAll(await _loadTeamAssignments(team));
+      final selected = teams.take(8).toList();
+      for (var start = 0; start < selected.length; start += 4) {
+        final batches = await Future.wait(
+            selected.skip(start).take(4).map(_loadTeamAssignments));
+        for (final batch in batches) {
+          previews.addAll(batch);
+        }
       }
 
       previews.sort(_compareAssignments);
       return previews;
     } catch (e) {
       debugPrint('[home] assignments failed: $e');
-      return [];
+      rethrow;
     }
   }
 
   Future<List<HomeAssignmentPreview>> _loadTeamAssignments(Team team) async {
     try {
-      final assignments = await _learningRepository.loadAssignments(team.id);
+      final assignments =
+          await _learningRepository.loadAssignments(team.id, strict: true);
       return assignments
           .where((assignment) =>
               assignment.published &&
@@ -424,7 +521,7 @@ class HomeDashboardService {
           .toList();
     } catch (e) {
       debugPrint('[home] assignments for ${team.id} failed: $e');
-      return [];
+      rethrow;
     }
   }
 
