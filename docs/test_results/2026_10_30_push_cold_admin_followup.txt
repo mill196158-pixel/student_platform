@@ -1,0 +1,10 @@
+Full root Flutter suite: 331 PASS
+Admin suite: 299 PASS, 1 SKIP (REAL_ACADEMIC_PDF unset)
+Targeted Flutter tests: 25 PASS
+Analyze 10 changed Dart files: No issues
+Primary DB no_plan_schedule_rehearsal.sql: PASS, ROLLBACK
+Probe Android PID26086: NATIVE_NOTIFICATION_PASS, COLD_PHASE_SEED_OK
+Force-stop, no reinstall, wifi/mobile disabled
+Probe Android PID26216: NATIVE_NOTIFICATION_PASS, COLD_PHASE_READ_OK
+Synthetic disk keys cleaned by probe; network restored
+Not covered: real FCM delivery, physical launcher, all app chat routes, full production admin forms, automatic no-plan provisioning

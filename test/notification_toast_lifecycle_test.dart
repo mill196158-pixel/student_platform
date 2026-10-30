@@ -39,6 +39,17 @@ void main() {
     await t.pump();
     await t.pump();
     expect(find.text('Synthetic sender'), findsNothing);
+    send('one');
+    await t.pumpAndSettle();
+    expect(find.text('Synthetic sender'), findsNothing,
+        reason: 'late duplicate after read must remain dismissed');
+    bus.emit(const InAppNotificationEvent(type: 'friend_accepted',
+        title: 'Friend accepted fixture', body: 'Accepted',
+        payload: PushPayload(version: 1, type: 'friend_accepted', notificationId: 'friend')));
+    await t.pumpAndSettle();
+    expect(find.text('Friend accepted fixture'), findsOneWidget);
+    bus.dismissNotifications({'friend'});
+    await t.pumpAndSettle();
     send('two');
     await t.pump();
     await t.pump();

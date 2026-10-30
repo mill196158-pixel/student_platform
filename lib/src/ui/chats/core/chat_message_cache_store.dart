@@ -58,16 +58,21 @@ class ChatMessageCacheStore {
       final keyPrefix = '$_prefsPrefix${uid}_';
       for (final prefsKey in prefs.getKeys()) {
         if (!prefsKey.startsWith(keyPrefix)) continue;
-        final raw = prefs.getString(prefsKey);
-        if (raw == null || raw.isEmpty) continue;
-        final decoded = jsonDecode(raw);
-        if (decoded is! Map) continue;
-        final envelope = Map<String, dynamic>.from(decoded);
-        final chatId = (envelope['chatId'] ?? '').toString();
-        if (chatId.isEmpty) continue;
-        final snap = _fromEnvelope(envelope, uid);
-        if (snap.found) {
-          _memory[_memKey(uid, chatId)] = snap;
+        try {
+          final raw = prefs.getString(prefsKey);
+          if (raw == null || raw.isEmpty) continue;
+          final decoded = jsonDecode(raw);
+          if (decoded is! Map) continue;
+          final envelope = Map<String, dynamic>.from(decoded);
+          final chatId = (envelope['chatId'] ?? '').toString();
+          if (chatId.isEmpty) continue;
+          final snap = _fromEnvelope(envelope, uid);
+          if (snap.found) {
+            _memory[_memKey(uid, chatId)] = snap;
+          }
+        } catch (_) {
+          // One corrupt conversation must not prevent warming other chats.
+          continue;
         }
       }
     } catch (_) {}

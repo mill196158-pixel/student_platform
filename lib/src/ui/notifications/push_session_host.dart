@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:student_platform/src/services/push/system_notification_sync.dart';
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -19,13 +20,35 @@ class PushSessionHost extends StatefulWidget {
   State<PushSessionHost> createState() => _PushSessionHostState();
 }
 
-class _PushSessionHostState extends State<PushSessionHost> {
+class _PushSessionHostState extends State<PushSessionHost>
+    with WidgetsBindingObserver {
   bool _started = false;
+  StreamSubscription<InAppNotificationEvent>? _badgeSubscription;
+  late final SystemNotificationSync _systemNotifications;
+
   RealtimeChannel? _notificationChannel;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _systemNotifications = SystemNotificationSync(
+      currentUser: () => Supabase.instance.client.auth.currentUser?.id,
+      unreadCount: () async {
+        final result = await Supabase.instance.client
+            .rpc('get_my_unread_notification_count');
+        if (result is! num) throw StateError('Invalid unread count');
+        return result.toInt();
+      },
+    );
+    _badgeSubscription = InAppNotificationBus.instance.stream.listen((event) {
+      if (event.type == '_badge_refresh') {
+        unawaited(_systemNotifications.reconcile());
+      } else {
+        _systemNotifications.invalidate();
+      }
+    });
+    unawaited(_systemNotifications.reconcile());
     WidgetsBinding.instance.addPostFrameCallback((_) => _start());
   }
 
@@ -35,9 +58,13 @@ class _PushSessionHostState extends State<PushSessionHost> {
     _started = true;
 
     _subscribeNotificationRealtime();
-    await PushNotificationService.instance.onAuthenticated(context);
-    if (!mounted) return;
-    await PushNavigation.flushPending(context);
+    try {
+      await PushNotificationService.instance.onAuthenticated(context);
+      if (!mounted) return;
+      await PushNavigation.flushPending(context);
+    } catch (_) {
+      _started = false; // Retry on resume after a transient startup failure.
+    }
   }
 
   void _subscribeNotificationRealtime() {
@@ -78,12 +105,7 @@ class _PushSessionHostState extends State<PushSessionHost> {
             data.putIfAbsent('type', () => type);
             data.putIfAbsent('notification_id', () => row['id']);
             final parsed = PushPayload.tryParse(data);
-            final isChatEvent = type == 'dm_message' ||
-                type == 'team_message' ||
-                type == 'team_reply';
-
-            if (ActiveChatTracker.instance.isActive(parsed?.chatId) ||
-                (isChatEvent && ActiveChatTracker.instance.isViewingMessages)) {
+            if (ActiveChatTracker.instance.isActive(parsed?.chatId)) {
               InAppNotificationBus.instance.requestBadgeRefresh();
               return;
             }
@@ -106,7 +128,18 @@ class _PushSessionHostState extends State<PushSessionHost> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_start());
+      unawaited(_systemNotifications.reconcile());
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _systemNotifications.invalidate();
+    unawaited(_badgeSubscription?.cancel());
     InAppNotificationBus.instance.resetSession();
     final channel = _notificationChannel;
     _notificationChannel = null;

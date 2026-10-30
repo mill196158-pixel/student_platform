@@ -65,7 +65,7 @@ class _InAppToastHostState extends State<InAppToastHost>
     }
     final show = event.isChatMessage ||
         event.type == 'friend_request' ||
-        event.type == 'friend_accept';
+        event.type == 'friend_accepted';
     if (!show) return;
 
     final now = DateTime.now();
@@ -128,7 +128,7 @@ class _InAppToastHostState extends State<InAppToastHost>
       case 'team_reply':
         return Icons.groups_rounded;
       case 'friend_request':
-      case 'friend_accept':
+      case 'friend_accepted':
         return Icons.person_add_alt_1_rounded;
       default:
         return Icons.notifications_rounded;

@@ -50,6 +50,20 @@ void main() {
     ChatMessageCacheStore.debugUserIdOverride = null;
   });
 
+  test('corrupt disk envelope does not block other conversations at startup', () async {
+    final prefs = await SharedPreferences.getInstance();
+    await ChatMessageCacheStore.replace(chatId: 'valid-after-corrupt', userId: 'user-a',
+        messages: [_msg('persisted')]);
+    final raw = prefs.getString('chat_msg_cache_v1_user-a_valid-after-corrupt')!;
+    await ChatMessageCacheStore.clearOnLogout();
+    ChatMessageCacheStore.debugUserIdOverride = 'user-a';
+    ChatMessageCacheStore.debugSetPrefs(prefs);
+    await prefs.setString('chat_msg_cache_v1_user-a_corrupt', '{broken');
+    await prefs.setString('chat_msg_cache_v1_user-a_valid-after-corrupt', raw);
+    await ChatMessageCacheStore.initializeCurrentUser();
+    expect(ChatMessageCacheStore.hasSnapshot('valid-after-corrupt', userId: 'user-a'), isTrue);
+  });
+
   test('1. empty snapshot has found/hasSnapshot=true', () async {
     final snap = await ChatMessageCacheStore.replace(
       chatId: 'chat-empty',

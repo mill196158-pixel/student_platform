@@ -96,9 +96,17 @@ class PushNotificationService {
 
   Future<void> onLogout() async {
     PushNavigation.markNotReady();
+    _sessionActive = false;
+    try {
+      if (_localReady) await _local.cancelAll();
+      if (!kIsWeb && Platform.isAndroid) {
+        await const MethodChannel('student_platform/notifications')
+            .invokeMethod<void>('clearNotifications');
+      }
+    } catch (_) {}
     final installationId = await _ensureInstallationId();
 
-    if (_sessionActive && Supabase.instance.client.auth.currentUser != null) {
+    if (Supabase.instance.client.auth.currentUser != null) {
       try {
         await Supabase.instance.client.rpc(
           'disable_device_push_token',
@@ -217,12 +225,32 @@ class PushNotificationService {
     final payload = PushPayload.tryParse(message.data);
     final chatId = payload?.chatId ?? message.data['chat_id']?.toString();
     final eventType = payload?.type ?? message.data['type']?.toString() ?? '';
-    final isChatEvent = eventType == 'dm_message' ||
-        eventType == 'team_message' ||
-        eventType == 'team_reply';
-    if (ActiveChatTracker.instance.isActive(chatId) ||
-        (isChatEvent && ActiveChatTracker.instance.isViewingMessages)) {
+    if (!_sessionActive ||
+        InAppNotificationBus.instance.wasDismissed(payload?.notificationId) ||
+        ActiveChatTracker.instance.isActive(chatId)) {
       return;
+    }
+
+    // FCM can arrive after the notification was read on another device.
+    // Verify the current recipient before presenting a delayed OS payload.
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    if (uid == null) return;
+    if (payload?.notificationId != null) {
+      try {
+        final row = await Supabase.instance.client
+            .from('app_notifications')
+            .select('id,read_at,deleted_at')
+            .eq('id', payload!.notificationId!)
+            .eq('recipient_id', uid)
+            .maybeSingle();
+        if (row == null || row['read_at'] != null || row['deleted_at'] != null) return;
+      } catch (_) {
+        // Realtime can still deliver fresh events; do not display an unverifiable delayed push.
+        return;
+      }
+      if (!_sessionActive || Supabase.instance.client.auth.currentUser?.id != uid ||
+          InAppNotificationBus.instance.wasDismissed(payload.notificationId) ||
+          ActiveChatTracker.instance.isActive(chatId)) return;
     }
 
     final title =
@@ -255,7 +283,7 @@ class PushNotificationService {
         eventType == 'team_message' ||
         eventType == 'team_reply' ||
         eventType == 'friend_request' ||
-        eventType == 'friend_accept';
+        eventType == 'friend_accepted';
     if (useInAppToast) return;
 
     await _showLocalNotification(

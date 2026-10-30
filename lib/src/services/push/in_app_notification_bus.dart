@@ -34,7 +34,12 @@ class InAppNotificationBus {
 
   Stream<InAppNotificationEvent> get stream => _controller.stream;
 
+  final Set<String> _dismissed = {};
+
+  bool wasDismissed(String? id) => id != null && _dismissed.contains(id);
+
   void emit(InAppNotificationEvent event) {
+    if (wasDismissed(event.payload?.notificationId)) return;
     if (_controller.isClosed) return;
     _controller.add(event);
   }
@@ -51,12 +56,14 @@ class InAppNotificationBus {
   }
 
   void dismissNotifications([Set<String>? ids]) {
+    if (ids != null) _dismissed.addAll(ids);
     emit(InAppNotificationEvent(
         type: '_dismiss', title: '', body: '', dismissedIds: ids));
     requestBadgeRefresh();
   }
 
   void resetSession() {
+    _dismissed.clear();
     emit(const InAppNotificationEvent(
         type: '_session_reset', title: '', body: ''));
   }

@@ -1,5 +1,6 @@
 package com.mill453020.studentplatform
 
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -55,6 +56,10 @@ class MainActivity : FlutterActivity() {
             "student_platform/notifications"
         ).setMethodCallHandler { call, result ->
             when (call.method) {
+                "clearNotifications" -> {
+                    (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancelAll()
+                    result.success(null)
+                }
                 "openNotificationSettings" -> {
                     openNotificationSettings()
                     result.success(null)
