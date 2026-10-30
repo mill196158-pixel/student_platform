@@ -101,7 +101,7 @@ class AuthService {
       );
     } finally {
       if (context.mounted && _sb.auth.currentSession == null) {
-        context.go('/login');
+        context.go('/guest');
       }
     }
     if (!cleanupComplete && context.mounted) {

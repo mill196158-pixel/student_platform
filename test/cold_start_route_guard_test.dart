@@ -37,6 +37,9 @@ void main() {
                   return const Scaffold(body: Text('Protected home'));
                 }),
             GoRoute(
+                path: '/guest',
+                builder: (_, __) => const Scaffold(body: Text('Guest'))),
+            GoRoute(
                 path: '/login',
                 builder: (_, __) => const Scaffold(body: Text('Login'))),
             GoRoute(
@@ -52,7 +55,7 @@ void main() {
       expect(homeBuilds, 0);
       if (!hasSession) {
         expect(calls, 0);
-        expect(find.text('Login'), findsOneWidget);
+        expect(find.text('Guest'), findsOneWidget);
         final prefs = await SharedPreferences.getInstance();
         expect(prefs.containsKey('user'), isFalse);
         expect(prefs.containsKey('loggedIn'), isFalse);

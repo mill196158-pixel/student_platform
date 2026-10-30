@@ -87,10 +87,10 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     } on AuthException catch (e) {
       if (!mounted) return;
-      final serverTimeout = e.statusCode == '504' ||
-          e.message.toLowerCase().contains('timeout');
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(serverTimeout
+      final serverTimeout =
+          e.statusCode == '504' || e.message.toLowerCase().contains('timeout');
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(serverTimeout
               ? 'Сервер входа не ответил вовремя. Повторите попытку позже.'
               : e.message)));
     } catch (e) {
@@ -243,6 +243,10 @@ class _LoginScreenState extends State<LoginScreen> {
                                           'Нет аккаунта? Зарегистрироваться',
                                         ),
                                       ),
+                                      TextButton(
+                                          onPressed: () => context.go('/guest'),
+                                          child: const Text(
+                                              'Продолжить без входа')),
                                       const SizedBox(height: 6),
                                       Padding(
                                         padding:

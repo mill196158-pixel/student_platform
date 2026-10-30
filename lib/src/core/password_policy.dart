@@ -30,7 +30,7 @@ Future<String?> authRouteRedirect({
   required bool hasSession,
   required Future<bool> Function() passwordChangeRequired,
 }) async {
-  if (path == '/login' || path == '/splash') return null;
+  if (path == '/login' || path == '/splash' || path == '/guest') return null;
   if (!hasSession) return '/login';
   if (path == '/change-password') return null;
   try {

@@ -38,7 +38,7 @@ class _SplashScreenState extends State<SplashScreen> {
       await prefs.remove('loggedIn');
       await prefs.remove('user');
 
-      if (mounted) context.go('/login');
+      if (mounted) context.go('/guest');
     } catch (_) {
       if (!mounted) return;
       context.go('/login');

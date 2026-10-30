@@ -65,6 +65,11 @@ final GoRouter appRouter = GoRouter(
       builder: (_, __) => AuthenticateScreen(),
     ),
     GoRoute(
+      path: '/guest',
+      builder: (_, __) =>
+          const NavigationScreen(key: ValueKey('guest-shell'), guest: true),
+    ),
+    GoRoute(
       path: '/home',
       builder: (_, __) => const PushSessionHost(child: NavigationScreen()),
     ),
@@ -154,6 +159,7 @@ Future<void> main() async {
   });
   unawaited(WidgetsBinding.instance.waitUntilFirstFrameRasterized.then((_) {
     stage('first-raster');
+    if (Supabase.instance.client.auth.currentSession == null) return;
     unawaited(PushNotificationService.instance.bootstrapFirebase().then((_) {
       stage(PushNotificationService.instance.isFirebaseReady
           ? 'push-ready'

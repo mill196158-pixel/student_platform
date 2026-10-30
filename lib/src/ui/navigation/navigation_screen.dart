@@ -13,9 +13,11 @@ import '../../services/presence/user_presence.dart';
 import '../../themes/theme_service.dart';
 import 'main_tab_scope.dart';
 import 'visited_tab.dart';
+import '../guest/guest_workspace.dart';
 
 class NavigationScreen extends StatefulWidget {
-  const NavigationScreen({super.key});
+  const NavigationScreen({super.key, this.guest = false});
+  final bool guest;
 
   @override
   State<NavigationScreen> createState() => _NavigationScreenState();
@@ -41,8 +43,10 @@ class _NavigationScreenState extends State<NavigationScreen> {
     super.initState();
     _profileActive.value = _currentIndex == 4;
     // Quietly refresh chat list + top thread histories in the background.
-    ChatWarmCoordinator.instance.start();
-    PresenceService.instance.start();
+    if (!widget.guest) {
+      ChatWarmCoordinator.instance.start();
+      PresenceService.instance.start();
+    }
   }
 
   void _switchToTab(MainTab tab) {
@@ -68,29 +72,32 @@ class _NavigationScreenState extends State<NavigationScreen> {
         switchTo: _switchToTab,
         child: Scaffold(
           extendBody: false,
-          body: PageStorage(
-            bucket: _bucket,
-            child: IndexedStack(
-              index: _currentIndex,
-              children: [
-                VisitedTab(
-                    active: _currentIndex == 0, builder: (_) => _tabs[0]),
-                VisitedTab(
-                    active: _currentIndex == 1, builder: (_) => _tabs[1]),
-                VisitedTab(
-                    active: _currentIndex == 2, builder: (_) => _tabs[2]),
-                VisitedTab(
-                    active: _currentIndex == 3, builder: (_) => _tabs[3]),
-                VisitedTab(
-                  active: _currentIndex == 4,
-                  builder: (_) => _KeepAlive(
-                    storageKey: 'tab_profile',
-                    child: ProfileScreen(activeListenable: _profileActive),
+          body: widget.guest
+              ? GuestWorkspace(tab: _currentIndex)
+              : PageStorage(
+                  bucket: _bucket,
+                  child: IndexedStack(
+                    index: _currentIndex,
+                    children: [
+                      VisitedTab(
+                          active: _currentIndex == 0, builder: (_) => _tabs[0]),
+                      VisitedTab(
+                          active: _currentIndex == 1, builder: (_) => _tabs[1]),
+                      VisitedTab(
+                          active: _currentIndex == 2, builder: (_) => _tabs[2]),
+                      VisitedTab(
+                          active: _currentIndex == 3, builder: (_) => _tabs[3]),
+                      VisitedTab(
+                        active: _currentIndex == 4,
+                        builder: (_) => _KeepAlive(
+                          storageKey: 'tab_profile',
+                          child:
+                              ProfileScreen(activeListenable: _profileActive),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
-            ),
-          ),
           bottomNavigationBar: StudentBottomNav(
             currentIndex: _currentIndex,
             items: studentBottomNavItems,
@@ -105,8 +112,10 @@ class _NavigationScreenState extends State<NavigationScreen> {
 
   @override
   void dispose() {
-    PresenceService.instance.stop();
-    ChatWarmCoordinator.instance.stop();
+    if (!widget.guest) {
+      PresenceService.instance.stop();
+      ChatWarmCoordinator.instance.stop();
+    }
     _profileActive.dispose();
     _homeActive.dispose();
     super.dispose();
