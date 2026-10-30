@@ -16,6 +16,7 @@ class NewsImageDiskCache {
   NewsImageDiskCache({
     NewsImageBytesCache? memory,
     Directory? Function()? rootOverride,
+    this.directoryName = 'news_images_v1',
     this.maxEntries = 80,
     this.maxTotalBytes = 48 * 1024 * 1024,
   })  : _memory = memory ?? NewsImageBytesCache.instance,
@@ -26,19 +27,25 @@ class NewsImageDiskCache {
   final int maxEntries;
   final int maxTotalBytes;
 
-  static const _dirName = 'news_images_v1';
+  final String directoryName;
   static const _indexName = 'index.json';
 
   Directory? _root;
   Map<String, _IndexEntry>? _index;
   bool _ready = false;
 
-  Future<void> ensureReady() async {
-    if (_ready) return;
+  Future<void>? _initializing;
+  Future<void> ensureReady() {
+    if (_ready) return Future.value();
+    return _initializing ??=
+        _initialize().whenComplete(() => _initializing = null);
+  }
+
+  Future<void> _initialize() async {
     final override = _rootOverride?.call();
     _root = override ??
         Directory(
-          '${(await getTemporaryDirectory()).path}/$_dirName',
+          '${(await getTemporaryDirectory()).path}/$directoryName',
         );
     if (!await _root!.exists()) {
       await _root!.create(recursive: true);

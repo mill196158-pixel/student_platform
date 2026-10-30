@@ -1,3 +1,6 @@
+import 'dart:io';
+import 'package:student_platform/src/ui/home/news_image_disk_cache.dart';
+import 'package:student_ui/student_ui.dart';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -44,5 +47,49 @@ void main() {
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.containsKey('content_media_url_v1__user-1|asset-1'), isFalse);
     expect(prefs.containsKey('content_media_url_v1__user-2|asset-1'), isTrue);
+  });
+  test('promo disk bytes survive new service, but not expiry or another user',
+      () async {
+    final dir = await Directory.systemTemp.createTemp('promo-media-test-');
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final expiry = DateTime.now().add(const Duration(minutes: 10));
+      await prefs.setString(
+          'content_media_url_v2__a|asset|v1',
+          jsonEncode({
+            'signedUrl': 'https://example.com/signed',
+            'expiresAt': expiry.toIso8601String(),
+          }));
+      var requests = 0;
+      ContentMediaService service(String uid) => ContentMediaService(
+          persistBytes: true,
+          currentUserId: () => uid,
+          diskCache: NewsImageDiskCache(
+              memory: NewsImageBytesCache(), rootOverride: () => dir),
+          httpClient: MockClient((_) async {
+            requests++;
+            return http.Response.bytes([1, 2, 3], 200);
+          }));
+      final first = service('a');
+      expect(await first.fetchBytes('asset', contentVersion: 'v1'), [1, 2, 3]);
+      expect(await service('a').fetchBytes('asset', contentVersion: 'v1'),
+          [1, 2, 3]);
+      expect(requests, 1, reason: 'new instance reads disk without HTTP');
+      expect(
+          await service('b').fetchBytes('asset', contentVersion: 'v1'), isNull);
+      expect(
+          await service('a').fetchBytes('asset', contentVersion: 'v2'), isNull);
+      await prefs.setString(
+          'content_media_url_v2__a|asset|v1',
+          jsonEncode({
+            'signedUrl': 'https://example.com/signed',
+            'expiresAt': DateTime(2000).toIso8601String(),
+          }));
+      expect(
+          await service('a').fetchBytes('asset', contentVersion: 'v1'), isNull);
+      expect(requests, 1);
+    } finally {
+      await dir.delete(recursive: true);
+    }
   });
 }

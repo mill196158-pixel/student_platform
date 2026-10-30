@@ -63,9 +63,22 @@ class HomePromoService {
   HomePromoService({
     HomePromoRpcClient? rpcClient,
     Future<SharedPreferences> Function()? prefs,
+    String? Function()? currentUserId,
   })  : _rpc = rpcClient ?? SupabaseHomePromoRpcClient(),
-        _prefs = prefs ?? SharedPreferences.getInstance;
+        _prefs = prefs ?? SharedPreferences.getInstance,
+        _currentUserId = currentUserId;
 
+  final String? Function()? _currentUserId;
+  String get _scope {
+    if (_currentUserId != null) return _currentUserId() ?? 'anon';
+    try {
+      return Supabase.instance.client.auth.currentUser?.id ?? 'anon';
+    } catch (_) {
+      return 'anon';
+    }
+  }
+
+  String _key(String scope) => 'home_promo_placements_v3_$scope';
   final HomePromoRpcClient _rpc;
   final Future<SharedPreferences> Function() _prefs;
 
@@ -73,13 +86,23 @@ class HomePromoService {
   static const String legacyCacheKey = 'home_promo_placement_v1';
 
   Future<HomePromoLoadResult> loadCached() async {
+    final scope = _scope;
     try {
       final prefs = await _prefs();
-      final raw = prefs.getString(cacheKey) ?? prefs.getString(legacyCacheKey);
+      if (_scope != scope)
+        return const HomePromoLoadResult(intentionallyEmpty: true);
+      final raw = prefs.getString(_key(scope));
       if (raw == null || raw.isEmpty) {
         return const HomePromoLoadResult(isDemoFallback: true);
       }
-      final decoded = jsonDecode(raw);
+      final envelope = jsonDecode(raw);
+      if (envelope is! Map ||
+          DateTime.tryParse('${envelope['expiresAt']}')
+                  ?.isAfter(DateTime.now()) !=
+              true) {
+        return const HomePromoLoadResult(intentionallyEmpty: true);
+      }
+      final decoded = envelope['rows'];
       final cards = <ManagedContentCard>[];
       if (decoded is List) {
         for (final row in decoded.whereType<Map>()) {
@@ -95,7 +118,7 @@ class HomePromoService {
         if (card != null) cards.add(card);
       }
       if (cards.isEmpty) {
-        return const HomePromoLoadResult(isDemoFallback: true);
+        return const HomePromoLoadResult(intentionallyEmpty: true);
       }
       return HomePromoLoadResult(cards: cards);
     } catch (e) {
@@ -105,14 +128,17 @@ class HomePromoService {
   }
 
   Future<HomePromoLoadResult> load({bool writeCache = true}) async {
+    final scope = _scope;
     try {
       final response = await _rpc.rpc(
         'get_my_content_for_placement',
         params: {'p_placement': 'home_promo'},
       );
+      if (_scope != scope)
+        return const HomePromoLoadResult(intentionallyEmpty: true);
       final rows = _asList(response);
       if (rows.isEmpty) {
-        if (writeCache) await _clearCache();
+        if (writeCache) await _writeCache([], scope);
         return const HomePromoLoadResult(intentionallyEmpty: true);
       }
 
@@ -126,10 +152,12 @@ class HomePromoService {
         }
       }
       if (cards.isEmpty) {
-        if (writeCache) await _clearCache();
+        if (writeCache) await _writeCache([], scope);
         return const HomePromoLoadResult(intentionallyEmpty: true);
       }
-      if (writeCache) await _writeCache(matchedRows);
+      if (writeCache) await _writeCache(matchedRows, scope);
+      if (_scope != scope)
+        return const HomePromoLoadResult(intentionallyEmpty: true);
       return HomePromoLoadResult(cards: cards);
     } on PostgrestException catch (error) {
       if (_isMissingRpc(error)) {
@@ -151,11 +179,22 @@ class HomePromoService {
   }
 
   Future<void> dismiss(String contentItemId) async {
+    final scope = _scope;
     await _rpc.rpc(
       'dismiss_content_item',
       params: {'p_id': contentItemId},
     );
-    await _clearCache();
+    final prefs = await _prefs();
+    if (_scope != scope) return;
+    final raw = prefs.getString(_key(scope));
+    var remaining = <Map<String, dynamic>>[];
+    try {
+      final envelope = jsonDecode(raw ?? '{}') as Map;
+      remaining = _asList(envelope['rows'])
+          .where((r) => r['id'] != contentItemId)
+          .toList();
+    } catch (_) {}
+    await _writeCache(remaining, scope);
   }
 
   Future<void> recordEvent(String contentItemId, String eventType) async {
@@ -169,22 +208,23 @@ class HomePromoService {
     }
   }
 
-  Future<void> _writeCache(List<Map<String, dynamic>> rows) async {
+  Future<void> _writeCache(
+      List<Map<String, dynamic>> rows, String scope) async {
     try {
       final prefs = await _prefs();
-      await prefs.setString(cacheKey, jsonEncode(rows));
+      if (_scope != scope) return;
+      await prefs.setString(
+          _key(scope),
+          jsonEncode({
+            'rows': rows,
+            'expiresAt': DateTime.now()
+                .add(const Duration(minutes: 15))
+                .toIso8601String(),
+          }));
       await prefs.remove(legacyCacheKey);
     } catch (e) {
       debugPrint('[home] promo cache write failed: $e');
     }
-  }
-
-  Future<void> _clearCache() async {
-    try {
-      final prefs = await _prefs();
-      await prefs.remove(cacheKey);
-      await prefs.remove(legacyCacheKey);
-    } catch (_) {}
   }
 
   bool _isMissingRpc(PostgrestException error) {

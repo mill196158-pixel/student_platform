@@ -782,3 +782,14 @@ No claim that no-registration or closed beta exempts actual personal-data handli
 from Russian law. Full user-flow testing requires an isolated backend with synthetic
 accounts; owner confirms only production Supabase currently exists.
 See `docs/E2E_TESTING_2026_10_29.md` for scenarios and measured test results.
+
+
+## Home promo loading follow-up — 2026-10-30
+
+Home promo metadata and media load independently of dashboard/badge queries. Cached metadata starts media hydration immediately; existing bitmap stays visible during same-asset refresh. At most two cards hydrate concurrently; admin home_slot/order remains authoritative. Cold dashboard still uses its existing loading surface until dashboard data arrives.
+
+Metadata cache v3 is scoped by user (anonymous scope is separate), expires after 15 minutes, and preserves successful empty responses. Legacy unscoped metadata is ignored. Dismissing one card preserves other cached placements. Server refresh runs on opening, resume and pull-to-refresh; administrative edits are not promised as instantaneous Realtime delivery.
+
+Home opts into persistent content image bytes: separate temporary cache content_media_images_v1, up to 24 entries / 16 MiB. Identity includes user, immutable asset ID and content version; grant expiry bounds both RAM and disk use. A new signed grant invalidates previous RAM bytes; 401/403 clears captured asset cache. Account changes during preferences, signed-download RPC or disk writes must never return bytes/grants to the new session. Signed URLs remain outside byte-cache identity. Replacement asset IDs remove the previous bitmap immediately.
+
+Validation: test/home_promo_loading_test.dart exercises cached hydration while dashboard, badge and remote promo are pending; media tests cover fresh service disk reads, user/version/expiry isolation and account-switch races. No production changes or publication required.

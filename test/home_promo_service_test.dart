@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_platform/src/ui/home/home_promo_service.dart';
-import 'package:student_ui/student_ui.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class _FakeRpc implements HomePromoRpcClient {
@@ -155,7 +154,32 @@ void main() {
     await service.dismiss('11111111-1111-1111-1111-111111111111');
     expect(rpc.calls, contains('dismiss_content_item'));
     final cached = await service.loadCached();
-    expect(cached.isDemoFallback, isTrue);
+    expect(cached.intentionallyEmpty, isTrue);
+  });
+
+  test('cache is isolated by account and preserves empty response', () async {
+    var uid = 'a';
+    final rpc = _FakeRpc(response: [sampleRow()]);
+    final service = HomePromoService(rpcClient: rpc, currentUserId: () => uid);
+    await service.load();
+    uid = 'b';
+    expect((await service.loadCached()).cards, isEmpty);
+    uid = 'a';
+    expect((await service.loadCached()).cards, hasLength(1));
+    rpc.response = [];
+    await service.load();
+    final freshInstance =
+        HomePromoService(rpcClient: rpc, currentUserId: () => uid);
+    expect((await freshInstance.loadCached()).intentionallyEmpty, isTrue);
+  });
+
+  test('dismissing one card preserves other cached placements', () async {
+    final rpc = _FakeRpc(response: [sampleRow(), {...sampleRow(), 'id': 'second'}]);
+    final service = HomePromoService(rpcClient: rpc);
+    await service.load();
+    await service.dismiss('11111111-1111-1111-1111-111111111111');
+    final cached = await HomePromoService(rpcClient: rpc).loadCached();
+    expect(cached.cards.map((c) => c.id), ['second']);
   });
 
   test('recordEvent is nonfatal on RPC failure', () async {

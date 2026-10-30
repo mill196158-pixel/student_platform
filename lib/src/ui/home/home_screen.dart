@@ -19,17 +19,30 @@ import 'package:student_platform/src/ui/navigation/main_tab_scope.dart';
 import 'package:student_platform/src/ui/notifications/notification_center_sheet.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen(
+      {super.key,
+      this.dashboardService,
+      this.promoService,
+      this.contentMedia,
+      this.notificationsApi});
+  final HomeDashboardService? dashboardService;
+  final HomePromoService? promoService;
+  final ContentMediaService? contentMedia;
+  final AppNotificationsApi? notificationsApi;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
-  final HomeDashboardService _service = HomeDashboardService();
-  final HomePromoService _promoService = HomePromoService();
-  final ContentMediaService _contentMedia = ContentMediaService();
-  final AppNotificationsApi _notificationsApi = AppNotificationsApi();
+  late final HomeDashboardService _service =
+      widget.dashboardService ?? HomeDashboardService();
+  late final HomePromoService _promoService =
+      widget.promoService ?? HomePromoService();
+  late final ContentMediaService _contentMedia =
+      widget.contentMedia ?? ContentMediaService(persistBytes: true);
+  late final AppNotificationsApi _notificationsApi =
+      widget.notificationsApi ?? AppNotificationsApi();
 
   HomeDashboardData? _data;
   HomePromoLoadResult _promo = const HomePromoLoadResult(isDemoFallback: true);
@@ -39,6 +52,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _promoLoadGeneration = 0;
   int _promoMediaGeneration = 0;
   final Set<String> _recordedImpressionIds = {};
+  final Map<String, String> _promoAssetIdentities = {};
   final Map<String, Uint8List> _promoImageBytes = {};
   final Map<String, Uint8List> _promoIconBytes = {};
   final Map<String, ContentImageRenderState> _promoImageStates = {};
@@ -93,33 +107,34 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     unawaited(_paintCachedNews());
 
     final promoGeneration = ++_promoLoadGeneration;
-    // Await cache paint before remote so a slow cache cannot overwrite fresher data.
-    await _paintCachedPromo(promoGeneration);
-
+    // Promo metadata/media must not wait for schedule, news or badge queries.
+    final promoWork = _refreshPromo(promoGeneration);
+    unawaited(_refreshUnreadBadge());
     try {
-      final results = await Future.wait<Object?>([
-        _service.load(),
-        _notificationsApi.unreadCount(),
-        _loadPromoSafe(),
-      ]);
+      final next = await _service.load();
       if (!mounted || promoGeneration != _promoLoadGeneration) return;
-      final next = results[0] as HomeDashboardData;
-      final promo = results[2] as HomePromoLoadResult;
       setState(() {
         _data = _mergeDashboardNewsImages(_data, next);
-        _unreadNotificationCount = results[1] as int;
-        _promo = promo;
         _error = null;
       });
-      _maybeRecordPromoImpression(promo);
-      unawaited(_hydratePromoMedia(promo));
     } catch (error) {
       if (!mounted) return;
       // Keep last good dashboard (and images) on refresh failure.
       if (!hadData) setState(() => _error = error);
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && promoGeneration == _promoLoadGeneration)
+        setState(() => _loading = false);
     }
+    await promoWork;
+  }
+
+  Future<void> _refreshPromo(int generation) async {
+    await _paintCachedPromo(generation);
+    final promo = await _loadPromoSafe();
+    if (!mounted || generation != _promoLoadGeneration) return;
+    setState(() => _promo = promo);
+    _maybeRecordPromoImpression(promo);
+    await _hydratePromoMedia(promo);
   }
 
   Future<HomePromoLoadResult> _loadPromoSafe() async {
@@ -143,10 +158,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final cached = await _promoService.loadCached();
       if (!mounted ||
           generation != _promoLoadGeneration ||
-          cached.card == null) {
+          (cached.card == null && !cached.intentionallyEmpty)) {
         return;
       }
       setState(() => _promo = cached);
+      unawaited(_hydratePromoMedia(cached));
     } catch (_) {}
   }
 
@@ -650,8 +666,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final usesImage = contentCardVariantUsesImage(
         effectiveContentCardVariant(card.homePromo.cardVariant),
       );
+      final identity =
+          '${card.homePromo.imageAssetId}|${card.homePromo.iconAssetId}';
+      if (_promoAssetIdentities[card.id] != identity) {
+        _promoImageBytes.remove(card.id);
+        _promoIconBytes.remove(card.id);
+      }
+      _promoAssetIdentities[card.id] = identity;
       if (usesImage) {
-        loadingStates[card.id] = ContentImageRenderState.loading;
+        final cached = _promoImageBytes[card.id];
+        loadingStates[card.id] = cached == null
+            ? ContentImageRenderState.loading
+            : ContentImageReady(cached);
       } else {
         loadingStates[card.id] = ContentImageRenderState.notApplicable;
       }
@@ -662,7 +688,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ..addAll(loadingStates));
     }
 
-    for (final card in promo.cards) {
+    Future<void> hydrate(ManagedContentCard card) async {
       final version = '${card.id}|${card.schemaVersion}';
       final imageId = card.homePromo.imageAssetId?.trim();
       final iconId = card.homePromo.iconAssetId?.trim();
@@ -706,6 +732,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (!mounted || generation != _promoMediaGeneration) return;
         setState(() => _promoIconBytes.remove(card.id));
       }
+    }
+
+    for (var offset = 0; offset < promo.cards.length; offset += 2) {
+      if (!mounted || generation != _promoMediaGeneration) return;
+      await Future.wait(promo.cards.skip(offset).take(2).map(hydrate));
     }
   }
 
