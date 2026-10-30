@@ -19,6 +19,53 @@ class DenyNetwork extends HttpOverrides {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  testWidgets(
+      'guest layouts fit a narrow phone and search does not hide profile favorites',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+    for (final tab in [0, 1, 2, 3, 4]) {
+      await tester.pumpWidget(
+          MaterialApp(theme: ThemeData.dark(), home: Scaffold(body: GuestWorkspace(tab: tab))));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: 'tab $tab at 320px');
+      expect(Theme.of(tester.element(find.byType(ListView).first)).brightness,
+          Brightness.light);
+    }
+    await tester.pumpWidget(
+        const MaterialApp(home: Scaffold(body: GuestWorkspace(tab: 1))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('В избранное').first);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byTooltip('В избранное').at(1));
+    await tester.tap(find.byTooltip('В избранное').at(1));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Избранное'));
+    await tester.tap(find.text('Избранное'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byType(TextField));
+    await tester.enterText(find.byType(TextField), 'Производная');
+    await tester.pumpAndSettle();
+    expect(find.text('Производная: правило произведения'), findsOneWidget);
+    expect(find.text('Единицы давления'), findsNothing);
+    await tester.tap(find.text('Все материалы'));
+    await tester.enterText(find.byType(TextField), 'нет такого материала');
+    await tester.pumpAndSettle();
+    expect(find.text('Материалы не найдены. Попробуй другой запрос.'),
+        findsOneWidget);
+    await tester.pumpWidget(
+        const MaterialApp(home: Scaffold(body: GuestWorkspace(tab: 4))));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Производная: правило произведения'));
+    await tester.pumpAndSettle();
+    expect(find.text('Производная: правило произведения').hitTestable(),
+        findsOneWidget);
+    expect(find.text('Единицы давления'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
   test('guest route never calls profile policy; private route stays protected',
       () async {
     var calls = 0;
@@ -103,6 +150,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(find.text('Добавить заметку'), 150,
         scrollable: find.byType(Scrollable).first);
+    await tester.ensureVisible(find.text('Добавить заметку'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Добавить заметку'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).at(0), 'Гостевая заметка');
@@ -138,6 +187,8 @@ void main() {
     await tester.scrollUntilVisible(find.text('Гостевая заметка'), 150,
         scrollable: find.byType(Scrollable).first);
     expect(find.text('Гостевая заметка'), findsOneWidget);
+    await tester.ensureVisible(find.text('Войти').first);
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Войти').first);
     await tester.pumpAndSettle();
     expect(find.text('Login target'), findsOneWidget);

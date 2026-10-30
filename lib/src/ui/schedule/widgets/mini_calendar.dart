@@ -184,16 +184,27 @@ class MiniCalendar extends StatelessWidget {
               }).toList(),
     );
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 2, 12, 8),
-      child: Row(
-        children: [
-          _arrow(Icons.chevron_left, onPrevWeek),
-          Expanded(child: daysRow),
-          _arrow(Icons.chevron_right, onNextWeek),
-        ],
-      ),
-    );
+    return LayoutBuilder(builder: (context, constraints) {
+      // Seven 36px dates plus arrows do not fit on a narrow phone.
+      // Keep the date targets intact and put week navigation above them.
+      final narrow = constraints.maxWidth < 360;
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(12, 2, 12, 8),
+        child: narrow
+            ? Column(children: [
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  _arrow(Icons.chevron_left, onPrevWeek),
+                  _arrow(Icons.chevron_right, onNextWeek),
+                ]),
+                daysRow,
+              ])
+            : Row(children: [
+                _arrow(Icons.chevron_left, onPrevWeek),
+                Expanded(child: daysRow),
+                _arrow(Icons.chevron_right, onNextWeek),
+              ]),
+      );
+    });
   }
 }
 
