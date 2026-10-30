@@ -793,3 +793,14 @@ Metadata cache v3 is scoped by user (anonymous scope is separate), expires after
 Home opts into persistent content image bytes: separate temporary cache content_media_images_v1, up to 24 entries / 16 MiB. Identity includes user, immutable asset ID and content version; grant expiry bounds both RAM and disk use. A new signed grant invalidates previous RAM bytes; 401/403 clears captured asset cache. Account changes during preferences, signed-download RPC or disk writes must never return bytes/grants to the new session. Signed URLs remain outside byte-cache identity. Replacement asset IDs remove the previous bitmap immediately.
 
 Validation: test/home_promo_loading_test.dart exercises cached hydration while dashboard, badge and remote promo are pending; media tests cover fresh service disk reads, user/version/expiry isolation and account-switch races. No production changes or publication required.
+
+
+### 2026-10-30: предметы из расписания без учебного плана
+
+Официальный импорт `admin_save_rasp_schedule_run` выполняет серверное сопоставление после вставки занятий. Используются нормализация суффиксов занятий, точные канонические названия и алиасы; сходство >=0.65 служит только сигналом ручной проверки. При отсутствии проверенного плана допускается создание draft canonical и offering без выдуманных часов/кредитов. При действующем reviewed/active плане недостающий offering остаётся на проверку. Конфликт периода/семестра/имени/старой команды не разрешается автоматически.
+
+Область обработки — группа и ограниченный диапазон дат; manual bind дополнительно ограничен нормализованным названием. Глобальная транзакционная advisory-блокировка и существующие unique indexes защищают повторный/параллельный импорт. После конфликтной вставки повторно проверяются связи. Private helper закрыт от клиентов; публичные RPC проверяют административные права. No-term/ambiguous/near-typo не создают сущности. Dry-run не пишет, NULL запрещён.
+
+Экран администратора «Предметы → Из расписания» позволяет явно выбрать канонический предмет без учебного плана. Ошибка сохраняет строку и допускает повтор; неполное сопоставление не выдаётся за полный успех. Успешный алиас действует на последующие импорты.
+
+Чат создаётся только для назначенного текущего academic term, с членством через active enrollment/group_id. Старые чаты не переназначаются. Периоды 2026/27 добавлены по согласованным номинальным границам Sep1/Feb1, с is_current=false и auto_activation_enabled=false. Исторический календарь не изменяется. Прямые SQL/REST-вставки занятий вне официального импорта требуют отдельного запуска admin_sync_schedule_subjects; новый row-trigger не добавлен.

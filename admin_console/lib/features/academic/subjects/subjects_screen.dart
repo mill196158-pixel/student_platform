@@ -1,3 +1,4 @@
+import 'schedule_subject_review_screen.dart';
 import 'package:admin_import_mapping/admin_import_mapping.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -92,10 +93,8 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
                             await _repository.restoreVersion(
                               item.id,
                               number,
-                              expectedCatalogRowVersion:
-                                  item.catalogRowVersion,
-                              expectedProfileRowVersion:
-                                  item.profileRowVersion,
+                              expectedCatalogRowVersion: item.catalogRowVersion,
+                              expectedProfileRowVersion: item.profileRowVersion,
                             );
                             if (context.mounted) Navigator.pop(context);
                             await _load();
@@ -364,6 +363,32 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
                 _load();
               },
             ),
+            if (canWrite && !AdminBackendConfig.isDemoMode)
+              OutlinedButton.icon(
+                icon: const Icon(Icons.link),
+                label: const Text('Из расписания'),
+                onPressed: () async {
+                  try {
+                    final subjects = await _repository.list();
+                    if (!context.mounted) return;
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            ScheduleSubjectReviewScreen(subjects: subjects),
+                      ),
+                    );
+                    if (mounted) await _load();
+                  } catch (_) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Не удалось открыть сопоставление'),
+                        ),
+                      );
+                    }
+                  }
+                },
+              ),
             if (canWrite)
               FilledButton.icon(
                 onPressed: () => _edit(),
@@ -528,4 +553,3 @@ class _SubjectMappingDialogState extends State<_SubjectMappingDialog> {
     );
   }
 }
-

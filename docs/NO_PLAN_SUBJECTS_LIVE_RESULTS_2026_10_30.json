@@ -1,0 +1,78 @@
+[
+  {
+    "scenario": "student cannot import",
+    "passed": true
+  },
+  {
+    "scenario": "anon cannot import",
+    "passed": true
+  },
+  {
+    "scenario": "full importer creates one offering for lecture and practice",
+    "passed": true
+  },
+  {
+    "scenario": "student sees one subject and available chat without curriculum",
+    "passed": true
+  },
+  {
+    "scenario": "student team list includes created team",
+    "passed": true
+  },
+  {
+    "scenario": "outsider sees no group subjects",
+    "passed": true
+  },
+  {
+    "scenario": "outsider cannot read chat",
+    "passed": true
+  },
+  {
+    "scenario": "member can open chat",
+    "passed": true
+  },
+  {
+    "scenario": "repeat and concurrent full imports retain offering and team IDs",
+    "passed": true
+  },
+  {
+    "scenario": "two lessons remain after concurrent imports",
+    "passed": true
+  },
+  {
+    "scenario": "near typo held for review without duplicate offering",
+    "passed": true
+  },
+  {
+    "scenario": "student cannot bind",
+    "passed": true
+  },
+  {
+    "scenario": "manual bind resolves typo and does not touch unrelated subject",
+    "passed": true
+  },
+  {
+    "scenario": "saved alias works on later import",
+    "passed": true
+  },
+  {
+    "scenario": "NULL dry-run rejected",
+    "passed": true
+  },
+  {
+    "scenario": "calendar boundary 2026-08-31 semester None",
+    "passed": true
+  },
+  {
+    "scenario": "calendar boundary 2026-09-01 semester 3",
+    "passed": true
+  },
+  {
+    "scenario": "calendar boundary 2027-01-31 semester 3",
+    "passed": true
+  },
+  {
+    "scenario": "calendar boundary 2027-02-01 semester 4",
+    "passed": true
+  }
+]
