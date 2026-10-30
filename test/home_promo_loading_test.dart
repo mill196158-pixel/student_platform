@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -34,6 +35,10 @@ class Notifications implements AppNotificationsApi {
 }
 
 class Promo implements HomePromoService {
+  final events = <String>[];
+  @override
+  Future<void> recordEvent(String id, String event) async =>
+      events.add('$id:$event');
   final pending = Completer<HomePromoLoadResult>();
   @override
   Future<HomePromoLoadResult> load({bool writeCache = true}) => pending.future;
@@ -57,7 +62,8 @@ class Promo implements HomePromoService {
             'dismissible': true,
             'card_variant': 'image_full',
             'image_asset_id': 'image-a',
-            'home_slot': 'top'
+            'icon_asset_id': 'icon-a',
+            'home_slot': 'after_news'
           },
         })!,
       ]);
@@ -75,6 +81,16 @@ class Media implements ContentMediaService {
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class SlowMedia extends Media {
+  final image = Completer<Uint8List?>();
+  final icon = Completer<Uint8List?>();
+  @override
+  Future<Uint8List?> fetchBytes(String id, {String? contentVersion}) {
+    requested.add(id);
+    return id == 'image-a' ? image.future : icon.future;
+  }
 }
 
 class ProgressiveDashboard implements HomeDashboardService {
@@ -109,6 +125,86 @@ HomeDashboardData partial(String id, String name) => HomeDashboardData(
     assignmentsStatus: 'Загружаем ближайшие дела…');
 
 void main() {
+  testWidgets('ready promo is not counted behind loading or an inactive tab',
+      (t) async {
+    final active = ValueNotifier<bool>(false);
+    final dashboard = ProgressiveDashboard();
+    final promo = Promo();
+    final media = SlowMedia();
+    final notifications = Notifications();
+    await t.pumpWidget(MaterialApp(
+        home: HomeScreen(
+            activeListenable: active,
+            dashboardService: dashboard,
+            promoService: promo,
+            contentMedia: media,
+            notificationsApi: notifications)));
+    await t.pump();
+    media.image.complete(base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=='));
+    media.icon.complete(null);
+    await t.pump();
+    await t.pump();
+    expect(promo.events, isEmpty);
+    dashboard.updates.single(partial('a', 'Alice'));
+    await t.pump();
+    expect(promo.events, isEmpty);
+    active.value = true;
+    await t.pump();
+    expect(promo.events, ['cached:impression']);
+    dashboard.requests.single.complete(partial('a', 'Alice'));
+    promo.pending.complete(await promo.loadCached());
+    notifications.pending.complete(0);
+    await t.pumpAndSettle();
+    expect(promo.events.length, 1);
+    await t.pumpWidget(const SizedBox.shrink());
+    active.dispose();
+  });
+  for (final success in [true, false]) {
+    testWidgets('promo stays hidden until usable image; success=$success',
+        (t) async {
+      final dashboard = ProgressiveDashboard();
+      final promo = Promo();
+      final media = SlowMedia();
+      final notifications = Notifications();
+      await t.pumpWidget(MaterialApp(
+          home: HomeScreen(
+              dashboardService: dashboard,
+              promoService: promo,
+              contentMedia: media,
+              notificationsApi: notifications)));
+      await t.pump();
+      dashboard.updates.single(partial('a', 'Alice'));
+      await t.pump();
+      expect(media.requested, containsAll(['image-a', 'icon-a']));
+      var view = t.widget<StudentHomeView>(find.byType(StudentHomeView));
+      expect(view.hideHomePromo, isTrue);
+      expect(view.homePromoPlacements, isEmpty);
+      expect(promo.events, isEmpty);
+      expect(find.text('Cached promo'), findsNothing);
+      if (success) {
+        media.image.complete(base64Decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=='));
+      } else {
+        media.image.completeError(StateError('offline'));
+      }
+      await t.pump();
+      await t.pump();
+      view = t.widget<StudentHomeView>(find.byType(StudentHomeView));
+      expect(view.hideHomePromo, !success);
+      expect(view.homePromoPlacements.length, success ? 1 : 0);
+      expect(promo.events, success ? ['cached:impression'] : isEmpty);
+      expect(media.icon.isCompleted, isFalse,
+          reason: 'main image does not wait for icon');
+      media.icon.complete(null);
+      dashboard.requests.single.complete(partial('a', 'Alice'));
+      promo.pending.complete(await promo.loadCached());
+      notifications.pending.complete(0);
+      await t.pumpAndSettle();
+      expect(promo.events.length, success ? 1 : 0);
+      expect(t.takeException(), isNull);
+    });
+  }
   testWidgets(
       'deadline releases coalescing and late attempt cannot overwrite retry',
       (t) async {

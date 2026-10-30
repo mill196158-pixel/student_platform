@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kReleaseMode;
+import 'package:flutter/foundation.dart' show kReleaseMode, ValueListenable;
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:student_ui/student_ui.dart';
@@ -18,6 +18,7 @@ import 'package:student_platform/src/ui/learning/tabs/chat/models/group_action_l
 import 'package:student_platform/src/ui/learning/tabs/chat/navigation/group_action_deeplink.dart';
 import 'package:student_platform/src/ui/navigation/main_tab_scope.dart';
 import 'package:student_platform/src/ui/notifications/notification_center_sheet.dart';
+import 'package:student_platform/src/ui/profile/profile_avatar_image.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen(
@@ -25,11 +26,13 @@ class HomeScreen extends StatefulWidget {
       this.dashboardService,
       this.promoService,
       this.contentMedia,
+      this.activeListenable,
       this.notificationsApi});
   final HomeDashboardService? dashboardService;
   final HomePromoService? promoService;
   final ContentMediaService? contentMedia;
   final AppNotificationsApi? notificationsApi;
+  final ValueListenable<bool>? activeListenable;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -46,13 +49,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       widget.notificationsApi ?? AppNotificationsApi();
 
   HomeDashboardData? _data;
-  HomePromoLoadResult _promo = const HomePromoLoadResult(isDemoFallback: true);
+  HomePromoLoadResult _promo =
+      const HomePromoLoadResult(intentionallyEmpty: true);
+  String? _avatarPrecacheKey;
   Object? _error;
   bool _loading = true;
   int _unreadNotificationCount = 0;
   int _promoLoadGeneration = 0;
   int _promoMediaGeneration = 0;
   final Set<String> _recordedImpressionIds = {};
+  final Map<String, GlobalKey> _promoKeys = {};
+  bool _impressionFramePending = false;
   final Map<String, String> _promoAssetIdentities = {};
   final Map<String, Uint8List> _promoImageBytes = {};
   final Map<String, Uint8List> _promoIconBytes = {};
@@ -65,6 +72,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    widget.activeListenable?.addListener(_queuePromoImpressions);
     _load();
     _inAppSub = InAppNotificationBus.instance.stream.listen(_onInAppEvent);
   }
@@ -72,6 +80,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    widget.activeListenable?.removeListener(_queuePromoImpressions);
     _inAppSub?.cancel();
     super.dispose();
   }
@@ -103,6 +112,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (_loadUserId != userId) {
       _data = null;
       _error = null;
+      _avatarPrecacheKey = null;
+      _promo = const HomePromoLoadResult(intentionallyEmpty: true);
+      ++_promoMediaGeneration;
+      _promoAssetIdentities.clear();
+      _promoImageBytes.clear();
+      _promoIconBytes.clear();
+      _promoImageStates.clear();
+      _recordedImpressionIds.clear();
+      _promoKeys.clear();
     }
     _loadUserId = userId;
     final work = _loadDashboard();
@@ -153,6 +171,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   _data = _mergeDashboardNewsImages(_data, partial);
                   _error = null;
                 });
+                _warmProfileAvatar(partial.profile);
               })
           .timeout(const Duration(seconds: 18));
       if (!mounted ||
@@ -189,7 +208,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         generation != _promoLoadGeneration ||
         userId != _service.currentUserId) return;
     setState(() => _promo = promo);
-    _maybeRecordPromoImpression(promo);
     await _hydratePromoMedia(promo);
   }
 
@@ -210,16 +228,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _paintCachedPromo(int generation) async {
+    final userId = _service.currentUserId;
     try {
       final cached = await _promoService.loadCached();
       if (!mounted ||
           generation != _promoLoadGeneration ||
+          userId != _service.currentUserId ||
           (cached.card == null && !cached.intentionallyEmpty)) {
         return;
       }
       setState(() => _promo = cached);
       unawaited(_hydratePromoMedia(cached));
     } catch (_) {}
+  }
+
+  void _warmProfileAvatar(HomeUserProfile profile) {
+    final uid = _service.currentUserId;
+    if (!mounted || uid == null || profile.id != uid) return;
+    final key = '$uid|${profile.avatarUrl}';
+    if (_avatarPrecacheKey == key) return;
+    final provider = profileAvatarImage(uid, profile.avatarUrl);
+    if (provider == null) return;
+    _avatarPrecacheKey = key;
+    unawaited(precacheImage(provider, context, onError: (_, __) {
+      if (_avatarPrecacheKey == key) _avatarPrecacheKey = null;
+    }));
   }
 
   Future<void> _paintCachedNews(int generation, String? userId) async {
@@ -297,6 +330,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       );
     }
     if (data == null) return const SizedBox.shrink();
+    _queuePromoImpressions();
 
     if (!data.isScheduleForToday && !_loading) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -314,39 +348,45 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           const LinearProgressIndicator(
               minHeight: 2, semanticsLabel: 'Обновляем данные'),
         Expanded(
-          child: StudentHomeView(
-            data: _toPresentationData(data),
-            notificationCount: _unreadNotificationCount,
-            onRefresh: _load,
-            onNotificationsTap: _openNotifications,
-            onNewsTap: (index) => _showNewsFeed(data.news, index),
-            onSummaryTap: () => MainTabScope.switchToTab(
-              context,
-              MainTab.schedule,
+          child: NotificationListener<ScrollNotification>(
+            onNotification: (_) {
+              _queuePromoImpressions();
+              return false;
+            },
+            child: StudentHomeView(
+              data: _toPresentationData(data),
+              notificationCount: _unreadNotificationCount,
+              onRefresh: _load,
+              onNotificationsTap: _openNotifications,
+              onNewsTap: (index) => _showNewsFeed(data.news, index),
+              onSummaryTap: () => MainTabScope.switchToTab(
+                context,
+                MainTab.schedule,
+              ),
+              onGroupActionTap: _openGroupAction,
+              onAssignmentsOpen: () => context.push('/my-diary'),
+              onAssignmentTap: (item) {
+                final source = _findAssignment(item.id);
+                if (source != null) _showAssignmentDetails(source);
+              },
+              onAssignmentDoneTap: (item) {
+                final source = _findAssignment(item.id);
+                if (source != null) _markAssignmentDone(source);
+              },
+              homePromo: _promo.hidePromoStrip || _promo.cards.length != 1
+                  ? null
+                  : (_promo.isDemoFallback ? null : _promo.payload),
+              homePromoIsDemo: _promo.showDemoBadge && _promo.cards.length <= 1,
+              hideHomePromo: _promoPlacements().isEmpty,
+              homePromoPlacements: _promoPlacements(),
+              // Placements carry per-card callbacks; these remain as single-slot fallbacks.
+              onHelpTap: () => _onHomePromoTap(card: _promo.card),
+              onHomePromoDismiss: _promo.card == null
+                  ? null
+                  : () => _onHomePromoDismiss(_promo.card!),
+              hiddenAssignmentIds: _hiddenDoneAssignmentIds,
+              markingDoneAssignmentIds: _markingDoneAssignmentIds,
             ),
-            onGroupActionTap: _openGroupAction,
-            onAssignmentsOpen: () => context.push('/my-diary'),
-            onAssignmentTap: (item) {
-              final source = _findAssignment(item.id);
-              if (source != null) _showAssignmentDetails(source);
-            },
-            onAssignmentDoneTap: (item) {
-              final source = _findAssignment(item.id);
-              if (source != null) _markAssignmentDone(source);
-            },
-            homePromo: _promo.hidePromoStrip || _promo.cards.length != 1
-                ? null
-                : (_promo.isDemoFallback ? null : _promo.payload),
-            homePromoIsDemo: _promo.showDemoBadge && _promo.cards.length <= 1,
-            hideHomePromo: _promo.hidePromoStrip,
-            homePromoPlacements: _promoPlacements(),
-            // Placements carry per-card callbacks; these remain as single-slot fallbacks.
-            onHelpTap: () => _onHomePromoTap(card: _promo.card),
-            onHomePromoDismiss: _promo.card == null
-                ? null
-                : () => _onHomePromoDismiss(_promo.card!),
-            hiddenAssignmentIds: _hiddenDoneAssignmentIds,
-            markingDoneAssignmentIds: _markingDoneAssignmentIds,
           ),
         ),
       ],
@@ -742,8 +782,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final usesImage = contentCardVariantUsesImage(
         effectiveContentCardVariant(card.homePromo.cardVariant),
       );
-      final identity =
-          '${card.homePromo.imageAssetId}|${card.homePromo.iconAssetId}';
+      final identity = _promoIdentity(card);
       if (_promoAssetIdentities[card.id] != identity) {
         _promoImageBytes.remove(card.id);
         _promoIconBytes.remove(card.id);
@@ -763,6 +802,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ..clear()
         ..addAll(loadingStates));
     }
+    _queuePromoImpressions();
 
     Future<void> hydrate(ManagedContentCard card) async {
       final version = '${card.id}|${card.schemaVersion}';
@@ -772,50 +812,63 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         effectiveContentCardVariant(card.homePromo.cardVariant),
       );
 
-      if (imageId != null && imageId.isNotEmpty && usesImage) {
-        final bytes = await _contentMedia.fetchBytes(
-          imageId,
-          contentVersion: version,
-        );
-        if (!mounted ||
-            generation != _promoMediaGeneration ||
-            mediaUser != _service.currentUserId) return;
-        setState(() {
-          if (bytes != null && bytes.isNotEmpty) {
-            _promoImageBytes[card.id] = bytes;
-            _promoImageStates[card.id] = ContentImageReady(bytes);
-          } else {
+      Future<void> image() async {
+        if (imageId != null && imageId.isNotEmpty && usesImage) {
+          Uint8List? bytes;
+          try {
+            bytes = await _contentMedia.fetchBytes(
+              imageId,
+              contentVersion: version,
+            );
+          } catch (_) {}
+          if (!mounted ||
+              generation != _promoMediaGeneration ||
+              mediaUser != _service.currentUserId) return;
+          setState(() {
+            if (bytes != null && bytes.isNotEmpty) {
+              _promoImageBytes[card.id] = bytes;
+              _promoImageStates[card.id] = ContentImageReady(bytes);
+            } else {
+              _promoImageBytes.remove(card.id);
+              _promoImageStates[card.id] = const ContentImageFailed();
+            }
+          });
+          _queuePromoImpressions();
+        } else if (usesImage) {
+          if (!mounted ||
+              generation != _promoMediaGeneration ||
+              mediaUser != _service.currentUserId) return;
+          setState(() {
             _promoImageBytes.remove(card.id);
-            _promoImageStates[card.id] = const ContentImageFailed();
-          }
-        });
-      } else if (usesImage) {
-        if (!mounted ||
-            generation != _promoMediaGeneration ||
-            mediaUser != _service.currentUserId) return;
-        setState(() {
-          _promoImageBytes.remove(card.id);
-          _promoImageStates[card.id] = ContentImageRenderState.missing;
-        });
+            _promoImageStates[card.id] = ContentImageRenderState.missing;
+          });
+        }
       }
 
-      if (iconId != null && iconId.isNotEmpty) {
-        final iconBytes = await _contentMedia.fetchBytes(
-          iconId,
-          contentVersion: '$version|icon',
-        );
-        if (!mounted ||
-            generation != _promoMediaGeneration ||
-            mediaUser != _service.currentUserId) return;
-        if (iconBytes != null && iconBytes.isNotEmpty) {
-          setState(() => _promoIconBytes[card.id] = iconBytes);
+      Future<void> icon() async {
+        if (iconId != null && iconId.isNotEmpty) {
+          Uint8List? iconBytes;
+          try {
+            iconBytes = await _contentMedia.fetchBytes(
+              iconId,
+              contentVersion: '$version|icon',
+            );
+          } catch (_) {}
+          if (!mounted ||
+              generation != _promoMediaGeneration ||
+              mediaUser != _service.currentUserId) return;
+          if (iconBytes != null && iconBytes.isNotEmpty) {
+            setState(() => _promoIconBytes[card.id] = iconBytes!);
+          }
+        } else {
+          if (!mounted ||
+              generation != _promoMediaGeneration ||
+              mediaUser != _service.currentUserId) return;
+          setState(() => _promoIconBytes.remove(card.id));
         }
-      } else {
-        if (!mounted ||
-            generation != _promoMediaGeneration ||
-            mediaUser != _service.currentUserId) return;
-        setState(() => _promoIconBytes.remove(card.id));
       }
+
+      await Future.wait([image(), icon()]);
     }
 
     for (var offset = 0; offset < promo.cards.length; offset += 2) {
@@ -842,32 +895,70 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (_promo.cards.isEmpty) return const [];
     return [
       for (final card in _promo.cards)
-        StudentHomePromoPlacement(
-          payload: card.homePromo,
-          slot: card.homePromo.effectiveHomeSlot,
-          showDemoBadge: card.showDemoBadge,
-          onTap: _promoTapCallback(card),
-          onDismiss: card.homePromo.dismissible
-              ? () => _onHomePromoDismiss(card)
-              : null,
-          imageBytes: _promoImageBytes[card.id],
-          iconBytes: _promoIconBytes[card.id],
-          imageState: _promoImageStates[card.id],
-          imageLoading: _promoImageStates[card.id]?.isLoading == true,
-        ),
+        if (_promoReady(card))
+          StudentHomePromoPlacement(
+            anchorKey: _promoKeys.putIfAbsent(card.id, GlobalKey.new),
+            payload: card.homePromo,
+            slot: card.homePromo.effectiveHomeSlot,
+            showDemoBadge: card.showDemoBadge,
+            onTap: _promoTapCallback(card),
+            onDismiss: card.homePromo.dismissible
+                ? () => _onHomePromoDismiss(card)
+                : null,
+            imageBytes: _promoImageBytes[card.id],
+            iconBytes: _promoIconBytes[card.id],
+            imageState: _promoImageStates[card.id],
+            imageLoading: _promoImageStates[card.id]?.isLoading == true,
+          ),
     ];
   }
 
   void _maybeRecordPromoImpression(HomePromoLoadResult promo) {
-    if (promo.isDemoFallback || promo.hidePromoStrip || promo.loadError) {
+    if (!mounted ||
+        _data == null ||
+        !(widget.activeListenable?.value ?? true) ||
+        _loadUserId != _service.currentUserId ||
+        ModalRoute.of(context)?.isCurrent == false ||
+        promo.isDemoFallback ||
+        promo.hidePromoStrip ||
+        promo.loadError) {
       return;
     }
+    final viewport = context.findRenderObject();
+    if (viewport is! RenderBox || !viewport.hasSize) return;
+    final bounds = viewport.localToGlobal(Offset.zero) & viewport.size;
     for (final card in promo.cards) {
+      if (!_promoReady(card)) continue;
+      final box = _promoKeys[card.id]?.currentContext?.findRenderObject();
+      if (box is! RenderBox ||
+          !box.attached ||
+          !box.hasSize ||
+          !(box.localToGlobal(Offset.zero) & box.size).overlaps(bounds))
+        continue;
       final id = card.id;
       if (!_recordedImpressionIds.add(id)) continue;
       unawaited(_promoService.recordEvent(id, 'impression'));
     }
   }
+
+  void _queuePromoImpressions() {
+    if (!mounted || _impressionFramePending) return;
+    _impressionFramePending = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _impressionFramePending = false;
+      if (mounted) _maybeRecordPromoImpression(_promo);
+    });
+  }
+
+  bool _promoReady(ManagedContentCard card) =>
+      !contentCardVariantUsesImage(
+          effectiveContentCardVariant(card.homePromo.cardVariant)) ||
+      (_promoAssetIdentities[card.id] == _promoIdentity(card) &&
+          _promoImageStates[card.id] is ContentImageReady &&
+          (_promoImageBytes[card.id]?.isNotEmpty ?? false));
+
+  String _promoIdentity(ManagedContentCard card) =>
+      '${card.schemaVersion}|${card.homePromo.imageAssetId}|${card.homePromo.iconAssetId}';
 
   VoidCallback? _promoTapCallback(ManagedContentCard card) {
     final payload = card.homePromo;

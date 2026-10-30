@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 import 'package:student_platform/src/ui/home/news_image_disk_cache.dart';
 import 'package:student_ui/student_ui.dart';
 import 'dart:convert';
@@ -14,6 +15,35 @@ void main() {
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+  });
+
+  test(
+      'timed out image releases flight; late response cannot replace retry cache',
+      () async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+        'content_media_url_v2__a|asset|v1',
+        jsonEncode({
+          'signedUrl': 'https://example.com/image',
+          'expiresAt':
+              DateTime.now().add(const Duration(hours: 1)).toIso8601String(),
+        }));
+    final old = Completer<http.Response>();
+    var calls = 0;
+    final service = ContentMediaService(
+        currentUserId: () => 'a',
+        networkTimeout: const Duration(milliseconds: 30),
+        httpClient: MockClient((_) async {
+          calls++;
+          if (calls == 1) return old.future;
+          return http.Response.bytes([2], 200);
+        }));
+    expect(await service.fetchBytes('asset', contentVersion: 'v1'), isNull);
+    expect(await service.fetchBytes('asset', contentVersion: 'v1'), [2]);
+    old.complete(http.Response.bytes([1], 200));
+    await Future<void>.delayed(Duration.zero);
+    expect(await service.fetchBytes('asset', contentVersion: 'v1'), [2]);
+    expect(calls, 2);
   });
 
   test('resolveDownload rejects responses that leak storage path', () async {

@@ -1,6 +1,16 @@
 import 'dart:typed_data';
 import 'package:student_ui/student_ui.dart';
 
+/// Mobile feed hides image cards until ready, without blocking text cards.
+List<ManagedProfileFeedCard> readyProfileFeedCards(
+        Iterable<ManagedProfileFeedCard> cards) =>
+    cards
+        .where((card) =>
+            !contentCardVariantUsesImage(
+                effectiveContentCardVariant(card.payload.cardVariant)) ||
+            (card.imageBytes?.isNotEmpty ?? false))
+        .toList(growable: false);
+
 /// Each asset starts immediately; a slow icon never holds back the main image.
 Future<void> hydrateProfileCardMedia(
   ManagedProfileFeedCard card, {

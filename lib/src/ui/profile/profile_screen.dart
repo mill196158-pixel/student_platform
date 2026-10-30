@@ -19,6 +19,7 @@ import 'package:student_platform/src/ui/content/content_nav_executor.dart';
 import 'package:student_platform/src/ui/info/content_media_service.dart';
 import 'package:student_platform/src/ui/profile/profile_feed_service.dart';
 import 'package:student_platform/src/ui/profile/profile_card_media_loader.dart';
+import 'package:student_platform/src/ui/profile/profile_avatar_image.dart';
 import 'package:student_platform/src/ui/profile/student_points_service.dart';
 import 'package:student_platform/src/ui/profile/my_reviews_screen.dart';
 
@@ -42,7 +43,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   final ContentMediaService _contentMedia =
       ContentMediaService(persistBytes: true);
   ProfileFeedLoadResult _feed =
-      const ProfileFeedLoadResult(isDemoFallback: true);
+      const ProfileFeedLoadResult(intentionallyEmpty: true);
   final StudentPointsService _pointsService = StudentPointsService();
   StudentPointsLoadResult _points =
       const StudentPointsLoadResult(isDemoFallback: true);
@@ -212,6 +213,9 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   void _recordVisibleFeedImpression(ManagedProfileFeedCard card) {
+    if (!mounted ||
+        !(widget.activeListenable?.value ?? true) ||
+        ModalRoute.of(context)?.isCurrent == false) return;
     if (_feed.isDemoFallback || _feed.hideFeed || _feed.showLoadError) return;
     if (card.showDemoBadge || card.id.startsWith('demo-')) return;
     if (!_recordedFeedImpressions.add(card.id)) return;
@@ -677,7 +681,11 @@ class _ProfileScreenState extends State<ProfileScreen>
             groupLabel: group,
             universityLabel: uni.isEmpty ? null : uni,
             statusLabel: status.isEmpty ? null : status,
-            avatarUrl: avatar,
+            avatarImage: profileAvatarImage(
+                u?['id'] == _sb.auth.currentUser?.id
+                    ? _sb.auth.currentUser?.id
+                    : null,
+                avatar),
             messagesBadge: _unreadTotal,
             friendsBadge: _requestsCount,
             pointsChip: (!_points.hidePoints || _points.showLoadError)
@@ -715,7 +723,9 @@ class _ProfileScreenState extends State<ProfileScreen>
                         ],
                       ))
                 : null,
-            feedCards: _feed.hideFeed ? const [] : _feed.displayCards,
+            feedCards: _feed.hideFeed
+                ? const []
+                : readyProfileFeedCards(_feed.displayCards),
             feedLoadError: _feed.showLoadError,
             onFeedRetry: () => unawaited(_loadFeed()),
             onFeedTap: _onManagedFeedTap,

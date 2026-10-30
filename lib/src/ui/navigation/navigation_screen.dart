@@ -25,9 +25,12 @@ class _NavigationScreenState extends State<NavigationScreen> {
   int _currentIndex = 0;
   final PageStorageBucket _bucket = PageStorageBucket();
   final ValueNotifier<bool> _profileActive = ValueNotifier<bool>(false);
+  final ValueNotifier<bool> _homeActive = ValueNotifier<bool>(true);
 
   late final List<Widget> _tabs = <Widget>[
-    const _KeepAlive(storageKey: 'tab_home', child: HomeScreen()),
+    _KeepAlive(
+        storageKey: 'tab_home',
+        child: HomeScreen(activeListenable: _homeActive)),
     const _KeepAlive(storageKey: 'tab_info', child: InfoScreen()),
     const _KeepAlive(storageKey: 'tab_learning', child: LearningScreen()),
     const _KeepAlive(storageKey: 'tab_schedule', child: ScheduleScreen()),
@@ -47,6 +50,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
     if (index != _currentIndex) {
       setState(() => _currentIndex = index);
       _profileActive.value = tab == MainTab.profile;
+      _homeActive.value = tab == MainTab.home;
     }
   }
 
@@ -104,6 +108,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
     PresenceService.instance.stop();
     ChatWarmCoordinator.instance.stop();
     _profileActive.dispose();
+    _homeActive.dispose();
     super.dispose();
   }
 }

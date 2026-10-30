@@ -16,6 +16,7 @@ class StudentProfileScreenPreview extends StatelessWidget {
     this.statusLabel,
     this.avatarBytes,
     this.avatarUrl,
+    this.avatarImage,
     this.pointsChip,
     this.messagesBadge = 0,
     this.friendsBadge = 0,
@@ -42,6 +43,7 @@ class StudentProfileScreenPreview extends StatelessWidget {
   final String? statusLabel;
   final Uint8List? avatarBytes;
   final String? avatarUrl;
+  final ImageProvider? avatarImage;
   final Widget? pointsChip;
   final int messagesBadge;
   final int friendsBadge;
@@ -96,6 +98,7 @@ class StudentProfileScreenPreview extends StatelessWidget {
               statusLabel: statusLabel,
               avatarBytes: avatarBytes,
               avatarUrl: avatarUrl,
+              avatarImage: avatarImage,
             ),
             if (pointsChip != null) ...[
               const SizedBox(height: sectionGap),
@@ -270,6 +273,7 @@ class _SoftHeader extends StatelessWidget {
     this.statusLabel,
     this.avatarBytes,
     this.avatarUrl,
+    this.avatarImage,
   });
 
   final String displayName;
@@ -278,6 +282,7 @@ class _SoftHeader extends StatelessWidget {
   final String? statusLabel;
   final Uint8List? avatarBytes;
   final String? avatarUrl;
+  final ImageProvider? avatarImage;
 
   @override
   Widget build(BuildContext context) {
@@ -289,10 +294,10 @@ class _SoftHeader extends StatelessWidget {
       if (group.isNotEmpty) 'группа $group',
     ].join(', ');
 
-    ImageProvider? avatarProvider;
+    ImageProvider? avatarProvider = avatarImage;
     if (avatarBytes != null && avatarBytes!.isNotEmpty) {
       avatarProvider = MemoryImage(avatarBytes!);
-    } else {
+    } else if (avatarProvider == null) {
       final url = avatarUrl?.trim();
       if (url != null && url.isNotEmpty) {
         avatarProvider = NetworkImage(url);

@@ -34,6 +34,7 @@ class ContentMediaService {
   ContentMediaService({
     SupabaseClient? client,
     this.persistBytes = false,
+    this.networkTimeout = const Duration(seconds: 12),
     NewsImageDiskCache? diskCache,
     http.Client? httpClient,
     Future<SharedPreferences> Function()? prefs,
@@ -49,6 +50,7 @@ class ContentMediaService {
         _currentUserId = currentUserId;
 
   final bool persistBytes;
+  final Duration networkTimeout;
   final NewsImageDiskCache _disk;
   final SupabaseClient? _client;
   SupabaseClient get _sb => _client ?? Supabase.instance.client;
@@ -120,7 +122,7 @@ class ContentMediaService {
           'action': 'createDownload',
           'assetId': id,
         },
-      );
+      ).timeout(networkTimeout);
       if (!current()) return null;
       if (response.status == 403 || response.status == 401) {
         await _clearCapturedKey(memKey);
@@ -191,7 +193,9 @@ class ContentMediaService {
         if (!current()) return null;
         final cached = _bytesMemory[key];
         if (cached != null && !download.shouldRefresh) return cached;
-        final response = await _http.get(Uri.parse(download.signedUrl));
+        final response = await _http
+            .get(Uri.parse(download.signedUrl))
+            .timeout(networkTimeout);
         if (response.statusCode == 403 || response.statusCode == 401) {
           await _clearCapturedKey(key);
           return null;

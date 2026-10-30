@@ -14,9 +14,14 @@ import time
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("label")
+    parser.add_argument("--runs", type=int, default=3)
+    parser.add_argument("--wait-push", action="store_true",
+                        help="Also capture the UI Firebase-ready timing marker")
     parser.add_argument("--disable-impeller", action="store_true",
                         help="Diagnostic intent override only; does not alter the APK")
     args = parser.parse_args()
+    if not 1 <= args.runs <= 20:
+        parser.error("runs must be between 1 and 20")
     allowed = "abcdefghijklmnopqrstuvwxyz0123456789-_"
     if not args.label or any(c not in allowed for c in args.label):
         parser.error("Use lowercase letters, digits, hyphens or underscores")
@@ -27,7 +32,7 @@ def main():
     output.parent.mkdir(parents=True, exist_ok=True)
     rows = []
     renderer_args = ["--ez", "enable-impeller", "false"] if args.disable_impeller else []
-    for index in range(3):
+    for index in range(args.runs):
         launch = subprocess.check_output(
             device + ["shell", "am", "start", "-S", "-W", "-n",
                       "com.mill453020.studentplatform/.MainActivity",
@@ -49,7 +54,9 @@ def main():
             tags = ("[startup-perf]", "[home-perf]", "StartupTrace:")
             markers = [line for line in logs.splitlines()
                        if any(tag in line for tag in tags)]
-            if any("[home-perf]" in line for line in markers):
+            if any("[home-perf]" in line for line in markers) and (
+                not args.wait_push or any("push-ready" in line or "push-unavailable" in line for line in markers)
+            ):
                 break
             time.sleep(1)
         row = {"run": index + 1, "launch": launch, "markers": markers}

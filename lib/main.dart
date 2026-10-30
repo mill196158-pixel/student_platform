@@ -151,8 +151,15 @@ Future<void> main() async {
   runApp(const StudentPlatformApp());
   WidgetsBinding.instance.addPostFrameCallback((_) {
     stage('first-frame');
-    unawaited(PushNotificationService.instance.bootstrapFirebase());
   });
+  unawaited(WidgetsBinding.instance.waitUntilFirstFrameRasterized.then((_) {
+    stage('first-raster');
+    unawaited(PushNotificationService.instance.bootstrapFirebase().then((_) {
+      stage(PushNotificationService.instance.isFirebaseReady
+          ? 'push-ready'
+          : 'push-unavailable');
+    }));
+  }));
 }
 
 class StudentPlatformApp extends StatelessWidget {

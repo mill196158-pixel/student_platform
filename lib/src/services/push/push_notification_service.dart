@@ -54,7 +54,11 @@ class PushNotificationService {
   final _firebaseBootstrap = SingleFlightInitialization();
   Future<void> bootstrapFirebase() {
     if (!isSupportedPlatform || _firebaseReady) return Future.value();
-    return _firebaseBootstrap.run(_initializeFirebase);
+    // Framework post-frame callbacks precede rasterization. Do not start the
+    // secondary messaging engine while the first visible frame is rendering.
+    // The separate background-message handler does not use this UI gate.
+    return _firebaseBootstrap.run(_initializeFirebase,
+        after: WidgetsBinding.instance.waitUntilFirstFrameRasterized);
   }
 
   Future<void> _initializeFirebase() async {

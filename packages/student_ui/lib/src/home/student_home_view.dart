@@ -115,10 +115,7 @@ class StudentHomeView extends StatelessWidget {
     ];
   }
 
-  List<Widget> _promoSliversFor(
-    String slot, {
-    required Duration delay,
-  }) {
+  List<Widget> _promoSliversFor(String slot) {
     final cards = _resolvedPlacements()
         .where((p) =>
             p.slot == slot || (p.slot.isEmpty && slot == 'after_assignments'))
@@ -127,20 +124,17 @@ class StudentHomeView extends StatelessWidget {
     return [
       for (var i = 0; i < cards.length; i++) ...[
         SliverToBoxAdapter(
-          child: _AnimatedEntry(
-            delay: delay + Duration(milliseconds: i * 20),
-            child: KeyedSubtree(
-              key: cards[i].anchorKey,
-              child: StudentHomePromoCard(
-                payload: cards[i].payload,
-                onTap: cards[i].onTap ?? onHelpTap,
-                onDismiss: cards[i].onDismiss ?? onHomePromoDismiss,
-                showDemoBadge: cards[i].showDemoBadge,
-                imageBytes: cards[i].imageBytes,
-                imageLoading: cards[i].imageLoading,
-                imageState: cards[i].imageState,
-                iconBytes: cards[i].iconBytes,
-              ),
+          child: KeyedSubtree(
+            key: cards[i].anchorKey,
+            child: StudentHomePromoCard(
+              payload: cards[i].payload,
+              onTap: cards[i].onTap ?? onHelpTap,
+              onDismiss: cards[i].onDismiss ?? onHomePromoDismiss,
+              showDemoBadge: cards[i].showDemoBadge,
+              imageBytes: cards[i].imageBytes,
+              imageLoading: cards[i].imageLoading,
+              imageState: cards[i].imageState,
+              iconBytes: cards[i].iconBytes,
             ),
           ),
         ),
@@ -179,10 +173,7 @@ class StudentHomeView extends StatelessWidget {
           ),
           _sectionSpacer,
         ],
-        ..._promoSliversFor(
-          'after_news',
-          delay: const Duration(milliseconds: 40),
-        ),
+        ..._promoSliversFor('after_news'),
         // System block: day summary (immovable).
         SliverToBoxAdapter(
           child: _AnimatedEntry(
@@ -191,10 +182,7 @@ class StudentHomeView extends StatelessWidget {
           ),
         ),
         _sectionSpacer,
-        ..._promoSliversFor(
-          'after_day_summary',
-          delay: const Duration(milliseconds: 90),
-        ),
+        ..._promoSliversFor('after_day_summary'),
         // System block: assignments (immovable).
         SliverToBoxAdapter(
           child: _AnimatedEntry(
@@ -212,18 +200,9 @@ class StudentHomeView extends StatelessWidget {
           ),
         ),
         _sectionSpacer,
-        ..._promoSliversFor(
-          'after_assignments',
-          delay: const Duration(milliseconds: 170),
-        ),
-        ..._promoSliversFor(
-          'before_bottom_info',
-          delay: const Duration(milliseconds: 190),
-        ),
-        ..._promoSliversFor(
-          'end_of_page',
-          delay: const Duration(milliseconds: 210),
-        ),
+        ..._promoSliversFor('after_assignments'),
+        ..._promoSliversFor('before_bottom_info'),
+        ..._promoSliversFor('end_of_page'),
         const SliverToBoxAdapter(child: SizedBox(height: 96)),
       ],
     );

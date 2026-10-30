@@ -25,6 +25,12 @@ void main() {
         'icon_asset_id': 'icon'
       }
     })!;
+    final textCard = card.copyWith(
+        id: 'text',
+        payload: card.payload.copyWith(cardVariant: 'gradient_text'));
+    final missingAsset =
+        card.copyWith(payload: card.payload.copyWith(clearImageAssetId: true));
+    expect(readyProfileFeedCards([card, missingAsset, textCard]), [textCard]);
     final image = Completer<Uint8List?>();
     final icon = Completer<Uint8List?>();
     final started = <String>[];
@@ -37,6 +43,11 @@ void main() {
     image.complete(Uint8List.fromList([1, 2, 3]));
     await Future<void>.delayed(Duration.zero);
     expect(updates.last.imageBytes, [1, 2, 3]);
+    expect(readyProfileFeedCards([textCard, updates.last]),
+        [textCard, updates.last]);
+    expect(
+        readyProfileFeedCards([updates.last.copyWith(clearImageBytes: true)]),
+        isEmpty);
     expect(updates.last.imageLoading, isFalse);
     expect(icon.isCompleted, isFalse);
     icon.complete(Uint8List.fromList([4]));
