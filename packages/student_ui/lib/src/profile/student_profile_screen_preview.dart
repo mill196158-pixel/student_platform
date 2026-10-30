@@ -29,6 +29,7 @@ class StudentProfileScreenPreview extends StatelessWidget {
     this.onFeedVisible,
     this.onFeedTap,
     this.showStudySection = true,
+    this.showDiary = true,
     this.onDiaryTap,
     this.onMapTap,
     this.onReviewsTap,
@@ -58,6 +59,7 @@ class StudentProfileScreenPreview extends StatelessWidget {
   final ValueChanged<ManagedProfileFeedCard>? onFeedVisible;
   final ValueChanged<ManagedProfileFeedCard>? onFeedTap;
   final bool showStudySection;
+  final bool showDiary;
   final VoidCallback? onDiaryTap;
   final VoidCallback? onMapTap;
   final VoidCallback? onReviewsTap;
@@ -146,17 +148,18 @@ class StudentProfileScreenPreview extends StatelessWidget {
               const SizedBox(height: sectionGap),
               const _SectionTitle('Учёба'),
               const SizedBox(height: sectionGap),
-              _StudyBanner(
-                title: 'Мой дневник',
-                subtitle: guest
-                    ? 'Заметки и конспекты на этом устройстве'
-                    : 'Записи, конспекты и файлы по предметам текущего семестра',
-                icon: Icons.menu_book_outlined,
-                iconColor: _accent,
-                colors: const [Color(0xFFDCD0FA), Color(0xFFC5EFE5)],
-                onTap: onDiaryTap,
-              ),
-              const SizedBox(height: sectionGap),
+              if (showDiary)
+                _StudyBanner(
+                  title: 'Мой дневник',
+                  subtitle: guest
+                      ? 'Заметки и конспекты на этом устройстве'
+                      : 'Записи, конспекты и файлы по предметам текущего семестра',
+                  icon: Icons.menu_book_outlined,
+                  iconColor: _accent,
+                  colors: const [Color(0xFFDCD0FA), Color(0xFFC5EFE5)],
+                  onTap: onDiaryTap,
+                ),
+              if (showDiary) const SizedBox(height: sectionGap),
               _StudyBanner(
                 title: 'Карта СПБГАСУ',
                 icon: Icons.map_outlined,

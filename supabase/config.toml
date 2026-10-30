@@ -32,3 +32,6 @@ entrypoint = "./functions/content-media/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/vacancy-media/index.ts"
+
+[functions.guest-news-media]
+verify_jwt = false

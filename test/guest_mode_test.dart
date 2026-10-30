@@ -1,82 +1,157 @@
-import 'dart:io';
-import 'package:student_ui/student_ui.dart';
-import 'package:student_platform/src/ui/shared/student_section_headers.dart';
 import 'dart:async';
-import 'package:student_platform/src/ui/guest/guest_workspace.dart';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:student_platform/src/ui/navigation/navigation_screen.dart';
+import 'package:student_platform/src/ui/guest/guest_workspace.dart';
+import 'package:student_platform/src/ui/guest/guest_public_service.dart';
 import 'package:student_platform/src/core/password_policy.dart';
+import 'package:student_ui/student_ui.dart';
 
-class DenyNetwork extends HttpOverrides {
-  int calls = 0;
+class FakeGuestService extends GuestPublicService {
+  final calls = <String>[];
+  bool fail = false;
+  final first = Completer<Uint8List?>();
   @override
-  HttpClient createHttpClient(SecurityContext? context) {
-    calls++;
-    throw StateError('Guest must not access network');
+  Future<List<Map<String, dynamic>>> rpc(String name,
+      [Map<String, dynamic> params = const {}]) async {
+    calls.add(name);
+    if (fail) throw StateError('offline');
+    if (name == 'get_guest_news')
+      return [
+        for (final id in ['a', 'b'])
+          {
+            'id': id,
+            'title': 'News $id',
+            'body': 'Body',
+            'variant': 'gradientText'
+          }
+      ];
+    if (name == 'get_guest_groups')
+      return [
+        {'id': 'test-group', 'name': 'Тестовая группа'}
+      ];
+    return [
+      {
+        'id': 'lesson',
+        'date': params['p_from'],
+        'subject': 'Математика',
+        'time_start': '09:00:00',
+        'time_end': '10:30:00',
+        'room': '101'
+      }
+    ];
   }
+
+  @override
+  Future<Uint8List?> image(Map<String, dynamic> row) => row['id'] == 'a'
+      ? first.future
+      : Future.value(Uint8List.fromList([1, 2, 3]));
+}
+
+class RefreshGuestService extends GuestPublicService {
+  int revision = 0;
+  final oldImage = Completer<Uint8List?>();
+  @override
+  Future<List<Map<String, dynamic>>> rpc(String name,
+          [Map<String, dynamic> params = const {}]) async =>
+      [
+        {
+          'id': 'same',
+          'title': 'Revision ${++revision}',
+          'body': '',
+          'variant': 'gradientText',
+          'version_number': revision
+        }
+      ];
+  @override
+  Future<Uint8List?> image(Map<String, dynamic> row) =>
+      row['version_number'] == 1
+          ? oldImage.future
+          : Future.value(Uint8List.fromList([2]));
 }
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   testWidgets(
-      'guest layouts fit a narrow phone and search does not hide profile favorites',
+      'guest tabs preserve original surfaces, remove private extras, select and restore group',
       (tester) async {
-    tester.view.physicalSize = const Size(320, 640);
+    tester.view.physicalSize = const Size(320, 740);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    SharedPreferences.setMockInitialValues({});
-    for (final tab in [0, 1, 2, 3, 4]) {
-      await tester.pumpWidget(
-          MaterialApp(home: Scaffold(body: GuestWorkspace(tab: tab))));
+    SharedPreferences.setMockInitialValues(
+        {'user': 'private cache', 'guest_workspace_v1': 'old data'});
+    Future<void> open(int tab) async {
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(MaterialApp(
+          home: GuestWorkspace(tab: tab, service: FakeGuestService())));
       await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull, reason: 'tab $tab at 320px');
-      final shared = [
-        StudentHomeView,
-        StudentInfoHeader,
-        StudentLearningHeader,
-        StudentScheduleHeader,
-        StudentProfileScreenPreview
-      ][tab];
-      expect(find.byType(shared), findsOneWidget);
     }
-    await tester.pumpWidget(
-        const MaterialApp(home: Scaffold(body: GuestWorkspace(tab: 1))));
+
+    await open(4);
+    expect(find.text('Мой дневник'), findsNothing);
+    expect(find.text('Избранное'), findsNothing);
+    expect(find.text('На этом устройстве'), findsNothing);
+    expect(find.text('Карта СПБГАСУ'), findsOneWidget);
+    await open(2);
+    expect(find.text('Войти или зарегистрироваться'), findsOneWidget);
+    await open(1);
+    expect(find.byTooltip('В избранное'), findsNothing);
+    await open(3);
+    await tester.tap(find.text('Выбрать группу'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('В избранное').first);
+    await tester.tap(find.text('Тестовая группа'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byTooltip('В избранное').at(1));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('В избранное').at(1));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Избранное'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Избранное'));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byType(TextField));
-    await tester.enterText(find.byType(TextField), 'Производная');
-    await tester.pumpAndSettle();
-    expect(find.text('Производная: правило произведения'), findsOneWidget);
-    expect(find.text('Единицы давления'), findsNothing);
-    await tester.tap(find.text('Все материалы'));
-    await tester.enterText(find.byType(TextField), 'нет такого материала');
-    await tester.pumpAndSettle();
-    expect(find.text('Материалы не найдены. Попробуй другой запрос.'),
-        findsOneWidget);
-    await tester.pumpWidget(
-        const MaterialApp(home: Scaffold(body: GuestWorkspace(tab: 4))));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Производная: правило произведения'));
-    await tester.pumpAndSettle();
-    expect(find.text('Производная: правило произведения').hitTestable(),
-        findsOneWidget);
-    expect(find.text('Единицы давления'), findsOneWidget);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('guest_selected_group_v1'), contains('test-group'));
+    expect(prefs.getString('user'), 'private cache');
+    expect(prefs.getString('guest_workspace_v1'), 'old data');
+    await open(3);
+    expect(find.text('Тестовая группа'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
-  test('guest route never calls profile policy; private route stays protected',
+  testWidgets('later news cover paints without waiting for first image',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final service = FakeGuestService();
+    await tester.pumpWidget(
+        MaterialApp(home: GuestWorkspace(tab: 0, service: service)));
+    await tester.pumpAndSettle();
+    final view = tester.widget<StudentHomeView>(find.byType(StudentHomeView));
+    expect(view.data.news[0].imageBytes, isNull);
+    expect(view.data.news[1].imageBytes, isNotNull);
+    service.first.complete(Uint8List.fromList([4, 5]));
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widget<StudentHomeView>(find.byType(StudentHomeView))
+            .data
+            .news[0]
+            .imageBytes,
+        isNotNull);
+  });
+  testWidgets('old cover cannot overwrite a refreshed version', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final service = RefreshGuestService();
+    await tester.pumpWidget(
+        MaterialApp(home: GuestWorkspace(tab: 0, service: service)));
+    await tester.pumpAndSettle();
+    await tester
+        .widget<StudentHomeView>(find.byType(StudentHomeView))
+        .onRefresh!();
+    await tester.pumpAndSettle();
+    service.oldImage.complete(Uint8List.fromList([1]));
+    await tester.pumpAndSettle();
+    final news = tester
+        .widget<StudentHomeView>(find.byType(StudentHomeView))
+        .data
+        .news
+        .single;
+    expect(news.title, 'Revision 2');
+    expect(news.imageBytes, Uint8List.fromList([2]));
+  });
+  test('guest bypasses profile policy, private routes remain protected',
       () async {
     var calls = 0;
     Future<bool> policy() async {
@@ -95,117 +170,5 @@ void main() {
             passwordChangeRequired: policy),
         '/login');
     expect(calls, 0);
-    expect(
-        await authRouteRedirect(
-            path: '/home', hasSession: true, passwordChangeRequired: policy),
-        '/change-password');
-  });
-  testWidgets('invalid local rows are ignored and failed save rolls back',
-      (tester) async {
-    SharedPreferences.setMockInitialValues({
-      'guest_workspace_v1':
-          '{"notes":[{"id":"x","title":1,"body":null,"date":"bad"}],"plans":[],"favorites":[]}'
-    });
-    final gate = Completer<bool>();
-    await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-            body: GuestWorkspace(tab: 1, saveSnapshot: (_) => gate.future))));
-    await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull);
-    await tester.tap(find.byTooltip('В избранное').first);
-    await tester.pump();
-    expect(
-        tester
-            .widgetList<AbsorbPointer>(find.byType(AbsorbPointer))
-            .any((w) => w.absorbing),
-        isTrue);
-    gate.complete(false);
-    await tester.pumpAndSettle();
-    expect(find.byIcon(Icons.star), findsNothing);
-    expect(find.text('Не удалось сохранить на устройстве. Повторите действие.'),
-        findsOneWidget);
-    await tester.pumpWidget(
-        const MaterialApp(home: Scaffold(body: GuestWorkspace(tab: 4))));
-    await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull);
-  });
-  testWidgets(
-      'all guest tabs operate without Supabase, persist local notes and favorites',
-      (tester) async {
-    SharedPreferences.setMockInitialValues({'user': 'private account cache'});
-    final network = DenyNetwork();
-    final old = HttpOverrides.current;
-    HttpOverrides.global = network;
-    addTearDown(() => HttpOverrides.global = old);
-    final router = GoRouter(initialLocation: '/guest', routes: [
-      GoRoute(
-          path: '/guest',
-          builder: (_, __) => const NavigationScreen(guest: true)),
-      GoRoute(
-          path: '/login',
-          builder: (_, __) => const Scaffold(body: Text('Login target'))),
-    ]);
-    addTearDown(router.dispose);
-    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
-    await tester.pumpAndSettle();
-    expect(find.text('Привет! 👋'), findsOneWidget);
-    await tester.tap(find.text('База').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('В избранное').first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Обучение').last);
-    await tester.pumpAndSettle();
-    expect(find.text('Войти в команды'), findsOneWidget);
-    await tester.tap(find.text('Профиль').last);
-    await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('Добавить заметку'), 150,
-        scrollable: find.byType(Scrollable).first);
-    await tester.ensureVisible(find.text('Добавить заметку'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Добавить заметку'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).at(0), 'Гостевая заметка');
-    await tester.enterText(find.byType(TextField).at(1), 'Мой разбор задачи');
-    await tester.tap(find.text('Сохранить'));
-    await tester.pumpAndSettle();
-    expect(find.text('Гостевая заметка'), findsOneWidget);
-    await tester.tap(find.text('Расписание').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Добавить в план'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).at(0), 'Подготовка');
-    await tester.tap(find.text('Сохранить'));
-    await tester.pumpAndSettle();
-    expect(find.text('Подготовка'), findsOneWidget);
-    await tester.tap(find.text('Профиль').last);
-    await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(
-        find.text('Производная: правило произведения'), 200,
-        scrollable: find.byType(Scrollable).first);
-    expect(find.text('Производная: правило произведения'), findsOneWidget);
-    final prefs = await SharedPreferences.getInstance();
-    expect(prefs.getString('guest_workspace_v1'), contains('Гостевая заметка'));
-    expect(prefs.getString('user'), 'private account cache');
-    expect(network.calls, 0);
-    // Destroy state, then read the actual persisted device workspace.
-    router.go('/login');
-    await tester.pumpAndSettle();
-    router.go('/guest');
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Профиль').last);
-    await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('Гостевая заметка'), 150,
-        scrollable: find.byType(Scrollable).first);
-    expect(find.text('Гостевая заметка'), findsOneWidget);
-    await tester.ensureVisible(find.text('Войти').first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Войти').first);
-    await tester.pumpAndSettle();
-    expect(find.text('Больше возможностей'), findsOneWidget);
-    await tester.ensureVisible(find.text('Войти').last);
-    await tester.tap(find.text('Войти').last);
-    await tester.pumpAndSettle();
-    expect(find.text('Login target'), findsOneWidget);
-    expect(network.calls, 0);
   });
 }

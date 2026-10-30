@@ -419,7 +419,9 @@ class _TodaySummaryCard extends StatelessWidget {
                 ? 'Пары закончились'
                 : 'Сегодня выходной');
     final subtitle = guest
-        ? 'Войди, чтобы видеть расписание своей группы'
+        ? (data.profile.groupName.isEmpty
+            ? 'Выбери группу во вкладке «Расписание»'
+            : 'Открыть расписание выбранной группы')
         : data.scheduleStatus != null
             ? 'Расписание на выбранный день'
             : count > 0
