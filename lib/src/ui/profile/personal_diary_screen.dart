@@ -7,6 +7,7 @@ import '../shared/workspace_page_header.dart';
 import '../learning/tabs/chat/navigation/group_action_deeplink.dart';
 import '../schedule/subject_diary/subject_diary.dart';
 import '../schedule/subject_diary_screen.dart';
+import 'diary_expansion_state.dart';
 
 class PersonalDiaryScreen extends StatefulWidget {
   const PersonalDiaryScreen({super.key, this.service});
@@ -160,6 +161,9 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
                         )
                       else
                         _CollapsibleTasksSection(
+                          key: ValueKey('active_tasks_${data.academicContext.userId}'),
+                          userId: data.academicContext.userId,
+                          section: 'active_tasks',
                           title: 'Активные ближайшие',
                           subtitle: '${upcomingItems.length} в списке',
                           icon: Icons.upcoming_rounded,
@@ -169,6 +173,9 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
                         ),
                       if (hiddenDoneItems.isNotEmpty)
                         _CollapsibleTasksSection(
+                          key: ValueKey('done_tasks_${data.academicContext.userId}'),
+                          userId: data.academicContext.userId,
+                          section: 'done_tasks',
                           title: 'Выполненные',
                           subtitle: '${hiddenDoneItems.length} скрыто',
                           icon: Icons.done_all_rounded,
@@ -194,6 +201,9 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
                           diarySubjects.isNotEmpty) ...[
                         SizedBox(height: compact ? 14 : 18),
                         _CollapsibleSubjectsSection(
+                          key: ValueKey('active_diaries_${data.academicContext.userId}'),
+                          userId: data.academicContext.userId,
+                          section: 'active_diaries',
                           title: 'Активные дневники',
                           subtitle: activeDiarySubjects.isEmpty
                               ? 'Записей пока нет'
@@ -203,6 +213,9 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
                           onTap: _openSubjectDiary,
                         ),
                         _CollapsibleSubjectsSection(
+                          key: ValueKey('semester_subjects_${data.academicContext.userId}'),
+                          userId: data.academicContext.userId,
+                          section: 'semester_subjects',
                           title: 'Предметы семестра',
                           subtitle: '${diarySubjects.length} предметов',
                           icon: Icons.menu_book_outlined,
@@ -2414,6 +2427,8 @@ class _SectionTitle extends StatelessWidget {
 }
 
 class _CollapsibleTasksSection extends StatelessWidget {
+  final String? userId;
+  final String section;
   final String title;
   final String subtitle;
   final IconData icon;
@@ -2422,6 +2437,9 @@ class _CollapsibleTasksSection extends StatelessWidget {
   final bool initiallyExpanded;
 
   const _CollapsibleTasksSection({
+    super.key,
+    required this.userId,
+    required this.section,
     required this.title,
     required this.subtitle,
     required this.icon,
@@ -2441,8 +2459,13 @@ class _CollapsibleTasksSection extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         child: Theme(
           data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-          child: ExpansionTile(
+          child: DiaryExpansionState(
+            userId: userId,
+            section: section,
             initiallyExpanded: initiallyExpanded,
+            builder: (context, expanded, onChanged) => ExpansionTile(
+            initiallyExpanded: expanded,
+            onExpansionChanged: onChanged,
             tilePadding: const EdgeInsets.symmetric(horizontal: 14),
             childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
             leading: Icon(
@@ -2464,6 +2487,7 @@ class _CollapsibleTasksSection extends StatelessWidget {
                   ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             children: items.map(itemBuilder).toList(),
+            ),
           ),
         ),
       ),
@@ -2604,6 +2628,8 @@ class _PlainStatusBadge extends StatelessWidget {
 }
 
 class _CollapsibleSubjectsSection extends StatelessWidget {
+  final String? userId;
+  final String section;
   final String title;
   final String subtitle;
   final IconData icon;
@@ -2611,6 +2637,9 @@ class _CollapsibleSubjectsSection extends StatelessWidget {
   final ValueChanged<PersonalDiarySubject> onTap;
 
   const _CollapsibleSubjectsSection({
+    super.key,
+    required this.userId,
+    required this.section,
     required this.title,
     required this.subtitle,
     required this.icon,
@@ -2629,7 +2658,13 @@ class _CollapsibleSubjectsSection extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         child: Theme(
           data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-          child: ExpansionTile(
+          child: DiaryExpansionState(
+            userId: userId,
+            section: section,
+            initiallyExpanded: false,
+            builder: (context, expanded, onChanged) => ExpansionTile(
+            initiallyExpanded: expanded,
+            onExpansionChanged: onChanged,
             tilePadding: const EdgeInsets.symmetric(horizontal: 14),
             childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
             leading: Icon(icon, color: const Color(0xFF7C63D8)),
@@ -2662,6 +2697,7 @@ class _CollapsibleSubjectsSection extends StatelessWidget {
                       ),
                     )
                     .toList(),
+          ),
           ),
         ),
       ),

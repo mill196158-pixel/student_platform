@@ -2,16 +2,18 @@ import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:student_platform/src/data/academic_context_service.dart';
 import 'package:student_platform/src/data/personal_diary_service.dart';
 import 'package:student_platform/src/ui/profile/personal_diary_screen.dart';
 
 class ControlledDiary extends PersonalDiaryService {
-  ControlledDiary()
+  ControlledDiary({this.userId})
       : super(
             client: SupabaseClient('http://localhost:54321', 'test',
                 authOptions: const AuthClientOptions(autoRefreshToken: false)));
+  final String? userId;
   final mutation = Completer<void>();
   final refresh = Completer<PersonalDiaryData>();
   int writes = 0;
@@ -23,7 +25,7 @@ class ControlledDiary extends PersonalDiaryService {
       createdAt: DateTime(2026),
       updatedAt: DateTime(2026));
   late final data = PersonalDiaryData(
-      academicContext: const AcademicContext.empty(),
+      academicContext: AcademicContext(userId: userId, hasActiveEnrollment: false),
       availableSemesters: const [],
       selectedSemesterNumber: null,
       allSubjects: const [],
@@ -49,6 +51,26 @@ class ControlledDiary extends PersonalDiaryService {
 }
 
 void main() {
+  testWidgets('diary restores collapsed active tasks after reopening', (t) async {
+    SharedPreferences.setMockInitialValues({});
+    final service = ControlledDiary(userId: 'diary-user');
+    await t.pumpWidget(MaterialApp(home: PersonalDiaryScreen(service: service)));
+    await t.pumpAndSettle();
+    expect(find.text('Test task'), findsOneWidget);
+    await t.tap(find.text('Активные ближайшие'));
+    await t.pumpAndSettle();
+    expect(find.text('Test task'), findsNothing);
+    await t.pumpWidget(const SizedBox());
+    await t.pumpWidget(MaterialApp(home: PersonalDiaryScreen(service: service)));
+    await t.pumpAndSettle();
+    expect(find.text('Активные ближайшие'), findsOneWidget);
+    expect(find.text('Test task'), findsNothing);
+    await t.tap(find.text('Активные ближайшие'));
+    await t.pumpAndSettle();
+    expect(find.text('Test task'), findsOneWidget);
+    service.refresh.complete(service.data);
+    await t.pump();
+  });
   for (final fail in [false, true]) {
     testWidgets('status stays visible, blocks duplicate writes, failure=$fail',
         (t) async {
