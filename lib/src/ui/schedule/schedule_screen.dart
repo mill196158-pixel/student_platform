@@ -23,17 +23,22 @@ import 'widgets/lesson_card.dart';
 import 'widgets/mini_calendar.dart';
 
 import 'utils/msk_date.dart';
+import '../../config/supabase_config.dart';
+import '../../core/auth_session_scope.dart';
+import '../../core/auth_session_scope_host.dart';
+import 'schedule_month_cache.dart';
 
 class ScheduleRepository {
-  final _sb = Supabase.instance.client;
+  ScheduleRepository({SupabaseClient? client}) : _sb = client ?? Supabase.instance.client;
+  final SupabaseClient _sb;
 
   /// Грузим все занятия за календарный месяц [anchor] (1-е число → последнее).
-  Future<List<Lesson>> loadMonth(DateTime anchor) async {
+  Future<List<Lesson>> loadMonth(DateTime anchor, {bool strict = false}) async {
     final first = DateTime(anchor.year, anchor.month, 1);
     final last =
         DateTime(anchor.year, anchor.month + 1, 0); // последний день месяца
     final days = last.difference(first).inDays + 1;
-    return loadRange(first, days: days);
+    return loadRange(first, days: days, strict: strict);
   }
 
   Future<List<Lesson>> loadRange(DateTime from,
@@ -56,6 +61,7 @@ class ScheduleRepository {
             '[schedule] loaded ${enriched.length} lessons from ${MskDate.isoDate(start)} for $days days');
         return enriched;
       }
+      if (strict) throw const FormatException('Invalid schedule response');
       return [];
     } catch (e, st) {
       // ignore: avoid_print
@@ -362,18 +368,26 @@ class ScheduleAssignment {
 const double _kHeaderSpacing = 12.0;
 
 class ScheduleScreen extends StatefulWidget {
-  const ScheduleScreen({super.key});
+  const ScheduleScreen({super.key, this.repository, this.now, this.subscribeRealtime = true});
+  final ScheduleRepository? repository;
+  final DateTime Function()? now;
+  final bool subscribeRealtime;
   @override
   State<ScheduleScreen> createState() => _ScheduleScreenState();
 }
 
 class _ScheduleScreenState extends State<ScheduleScreen> {
-  final _repo = ScheduleRepository();
+  late final _repo = widget.repository ?? ScheduleRepository();
 
   late DateTime _selectedWeekStart;
   late DateTime _selectedDay;
   bool _loading = true;
   bool _weekMode = false; // режим «День»/«Неделя»
+  bool _lessonsUnavailable = false;
+  bool _showingCachedSchedule = false;
+  int _loadRevision = 0;
+  AuthSessionScope? _sessionScope;
+  ScheduleMonthCache? _monthCache;
   List<Lesson> _all = [];
   List<ScheduleAssignment> _assignments = [];
   List<ScheduleGroupActionEvent> _groupActions = [];
@@ -403,7 +417,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     final now = _nowMsk();
     _selectedDay = now;
     _selectedWeekStart = _mondayOf(now);
-    _loadMonth(anchor: _selectedDay);
 
     // Обновляем «живые» индикаторы пар раз в минуту.
     _liveTick = Timer.periodic(const Duration(minutes: 1), (_) {
@@ -411,6 +424,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     });
 
     // Realtime (если включено на сервере)
+    if (widget.subscribeRealtime) {
     _channel = Supabase.instance.client
         .channel('public:lessons')
         .onPostgresChanges(
@@ -429,10 +443,38 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           callback: (_) => _reload(),
         )
         .subscribe();
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final scope = AuthSessionScopeHost.maybeOf(context);
+    if (identical(scope, _sessionScope) && _monthCache != null) return;
+    _sessionScope?.removeListener(_sessionChanged);
+    _sessionScope = scope;
+    _monthCache = scope == null ? null : ScheduleMonthCache(scope, SupabaseConfig.url);
+    scope?.addListener(_sessionChanged);
+    _reload();
+  }
+
+  void _sessionChanged() {
+    if (!mounted) return;
+    _loadRevision++;
+    setState(() {
+      _all = [];
+      _assignments = [];
+      _groupActions = [];
+      _loading = true;
+      _showingCachedSchedule = false;
+    });
+    unawaited(_reload());
   }
 
   @override
   void dispose() {
+    _loadRevision++;
+    _sessionScope?.removeListener(_sessionChanged);
     _channel?.unsubscribe();
     _assignmentsChannel?.unsubscribe();
     _liveTick?.cancel();
@@ -442,7 +484,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
   // ===== helpers
 
-  DateTime _nowMsk() => MskDate.now();
+  DateTime _nowMsk() => widget.now?.call() ?? MskDate.now();
 
   DateTime _mondayOf(DateTime d) {
     final wd = d.weekday; // 1..7
@@ -457,15 +499,34 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   }
 
   Future<void> _loadMonth({required DateTime anchor}) async {
+    final revision = ++_loadRevision;
     setState(() => _loading = true);
+    final scope = _sessionScope;
+    if (scope != null) await scope.ready;
+    if (!mounted || revision != _loadRevision) return;
+    final cache = _monthCache;
+    final attempt = cache?.begin(anchor);
+    bool current() => mounted && revision == _loadRevision &&
+        (scope == null || (attempt != null && scope.isCurrent(attempt.owner)));
+    final cached = attempt == null ? null : await cache!.read(attempt);
+    if (!current()) return;
+    if (cached != null) {
+      setState(() { _all = cached; _assignments = []; _groupActions = [];
+        _lessonsUnavailable = false; _showingCachedSchedule = true; _loading = false; });
+    }
     final data = await Future.wait<dynamic>([
-      _repo.loadMonth(anchor),
+      _repo.loadMonth(anchor, strict: true).then<List<Lesson>?>((value) => value,
+          onError: (Object _, StackTrace __) => null),
       _repo.loadMonthAssignments(anchor),
       _repo.loadMonthGroupActions(anchor),
     ]);
-    if (!mounted) return;
+    if (!current()) return;
+    final lessons = data[0] as List<Lesson>?;
+    if (lessons != null && attempt != null) unawaited(cache!.write(attempt, lessons));
     setState(() {
-      _all = data[0] as List<Lesson>;
+      _all = lessons ?? cached ?? [];
+      _lessonsUnavailable = lessons == null && cached == null;
+      _showingCachedSchedule = lessons == null && cached != null;
       _assignments = data[1] as List<ScheduleAssignment>;
       _groupActions = data[2] as List<ScheduleGroupActionEvent>;
       _loading = false;
@@ -476,6 +537,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   /// Грузим данные для всей видимой недели. Неделя может пересекать границу
   /// месяца — тогда подтягиваем оба месяца и объединяем по id.
   Future<void> _loadWeek() async {
+    final revision = ++_loadRevision;
     setState(() => _loading = true);
     final weekStart = _selectedWeekStart;
     final weekEnd = weekStart.add(const Duration(days: 6));
@@ -483,19 +545,47 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       DateTime(weekStart.year, weekStart.month, 1),
       DateTime(weekEnd.year, weekEnd.month, 1),
     };
+    final scope = _sessionScope;
+    if (scope != null) await scope.ready;
+    if (!mounted || revision != _loadRevision) return;
+    final cache = _monthCache;
+    final attempts = {for (final anchor in anchors) anchor: cache?.begin(anchor)};
+    bool current() => mounted && revision == _loadRevision &&
+        (scope == null || attempts.values.every((a) => a != null && scope.isCurrent(a.owner)));
+    final cached = <DateTime, List<Lesson>>{};
+    for (final anchor in anchors) {
+      final attempt = attempts[anchor];
+      final items = attempt == null ? null : await cache!.read(attempt);
+      if (!current()) return;
+      if (items != null) cached[anchor] = items;
+    }
+    if (cached.length == anchors.length) {
+      setState(() { _all = cached.values.expand((value) => value).toList();
+        _assignments = []; _groupActions = []; _lessonsUnavailable = false;
+        _showingCachedSchedule = true; _loading = false; });
+    }
 
     final lessonsById = <String, Lesson>{};
     final assignmentsById = <String, ScheduleAssignment>{};
     final groupActionsByKey = <String, ScheduleGroupActionEvent>{};
+    var lessonsUnavailable = false;
+    var showingCachedSchedule = false;
     for (final anchor in anchors) {
       final data = await Future.wait<dynamic>([
-        _repo.loadMonth(anchor),
+        _repo.loadMonth(anchor, strict: true).then<List<Lesson>?>((value) => value,
+            onError: (Object _, StackTrace __) => null),
         _repo.loadMonthAssignments(anchor),
         _repo.loadMonthGroupActions(anchor),
       ]);
-      for (final l in data[0] as List<Lesson>) {
+      if (!current()) return;
+      final networkLessons = data[0] as List<Lesson>?;
+      final attempt = attempts[anchor];
+      if (networkLessons != null && attempt != null) unawaited(cache!.write(attempt, networkLessons));
+      for (final l in networkLessons ?? cached[anchor] ?? <Lesson>[]) {
         lessonsById[l.id] = l;
       }
+      if (networkLessons == null && !cached.containsKey(anchor)) lessonsUnavailable = true;
+      if (networkLessons == null && cached.containsKey(anchor)) showingCachedSchedule = true;
       for (final a in data[1] as List<ScheduleAssignment>) {
         assignmentsById[a.id] = a;
       }
@@ -504,9 +594,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       }
     }
 
-    if (!mounted) return;
+    if (!current()) return;
     setState(() {
       _all = lessonsById.values.toList();
+      _lessonsUnavailable = lessonsUnavailable;
+      _showingCachedSchedule = showingCachedSchedule;
       _assignments = assignmentsById.values.toList();
       _groupActions = groupActionsByKey.values.toList()
         ..sort((a, b) => a.occursAt.compareTo(b.occursAt));
@@ -791,7 +883,21 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     if (_loading) {
       return const Center(child: ProductLoadingIndicator.page());
     }
-    return _weekMode ? _buildWeekBody(context) : _buildDayBody(context);
+    if (_lessonsUnavailable && _all.isEmpty && _assignments.isEmpty && _groupActions.isEmpty) {
+      return Center(child: Text('Не удалось загрузить расписание. Подключитесь к сети и повторите.'));
+    }
+    final body = _weekMode ? _buildWeekBody(context) : _buildDayBody(context);
+    if (!_showingCachedSchedule && !_lessonsUnavailable) return body;
+    return Column(children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+        child: Text(_lessonsUnavailable
+            ? 'Не удалось загрузить часть расписания. Подключитесь к сети и повторите.'
+            : 'Сохранённое расписание. Данные могут быть неактуальны.',
+            style: Theme.of(context).textTheme.bodySmall),
+      ),
+      Expanded(child: body),
+    ]);
   }
 
   Widget _buildDayBody(BuildContext context) {
