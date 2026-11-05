@@ -8,6 +8,8 @@ import 'package:intl/intl.dart';
 import 'package:student_ui/student_ui.dart';
 
 import 'package:student_platform/src/services/push/app_notifications_api.dart';
+import 'package:student_platform/src/core/auth_session_scope.dart';
+import 'package:student_platform/src/core/auth_session_scope_host.dart';
 import 'package:student_platform/src/services/push/in_app_notification_bus.dart';
 import 'package:student_platform/src/ui/content/content_nav_executor.dart';
 import 'package:student_platform/src/ui/home/home_dashboard_service.dart';
@@ -39,8 +41,10 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
-  late final HomeDashboardService _service =
-      widget.dashboardService ?? HomeDashboardService();
+  late HomeDashboardService _service;
+  AuthSessionScope? _authScope;
+  bool _serviceInitialized = false;
+  bool _ownsService = false;
   late final HomePromoService _promoService =
       widget.promoService ?? HomePromoService();
   late final ContentMediaService _contentMedia =
@@ -73,14 +77,73 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     widget.activeListenable?.addListener(_queuePromoImpressions);
-    _load();
     _inAppSub = InAppNotificationBus.instance.stream.listen(_onInAppEvent);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final source = AuthSessionScopeHost.maybeOf(context);
+    if (_serviceInitialized && identical(source, _authScope)) return;
+    if (_serviceInitialized) {
+      _authScope?.removeListener(_onAuthScopeChanged);
+      if (_ownsService) _service.dispose();
+      _data = null;
+      _loadInFlight = null;
+      _loadUserId = null;
+      _loadAuthScope = null;
+      _promoLoadGeneration++;
+    }
+    _authScope = source;
+    _authScope?.addListener(_onAuthScopeChanged);
+    _ownsService = widget.dashboardService == null;
+    _service =
+        widget.dashboardService ?? HomeDashboardService(sessionScope: source);
+    _serviceInitialized = true;
+    unawaited(_load());
+  }
+
+  void _onAuthScopeChanged() {
+    if (!mounted) return;
+    final scope = _authScope?.capture();
+    if (_authScope != null && scope == null) {
+      setState(() {
+        _data = null;
+        _error = null;
+        _loading = true;
+        _loadUserId = null;
+        _loadAuthScope = null;
+        _loadInFlight = null;
+        _promoLoadGeneration++;
+      });
+      return;
+    }
+    unawaited(_load());
+  }
+
+  @override
+  void didUpdateWidget(covariant HomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_serviceInitialized ||
+        identical(oldWidget.dashboardService, widget.dashboardService)) return;
+    if (_ownsService) _service.dispose();
+    _ownsService = widget.dashboardService == null;
+    _service = widget.dashboardService ??
+        HomeDashboardService(sessionScope: _authScope);
+    _data = null;
+    _loadInFlight = null;
+    _loadUserId = null;
+    _loadAuthScope = null;
+    _promoLoadGeneration++;
+    unawaited(_load());
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.activeListenable?.removeListener(_queuePromoImpressions);
+    _authScope?.removeListener(_onAuthScopeChanged);
+    if (_serviceInitialized && _ownsService) _service.dispose();
     _inAppSub?.cancel();
     super.dispose();
   }
@@ -106,9 +169,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void>? _loadInFlight;
   String? _loadUserId;
+  AuthOperationScope? _loadAuthScope;
   Future<void> _load() {
     final userId = _service.currentUserId;
-    if (_loadInFlight != null && _loadUserId == userId) return _loadInFlight!;
+    final operationScope = _authScope?.capture();
+    if (_loadInFlight != null &&
+        _loadUserId == userId &&
+        _loadAuthScope == operationScope) return _loadInFlight!;
     if (_loadUserId != userId) {
       _data = null;
       _error = null;
@@ -123,6 +190,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _promoKeys.clear();
     }
     _loadUserId = userId;
+    _loadAuthScope = operationScope;
     final work = _loadDashboard();
     _loadInFlight = work;
     void release() {
@@ -182,6 +250,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _error = null;
       });
     } catch (error) {
+      if (error is HomeLoadCancelled) return;
       if (!mounted ||
           _service.currentUserId != userId ||
           promoGeneration != _promoLoadGeneration) return;

@@ -37,6 +37,10 @@ class HomeSnapshotCache {
     return HomeSnapshotScope._(_scopeIssuer, uid, generation, identity!);
   }
 
+  bool isCurrent(HomeSnapshotScope scope) =>
+      identical(scope._issuer, _scopeIssuer) &&
+      _isCurrent(scope._uid, scope._generation, scope._identity);
+
   Future<HomeSectionSnapshot?> read(
       String userId, HomeSnapshotSection section) async {
     final uid = userId.trim();
@@ -135,7 +139,7 @@ class HomeSnapshotScope {
   final Object _identity;
 }
 
-enum HomeSnapshotSection { schedule, assignments }
+enum HomeSnapshotSection { schedule, assignments, profile }
 
 class HomeSectionSnapshot {
   const HomeSectionSnapshot(

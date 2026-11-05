@@ -9,6 +9,9 @@ import 'package:student_ui/student_ui.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
+import 'package:student_platform/src/core/auth_session_scope.dart';
+import 'package:student_platform/src/ui/home/home_snapshot_cache.dart';
+import 'package:student_platform/src/ui/home/home_snapshot_codec.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/data/chat_group_actions_repository.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_group_actions.dart';
 import 'package:student_platform/src/ui/home/news_image_disk_cache.dart';
@@ -26,7 +29,18 @@ class HomeDashboardService {
     PublishedNewsCache? newsCache,
     NewsImageDiskCache? imageCache,
     http.Client? httpClient,
+    AuthSessionScope? sessionScope,
+    HomeSnapshotCache? snapshotCache,
   })  : _sb = client ?? Supabase.instance.client,
+        _sessionScope = sessionScope,
+        _snapshotCache = snapshotCache ??
+            (sessionScope == null
+                ? null
+                : HomeSnapshotCache(
+                    currentUserId: () => sessionScope.capture()?.userId,
+                    sessionGeneration: () => sessionScope.generation,
+                    sessionIdentity: sessionScope.capture,
+                  )),
         _scheduleRepository = scheduleRepository ?? ScheduleRepository(),
         _learningRepository =
             learningRepository ?? SupabaseLearningRepository(),
@@ -36,7 +50,8 @@ class HomeDashboardService {
                   (client ?? Supabase.instance.client).auth.currentUser?.id,
             ),
         _imageCache = imageCache ?? NewsImageDiskCache(),
-        _http = httpClient ?? http.Client();
+        _http = httpClient ?? http.Client(),
+        _ownsHttpClient = httpClient == null;
 
   String? get currentUserId => _sb.auth.currentUser?.id;
 
@@ -46,6 +61,17 @@ class HomeDashboardService {
   final PublishedNewsCache _newsCache;
   final NewsImageDiskCache _imageCache;
   final http.Client _http;
+  final bool _ownsHttpClient;
+  final AuthSessionScope? _sessionScope;
+  final HomeSnapshotCache? _snapshotCache;
+  bool _disposed = false;
+  int _loadRevision = 0;
+
+  void dispose() {
+    _disposed = true;
+    _loadRevision++;
+    if (_ownsHttpClient) _http.close();
+  }
 
   /// Instant cache-first news (JSON + previously saved image bytes).
   /// Never hits the network.
@@ -59,7 +85,19 @@ class HomeDashboardService {
     void Function(HomeDashboardData)? onUpdate,
     HomeDashboardData? previous,
   }) async {
+    final revision = ++_loadRevision;
+    final source = _sessionScope;
+    if (source != null) await source.ready;
+    final authScope = source?.capture();
     final userId = _sb.auth.currentUser?.id;
+    bool current() =>
+        !_disposed &&
+        revision == _loadRevision &&
+        _sb.auth.currentUser?.id == userId &&
+        (source == null || (authScope != null && source.isCurrent(authScope)));
+    if (!current()) throw HomeLoadCancelled();
+    final cache = _snapshotCache;
+    final cacheScope = userId == null ? null : cache?.captureScope(userId);
     final scheduleDate = MskDate.today();
     final validPrevious =
         previous?.profile.id == userId && userId != null ? previous : null;
@@ -73,6 +111,57 @@ class HomeDashboardService {
     var actions = validPrevious?.groupActions ?? <HomeGroupActionPreview>[];
     String? scheduleStatus = 'Загружаем расписание…';
     String? assignmentsStatus = 'Загружаем ближайшие дела…';
+    var scheduleFromCache = false;
+    var assignmentsFromCache = false;
+    var profileFromCache = false;
+    if (validPrevious == null &&
+        cache != null &&
+        cacheScope != null &&
+        userId != null) {
+      Future<HomeSectionSnapshot?> safeRead(HomeSnapshotSection section) async {
+        try {
+          return await cache.read(userId, section);
+        } catch (_) {
+          return null;
+        }
+      }
+
+      final cached = await Future.wait([
+        safeRead(HomeSnapshotSection.schedule),
+        safeRead(HomeSnapshotSection.assignments),
+        safeRead(HomeSnapshotSection.profile),
+      ]).timeout(const Duration(seconds: 1),
+          onTimeout: () => [null, null, null]);
+      if (!current() || !cache.isCurrent(cacheScope)) throw HomeLoadCancelled();
+      final schedule = cached[0];
+      if (schedule != null && schedule.date == MskDate.isoDate(scheduleDate)) {
+        final decoded =
+            schedule.items.map(HomeSnapshotCodec.lessonFromMap).toList();
+        if (decoded.every((item) => item != null)) {
+          lessons = decoded.cast<Lesson>();
+          scheduleStatus = 'Сохранённое расписание';
+          scheduleFromCache = true;
+        }
+      }
+      final savedAssignments = cached[1];
+      if (savedAssignments != null) {
+        final decoded = savedAssignments.items
+            .map(HomeSnapshotCodec.assignmentFromMap)
+            .toList();
+        if (decoded.every((item) => item != null)) {
+          assignments = decoded.cast<HomeAssignmentPreview>();
+          assignmentsStatus = 'Сохранённые задания';
+          assignmentsFromCache = true;
+        }
+      }
+      final savedProfile = cached[2];
+      if (savedProfile != null &&
+          savedProfile.items.length == 1 &&
+          savedProfile.items.first['id'] == userId) {
+        profile = HomeUserProfile.fromMap(savedProfile.items.first);
+        profileFromCache = true;
+      }
+    }
     var assignmentsReady = false;
     var actionsReady = false;
     void updateAssignmentStatus() {
@@ -90,26 +179,65 @@ class HomeDashboardService {
         readNotificationIds: reads,
         groupActions: actions.take(4).toList());
     void publish() {
-      if (_sb.auth.currentUser?.id == userId) onUpdate?.call(snapshot());
+      if (current()) onUpdate?.call(snapshot());
     }
+
+    // Paint the available cache without waiting for unrelated network calls.
+    // The later profile/news callbacks will fill their existing sections.
+    if (scheduleFromCache || assignmentsFromCache || profileFromCache)
+      publish();
 
     // Independent work starts before the remote profile. Media never gates
     // schedule or assignments; each completed section is painted immediately.
-    final profileWork = _loadProfile(onCached: (cached) {
-      profile = cached;
-      publish();
-    }).then((value) {
+    final profileWork = _loadProfile(
+        isCurrent: current,
+        fallback: profile.id == userId ? profile : null,
+        onFresh: (fresh) {
+          if (cache != null &&
+              cacheScope != null &&
+              current() &&
+              cache.isCurrent(cacheScope)) {
+            unawaited(cache
+                .write(
+                    scope: cacheScope,
+                    section: HomeSnapshotSection.profile,
+                    items: [fresh],
+                    savedAt: DateTime.now())
+                .catchError((Object _) => false));
+          }
+        },
+        onCached: (cached) {
+          profile = cached;
+          publish();
+        }).then((value) {
       profile = value;
       publish();
     });
-    final assignmentsWork =
-        _loadAssignments().timeout(const Duration(seconds: 15)).then((value) {
+    final assignmentsWork = _loadAssignments(isCurrent: current)
+        .timeout(const Duration(seconds: 15))
+        .then((value) {
+      if (!current()) return;
       assignments = value;
+      assignmentsFromCache = false;
       assignmentsReady = true;
       updateAssignmentStatus();
       publish();
+      if (cache != null && cacheScope != null && cache.isCurrent(cacheScope)) {
+        unawaited(cache
+            .write(
+                scope: cacheScope,
+                section: HomeSnapshotSection.assignments,
+                items: value
+                    .take(4)
+                    .map(HomeSnapshotCodec.assignmentToMap)
+                    .toList(),
+                savedAt: DateTime.now())
+            .catchError((Object _) => false));
+      }
     }, onError: (Object error) {
-      assignmentsStatus = 'Не удалось обновить задания';
+      assignmentsStatus = assignmentsFromCache
+          ? 'Сохранённые задания'
+          : 'Не удалось обновить задания';
       publish();
     });
     await Future.wait<void>([
@@ -117,21 +245,39 @@ class HomeDashboardService {
       assignmentsWork,
       _loadTodayLessons(scheduleDate).timeout(const Duration(seconds: 15)).then(
           (value) {
+        if (!current()) return;
         lessons = value;
+        scheduleFromCache = false;
         scheduleStatus = null;
         publish();
+        if (cache != null &&
+            cacheScope != null &&
+            cache.isCurrent(cacheScope)) {
+          unawaited(cache
+              .write(
+                  scope: cacheScope,
+                  section: HomeSnapshotSection.schedule,
+                  date: MskDate.isoDate(scheduleDate),
+                  items: value.map(HomeSnapshotCodec.lessonToMap).toList(),
+                  savedAt: DateTime.now())
+              .catchError((Object _) => false));
+        }
       }, onError: (Object error) {
-        scheduleStatus = 'Не удалось обновить расписание';
+        scheduleStatus = scheduleFromCache
+            ? 'Сохранённое расписание'
+            : 'Не удалось обновить расписание';
         publish();
       }),
       _loadReadNotificationIds().then((value) {
         reads = value;
         publish();
       }),
-      _loadPublishedNews(onMetadata: (value) {
-        news = value;
-        publish();
-      }).then((value) {
+      _loadPublishedNews(
+          isCurrent: current,
+          onMetadata: (value) {
+            news = value;
+            publish();
+          }).then((value) {
         news = value;
         publish();
       }),
@@ -142,11 +288,13 @@ class HomeDashboardService {
         updateAssignmentStatus();
         publish();
       }, onError: (Object error) {
-        assignmentsStatus = 'Не удалось обновить ближайшие дела';
+        assignmentsStatus = assignmentsFromCache
+            ? 'Сохранённые задания'
+            : 'Не удалось обновить ближайшие дела';
         publish();
       }),
     ]);
-    if (_sb.auth.currentUser?.id != userId) throw StateError('session_changed');
+    if (!current()) throw HomeLoadCancelled();
     return snapshot();
   }
 
@@ -172,18 +320,24 @@ class HomeDashboardService {
   /// - Refresh never clears working image bytes for an unchanged cache key.
   Future<List<HomeNewsItem>> _loadPublishedNews({
     void Function(List<HomeNewsItem>)? onMetadata,
+    bool Function()? isCurrent,
   }) async {
     final newsUser = _sb.auth.currentUser?.id;
-    final cached = await _newsCache.read();
+    bool current() =>
+        _sb.auth.currentUser?.id == newsUser && (isCurrent?.call() ?? true);
+    final cached = await _newsCache.read(owner: newsUser, isCurrent: current);
+    if (!current()) return const [];
     final cachedWithImages = await _hydrateImagesFromDisk(cached);
+    if (!current()) return const [];
     if (cachedWithImages.isNotEmpty) onMetadata?.call(cachedWithImages);
     try {
       final response = await _sb
           .rpc('get_my_published_news')
           .timeout(const Duration(seconds: 12));
       final rows = _asMapList(response);
-      if (_sb.auth.currentUser?.id != newsUser) return const [];
-      await _newsCache.write(rows);
+      if (!current()) return const [];
+      await _newsCache.write(rows, owner: newsUser, isCurrent: current);
+      if (!current()) return const [];
       final fresh = rows.map(mapPublishedNews).toList();
       final merged =
           _mergeKeepingImages(previous: cachedWithImages, next: fresh);
@@ -191,7 +345,7 @@ class HomeDashboardService {
       // Media owns its own deadlines; the dashboard timeout must not discard
       // a successful cover arriving after other sections have finished.
       unawaited(_resolveNewsImages(merged, onImage: (items) {
-        if (_sb.auth.currentUser?.id == newsUser) onMetadata?.call(items);
+        if (current()) onMetadata?.call(items);
       }));
       return merged;
     } catch (e) {
@@ -200,7 +354,7 @@ class HomeDashboardService {
         // Keep last good cache — do not wipe images on network error.
         return cachedWithImages;
       }
-      return _localNews();
+      return _sessionScope == null ? _localNews() : const [];
     }
   }
 
@@ -397,8 +551,12 @@ class HomeDashboardService {
     }
   }
 
-  Future<HomeUserProfile> _loadProfile(
-      {void Function(HomeUserProfile)? onCached}) async {
+  Future<HomeUserProfile> _loadProfile({
+    void Function(HomeUserProfile)? onCached,
+    void Function(Map<String, dynamic>)? onFresh,
+    bool Function()? isCurrent,
+    HomeUserProfile? fallback,
+  }) async {
     final userId = _sb.auth.currentUser?.id;
     Map<String, dynamic>? cached;
 
@@ -411,7 +569,8 @@ class HomeDashboardService {
             candidate['id'] == userId &&
             _sb.auth.currentUser?.id == userId) {
           cached = candidate;
-          onCached?.call(HomeUserProfile.fromMap(candidate));
+          if (fallback == null)
+            onCached?.call(HomeUserProfile.fromMap(candidate));
         }
       }
     } catch (e) {
@@ -425,16 +584,23 @@ class HomeDashboardService {
       if (rows != null && rows.isNotEmpty) {
         final fresh = Map<String, dynamic>.from(rows.first as Map);
         final prefs = await SharedPreferences.getInstance();
-        if (_sb.auth.currentUser?.id != userId || fresh['id'] != userId) {
+        if (_sb.auth.currentUser?.id != userId ||
+            fresh['id'] != userId ||
+            (isCurrent != null && !isCurrent())) {
           throw StateError('session_changed');
         }
-        await prefs.setString('user', jsonEncode(fresh));
+        if (_sessionScope == null) {
+          await prefs.setString('user', jsonEncode(fresh));
+        } else {
+          onFresh?.call(fresh);
+        }
         return HomeUserProfile.fromMap(fresh);
       }
     } catch (e) {
       debugPrint('[home] get_my_profile failed: $e');
     }
 
+    if (fallback != null) return fallback;
     if (cached != null) return HomeUserProfile.fromMap(cached);
 
     return const HomeUserProfile();
@@ -474,15 +640,19 @@ class HomeDashboardService {
     }
   }
 
-  Future<List<HomeAssignmentPreview>> _loadAssignments() async {
+  Future<List<HomeAssignmentPreview>> _loadAssignments(
+      {bool Function()? isCurrent}) async {
     try {
       final teams = await _learningRepository.loadTeams('', strict: true);
+      if (isCurrent != null && !isCurrent()) throw HomeLoadCancelled();
       final previews = <HomeAssignmentPreview>[];
 
       final selected = teams.take(8).toList();
       for (var start = 0; start < selected.length; start += 4) {
+        if (isCurrent != null && !isCurrent()) throw HomeLoadCancelled();
         final batches = await Future.wait(
             selected.skip(start).take(4).map(_loadTeamAssignments));
+        if (isCurrent != null && !isCurrent()) throw HomeLoadCancelled();
         for (final batch in batches) {
           previews.addAll(batch);
         }
@@ -605,6 +775,10 @@ class HomeDashboardService {
   }
 }
 
+class HomeLoadCancelled extends StateError {
+  HomeLoadCancelled() : super('session_changed');
+}
+
 /// Persists the published news feed for cache-first / stale-while-revalidate.
 ///
 /// Only the JSON returned by `get_my_published_news` is stored (never image
@@ -627,10 +801,13 @@ class PublishedNewsCache {
     return '${keyPrefix}__$id';
   }
 
-  Future<List<HomeNewsItem>> read() async {
+  Future<List<HomeNewsItem>> read(
+      {String? owner, bool Function()? isCurrent}) async {
     try {
+      final userId = owner ?? _currentUserId?.call();
       final prefs = await _prefs();
-      final userId = _currentUserId?.call();
+      if ((_currentUserId != null && _currentUserId() != userId) ||
+          !(isCurrent?.call() ?? true)) return const [];
       final raw = prefs.getString(_keyFor(userId));
       if (raw == null || raw.isEmpty) return const [];
       final decoded = jsonDecode(raw);
@@ -646,10 +823,13 @@ class PublishedNewsCache {
     return const [];
   }
 
-  Future<void> write(List<Map<String, dynamic>> rows) async {
+  Future<void> write(List<Map<String, dynamic>> rows,
+      {String? owner, bool Function()? isCurrent}) async {
     try {
+      final userId = owner ?? _currentUserId?.call();
       final prefs = await _prefs();
-      final userId = _currentUserId?.call();
+      if ((_currentUserId != null && _currentUserId() != userId) ||
+          !(isCurrent?.call() ?? true)) return;
       await prefs.setString(_keyFor(userId), jsonEncode(rows));
     } catch (e) {
       debugPrint('[home] news cache write failed: $e');
