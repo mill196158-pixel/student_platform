@@ -22,6 +22,7 @@ import '../data/chat_composer_capabilities_repository.dart';
 import '../data/chat_group_actions_repository.dart';
 import '../models/group_action_labels.dart';
 import '../navigation/group_action_deeplink.dart';
+import '../unavailable_card.dart';
 
 String _fmtDate(DateTime dt) {
   return '${dt.day.toString().padLeft(2, '0')}.'
@@ -232,7 +233,7 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
             entry.status == 'cancelled' ||
             entry.status == 'unavailable');
     if (removed) {
-      return const SizedBox.shrink(key: ValueKey('topic_removed'));
+      return const UnavailableChatCard(key: ValueKey('topic_removed'));
     }
     final closed = entry != null && entry.available && entry.isClosed;
     final progress = (entry != null && entry.totalCapacity > 0)
@@ -560,7 +561,7 @@ class _CollectionCardState extends State<CollectionCard> {
             entry.status == 'cancelled' ||
             entry.status == 'unavailable');
     if (removed) {
-      return const SizedBox.shrink(key: ValueKey('collection_removed'));
+      return const UnavailableChatCard(key: ValueKey('collection_removed'));
     }
     final closed = entry != null && entry.available && entry.isClosed;
 

@@ -11,6 +11,7 @@ import '../../assignment_details_screen.dart';
 import '../../widgets/file_card.dart';
 import '../../widgets/fullscreen_image.dart';
 import 'assignments/assignment_form_dialog.dart';
+import 'unavailable_card.dart';
 
 class AssignmentBubble extends StatelessWidget {
   final Message message;
@@ -51,7 +52,7 @@ class AssignmentBubble extends StatelessWidget {
     // Рендерим карточку ТОЛЬКО если есть валидный assignmentId и нашли задание.
     final String? aid =
         (message.assignmentId ?? '').isNotEmpty ? message.assignmentId : null;
-    if (aid == null) return const SizedBox.shrink();
+    if (aid == null) return const UnavailableChatCard();
 
     Assignment? a;
     final byId = st.assignments.where((x) => x.id == aid);
