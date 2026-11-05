@@ -10,6 +10,8 @@ import 'auth_session_scope_test.dart' show fakeSession;
 class Storage implements ForwardOutboxStorage {
   final values = <String, String>{};
   final failures = <String>[];
+  int calls = 0;
+  Completer<void>? readEntered, readRelease;
   Completer<void>? writeEntered, writeRelease, removeEntered, removeRelease;
   bool fail(String operation) {
     if (failures.isEmpty || failures.first != operation) return false;
@@ -19,12 +21,16 @@ class Storage implements ForwardOutboxStorage {
 
   @override
   Future<String?> read(String key) async {
+    calls++;
+    readEntered?.complete();
+    await readRelease?.future;
     if (fail('read')) throw StateError('read');
     return values[key];
   }
 
   @override
   Future<bool> write(String key, String value) async {
+    calls++;
     writeEntered?.complete();
     await writeRelease?.future;
     values[key] = value;
@@ -34,6 +40,7 @@ class Storage implements ForwardOutboxStorage {
 
   @override
   Future<bool> remove(String key) async {
+    calls++;
     removeEntered?.complete();
     await removeRelease?.future;
     values.remove(key);
@@ -215,5 +222,76 @@ void main() {
     storage.writeRelease!.complete();
     await expectLater(pending, throwsStateError);
     expect(storage.values.values.single, contains('old'));
+  });
+
+  test('disposing store during a write rolls back and prevents further access',
+      () async {
+    final owner = scope.capture()!;
+    await store.put(owner, 'chat', text: 'old');
+    storage.writeEntered = Completer();
+    storage.writeRelease = Completer();
+    final pending = store.put(owner, 'chat', text: 'new');
+    await storage.writeEntered!.future;
+    store.dispose();
+    storage.writeEntered = null;
+    storage.writeRelease!.complete();
+    await expectLater(pending, throwsStateError);
+    expect(storage.values.values.single, contains('old'));
+    await expectLater(store.peek(owner, 'chat'), throwsStateError);
+  });
+
+  test('disposed reader cannot return a delayed snapshot', () async {
+    final owner = scope.capture()!;
+    await store.put(owner, 'chat', text: 'saved');
+    storage.readEntered = Completer();
+    storage.readRelease = Completer();
+    final pending = store.peek(owner, 'chat');
+    await storage.readEntered!.future;
+    store.dispose();
+    storage.readEntered = null;
+    storage.readRelease!.complete();
+    await expectLater(pending, throwsStateError);
+    expect(storage.values.values.single, contains('saved'));
+  });
+
+  test('disposed acknowledgement restores before replacement store writes',
+      () async {
+    final owner = scope.capture()!;
+    final shared = ForwardOutboxCoordinator(storage);
+    final old = ForwardOutboxStore(scope, shared);
+    final fresh = ForwardOutboxStore(scope, shared);
+    await old.put(owner, 'chat', text: 'old');
+    final entry = (await old.peek(owner, 'chat'))!;
+    storage.removeEntered = Completer();
+    storage.removeRelease = Completer();
+    final pending = old.acknowledge(entry);
+    await storage.removeEntered!.future;
+    old.dispose();
+    final replacement = fresh.put(owner, 'chat', text: 'fresh');
+    storage.removeEntered = null;
+    storage.removeRelease!.complete();
+    await expectLater(pending, throwsStateError);
+    await replacement;
+    expect((await fresh.peek(owner, 'chat'))!.text, 'fresh');
+  });
+
+  test('failed rollback quarantines key for replacement store as well',
+      () async {
+    final owner = scope.capture()!;
+    final shared = ForwardOutboxCoordinator(storage);
+    final old = ForwardOutboxStore(scope, shared);
+    final fresh = ForwardOutboxStore(scope, shared);
+    await old.put(owner, 'chat', text: 'old');
+    storage.writeEntered = Completer();
+    storage.writeRelease = Completer();
+    final pending = old.put(owner, 'chat', text: 'new');
+    await storage.writeEntered!.future;
+    old.dispose();
+    storage.failures.addAll(['write-false', 'write-false']);
+    storage.writeEntered = null;
+    storage.writeRelease!.complete();
+    await expectLater(pending, throwsA(isA<ForwardOutboxStorageFailure>()));
+    await expectLater(
+        fresh.peek(owner, 'chat'), throwsA(isA<ForwardOutboxStorageFailure>()));
   });
 }

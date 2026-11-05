@@ -70,12 +70,18 @@ class ForwardOutboxStore {
   final ForwardOutboxCoordinator coordinator;
   final Object _issuer = Object();
   final Random _random = Random.secure();
+  bool _disposed = false;
+
+  void dispose() => _disposed = true;
+
+  bool _isCurrent(AuthOperationScope owner) =>
+      !_disposed && scope.isCurrent(owner);
 
   String _key(AuthOperationScope owner, String chatId) =>
       'forward_outbox_${owner.userId}_$chatId';
 
   void _check(AuthOperationScope owner, String key) {
-    if (!scope.isCurrent(owner)) throw StateError('Session changed');
+    if (!_isCurrent(owner)) throw StateError('Session changed');
     if (coordinator._quarantined.contains(key)) {
       throw const ForwardOutboxStorageFailure();
     }
@@ -107,7 +113,7 @@ class ForwardOutboxStore {
         'file_ids': capturedIds
       });
       await _mutate(key, previous, () => coordinator.storage.write(key, raw));
-      if (!scope.isCurrent(owner)) {
+      if (!_isCurrent(owner)) {
         await _restore(key, previous);
         throw StateError('Session changed');
       }
@@ -163,7 +169,7 @@ class ForwardOutboxStore {
       if (previous != receipt.raw) return ForwardAcknowledgeResult.changed;
       await _mutate(
           receipt.key, previous, () => coordinator.storage.remove(receipt.key));
-      if (!scope.isCurrent(receipt.owner)) {
+      if (!_isCurrent(receipt.owner)) {
         await _restore(receipt.key, previous);
         throw StateError('Session changed');
       }
