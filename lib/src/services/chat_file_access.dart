@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:crypto/crypto.dart' as crypto;
 import 'dart:convert';
 import 'package:path_provider/path_provider.dart';
+import 'chat_file_offline_policy.dart';
 
 /// Resolves only the application's private object namespace. Signed URLs are
 /// ephemeral and never become message metadata or persistent cache keys.
@@ -77,8 +78,12 @@ class ChatFileAccess {
   }
 
   static Future<void> _purge(String url, String? uid) async {
-    final file = await _cachedFile(url, uid);
-    if (file != null && await file.exists()) await file.delete();
+    try {
+      final file = await _cachedFile(url, uid);
+      if (file != null && await file.exists()) await file.delete();
+    } catch (_) {
+      // Cache cleanup must never replace the original access denial.
+    }
   }
 
   static Future<void> discardUnreadableImage(
@@ -98,30 +103,73 @@ class ChatFileAccess {
     return File('${root.path}/authorized_chat_files/$uid/$digest');
   }
 
-  static Future<bool> _offlineCopy(File? file) async {
-    if (file == null || !await file.exists()) return false;
-    if (DateTime.now().difference(await file.lastModified()) >
-        const Duration(hours: 24)) {
-      await file.delete();
+  static Future<bool> _offlineCopy(
+      Object error, String url, File? file, String? uid, int epoch) async {
+    if (!_offline(error) || file == null) return false;
+    try {
+      final stat = await file.stat();
+      if (stat.type != FileSystemEntityType.file) return false;
+      final session = Supabase.instance.client.auth.currentSession;
+      final expires = session?.expiresAt;
+      final key = keyFor(url);
+      return canUseOfflineChatFile(
+        error: error,
+        owner: uid,
+        currentOwner: userId,
+        sessionOwner: session?.user.id,
+        epoch: epoch,
+        currentEpoch: generation,
+        isPrivateKey: key != null,
+        cacheable: !_noOffline.contains('$uid:$key'),
+        length: stat.size,
+        modified: stat.modified,
+        sessionExpiresAt: expires == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(expires * 1000),
+        now: DateTime.now(),
+      );
+    } catch (_) {
       return false;
     }
-    return true;
   }
 
   static bool _offline(Object error) =>
       error is SocketException ||
       error is http.ClientException ||
       error is TimeoutException;
+
+  static String? _currentAccessToken() {
+    try {
+      return Supabase.instance.client.auth.currentSession?.accessToken;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static bool _offlineOwnerCurrent(
+      String url, String? uid, int epoch, String? token) {
+    try {
+      final session = Supabase.instance.client.auth.currentSession;
+      final expiry = session?.expiresAt;
+      final key = keyFor(url);
+      return uid != null && uid.isNotEmpty && key != null && token != null &&
+          uid == userId && session?.user.id == uid && generation == epoch &&
+          session?.accessToken == token &&
+          expiry != null && expiry * 1000 > DateTime.now().millisecondsSinceEpoch &&
+          !_noOffline.contains('$uid:$key');
+    } catch (_) {
+      return false;
+    }
+  }
   static Future<void> authorize(String url) async {
     final uid = userId, epoch = generation;
+    final token = _currentAccessToken();
     try {
       await resolve(url);
     } catch (error) {
       final cached = await _cachedFile(url, uid);
-      if (!_offline(error) ||
-          uid != userId ||
-          epoch != generation ||
-          !await _offlineCopy(cached)) rethrow;
+      if (!await _offlineCopy(error, url, cached, uid, epoch) ||
+          !_offlineOwnerCurrent(url, uid, epoch, token)) rethrow;
     }
   }
 
@@ -130,21 +178,57 @@ class ChatFileAccess {
     if (key == null) return url;
     final uid = userId, epoch = generation;
     if (uid == null) throw StateError('Войдите, чтобы открыть вложение.');
+    final token = _currentAccessToken();
     late final FunctionResponse response;
     try {
-      response = await Supabase.instance.client.functions
-          .invoke('chat-file-access', body: {'action': 'resolve', 'key': key})
-          .timeout(
+      final request = Supabase.instance.client.functions
+          .invoke('chat-file-access', body: {'action': 'resolve', 'key': key});
+      // Observe denials even if the waiting caller has already timed out.
+      // The observer never downloads or returns data and only acts on the
+      // exact session that initiated this request.
+      bool current() {
+        try {
+          return uid == userId && epoch == generation && token != null &&
+              Supabase.instance.client.auth.currentSession?.accessToken == token;
+        } catch (_) {
+          return false;
+        }
+      }
+      Future<void> revoke() async {
+        if (!current()) return;
+        _noOffline.add('$uid:$key');
+        try {
+          final file = await _cachedFile(url, uid);
+          if (current() && file != null && await file.exists() && current()) {
+            await file.delete();
+          }
+        } catch (_) {}
+      }
+      unawaited(request.then<void>((result) async {
+        if (result.data is Map && result.data['cacheable'] == false) {
+          await revoke();
+        }
+      }, onError: (Object error, StackTrace _) async {
+        if (error is FunctionException &&
+            (error.status == 401 || error.status == 403 || error.status == 404)) {
+          await revoke();
+        }
+      }));
+      response = await request.timeout(
             const Duration(seconds: 15),
-            onTimeout: () => throw StateError('Проверка доступа заняла слишком много времени.'),
+            onTimeout: () => throw TimeoutException('Проверка доступа заняла слишком много времени.'),
           );
     } on FunctionException catch (error) {
-      if (error.status == 401 || error.status == 403 || error.status == 404) {
+      if ((error.status == 401 || error.status == 403 || error.status == 404) &&
+          uid == userId && epoch == generation && token != null &&
+          token == _currentAccessToken()) {
+        _noOffline.add('$uid:$key');
         await _purge(url, uid);
       }
       rethrow;
     }
-    if (userId != uid || generation != epoch)
+    if (userId != uid || generation != epoch || token == null ||
+        token != _currentAccessToken())
       throw StateError('Сессия изменилась.');
     if (response.data is Map && response.data['cacheable'] == false) {
       _noOffline.add('$uid:${keyFor(url) ?? url}');
@@ -161,6 +245,7 @@ class ChatFileAccess {
 
   static Future<Uint8List> readBytes(String url) async {
     final uid = userId, epoch = generation;
+    final token = _currentAccessToken();
     final cached = await _cachedFile(url, uid);
     final client = http.Client();
     try {
@@ -201,12 +286,10 @@ class ChatFileAccess {
         throw StateError('Сессия изменилась.');
       return result;
     } catch (error) {
-      if (!_offline(error) ||
-          uid != userId ||
-          epoch != generation ||
-          !await _offlineCopy(cached)) rethrow;
+      if (!await _offlineCopy(error, url, cached, uid, epoch)) rethrow;
       final bytes = await cached!.readAsBytes();
-      if (uid != userId || epoch != generation)
+      if (!await _offlineCopy(error, url, cached, uid, epoch) ||
+          !_offlineOwnerCurrent(url, uid, epoch, token))
         throw StateError('Сессия изменилась.');
       return bytes;
     } finally {
