@@ -8,6 +8,9 @@ class PreferencesTeamSnapshotStorage implements TeamSnapshotStorage {
   final Future<SharedPreferences> Function() _preferences;
 
   @override
+  Future<Set<String>> keys() async => (await _preferences()).getKeys();
+
+  @override
   Future<String?> read(String key) async =>
       (await _preferences()).getString(key);
   @override

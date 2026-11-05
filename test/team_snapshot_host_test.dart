@@ -8,6 +8,12 @@ import 'package:student_platform/src/ui/learning/state/team_snapshot_preferences
 class _Storage implements TeamSnapshotStorage {
   int calls = 0;
   @override
+  Future<Set<String>> keys() async {
+    calls++;
+    return {};
+  }
+
+  @override
   Future<String?> read(String key) async {
     calls++;
     return null;

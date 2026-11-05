@@ -11,10 +11,21 @@ class _Storage implements TeamSnapshotStorage {
   final values = <String, String>{};
   final failures = <String>[];
   Completer<void>? writeEntered, writeRelease;
+  final removeGates = <Completer<void>>[];
+  int removeCalls = 0;
+  final keyGates = <Completer<void>>[];
+  int keyCalls = 0;
   bool _fail(String kind) {
     if (failures.isEmpty || failures.first != kind) return false;
     failures.removeAt(0);
     return true;
+  }
+
+  @override
+  Future<Set<String>> keys() async {
+    final index = keyCalls++;
+    if (index < keyGates.length) await keyGates[index].future;
+    return values.keys.toSet();
   }
 
   @override
@@ -30,6 +41,8 @@ class _Storage implements TeamSnapshotStorage {
 
   @override
   Future<bool> remove(String key) async {
+    final index = removeCalls++;
+    if (index < removeGates.length) await removeGates[index].future;
     values.remove(key);
     return !_fail('remove');
   }
@@ -213,5 +226,148 @@ void main() {
     events.add(AuthState(AuthChangeEvent.signedIn, session));
     expect(await store.save(stale, [], now), isFalse);
     expect(store.beginLoad(), isNull);
+  });
+
+  test('clear fences immediately and waits for stale write rollback', () async {
+    expect(await store.save(store.beginLoad()!, [assignment([])], now), isTrue);
+    final beforeClear = store.beginLoad()!;
+    storage.writeEntered = Completer();
+    storage.writeRelease = Completer();
+    final pending = store.save(store.beginLoad()!, [], now);
+    await storage.writeEntered!.future;
+    final clear = coordinator.beginClear('project', 'a');
+    expect(store.beginLoad(), isNull);
+    storage.writeEntered = null;
+    storage.writeRelease!.complete();
+    expect(await pending, isFalse);
+    expect((await clear).complete, isTrue);
+    expect(storage.values, isEmpty);
+    expect((await store.read(owner.capture()!)).status,
+        TeamSnapshotStatus.missing);
+    expect(await store.save(beforeClear, [assignment([])], now), isFalse);
+    final restarted = TeamAssignmentSnapshotStore(
+        owner: owner,
+        project: 'project',
+        coordinator: TeamSnapshotCoordinator(storage));
+    expect((await restarted.read(owner.capture()!)).status,
+        TeamSnapshotStatus.missing);
+    restarted.dispose();
+  });
+
+  test('failed removal stays fenced and retry removes even if memory is empty',
+      () async {
+    expect(await store.save(store.beginLoad()!, [assignment([])], now), isTrue);
+    storage.failures.add('remove');
+    expect((await coordinator.beginClear('project', 'a')).complete, isFalse);
+    expect(storage.values, isEmpty);
+    expect(store.beginLoad(), isNull);
+    expect((await coordinator.beginClear('project', 'a')).complete, isTrue);
+    expect(storage.removeCalls, 2);
+    expect(store.beginLoad(), isNotNull);
+  });
+
+  test('clear finds an in-flight key absent from the storage scan', () async {
+    storage.writeEntered = Completer();
+    storage.writeRelease = Completer();
+    final pending = store.save(store.beginLoad()!, [assignment([])], now);
+    await storage.writeEntered!.future;
+    expect(storage.values, isEmpty);
+    final clear = coordinator.beginClear('project', 'a');
+    storage.writeEntered = null;
+    storage.writeRelease!.complete();
+    expect(await pending, isFalse);
+    expect((await clear).complete, isTrue);
+    expect(storage.values, isEmpty);
+  });
+
+  test('overlapping clears stay fenced until latest queued clear completes',
+      () async {
+    expect(await store.save(store.beginLoad()!, [assignment([])], now), isTrue);
+    final gate1 = Completer<void>();
+    final gate2 = Completer<void>();
+    storage.keyGates.addAll([gate1, gate2]);
+    final first = coordinator.beginClear('project', 'a');
+    final second = coordinator.beginClear('project', 'a');
+    gate1.complete();
+    expect((await first).complete, isTrue);
+    expect(store.beginLoad(), isNull);
+    gate2.complete();
+    expect((await second).complete, isTrue);
+    expect(store.beginLoad(), isNotNull);
+  });
+
+  test('clear leaves a different owner and unknown corrupt data untouched',
+      () async {
+    expect(await store.save(store.beginLoad()!, [assignment([])], now), isTrue);
+    final bEvents = StreamController<AuthState>.broadcast(sync: true);
+    final bSession = fakeSession('b');
+    final bScope = AuthSessionScope(
+        currentSession: () => bSession, authEvents: bEvents.stream);
+    bEvents.add(AuthState(AuthChangeEvent.initialSession, bSession));
+    final b = TeamCacheOwner.bind(bScope, 'team')!;
+    final bStore = TeamAssignmentSnapshotStore(
+        owner: b, project: 'project', coordinator: coordinator);
+    expect(
+        await bStore.save(bStore.beginLoad()!, [assignment([])], now), isTrue);
+    storage.values['team_assign_v2_unknown'] = '{broken';
+    expect((await coordinator.beginClear('project', 'a')).complete, isFalse);
+    expect((await bStore.read(b.capture()!)).status, TeamSnapshotStatus.found);
+    expect(storage.values['team_assign_v2_unknown'], '{broken');
+    expect(store.beginLoad(), isNotNull);
+    bStore.dispose();
+    b.dispose();
+    bScope.dispose();
+    await bEvents.close();
+  });
+
+  test('clear removes a registered owner key with corrupt identity fields',
+      () async {
+    expect(await store.save(store.beginLoad()!, [assignment([])], now), isTrue);
+    final key = storage.values.keys.single;
+    storage.values[key] = '{"schema":2}';
+    final result = await coordinator.beginClear('project', 'a');
+    expect(result.complete, isTrue);
+    expect(storage.values.containsKey(key), isFalse);
+    expect(store.beginLoad(), isNotNull);
+  });
+
+  test('caller timeout does not cancel clear or unblock owner early', () async {
+    expect(await store.save(store.beginLoad()!, [assignment([])], now), isTrue);
+    final gate = Completer<void>();
+    storage.keyGates.add(gate);
+    final clear = coordinator.beginClear('project', 'a');
+    await expectLater(clear.timeout(const Duration(milliseconds: 10)),
+        throwsA(isA<TimeoutException>()));
+    expect(store.beginLoad(), isNull);
+    gate.complete();
+    expect((await clear).complete, isTrue);
+    expect(store.beginLoad(), isNotNull);
+  });
+
+  test('same-account re-login waits for clear and uses a fresh owner',
+      () async {
+    expect(await store.save(store.beginLoad()!, [assignment([])], now), isTrue);
+    final oldAttempt = store.beginLoad()!;
+    final gate = Completer<void>();
+    storage.keyGates.add(gate);
+    final clear = coordinator.beginClear('project', 'a');
+    scope.invalidateForSignOut();
+    events.add(AuthState(AuthChangeEvent.signedOut, null));
+    session = fakeSession('a', access: 'new-session');
+    events.add(AuthState(AuthChangeEvent.signedIn, session));
+    final freshOwner = TeamCacheOwner.bind(scope, 'team')!;
+    final freshStore = TeamAssignmentSnapshotStore(
+        owner: freshOwner, project: 'project', coordinator: coordinator);
+    expect(freshStore.beginLoad(), isNull);
+    gate.complete();
+    expect((await clear).complete, isTrue);
+    expect(await store.save(oldAttempt, [], now), isFalse);
+    expect(
+        await freshStore.save(freshStore.beginLoad()!, [assignment([])], now),
+        isTrue);
+    expect((await freshStore.read(freshOwner.capture()!)).status,
+        TeamSnapshotStatus.found);
+    freshStore.dispose();
+    freshOwner.dispose();
   });
 }
