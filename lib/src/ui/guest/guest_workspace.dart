@@ -261,41 +261,81 @@ class _GuestWorkspaceState extends State<GuestWorkspace> {
             const SizedBox(height: 12),
             SelectableText(body)
           ])));
+  void _showNewsFeed(
+    List<Map<String, dynamic>> rows,
+    List<StudentHomeNews> presentation,
+    int initialIndex,
+  ) {
+    if (presentation.isEmpty ||
+        initialIndex < 0 ||
+        initialIndex >= presentation.length) {
+      return;
+    }
+    final byId = {for (final row in rows) (row['id'] ?? '').toString(): row};
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+      ),
+      builder: (_) => StudentNewsStorySheet(
+        news: presentation,
+        initialIndex: initialIndex,
+        resolveImage: (item) async {
+          final row = byId[item.id];
+          if (row == null) return item.imageBytes;
+          try {
+            return await _service.image(row);
+          } catch (_) {
+            return null;
+          }
+        },
+      ),
+    );
+  }
+
   Widget _loginStrip(String title, String subtitle) => GuestActionTile(
       title: title,
       subtitle: subtitle,
       icon: Icons.school_outlined,
       onTap: _login);
-  Widget _home() => Column(children: [
-        if (_newsFailed)
-          MaterialBanner(
-              content: const Text('Новости временно недоступны'),
-              actions: [
-                TextButton(onPressed: _loadNews, child: const Text('Повторить'))
-              ]),
-        Expanded(
-            child: StudentHomeView(
-                guest: true,
-                hideHomePromo: true,
-                data: StudentHomeData(
-                    profile: StudentHomeProfile(
-                        name: '', groupName: _group?['name'] ?? ''),
-                    currentDate: DateTime.now(),
-                    lessons: const [],
-                    assignments: const [],
-                    scheduleStatus: _group == null
-                        ? 'Выбери свою группу'
-                        : 'Расписание ${_group!['name']}',
-                    assignmentsStatus:
-                        'Задания твоих команд появятся после входа.',
-                    news: [for (final row in _news) _presentation(row)]),
-                onRefresh: _loadNews,
-                onNotificationsTap: _login,
-                onNewsTap: (index) => _info(_news[index]['title'] as String,
-                    _news[index]['body'] as String? ?? ''),
-                onSummaryTap: () => _tab(MainTab.schedule),
-                onAssignmentsOpen: _login)),
-      ]);
+  Widget _home() {
+    // The tap index must refer to the same snapshot that produced the cards,
+    // even if a refresh replaces the backing list before the next frame.
+    final rows = [for (final row in _news) Map<String, dynamic>.from(row)];
+    final presentation = [for (final row in rows) _presentation(row)];
+    return Column(children: [
+      if (_newsFailed)
+        MaterialBanner(
+            content: const Text('Новости временно недоступны'),
+            actions: [
+              TextButton(onPressed: _loadNews, child: const Text('Повторить'))
+            ]),
+      Expanded(
+          child: StudentHomeView(
+              guest: true,
+              hideHomePromo: true,
+              data: StudentHomeData(
+                  profile: StudentHomeProfile(
+                      name: '', groupName: _group?['name'] ?? ''),
+                  currentDate: DateTime.now(),
+                  lessons: const [],
+                  assignments: const [],
+                  scheduleStatus: _group == null
+                      ? 'Выбери свою группу'
+                      : 'Расписание ${_group!['name']}',
+                  assignmentsStatus:
+                      'Задания твоих команд появятся после входа.',
+                  news: presentation),
+              onRefresh: _loadNews,
+              onNotificationsTap: _login,
+              onNewsTap: (index) => _showNewsFeed(rows, presentation, index),
+              onSummaryTap: () => _tab(MainTab.schedule),
+              onAssignmentsOpen: _login)),
+    ]);
+  }
+
   StudentHomeNews _presentation(Map<String, dynamic> row) {
     final n = mapPublishedNews(row);
     return StudentHomeNews(
