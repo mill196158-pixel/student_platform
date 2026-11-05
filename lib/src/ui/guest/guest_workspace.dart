@@ -390,7 +390,11 @@ class _GuestWorkspaceState extends State<GuestWorkspace> {
             icon: Icons.groups_outlined,
             onTap: _chooseGroup,
             trailing: const Icon(Icons.expand_more)),
-        if (_lessonsLoading) const LinearProgressIndicator(),
+        if (_lessonsLoading)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 20),
+            child: Center(child: Text('Загружаем расписание…')),
+          ),
         if (_lessonsError != null)
           TextButton(onPressed: _loadLessons, child: Text(_lessonsError!)),
         for (final l

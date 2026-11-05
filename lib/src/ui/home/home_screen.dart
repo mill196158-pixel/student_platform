@@ -344,9 +344,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           TextButton(
               onPressed: _load,
               child: const Text('Не всё удалось обновить. Повторить')),
-        if (_loading)
-          const LinearProgressIndicator(
-              minHeight: 2, semanticsLabel: 'Обновляем данные'),
         Expanded(
           child: NotificationListener<ScrollNotification>(
             onNotification: (_) {

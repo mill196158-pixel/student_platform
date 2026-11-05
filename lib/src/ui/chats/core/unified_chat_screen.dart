@@ -1808,13 +1808,6 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
               ),
 
               // Тонкая полоска статуса нужна только для реальной загрузки файлов.
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 150),
-                child: _isUploadingAttachments
-                    ? const LinearProgressIndicator(minHeight: 2)
-                    : const SizedBox.shrink(),
-              ),
-
               if (!_selecting && _editingMessage != null)
                 _InlineEditBar(
                   message: _editingMessage!,

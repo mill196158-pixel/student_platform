@@ -189,7 +189,7 @@ class _BodyState extends State<_Body> with SingleTickerProviderStateMixin {
                     readOnly: widget.readOnly,
                     highlightMessageId: widget.highlightMessageId,
                   ),
-                  const FilesTab(), // без отступов сверху — прижато к табам
+                  FilesTab(isActive: _tabController.index == 2),
                 ],
               ),
             ),

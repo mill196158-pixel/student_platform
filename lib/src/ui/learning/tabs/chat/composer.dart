@@ -388,7 +388,6 @@ class _AttachedImagePreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final showProgress = file.isUploading || file.isQueued;
-    final progress = file.progress.clamp(0.0, 1.0).toDouble();
     final progressLabel = file.isQueued ? 'В очереди' : statusLabel;
 
     return Material(
@@ -466,20 +465,6 @@ class _AttachedImagePreview extends StatelessWidget {
                         blurRadius: 4,
                       ),
                     ],
-                  ),
-                ),
-              ),
-            if (showProgress)
-              Positioned(
-                left: 8,
-                right: 8,
-                bottom: 3,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: LinearProgressIndicator(
-                    minHeight: 3,
-                    value: file.isQueued ? null : progress,
-                    backgroundColor: Colors.white.withValues(alpha: 0.25),
                   ),
                 ),
               ),
@@ -577,8 +562,6 @@ class _AttachedDocumentPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final showProgress = file.isUploading || file.isQueued;
-    final progress = file.progress.clamp(0.0, 1.0).toDouble();
 
     return Material(
       color: Colors.transparent,
@@ -648,17 +631,6 @@ class _AttachedDocumentPreview extends StatelessWidget {
                 ],
               ),
             ),
-            if (showProgress)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: LinearProgressIndicator(
-                  minHeight: 3,
-                  value: file.isQueued ? null : progress,
-                  backgroundColor: scheme.outline.withValues(alpha: 0.14),
-                ),
-              ),
           ],
         ),
       ),

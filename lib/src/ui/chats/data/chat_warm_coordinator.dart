@@ -28,6 +28,7 @@ class ChatWarmCoordinator with WidgetsBindingObserver {
 
   bool _started = false;
   bool _observerAttached = false;
+  int _generation = 0;
   Future<void>? _refreshInFlight;
   DateTime? _lastRefreshAt;
   Timer? _pendingTimer;
@@ -39,6 +40,7 @@ class ChatWarmCoordinator with WidgetsBindingObserver {
       return;
     }
     _started = true;
+    _generation++;
     if (!_observerAttached) {
       WidgetsBinding.instance.addObserver(this);
       _observerAttached = true;
@@ -47,6 +49,10 @@ class ChatWarmCoordinator with WidgetsBindingObserver {
   }
 
   void stop() {
+    _generation++;
+    ChatPreloadService.cancelPending();
+    _refreshInFlight = null;
+    _lastRefreshAt = null;
     _pendingTimer?.cancel();
     _pendingTimer = null;
     if (_observerAttached) {
@@ -103,10 +109,15 @@ class ChatWarmCoordinator with WidgetsBindingObserver {
     final sb = Supabase.instance.client;
     final me = sb.auth.currentUser?.id;
     if (me == null || me.isEmpty) return;
+    final generation = _generation;
+    bool current() =>
+        _started && generation == _generation && sb.auth.currentUser?.id == me;
+    if (!current()) return;
 
     safeDebugLog('[ChatWarm] refresh start');
     try {
       final res = await sb.rpc('get_my_chat_summaries');
+      if (!current()) return;
       final rows = (res as List? ?? const [])
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
@@ -121,6 +132,7 @@ class ChatWarmCoordinator with WidgetsBindingObserver {
       summaries.sort(_compareSummaryMaps);
 
       await _saveSummariesCache(me, summaries);
+      if (!current()) return;
 
       final avatarUrls = <String>[];
       final lastMessageIdByChat = <String, String>{};
@@ -150,6 +162,7 @@ class ChatWarmCoordinator with WidgetsBindingObserver {
         );
       }
 
+      if (!current()) return;
       _lastRefreshAt = DateTime.now();
       safeDebugLog(
         '[ChatWarm] refresh done summaries=${summaries.length} warmed=${chatIds.length}',

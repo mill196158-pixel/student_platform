@@ -600,7 +600,7 @@ class _CollectionDetailScreenState extends State<_CollectionDetailScreen> {
             ),
             const SizedBox(height: 8),
             if (_loadingContributions)
-              const LinearProgressIndicator()
+              const Center(child: Text('Загружаем данные…'))
             else if (_contributionsError)
               _GroupStatePanel(
                 icon: Icons.error_outline,

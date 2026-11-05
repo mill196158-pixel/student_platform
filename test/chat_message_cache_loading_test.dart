@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -51,18 +52,25 @@ void main() {
     ChatMessageCacheStore.debugUserIdOverride = null;
   });
 
-  test('corrupt disk envelope does not block other conversations at startup', () async {
+  test('corrupt disk envelope does not block other conversations at startup',
+      () async {
     final prefs = await SharedPreferences.getInstance();
-    await ChatMessageCacheStore.replace(chatId: 'valid-after-corrupt', userId: 'user-a',
+    await ChatMessageCacheStore.replace(
+        chatId: 'valid-after-corrupt',
+        userId: 'user-a',
         messages: [_msg('persisted')]);
-    final raw = prefs.getString('chat_msg_cache_v1_user-a_valid-after-corrupt')!;
+    final raw =
+        prefs.getString('chat_msg_cache_v1_user-a_valid-after-corrupt')!;
     await ChatMessageCacheStore.clearOnLogout();
     ChatMessageCacheStore.debugUserIdOverride = 'user-a';
     ChatMessageCacheStore.debugSetPrefs(prefs);
     await prefs.setString('chat_msg_cache_v1_user-a_corrupt', '{broken');
     await prefs.setString('chat_msg_cache_v1_user-a_valid-after-corrupt', raw);
     await ChatMessageCacheStore.initializeCurrentUser();
-    expect(ChatMessageCacheStore.hasSnapshot('valid-after-corrupt', userId: 'user-a'), isTrue);
+    expect(
+        ChatMessageCacheStore.hasSnapshot('valid-after-corrupt',
+            userId: 'user-a'),
+        isTrue);
   });
 
   test('1. empty snapshot has found/hasSnapshot=true', () async {
@@ -588,5 +596,116 @@ void main() {
           ChatMessageCacheStore.messagesSync(chatId).map((m) => m.id).toList();
       expect(ids, containsAll(['a', 'b']));
     });
+  });
+  test('a delayed sync and buffered realtime never enter the next account',
+      () async {
+    const chat = 'session-switch';
+    final started = Completer<void>();
+    final reply = Completer<({List<Message> messages, bool hasMore})>();
+    var lateRealtimeFetches = 0;
+    DmApi.debugPrimeClearedAt(chat, null);
+    DmApi.debugSyncPageLoader =
+        ({required String chatId, required int limit, DateTime? clearedAt}) {
+      started.complete();
+      return reply.future;
+    };
+    DmApi.debugLoadMessageById =
+        ({required String chatId, required String messageId}) async {
+      lateRealtimeFetches++;
+      return _msg('old-event', chatId: chat);
+    };
+    final previous =
+        DmApi.syncLatest(chatId: chat, invalidateClearBoundary: false);
+    await started.future;
+    await DmApi.debugHandleRealtimeUpsert(chatId: chat, messageId: 'old-event');
+    await DmApi.clearSessionState();
+    ChatMessageCacheStore.debugUserIdOverride = 'user-b';
+    await ChatMessageCacheStore.replace(
+        chatId: chat,
+        userId: 'user-b',
+        messages: [_msg('new-user', chatId: chat)]);
+    reply
+        .complete((messages: [_msg('old-user', chatId: chat)], hasMore: false));
+    final result = await previous;
+    expect(result.ok, isFalse);
+    expect(
+        ChatMessageCacheStore.messagesSync(chat, userId: 'user-b')
+            .map((m) => m.id),
+        ['new-user']);
+    expect(lateRealtimeFetches, 0);
+  });
+
+  test('stopping preload prevents queued chats from being fetched', () async {
+    final started = Completer<void>();
+    final page = Completer<({List<Message> messages, bool hasMore})>();
+    final loaded = <String>[];
+    DmApi.debugPrimeClearedAt('first', null);
+    DmApi.debugPrimeClearedAt('later', null);
+    DmApi.debugSyncPageLoader =
+        ({required String chatId, required int limit, DateTime? clearedAt}) {
+      loaded.add(chatId);
+      if (chatId == 'first') {
+        started.complete();
+        return page.future;
+      }
+      return Future.value((messages: <Message>[], hasMore: false));
+    };
+    final work =
+        ChatPreloadService.warmUpChatIds(['first', 'later'], parallel: 1);
+    await started.future;
+    ChatPreloadService.cancelPending();
+    page.complete((messages: [_msg('one', chatId: 'first')], hasMore: false));
+    await work;
+    expect(loaded, ['first']);
+    expect(
+        ChatMessageCacheStore.hasSnapshot('later', userId: 'user-a'), isFalse);
+  });
+  test('late realtime callback from old subscription is ignored after switch',
+      () async {
+    const chat = 'old-channel';
+    DmApi.debugPrimeClearedAt(chat, null);
+    final oldCallback = DmApi.debugCaptureRealtimeUpsert(chat);
+    await DmApi.clearSessionState();
+    ChatMessageCacheStore.debugUserIdOverride = 'user-b';
+    var calls = 0;
+    DmApi.debugLoadMessageById =
+        ({required String chatId, required String messageId}) async {
+      calls++;
+      return _msg('old-event', chatId: chat);
+    };
+    await oldCallback('old-event');
+    expect(calls, 0);
+    expect(ChatMessageCacheStore.hasSnapshot(chat, userId: 'user-b'), isFalse);
+  });
+
+  test('delayed older page cannot enter a different account', () async {
+    const chat = 'old-page';
+    final started = Completer<void>();
+    final page = Completer<({List<Message> messages, bool hasMore})>();
+    DmApi.debugPrimeClearedAt(chat, null);
+    DmApi.debugOlderPageLoader = (
+        {required String chatId,
+        required Message before,
+        required int limit,
+        DateTime? clearedAt}) {
+      started.complete();
+      return page.future;
+    };
+    final loading = DmApi.loadOlderMessages(
+        chatId: chat, before: _msg('before', chatId: chat));
+    final failed = expectLater(loading, throwsA(isA<StateError>()));
+    await started.future;
+    await DmApi.clearSessionState();
+    ChatMessageCacheStore.debugUserIdOverride = 'user-b';
+    await ChatMessageCacheStore.replace(
+        chatId: chat,
+        userId: 'user-b',
+        messages: [_msg('new-user', chatId: chat)]);
+    page.complete((messages: [_msg('old-user', chatId: chat)], hasMore: false));
+    await failed;
+    expect(
+        ChatMessageCacheStore.messagesSync(chat, userId: 'user-b')
+            .map((m) => m.id),
+        ['new-user']);
   });
 }

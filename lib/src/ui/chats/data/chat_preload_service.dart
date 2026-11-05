@@ -19,6 +19,13 @@ class ChatPreloadService {
   static Future<void>? _inFlight;
   static int _generation = 0;
 
+  /// Prevent queued background work from continuing after the session stops.
+  static void cancelPending() {
+    _generation++;
+    // New sessions must not wait on a request owned by the old session.
+    _inFlight = null;
+  }
+
   /// Schedule a delayed warm of [chatIds] (fire-and-forget).
   static void scheduleWarmUpChatIds(
     Iterable<String?> chatIds, {
@@ -63,6 +70,7 @@ class ChatPreloadService {
       limit: limit,
       parallel: parallel.clamp(1, 4),
       lastMessageIdByChat: lastMessageIdByChat ?? const {},
+      generation: gen,
     );
     _inFlight = future;
     try {
@@ -87,6 +95,7 @@ class ChatPreloadService {
     required int limit,
     required int parallel,
     required Map<String, String> lastMessageIdByChat,
+    required int generation,
   }) async {
     final ids = <String>[];
     final seen = <String>{};
@@ -104,7 +113,7 @@ class ChatPreloadService {
     var index = 0;
     Future<void> worker() async {
       while (true) {
-        if (index >= ids.length) return;
+        if (generation != _generation || index >= ids.length) return;
         final i = index++;
         final chatId = ids[i];
         try {
@@ -112,6 +121,7 @@ class ChatPreloadService {
             chatId,
             limit: limit,
             expectedLastMessageId: lastMessageIdByChat[chatId],
+            generation: generation,
           );
         } catch (e) {
           safeDebugLog(
@@ -132,7 +142,9 @@ class ChatPreloadService {
     String chatId, {
     required int limit,
     String? expectedLastMessageId,
+    required int generation,
   }) async {
+    if (generation != _generation) return;
     if (ActiveChatTracker.instance.isActive(chatId)) {
       return;
     }
@@ -141,7 +153,7 @@ class ChatPreloadService {
       chatId,
       expectedLastMessageId: expectedLastMessageId,
     );
-    if (!needs) return;
+    if (!needs || generation != _generation) return;
 
     await DmApi.syncLatest(
       chatId: chatId,

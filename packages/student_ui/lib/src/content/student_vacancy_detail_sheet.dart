@@ -229,7 +229,7 @@ class _StudentVacancyDetailSheetState extends State<StudentVacancyDetailSheet> {
                   child: const Text('Показать контакты'),
                 )
               else if (_contactsLoading)
-                const LinearProgressIndicator()
+                const Text('Загружаем контакты…')
               else if (_contactsError)
                 Text(
                   'Контакты недоступны.',

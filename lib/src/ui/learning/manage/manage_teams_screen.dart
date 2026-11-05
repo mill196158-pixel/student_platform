@@ -82,7 +82,6 @@ class _ManageTeamsScreenState extends State<ManageTeamsScreen> {
                                   })),
                       onChanged: (value) => setState(() => _query = value),
                     )),
-                if (state.loading) const LinearProgressIndicator(),
                 Expanded(
                     child: teams.isEmpty
                         ? Center(

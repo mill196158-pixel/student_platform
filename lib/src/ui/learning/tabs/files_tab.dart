@@ -20,7 +20,9 @@ import 'package:path_provider/path_provider.dart';
 enum _FilesSection { images, documents }
 
 class FilesTab extends StatefulWidget {
-  const FilesTab({super.key});
+  const FilesTab({super.key, this.isActive = true});
+
+  final bool isActive;
 
   @override
   State<FilesTab> createState() => _FilesTabState();
@@ -40,10 +42,23 @@ class _FilesTabState extends State<FilesTab>
   bool _uploading = false;
   bool _selecting = false;
   final Set<String> _selectedIds = {};
+  bool _initialized = false;
 
   @override
   void initState() {
     super.initState();
+    if (widget.isActive) _startLoading();
+  }
+
+  @override
+  void didUpdateWidget(covariant FilesTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isActive) _startLoading();
+  }
+
+  void _startLoading() {
+    if (_initialized) return;
+    _initialized = true;
     _init();
   }
 
@@ -59,8 +74,10 @@ class _FilesTabState extends State<FilesTab>
     setState(() => _loading = true);
     final teamId = context.read<TeamCubit>().state.team.id;
     final chatId = await _getMainChatId(teamId);
+    if (!mounted) return;
     _chatId = chatId;
     await _loadFiles();
+    if (!mounted) return;
     _subscribeRealtime();
     if (mounted) setState(() => _loading = false);
   }
@@ -788,6 +805,7 @@ class _FilesTabState extends State<FilesTab>
           .single();
       return response['id'] as String;
     } catch (e) {
+      if (!mounted) return '';
       for (final message in context.read<TeamCubit>().state.chat) {
         if (message.chatId.isNotEmpty) return message.chatId;
         for (final file in message.attachments ?? const <ChatFile>[]) {

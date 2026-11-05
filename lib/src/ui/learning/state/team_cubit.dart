@@ -156,7 +156,6 @@ class TeamCubit extends Cubit<TeamState> {
 
     // Chat sync must not wait for files/assignments/role.
     unawaited(_loadChatInBackground(chatId));
-    unawaited(_loadFilesInBackground());
     unawaited(_loadAssignmentsInBackground());
     unawaited(_loadRoleInBackground());
 
@@ -245,17 +244,6 @@ class TeamCubit extends Cubit<TeamState> {
         chatRefreshing: false,
         chatError: !state.chatHasSnapshot,
       ));
-    }
-  }
-
-  Future<void> _loadFilesInBackground() async {
-    emit(state.copyWith(filesLoading: true));
-    try {
-      final files = await repo.loadFiles(state.team.id);
-      if (isClosed) return;
-      emit(state.copyWith(files: files, filesLoading: false));
-    } catch (_) {
-      if (!isClosed) emit(state.copyWith(filesLoading: false));
     }
   }
 

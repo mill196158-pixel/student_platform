@@ -9,6 +9,7 @@ import 'package:student_platform/src/core/logout_cleanup.dart';
 import 'package:student_platform/src/services/push/push_notification_service.dart';
 import 'package:student_platform/src/ui/chats/core/chat_message_cache_store.dart';
 import 'package:student_platform/src/ui/chats/data/dm_api.dart';
+import 'package:student_platform/src/ui/chats/data/chat_warm_coordinator.dart';
 import 'package:student_platform/src/ui/home/home_dashboard_service.dart';
 import 'package:student_platform/src/ui/home/news_image_disk_cache.dart';
 import 'package:student_platform/src/ui/learning/state/team_cubit.dart';
@@ -25,6 +26,7 @@ class AuthService {
   static final _sb = Supabase.instance.client;
 
   static Future<void> signOut(BuildContext context) async {
+    ChatWarmCoordinator.instance.stop();
     var cleanupComplete = false;
     try {
       cleanupComplete = await runLogoutCleanup(

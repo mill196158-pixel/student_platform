@@ -1393,7 +1393,7 @@ class _InfoSheetHeader extends StatelessWidget {
     return Text(
       'Что внутри раздела',
       style: Theme.of(context).textTheme.titleLarge?.copyWith(
-            color: Colors.black,
+            color: Theme.of(context).colorScheme.onSurface,
             fontWeight: FontWeight.w900,
           ),
     );
@@ -1418,9 +1418,11 @@ class _InfoSheetPoint extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8F4FF),
+        color: theme.brightness == Brightness.dark
+            ? theme.colorScheme.surfaceContainerHighest
+            : const Color(0xFFF8F4FF),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
+        border: Border.all(color: theme.colorScheme.outlineVariant.withValues(alpha: 0.35)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1443,7 +1445,7 @@ class _InfoSheetPoint extends StatelessWidget {
                 Text(
                   title,
                   style: theme.textTheme.titleSmall?.copyWith(
-                    color: Colors.black,
+                    color: theme.colorScheme.onSurface,
                     fontWeight: FontWeight.w900,
                   ),
                 ),
@@ -1451,7 +1453,7 @@ class _InfoSheetPoint extends StatelessWidget {
                 Text(
                   text,
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: Colors.black.withValues(alpha: 0.64),
+                    color: theme.colorScheme.onSurfaceVariant,
                     height: 1.3,
                   ),
                 ),

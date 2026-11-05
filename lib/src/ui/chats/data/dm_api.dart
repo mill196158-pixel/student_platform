@@ -65,6 +65,14 @@ class DmApi {
     DateTime? clearedAt,
   })? debugSyncPageLoader;
 
+  /// Test hook for an in-flight older-page fetch.
+  static Future<({List<Message> messages, bool hasMore})> Function({
+    required String chatId,
+    required Message before,
+    required int limit,
+    DateTime? clearedAt,
+  })? debugOlderPageLoader;
+
   /// Test hook: replace targeted single-message load used by Realtime flush.
   static Future<Message?> Function({
     required String chatId,
@@ -76,12 +84,44 @@ class DmApi {
   static int debugLoadCount(String chatId) =>
       debugLoadMessagesCounts[chatId] ?? 0;
 
+  // A background operation always belongs to the account that started it.
+  // The debug override lets the cache/realtime tests exercise account changes
+  // without a live Supabase session.
+  static String? get _currentSessionUserId {
+    final override = ChatMessageCacheStore.debugUserIdOverride;
+    if (override != null) return override;
+    try {
+      return _sb.auth.currentUser?.id;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static bool _isCurrentSession(String? userId, int generation) =>
+      userId != null &&
+      userId.isNotEmpty &&
+      generation == _sessionGeneration &&
+      _currentSessionUserId == userId;
+
   static ChatSyncRealtimeGate _gateFor(String chatId) {
+    final owner = _currentSessionUserId;
+    final generation = _sessionGeneration;
+    final gateKey = '$generation:$owner:$chatId';
     return _syncGates.putIfAbsent(
-      chatId,
+      gateKey,
       () => ChatSyncRealtimeGate(
-        applyUpsert: (messageId) => _applyRealtimeUpsert(chatId, messageId),
-        applyDelete: (messageId) => _applyRealtimeDelete(chatId, messageId),
+        applyUpsert: (messageId) => _applyRealtimeUpsert(
+          chatId,
+          messageId,
+          owner,
+          generation,
+        ),
+        applyDelete: (messageId) => _applyRealtimeDelete(
+          chatId,
+          messageId,
+          owner,
+          generation,
+        ),
       ),
     );
   }
@@ -101,25 +141,33 @@ class DmApi {
       _gateFor(chatId).handleDelete(messageId);
 
   static ChatSyncRealtimeGate? debugGateFor(String chatId) =>
-      _syncGates[chatId];
+      _syncGates['$_sessionGeneration:$_currentSessionUserId:$chatId'];
 
   static Future<void> _applyRealtimeUpsert(
     String chatId,
     String messageId,
+    String? owner,
+    int generation,
   ) async {
+    if (!_isCurrentSession(owner, generation)) return;
     final clearedAt = await loadClearedAt(chatId);
+    if (!_isCurrentSession(owner, generation)) return;
     final message = debugLoadMessageById != null
         ? await debugLoadMessageById!(chatId: chatId, messageId: messageId)
         : await loadMessageById(chatId: chatId, messageId: messageId);
-    if (message == null) return;
+    if (!_isCurrentSession(owner, generation) || message == null) return;
     if (clearedAt != null && !message.at.isAfter(clearedAt)) return;
-    final snap = await ChatMessageCacheStore.reconcileUpsert(chatId, message);
-    await ChatMessageCacheStore.pruneAtOrBefore(chatId, clearedAt);
+    final snap = await ChatMessageCacheStore.reconcileUpsert(chatId, message,
+        userId: owner);
+    if (!_isCurrentSession(owner, generation)) return;
+    await ChatMessageCacheStore.pruneAtOrBefore(chatId, clearedAt,
+        userId: owner);
+    if (!_isCurrentSession(owner, generation)) return;
     _emitView(
       chatId,
       ChatMessagesViewState(
         phase: ChatMessagesLoadPhase.ready,
-        messages: ChatMessageCacheStore.messagesSync(chatId),
+        messages: ChatMessageCacheStore.messagesSync(chatId, userId: owner),
         hasSnapshot: true,
         hasMoreBefore: snap.hasMoreBefore,
       ),
@@ -129,14 +177,20 @@ class DmApi {
   static Future<void> _applyRealtimeDelete(
     String chatId,
     String messageId,
+    String? owner,
+    int generation,
   ) async {
-    final snap = await ChatMessageCacheStore.remove(chatId, messageId);
+    if (!_isCurrentSession(owner, generation)) return;
+    final snap =
+        await ChatMessageCacheStore.remove(chatId, messageId, userId: owner);
+    if (!_isCurrentSession(owner, generation)) return;
     _emitView(
       chatId,
       ChatMessagesViewState(
         phase: ChatMessagesLoadPhase.ready,
         messages: snap.found ? snap.messages : const <Message>[],
-        hasSnapshot: snap.found || ChatMessageCacheStore.hasSnapshot(chatId),
+        hasSnapshot: snap.found ||
+            ChatMessageCacheStore.hasSnapshot(chatId, userId: owner),
         hasMoreBefore: snap.hasMoreBefore,
       ),
     );
@@ -246,8 +300,17 @@ class DmApi {
     debugLoadMessagesCounts[chatId] =
         (debugLoadMessagesCounts[chatId] ?? 0) + 1;
 
+    final owner = _currentSessionUserId;
+    final generation = _sessionGeneration;
+    if (!_isCurrentSession(owner, generation))
+      throw StateError('Session changed');
     final clearFloor = clearedAt ?? await loadClearedAt(chatId);
-    await ChatMessageCacheStore.pruneAtOrBefore(chatId, clearFloor);
+    if (!_isCurrentSession(owner, generation))
+      throw StateError('Session changed');
+    await ChatMessageCacheStore.pruneAtOrBefore(chatId, clearFloor,
+        userId: owner);
+    if (!_isCurrentSession(owner, generation))
+      throw StateError('Session changed');
 
     try {
       final rows = await _sb.rpc('get_chat_messages_page', params: {
@@ -257,6 +320,8 @@ class DmApi {
         if (beforeId != null && beforeId.isNotEmpty) 'p_before_id': beforeId,
       });
 
+      if (!_isCurrentSession(owner, generation))
+        throw StateError('Session changed');
       final list = <Message>[];
       var hasMore = false;
       for (final row in (rows as List? ?? const [])) {
@@ -278,18 +343,23 @@ class DmApi {
       }
       return (messages: list, hasMore: hasMore);
     } catch (e) {
+      if (!_isCurrentSession(owner, generation)) rethrow;
       if (kDebugMode) {
         debugPrint(
           '[DM] get_chat_messages_page fallback chat=${maskDebugId(chatId)}: $e',
         );
       }
-      return _loadMessagesLegacyPage(
+      final result = await _loadMessagesLegacyPage(
         chatId: chatId,
         limit: limit,
         beforeAt: beforeAt,
         beforeId: beforeId,
         clearedAt: clearFloor,
       );
+      if (!_isCurrentSession(owner, generation)) {
+        throw StateError('Session changed');
+      }
+      return result;
     }
   }
 
@@ -488,25 +558,42 @@ class DmApi {
     required Message before,
     int limit = 50,
   }) async {
+    final owner = _currentSessionUserId;
+    final generation = _sessionGeneration;
+    if (!_isCurrentSession(owner, generation))
+      throw StateError('Session changed');
     final clearedAt = await loadClearedAt(chatId);
-    final page = await loadMessagesPage(
-      chatId: chatId,
-      limit: limit,
-      beforeAt: before.at,
-      beforeId: before.id,
-      clearedAt: clearedAt,
-    );
+    if (!_isCurrentSession(owner, generation))
+      throw StateError('Session changed');
+    final page = debugOlderPageLoader != null
+        ? await debugOlderPageLoader!(
+            chatId: chatId, before: before, limit: limit, clearedAt: clearedAt)
+        : await loadMessagesPage(
+            chatId: chatId,
+            limit: limit,
+            beforeAt: before.at,
+            beforeId: before.id,
+            clearedAt: clearedAt,
+          );
+    if (!_isCurrentSession(owner, generation))
+      throw StateError('Session changed');
 
     final older = page.messages.where((m) => m.id != before.id).toList()
       ..sort((a, b) => a.at.compareTo(b.at));
 
     await ChatMessageCacheStore.merge(
       chatId: chatId,
+      userId: owner,
       messages: older,
       clearedAt: clearedAt,
       hasMoreBefore: page.hasMore,
     );
-    await ChatMessageCacheStore.pruneAtOrBefore(chatId, clearedAt);
+    if (!_isCurrentSession(owner, generation))
+      throw StateError('Session changed');
+    await ChatMessageCacheStore.pruneAtOrBefore(chatId, clearedAt,
+        userId: owner);
+    if (!_isCurrentSession(owner, generation))
+      throw StateError('Session changed');
 
     final current = _streamMessages[chatId];
     final ctrl = _streamControllers[chatId];
@@ -515,7 +602,8 @@ class DmApi {
       final unique = older.where((m) => existingIds.add(m.id)).toList();
       if (unique.isNotEmpty) {
         current.insertAll(0, unique);
-        final visible = ChatMessageCacheStore.messagesSync(chatId);
+        final visible =
+            ChatMessageCacheStore.messagesSync(chatId, userId: owner);
         current
           ..clear()
           ..addAll(visible);
@@ -612,18 +700,27 @@ class DmApi {
     if (chatId.isEmpty) {
       return Future.value(ChatSyncResult.success(const <Message>[]));
     }
-    final existing = _syncInFlight[chatId];
+    final owner = _currentSessionUserId;
+    final generation = _sessionGeneration;
+    if (!_isCurrentSession(owner, generation)) {
+      return Future.value(
+          ChatSyncResult.failure(StateError('No active session')));
+    }
+    final syncKey = '$generation:$owner:$chatId';
+    final existing = _syncInFlight[syncKey];
     if (existing != null) return existing;
 
     final future = _syncLatestImpl(
       chatId: chatId,
       limit: limit,
       invalidateClearBoundary: invalidateClearBoundary,
+      owner: owner!,
+      generation: generation,
     );
-    _syncInFlight[chatId] = future;
+    _syncInFlight[syncKey] = future;
     future.whenComplete(() {
-      if (identical(_syncInFlight[chatId], future)) {
-        _syncInFlight.remove(chatId);
+      if (identical(_syncInFlight[syncKey], future)) {
+        _syncInFlight.remove(syncKey);
       }
     });
     return future;
@@ -633,12 +730,20 @@ class DmApi {
     required String chatId,
     required int limit,
     required bool invalidateClearBoundary,
+    required String owner,
+    required int generation,
   }) async {
     final gate = _gateFor(chatId);
     return gate.runExclusiveSync(() async {
       try {
+        if (!_isCurrentSession(owner, generation)) {
+          return ChatSyncResult.failure(StateError('Session changed'));
+        }
         if (invalidateClearBoundary) invalidateClearedAt(chatId);
         final clearedAt = await loadClearedAt(chatId);
+        if (!_isCurrentSession(owner, generation)) {
+          return ChatSyncResult.failure(StateError('Session changed'));
+        }
         final page = debugSyncPageLoader != null
             ? await debugSyncPageLoader!(
                 chatId: chatId,
@@ -650,6 +755,9 @@ class DmApi {
                 limit: limit,
                 clearedAt: clearedAt,
               );
+        if (!_isCurrentSession(owner, generation)) {
+          return ChatSyncResult.failure(StateError('Session changed'));
+        }
         // DELETE tombstones win over a page fetched before the delete.
         final tombs = gate.pendingDeleteTombstones;
         final serverPage = tombs.isEmpty
@@ -659,11 +767,15 @@ class DmApi {
                 .toList(growable: false);
         final snap = await ChatMessageCacheStore.applyLatestServerPage(
           chatId: chatId,
+          userId: owner,
           serverPage: serverPage,
           pageLimit: limit,
           clearedAt: clearedAt,
           hasMoreBefore: page.hasMore,
         );
+        if (!_isCurrentSession(owner, generation)) {
+          return ChatSyncResult.failure(StateError('Session changed'));
+        }
         _emitView(
           chatId,
           ChatMessagesViewState(
@@ -678,10 +790,13 @@ class DmApi {
           hasMoreBefore: snap.hasMoreBefore,
         );
       } catch (e) {
+        if (!_isCurrentSession(owner, generation)) {
+          return ChatSyncResult.failure(StateError('Session changed'));
+        }
         if (kDebugMode) {
           debugPrint('[DM] syncLatest failed chat=${maskDebugId(chatId)}: $e');
         }
-        final cached = ChatMessageCacheStore.peek(chatId);
+        final cached = ChatMessageCacheStore.peek(chatId, userId: owner);
         _emitView(
           chatId,
           ChatMessagesViewState(
@@ -757,8 +872,12 @@ class DmApi {
   }
 
   static Future<void> _bootstrapWatch(String chatId) async {
+    final owner = _currentSessionUserId;
+    final generation = _sessionGeneration;
+    if (!_isCurrentSession(owner, generation)) return;
     // 1) Snapshot first (empty found snapshot is valid).
-    final snap = await ChatMessageCacheStore.read(chatId);
+    final snap = await ChatMessageCacheStore.read(chatId, userId: owner);
+    if (!_isCurrentSession(owner, generation)) return;
     if (snap.found) {
       _emitView(
         chatId,
@@ -787,36 +906,49 @@ class DmApi {
     await syncLatest(chatId: chatId);
   }
 
+  // Bind callbacks to the owner and epoch at subscription creation. A late
+  // event from an old channel must never be applied to a new account.
+  static Future<void> Function(String) _boundRealtimeUpsert(String chatId,
+      {required bool dedupe}) {
+    final owner = _currentSessionUserId;
+    final generation = _sessionGeneration;
+    final gate = _gateFor(chatId);
+    return (id) async {
+      if (id.isEmpty || !_isCurrentSession(owner, generation)) return;
+      if (dedupe && !gate.isBusy) {
+        final current = _streamMessages[chatId] ?? const <Message>[];
+        if (current.any((message) => message.id == id)) return;
+      }
+      await gate.handleUpsert(id);
+    };
+  }
+
+  @visibleForTesting
+  static Future<void> Function(String) debugCaptureRealtimeUpsert(
+          String chatId) =>
+      _boundRealtimeUpsert(chatId, dedupe: false);
+
   static void _ensureRealtime(String chatId) {
     if (_channels.containsKey(chatId)) return;
+    final owner = _currentSessionUserId;
+    final generation = _sessionGeneration;
+    final gate = _gateFor(chatId);
+    final insert = _boundRealtimeUpsert(chatId, dedupe: true);
+    final update = _boundRealtimeUpsert(chatId, dedupe: false);
 
     String idFromPayload(PostgresChangePayload payload, {bool old = false}) {
       final record = old ? payload.oldRecord : payload.newRecord;
       return (record['id'] ?? '').toString();
     }
 
-    Future<void> insertOne(PostgresChangePayload payload) async {
-      final id = idFromPayload(payload);
-      if (id.isEmpty) return;
-      // Dedupe only when applying immediately; during sync/flush always buffer.
-      final gate = _gateFor(chatId);
-      if (!gate.isBusy) {
-        final current = _streamMessages[chatId] ?? const <Message>[];
-        if (current.any((m) => m.id == id)) return;
-      }
-      await gate.handleUpsert(id);
-    }
-
-    Future<void> updateOne(PostgresChangePayload payload) async {
-      final id = idFromPayload(payload);
-      if (id.isEmpty) return;
-      await _gateFor(chatId).handleUpsert(id);
-    }
-
+    Future<void> insertOne(PostgresChangePayload payload) =>
+        insert(idFromPayload(payload));
+    Future<void> updateOne(PostgresChangePayload payload) =>
+        update(idFromPayload(payload));
     Future<void> deleteOne(PostgresChangePayload payload) async {
       final id = idFromPayload(payload, old: true);
-      if (id.isEmpty) return;
-      await _gateFor(chatId).handleDelete(id);
+      if (id.isEmpty || !_isCurrentSession(owner, generation)) return;
+      await gate.handleDelete(id);
     }
 
     final ch = _sb.channel('dm:messages:$chatId')
@@ -899,6 +1031,7 @@ class DmApi {
     _clearedAtByChat.clear();
     debugLoadMessagesCounts.clear();
     debugSyncPageLoader = null;
+    debugOlderPageLoader = null;
     debugLoadMessageById = null;
   }
 

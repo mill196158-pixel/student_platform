@@ -568,6 +568,28 @@ void main() {
       expect(calls, greaterThanOrEqualTo(2));
     });
 
+    testWidgets('section information stays readable in the dark theme',
+        (tester) async {
+      final theme = ThemeData.dark(useMaterial3: true);
+      await tester.pumpWidget(MaterialApp(
+        theme: theme,
+        home: InfoScreen(
+          debugUserId: 'dark-sheet-user',
+          planLoader: () async => InfoPlanState(
+            contextData: const AcademicContext(hasActiveEnrollment: false),
+            subjects: const [],
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('О разделе'));
+      await tester.pumpAndSettle();
+      final title = tester.widget<Text>(find.text('Что внутри раздела'));
+      expect(title.style?.color, theme.colorScheme.onSurface);
+      final detail = tester.widget<Text>(find.textContaining('Здесь собраны дисциплины'));
+      expect(detail.style?.color, theme.colorScheme.onSurfaceVariant);
+    });
+
     testWidgets('background refresh error keeps last-good cache on screen',
         (tester) async {
       var failRefresh = false;

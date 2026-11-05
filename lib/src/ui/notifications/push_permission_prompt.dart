@@ -49,7 +49,7 @@ Future<bool?> showPushPermissionPrompt(BuildContext context) {
               ),
               const SizedBox(height: 14),
               Text(
-                'Сообщим о личных сообщениях, заявках в друзья, заданиях и изменениях в учёбе.',
+                'Не пропускайте сообщения одногруппников, заявки в друзья, задания и изменения в учёбе.',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   height: 1.45,
                   color: cs.onSurface.withValues(alpha: 0.74),

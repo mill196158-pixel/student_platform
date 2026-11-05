@@ -562,7 +562,8 @@ class _TopicListReviewScreenState extends State<TopicListReviewScreen> {
                             ),
                             if (_reparsing) ...[
                               const SizedBox(height: 10),
-                              const LinearProgressIndicator(minHeight: 2),
+                              if (_reparseProgress == null)
+                                const Text('Обрабатываем…'),
                               if (_reparseProgress != null)
                                 Padding(
                                   padding: const EdgeInsets.only(top: 6),

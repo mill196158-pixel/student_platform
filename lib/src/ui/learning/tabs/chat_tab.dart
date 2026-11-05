@@ -1937,13 +1937,6 @@ class _ChatTabState extends State<ChatTab> {
               ),
 
               // Тонкая полоска статуса: идёт загрузка файлов или выполняется отправка
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 150),
-                child: (_isUploadingAttachments || _isSending)
-                    ? const LinearProgressIndicator(minHeight: 2)
-                    : const SizedBox.shrink(),
-              ),
-
               if (_selectingMessages)
                 Builder(
                   builder: (_) {
