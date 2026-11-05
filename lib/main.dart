@@ -35,6 +35,7 @@ import 'src/config/supabase_config.dart';
 import 'src/core/session_keeper.dart';
 import 'src/core/auth_session_scope_host.dart';
 import 'src/core/auth_transition_host.dart';
+import 'src/core/serial_auth_local_storage.dart';
 import 'src/core/session_capabilities_host.dart';
 import 'src/core/offline_policy_grant_host.dart';
 import 'src/core/guarded_policy_redirect.dart';
@@ -178,8 +179,9 @@ Future<void> _initializeApp(
   await Supabase.initialize(
     url: SupabaseConfig.url,
     anonKey: SupabaseConfig.anonKey,
-    authOptions: const FlutterAuthClientOptions(
+    authOptions: FlutterAuthClientOptions(
       autoRefreshToken: true,
+      localStorage: createSerialSdkAuthStorage(SupabaseConfig.url),
     ),
   );
 

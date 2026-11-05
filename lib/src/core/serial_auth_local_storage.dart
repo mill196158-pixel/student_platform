@@ -1,6 +1,12 @@
 import 'dart:async';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+/// Mirrors the SDK's default key while retaining its platform-specific delegate.
+SerialAuthLocalStorage createSerialSdkAuthStorage(String projectUrl) =>
+    SerialAuthLocalStorage(SharedPreferencesLocalStorage(
+        persistSessionKey:
+            'sb-${Uri.parse(projectUrl).host.split('.').first}-auth-token'));
+
 /// Serializes calls to an existing SDK storage without changing its format.
 /// This does not associate SDK events with owners or authorize a session.
 class SerialAuthLocalStorage extends LocalStorage {
