@@ -306,8 +306,7 @@ class _ChatTabState extends State<ChatTab> {
 
   Future<void> _forwardSelectedMessages(List<Message> selected) async {
     if (selected.isEmpty) return;
-    _exitSelection();
-    await _startForwardSelection(selected);
+    await _startForwardSelection(selected, onPrepared: _exitSelection);
   }
 
   bool _canEditMessage(Message m) => canEditOwnTextMessage(
@@ -604,6 +603,7 @@ class _ChatTabState extends State<ChatTab> {
       final teamId = context.read<TeamCubit>().state.team.id;
       _currentChatId = teamId;
       _restoreDraft();
+      final outbox = ForwardOutbox.capture(context);
       () async {
         final chatId = await _getChatIdForTeam(teamId);
         if (!mounted) return;
@@ -611,7 +611,7 @@ class _ChatTabState extends State<ChatTab> {
           _trackedChatId = chatId;
           ActiveChatTracker.instance.enter(chatId);
         }
-        await _consumeForwardOutboxIfAny(chatId);
+        await _consumeForwardOutboxIfAny(chatId, outbox);
       }();
 
       // Асинхронно фиксируем «границу на входе» по last_read_at / first_unread_id
@@ -2364,10 +2364,20 @@ class _ChatTabState extends State<ChatTab> {
     unawaited(_loadComposerCapabilities());
   }
 
-  Future<void> _consumeForwardOutboxIfAny(String chatId) async {
+  Future<void> _consumeForwardOutboxIfAny(String chatId, ForwardOutboxSession? outbox) async {
     final uid=ChatFileAccess.userId, epoch=ChatFileAccess.generation;
-    final data = await ForwardOutbox.tryTakeForChat(chatId);
-    if (data == null || !mounted || uid!=ChatFileAccess.userId || epoch!=ChatFileAccess.generation) return;
+    if (outbox == null || !outbox.isCurrent) return;
+    ForwardOutboxData? data;
+    try {
+      data = await outbox.tryTakeForChat(chatId);
+    } catch (_) {
+      if (outbox.isCurrent) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Не удалось открыть сохранённую пересылку.')));
+      }
+      return;
+    }
+    if (data == null || !mounted || !outbox.isCurrent || uid!=ChatFileAccess.userId || epoch!=ChatFileAccess.generation) return;
     final raw = data.text ?? '';
     if (!ForwardPayload.isForwardText(raw)) {
       if (raw.isNotEmpty) {
@@ -2494,8 +2504,10 @@ class _ChatTabState extends State<ChatTab> {
 
   String? _forwardComposerPreview() => _stagedForward?.composerPreview();
 
-  Future<void> _startForwardSelection(List<Message> selected) async {
+  Future<void> _startForwardSelection(List<Message> selected, {VoidCallback? onPrepared}) async {
     if (selected.isEmpty) return;
+    final outbox = ForwardOutbox.capture(context);
+    if (outbox == null) return;
 
     final items = <ForwardItem>[];
     final fileUrls = <String>[];
@@ -2537,18 +2549,29 @@ class _ChatTabState extends State<ChatTab> {
     final uniqueFileUrls = fileUrls.where((u) => u.isNotEmpty).toSet().toList();
     final uniqueFileIds = fileIds.where((id) => id.isNotEmpty).toSet().toList();
 
-    final target = await pickForwardTarget(context);
-    if (target == null) return;
+    if (!outbox.isCurrent) return;
+    final target = await pickForwardTarget(context, isCurrent: () => outbox.isCurrent);
+    if (target == null || !outbox.isCurrent) return;
 
     if (target.chatId == fromChatId) {
-      await _stageForwardPayload(payload, uniqueFileUrls, target.chatId);
+      await completeForwardHandoff(
+          prepare: () => _stageForwardPayload(payload, uniqueFileUrls, target.chatId),
+          isCurrent: () => outbox.isCurrent, onPrepared: onPrepared);
     } else {
-      await ForwardOutbox.putForChat(
-        chatId: target.chatId,
-        text: payload.encodeForText(),
-        fileUrls: uniqueFileUrls,
-        fileIds: uniqueFileIds,
-      );
+      try {
+        final ready = await completeForwardHandoff(
+          prepare: () => outbox.putForChat(chatId: target.chatId, text: payload.encodeForText(),
+            fileUrls: uniqueFileUrls, fileIds: uniqueFileIds),
+          isCurrent: () => outbox.isCurrent, onPrepared: onPrepared);
+        if (!ready) return;
+      } catch (_) {
+        if (outbox.isCurrent) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Не удалось сохранить пересылку. Попробуйте ещё раз.')));
+        }
+        return;
+      }
+      if (!outbox.isCurrent) return;
       await target.open(context); // в целевом чате пакет вставится в композер
     }
   }

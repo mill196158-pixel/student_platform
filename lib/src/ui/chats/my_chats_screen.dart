@@ -19,6 +19,8 @@ import 'package:student_platform/src/ui/chats/core/i_chat_service.dart'
     show ChatMode;
 import 'package:student_platform/src/ui/chats/forward/forward_picker.dart'
     show ForwardTarget;
+import 'package:student_platform/src/ui/chats/forward/forward_session_guard.dart'
+    show resolveForwardTargetForSession;
 import 'package:student_platform/src/ui/chats/data/chat_archive_api.dart';
 import 'package:student_platform/src/ui/chats/data/dm_api.dart';
 import 'package:student_platform/src/ui/chats/data/chat_summaries_cache.dart';
@@ -30,8 +32,9 @@ import 'package:student_platform/src/ui/learning/state/team_cubit.dart';
 import 'package:student_platform/src/utils/safe_debug_log.dart';
 
 class MyChatsScreen extends StatefulWidget {
-  const MyChatsScreen({super.key, this.pickMode = false});
+  const MyChatsScreen({super.key, this.pickMode = false, this.pickIsCurrent});
   final bool pickMode;
+  final bool Function()? pickIsCurrent;
   @override
   State<MyChatsScreen> createState() => _MyChatsScreenState();
 }
@@ -893,11 +896,14 @@ class _MyChatsScreenState extends State<MyChatsScreen>
                                   '[MyChatsScreen] onTap -> \'${c.title}\'');
                               if (widget.pickMode) {
                                 try {
+                                  bool current() => mounted && (widget.pickIsCurrent?.call() ?? true);
+                                  if (!current()) return;
                                   if (c.isDm &&
                                       (c.peerId?.isNotEmpty ?? false)) {
                                     final realId =
-                                        await DmApi.getOrCreateChatId(
-                                            peerId: c.peerId!);
+                                        await resolveForwardTargetForSession(current,
+                                          () => DmApi.getOrCreateChatId(peerId: c.peerId!));
+                                    if (realId == null || !current()) return;
                                     // ignore: use_build_context_synchronously
                                     Navigator.pop(
                                         context,
@@ -926,19 +932,20 @@ class _MyChatsScreenState extends State<MyChatsScreen>
                                     String? chatId = c.chatId;
                                     if (chatId == null || chatId.isEmpty) {
                                       try {
-                                        final res = await Supabase
+                                        final res = await resolveForwardTargetForSession(current, () => Supabase
                                             .instance.client
                                             .from('chats')
                                             .select('id')
                                             .eq('team_id', c.team.id)
                                             .eq('type', 'team_main')
                                             .limit(1)
-                                            .maybeSingle();
-                                        if (res != null && res is Map) {
+                                            .maybeSingle());
+                                        if (res != null) {
                                           chatId = (res['id'] ?? '').toString();
                                         }
                                       } catch (_) {}
                                     }
+                                    if (!current()) return;
                                     // ignore: use_build_context_synchronously
                                     Navigator.pop(
                                         context,

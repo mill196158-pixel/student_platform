@@ -233,6 +233,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
   Future<void> _initializeChat() async {
     if (_chatInitializing || !mounted) return;
+    final outbox = ForwardOutbox.capture(context);
     setState(() {
       _chatInitializing = true;
       _chatInitializationFailed = false;
@@ -249,7 +250,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         _restoreDraftDm();
         _draftRestored = true;
       }
-      await _consumeForwardOutboxIfAny(cid);
+      await _consumeForwardOutboxIfAny(cid, outbox);
       if (!mounted) return;
       setState(() => _dmComposerReady = true);
     } catch (e) {
@@ -619,10 +620,17 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   }
 
   // ---------- Forward Outbox ----------
-  Future<void> _consumeForwardOutboxIfAny(String chatId) async {
+  Future<void> _consumeForwardOutboxIfAny(String chatId, ForwardOutboxSession? outbox) async {
     final uid=ChatFileAccess.userId, epoch=ChatFileAccess.generation;
-    final data = await ForwardOutbox.tryTakeForChat(chatId);
-    if (data == null || !mounted || uid!=ChatFileAccess.userId || epoch!=ChatFileAccess.generation) return;
+    if (outbox == null || !outbox.isCurrent) return;
+    ForwardOutboxData? data;
+    try {
+      data = await outbox.tryTakeForChat(chatId);
+    } catch (_) {
+      if (outbox.isCurrent) _showSnack('Не удалось открыть сохранённую пересылку.');
+      return;
+    }
+    if (data == null || !mounted || !outbox.isCurrent || uid!=ChatFileAccess.userId || epoch!=ChatFileAccess.generation) return;
     final raw = data.text ?? '';
     if (!ForwardPayload.isForwardText(raw)) return;
     final payload = ForwardPayload.tryParse(raw);
@@ -763,8 +771,10 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     await _clearDraftDm();
   }
 
-  Future<void> _startForwardSelection(List<Message> selected) async {
+  Future<void> _startForwardSelection(List<Message> selected, {VoidCallback? onPrepared}) async {
     if (selected.isEmpty) return;
+    final outbox = ForwardOutbox.capture(context);
+    if (outbox == null) return;
 
     final items = <ForwardItem>[];
     final fileUrls = <String>[];
@@ -805,21 +815,29 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     final uniqueFileUrls = fileUrls.where((u) => u.isNotEmpty).toSet().toList();
     final uniqueFileIds = fileIds.where((id) => id.isNotEmpty).toSet().toList();
 
-    final target = await pickForwardTarget(context);
-    if (target == null) return;
+    if (!outbox.isCurrent) return;
+    final target = await pickForwardTarget(context, isCurrent: () => outbox.isCurrent);
+    if (target == null || !outbox.isCurrent) return;
 
     final targetChatId = await _resolveForwardTargetChatId(target);
+    if (!outbox.isCurrent) return;
     if (targetChatId == fromChatId) {
       // Всегда staged-чип, не вставляем сырой FG-текст
-      await _stageForwardPayload(
-          payload, uniqueFileUrls, uniqueFileIds, targetChatId);
+      await completeForwardHandoff(
+          prepare: () => _stageForwardPayload(payload, uniqueFileUrls, uniqueFileIds, targetChatId),
+          isCurrent: () => outbox.isCurrent, onPrepared: onPrepared);
     } else {
-      await ForwardOutbox.putForChat(
-        chatId: targetChatId,
-        text: payload.encodeForText(),
-        fileUrls: uniqueFileUrls,
-        fileIds: uniqueFileIds,
-      );
+      try {
+        final ready = await completeForwardHandoff(
+          prepare: () => outbox.putForChat(chatId: targetChatId, text: payload.encodeForText(),
+            fileUrls: uniqueFileUrls, fileIds: uniqueFileIds),
+          isCurrent: () => outbox.isCurrent, onPrepared: onPrepared);
+        if (!ready) return;
+      } catch (_) {
+        if (outbox.isCurrent) _showSnack('Не удалось сохранить пересылку. Попробуйте ещё раз.');
+        return;
+      }
+      if (!outbox.isCurrent) return;
       await target.open(context);
     }
   }
@@ -1075,8 +1093,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
   Future<void> _forwardSelectedMessages(List<Message> selected) async {
     if (selected.isEmpty) return;
-    _exitSelection();
-    await _startForwardSelection(selected);
+    await _startForwardSelection(selected, onPrepared: _exitSelection);
   }
 
   bool _canCopySelected(List<Message> selected) {
@@ -1406,6 +1423,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
   // ---------- Пересылка ----------
   Future<void> _handleForwardFlow() async {
+    final outbox = ForwardOutbox.capture(context);
+    if (outbox == null) return;
     final list = widget.service.currentMessages;
     final selected = list
         .where((m) => _forwardSelectedIds.contains(m.id))
@@ -1451,10 +1470,12 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     final uniqueFileUrls = fileUrls.where((u) => u.isNotEmpty).toSet().toList();
     final uniqueFileIds = fileIds.where((id) => id.isNotEmpty).toSet().toList();
 
-    final target = await pickForwardTarget(context);
-    if (target == null) return;
+    if (!outbox.isCurrent) return;
+    final target = await pickForwardTarget(context, isCurrent: () => outbox.isCurrent);
+    if (target == null || !outbox.isCurrent) return;
 
     final targetChatId = await _resolveForwardTargetChatId(target);
+    if (!outbox.isCurrent) return;
     if (targetChatId == fromChatId) {
       await _stageForwardPayload(
         payload,
@@ -1465,12 +1486,14 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       return;
     }
 
-    await ForwardOutbox.putForChat(
-      chatId: targetChatId,
-      text: payload.encodeForText(),
-      fileUrls: uniqueFileUrls,
-      fileIds: uniqueFileIds,
-    );
+    try {
+      await outbox.putForChat(chatId: targetChatId, text: payload.encodeForText(),
+        fileUrls: uniqueFileUrls, fileIds: uniqueFileIds);
+    } catch (_) {
+      if (outbox.isCurrent) _showSnack('Не удалось сохранить пересылку. Попробуйте ещё раз.');
+      return;
+    }
+    if (!outbox.isCurrent) return;
 
     setState(() {
       _forwardPackageAttached = false;
