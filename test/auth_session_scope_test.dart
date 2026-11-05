@@ -1,7 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
+import 'package:student_platform/src/ui/home/home_snapshot_cache.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 Session fakeSession(String uid,
@@ -18,6 +20,7 @@ Session fakeSession(String uid,
             createdAt: ''));
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   test('requires initial auth event and accepts a silent equivalent clone',
       () async {
     final events = StreamController<AuthState>.broadcast(sync: true);
@@ -30,6 +33,8 @@ void main() {
     final scope = source.capture()!;
     current = fakeSession('a');
     expect(source.isCurrent(scope), isTrue);
+    expect(source.capture(), scope);
+    expect(source.capture().hashCode, scope.hashCode);
     source.dispose();
     await events.close();
   });
@@ -158,5 +163,39 @@ void main() {
     await events.close();
     expect(notifications, 3);
     source.dispose();
+  });
+
+  test('opaque scope connects the local cache without exposing credentials',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    var current = fakeSession('a');
+    final source = AuthSessionScope(
+        currentSession: () => current, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, current));
+    final cache = HomeSnapshotCache(
+      currentUserId: () => source.capture()?.userId,
+      sessionGeneration: () => source.generation,
+      sessionIdentity: source.capture,
+    );
+    final original = cache.captureScope('a')!;
+    expect(
+        await cache.write(
+            scope: original,
+            section: HomeSnapshotSection.schedule,
+            items: [],
+            savedAt: DateTime.utc(2026)),
+        isTrue);
+    expect(await cache.read('a', HomeSnapshotSection.schedule), isNotNull);
+    current = fakeSession('a', access: 'rotated');
+    expect(
+        await cache.write(
+            scope: original,
+            section: HomeSnapshotSection.schedule,
+            items: [],
+            savedAt: DateTime.utc(2026)),
+        isFalse);
+    source.dispose();
+    await events.close();
   });
 }

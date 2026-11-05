@@ -111,4 +111,14 @@ class AuthOperationScope {
   final (String, String, String?) _identity;
   final int _generation;
   String get userId => _identity.$1;
+
+  @override
+  bool operator ==(Object other) =>
+      other is AuthOperationScope &&
+      identical(_issuer, other._issuer) &&
+      _generation == other._generation &&
+      _identity == other._identity;
+
+  @override
+  int get hashCode => Object.hash(_issuer, _generation, _identity);
 }
