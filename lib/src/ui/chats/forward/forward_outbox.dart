@@ -3,6 +3,7 @@ import '../../../services/chat_file_access.dart';
 import 'dart:convert';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../core/forward_payload.dart';
 
 class ForwardOutboxData {
   final String? text;
@@ -41,14 +42,25 @@ class ForwardOutbox {
     final prefs = await SharedPreferences.getInstance();
     if (uid != ChatFileAccess.userId || epoch != ChatFileAccess.generation)
       return null;
+    return readAndConsume(prefs, key, () =>
+        uid == ChatFileAccess.userId && epoch == ChatFileAccess.generation);
+  }
+
+  /// Validates before removing so unreadable queued data is not discarded.
+  static Future<ForwardOutboxData?> readAndConsume(
+      SharedPreferences prefs, String key, bool Function() isCurrent) async {
+    if (!isCurrent()) return null;
     final raw = prefs.getString(key);
     if (raw == null || raw.isEmpty) return null;
-    await prefs.remove(key);
-    if (uid != ChatFileAccess.userId || epoch != ChatFileAccess.generation)
-      return null;
+    late final ForwardOutboxData result;
     try {
       final map = jsonDecode(raw) as Map<String, dynamic>;
+      if (!map.containsKey('text') &&
+          !map.containsKey('files') &&
+          !map.containsKey('file_ids')) return null;
       final text = (map['text'] as String?) ?? '';
+      if (ForwardPayload.isForwardText(text) &&
+          ForwardPayload.tryParse(text) == null) return null;
       final files = (map['files'] as List?)
               ?.map((e) => (e ?? '').toString())
               .where((s) => s.isNotEmpty)
@@ -59,9 +71,12 @@ class ForwardOutbox {
               .where((s) => s.isNotEmpty)
               .toList() ??
           const <String>[];
-      return ForwardOutboxData(text: text, fileUrls: files, fileIds: ids);
+      result = ForwardOutboxData(text: text, fileUrls: files, fileIds: ids);
     } catch (_) {
       return null;
     }
+    if (!isCurrent()) return null;
+    await prefs.remove(key);
+    return isCurrent() ? result : null;
   }
 }
