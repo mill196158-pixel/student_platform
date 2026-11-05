@@ -34,6 +34,7 @@ import 'src/ui/notifications/in_app_toast_host.dart';
 import 'src/config/supabase_config.dart';
 import 'src/core/session_keeper.dart';
 import 'src/core/auth_session_scope_host.dart';
+import 'src/core/auth_transition_host.dart';
 import 'src/core/session_capabilities_host.dart';
 import 'src/core/offline_policy_grant_host.dart';
 import 'src/core/guarded_policy_redirect.dart';
@@ -239,11 +240,12 @@ class StudentPlatformApp extends StatelessWidget {
         ),
       ],
       child: AuthSessionScopeHost(
-          child: TeamSnapshotHost(
-              child: ForwardOutboxHost(
-                  child: OfflinePolicyGrantHost(
-                      child: SessionCapabilitiesHost(
-                          child: SessionKeeper(
+          child: AuthTransitionHost(
+              child: TeamSnapshotHost(
+                  child: ForwardOutboxHost(
+                      child: OfflinePolicyGrantHost(
+                          child: SessionCapabilitiesHost(
+                              child: SessionKeeper(
         child: ValueListenableBuilder<ThemeMode>(
           valueListenable: themeService,
           builder: (context, mode, _) => MaterialApp.router(
@@ -270,7 +272,7 @@ class StudentPlatformApp extends StatelessWidget {
             ],
           ),
         ),
-      )))))),
+      ))))))),
     );
   }
 }
