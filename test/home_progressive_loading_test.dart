@@ -90,8 +90,60 @@ class GatedImages extends NewsImageDiskCache {
   }
 }
 
+class GatedDiskReads extends NewsImageDiskCache {
+  final gates = List.generate(5, (_) => Completer<Uint8List?>());
+  final started = <int>[];
+
+  @override
+  Future<Uint8List?> peek(NewsImageCacheKey key) {
+    final index = int.parse(key.path);
+    started.add(index);
+    return gates[index].future;
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('cached covers read in bounded parallel order and tolerate a failure',
+      () async {
+    SharedPreferences.setMockInitialValues({
+      '${PublishedNewsCache.keyPrefix}__anon': jsonEncode(List.generate(
+          5,
+          (i) => {
+                'id': '$i',
+                'title': 'News $i',
+                'image_path': '$i',
+                'variant': 'imageOverlay',
+              }))
+    });
+    final client = SupabaseClient('https://example.test', 'test',
+        authOptions: const AuthClientOptions(autoRefreshToken: false));
+    addTearDown(client.dispose);
+    final disk = GatedDiskReads();
+    final service = HomeDashboardService(
+        client: client,
+        scheduleRepository: Schedule(),
+        learningRepository: Learning(),
+        imageCache: disk);
+    addTearDown(service.dispose);
+    final result = service.loadCachedNews();
+    await Future<void>.delayed(Duration.zero);
+    expect(disk.started, [0, 1, 2, 3]);
+    disk.gates[3].complete(Uint8List.fromList([3]));
+    await Future<void>.delayed(Duration.zero);
+    expect(disk.started, [0, 1, 2, 3, 4]);
+    disk.gates[4].complete(Uint8List.fromList([4]));
+    disk.gates[2].completeError(StateError('unreadable'));
+    disk.gates[1].complete(null);
+    disk.gates[0].complete(Uint8List.fromList([0]));
+    final news = await result;
+    expect(news.map((item) => item.id), ['0', '1', '2', '3', '4']);
+    expect(news[0].imageBytes, [0]);
+    expect(news[1].imageBytes, isNull);
+    expect(news[2].imageBytes, isNull);
+    expect(news[3].imageBytes, [3]);
+    expect(news[4].imageBytes, [4]);
+  });
   test(
       'covers publish individually beyond six, do not gate dashboard, reject old account',
       () async {

@@ -52,8 +52,93 @@ class _ReorderingNewsService extends _GuestNewsService {
   }
 }
 
+class _RefreshNewsService extends GuestPublicService {
+  List<Map<String, dynamic>> rows = [
+    {
+      'id': 'one',
+      'title': 'One',
+      'variant': 'imageOverlay',
+      'image_path': 'one.jpg',
+      'version_number': 1,
+      'updated_at': 'a'
+    },
+    {
+      'id': 'two',
+      'title': 'Two',
+      'variant': 'imageOverlay',
+      'image_path': 'two.jpg',
+      'version_number': 1,
+      'updated_at': 'a'
+    },
+  ];
+  bool fail = false;
+  final pending = <String, Completer<Uint8List?>>{};
+
+  @override
+  Future<List<Map<String, dynamic>>> rpc(String name,
+      [Map<String, dynamic> params = const {}]) async {
+    if (fail) throw StateError('offline');
+    return rows.map((row) => Map<String, dynamic>.from(row)).toList();
+  }
+
+  @override
+  Future<Uint8List?> image(Map<String, dynamic> row) =>
+      pending.putIfAbsent('${row['id']}', Completer<Uint8List?>.new).future;
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  testWidgets('guest refresh retains only images with unchanged identities',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final service = _RefreshNewsService();
+    await tester.pumpWidget(
+        MaterialApp(home: GuestWorkspace(tab: 0, service: service)));
+    await tester.pump();
+    final bytes = base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==');
+    service.pending['one']!.complete(bytes);
+    service.pending['two']!.complete(bytes);
+    await tester.pumpAndSettle();
+    StudentHomeView home() =>
+        tester.widget<StudentHomeView>(find.byType(StudentHomeView));
+    expect(home().data.news.every((item) => item.imageBytes != null), isTrue);
+
+    // A still-loading replacement must not flash or retain another version.
+    service.pending.clear();
+    service.rows = [
+      {...service.rows[0]},
+      {...service.rows[1], 'version_number': 2},
+    ];
+    final refresh = home().onRefresh!();
+    await tester.pump();
+    await tester.pump();
+    expect(home().data.news[0].imageBytes, isNotNull);
+    expect(home().data.news[1].imageBytes, isNull);
+    service.pending['one']!.complete(bytes);
+    service.pending['two']!.complete(bytes);
+    await tester.pumpAndSettle();
+    await refresh;
+
+    service.fail = true;
+    await home().onRefresh!();
+    await tester.pump();
+    expect(home().data.news.every((item) => item.imageBytes != null), isTrue);
+    service.fail = false;
+    service.pending.clear();
+    service.rows = [
+      {...service.rows[0], 'image_path': 'changed.jpg'}
+    ];
+    final changed = home().onRefresh!();
+    await tester.pump();
+    await tester.pump();
+    expect(home().data.news.length, 1);
+    expect(home().data.news.single.imageBytes, isNull);
+    service.pending['one']!.complete(bytes);
+    await tester.pumpAndSettle();
+    await changed;
+    expect(tester.takeException(), isNull);
+  });
   for (final brightness in Brightness.values) {
     testWidgets('guest opens and swipes news with delayed cover $brightness',
         (tester) async {

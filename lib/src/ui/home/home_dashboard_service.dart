@@ -380,16 +380,23 @@ class HomeDashboardService {
   Future<List<HomeNewsItem>> _hydrateImagesFromDisk(
     List<HomeNewsItem> items,
   ) async {
-    final out = <HomeNewsItem>[];
-    for (final item in items) {
-      final key = item.imageCacheKey;
-      if (key == null || item.imageBytes != null) {
-        out.add(item);
-        continue;
+    final out = List<HomeNewsItem>.of(items);
+    var next = 0;
+    Future<void> worker() async {
+      while (next < items.length) {
+        final index = next++;
+        final item = items[index];
+        final key = item.imageCacheKey;
+        if (key == null || item.imageBytes != null) continue;
+        try {
+          final bytes = await _imageCache.peek(key);
+          if (bytes != null) out[index] = item.copyWith(imageBytes: bytes);
+        } catch (_) {
+          // One damaged cache entry must not hide the remaining news.
+        }
       }
-      final bytes = await _imageCache.peek(key);
-      out.add(bytes == null ? item : item.copyWith(imageBytes: bytes));
     }
+    await Future.wait(List.generate(items.length.clamp(0, 4), (_) => worker()));
     return out;
   }
 

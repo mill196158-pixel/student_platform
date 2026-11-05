@@ -65,7 +65,8 @@ class NewsImageDiskCache {
       final file = File('${_root!.path}/${entry.file}');
       if (!await file.exists()) {
         _index!.remove(key.id);
-        await _persistIndex();
+        // Persist the removal with the next mutation, just like access time.
+        // Reads can run concurrently without racing index file writes.
         return null;
       }
       final bytes = await file.readAsBytes();

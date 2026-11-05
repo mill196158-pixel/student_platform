@@ -5,6 +5,15 @@ import 'package:student_ui/student_ui.dart';
 import '../../config/supabase_config.dart';
 import '../home/news_image_disk_cache.dart';
 
+/// The same identity is used for disk caching and refresh retention.
+NewsImageCacheKey? guestNewsImageKey(Map<String, dynamic> row) {
+  final path = row['image_path'];
+  if (path is! String || path.isEmpty) return null;
+  return NewsImageCacheKey(
+      path: 'guest/$path',
+      version: '${row['version_number']}:${row['updated_at']}');
+}
+
 /// Public projection only. Never attaches the signed-in account's JWT.
 class GuestPublicService {
   final _client = http.Client();
@@ -24,11 +33,8 @@ class GuestPublicService {
   }
 
   Future<Uint8List?> image(Map<String, dynamic> row) async {
-    final path = row['image_path'] as String?;
-    if (path == null || path.isEmpty) return null;
-    final key = NewsImageCacheKey(
-        path: 'guest/$path',
-        version: '${row['version_number']}:${row['updated_at']}');
+    final key = guestNewsImageKey(row);
+    if (key == null) return null;
     return _images.getOrFetch(key, () async {
       final link = await _client
           .post(

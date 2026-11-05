@@ -71,8 +71,23 @@ class _GuestWorkspaceState extends State<GuestWorkspace> {
       final rows = await _service.rpc('get_guest_news');
       if (!mounted || generation != _newsRequest) return;
       setState(() {
+        final oldRows = {for (final row in _news) row['id']: row};
+        final retained = <String, Uint8List>{};
+        for (final row in rows) {
+          final id = row['id'];
+          if (id is! String || id.isEmpty) continue;
+          final old = oldRows[id];
+          final previous = old == null ? null : guestNewsImageKey(old);
+          final next = guestNewsImageKey(row);
+          final bytes = _images[id];
+          if (bytes != null && previous != null && previous.id == next?.id) {
+            retained[id] = bytes;
+          }
+        }
         _news = rows;
-        _images.clear();
+        _images
+          ..clear()
+          ..addAll(retained);
         _newsFailed = false;
       });
       var next = 0;
@@ -450,13 +465,15 @@ class _GuestWorkspaceState extends State<GuestWorkspace> {
               backgroundColor: Theme.of(context).scaffoldBackgroundColor,
               extendBodyBehindAppBar: true,
               appBar: AppBar(
-                  systemOverlayStyle: Theme.of(context).appBarTheme.systemOverlayStyle,
+                  systemOverlayStyle:
+                      Theme.of(context).appBarTheme.systemOverlayStyle,
                   backgroundColor: Colors.transparent,
                   surfaceTintColor: Colors.transparent,
                   elevation: 0,
                   leading: IconButton(
                       icon: const Icon(Icons.info_outline),
-                      onPressed: () => _info('Гостевой режим', 'Выбранная группа сохраняется после закрытия приложения. Аккаунт открывает личные учебные разделы.')),
+                      onPressed: () =>
+                          _info('Гостевой режим', 'Выбранная группа сохраняется после закрытия приложения. Аккаунт открывает личные учебные разделы.')),
                   actions: [
                     IconButton(
                         tooltip: 'Войти',
@@ -469,15 +486,11 @@ class _GuestWorkspaceState extends State<GuestWorkspace> {
                   displayName: 'Гостевой режим',
                   groupLabel: _group?['name'] ?? '',
                   padding: EdgeInsets.fromLTRB(
-                      16,
-                      MediaQuery.paddingOf(context).top + kToolbarHeight - 16,
-                      16,
-                      24),
+                      16, MediaQuery.paddingOf(context).top + kToolbarHeight - 16, 16, 24),
                   onMessagesTap: _login,
                   onFriendsTap: _login,
                   onReviewsTap: _login,
-                  onMapTap: () => Navigator.of(context)
-                      .push(MaterialPageRoute<void>(builder: (_) => const MapSpbgasuScreen())),
+                  onMapTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const MapSpbgasuScreen())),
                   footer: FilledButton(onPressed: _login, child: const Text('Продолжить с аккаунтом'))))));
   @override
   Widget build(BuildContext context) {
@@ -525,8 +538,7 @@ class _GuestWorkspaceState extends State<GuestWorkspace> {
                     'Войди, чтобы открыть команды, чаты и задания своей группы.')),
             IconButton(
                 tooltip: 'Команды после входа',
-                icon:
-                    const Icon(Icons.grid_view_rounded),
+                icon: const Icon(Icons.grid_view_rounded),
                 onPressed: _login),
           ])),
         _ => StudentScheduleHeader(
