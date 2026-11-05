@@ -92,6 +92,38 @@ class _FakePicker implements AdminImagePicker {
 }
 
 void main() {
+  test('new image preparation retains fallback and keeps MIME aligned', () async {
+    final source = Uint8List.fromList([137, 80, 78, 71, 1, 2, 3, 4, 5]);
+    final jpeg = Uint8List.fromList([255, 216, 255, 1]);
+    final result = await LocalAdminImagePicker.prepareSelected(bytes: source,
+      fileName: 'cover.png', mimeType: 'image/png', optimizer: (_) async => jpeg);
+    expect(result.fileName, 'cover.jpg');
+    expect(result.mimeType, 'image/jpeg');
+    expect(result.bytes, jpeg);
+    expect(source, [137, 80, 78, 71, 1, 2, 3, 4, 5]);
+    final fallback = await LocalAdminImagePicker.prepareSelected(bytes: source,
+      fileName: 'cover.png', mimeType: 'image/png', optimizer: (_) async => throw StateError('worker'));
+    expect(fallback.bytes, source);
+    expect(fallback.mimeType, 'image/png');
+    final invalid = await LocalAdminImagePicker.prepareSelected(bytes: source,
+      fileName: 'cover.png', mimeType: 'image/png', optimizer: (_) async => Uint8List.fromList([1, 2, 3]));
+    expect(invalid.bytes, source);
+  });
+
+  test('large source is accepted only if safe output fits upload limit', () async {
+    final source = Uint8List(LocalAdminImagePicker.maxBytes + 1);
+    final jpeg = Uint8List.fromList([255, 216, 255, 1]);
+    final result = await LocalAdminImagePicker.prepareSelected(bytes: source,
+      fileName: 'large.png', mimeType: 'image/png', optimizer: (_) async => jpeg);
+    expect(result.bytes, jpeg);
+    await expectLater(LocalAdminImagePicker.prepareSelected(bytes: source,
+      fileName: 'large.png', mimeType: 'image/png', optimizer: (_) async => null),
+      throwsA(isA<AdminImagePickException>()));
+    await expectLater(LocalAdminImagePicker.prepareSelected(
+      bytes: Uint8List(LocalAdminImagePicker.maxInputBytes + 1), fileName: 'huge.png',
+      mimeType: 'image/png', optimizer: (_) async => jpeg), throwsA(isA<AdminImagePickException>()));
+  });
+
   test('image validation accepts png and rejects oversized files', () {
     final ok = LocalAdminImagePicker.validateAndWrap(
       bytes: _pngBytes,

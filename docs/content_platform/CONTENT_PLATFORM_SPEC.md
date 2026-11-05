@@ -259,6 +259,18 @@ Admin Home Promo and Profile Feed image uploads identify PNG/JPEG/WebP by
 their file headers; unknown formats fail before upload. Custom promo icons
 accept only PNG/WebP. This does not rewrite already published assets.
 
+Local image-delivery work (not yet deployed): the Admin Web picker attempts
+best-effort, bounded background conversion for safe upright JPEG and opaque
+PNG photos. It keeps the source unchanged when orientation, transparency,
+animation, color profile, size, browser support or encoding makes conversion
+unsuitable; the accepted result must be a smaller JPEG. The picker accepts up
+to 20 MiB of source input but still enforces the 5 MiB upload ceiling after
+optimization. News, Home Promo and Profile Feed
+retain their existing upload, versioning and access-control contracts. Custom
+icons are excluded. Existing published assets require a separately reviewed
+retention and conditional-swap process; local conversion alone is not a
+production migration or proof that originals can be restored from Storage.
+
 CTA rules v1:
 
 - internal route from fixed allowlist (e.g. `/diary`, `/info`, `/chat/...` patterns approved in migration); **or**

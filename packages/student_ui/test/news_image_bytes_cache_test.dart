@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -78,6 +79,45 @@ void main() {
     cache.clear();
     expect(cache.entryCount, 0);
     expect(cache.peek(key('news/a.png', '1')), isNull);
+  });
+
+  for (final operation in ['clear', 'path', 'key']) {
+    test('late fetch cannot restore invalidated bytes: $operation', () async {
+      final k = key('news/a.png', '1');
+      final old = Completer<Uint8List?>();
+      final stale = cache.getOrFetch(k, () => old.future);
+      switch (operation) {
+        case 'clear':
+          cache.clear();
+        case 'path':
+          cache.invalidatePath(k.path);
+        case 'key':
+          cache.invalidateKey(k);
+      }
+      final fresh = Completer<Uint8List?>();
+      final next = cache.getOrFetch(k, () => fresh.future);
+      old.complete(Uint8List.fromList([1]));
+      expect(await stale, isNull);
+      expect(cache.inflightCount, 1);
+      fresh.complete(Uint8List.fromList([2]));
+      expect(await next, [2]);
+      expect(cache.peek(k), [2]);
+    });
+  }
+
+  test('late failure after clear does not affect a new fetch', () async {
+    final k = key('news/a.png', '1');
+    final old = Completer<Uint8List?>();
+    final stale = cache.getOrFetch(k, () => old.future);
+    cache.clear();
+    final fresh = Completer<Uint8List?>();
+    final next = cache.getOrFetch(k, () => fresh.future);
+    old.completeError(StateError('old request failed'));
+    expect(await stale, isNull);
+    expect(cache.inflightCount, 1);
+    fresh.complete(Uint8List.fromList([2]));
+    expect(await next, [2]);
+    expect(cache.peek(k), [2]);
   });
 
   test('LRU evicts when over maxEntries', () {

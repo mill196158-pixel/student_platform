@@ -51,7 +51,14 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
   final _bodyController = TextEditingController();
 
   List<NewsItem> _items = [];
-  String? _selectedId;
+  String? _selectedIdValue;
+  int _imagePickRevision = 0;
+  String? get _selectedId => _selectedIdValue;
+  set _selectedId(String? value) {
+    if (_selectedIdValue != value) _imagePickRevision++;
+    _selectedIdValue = value;
+  }
+  void _invalidateImagePick() => _imagePickRevision++;
   _NewsListTab _listTab = _NewsListTab.published;
   final Map<String, Uint8List> _resolvedBytes = {};
 
@@ -132,11 +139,24 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
   @override
   void initState() {
     super.initState();
+    widget.session?.addListener(_invalidateImagePick);
     _bootstrap();
   }
 
   @override
+  void didUpdateWidget(covariant NewsEditorScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.session, widget.session)) {
+      oldWidget.session?.removeListener(_invalidateImagePick);
+      _invalidateImagePick();
+      widget.session?.addListener(_invalidateImagePick);
+    }
+  }
+
+  @override
   void dispose() {
+    widget.session?.removeListener(_invalidateImagePick);
+    _invalidateImagePick();
     _titleController.dispose();
     _subtitleController.dispose();
     _bodyController.dispose();
@@ -325,6 +345,7 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
   }
 
   void _syncControllers() {
+    _invalidateImagePick();
     final selected = _selected;
     _titleController.value = TextEditingValue(
       text: selected?.title ?? '',
@@ -618,6 +639,7 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
   }
 
   Future<void> _publish() async {
+    _invalidateImagePick();
     final selected = _selected;
     if (selected == null) return;
     if (!_canPublish) {
@@ -845,34 +867,50 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
 
   Future<void> _pickImage() async {
     final selected = _selected;
-    if (selected == null) return;
+    if (selected == null || !_canWrite) return;
+    final revision = ++_imagePickRevision;
+    final session = widget.session;
+    final auth = _tryClient()?.auth.currentSession;
+    bool current() {
+      final now = _tryClient()?.auth.currentSession;
+      return mounted && revision == _imagePickRevision && _selectedId == selected.id &&
+          identical(session, widget.session) && _canWrite &&
+          auth?.user.id == now?.user.id && auth?.accessToken == now?.accessToken &&
+          auth?.refreshToken == now?.refreshToken;
+    }
     try {
       final picked = await _imagePicker.pickImage();
-      if (picked == null) return;
-      final previousLocalId = selected.imageId;
+      if (picked == null || !current()) return;
       final stored = await _imageStore.put(
         bytes: picked.bytes,
         mimeType: picked.mimeType,
         fileName: picked.fileName,
       );
-      if (previousLocalId != null) {
-        await _imageStore.remove(previousLocalId);
+      if (!current()) {
+        if (!_items.any((item) => item.imageId == stored.id)) {
+          try { await _imageStore.remove(stored.id); } catch (_) {}
+        }
+        return;
       }
-      if (!mounted) return;
+      final previousLocalId = _selected?.imageId;
       setState(() {
         _imageError = null;
         // Keep existing imagePath until upload succeeds — do not clear it yet.
         // Local bytes are shown immediately and kept across save/refresh.
-        _replaceItem(selected.copyWith(imageId: stored.id));
+        _replaceItem(_selected!.copyWith(imageId: stored.id));
         _resolvedBytes[selected.id] = stored.bytes;
         _imageIntent[selected.id] = _ImageIntent.pendingLocal;
         _dirty = true;
       });
+      if (previousLocalId != null && previousLocalId != stored.id &&
+          !_imageUploading && !_items.any((item) => item.imageId == previousLocalId)) {
+        try { await _imageStore.remove(previousLocalId); } catch (_) {}
+      }
     } on AdminImagePickException catch (error) {
-      if (!mounted) return;
+      if (!current()) return;
       setState(() => _imageError = error.message);
     } catch (_) {
-      if (!mounted) return;
+      if (!current()) return;
       setState(
         () => _imageError =
             'Не удалось выбрать изображение. Попробуйте другой файл.',
@@ -881,6 +919,7 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
   }
 
   Future<void> _clearImage() async {
+    _invalidateImagePick();
     final selected = _selected;
     if (selected == null) return;
     final previousLocalId = selected.imageId;

@@ -84,7 +84,14 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
 
   List<HomePromoItem> _items = [];
   List<StudentHomeNews> _previewNews = const [];
-  String? _selectedId;
+  String? _selectedIdValue;
+  int _imagePickRevision = 0;
+  String? get _selectedId => _selectedIdValue;
+  set _selectedId(String? value) {
+    if (_selectedIdValue != value) _imagePickRevision++;
+    _selectedIdValue = value;
+  }
+  void _invalidateImagePick() => _imagePickRevision++;
   VisualEditorListTab _listTab = VisualEditorListTab.published;
   bool _showDemoOnly = false;
 
@@ -210,11 +217,24 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
   @override
   void initState() {
     super.initState();
+    widget.session?.addListener(_invalidateImagePick);
     _bootstrap();
   }
 
   @override
+  void didUpdateWidget(covariant HomePromoEditorScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.session, widget.session)) {
+      oldWidget.session?.removeListener(_invalidateImagePick);
+      _invalidateImagePick();
+      widget.session?.addListener(_invalidateImagePick);
+    }
+  }
+
+  @override
   void dispose() {
+    widget.session?.removeListener(_invalidateImagePick);
+    _invalidateImagePick();
     _titleController.dispose();
     _subtitleController.dispose();
     _ctaLabelController.dispose();
@@ -281,6 +301,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
   }
 
   void _bindSelected() {
+    _invalidateImagePick();
     final selected = _selected;
     if (selected == null) {
       _boundSnapshot = null;
@@ -494,6 +515,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
   }
 
   void _discardLocalChanges() {
+    _invalidateImagePick();
     final snapshot = _boundSnapshot;
     if (snapshot == null) return;
     _titleController.text = snapshot.title;
@@ -697,6 +719,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
   }
 
   Future<void> _discardWorkingDraft() async {
+    _invalidateImagePick();
     final selected = _selected;
     if (selected == null || !_canWrite) return;
     await _run(() async {
@@ -940,6 +963,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
   }
 
   Future<void> _publish() async {
+    _invalidateImagePick();
     final selected = _selected;
     if (selected == null || _busy || _publishing) return;
     setState(() {
@@ -1226,9 +1250,19 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
   Future<void> _pickImage() async {
     final selected = _selected;
     if (selected == null || !_canWrite || selected.isArchived) return;
+    final revision = ++_imagePickRevision;
+    final session = widget.session;
+    final auth = _tryClient()?.auth.currentSession;
+    bool current() {
+      final now = _tryClient()?.auth.currentSession;
+      return mounted && revision == _imagePickRevision && _selectedId == selected.id &&
+          identical(session, widget.session) && _canWrite && !(_selected?.isArchived ?? true) &&
+          auth?.user.id == now?.user.id && auth?.accessToken == now?.accessToken &&
+          auth?.refreshToken == now?.refreshToken;
+    }
     try {
       final picked = await _imagePicker.pickImage();
-      if (picked == null) return;
+      if (picked == null || !current()) return;
       setState(() {
         _imageIntent[selected.id] =
             (_imageIntent[selected.id] ?? ContentMediaIntentState.untouched)
@@ -1237,11 +1271,13 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
       });
       _markDirty();
     } on AdminImagePickException catch (error) {
+      if (!current()) return;
       setState(() => _imageError = error.message);
     }
   }
 
   void _clearImage() {
+    _invalidateImagePick();
     final selected = _selected;
     if (selected == null || !_canWrite || selected.isArchived) return;
     setState(() {

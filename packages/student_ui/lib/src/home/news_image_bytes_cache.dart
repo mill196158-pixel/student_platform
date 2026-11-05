@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:collection';
 import 'dart:typed_data';
 
@@ -55,6 +56,9 @@ class NewsImageBytesCache {
   final LinkedHashMap<String, Uint8List> _memory =
       LinkedHashMap<String, Uint8List>();
   final Map<String, Future<Uint8List?>> _inflight = {};
+  int _generation = 0;
+  final Map<String, int> _keyRevision = {};
+  final Map<String, int> _pathRevision = {};
 
   int _totalBytes = 0;
 
@@ -98,23 +102,43 @@ class NewsImageBytesCache {
     final existing = _inflight[key.id];
     if (existing != null) return existing;
 
-    final future = () async {
+    final generation = _generation;
+    final keyRevision = _keyRevision[key.id] ?? 0;
+    final pathRevision = _pathRevision[key.path.trim()] ?? 0;
+    final completer = Completer<Uint8List?>();
+    final future = completer.future;
+    _inflight[key.id] = future;
+    () async {
       try {
         final bytes = await fetch();
+        if (_generation != generation ||
+            (_keyRevision[key.id] ?? 0) != keyRevision ||
+            (_pathRevision[key.path.trim()] ?? 0) != pathRevision) {
+          completer.complete(null);
+          return;
+        }
         if (bytes != null && bytes.isNotEmpty) {
           downloadCount += 1;
           put(key, bytes);
         }
-        return bytes;
+        completer.complete(bytes);
+      } catch (error, stack) {
+        if (_generation != generation ||
+            (_keyRevision[key.id] ?? 0) != keyRevision ||
+            (_pathRevision[key.path.trim()] ?? 0) != pathRevision) {
+          completer.complete(null);
+        } else {
+          completer.completeError(error, stack);
+        }
       } finally {
-        _inflight.remove(key.id);
+        if (identical(_inflight[key.id], future)) _inflight.remove(key.id);
       }
     }();
-    _inflight[key.id] = future;
     return future;
   }
 
   void invalidateKey(NewsImageCacheKey key) {
+    _keyRevision[key.id] = (_keyRevision[key.id] ?? 0) + 1;
     final removed = _memory.remove(key.id);
     if (removed != null) _totalBytes -= removed.length;
     _inflight.remove(key.id);
@@ -124,6 +148,7 @@ class NewsImageBytesCache {
   void invalidatePath(String path) {
     final trimmed = path.trim();
     if (trimmed.isEmpty) return;
+    _pathRevision[trimmed] = (_pathRevision[trimmed] ?? 0) + 1;
     final prefix = '$trimmed|';
     final toRemove = _memory.keys.where((k) => k.startsWith(prefix)).toList();
     for (final key in toRemove) {
@@ -134,6 +159,9 @@ class NewsImageBytesCache {
   }
 
   void clear() {
+    _generation++;
+    _keyRevision.clear();
+    _pathRevision.clear();
     _memory.clear();
     _inflight.clear();
     _totalBytes = 0;

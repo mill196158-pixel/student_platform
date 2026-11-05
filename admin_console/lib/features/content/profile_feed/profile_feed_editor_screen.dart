@@ -77,7 +77,14 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
   final _gradientBController = TextEditingController(text: '#C9B8F3');
 
   List<ProfileFeedItem> _items = [];
-  String? _selectedId;
+  String? _selectedIdValue;
+  int _imagePickRevision = 0;
+  String? get _selectedId => _selectedIdValue;
+  set _selectedId(String? value) {
+    if (_selectedIdValue != value) _imagePickRevision++;
+    _selectedIdValue = value;
+  }
+  void _invalidateImagePick() => _imagePickRevision++;
   VisualEditorListTab _listTab = VisualEditorListTab.published;
   bool _showDemoOnly = false;
   bool _loading = true;
@@ -169,11 +176,24 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
   @override
   void initState() {
     super.initState();
+    widget.session?.addListener(_invalidateImagePick);
     _bootstrap();
   }
 
   @override
+  void didUpdateWidget(covariant ProfileFeedEditorScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.session, widget.session)) {
+      oldWidget.session?.removeListener(_invalidateImagePick);
+      _invalidateImagePick();
+      widget.session?.addListener(_invalidateImagePick);
+    }
+  }
+
+  @override
   void dispose() {
+    widget.session?.removeListener(_invalidateImagePick);
+    _invalidateImagePick();
     _titleController.dispose();
     _subtitleController.dispose();
     _ctaLabelController.dispose();
@@ -210,6 +230,7 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
   }
 
   void _syncControllers() {
+    _invalidateImagePick();
     final selected = _selected;
     _titleController.value = TextEditingValue(
       text: selected?.payload.title ?? '',
@@ -278,6 +299,7 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
   }
 
   void _discardLocalChanges() {
+    _invalidateImagePick();
     final bound = _boundItem;
     if (bound == null) return;
     setState(() {
@@ -347,6 +369,7 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
   }
 
   Future<void> _discardWorkingDraft() async {
+    _invalidateImagePick();
     final selected = _selected;
     if (selected == null || !_canWrite) return;
     await _runGuarded(() async {
@@ -670,6 +693,7 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
   }
 
   Future<void> _publish() async {
+    _invalidateImagePick();
     final selected = _selected;
     if (selected == null || !_canPublish || _busy || _publishing) return;
     setState(() {
@@ -948,15 +972,27 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
         !_canWrite) {
       return;
     }
+    final revision = ++_imagePickRevision;
+    final session = widget.session;
+    final auth = _tryClient()?.auth.currentSession;
+    bool current() {
+      final now = _tryClient()?.auth.currentSession;
+      final item = _selected;
+      return mounted && revision == _imagePickRevision && item?.id == selected.id &&
+          identical(session, widget.session) && _canWrite &&
+          (item?.isDraft == true || _editingWorkingDraft) &&
+          auth?.user.id == now?.user.id && auth?.accessToken == now?.accessToken &&
+          auth?.refreshToken == now?.refreshToken;
+    }
     PickedAdminImage? picked;
     try {
       picked = await (widget.imagePicker ?? LocalAdminImagePicker())
           .pickImage();
     } on AdminImagePickException catch (error) {
-      if (mounted) _showBanner(error.message);
+      if (current()) _showBanner(error.message);
       return;
     }
-    if (picked == null || !mounted) return;
+    if (picked == null || !current()) return;
     final bytes = picked.bytes;
     final String mimeType;
     try {
@@ -979,6 +1015,7 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
   }
 
   Future<void> _clearImage() async {
+    _invalidateImagePick();
     final selected = _selected;
     if (selected == null) return;
     setState(() {
