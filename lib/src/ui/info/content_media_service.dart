@@ -182,7 +182,9 @@ class ContentMediaService {
         if (download == null || !current()) return null;
         final diskKey = NewsImageCacheKey(
             path: 'content-media/$key',
-            version: download.expiresAt.toIso8601String());
+            // The grant must still be valid before any cache read. Asset
+            // identity is independent of the temporary URL's expiry.
+            version: 'asset-v1');
         if (persistBytes) {
           try {
             final bytes = await _disk.peek(diskKey);

@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_platform/src/ui/info/content_media_service.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -105,8 +106,37 @@ void main() {
       expect(await service('a').fetchBytes('asset', contentVersion: 'v1'),
           [1, 2, 3]);
       expect(requests, 1, reason: 'new instance reads disk without HTTP');
+      await prefs.setString(
+          'content_media_url_v2__a|asset|v1',
+          jsonEncode({
+            'signedUrl': 'https://example.com/expired',
+            'expiresAt': DateTime(2000).toIso8601String(),
+          }));
+      var authorizations = 0;
+      final client = SupabaseClient('https://example.test', 'public-test-key',
+          httpClient: MockClient((_) async {
+        authorizations++;
+        return http.Response(jsonEncode({
+          'signedUrl': 'https://example.com/new-grant', 'expiresIn': 3600,
+        }), 200, headers: {'content-type': 'application/json'});
+      }));
+      addTearDown(client.dispose);
+      final renewed = ContentMediaService(
+          client: client, persistBytes: true, currentUserId: () => 'a',
+          diskCache: NewsImageDiskCache(
+              memory: NewsImageBytesCache(), rootOverride: () => dir),
+          httpClient: MockClient((_) async {
+            requests++;
+            return http.Response.bytes([9], 200);
+          }));
+      expect(await renewed.fetchBytes('asset', contentVersion: 'v1'), [1, 2, 3]);
+      expect(authorizations, 1);
+      expect(requests, 1,
+          reason: 'a renewed grant reuses the same authorized asset bytes');
       expect(
           await service('b').fetchBytes('asset', contentVersion: 'v1'), isNull);
+      expect(
+          await service('a').fetchBytes('another', contentVersion: 'v1'), isNull);
       expect(
           await service('a').fetchBytes('asset', contentVersion: 'v2'), isNull);
       await prefs.setString(
@@ -121,5 +151,37 @@ void main() {
     } finally {
       await dir.delete(recursive: true);
     }
+  });
+
+  test('denied renewal does not return cached bytes and clears the entry', () async {
+    final dir = await Directory.systemTemp.createTemp('promo-denied-test-');
+    final client = SupabaseClient('https://example.test', 'public-test-key',
+        httpClient: MockClient((_) async => http.Response('{"error":"forbidden"}', 403,
+            headers: {'content-type': 'application/json'})));
+    addTearDown(() async {
+      await client.dispose();
+      await dir.delete(recursive: true);
+    });
+    final prefs = await SharedPreferences.getInstance();
+    const prefKey = 'content_media_url_v2__a|asset|v1';
+    await prefs.setString(prefKey, jsonEncode({
+      'signedUrl': 'https://example.com/signed',
+      'expiresAt': DateTime.now().add(const Duration(minutes: 10)).toIso8601String(),
+    }));
+    NewsImageDiskCache disk() => NewsImageDiskCache(
+        memory: NewsImageBytesCache(), rootOverride: () => dir);
+    final first = ContentMediaService(
+        persistBytes: true, currentUserId: () => 'a', diskCache: disk(),
+        httpClient: MockClient((_) async => http.Response.bytes([1, 2, 3], 200)));
+    expect(await first.fetchBytes('asset', contentVersion: 'v1'), [1, 2, 3]);
+    await prefs.setString(prefKey, jsonEncode({
+      'signedUrl': 'https://example.com/expired',
+      'expiresAt': DateTime(2000).toIso8601String(),
+    }));
+    final denied = ContentMediaService(
+        client: client, persistBytes: true, currentUserId: () => 'a', diskCache: disk());
+    expect(await denied.fetchBytes('asset', contentVersion: 'v1'), isNull);
+    final key = NewsImageCacheKey(path: 'content-media/a|asset|v1', version: 'asset-v1');
+    expect(await disk().peek(key), isNull);
   });
 }

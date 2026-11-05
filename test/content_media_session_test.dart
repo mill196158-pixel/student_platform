@@ -62,6 +62,24 @@ void main() {
     expect((await SharedPreferences.getInstance()).getKeys(), isEmpty);
     await client.dispose();
   });
+  test('clearAsset while authorization is pending prevents old results', () async {
+    final entered = Completer<void>();
+    final response = Completer<http.Response>();
+    final client = SupabaseClient('https://example.com', 'public-test-key',
+        httpClient: MockClient((_) {
+      entered.complete();
+      return response.future;
+    }));
+    addTearDown(client.dispose);
+    final service = ContentMediaService(client: client, currentUserId: () => 'a');
+    final result = service.fetchBytes('asset', contentVersion: 'v1');
+    await entered.future;
+    await service.clearAsset('asset', contentVersion: 'v1');
+    response.complete(http.Response(
+        jsonEncode({'signedUrl': 'https://example.com/image', 'expiresIn': 3600}),
+        200, headers: {'content-type': 'application/json'}));
+    expect(await result, isNull);
+  });
   test('switch during disk write cannot return bytes to the new account',
       () async {
     var uid = 'a';
