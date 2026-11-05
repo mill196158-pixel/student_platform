@@ -783,7 +783,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
         final uploaded = await media.uploadBytesDetailed(
           contentItemId: selected.id,
           bytes: bytes,
-          contentType: 'image/png',
+          contentType: imageUploadMime(bytes),
           title: payload.title,
         );
         uploadedImageAssetId = uploaded.assetId;
@@ -797,7 +797,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
           _resolvedAssetBytes[selected.id] = bytes;
           _imageIntent[selected.id] = ContentMediaIntentState(
             assetId: uploaded.assetId,
-          ).pickLocal(bytes);
+          ).pickLocal(bytes, mimeType: intent.localMimeType);
         });
       } catch (error) {
         if (mounted) {
@@ -823,10 +823,14 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
         return null;
       }
       try {
+        final iconMime = imageUploadMime(bytes);
+        if (iconMime != 'image/png' && iconMime != 'image/webp') {
+          throw StateError('Для иконки выберите PNG или WebP.');
+        }
         final uploaded = await media.uploadBytesDetailed(
           contentItemId: selected.id,
           bytes: bytes,
-          contentType: 'image/png',
+          contentType: iconMime,
           title: '${payload.title} icon',
         );
         uploadedIconAssetId = uploaded.assetId;
@@ -839,7 +843,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
           _resolvedIconBytes[selected.id] = bytes;
           _iconIntent[selected.id] = ContentMediaIntentState(
             assetId: uploaded.assetId,
-          ).pickLocal(bytes);
+          ).pickLocal(bytes, mimeType: iconIntent.localMimeType);
         });
       } catch (error) {
         if (mounted) {
@@ -1228,7 +1232,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
       setState(() {
         _imageIntent[selected.id] =
             (_imageIntent[selected.id] ?? ContentMediaIntentState.untouched)
-                .pickLocal(picked.bytes);
+                .pickLocal(picked.bytes, mimeType: picked.mimeType);
         _imageError = null;
       });
       _markDirty();
@@ -1277,10 +1281,23 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
           'Для своей иконки поддерживаются только PNG и WebP.',
         );
       }
+      String mimeType;
+      try {
+        mimeType = imageUploadMime(bytes);
+      } on StateError {
+        throw const AdminImagePickException(
+          'Для своей иконки поддерживаются только PNG и WebP.',
+        );
+      }
+      if (mimeType != 'image/png' && mimeType != 'image/webp') {
+        throw const AdminImagePickException(
+          'Для своей иконки поддерживаются только PNG и WebP.',
+        );
+      }
       setState(() {
         _iconIntent[selected.id] =
             (_iconIntent[selected.id] ?? ContentMediaIntentState.untouched)
-                .pickLocal(bytes);
+                .pickLocal(bytes, mimeType: mimeType);
         _iconError = null;
       });
       _markDirty();

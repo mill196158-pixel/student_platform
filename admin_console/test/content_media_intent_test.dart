@@ -5,6 +5,45 @@ import 'package:student_platform_admin/features/content/shared/content_media_int
 
 void main() {
   group('ContentMediaIntentState', () {
+    test(
+      'image format comes from bytes, and MIME survives state transitions',
+      () {
+        final jpeg = Uint8List.fromList([255, 216, 255, 0]);
+        final webp = Uint8List.fromList([
+          82,
+          73,
+          70,
+          70,
+          0,
+          0,
+          0,
+          0,
+          87,
+          69,
+          66,
+          80,
+        ]);
+        final png = Uint8List.fromList([137, 80, 78, 71, 13, 10, 26, 10]);
+        expect(imageUploadMime(jpeg), 'image/jpeg');
+        expect(imageUploadMime(webp), 'image/webp');
+        expect(imageUploadMime(png), 'image/png');
+        expect(
+          () => imageUploadMime(Uint8List.fromList([1, 2, 3])),
+          throwsStateError,
+        );
+        final picked = ContentMediaIntentState.untouched.pickLocal(
+          jpeg,
+          mimeType: 'image/jpeg',
+        );
+        expect(
+          picked.markUploading().markFailed('retry').localMimeType,
+          'image/jpeg',
+        );
+        expect(picked.copyWith(clearLocalBytes: true).localMimeType, isNull);
+        expect(picked.markUploaded('id').localMimeType, isNull);
+        expect(picked, isNot(picked.copyWith(localMimeType: 'image/png')));
+      },
+    );
     test('pickLocal sets pendingLocal and bytesForPreview', () {
       final bytes = Uint8List.fromList([1, 2, 3]);
       final state = ContentMediaIntentState.untouched.pickLocal(bytes);

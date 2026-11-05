@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart';
 
 /// Lifecycle phase for a single media field in Admin editors.
@@ -18,12 +16,14 @@ class ContentMediaIntentState {
   const ContentMediaIntentState({
     this.phase = ContentMediaPhase.untouched,
     this.localBytes,
+    this.localMimeType,
     this.assetId,
     this.error,
   });
 
   final ContentMediaPhase phase;
   final Uint8List? localBytes;
+  final String? localMimeType;
   final String? assetId;
   final String? error;
 
@@ -56,10 +56,11 @@ class ContentMediaIntentState {
     );
   }
 
-  ContentMediaIntentState pickLocal(Uint8List bytes) {
+  ContentMediaIntentState pickLocal(Uint8List bytes, {String? mimeType}) {
     return ContentMediaIntentState(
       phase: ContentMediaPhase.pendingLocal,
       localBytes: bytes,
+      localMimeType: mimeType,
       assetId: assetId,
     );
   }
@@ -86,6 +87,7 @@ class ContentMediaIntentState {
   ContentMediaIntentState copyWith({
     ContentMediaPhase? phase,
     Uint8List? localBytes,
+    String? localMimeType,
     String? assetId,
     String? error,
     bool clearLocalBytes = false,
@@ -95,6 +97,9 @@ class ContentMediaIntentState {
     return ContentMediaIntentState(
       phase: phase ?? this.phase,
       localBytes: clearLocalBytes ? null : (localBytes ?? this.localBytes),
+      localMimeType: clearLocalBytes
+          ? null
+          : (localMimeType ?? this.localMimeType),
       assetId: clearAssetId ? null : (assetId ?? this.assetId),
       error: clearError ? null : (error ?? this.error),
     );
@@ -105,12 +110,37 @@ class ContentMediaIntentState {
     return other is ContentMediaIntentState &&
         other.phase == phase &&
         _bytesEq(other.localBytes, localBytes) &&
+        other.localMimeType == localMimeType &&
         other.assetId == assetId &&
         other.error == error;
   }
 
   @override
-  int get hashCode => Object.hash(phase, assetId, error, localBytes?.length);
+  int get hashCode =>
+      Object.hash(phase, assetId, error, localBytes?.length, localMimeType);
+}
+
+/// Determine the actual upload type from the file header, not its extension.
+String imageUploadMime(Uint8List bytes) {
+  if (bytes.length >= 8 &&
+      _bytesEq(
+        bytes.sublist(0, 8),
+        Uint8List.fromList([137, 80, 78, 71, 13, 10, 26, 10]),
+      )) {
+    return 'image/png';
+  }
+  if (bytes.length >= 3 &&
+      bytes[0] == 255 &&
+      bytes[1] == 216 &&
+      bytes[2] == 255) {
+    return 'image/jpeg';
+  }
+  if (bytes.length >= 12 &&
+      String.fromCharCodes(bytes.sublist(0, 4)) == 'RIFF' &&
+      String.fromCharCodes(bytes.sublist(8, 12)) == 'WEBP') {
+    return 'image/webp';
+  }
+  throw StateError('Выберите изображение в формате JPG, PNG или WebP.');
 }
 
 bool _bytesEq(Uint8List? a, Uint8List? b) {

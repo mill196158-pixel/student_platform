@@ -255,6 +255,10 @@ Publish re-validates.
 
 Missing/foreign/wrong-MIME asset → loud failure (no silent drop).
 
+Admin Home Promo and Profile Feed image uploads identify PNG/JPEG/WebP by
+their file headers; unknown formats fail before upload. Custom promo icons
+accept only PNG/WebP. This does not rewrite already published assets.
+
 CTA rules v1:
 
 - internal route from fixed allowlist (e.g. `/diary`, `/info`, `/chat/...` patterns approved in migration); **or**

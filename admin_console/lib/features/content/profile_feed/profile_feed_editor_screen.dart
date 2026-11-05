@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:student_ui/student_ui.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -10,6 +9,7 @@ import '../../../core/auth/admin_backend_config.dart';
 import '../../../core/auth/admin_session_controller.dart';
 import '../../academic/students/students_repository.dart';
 import '../reference/content_media_store.dart';
+import '../news/admin_image_picker.dart';
 import '../shared/admin_content_backend.dart';
 import '../shared/content_action_model.dart';
 import '../shared/content_action_picker.dart';
@@ -40,11 +40,13 @@ class ProfileFeedEditorScreen extends StatefulWidget {
     this.repository,
     this.session,
     this.mediaStore,
+    this.imagePicker,
   });
 
   final ProfileFeedRepository? repository;
   final AdminSessionController? session;
   final ContentMediaStore? mediaStore;
+  final AdminImagePicker? imagePicker;
 
   @override
   State<ProfileFeedEditorScreen> createState() =>
@@ -553,7 +555,7 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
         final uploaded = await store.uploadBytesDetailed(
           contentItemId: selected.id,
           bytes: bytes,
-          contentType: 'image/png',
+          contentType: imageUploadMime(bytes),
           title: payload.title,
         );
         nextPayload = payload.copyWith(imageAssetId: uploaded.assetId);
@@ -563,7 +565,7 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
           _resolvedAssetBytes[selected.id] = bytes;
           _imageIntent[selected.id] = ContentMediaIntentState(
             assetId: uploaded.assetId,
-          ).pickLocal(bytes);
+          ).pickLocal(bytes, mimeType: intent.localMimeType);
         });
       } finally {
         if (mounted) setState(() => _imageUploading = false);
@@ -946,17 +948,27 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
         !_canWrite) {
       return;
     }
-    final picked = await FilePicker.pickFiles(
-      type: FileType.image,
-      withData: true,
-    );
-    final file = picked?.files.single;
-    final bytes = file?.bytes;
-    if (bytes == null || bytes.isEmpty) return;
+    PickedAdminImage? picked;
+    try {
+      picked = await (widget.imagePicker ?? LocalAdminImagePicker())
+          .pickImage();
+    } on AdminImagePickException catch (error) {
+      if (mounted) _showBanner(error.message);
+      return;
+    }
+    if (picked == null || !mounted) return;
+    final bytes = picked.bytes;
+    final String mimeType;
+    try {
+      mimeType = imageUploadMime(bytes);
+    } on StateError {
+      _showBanner('Выберите изображение в формате JPG, PNG или WebP.');
+      return;
+    }
     setState(() {
       _imageIntent[selected.id] =
           (_imageIntent[selected.id] ?? ContentMediaIntentState.untouched)
-              .pickLocal(bytes);
+              .pickLocal(bytes, mimeType: mimeType);
       // Image plane only renders for image_* variants.
       if (!contentCardVariantUsesImage(_cardVariant.key)) {
         _cardVariant = ContentCardVariant.imageOverlay;
@@ -1908,9 +1920,7 @@ class _PropertiesPanel extends StatelessWidget {
                   ? const SizedBox(
                       width: 18,
                       height: 18,
-                      child: ProductLoadingIndicator(
-                        color: Colors.white,
-                      ),
+                      child: ProductLoadingIndicator(color: Colors.white),
                     )
                   : const Icon(Icons.delete_forever_outlined),
               label: Text(deleting ? 'Удаление…' : 'Удалить окончательно'),
