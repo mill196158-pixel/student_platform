@@ -1194,7 +1194,6 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
     return Padding(
       padding: const EdgeInsets.all(20),
       child: VisualEditorShell(
-        title: 'Вакансии',
         selectedTitle: selected?.title,
         statusChip: selected?.status.russianLabel,
         originDemoBadge: selected?.origin == ContentOrigin.demo,
@@ -1239,7 +1238,7 @@ class _VacancyEditorScreenState extends State<VacancyEditorScreen> {
           children: [
             Expanded(
               child: VisualEditorListPanel(
-                panelTitle: 'Вакансии',
+                panelTitle: 'Список вакансий',
                 tab: _listTab,
                 tabCounts: _tabCounts,
                 items: [
@@ -1734,6 +1733,9 @@ class _VacancyPropertiesPanel extends StatelessWidget {
             onChanged: (_) => onChanged(),
           ),
           DropdownButtonFormField<VacancyEmploymentType?>(
+            borderRadius: ProductTheme.selectionMenuRadius,
+            elevation: ProductTheme.selectionMenuElevation,
+            icon: const Icon(Icons.keyboard_arrow_down_rounded),
             key: ValueKey('employment-$employmentType'),
             initialValue: employmentType,
             decoration: const InputDecoration(labelText: 'Формат занятости'),
@@ -1749,6 +1751,9 @@ class _VacancyPropertiesPanel extends StatelessWidget {
             onChanged: !_editable ? null : onEmploymentTypeChanged,
           ),
           DropdownButtonFormField<VacancyWorkFormat?>(
+            borderRadius: ProductTheme.selectionMenuRadius,
+            elevation: ProductTheme.selectionMenuElevation,
+            icon: const Icon(Icons.keyboard_arrow_down_rounded),
             key: ValueKey('format-$workFormat'),
             initialValue: workFormat,
             decoration: const InputDecoration(
@@ -1852,6 +1857,9 @@ class _VacancyPropertiesPanel extends StatelessWidget {
             ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
+            borderRadius: ProductTheme.selectionMenuRadius,
+            elevation: ProductTheme.selectionMenuElevation,
+            icon: const Icon(Icons.keyboard_arrow_down_rounded),
             key: ValueKey('audience-$audienceMode'),
             initialValue: audienceMode,
             decoration: const InputDecoration(labelText: 'Аудитория'),
@@ -2089,6 +2097,9 @@ class _VacancyPropertiesPanel extends StatelessWidget {
               if (selected.origin != ContentOrigin.userSubmission &&
                   selected.origin != ContentOrigin.importSource)
                 DropdownButtonFormField<String>(
+                  borderRadius: ProductTheme.selectionMenuRadius,
+                  elevation: ProductTheme.selectionMenuElevation,
+                  icon: const Icon(Icons.keyboard_arrow_down_rounded),
                   key: ValueKey('origin-$origin'),
                   initialValue: origin,
                   decoration: const InputDecoration(labelText: 'origin'),

@@ -1,7 +1,9 @@
+import 'package:student_ui/student_ui.dart' show ProductTheme, ProductLoadingIndicator;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/auth/admin_backend_config.dart';
+import '../content/shared/visual_editor_states.dart';
 import 'academic_document_draft.dart';
 import 'academic_document_intake_service.dart';
 import 'curriculum_plan_import_repository.dart';
@@ -334,12 +336,12 @@ class _CurriculumDocumentReviewPanelState
                 ],
               ),
             ),
-            OutlinedButton.icon(
-              onPressed: _loading || _serverBusy ? null : _pickDocument,
-              icon: const Icon(Icons.upload_file_outlined),
-              label: Text(draft == null ? 'Выбрать файл' : 'Заменить'),
-            ),
             if (draft != null) ...[
+              OutlinedButton.icon(
+                onPressed: _loading || _serverBusy ? null : _pickDocument,
+                icon: const Icon(Icons.upload_file_outlined),
+                label: const Text('Заменить'),
+              ),
               const SizedBox(width: 8),
               TextButton(
                 onPressed: _loading || _serverBusy ? null : _reset,
@@ -416,7 +418,7 @@ class _CurriculumDocumentReviewPanelState
                     ? const SizedBox(
                         width: 16,
                         height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                        child: ProductLoadingIndicator(),
                       )
                     : Icon(
                         previewReady
@@ -429,17 +431,25 @@ class _CurriculumDocumentReviewPanelState
               ),
             ],
           ),
-        ] else if (!_loading) ...[
-          const SizedBox(height: 48),
-          const Center(
-            child: Text(
-              'Выберите официальный учебный план.\n'
-              'Для ПГС 2025 можно загрузить имеющийся PDF.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.black54),
+        ] else if (!_loading)
+          Expanded(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: VisualEditorEmptyState(
+                    message: 'Выберите официальный учебный план',
+                    supportingText:
+                        'Для ПГС 2025 можно использовать имеющийся PDF.',
+                    icon: Icons.upload_file_outlined,
+                    actionLabel: 'Выбрать файл',
+                    onAction: _serverBusy ? null : _pickDocument,
+                  ),
+                ),
+              ),
             ),
           ),
-        ],
       ],
     );
   }
@@ -495,6 +505,9 @@ class _CurriculumDocumentReviewPanelState
             SizedBox(
               width: 190,
               child: DropdownButtonFormField<AcademicStudyForm>(
+                borderRadius: ProductTheme.selectionMenuRadius,
+                elevation: ProductTheme.selectionMenuElevation,
+                icon: const Icon(Icons.keyboard_arrow_down_rounded),
                 key: ValueKey(_studyForm),
                 initialValue: _studyForm,
                 isExpanded: true,
@@ -944,6 +957,9 @@ class _CurriculumRowEditorState extends State<_CurriculumRowEditor> {
                   SizedBox(
                     width: 320,
                     child: DropdownButtonFormField<String>(
+                      borderRadius: ProductTheme.selectionMenuRadius,
+                      elevation: ProductTheme.selectionMenuElevation,
+                      icon: const Icon(Icons.keyboard_arrow_down_rounded),
                       key: ValueKey(widget.row.subjectId),
                       initialValue:
                           widget.subjects.any(
@@ -982,6 +998,9 @@ class _CurriculumRowEditorState extends State<_CurriculumRowEditor> {
                   SizedBox(
                     width: 210,
                     child: DropdownButtonFormField<CurriculumRowDisposition>(
+                      borderRadius: ProductTheme.selectionMenuRadius,
+                      elevation: ProductTheme.selectionMenuElevation,
+                      icon: const Icon(Icons.keyboard_arrow_down_rounded),
                       key: ValueKey(widget.row.disposition),
                       initialValue: widget.row.disposition,
                       isExpanded: true,
@@ -1065,6 +1084,9 @@ class _CurriculumRowEditorState extends State<_CurriculumRowEditor> {
                             SizedBox(
                               width: 180,
                               child: DropdownButtonFormField<int>(
+                                borderRadius: ProductTheme.selectionMenuRadius,
+                                elevation: ProductTheme.selectionMenuElevation,
+                                icon: const Icon(Icons.keyboard_arrow_down_rounded),
                                 key: ValueKey(
                                   'resolve:${widget.row.candidateKey}:'
                                   '$unresolvedIndex',
@@ -1106,6 +1128,9 @@ class _CurriculumRowEditorState extends State<_CurriculumRowEditor> {
                         SizedBox(
                           width: 170,
                           child: DropdownButtonFormField<int>(
+                            borderRadius: ProductTheme.selectionMenuRadius,
+                            elevation: ProductTheme.selectionMenuElevation,
+                            icon: const Icon(Icons.keyboard_arrow_down_rounded),
                             initialValue: _newSemester,
                             decoration: const InputDecoration(
                               labelText: 'Новый семестр',
@@ -1310,6 +1335,9 @@ class _OccurrenceEditor extends StatelessWidget {
                 SizedBox(
                   width: 150,
                   child: DropdownButtonFormField<int>(
+                    borderRadius: ProductTheme.selectionMenuRadius,
+                    elevation: ProductTheme.selectionMenuElevation,
+                    icon: const Icon(Icons.keyboard_arrow_down_rounded),
                     key: ValueKey('semester:${occurrence.semesterNumber}'),
                     initialValue: occurrence.semesterNumber,
                     decoration: const InputDecoration(

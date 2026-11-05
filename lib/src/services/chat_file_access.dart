@@ -81,6 +81,15 @@ class ChatFileAccess {
     if (file != null && await file.exists()) await file.delete();
   }
 
+  static Future<void> discardUnreadableImage(
+    String url, {
+    required String? user,
+    required int epoch,
+  }) async {
+    if (user != userId || epoch != generation) return;
+    await _purge(url, user);
+  }
+
   static Future<File?> _cachedFile(String url, String? uid) async {
     if (keyFor(url) == null || uid == null) return null;
     final root = await getApplicationCacheDirectory();
@@ -124,7 +133,11 @@ class ChatFileAccess {
     late final FunctionResponse response;
     try {
       response = await Supabase.instance.client.functions
-          .invoke('chat-file-access', body: {'action': 'resolve', 'key': key});
+          .invoke('chat-file-access', body: {'action': 'resolve', 'key': key})
+          .timeout(
+            const Duration(seconds: 15),
+            onTimeout: () => throw StateError('Проверка доступа заняла слишком много времени.'),
+          );
     } on FunctionException catch (error) {
       if (error.status == 401 || error.status == 403 || error.status == 404) {
         await _purge(url, uid);

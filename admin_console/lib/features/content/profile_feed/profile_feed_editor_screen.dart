@@ -1790,7 +1790,7 @@ class _PropertiesPanel extends StatelessWidget {
                       ? const SizedBox(
                           width: 16,
                           height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                          child: ProductLoadingIndicator(),
                         )
                       : const Icon(Icons.image_outlined),
                   label: Text(imageUploading ? 'Загрузка…' : 'Иллюстрация'),
@@ -1816,6 +1816,9 @@ class _PropertiesPanel extends StatelessWidget {
             ),
           const Divider(height: 28),
           DropdownButtonFormField<String>(
+            borderRadius: ProductTheme.selectionMenuRadius,
+            elevation: ProductTheme.selectionMenuElevation,
+            icon: const Icon(Icons.keyboard_arrow_down_rounded),
             key: ValueKey('audience-$audienceMode'),
             initialValue: audienceMode,
             isExpanded: true,
@@ -1905,8 +1908,7 @@ class _PropertiesPanel extends StatelessWidget {
                   ? const SizedBox(
                       width: 18,
                       height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
+                      child: ProductLoadingIndicator(
                         color: Colors.white,
                       ),
                     )

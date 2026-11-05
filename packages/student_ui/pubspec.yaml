@@ -4,11 +4,13 @@ publish_to: none
 version: 0.1.0
 
 environment:
-  sdk: ">=3.4.0 <4.0.0"
+  sdk: ">=3.6.0 <4.0.0"
+  flutter: ">=3.27.0"
 
 dependencies:
   flutter:
     sdk: flutter
+  lottie: 3.3.0
 
 dev_dependencies:
   flutter_test:
@@ -17,3 +19,10 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/animations/cat_loader.json
+    - assets/animations/cat_loader.LICENSE.txt
+  fonts:
+    - family: WorkspaceSans
+      fonts:
+        - asset: assets/fonts/NotoSans-Regular.ttf

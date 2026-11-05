@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:student_ui/student_ui.dart' show ProductTheme;
 
 import 'content_action_model.dart';
 
@@ -142,6 +143,9 @@ class _ContentActionPickerState extends State<ContentActionPicker> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         DropdownButtonFormField<ContentActionKind>(
+          borderRadius: ProductTheme.selectionMenuRadius,
+          elevation: ProductTheme.selectionMenuElevation,
+          icon: const Icon(Icons.keyboard_arrow_down_rounded),
           isExpanded: true,
           key: ValueKey('action-kind-${widget.selection.kind}'),
           initialValue: widget.allowedKinds.contains(widget.selection.kind)
@@ -171,6 +175,9 @@ class _ContentActionPickerState extends State<ContentActionPicker> {
     switch (widget.selection.kind) {
       case ContentActionKind.appScreen:
         return DropdownButtonFormField<String>(
+          borderRadius: ProductTheme.selectionMenuRadius,
+          elevation: ProductTheme.selectionMenuElevation,
+          icon: const Icon(Icons.keyboard_arrow_down_rounded),
           isExpanded: true,
           key: ValueKey('screen-${widget.selection.screenKey}'),
           initialValue:
@@ -233,6 +240,9 @@ class _ContentActionPickerState extends State<ContentActionPicker> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         DropdownButtonFormField<String>(
+          borderRadius: ProductTheme.selectionMenuRadius,
+          elevation: ProductTheme.selectionMenuElevation,
+          icon: const Icon(Icons.keyboard_arrow_down_rounded),
           isExpanded: true,
           key: ValueKey('chat-mode-$_chatTargetMode'),
           initialValue: _chatTargetMode,
@@ -313,6 +323,9 @@ class _ContentActionPickerState extends State<ContentActionPicker> {
       });
     }
     return DropdownButtonFormField<String>(
+      borderRadius: ProductTheme.selectionMenuRadius,
+      elevation: ProductTheme.selectionMenuElevation,
+      icon: const Icon(Icons.keyboard_arrow_down_rounded),
       isExpanded: true,
       key: ValueKey('target-${widget.selection.targetId ?? options.first.id}'),
       initialValue: selectedId ?? options.first.id,

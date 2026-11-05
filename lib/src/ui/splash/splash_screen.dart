@@ -1,5 +1,5 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:flutter/material.dart';
-import 'package:lottie/lottie.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -50,25 +50,48 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   @override
+  Widget build(BuildContext context) => const SplashLoadingView();
+}
+
+class SplashLoadingView extends StatelessWidget {
+  const SplashLoadingView({super.key, this.failed = false});
+
+  final bool failed;
+
+  @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
     return Scaffold(
       backgroundColor: t.colorScheme.surface,
       body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Lottie.asset('assets/lottie/cat_sleeping.json', height: 200),
-            const SizedBox(height: 16),
-            Text('Загружаем…', style: t.textTheme.titleMedium),
-            const SizedBox(height: 8),
-            const SizedBox(
-              width: 28,
-              height: 28,
-              child: CircularProgressIndicator(strokeWidth: 3),
-            ),
-          ],
-        ),
+        child: failed
+            ? const Padding(
+                padding: EdgeInsets.all(24),
+                child: Text(
+                  'Не удалось открыть приложение. Закройте его и попробуйте снова.',
+                  textAlign: TextAlign.center,
+                ),
+              )
+            : Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Flexible(
+                    child: Transform.translate(
+                      // Align the cat artwork with the Android launch frame.
+                      offset: const Offset(36, 30),
+                      child: const ProductLoadingIndicator(
+                        size: 260,
+                        semanticsLabel: 'Открываем приложение',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  ExcludeSemantics(
+                    child: Text('Открываем приложение…',
+                        style: t.textTheme.titleMedium),
+                  ),
+                ],
+              ),
       ),
     );
   }

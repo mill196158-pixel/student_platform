@@ -12,8 +12,10 @@ class SubjectQuickNoteScreen extends StatefulWidget {
     String? subjectKey,
     this.args,
     required this.date,
-  }) : subjectKey =
-            subjectKey ?? args?.subjectTitle ?? args?.legacySubjectKey ?? 'Предмет';
+  }) : subjectKey = subjectKey ??
+            args?.subjectTitle ??
+            args?.legacySubjectKey ??
+            'Предмет';
 
   @override
   State<SubjectQuickNoteScreen> createState() => _SubjectQuickNoteScreenState();
@@ -27,6 +29,7 @@ class _SubjectQuickNoteScreenState extends State<SubjectQuickNoteScreen> {
   late final String _subjectKey = _args.displayTitle;
   late DateTime _day;
   bool _loading = true;
+  bool _loadError = false;
   List<SubjectDiaryEntry> _dayEntries = [];
   bool _isEditMode = false;
   // Пер-блоковый режим редактирования для фото-наборов
@@ -60,16 +63,36 @@ class _SubjectQuickNoteScreenState extends State<SubjectQuickNoteScreen> {
     final base = widget.date;
     _day = DateTime(base.year, base.month, base.day);
     _loadDay();
-    diaryRealtimeSuspended.value = true; // отписать родителя на время работы экрана дня
+    diaryRealtimeSuspended.value =
+        true; // отписать родителя на время работы экрана дня
     _subscribeDiaryRealtime(anchor: _day);
   }
 
   Future<void> _loadDay() async {
-    setState(() => _loading = true);
-    final all = await _repo.listByArgs(_args);
-    _dayEntries = all.where((e) =>
-        e.date.year == _day.year && e.date.month == _day.month && e.date.day == _day.day).toList();
-    setState(() => _loading = false);
+    if (!mounted) return;
+    setState(() {
+      _loading = true;
+      _loadError = false;
+    });
+    try {
+      final all = await _repo.listByArgs(_args);
+      if (!mounted) return;
+      setState(() {
+        _dayEntries = all
+            .where((e) =>
+                e.date.year == _day.year &&
+                e.date.month == _day.month &&
+                e.date.day == _day.day)
+            .toList();
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _loadError = true;
+      });
+    }
   }
 
   // realtime
@@ -119,11 +142,15 @@ class _SubjectQuickNoteScreenState extends State<SubjectQuickNoteScreen> {
     final res = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('Подтверждение', style: TextStyle(color: Colors.black)),
-        content: Text(message, style: const TextStyle(color: Colors.black)),
+        title: const Text('Подтверждение'),
+        content: Text(message),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Отмена')),
-          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Удалить')),
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Отмена')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Удалить')),
         ],
       ),
     );
@@ -144,7 +171,7 @@ class _SubjectQuickNoteScreenState extends State<SubjectQuickNoteScreen> {
         final media = MediaQuery.of(ctx);
         return ConstrainedBox(
           constraints: BoxConstraints(maxHeight: media.size.height * 0.5),
-          child: Padding(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
             child: _AddBranchPanel(
               tinted: true,
@@ -178,23 +205,21 @@ class _SubjectQuickNoteScreenState extends State<SubjectQuickNoteScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final totalPhotos = _dayEntries.fold<int>(0, (s, e) => s + e.files.where((f) => f.isImage).length);
+    final totalPhotos = _dayEntries.fold<int>(
+        0, (s, e) => s + e.files.where((f) => f.isImage).length);
     final notesCount = _dayEntries.where((e) => e.hasText).length;
 
     return Scaffold(
       body: Column(
         children: [
-          SizedBox(
-            height: 128,
-            child: _ModelHeader(
-              title: widget.subjectKey,
-              subtitle: _dateStr, // оставить только дату
-              subtitle2: null, // убрать счётчики чтобы не вылезал текст
-              trailing: IconButton(
-                tooltip: 'Добавить',
-                icon: const Icon(Icons.more_horiz),
-                onPressed: _openActionsSheet,
-              ),
+          _ModelHeader(
+            title: widget.subjectKey,
+            subtitle: _dateStr, // оставить только дату
+            subtitle2: null, // убрать счётчики чтобы не вылезал текст
+            trailing: IconButton(
+              tooltip: 'Добавить',
+              icon: const Icon(Icons.more_horiz),
+              onPressed: _openActionsSheet,
             ),
           ),
           const SizedBox(height: 12),
@@ -202,13 +227,27 @@ class _SubjectQuickNoteScreenState extends State<SubjectQuickNoteScreen> {
             child: RefreshIndicator(
               onRefresh: _loadDay,
               child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                padding: EdgeInsets.symmetric(
+                    vertical: 24,
+                    horizontal: ((MediaQuery.sizeOf(context).width - 800) / 2)
+                        .clamp(16.0, double.infinity)),
                 children: [
                   if (_loading)
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 60),
-                      child: Center(child: CircularProgressIndicator()),
+                      child: Center(child: ProductLoadingIndicator.page()),
                     )
+                  else if (_loadError)
+                    Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 36),
+                        child: Column(children: [
+                          const Text('Не удалось загрузить записи'),
+                          const SizedBox(height: 12),
+                          OutlinedButton.icon(
+                              onPressed: _loadDay,
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('Повторить')),
+                        ]))
                   else if (_dayEntries.isEmpty)
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 36),
@@ -229,9 +268,9 @@ class _SubjectQuickNoteScreenState extends State<SubjectQuickNoteScreen> {
     final theme = Theme.of(ctx);
     final repo = _repo;
 
-    final noteEntries  = _dayEntries.where((e) => e.hasText).toList();
+    final noteEntries = _dayEntries.where((e) => e.hasText).toList();
     final photoEntries = _dayEntries.where((e) => e.hasImages).toList();
-    final fileEntries  = _dayEntries.where((e) => e.hasDocs).toList();
+    final fileEntries = _dayEntries.where((e) => e.hasDocs).toList();
 
     final blocks = <Widget>[];
 
@@ -252,14 +291,18 @@ class _SubjectQuickNoteScreenState extends State<SubjectQuickNoteScreen> {
             children: [
               _PhotosGrid(
                 images: imgs
-                    .where((f) => repo.getFileBytes(f.url) != null || repo.getLocalThumb(f.url) != null)
+                    .where((f) =>
+                        repo.getFileBytes(f.url) != null ||
+                        repo.getLocalThumb(f.url) != null)
                     .map((f) => _PickedImage(
                           name: f.name,
                           mime: f.mime,
-                          bytes: repo.getFileBytes(f.url) ?? repo.getLocalThumb(f.url)!,
+                          bytes: repo.getFileBytes(f.url) ??
+                              repo.getLocalThumb(f.url)!,
                         ))
                     .toList(),
-                onRemove: (i) => _removeSingleImage(entryId: e.id, fileUrl: imgs[i].url),
+                onRemove: (i) =>
+                    _removeSingleImage(entryId: e.id, fileUrl: imgs[i].url),
                 onOpen: (i) => _openImageViewer(ctx, imgs, i),
                 editMode: isEdit,
               ),
@@ -280,11 +323,14 @@ class _SubjectQuickNoteScreenState extends State<SubjectQuickNoteScreen> {
                       label: 'Удалить',
                       kind: _ActionKind.danger,
                       onTap: () async {
-                        final ok = await _confirm(ctx, 'Удалить этот набор фото?');
+                        final ok =
+                            await _confirm(ctx, 'Удалить этот набор фото?');
                         if (!ok) return;
-                        await _repo.removeFilesForEntry(entryId: e.id, images: true);
+                        await _repo.removeFilesForEntry(
+                            entryId: e.id, images: true);
                         await _loadDay();
-                        if (mounted) setState(() => _editingEntries.remove(e.id));
+                        if (mounted)
+                          setState(() => _editingEntries.remove(e.id));
                         if (ctx.mounted) {
                           ScaffoldMessenger.of(ctx).showSnackBar(
                             const SnackBar(content: Text('Набор фото удалён')),
@@ -317,7 +363,7 @@ class _SubjectQuickNoteScreenState extends State<SubjectQuickNoteScreen> {
                 e.text!.trim(),
                 style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
                       fontSize: 16,
-                      color: Colors.black,
+                      color: Theme.of(context).colorScheme.onSurface,
                       height: 1.25,
                     ),
               ),
@@ -333,17 +379,20 @@ class _SubjectQuickNoteScreenState extends State<SubjectQuickNoteScreen> {
                     await _repo.updateTextEntry(id: e.id, newText: '');
                     await _loadDay();
                     // Если запись осталась пустой (без файлов и без текста) — удаляем
-                    final still = _dayEntries.where((x) => x.id == e.id).toList();
+                    final still =
+                        _dayEntries.where((x) => x.id == e.id).toList();
                     if (still.isNotEmpty) {
                       final it = still.first;
-                      final empty = !(it.hasText) && !(it.hasImages) && !(it.hasDocs);
+                      final empty =
+                          !(it.hasText) && !(it.hasImages) && !(it.hasDocs);
                       if (empty) {
                         await _repo.deleteEntry(it.id);
                         await _loadDay();
                       }
                     }
                     if (ctx.mounted) {
-                      ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Заметка удалена')));
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                          const SnackBar(content: Text('Заметка удалена')));
                     }
                   },
                 ),
@@ -375,19 +424,23 @@ class _SubjectQuickNoteScreenState extends State<SubjectQuickNoteScreen> {
                       size: f.size,
                       mime: f.mime,
                       onDownload: () async => _openFile(ctx, f),
-                      onDelete: () => _removeSingleFile(entryId: e.id, fileUrl: f.url),
+                      onDelete: () =>
+                          _removeSingleFile(entryId: e.id, fileUrl: f.url),
                     ),
                   )),
               Align(
                 alignment: Alignment.centerLeft,
                 child: TextButton.icon(
                   onPressed: () async {
-                    final ok = await _confirm(ctx, 'Удалить этот набор файлов?');
+                    final ok =
+                        await _confirm(ctx, 'Удалить этот набор файлов?');
                     if (!ok) return;
-                    await _repo.removeFilesForEntry(entryId: e.id, images: false);
+                    await _repo.removeFilesForEntry(
+                        entryId: e.id, images: false);
                     await _loadDay();
                     if (ctx.mounted) {
-                      ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Набор файлов удалён')));
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                          const SnackBar(content: Text('Набор файлов удалён')));
                     }
                   },
                   icon: const Icon(Icons.delete_outline, size: 18),
@@ -410,6 +463,8 @@ class _SubjectQuickNoteScreenState extends State<SubjectQuickNoteScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
+      constraints: const BoxConstraints(maxWidth: 600),
       showDragHandle: true,
       backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
@@ -431,6 +486,8 @@ class _SubjectQuickNoteScreenState extends State<SubjectQuickNoteScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
+      constraints: const BoxConstraints(maxWidth: 600),
       showDragHandle: true,
       backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
@@ -473,8 +530,8 @@ class _SubjectQuickNoteScreenState extends State<SubjectQuickNoteScreen> {
     final files = <_PickedFile>[];
     for (final f in result.files) {
       final bytes = f.bytes;
-      final name  = f.name;
-      String mime  = _detectMime(name);
+      final name = f.name;
+      String mime = _detectMime(name);
       if (mime.startsWith('image/')) {
         mime = 'application/octet-stream';
       }
@@ -489,28 +546,32 @@ class _SubjectQuickNoteScreenState extends State<SubjectQuickNoteScreen> {
     );
     if (mounted) {
       await _loadDay();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Файлы добавлены')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Файлы добавлены')));
     }
   }
 
   Future<void> _openFile(BuildContext ctx, SubjectDiaryFile f) async {
     final bytes = _repo.getFileBytes(f.url);
     if (bytes == null) {
-      ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Файл недоступен')));
+      ScaffoldMessenger.of(ctx)
+          .showSnackBar(const SnackBar(content: Text('Файл недоступен')));
       return;
     }
     try {
-      final dir  = await getTemporaryDirectory();
+      final dir = await getTemporaryDirectory();
       final path = '${dir.path}/${f.name}';
       final file = io.File(path);
       await file.writeAsBytes(bytes, flush: true);
       await OpenFilex.open(path);
     } catch (e) {
-      ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text('Не удалось открыть: $e')));
+      ScaffoldMessenger.of(ctx)
+          .showSnackBar(SnackBar(content: Text('Не удалось открыть: $e')));
     }
   }
 
-  Future<void> _openImageViewer(BuildContext ctx, List<SubjectDiaryFile> imgs, int start) async {
+  Future<void> _openImageViewer(
+      BuildContext ctx, List<SubjectDiaryFile> imgs, int start) async {
     final controller = PageController(initialPage: start);
     int cur = start;
 
@@ -528,10 +589,13 @@ class _SubjectQuickNoteScreenState extends State<SubjectQuickNoteScreen> {
                   itemCount: imgs.length,
                   onPageChanged: (i) => setS(() => cur = i),
                   itemBuilder: (c, i) {
-                    final b = _repo.getFileBytes(imgs[i].url) ?? _repo.getLocalThumb(imgs[i].url);
+                    final b = _repo.getFileBytes(imgs[i].url) ??
+                        _repo.getLocalThumb(imgs[i].url);
                     return Center(
                       child: InteractiveViewer(
-                        child: b != null ? Image.memory(b, fit: BoxFit.contain) : const SizedBox(),
+                        child: b != null
+                            ? Image.memory(b, fit: BoxFit.contain)
+                            : const SizedBox(),
                       ),
                     );
                   },
@@ -539,15 +603,22 @@ class _SubjectQuickNoteScreenState extends State<SubjectQuickNoteScreen> {
 
                 // Мягкий градиент под верхней панелью
                 Positioned(
-                  left: 0, right: 0, top: 0,
+                  left: 0,
+                  right: 0,
+                  top: 0,
                   child: IgnorePointer(
                     ignoring: true,
                     child: Container(
                       height: 96,
                       decoration: const BoxDecoration(
                         gradient: LinearGradient(
-                          begin: Alignment.topCenter, end: Alignment.bottomCenter,
-                          colors: [Color(0xAA000000), Color(0x33000000), Colors.transparent],
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Color(0xAA000000),
+                            Color(0x33000000),
+                            Colors.transparent
+                          ],
                         ),
                       ),
                     ),
@@ -556,16 +627,21 @@ class _SubjectQuickNoteScreenState extends State<SubjectQuickNoteScreen> {
 
                 // Верхняя панель: закрыть • имя файла • скачать
                 Positioned(
-                  top: 8, left: 8, right: 8,
+                  top: 8,
+                  left: 8,
+                  right: 8,
                   child: SafeArea(
                     bottom: false,
                     child: Row(
                       children: [
-                        _viewerIconButton(icon: Icons.close, onTap: () => Navigator.pop(dCtx)),
+                        _viewerIconButton(
+                            icon: Icons.close,
+                            onTap: () => Navigator.pop(dCtx)),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
                             decoration: BoxDecoration(
                               color: Colors.black.withOpacity(.35),
                               borderRadius: BorderRadius.circular(12),
@@ -587,16 +663,19 @@ class _SubjectQuickNoteScreenState extends State<SubjectQuickNoteScreen> {
                         _viewerIconButton(
                           icon: Icons.download,
                           onTap: () async {
-                            final b = _repo.getFileBytes(imgs[cur].url) ?? _repo.getLocalThumb(imgs[cur].url);
+                            final b = _repo.getFileBytes(imgs[cur].url) ??
+                                _repo.getLocalThumb(imgs[cur].url);
                             if (b == null) return;
                             try {
-                              final dir  = await getTemporaryDirectory();
+                              final dir = await getTemporaryDirectory();
                               final path = '${dir.path}/${imgs[cur].name}';
                               final file = io.File(path);
                               await file.writeAsBytes(b, flush: true);
                               if (ctx.mounted) {
                                 ScaffoldMessenger.of(ctx).showSnackBar(
-                                  const SnackBar(content: Text('Сохранено во временную папку')),
+                                  const SnackBar(
+                                      content:
+                                          Text('Сохранено во временную папку')),
                                 );
                               }
                             } catch (_) {}
@@ -615,7 +694,8 @@ class _SubjectQuickNoteScreenState extends State<SubjectQuickNoteScreen> {
   }
 
   // Круглая кнопка в просмотрщике
-  Widget _viewerIconButton({required IconData icon, required VoidCallback onTap}) {
+  Widget _viewerIconButton(
+      {required IconData icon, required VoidCallback onTap}) {
     return Material(
       color: Colors.black.withOpacity(.35),
       shape: const CircleBorder(),
@@ -630,11 +710,13 @@ class _SubjectQuickNoteScreenState extends State<SubjectQuickNoteScreen> {
     );
   }
 
-  Future<void> _removeSingleImage({required String entryId, required String fileUrl}) async {
+  Future<void> _removeSingleImage(
+      {required String entryId, required String fileUrl}) async {
     _suppressRealtime = true;
     _pendingDeletedUrls.add(fileUrl);
     if (mounted) setState(() {});
-    final updated = await _repo.removeFileFromEntry(entryId: entryId, fileUrl: fileUrl);
+    final updated =
+        await _repo.removeFileFromEntry(entryId: entryId, fileUrl: fileUrl);
     if (updated != null && updated.files.isEmpty && !updated.hasText) {
       await _repo.deleteEntry(updated.id);
       await _loadDay();
@@ -644,11 +726,13 @@ class _SubjectQuickNoteScreenState extends State<SubjectQuickNoteScreen> {
     if (!_isEditMode) _scheduleReload();
   }
 
-  Future<void> _removeSingleFile({required String entryId, required String fileUrl}) async {
+  Future<void> _removeSingleFile(
+      {required String entryId, required String fileUrl}) async {
     _suppressRealtime = true;
     _pendingDeletedUrls.add(fileUrl);
     if (mounted) setState(() {});
-    final updated = await _repo.removeFileFromEntry(entryId: entryId, fileUrl: fileUrl);
+    final updated =
+        await _repo.removeFileFromEntry(entryId: entryId, fileUrl: fileUrl);
     if (updated != null && updated.files.isEmpty && !updated.hasText) {
       await _repo.deleteEntry(updated.id);
       await _loadDay();
@@ -682,10 +766,16 @@ class _NewNoteSheetState extends State<_NewNoteSheet> {
   bool _saving = false;
 
   @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final insets = MediaQuery.of(context).viewInsets;
-    return Padding(
+    return SingleChildScrollView(
       padding: EdgeInsets.only(bottom: insets.bottom),
       child: Container(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
@@ -693,33 +783,40 @@ class _NewNoteSheetState extends State<_NewNoteSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Заметка с пары',
-              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800, color: Colors.black),
+            Text(
+              'Заметка с пары',
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
             TextField(
               controller: _ctrl,
               maxLines: null,
-              minLines: 9,
+              minLines: 3,
               decoration: InputDecoration(
                 hintText: 'Заметка...',
                 filled: true,
                 fillColor: theme.colorScheme.surface,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
               ),
             ),
             const SizedBox(height: 12),
-            Row(
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
                 OutlinedButton(
                   onPressed: _saving ? null : () => Navigator.pop(context),
                   child: const Text('Отмена'),
                 ),
-                const SizedBox(width: 8),
                 FilledButton.icon(
                   onPressed: _saving ? null : _save,
                   icon: _saving
-                      ? const SizedBox(width:16, height:16, child: CircularProgressIndicator(strokeWidth: 2))
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: ProductLoadingIndicator())
                       : const Icon(Icons.save_outlined, size: 18),
                   label: const Text('Сохранить'),
                 ),
@@ -734,7 +831,8 @@ class _NewNoteSheetState extends State<_NewNoteSheet> {
   Future<void> _save() async {
     final text = _ctrl.text.trim();
     if (text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Пустой текст')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Пустой текст')));
       return;
     }
     setState(() => _saving = true);
@@ -757,21 +855,31 @@ class _EditNoteSheet extends StatefulWidget {
   final String entryId;
   final String initialText;
   final VoidCallback onSaved;
-  const _EditNoteSheet({required this.entryId, required this.initialText, required this.onSaved});
+  const _EditNoteSheet(
+      {required this.entryId,
+      required this.initialText,
+      required this.onSaved});
 
   @override
   State<_EditNoteSheet> createState() => _EditNoteSheetState();
 }
 
 class _EditNoteSheetState extends State<_EditNoteSheet> {
-  late final TextEditingController _ctrl = TextEditingController(text: widget.initialText);
+  late final TextEditingController _ctrl =
+      TextEditingController(text: widget.initialText);
   bool _saving = false;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final insets = MediaQuery.of(context).viewInsets;
-    return Padding(
+    return SingleChildScrollView(
       padding: EdgeInsets.only(bottom: insets.bottom),
       child: Container(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
@@ -779,33 +887,40 @@ class _EditNoteSheetState extends State<_EditNoteSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Редактировать заметку',
-              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800, color: Colors.black),
+            Text(
+              'Редактировать заметку',
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
             TextField(
               controller: _ctrl,
               maxLines: null,
-              minLines: 9,
+              minLines: 3,
               decoration: InputDecoration(
                 hintText: 'Текст заметки...',
                 filled: true,
                 fillColor: theme.colorScheme.surface,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
               ),
             ),
             const SizedBox(height: 12),
-            Row(
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
                 OutlinedButton(
                   onPressed: _saving ? null : () => Navigator.pop(context),
                   child: const Text('Отмена'),
                 ),
-                const SizedBox(width: 8),
                 FilledButton.icon(
                   onPressed: _saving ? null : _save,
                   icon: _saving
-                      ? const SizedBox(width:16, height:16, child: CircularProgressIndicator(strokeWidth: 2))
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: ProductLoadingIndicator())
                       : const Icon(Icons.save_outlined, size: 18),
                   label: const Text('Сохранить'),
                 ),
@@ -820,12 +935,14 @@ class _EditNoteSheetState extends State<_EditNoteSheet> {
   Future<void> _save() async {
     final text = _ctrl.text.trim();
     if (text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Пустой текст')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Пустой текст')));
       return;
     }
     setState(() => _saving = true);
     try {
-      await SubjectDiaryRepository.instance.updateTextEntry(id: widget.entryId, newText: text);
+      await SubjectDiaryRepository.instance
+          .updateTextEntry(id: widget.entryId, newText: text);
       if (!mounted) return;
       widget.onSaved();
     } finally {

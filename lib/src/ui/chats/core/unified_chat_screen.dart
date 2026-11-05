@@ -1,3 +1,5 @@
+import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_card_envelope.dart';
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:student_platform/src/ui/learning/widgets/authorized_file_image.dart';
 import 'package:student_platform/src/services/chat_file_access.dart';
 // FILE: lib/src/ui/chats/core/unified_chat_screen.dart
@@ -848,23 +850,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         p.endsWith('.webp');
   }
 
-  String? _forwardComposerPreview() {
-    final payload = _stagedForward;
-    if (payload == null || payload.items.isEmpty) return null;
-    final first = payload.items.first;
-    final author =
-        first.authorName.trim().isEmpty ? 'Сообщение' : first.authorName.trim();
-    final text = first.text.trim();
-    if (text.isNotEmpty) {
-      final normalized = text.replaceAll(RegExp(r'\s+'), ' ');
-      return '$author: $normalized';
-    }
-    if (first.files.isNotEmpty) {
-      final fileName = first.files.first.name.trim();
-      return '$author: ${fileName.isEmpty ? 'вложение' : fileName}';
-    }
-    return author;
-  }
+  String? _forwardComposerPreview() => _stagedForward?.composerPreview();
 
   Future<String> _resolveForwardTargetChatId(ForwardTarget target) async {
     final id = target.chatId.trim();
@@ -1527,9 +1513,6 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     final selected = await showMenu<String>(
       context: context,
       position: target,
-      color: Theme.of(context).colorScheme.surface,
-      shadowColor: Colors.black.withOpacity(0.25),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       items: const <PopupMenuEntry<String>>[
         PopupMenuItem<String>(
           value: 'search',
@@ -1537,13 +1520,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.search, size: 20, color: Colors.black),
+              Icon(Icons.search_rounded, size: 20),
               SizedBox(width: 10),
-              Text('Поиск сообщений',
-                  style: TextStyle(
-                      color: Colors.black,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500)),
+              Flexible(child: Text('Поиск сообщений')),
             ],
           ),
         ),
@@ -1615,10 +1594,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                             );
                           },
                     )
-                  : Text(titleText,
-                      style: const TextStyle(color: Colors.black)),
+                  : Text(titleText),
               centerTitle: false,
-              iconTheme: const IconThemeData(color: Colors.black),
+              iconTheme: IconThemeData(color: theme.colorScheme.onSurface),
               actions: [
                 Padding(
                   padding: const EdgeInsets.only(right: 6),
@@ -1628,10 +1606,10 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                       key: _kebabKey,
                       radius: 22,
                       onTap: _openKebabMenu,
-                      child: const Padding(
-                        padding: EdgeInsets.all(10),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
                         child: Icon(Icons.more_horiz,
-                            size: 24, color: Colors.black),
+                            size: 24, color: theme.colorScheme.onSurface),
                       ),
                     ),
                   ),
@@ -1672,31 +1650,23 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
           final pins = list
               .where((m) => m.isPinned)
-              .map((m) => PinEntry.message(
-                    id: m.id,
-                    title: 'Сообщение',
-                    subtitle: m.text.trim().isEmpty ? null : m.text.trim(),
-                    messageId: m.id,
-                  ))
+              .map((m) {
+                final preview = ChatCardPreview.forPreview(m).trim();
+                return PinEntry.message(
+                  id: m.id,
+                  title: 'Сообщение',
+                  subtitle: preview.isEmpty ? null : preview,
+                  messageId: m.id,
+                );
+              })
               .toList();
 
           return Column(
             children: [
               if (_search.isActive)
-                Theme(
-                  data: theme.copyWith(
-                    textTheme: theme.textTheme.apply(
-                      bodyColor: Colors.black,
-                      displayColor: Colors.black,
-                    ),
-                    inputDecorationTheme: theme.inputDecorationTheme.copyWith(
-                      hintStyle: const TextStyle(color: Colors.black54),
-                    ),
-                  ),
-                  child: InlineSearchBar(
+                InlineSearchBar(
                     controller: _search,
                     onClose: () => setState(() => _search.setActive(false)),
-                  ),
                 )
               else if (!_selecting && pins.isNotEmpty)
                 PinnedStripContainer(
@@ -1822,7 +1792,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                             child: SizedBox(
                               width: 22,
                               height: 22,
-                              child: CircularProgressIndicator(strokeWidth: 2),
+                              child: ProductLoadingIndicator(),
                             ),
                           ),
                         ),
@@ -1903,8 +1873,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                                         SizedBox(
                                             width: 20,
                                             height: 20,
-                                            child: CircularProgressIndicator(
-                                                strokeWidth: 2)),
+                                            child: ProductLoadingIndicator()),
                                         SizedBox(width: 12),
                                         Text('Подключение к чату…'),
                                       ],
@@ -2565,7 +2534,7 @@ class _DmBlockedComposerBar extends StatelessWidget {
                     ? const SizedBox(
                         width: 16,
                         height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                        child: ProductLoadingIndicator(),
                       )
                     : const Text('Разблокировать'),
               ),
@@ -2584,6 +2553,7 @@ class _DmTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -2591,13 +2561,13 @@ class _DmTitle extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           CircleAvatar(
-            radius: 14,
-            backgroundColor: Colors.black.withOpacity(.06),
+            radius: 17,
+            backgroundColor: colors.primaryContainer,
             backgroundImage: (avatarUrl != null && avatarUrl!.isNotEmpty)
                 ? CachedNetworkImageProvider(avatarUrl!) as ImageProvider
                 : null,
             child: (avatarUrl == null || avatarUrl!.isEmpty)
-                ? const Icon(Icons.person, size: 18, color: Colors.black)
+                ? Icon(Icons.person_outline_rounded, size: 20, color: colors.onPrimaryContainer)
                 : null,
           ),
           const SizedBox(width: 8),
@@ -2606,8 +2576,8 @@ class _DmTitle extends StatelessWidget {
               title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                  color: Colors.black,
+              style: TextStyle(
+                  color: colors.onSurface,
                   fontSize: 18,
                   fontWeight: FontWeight.w600),
             ),

@@ -108,13 +108,11 @@ class _ComposerState extends State<Composer> {
       child: Container(
         decoration: BoxDecoration(
           color: theme.colorScheme.surface.withValues(alpha: .96),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: .06),
-              blurRadius: 18,
-              offset: const Offset(0, -4),
+          border: Border(
+            top: BorderSide(
+              color: theme.colorScheme.outlineVariant.withValues(alpha: .35),
             ),
-          ],
+          ),
         ),
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
         child: Column(
@@ -225,8 +223,7 @@ class _ComposerState extends State<Composer> {
                 Expanded(
                   child: Container(
                     decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHighest
-                          .withValues(alpha: .58),
+                      color: theme.colorScheme.surfaceContainerHigh,
                       borderRadius: BorderRadius.circular(24),
                       border: Border.all(
                           color:
@@ -269,7 +266,13 @@ class _ComposerState extends State<Composer> {
                                 maxLines: 6,
                                 decoration: const InputDecoration(
                                   hintText: 'Сообщение',
+                                  filled: false,
                                   border: InputBorder.none,
+                                  enabledBorder: InputBorder.none,
+                                  focusedBorder: InputBorder.none,
+                                  disabledBorder: InputBorder.none,
+                                  errorBorder: InputBorder.none,
+                                  focusedErrorBorder: InputBorder.none,
                                   isCollapsed: true,
                                   contentPadding:
                                       EdgeInsets.symmetric(vertical: 12),
@@ -310,11 +313,15 @@ class _ComposerState extends State<Composer> {
                             if (widget.onAttachFile != null)
                               IconButton(
                                 icon: const Icon(Icons.attach_file_rounded),
+                                constraints: const BoxConstraints(minWidth: 40, minHeight: 48),
+                                padding: EdgeInsets.zero,
                                 onPressed: widget.onAttachFile,
                                 tooltip: 'Прикрепить файл',
                               ),
                             IconButton(
                               icon: const Icon(Icons.image_outlined),
+                              constraints: const BoxConstraints(minWidth: 40, minHeight: 48),
+                              padding: EdgeInsets.zero,
                               onPressed: widget.onPickImage,
                               tooltip: 'Прикрепить изображение',
                             ),

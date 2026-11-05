@@ -72,15 +72,17 @@ class MessageBubble extends StatelessWidget {
     final theme = Theme.of(context);
     final isMe = message.isMine(Supabase.instance.client.auth.currentUser?.id);
 
-    final baseBg = isMe
-        ? theme.colorScheme.primary.withValues(alpha: 0.22)
-        : theme.colorScheme.surfaceContainerHighest;
+    final colors = theme.colorScheme;
+    final baseBg = isMe ? colors.primaryContainer : colors.surface;
 
     // Если выбран/под меню — одинаково высветляем оба типа
-    final Color bg =
-        selected ? Colors.white.withValues(alpha: isMe ? 0.85 : 0.78) : baseBg;
+    final Color bg = selected ? colors.secondaryContainer : baseBg;
 
-    final textColor = Colors.black87;
+    final textColor = selected
+        ? colors.onSecondaryContainer
+        : isMe
+            ? colors.onPrimaryContainer
+            : colors.onSurface;
     final displayTime = formatMessageTimeLabel(
       time: time,
       isMe: isMe,
@@ -155,13 +157,23 @@ class MessageBubble extends StatelessWidget {
                     maxWidth: bubbleMaxWidth,
                   ),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 10),
+                    padding: fg != null
+                        ? EdgeInsets.zero
+                        : const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 10),
                     decoration: BoxDecoration(
-                      color: bg,
-                      border: Border.all(
-                          color: Colors.black.withValues(alpha: .06)),
-                      borderRadius: BorderRadius.circular(22),
+                      color: fg != null ? Colors.transparent : bg,
+                      border: fg != null
+                          ? null
+                          : Border.all(
+                              color:
+                                  colors.outlineVariant.withValues(alpha: .45)),
+                      borderRadius: BorderRadius.only(
+                        topLeft: const Radius.circular(20),
+                        topRight: const Radius.circular(20),
+                        bottomLeft: Radius.circular(isMe ? 20 : 7),
+                        bottomRight: Radius.circular(isMe ? 7 : 20),
+                      ),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -180,7 +192,8 @@ class MessageBubble extends StatelessWidget {
                           ),
 
                         if (replyPreview != null ||
-                            (message.attachments != null &&
+                            (fg == null &&
+                                message.attachments != null &&
                                 message.attachments!.isNotEmpty)) ...[
                           GestureDetector(
                             onTap: () {
@@ -204,7 +217,7 @@ class MessageBubble extends StatelessWidget {
                                   Icon(
                                     Icons.reply,
                                     size: 14,
-                                    color: textColor.withValues(alpha: 0.7),
+                                    color: textColor,
                                   ),
                                   const SizedBox(width: 4),
                                   Expanded(
@@ -212,7 +225,7 @@ class MessageBubble extends StatelessWidget {
                                       replyPreview ??
                                           _buildAttachmentPreviewText(),
                                       style: TextStyle(
-                                        color: textColor.withValues(alpha: 0.7),
+                                        color: textColor,
                                         fontSize: 12,
                                         fontStyle: FontStyle.italic,
                                       ),
@@ -288,6 +301,15 @@ class MessageBubble extends StatelessWidget {
                               time: displayTime,
                               textColor: textColor,
                             ),
+                          ] else if (message.isLocal &&
+                              message.outboundFileIds.isNotEmpty &&
+                              (attachments == null ||
+                                  attachments!.isEmpty)) ...[
+                            _TextMessageContent(
+                              text: 'Вложение',
+                              time: displayTime,
+                              textColor: textColor,
+                            ),
                           ] else if (imagePath == null &&
                               (attachments == null ||
                                   attachments!.isEmpty)) ...[
@@ -297,7 +319,7 @@ class MessageBubble extends StatelessWidget {
                               child: Text(
                                 displayTime,
                                 style: TextStyle(
-                                  color: textColor.withValues(alpha: .6),
+                                  color: textColor,
                                   fontSize: 11,
                                 ),
                               ),
@@ -400,7 +422,7 @@ class _TextMessageContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final textStyle = TextStyle(color: textColor, height: 1.24);
     final timeStyle = TextStyle(
-      color: textColor.withValues(alpha: .6),
+      color: textColor,
       fontSize: 11,
       height: 1.0,
     );
@@ -414,14 +436,16 @@ class _TextMessageContent extends StatelessWidget {
         final textPainter = TextPainter(
           text: TextSpan(text: text, style: textStyle),
           textDirection: direction,
+          textScaler: MediaQuery.textScalerOf(context),
           maxLines: 1,
         )..layout(maxWidth: maxWidth);
         final timePainter = TextPainter(
           text: TextSpan(text: time, style: timeStyle),
           textDirection: direction,
+          textScaler: MediaQuery.textScalerOf(context),
           maxLines: 1,
         )..layout();
-        final oneLineFits =
+        final oneLineFits = !textPainter.didExceedMaxLines &&
             textPainter.width + timePainter.width + 10 <= maxWidth;
 
         if (oneLineFits) {

@@ -1,3 +1,4 @@
+import 'package:student_platform/src/ui/chats/core/forward_payload.dart';
 import 'package:flutter/material.dart';
 import '../../models/message.dart';
 import '../../models/chat_file.dart';
@@ -148,7 +149,11 @@ class _ForwardInfoTile extends StatelessWidget {
                       ?.copyWith(color: on.withValues(alpha: .6), height: 1.1)),
               if ((item.text ?? '').isNotEmpty) ...[
                 const SizedBox(height: 6),
-                Text(item.text!, style: t.bodyMedium),
+                Text(
+                    item.text!.contains('__FG__:')
+                        ? ForwardPayload.displayText(item.text!)
+                        : item.text!,
+                    style: t.bodyMedium),
               ],
               if (item.attachments.isNotEmpty) ...[
                 const SizedBox(height: 6),

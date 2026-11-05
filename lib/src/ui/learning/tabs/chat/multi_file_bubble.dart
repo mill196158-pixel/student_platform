@@ -129,12 +129,10 @@ class MultiFileBubble extends StatelessWidget {
                       color: isAllImages
                           ? Colors.transparent
                           : (selected
-                              ? theme.colorScheme.surface
-                                  .withValues(alpha: isMe ? 0.92 : 0.86)
+                              ? theme.colorScheme.secondaryContainer
                               : (isMe
-                                  ? theme.colorScheme.primary
-                                      .withValues(alpha: 0.22)
-                                  : theme.colorScheme.surfaceContainerHighest)),
+                                  ? theme.colorScheme.primaryContainer
+                                  : theme.colorScheme.surface)),
                       border: isAllImages
                           ? null
                           : Border.all(
@@ -145,7 +143,7 @@ class MultiFileBubble extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (!isMe && showAuthorLine && captionText != null) ...[
+                        if (!isMe && showAuthorLine) ...[
                           Padding(
                             padding: const EdgeInsets.only(bottom: 2),
                             child: Text(
@@ -166,7 +164,8 @@ class MultiFileBubble extends StatelessWidget {
                         // Подпись и время в ОДНОЙ строке, прижатой к стороне отправителя (если есть подпись)
                         if (captionText != null) ...[
                           const SizedBox(height: 8),
-                          _captionWithTime(theme, displayTime, captionText),
+                          _captionWithTime(
+                              theme, displayTime, captionText, isAllImages),
                         ] else if (!isAllImages) ...[
                           // Если подписи нет и это не чисто изображения — время отдельной строкой у стороны отправителя
                           Row(
@@ -178,7 +177,11 @@ class MultiFileBubble extends StatelessWidget {
                                 displayTime,
                                 style: TextStyle(
                                   fontSize: 10,
-                                  color: theme.colorScheme.onSurfaceVariant,
+                                  color: selected
+                                      ? theme.colorScheme.onSecondaryContainer
+                                      : isMe
+                                          ? theme.colorScheme.onPrimaryContainer
+                                          : theme.colorScheme.onSurface,
                                 ),
                               ),
                             ],
@@ -255,14 +258,22 @@ class MultiFileBubble extends StatelessWidget {
     ThemeData theme,
     String displayTime,
     String captionText,
+    bool isAllImages,
   ) {
+    final foreground = isAllImages
+        ? theme.colorScheme.onSurface
+        : selected
+            ? theme.colorScheme.onSecondaryContainer
+            : isMe
+                ? theme.colorScheme.onPrimaryContainer
+                : theme.colorScheme.onSurface;
     final caption = Expanded(
       child: Text(
         captionText,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
-          color: theme.colorScheme.onSurface,
+          color: foreground,
           fontSize: 14,
         ),
       ),
@@ -272,7 +283,7 @@ class MultiFileBubble extends StatelessWidget {
       displayTime,
       style: TextStyle(
         fontSize: 10,
-        color: theme.colorScheme.onSurfaceVariant,
+        color: foreground,
       ),
     );
 

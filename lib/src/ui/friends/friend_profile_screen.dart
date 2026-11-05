@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'dart:async';
 import 'dart:convert';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -128,53 +129,54 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
     final other = widget.userId;
     final me = _myId;
 
-    var channel = _sb.channel('public:friends:for:$other')
-      // INSERT: когда у гостя появляется новый друг
-      .onPostgresChanges(
-        event: PostgresChangeEvent.insert,
-        schema: 'public',
-        table: 'friends',
-        filter: PostgresChangeFilter(
-          type: PostgresChangeFilterType.eq,
-          column: 'user_id',
-          value: other,
-        ),
-        callback: (_) async => _onFriendsChangedRealtime(),
-      )
-      .onPostgresChanges(
-        event: PostgresChangeEvent.insert,
-        schema: 'public',
-        table: 'friends',
-        filter: PostgresChangeFilter(
-          type: PostgresChangeFilterType.eq,
-          column: 'friend_id',
-          value: other,
-        ),
-        callback: (_) async => _onFriendsChangedRealtime(),
-      )
-      // DELETE: когда у гостя удаляют друга
-      .onPostgresChanges(
-        event: PostgresChangeEvent.delete,
-        schema: 'public',
-        table: 'friends',
-        filter: PostgresChangeFilter(
-          type: PostgresChangeFilterType.eq,
-          column: 'user_id',
-          value: other,
-        ),
-        callback: (_) async => _onFriendsChangedRealtime(),
-      )
-      .onPostgresChanges(
-        event: PostgresChangeEvent.delete,
-        schema: 'public',
-        table: 'friends',
-        filter: PostgresChangeFilter(
-          type: PostgresChangeFilterType.eq,
-          column: 'friend_id',
-          value: other,
-        ),
-        callback: (_) async => _onFriendsChangedRealtime(),
-      );
+    var channel = _sb
+        .channel('public:friends:for:$other')
+        // INSERT: когда у гостя появляется новый друг
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'friends',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: other,
+          ),
+          callback: (_) async => _onFriendsChangedRealtime(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'friends',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'friend_id',
+            value: other,
+          ),
+          callback: (_) async => _onFriendsChangedRealtime(),
+        )
+        // DELETE: когда у гостя удаляют друга
+        .onPostgresChanges(
+          event: PostgresChangeEvent.delete,
+          schema: 'public',
+          table: 'friends',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: other,
+          ),
+          callback: (_) async => _onFriendsChangedRealtime(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.delete,
+          schema: 'public',
+          table: 'friends',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'friend_id',
+            value: other,
+          ),
+          callback: (_) async => _onFriendsChangedRealtime(),
+        );
 
     // Outgoing/incoming request changes so "Заявка отправлена" updates live.
     if (me != null && me.isNotEmpty) {
@@ -739,7 +741,7 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
         backgroundColor: colorScheme.surface,
         body: Stack(
           children: [
-            const Center(child: CircularProgressIndicator()),
+            const Center(child: ProductLoadingIndicator.page()),
             PositionedDirectional(
               start: 4,
               top: media.padding.top + 4,
@@ -821,7 +823,7 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
                   const SizedBox(height: 10),
                   _GActionLarge(
                     onTap: _openDirectChat,
-                    gradient: _gradBlue,
+                    tint: _actionBlue,
                     icon: Icons.maps_ugc_rounded,
                     text: 'Сообщение',
                   ),
@@ -962,9 +964,6 @@ class _ProfileActionsMenu extends StatelessWidget {
         padding: EdgeInsets.zero,
         offset: const Offset(0, 4),
         position: PopupMenuPosition.under,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        color: scheme.surface,
-        surfaceTintColor: Colors.transparent,
         onSelected: (value) {
           if (busy) return;
           if (value == 'block') onBlock();
@@ -1149,7 +1148,7 @@ class _FriendAction extends StatelessWidget {
             Expanded(
               child: _GActionLarge(
                 onTap: null,
-                gradient: _gradPurple,
+                tint: _actionPurple,
                 icon: Icons.check_circle,
                 text: 'В друзьях',
               ),
@@ -1158,7 +1157,7 @@ class _FriendAction extends StatelessWidget {
             Expanded(
               child: _GActionLarge(
                 onTap: onRemove,
-                gradient: _gradGrey,
+                tint: _actionGrey,
                 icon: Icons.person_remove,
                 text: 'Удалить',
               ),
@@ -1172,7 +1171,7 @@ class _FriendAction extends StatelessWidget {
             Expanded(
               child: _GActionLarge(
                 onTap: null,
-                gradient: _gradBlue,
+                tint: _actionBlue,
                 icon: Icons.hourglass_top,
                 text: 'Заявка отправлена',
               ),
@@ -1181,7 +1180,7 @@ class _FriendAction extends StatelessWidget {
             Expanded(
               child: _GActionLarge(
                 onTap: onCancelRequest,
-                gradient: _gradGrey,
+                tint: _actionGrey,
                 icon: Icons.close,
                 text: 'Отменить',
               ),
@@ -1195,7 +1194,7 @@ class _FriendAction extends StatelessWidget {
             Expanded(
               child: _GActionLarge(
                 onTap: onAccept,
-                gradient: _gradPurple,
+                tint: _actionPurple,
                 icon: Icons.check,
                 text: 'Принять',
               ),
@@ -1204,7 +1203,7 @@ class _FriendAction extends StatelessWidget {
             Expanded(
               child: _GActionLarge(
                 onTap: onDecline,
-                gradient: _gradGrey,
+                tint: _actionGrey,
                 icon: Icons.close,
                 text: 'Отклонить',
               ),
@@ -1220,7 +1219,7 @@ class _FriendAction extends StatelessWidget {
             Expanded(
               child: _GActionLarge(
                 onTap: onAdd,
-                gradient: _gradPurple,
+                tint: _actionPurple,
                 icon: Icons.person_add_alt_1,
                 text: 'Добавить',
               ),
@@ -1523,69 +1522,40 @@ enum _FriendshipState {
   friends,
 }
 
-// Градиенты в фирменной мягкой гамме
-const _gradPurple = [
-  Color(0xFFEDE7F6),
-  Color(0xFFD1C4E9)
-]; // добавить/в друзьях
-const _gradGrey = [Color(0xFFF5F5F5), Color(0xFFE0E0E0)]; // убрать/отменить
-const _gradBlue = [Color(0xFFE3F2FD), Color(0xFFBBDEFB)]; // заявка отправлена
+// Restrained brand accents; action states and callbacks stay in _FriendAction.
+const _actionPurple = Color(0xFF7C63D8);
+const _actionGrey = Color(0xFF606B7E);
+const _actionBlue = Color(0xFF1DA1F2);
 
-/// Универсальная большая «чип-кнопка» с градиентом
 class _GActionLarge extends StatelessWidget {
   final VoidCallback? onTap;
-  final List<Color> gradient;
+  final Color tint;
   final IconData icon;
   final String text;
-  const _GActionLarge({
-    required this.onTap,
-    required this.gradient,
-    required this.icon,
-    required this.text,
-  });
+  const _GActionLarge(
+      {required this.onTap,
+      required this.tint,
+      required this.icon,
+      required this.text});
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final fg = colorScheme.onSurface;
-    final radius = BorderRadius.circular(16);
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: radius,
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-                colors: gradient,
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight),
-            borderRadius: radius,
-            boxShadow: [
-              BoxShadow(
-                color: colorScheme.shadow.withAlpha(28),
-                blurRadius: 4,
-                offset: const Offset(0, 2),
-              )
-            ],
-          ),
-          child: Row(
-            children: [
-              Icon(icon, color: fg, size: 18),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  text,
-                  style: TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w700, color: fg),
-                ),
-              ),
-            ],
-          ),
-        ),
+    final cs = Theme.of(context).colorScheme;
+    final background =
+        Color.alphaBlend(tint.withValues(alpha: 0.07), cs.surface);
+    return OutlinedButton.icon(
+      onPressed: onTap,
+      icon: Icon(icon, size: 18),
+      label: Text(text),
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size(0, 48),
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 14),
+        alignment: Alignment.centerLeft,
+        foregroundColor: cs.onSurface,
+        backgroundColor: background,
+        disabledBackgroundColor: background,
+        disabledForegroundColor: cs.onSurfaceVariant,
+        side: BorderSide(color: cs.outlineVariant),
       ),
     );
   }

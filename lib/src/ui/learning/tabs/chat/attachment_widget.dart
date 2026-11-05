@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:student_platform/src/services/chat_file_access.dart';
 import 'package:flutter/material.dart';
 import 'package:student_platform/src/ui/learning/widgets/authorized_file_image.dart';
@@ -72,7 +73,7 @@ class AttachmentWidget extends StatelessWidget {
             height: double.infinity,
             placeholder: (context, url) => Container(
               color: theme.colorScheme.surfaceContainerHighest,
-              child: const Center(child: CircularProgressIndicator()),
+              child: const Center(child: ProductLoadingIndicator(size: 72)),
             ),
             errorWidget: (context, url, error) => Container(
               color: theme.colorScheme.surfaceContainerHighest,

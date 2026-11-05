@@ -70,9 +70,10 @@ class _NavigationScreenState extends State<NavigationScreen> {
       value: overlay,
       child: MainTabScope(
         switchTo: _switchToTab,
-        child: Scaffold(
-          extendBody: false,
-          body: widget.guest
+        child: StudentWorkspaceFrame(
+          index: _currentIndex,
+          onSelected: (index) => _switchToTab(MainTab.values[index]),
+          child: widget.guest
               ? GuestWorkspace(tab: _currentIndex)
               : PageStorage(
                   bucket: _bucket,
@@ -98,13 +99,6 @@ class _NavigationScreenState extends State<NavigationScreen> {
                     ],
                   ),
                 ),
-          bottomNavigationBar: StudentBottomNav(
-            currentIndex: _currentIndex,
-            items: studentBottomNavItems,
-            onTap: (index) {
-              _switchToTab(MainTab.values[index]);
-            },
-          ),
         ),
       ),
     );

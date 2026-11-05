@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'entity_review_screen.dart';
 import '../profile/student_review_service.dart';
+
 class TeacherProfileScreen extends StatefulWidget {
   final String teacherName;
   final String? teacherId;
@@ -154,7 +155,8 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
       context: context,
       useSafeArea: true,
       isScrollControlled: true,
-      backgroundColor: Colors.transparent,
+      showDragHandle: true,
+      constraints: const BoxConstraints(maxWidth: 600),
       builder: (sheetContext) => _TeacherRatingSheet(
         myScore: _rating?.myScore,
         onVote: (score) {
@@ -176,68 +178,72 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
     final media = MediaQuery.of(context);
 
     return Scaffold(
-      backgroundColor: const Color(0xFFFBFAFF),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Stack(
         children: [
-          ListView(
-            padding: EdgeInsets.zero,
-            children: [
-              _TeacherHero(
-                topPadding: media.padding.top,
-                name: name,
-                department: departmentName,
-                difficulty: difficulty,
-                averageScore: averageScore,
-                voteCount: _rating?.voteCount ?? 0,
-                myScore: _rating?.myScore,
-                ratingLoading: _ratingLoading || _ratingSubmitting,
-                canVote: _rating?.teacherId != null,
-                onRate: _showRatingSheet,
-              ),
-              const SizedBox(height: 14),
-              Padding(
-                padding: EdgeInsets.fromLTRB(
-                  16,
-                  0,
-                  16,
-                  28 + media.padding.bottom,
-                ),
-                child: Column(
-                  children: [
-                    if ((_clean(_publishedAbout) ?? _rating?.aboutOrNull) !=
-                        null) ...[
-                      _ProfileCard(
-                        icon: Icons.info_outline_rounded,
-                        title: 'О преподавателе',
-                        compact: true,
-                        child: _AboutTeacherBlock(
-                          text:
-                              _clean(_publishedAbout) ?? _rating!.aboutOrNull!,
+          Center(
+              child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 760),
+                  child: ListView(
+                    padding: EdgeInsets.zero,
+                    children: [
+                      _TeacherHero(
+                        topPadding: media.padding.top,
+                        name: name,
+                        department: departmentName,
+                        difficulty: difficulty,
+                        averageScore: averageScore,
+                        voteCount: _rating?.voteCount ?? 0,
+                        myScore: _rating?.myScore,
+                        ratingLoading: _ratingLoading || _ratingSubmitting,
+                        canVote: _rating?.teacherId != null,
+                        onRate: _showRatingSheet,
+                      ),
+                      const SizedBox(height: 14),
+                      Padding(
+                        padding: EdgeInsets.fromLTRB(
+                          16,
+                          0,
+                          16,
+                          28 + media.padding.bottom,
+                        ),
+                        child: Column(
+                          children: [
+                            if ((_clean(_publishedAbout) ??
+                                    _rating?.aboutOrNull) !=
+                                null) ...[
+                              _ProfileCard(
+                                icon: Icons.info_outline_rounded,
+                                title: 'О преподавателе',
+                                compact: true,
+                                child: _AboutTeacherBlock(
+                                  text: _clean(_publishedAbout) ??
+                                      _rating!.aboutOrNull!,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                            ],
+                            if (subject != null)
+                              _ProfileCard(
+                                icon: Icons.auto_stories_outlined,
+                                title: 'Предмет',
+                                compact: true,
+                                child: _SubjectRow(
+                                  title: subject,
+                                  semesterNumber: widget.semesterNumber,
+                                  subjectDifficultyAvg: _subjectDifficultyAvg,
+                                ),
+                              ),
+                            const SizedBox(height: 10),
+                            _TeacherReviewEntry(
+                              teacherId: widget.teacherId ?? _rating?.teacherId,
+                              teacherName: name,
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 10),
                     ],
-                    if (subject != null)
-                      _ProfileCard(
-                        icon: Icons.auto_stories_outlined,
-                        title: 'Предмет',
-                        compact: true,
-                        child: _SubjectRow(
-                          title: subject,
-                          semesterNumber: widget.semesterNumber,
-                          subjectDifficultyAvg: _subjectDifficultyAvg,
-                        ),
-                      ),
-                    const SizedBox(height: 10),
-                    _TeacherReviewEntry(
-                      teacherId: widget.teacherId ?? _rating?.teacherId,
-                      teacherName: name,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+                  ))),
           PositionedDirectional(
             start: 4,
             top: media.padding.top + 4,
@@ -544,72 +550,55 @@ class _TeacherHero extends StatelessWidget {
       width: double.infinity,
       padding: EdgeInsets.fromLTRB(18, topPadding + 8, 18, 18),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFEDE4FF), Color(0xFFF8F4FF), Colors.white],
-        ),
-        borderRadius: const BorderRadius.vertical(
-          bottom: Radius.circular(30),
-        ),
-        border: Border(
-          bottom: BorderSide(
-            color: const Color(0xFF6A4BBC).withValues(alpha: 0.08),
-          ),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF6A4BBC).withValues(alpha: 0.12),
-            blurRadius: 30,
-            offset: const Offset(0, 14),
-          ),
-        ],
+        color: theme.colorScheme.surface,
+        border:
+            Border(bottom: BorderSide(color: theme.colorScheme.outlineVariant)),
       ),
       child: Column(
         children: [
           _DifficultyAvatar(difficulty: difficulty),
-          const SizedBox(height: 12),
+          SizedBox(height: 12),
           Text(
             name,
             maxLines: 3,
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
             style: theme.textTheme.headlineSmall?.copyWith(
-              color: Colors.black,
-              fontWeight: FontWeight.w900,
+              color: theme.colorScheme.onSurface,
+              fontWeight: FontWeight.w700,
               height: 1.08,
             ),
           ),
           if (department != null) ...[
-            const SizedBox(height: 7),
+            SizedBox(height: 7),
             Text(
               department!,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium?.copyWith(
-                color: Colors.black54,
+                color: theme.colorScheme.onSurfaceVariant,
                 fontWeight: FontWeight.w700,
               ),
             ),
           ],
           if (difficulty.isKnown) ...[
-            const SizedBox(height: 10),
+            SizedBox(height: 10),
             _StatusPill(
               icon: Icons.auto_awesome_rounded,
               text: difficulty.title,
             ),
-            const SizedBox(height: 8),
+            SizedBox(height: 8),
             Text(
               difficulty.story,
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(
-                color: Colors.black54,
+                color: theme.colorScheme.onSurfaceVariant,
                 height: 1.3,
               ),
             ),
           ],
-          const SizedBox(height: 12),
+          SizedBox(height: 12),
           Text(
             difficulty.isKnown
                 ? '${averageScore!.toStringAsFixed(1)} из 5 · '
@@ -617,24 +606,24 @@ class _TeacherHero extends StatelessWidget {
                 : 'Сложность сдачи преподавателю пока не оценена',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodySmall?.copyWith(
-              color: Colors.black54,
+              color: theme.colorScheme.onSurfaceVariant,
               fontWeight: FontWeight.w700,
             ),
           ),
-          const SizedBox(height: 10),
+          SizedBox(height: 10),
           FilledButton.tonalIcon(
             onPressed: canVote && !ratingLoading ? onRate : null,
             style: FilledButton.styleFrom(
               visualDensity: VisualDensity.compact,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-              minimumSize: const Size(0, 38),
+              minimumSize: Size(0, 48),
             ),
             icon: ratingLoading
                 ? const SizedBox.square(
                     dimension: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    child: ProductLoadingIndicator(),
                   )
-                : const Icon(Icons.star_rounded, size: 18),
+                : Icon(Icons.star_rounded, size: 18),
             label: Text(myScore == null ? 'Оценить' : 'Моя оценка: $myScore'),
           ),
         ],
@@ -664,14 +653,7 @@ class _DifficultyAvatar extends StatelessWidget {
       height: 104,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: const Color(0xFFEDE4FF),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF6A4BBC).withValues(alpha: 0.25),
-            blurRadius: 22,
-            offset: const Offset(0, 10),
-          ),
-        ],
+        color: Theme.of(context).colorScheme.primaryContainer,
       ),
       child: ClipOval(
         child: _CenteredDifficultyImage(
@@ -703,11 +685,11 @@ class _CenteredDifficultyImage extends StatelessWidget {
           alignment: Alignment.center,
           gaplessPlayback: true,
           errorBuilder: (_, __, ___) => ColoredBox(
-            color: const Color(0xFFEDE4FF),
+            color: Theme.of(context).colorScheme.primaryContainer,
             child: Center(
               child: Icon(
                 Icons.person_outline_rounded,
-                color: const Color(0xFF6A4BBC),
+                color: Theme.of(context).colorScheme.primary,
                 size: fallbackIconSize,
               ),
             ),
@@ -781,9 +763,9 @@ class _TeacherDifficultyAvatarState extends State<TeacherDifficultyAvatar> {
       height: widget.size,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: const Color(0xFFEDE4FF),
+        color: Theme.of(context).colorScheme.primaryContainer,
         border: Border.all(
-          color: const Color(0xFF6A4BBC).withValues(alpha: 0.14),
+          color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.14),
         ),
       ),
       child: ClipOval(
@@ -801,112 +783,51 @@ class _ProfileCard extends StatelessWidget {
   final String title;
   final Widget child;
   final bool compact;
-
-  const _ProfileCard({
-    required this.icon,
-    required this.title,
-    required this.child,
-    this.compact = false,
-  });
-
+  const _ProfileCard(
+      {required this.icon,
+      required this.title,
+      required this.child,
+      this.compact = false});
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final iconSize = compact ? 30.0 : 36.0;
-    return Container(
-      padding: EdgeInsets.all(compact ? 12 : 16),
-      decoration: BoxDecoration(
+    return Material(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(compact ? 20 : 24),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: compact ? 12 : 18,
-            offset: Offset(0, compact ? 5 : 7),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: iconSize,
-                height: iconSize,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF6A4BBC).withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(compact ? 10 : 12),
-                ),
-                child: Icon(
-                  icon,
-                  color: const Color(0xFF6A4BBC),
-                  size: compact ? 17 : 19,
-                ),
-              ),
-              SizedBox(width: compact ? 8 : 10),
-              Expanded(
-                child: Text(
-                  title,
-                  style: (compact
-                          ? theme.textTheme.titleSmall
-                          : theme.textTheme.titleMedium)
-                      ?.copyWith(
-                    color: Colors.black,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          SizedBox(height: compact ? 8 : 14),
-          child,
-        ],
-      ),
-    );
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(color: theme.colorScheme.outlineVariant)),
+        child: Padding(
+            padding: EdgeInsets.all(compact ? 16 : 20),
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Icon(icon, color: theme.colorScheme.primary, size: 20),
+                const SizedBox(width: 8),
+                Expanded(child: Text(title, style: theme.textTheme.titleSmall)),
+              ]),
+              const SizedBox(height: 12),
+              child,
+            ])));
   }
 }
 
 class _AboutTeacherBlock extends StatelessWidget {
   final String text;
-
   const _AboutTeacherBlock({required this.text});
-
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8F5FF),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Text(
-        text,
-        style: theme.textTheme.bodyMedium?.copyWith(
-          color: Colors.black.withValues(alpha: 0.78),
-          height: 1.28,
-          fontSize: 13.5,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Text(text,
+      style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.45));
 }
 
 class _SubjectRow extends StatelessWidget {
   final String title;
   final int? semesterNumber;
   final double? subjectDifficultyAvg;
-
-  const _SubjectRow({
-    required this.title,
-    required this.semesterNumber,
-    this.subjectDifficultyAvg,
-  });
-
+  const _SubjectRow(
+      {required this.title,
+      required this.semesterNumber,
+      this.subjectDifficultyAvg});
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -917,196 +838,110 @@ class _SubjectRow extends StatelessWidget {
         : 'нет оценок';
     final semesterLabel =
         semesterNumber == null ? null : '$semesterNumber-й семестр';
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8F5FF),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 34,
-            height: 34,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: const Color(0xFF6A4BBC),
-              borderRadius: BorderRadius.circular(11),
-            ),
-            child: Text(
-              title.substring(0, 1).toUpperCase(),
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w900,
-                fontSize: 15,
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: Colors.black,
-                    fontWeight: FontWeight.w800,
-                    height: 1.2,
-                    fontSize: 13.5,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    Icon(
-                      Icons.local_fire_department_rounded,
-                      size: 14,
-                      color: hasSubjectScore
-                          ? const Color(0xFFE67E22)
-                          : Colors.black38,
-                    ),
-                    const SizedBox(width: 3),
-                    Flexible(
-                      child: Text(
-                        'Сложность: $difficultyLabel',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color:
-                              hasSubjectScore ? Colors.black87 : Colors.black45,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
-                    if (semesterLabel != null) ...[
-                      Text(
-                        ' · ',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: Colors.black38,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      Text(
-                        semesterLabel,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: Colors.black45,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
+    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Container(
+          width: 36,
+          height: 36,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+              color: theme.colorScheme.primaryContainer,
+              borderRadius: BorderRadius.circular(10)),
+          child: Text(title.substring(0, 1).toUpperCase(),
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(color: theme.colorScheme.onPrimaryContainer))),
+      const SizedBox(width: 12),
+      Expanded(
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(title,
+            style: theme.textTheme.bodyMedium
+                ?.copyWith(fontWeight: FontWeight.w600)),
+        const SizedBox(height: 6),
+        Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text('Сложность: $difficultyLabel',
+                  style: theme.textTheme.bodySmall),
+              if (semesterLabel != null)
+                Text(semesterLabel, style: theme.textTheme.bodySmall),
+            ]),
+      ])),
+    ]);
   }
 }
 
 class _TeacherRatingSheet extends StatelessWidget {
   final int? myScore;
   final ValueChanged<int> onVote;
-
-  const _TeacherRatingSheet({
-    required this.myScore,
-    required this.onVote,
-  });
+  const _TeacherRatingSheet({required this.myScore, required this.onVote});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
-      decoration: const BoxDecoration(
-        color: Color(0xFFFBFAFF),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 42,
-            height: 4,
-            decoration: BoxDecoration(
-              color: Colors.black12,
-              borderRadius: BorderRadius.circular(999),
-            ),
+    final cs = theme.colorScheme;
+    return SafeArea(
+        top: false,
+        child: ConstrainedBox(
+          constraints:
+              BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * .8),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Expanded(
+                        child: Text('Сложность сдачи преподавателю',
+                            style: theme.textTheme.titleLarge)),
+                    IconButton(
+                        tooltip: 'Закрыть без оценки',
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close_rounded)),
+                  ]),
+                  const SizedBox(height: 8),
+                  Text('1 звезда — очень тяжело, 5 звёзд — легко',
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(color: cs.onSurfaceVariant)),
+                  const SizedBox(height: 24),
+                  Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      alignment: WrapAlignment.center,
+                      children: [
+                        for (var score = 1; score <= 5; score++)
+                          IconButton.filledTonal(
+                              tooltip: '$score из 5',
+                              onPressed: () => onVote(score),
+                              constraints: const BoxConstraints(
+                                  minWidth: 48, minHeight: 48),
+                              style: IconButton.styleFrom(
+                                  backgroundColor:
+                                      myScore != null && score <= myScore!
+                                          ? cs.secondaryContainer
+                                          : cs.surfaceContainerHigh,
+                                  foregroundColor:
+                                      myScore != null && score <= myScore!
+                                          ? cs.onSecondaryContainer
+                                          : cs.primary),
+                              icon: Icon(
+                                  myScore != null && score <= myScore!
+                                      ? Icons.star_rounded
+                                      : Icons.star_border_rounded,
+                                  size: 28)),
+                      ]),
+                  const SizedBox(height: 16),
+                  Text(
+                      myScore == null
+                          ? 'Нажмите на звезду, чтобы сохранить оценку'
+                          : 'Текущая оценка: $myScore из 5',
+                      style: theme.textTheme.bodySmall,
+                      textAlign: TextAlign.center),
+                ]),
           ),
-          const SizedBox(height: 18),
-          Text(
-            'Сложность сдачи преподавателю',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.titleLarge?.copyWith(
-              color: Colors.black,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            '1 звезда — очень тяжело, 5 звёзд — легко',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: Colors.black54,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 22),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(
-              5,
-              (index) {
-                final score = index + 1;
-                final selected = myScore != null && score <= myScore!;
-                return Padding(
-                  padding: EdgeInsets.only(right: index == 4 ? 0 : 6),
-                  child: InkResponse(
-                    onTap: () => onVote(score),
-                    radius: 28,
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 180),
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: selected
-                            ? const Color(0xFFFFF1D6)
-                            : const Color(0xFFF1ECFA),
-                      ),
-                      child: Icon(
-                        selected
-                            ? Icons.star_rounded
-                            : Icons.star_border_rounded,
-                        color: selected
-                            ? const Color(0xFFFFA928)
-                            : const Color(0xFF6A4BBC),
-                        size: 28,
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            myScore == null
-                ? 'Нажмите на звезду, чтобы сохранить оценку'
-                : 'Текущая оценка: $myScore из 5',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: Colors.black45,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
+        ));
   }
 }
 
@@ -1123,7 +958,7 @@ class _TeacherReviewEntry extends StatelessWidget {
   Widget build(BuildContext context) {
     final id = (teacherId ?? '').trim();
     if (id.isEmpty) {
-      return const _ProfileCard(
+      return _ProfileCard(
         icon: Icons.forum_outlined,
         title: 'Отзывы студентов',
         compact: true,
@@ -1137,9 +972,9 @@ class _TeacherReviewEntry extends StatelessWidget {
       compact: true,
       child: ListTile(
         contentPadding: EdgeInsets.zero,
-        title: const Text('Оставить или изменить отзыв'),
-        subtitle: const Text('После модерации начисляется 1 балл'),
-        trailing: const Icon(Icons.chevron_right_rounded),
+        title: Text('Оставить или изменить отзыв'),
+        subtitle: Text('После модерации начисляется 1 балл'),
+        trailing: Icon(Icons.chevron_right_rounded),
         onTap: () => Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => EntityReviewScreen(
@@ -1164,18 +999,18 @@ class _ReviewsPausedState extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFF5F6FA),
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(18),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(
+          Icon(
             Icons.shield_outlined,
-            color: Color(0xFF6A4BBC),
+            color: Theme.of(context).colorScheme.primary,
             size: 22,
           ),
-          const SizedBox(width: 10),
+          SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1183,15 +1018,15 @@ class _ReviewsPausedState extends StatelessWidget {
                 Text(
                   'Раздел готовится',
                   style: theme.textTheme.titleSmall?.copyWith(
-                    color: Colors.black,
-                    fontWeight: FontWeight.w900,
+                    color: Theme.of(context).colorScheme.onSurface,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(height: 3),
+                SizedBox(height: 3),
                 Text(
                   'Отзывы появятся после подключения модерации.',
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: Colors.black54,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                     height: 1.3,
                   ),
                 ),
@@ -1218,22 +1053,24 @@ class _StatusPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.82),
+        color: Theme.of(context).colorScheme.primaryContainer,
         borderRadius: BorderRadius.circular(999),
         border: Border.all(
-          color: const Color(0xFF6A4BBC).withValues(alpha: 0.10),
+          color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.10),
         ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 15, color: const Color(0xFF6A4BBC)),
-          const SizedBox(width: 6),
+          Icon(icon,
+              size: 15,
+              color: Theme.of(context).colorScheme.onPrimaryContainer),
+          SizedBox(width: 6),
           Text(
             text,
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: const Color(0xFF6A4BBC),
-                  fontWeight: FontWeight.w900,
+                  color: Theme.of(context).colorScheme.onPrimaryContainer,
+                  fontWeight: FontWeight.w700,
                 ),
           ),
         ],
@@ -1249,9 +1086,9 @@ class _TopBackButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: Colors.transparent,
-      shape: const CircleBorder(),
+      shape: CircleBorder(),
       child: InkWell(
-        customBorder: const CircleBorder(),
+        customBorder: CircleBorder(),
         onTap: () => Navigator.maybePop(context),
         child: SizedBox(
           width: 48,

@@ -1,3 +1,5 @@
+import '../guest/guest_public_service.dart';
+import '../guest/guest_surface.dart' show GuestActionTile;
 import '../shared/student_section_headers.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -28,6 +30,7 @@ import 'vacancy_service.dart';
 import 'vacancy_submission_service.dart';
 import 'subject_info_screen.dart';
 import 'useful_subject.dart';
+import 'semester_subjects_picker.dart';
 import 'useful_subjects_repository.dart';
 
 enum _UsefulFilter { all, exams, credits, practices, courseWorks }
@@ -35,7 +38,8 @@ enum _UsefulFilter { all, exams, credits, practices, courseWorks }
 enum _UsefulSection { subjects, help, jobs }
 
 BoxConstraints _fullWidthSheetConstraints(BuildContext context) {
-  return BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width);
+  return BoxConstraints(
+      maxWidth: MediaQuery.sizeOf(context).width.clamp(0.0, 720.0));
 }
 
 Future<void> _openManagedExternalUrl(BuildContext context, String url) async {
@@ -1007,7 +1011,6 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
         (MediaQuery.paddingOf(context).top + 86.0).clamp(128.0, 150.0);
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F7FB),
       body: FutureBuilder<InfoPlanState>(
         future: _future,
         builder: (context, snapshot) {
@@ -1040,7 +1043,7 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
     InfoPlanState? state,
   ) {
     if (snapshot.connectionState != ConnectionState.done) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: ProductLoadingIndicator.page());
     }
 
     if (_section == _UsefulSection.help) {
@@ -1467,65 +1470,37 @@ class _SectionChoiceTile extends StatelessWidget {
   final String subtitle;
   final bool selected;
   final VoidCallback onTap;
-
-  const _SectionChoiceTile({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.selected,
-    required this.onTap,
-  });
+  const _SectionChoiceTile(
+      {required this.icon,
+      required this.title,
+      required this.subtitle,
+      required this.selected,
+      required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(18),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: selected
-              ? theme.colorScheme.primary.withValues(alpha: 0.10)
-              : theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(
-            color: selected
-                ? theme.colorScheme.primary.withValues(alpha: 0.22)
-                : Colors.black.withValues(alpha: 0.06),
-          ),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, color: theme.colorScheme.primary),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: Colors.black,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.black.withValues(alpha: 0.58),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (selected)
-              Icon(Icons.check_circle_rounded,
-                  color: theme.colorScheme.primary),
-          ],
-        ),
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: ListTile(
+        selected: selected,
+        selectedTileColor: cs.primaryContainer.withValues(alpha: .45),
+        selectedColor: cs.onSurface,
+        iconColor: cs.onSurfaceVariant,
+        textColor: cs.onSurface,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        leading: Icon(icon, color: selected ? cs.primary : cs.onSurfaceVariant),
+        title: Text(title),
+        subtitle: Text(subtitle,
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: cs.onSurfaceVariant)),
+        trailing: Icon(
+            selected ? Icons.check_rounded : Icons.chevron_right_rounded,
+            color: selected ? cs.primary : cs.onSurfaceVariant),
+        onTap: onTap,
       ),
     );
   }
@@ -1551,11 +1526,7 @@ class InfoAcademicContextStrip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Colors.white, Color(0xFFF8F4FF)],
-        ),
+        color: theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(22),
         border: Border.all(
             color: theme.colorScheme.primary.withValues(alpha: 0.10)),
@@ -1615,9 +1586,9 @@ class _SessionDifficultyMeter extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.90),
+        color: theme.colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1637,7 +1608,7 @@ class _SessionDifficultyMeter extends StatelessWidget {
                 Text(
                   'Сложность сессии',
                   style: theme.textTheme.labelSmall?.copyWith(
-                    color: Colors.black45,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.w800,
                     height: 1.1,
                   ),
@@ -1646,7 +1617,7 @@ class _SessionDifficultyMeter extends StatelessWidget {
                 Text(
                   summary.valueLabel,
                   style: theme.textTheme.titleSmall?.copyWith(
-                    color: Colors.black87,
+                    color: Theme.of(context).colorScheme.onSurface,
                     fontWeight: FontWeight.w900,
                     height: 1.15,
                   ),
@@ -1677,10 +1648,10 @@ class _ContextPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.86),
+        color: theme.colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: Colors.black.withValues(alpha: 0.05),
+          color: Theme.of(context).colorScheme.outlineVariant,
         ),
       ),
       child: Row(
@@ -1696,7 +1667,7 @@ class _ContextPill extends StatelessWidget {
                 Text(
                   label,
                   style: theme.textTheme.labelSmall?.copyWith(
-                    color: Colors.black45,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.w800,
                     height: 1,
                   ),
@@ -1707,7 +1678,7 @@ class _ContextPill extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.labelMedium?.copyWith(
-                    color: Colors.black87,
+                    color: Theme.of(context).colorScheme.onSurface,
                     fontWeight: FontWeight.w900,
                     height: 1,
                   ),
@@ -1753,9 +1724,9 @@ class _SemesterSubjectsSection extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1791,16 +1762,16 @@ class _SemesterSubjectsSection extends StatelessWidget {
                     children: [
                       Text(
                         title,
-                        style: const TextStyle(
-                          color: Colors.black87,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurface,
                           fontWeight: FontWeight.w900,
                         ),
                       ),
                       const SizedBox(height: 2),
                       Text(
                         '${subjects.length} ${_pluralRu(subjects.length, 'дисциплина', 'дисциплины', 'дисциплин')}',
-                        style: const TextStyle(
-                            color: Colors.black54, fontSize: 12),
+                        style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12),
                       ),
                     ],
                   ),
@@ -1814,6 +1785,20 @@ class _SemesterSubjectsSection extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
+          if (selectedFilter != _UsefulFilter.all)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: InputChip(
+                label: Text(_filterLabel(selectedFilter)),
+                deleteButtonTooltipMessage: 'Показать все типы',
+                onDeleted: () => onSortApplied(null, _UsefulFilter.all),
+                backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                labelStyle: TextStyle(
+                    color: Theme.of(context).colorScheme.onPrimaryContainer),
+                deleteIconColor:
+                    Theme.of(context).colorScheme.onPrimaryContainer,
+              ),
+            ),
           if (subjects.isEmpty)
             const Padding(
               padding: EdgeInsets.fromLTRB(4, 8, 4, 16),
@@ -1839,117 +1824,25 @@ class _SemesterSubjectsSection extends StatelessWidget {
   }
 
   Future<void> _showSubjectsSortSheet(BuildContext context) async {
-    var draftSemester = semester;
-    var draftFilter = selectedFilter;
-
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      constraints: _fullWidthSheetConstraints(context),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            return SafeArea(
-              child: SizedBox(
-                width: double.infinity,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 22),
-                  child: SingleChildScrollView(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Предметы семестра',
-                          style:
-                              Theme.of(context).textTheme.titleLarge?.copyWith(
-                                    color: Colors.black,
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Выберите семестр и тип контроля',
-                          style:
-                              Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                    color: Colors.black54,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'Семестр',
-                          style:
-                              Theme.of(context).textTheme.titleSmall?.copyWith(
-                                    color: Colors.black87,
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                        ),
-                        const SizedBox(height: 8),
-                        ...semesters.map(
-                          (value) => _ChoiceSheetTile(
-                            title: 'Семестр $value',
-                            subtitle:
-                                value == currentSemester ? 'текущий' : null,
-                            selected: value == draftSemester,
-                            onTap: () {
-                              setSheetState(() => draftSemester = value);
-                            },
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          'Тип',
-                          style:
-                              Theme.of(context).textTheme.titleSmall?.copyWith(
-                                    color: Colors.black87,
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                        ),
-                        const SizedBox(height: 8),
-                        ..._UsefulFilter.values.map(
-                          (filter) => _ChoiceSheetTile(
-                            title: _filterLabel(filter),
-                            selected: filter == draftFilter,
-                            onTap: () {
-                              setSheetState(() => draftFilter = filter);
-                            },
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        SizedBox(
-                          width: double.infinity,
-                          child: FilledButton(
-                            onPressed: () {
-                              Navigator.of(sheetContext).pop();
-                              final semesterChanged = draftSemester != null &&
-                                  draftSemester != semester;
-                              final filterChanged =
-                                  draftFilter != selectedFilter;
-                              if (semesterChanged || filterChanged) {
-                                onSortApplied(
-                                  semesterChanged ? draftSemester : null,
-                                  draftFilter,
-                                );
-                              }
-                            },
-                            child: const Text('Готово'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
+    final selection = await showSemesterSubjectsPicker<_UsefulFilter>(
+      context,
+      semesters: semesters,
+      semester: semester,
+      currentSemester: currentSemester,
+      filters: [
+        for (final filter in _UsefulFilter.values)
+          SubjectFilterOption(filter, _filterLabel(filter))
+      ],
+      selectedFilter: selectedFilter,
     );
+    if (selection == null) return;
+    final semesterChanged =
+        selection.semester != null && selection.semester != semester;
+    final filterChanged = selection.filter != selectedFilter;
+    if (semesterChanged || filterChanged) {
+      onSortApplied(
+          semesterChanged ? selection.semester : null, selection.filter);
+    }
   }
 }
 
@@ -1997,7 +1890,7 @@ class _ControlGroupBlock extends StatelessWidget {
                   child: Text(
                     label,
                     style: theme.textTheme.titleSmall?.copyWith(
-                      color: Colors.black87,
+                      color: Theme.of(context).colorScheme.onSurface,
                       fontWeight: FontWeight.w900,
                     ),
                   ),
@@ -2007,13 +1900,13 @@ class _ControlGroupBlock extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.82),
+                    color: theme.colorScheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
                     '${subjects.length}',
                     style: theme.textTheme.labelSmall?.copyWith(
-                      color: accent,
+                      color: theme.colorScheme.onSurfaceVariant,
                       fontWeight: FontWeight.w900,
                     ),
                   ),
@@ -2470,163 +2363,47 @@ class _FancySearchPanel extends StatelessWidget {
   }
 }
 
-class _HelpSummaryCard extends StatelessWidget {
-  final bool showLegacyDemoBadge;
-
-  const _HelpSummaryCard({this.showLegacyDemoBadge = false});
-
+class _BaseSectionIntro extends StatelessWidget {
+  const _BaseSectionIntro(
+      {required this.icon, required this.title, required this.subtitle});
+  final IconData icon;
+  final String title;
+  final String subtitle;
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final primary = theme.colorScheme.primary;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        gradient: LinearGradient(
-          colors: [
-            primary.withValues(alpha: 0.88),
-            primary.withValues(alpha: 0.52),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: primary.withValues(alpha: 0.16),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.16),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(
-              Icons.help_outline_rounded,
-              color: Colors.white,
-              size: 22,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Справочная информация',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w900,
-                    height: 1.15,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  showLegacyDemoBadge
-                      ? 'Пример справочных материалов'
-                      : 'Доступы, документы, программы, карта и частые вопросы',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: Colors.white.withValues(alpha: 0.88),
-                    height: 1.25,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 8, 4, 16),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Icon(icon, size: 28, color: theme.colorScheme.primary),
+        const SizedBox(width: 14),
+        Expanded(
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(title,
+              style: theme.textTheme.titleLarge
+                  ?.copyWith(color: theme.colorScheme.onSurface)),
+          const SizedBox(height: 6),
+          Text(subtitle,
+              style: theme.textTheme.bodyMedium
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+        ])),
+      ]),
     );
   }
 }
 
-class _ChoiceSheetTile extends StatelessWidget {
-  final String title;
-  final String? subtitle;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _ChoiceSheetTile({
-    required this.title,
-    this.subtitle,
-    required this.selected,
-    required this.onTap,
-  });
-
+class _HelpSummaryCard extends StatelessWidget {
+  final bool showLegacyDemoBadge;
+  const _HelpSummaryCard({this.showLegacyDemoBadge = false});
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(13),
-        decoration: BoxDecoration(
-          color: selected
-              ? theme.colorScheme.primary.withValues(alpha: 0.10)
-              : theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Row(
-                children: [
-                  Flexible(
-                    child: Text(
-                      title,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        color: Colors.black,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ),
-                  if (subtitle != null) ...[
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color:
-                            theme.colorScheme.primary.withValues(alpha: 0.10),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        subtitle!,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: theme.colorScheme.primary,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            if (selected)
-              Icon(Icons.check_circle_rounded,
-                  color: theme.colorScheme.primary),
-          ],
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => _BaseSectionIntro(
+        icon: Icons.help_outline_rounded,
+        title: 'Справочная информация',
+        subtitle: showLegacyDemoBadge
+            ? 'Пример справочных материалов'
+            : 'Доступы, документы, программы, карта и частые вопросы',
+      );
 }
 
 class _HelpSection extends StatelessWidget {
@@ -2807,140 +2584,35 @@ class _JobsHeroCard extends StatelessWidget {
     required this.submissionService,
   });
 
-  static const _minTouch = 40.0;
-
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final primary = theme.colorScheme.primary;
-    final actionStyle = theme.textTheme.labelLarge?.copyWith(
-      fontWeight: FontWeight.w800,
-      fontSize: 12,
-      height: 1.1,
-    );
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            primary.withValues(alpha: 0.92),
-            const Color(0xFF8E6BE8),
-          ],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: primary.withValues(alpha: 0.16),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
-          ),
-        ],
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      _BaseSectionIntro(
+        icon: Icons.work_outline_rounded,
+        title: 'Доска вакансий',
+        subtitle: showLegacyDemoBadge
+            ? 'Пример вакансий для просмотра'
+            : 'Подработки, стажировки и проектные задачи.',
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(
-                  Icons.work_outline_rounded,
-                  color: Colors.white,
-                  size: 18,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Доска вакансий',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w900,
-                        height: 1.15,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      showLegacyDemoBadge
-                          ? 'Пример вакансий для просмотра'
-                          : 'Подработки, стажировки и проектные задачи.',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: Colors.white.withValues(alpha: 0.88),
-                        height: 1.25,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: _minTouch),
-                  child: Tooltip(
-                    message: 'Предложить вакансию',
-                    child: FilledButton.icon(
-                      onPressed: () => _openProposeVacancy(context),
-                      icon: const Icon(Icons.add_rounded, size: 16),
-                      label: const Text('Предложить'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: primary,
-                        minimumSize: const Size(0, _minTouch),
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        visualDensity: VisualDensity.compact,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        textStyle: actionStyle,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: _minTouch),
-                  child: OutlinedButton.icon(
-                    onPressed: () => _openMyVacancySubmissions(context),
-                    icon: const Icon(Icons.inbox_outlined, size: 16),
-                    label: const Text('Мои заявки'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white,
-                      side: const BorderSide(color: Colors.white70),
-                      minimumSize: const Size(0, _minTouch),
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      visualDensity: VisualDensity.compact,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      textStyle: actionStyle,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
+      Padding(
+        padding: const EdgeInsets.fromLTRB(4, 0, 4, 16),
+        child: Row(children: [
+          Expanded(
+              child: FilledButton.icon(
+            onPressed: () => _openProposeVacancy(context),
+            icon: const Icon(Icons.add_rounded, size: 18),
+            label: const Text('Предложить'),
+          )),
+          const SizedBox(width: 12),
+          Expanded(
+              child: OutlinedButton.icon(
+            onPressed: () => _openMyVacancySubmissions(context),
+            icon: const Icon(Icons.inbox_outlined, size: 18),
+            label: const Text('Мои заявки'),
+          )),
+        ]),
       ),
-    );
+    ]);
   }
 
   void _openProposeVacancy(BuildContext context) {
@@ -3055,40 +2727,19 @@ class _JobsGroupSection extends StatelessWidget {
 class _HelpGroupSection extends StatelessWidget {
   final String title;
   final List<Widget> cards;
-
-  const _HelpGroupSection({
-    required this.title,
-    required this.cards,
-  });
-
+  const _HelpGroupSection({required this.title, required this.cards});
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.fromLTRB(10, 10, 10, 2),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(bottom: 14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
-            child: Text(
-              title,
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    color: Colors.black87,
-                    fontWeight: FontWeight.w900,
-                  ),
-            ),
-          ),
+              padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
+              child: Text(title,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurface))),
           ...cards,
-        ],
-      ),
-    );
-  }
+        ]),
+      );
 }
 
 /// Public subject card used by Info tab (exported for focused widget tests).
@@ -3096,6 +2747,7 @@ class InfoSubjectCard extends StatelessWidget {
   final UsefulSubject item;
   final Widget? details;
   final Widget? trailing;
+  final bool showMetadata;
   final ValueChanged<UsefulSubject>? onOpen;
 
   const InfoSubjectCard({
@@ -3104,84 +2756,86 @@ class InfoSubjectCard extends StatelessWidget {
     this.onOpen,
     this.details,
     this.trailing,
+    this.showMetadata = true,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final controlText = item.controlForm.isEmpty
         ? 'Форма контроля уточняется'
         : item.controlForm;
     final accent = _controlAccent(controlText);
-
-    return InkWell(
-      onTap: () {
-        if (onOpen != null) {
-          onOpen!(item);
-          return;
-        }
-        _openSubjectInfo(context, item);
-      },
-      borderRadius: BorderRadius.circular(22),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Colors.white,
-              accent.withValues(alpha: 0.055),
-            ],
-          ),
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: accent.withValues(alpha: 0.12)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.035),
-              blurRadius: 16,
-              offset: const Offset(0, 5),
-            ),
-          ],
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: colors.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: colors.outlineVariant.withValues(alpha: .45)),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () {
+            if (onOpen != null) {
+              onOpen!(item);
+            } else {
+              _openSubjectInfo(context, item);
+            }
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _SubjectAvatar(title: item.title, size: 40, accent: accent),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    item.title,
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      color: Colors.black,
-                      fontWeight: FontWeight.w900,
-                      height: 1.16,
-                    ),
-                  ),
-                ),
-                if (trailing != null) trailing!,
-              ],
-            ),
-            const SizedBox(height: 12),
-            details ??
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    _MiniControlPill(text: controlText, color: accent),
-                    _SubjectDifficultyPill(
-                      difficulty: item.difficulty,
-                      color: accent,
+                    Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: colors.primary.withValues(alpha: .08),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(Icons.menu_book_rounded,
+                          size: 18, color: colors.primary),
                     ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        item.title,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: colors.onSurface,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    trailing ??
+                        Icon(Icons.chevron_right_rounded,
+                            size: 20, color: colors.onSurfaceVariant),
                   ],
                 ),
-          ],
+                if (showMetadata) ...[
+                  const SizedBox(height: 12),
+                  details ??
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          _MiniControlPill(text: controlText, color: accent),
+                          _SubjectDifficultyPill(
+                              difficulty: item.difficulty, color: accent),
+                        ],
+                      ),
+                ],
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -3205,53 +2859,6 @@ void _openSubjectInfo(BuildContext context, UsefulSubject item) {
       builder: (_) => subjectInfoScreenFor(item),
     ),
   );
-}
-
-class _SubjectAvatar extends StatelessWidget {
-  final String title;
-  final double size;
-  final Color accent;
-
-  const _SubjectAvatar({
-    required this.title,
-    this.size = 44,
-    this.accent = const Color(0xFF6A4BBC),
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final trimmed = title.trim();
-    final letter =
-        trimmed.isEmpty ? '?' : trimmed.substring(0, 1).toUpperCase();
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [accent.withValues(alpha: 0.78), accent],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: accent.withValues(alpha: 0.20),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        letter,
-        style: TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.w900,
-          fontSize: size * 0.38,
-        ),
-      ),
-    );
-  }
 }
 
 class _MiniControlPill extends StatelessWidget {
@@ -3301,7 +2908,7 @@ class _SubjectDifficultyPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.88),
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(999),
         border: Border.all(color: color.withValues(alpha: 0.14)),
       ),
@@ -3316,13 +2923,14 @@ class _SubjectDifficultyPill extends StatelessWidget {
             size: 14,
           ),
           const SizedBox(width: 4),
-          Text(
+          Flexible(
+              child: Text(
             label,
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
                   color: color,
                   fontWeight: FontWeight.w900,
                 ),
-          ),
+          )),
         ],
       ),
     );
@@ -3353,7 +2961,7 @@ class _EmptyState extends StatelessWidget {
             text,
             style: TextStyle(
               fontSize: compact ? 13 : 14,
-              color: Colors.black54,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
               fontWeight: FontWeight.w600,
             ),
             textAlign: TextAlign.center,
@@ -3383,73 +2991,126 @@ Future<_UsefulSection?> _showInfoSectionPicker(
     context: context,
     showDragHandle: true,
     isScrollControlled: true,
-    constraints: _fullWidthSheetConstraints(context),
+    constraints: const BoxConstraints(maxWidth: 600),
+    useSafeArea: true,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
     builder: (sheetContext) {
-      return SizedBox(
-        width: double.infinity,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 22),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Раздел',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: Colors.black,
-                      fontWeight: FontWeight.w900,
-                    ),
+      return SafeArea(
+          top: false,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(sheetContext).height * .82),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(left: 8, bottom: 12),
+                    child: Row(children: [
+                      Expanded(
+                          child: Text('Раздел базы',
+                              style: Theme.of(context).textTheme.titleLarge)),
+                      IconButton(
+                          tooltip: 'Закрыть',
+                          onPressed: () => Navigator.of(sheetContext).pop(),
+                          icon: const Icon(Icons.close_rounded)),
+                    ]),
+                  ),
+                  const SizedBox(height: 10),
+                  _SectionChoiceTile(
+                    icon: Icons.school_outlined,
+                    title: 'Предметы',
+                    subtitle: 'Учебный план',
+                    selected: selected == _UsefulSection.subjects,
+                    onTap: () {
+                      Navigator.of(sheetContext).pop(_UsefulSection.subjects);
+                    },
+                  ),
+                  _SectionChoiceTile(
+                    icon: Icons.help_outline_rounded,
+                    title: 'Справочный раздел',
+                    subtitle:
+                        'Инструкции, документы и ответы на учебные вопросы',
+                    selected: selected == _UsefulSection.help,
+                    onTap: () {
+                      Navigator.of(sheetContext).pop(_UsefulSection.help);
+                    },
+                  ),
+                  _SectionChoiceTile(
+                    icon: Icons.work_outline_rounded,
+                    title: 'Вакансии',
+                    subtitle: 'Работа и стажировки',
+                    selected: selected == _UsefulSection.jobs,
+                    onTap: () {
+                      Navigator.of(sheetContext).pop(_UsefulSection.jobs);
+                    },
+                  ),
+                ],
               ),
-              const SizedBox(height: 10),
-              _SectionChoiceTile(
-                icon: Icons.school_outlined,
-                title: 'Предметы',
-                subtitle: 'Учебный план',
-                selected: selected == _UsefulSection.subjects,
-                onTap: () {
-                  Navigator.of(sheetContext).pop(_UsefulSection.subjects);
-                },
-              ),
-              _SectionChoiceTile(
-                icon: Icons.help_outline_rounded,
-                title: 'Справочный раздел',
-                subtitle: 'Инструкции, документы и ответы на учебные вопросы',
-                selected: selected == _UsefulSection.help,
-                onTap: () {
-                  Navigator.of(sheetContext).pop(_UsefulSection.help);
-                },
-              ),
-              _SectionChoiceTile(
-                icon: Icons.work_outline_rounded,
-                title: 'Вакансии',
-                subtitle: 'Работа и стажировки',
-                selected: selected == _UsefulSection.jobs,
-                onTap: () {
-                  Navigator.of(sheetContext).pop(_UsefulSection.jobs);
-                },
-              ),
-            ],
-          ),
-        ),
-      );
+            ),
+          ));
     },
   );
 }
 
-/// Same Base header and selector as the authenticated screen, without touching
-/// account caches or pretending that unpublished content is a public catalog.
+/// Public catalogue uses the same cards/header, never personal RPCs or caches.
 class GuestInfoScreen extends StatefulWidget {
-  const GuestInfoScreen({super.key, required this.onAccountInfo});
+  const GuestInfoScreen({
+    super.key,
+    required this.onAccountInfo,
+    this.service,
+    this.group,
+    this.onChooseGroup,
+  });
   final VoidCallback onAccountInfo;
+  final ({String id, String name})? group;
+  final VoidCallback? onChooseGroup;
+  final GuestPublicService? service;
   @override
   State<GuestInfoScreen> createState() => _GuestInfoScreenState();
 }
 
 class _GuestInfoScreenState extends State<GuestInfoScreen> {
   _UsefulSection _section = _UsefulSection.subjects;
+  late final _service = widget.service ?? GuestPublicService();
+  final _rows = <_UsefulSection, List<Map<String, dynamic>>>{};
+  final _errors = <_UsefulSection>{};
+  final _loading = <_UsefulSection>{};
+  final _more = <_UsefulSection>{};
+  final _versions = <_UsefulSection, int>{};
+  final _search = TextEditingController();
+  Timer? _debounce;
+  @override
+  void initState() {
+    super.initState();
+    for (final section in _UsefulSection.values) {
+      unawaited(_load(section));
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant GuestInfoScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.group?.id == widget.group?.id) return;
+
+    const section = _UsefulSection.subjects;
+    _rows.remove(section);
+    _more.remove(section);
+    unawaited(_load(section));
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _search.dispose();
+    if (widget.service == null) _service.dispose();
+    super.dispose();
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -3458,45 +3119,275 @@ class _GuestInfoScreenState extends State<GuestInfoScreen> {
     if (saved is _UsefulSection) _section = saved;
   }
 
+  Future<void> _load(_UsefulSection section, {bool append = false}) async {
+    final version = (_versions[section] ?? 0) + 1;
+    _versions[section] = version;
+    setState(() {
+      _loading.add(section);
+      _errors.remove(section);
+    });
+    try {
+      final group = section == _UsefulSection.subjects ? widget.group : null;
+      final rows = await _service.rpc(
+        group == null ? 'get_guest_base' : 'get_guest_group_subjects',
+        {
+          if (group == null) 'p_section': section.name else 'p_group': group.id,
+          'p_query': _search.text.trim(),
+          'p_offset': append ? (_rows[section]?.length ?? 0) : 0,
+        },
+      );
+      if (!mounted || _versions[section] != version) return;
+      setState(() {
+        _rows[section] = [if (append) ...?_rows[section], ...rows];
+        rows.length == 50 ? _more.add(section) : _more.remove(section);
+      });
+    } catch (_) {
+      if (mounted && _versions[section] == version)
+        setState(() => _errors.add(section));
+    } finally {
+      if (mounted && _versions[section] == version)
+        setState(() => _loading.remove(section));
+    }
+  }
+
+  void _queryChanged(String value) {
+    _debounce?.cancel();
+    // Invalidate old responses immediately, before the debounce starts.
+    for (final section in _UsefulSection.values) {
+      _versions[section] = (_versions[section] ?? 0) + 1;
+    }
+    setState(() {
+      _rows.clear();
+      _more.clear();
+      _errors.clear();
+      _loading.addAll(_UsefulSection.values);
+    });
+    _debounce = Timer(const Duration(milliseconds: 300), () {
+      for (final section in _UsefulSection.values) {
+        unawaited(_load(section));
+      }
+    });
+  }
+
+  void _detail(String title, Widget body) =>
+      Navigator.of(context).push(MaterialPageRoute<void>(
+          builder: (_) => Scaffold(
+              appBar: AppBar(title: Text(title)),
+              body: SafeArea(
+                  child: Center(
+                      child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 880),
+                          child: body))))));
+  Widget _card(Map<String, dynamic> row) {
+    if (_section == _UsefulSection.help) {
+      final article = ManagedReferenceArticle.tryParse(row);
+      if (article == null) return const SizedBox.shrink();
+      return StudentReferenceArticleCard(
+          article: article,
+          onTap: () => _detail(
+              'Справочник',
+              StudentReferenceArticleDetail(
+                  article: article, onReportError: widget.onAccountInfo)));
+    }
+    if (_section == _UsefulSection.jobs) {
+      final card = ManagedVacancyCard.tryParse(row);
+      if (card == null) return const SizedBox.shrink();
+      return StudentVacancyCard(
+          payload: card.payload,
+          hasContacts: card.hasContacts,
+          onTap: () => _detail(
+              'Вакансия',
+              StudentVacancyDetailSheet(
+                  card: card,
+                  showCloseButton: false,
+                  onRevealContacts: () async {
+                    widget.onAccountInfo();
+                    return null;
+                  })));
+    }
+    final item = UsefulSubject(
+        id: row['id'] as String,
+        title: row['title'] as String,
+        controlForm: row['control_form'] as String? ?? '',
+        description: row['description'] as String? ?? '',
+        teacherName: '',
+        teamName: '',
+        teamIcon: '',
+        teamGroupName: '');
+    return InfoSubjectCard(
+        item: item,
+        trailing: const Icon(Icons.chevron_right),
+        showMetadata: false,
+        onOpen: (_) => _detail(
+            item.title,
+            ListView(padding: const EdgeInsets.all(20), children: [
+              for (final entry in {
+                'Описание': 'description',
+                'Кафедра': 'department',
+                'Требования': 'requirements',
+                'Результаты обучения': 'learning_outcomes'
+              }.entries)
+                if ((row[entry.value] as String? ?? '').trim().isNotEmpty) ...[
+                  Text(entry.key,
+                      style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  SelectableText(row[entry.value] as String),
+                  const SizedBox(height: 24)
+                ],
+              if ([
+                'description',
+                'department',
+                'requirements',
+                'learning_outcomes'
+              ].every((k) => (row[k] as String? ?? '').trim().isEmpty))
+                const Text('Описание предмета пока не добавлено.'),
+              const SizedBox(height: 24),
+              ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.school_outlined),
+                  title: const Text('Мой учебный план'),
+                  subtitle: const Text(
+                      'Твои дисциплины, семестры и прогресс — в аккаунте'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: widget.onAccountInfo),
+            ])));
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
-        backgroundColor: const Color(0xFFF7F7FB),
-        body: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          SizedBox(
+      body: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        SizedBox(
             height:
                 (MediaQuery.paddingOf(context).top + 86.0).clamp(128.0, 150.0),
             child: StudentInfoHeader(
-              subtitle: _sectionSubtitle(_section),
-              sectionIcon: _sectionIcon(_section),
-              onInfoTap: widget.onAccountInfo,
-              onSectionTap: () async {
-                final selected =
-                    await _showInfoSectionPicker(context, _section);
-                if (mounted && selected != null) {
-                  PageStorage.maybeOf(context)?.writeState(context, selected,
-                      identifier: 'guest_base_section');
-                  setState(() => _section = selected);
-                }
-              },
-            ),
-          ),
-          Expanded(
-              child: ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                  children: [
-                _EmptyState(
-                  text: switch (_section) {
-                    _UsefulSection.subjects =>
-                      'Войди, чтобы открыть предметы своего учебного плана',
-                    _UsefulSection.help =>
-                      'Справочный раздел пока доступен пользователям с аккаунтом',
-                    _UsefulSection.jobs =>
-                      'Вакансии пока доступны пользователям с аккаунтом',
-                  },
-                  actionLabel: 'Возможности аккаунта',
-                  onAction: widget.onAccountInfo,
-                ),
-              ])),
-        ]),
-      );
+                subtitle: _section == _UsefulSection.subjects
+                    ? (widget.group == null
+                        ? 'каталог предметов'
+                        : 'предметы группы')
+                    : _sectionSubtitle(_section),
+                sectionIcon: _sectionIcon(_section),
+                onInfoTap: widget.onAccountInfo,
+                onSectionTap: () async {
+                  final selected =
+                      await _showInfoSectionPicker(context, _section);
+                  if (mounted && selected != null) {
+                    PageStorage.maybeOf(context)?.writeState(context, selected,
+                        identifier: 'guest_base_section');
+                    setState(() => _section = selected);
+                  }
+                })),
+        Expanded(
+            child: RefreshIndicator(
+                onRefresh: () => _load(_section),
+                child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                    children: [
+                      if (_section == _UsefulSection.subjects &&
+                          widget.onChooseGroup != null)
+                        GuestActionTile(
+                          title: widget.group?.name ?? 'Выбрать группу',
+                          subtitle: widget.group == null
+                              ? 'Подобрать предметы и расписание'
+                              : 'Группа для предметов и расписания',
+                          icon: Icons.groups_outlined,
+                          onTap: widget.onChooseGroup!,
+                          trailing: widget.group == null
+                              ? null
+                              : const Icon(Icons.swap_horiz_rounded),
+                        ),
+                      TextField(
+                          controller: _search,
+                          onChanged: _queryChanged,
+                          decoration: InputDecoration(
+                              filled: true,
+                              fillColor: Theme.of(context)
+                                  .colorScheme
+                                  .surfaceContainerHighest
+                                  .withValues(alpha: .4),
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 12),
+                              border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                  borderSide: BorderSide.none),
+                              enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                  borderSide: BorderSide.none),
+                              focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                  borderSide: BorderSide(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .primary)),
+                              prefixIcon:
+                                  const Icon(Icons.search_rounded, size: 21),
+                              hintText: switch (_section) {
+                                _UsefulSection.subjects => 'Найти предмет',
+                                _UsefulSection.help => 'Найти в справочнике',
+                                _UsefulSection.jobs => 'Найти вакансию'
+                              })),
+                      const SizedBox(height: 16),
+                      if (_loading.contains(_section) &&
+                          (_rows[_section]?.isEmpty ?? true))
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 28),
+                          child: Center(
+                            child: Text('Загружаем материалы…',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodyMedium
+                                    ?.copyWith(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onSurfaceVariant)),
+                          ),
+                        ),
+                      if (_errors.contains(_section))
+                        _EmptyState(
+                            text: 'Не удалось загрузить раздел',
+                            actionLabel: 'Повторить',
+                            onAction: () => _load(_section)),
+                      if (!_loading.contains(_section) &&
+                          !_errors.contains(_section) &&
+                          (_rows[_section]?.isEmpty ?? false))
+                        _EmptyState(
+                            text: _search.text.trim().isNotEmpty
+                                ? 'По запросу ничего не найдено'
+                                : switch (_section) {
+                                    _UsefulSection.subjects =>
+                                      widget.group == null
+                                          ? 'Предметы пока не опубликованы'
+                                          : 'Для этой группы пока нет опубликованных предметов',
+                                    _UsefulSection.help =>
+                                      'Справочник пока пуст',
+                                    _UsefulSection.jobs =>
+                                      'Опубликованных вакансий пока нет'
+                                  }),
+                      for (final row
+                          in _rows[_section] ?? <Map<String, dynamic>>[])
+                        Padding(
+                            padding: EdgeInsets.only(
+                                bottom: _section == _UsefulSection.subjects
+                                    ? 0
+                                    : 10),
+                            child: _card(row)),
+                      if (_more.contains(_section))
+                        TextButton(
+                            onPressed: _loading.contains(_section)
+                                ? null
+                                : () => _load(_section, append: true),
+                            child: const Text('Показать ещё')),
+                      if (_section == _UsefulSection.subjects &&
+                          !_loading.contains(_section))
+                        ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Icons.school_outlined),
+                            title: const Text('Мой учебный план'),
+                            subtitle:
+                                const Text('Личные дисциплины и прогресс'),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: widget.onAccountInfo),
+                    ]))),
+      ]));
 }

@@ -7,6 +7,7 @@ import 'package:student_ui/student_ui.dart';
 import '../../core/auth/admin_backend_config.dart';
 
 import '../../core/auth/admin_session_controller.dart';
+import '../content/shared/visual_editor_states.dart';
 
 import 'moderation_queue_item.dart';
 
@@ -502,22 +503,40 @@ class _ModerationScreenState extends State<ModerationScreen> {
 
       context: context,
 
-      builder: (context) => SimpleDialog(
-
-        title: Text('Действие · ${domain.labelRu}'),
-
-        children: [
-
-          for (final option in options)
-
-            SimpleDialogOption(
-
-              onPressed: () => Navigator.pop(context, option.$1),
-
-              child: Text(option.$2),
-
-            ),
-
+      builder: (context) => AlertDialog(
+        scrollable: true,
+        title: const Text('Выберите решение'),
+        content: SizedBox(
+          width: 360,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                domain.labelRu,
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              const SizedBox(height: 12),
+              for (final (action, label) in options)
+                ListTile(
+                  leading: Icon(switch (action) {
+                    'approve' || 'resolve' => Icons.check_circle_outline,
+                    'reject' || 'remove_violation' => Icons.block_outlined,
+                    'request_clarification' => Icons.question_answer_outlined,
+                    'restore' => Icons.restore_outlined,
+                    _ => Icons.assignment_outlined,
+                  }),
+                  title: Text(label),
+                  onTap: () => Navigator.pop(context, action),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Отмена'),
+          ),
         ],
 
       ),
@@ -612,25 +631,16 @@ class _ModerationScreenState extends State<ModerationScreen> {
 
   Widget build(BuildContext context) {
 
+    final error = _error;
+    final hasRows = _tabIndex == 0
+        ? _unifiedItems.isNotEmpty
+        : _legacyItems.isNotEmpty;
     return Column(
 
       crossAxisAlignment: CrossAxisAlignment.start,
 
       children: [
 
-        Text(
-
-          'Модерация',
-
-          style: Theme.of(
-
-            context,
-
-          ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
-
-        ),
-
-        const SizedBox(height: 6),
 
         const Text(
 
@@ -764,7 +774,7 @@ class _ModerationScreenState extends State<ModerationScreen> {
 
               SizedBox(
 
-                width: 160,
+                width: 224,
 
                 child: TextField(
 
@@ -786,7 +796,7 @@ class _ModerationScreenState extends State<ModerationScreen> {
 
               SizedBox(
 
-                width: 100,
+                width: 126,
 
                 child: TextField(
 
@@ -848,11 +858,11 @@ class _ModerationScreenState extends State<ModerationScreen> {
 
         ),
 
-        if (_error != null) ...[
+        if (error != null && hasRows) ...[
 
           const SizedBox(height: 8),
 
-          Text(_error!, style: const TextStyle(color: Color(0xFFB91C1C))),
+          Text(error, style: TextStyle(color: Theme.of(context).colorScheme.error)),
 
         ],
 
@@ -860,19 +870,14 @@ class _ModerationScreenState extends State<ModerationScreen> {
 
         Expanded(
 
-          child: Card(
+          child: _loading
+              ? const Center(child: ProductLoadingIndicator())
+              : error != null && !hasRows
+              ? VisualEditorErrorState(message: error, onRetry: _load)
+              : _tabIndex == 0
+              ? _buildUnifiedList(_canModerate)
+              : _buildLegacyList(_canModerate),
 
-            child: _loading
-
-                ? const Center(child: CircularProgressIndicator())
-
-                : _tabIndex == 0
-
-                ? _buildUnifiedList(_canModerate)
-
-                : _buildLegacyList(_canModerate),
-
-          ),
 
         ),
 
@@ -888,7 +893,10 @@ class _ModerationScreenState extends State<ModerationScreen> {
 
     if (_unifiedItems.isEmpty) {
 
-      return const Center(child: Text('Очередь пуста'));
+      return const VisualEditorEmptyState(
+        message: 'Очередь пуста',
+        icon: Icons.inbox_outlined,
+      );
 
     }
 
@@ -978,7 +986,10 @@ class _ModerationScreenState extends State<ModerationScreen> {
 
     if (_legacyItems.isEmpty) {
 
-      return const Center(child: Text('Очередь пуста'));
+      return const VisualEditorEmptyState(
+        message: 'Очередь пуста',
+        icon: Icons.inbox_outlined,
+      );
 
     }
 

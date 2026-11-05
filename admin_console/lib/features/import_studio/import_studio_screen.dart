@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductTheme, ProductLoadingIndicator;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -326,7 +327,7 @@ class _ImportStudioScreenState extends State<ImportStudioScreen> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: ProductLoadingIndicator());
     }
     if (_loadError != null) {
       return _ErrorPanel(message: _loadError!, onRetry: _reloadDomains);
@@ -474,13 +475,9 @@ class _Header extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Import Studio',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
-              ),
               Text(
                 isLocal
-                    ? 'Локальный scaffold: XLSX → mapping → dry-run → confirm'
+                    ? 'Локальная проверка импорта: файл, сопоставление, предварительный просмотр'
                     : 'RPC через Supabase (без service_role)',
                 style: const TextStyle(color: Colors.black54),
               ),
@@ -545,8 +542,8 @@ class _DomainHub extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           const Text(
-            'Проходите этапы слева направо: что изучают → кто учится → '
-            'когда идут периоды → когда стоят конкретные пары.',
+            'Пройдите этапы по порядку: учебный план, группы, '
+            'учебные периоды и расписание.',
             style: TextStyle(color: Colors.black54),
           ),
           const SizedBox(height: 16),
@@ -554,7 +551,7 @@ class _DomainHub extends StatelessWidget {
             step: 1,
             icon: Icons.account_tree_outlined,
             title: 'Учебный план',
-            status: 'Review + server preview',
+            status: 'Проверка учебных данных',
             statusColor: const Color(0xFF3157C8),
             description:
                 'Загрузите PDF или XLSX, проверьте предметы, семестры, часы '
@@ -571,7 +568,7 @@ class _DomainHub extends StatelessWidget {
             step: 2,
             icon: Icons.groups_outlined,
             title: 'Группы и студенты',
-            status: 'Matching preview',
+            status: 'Сопоставление групп',
             statusColor: Color(0xFF8B5A00),
             description:
                 'Группа появляется из студента или позже из расписания. '
@@ -580,7 +577,7 @@ class _DomainHub extends StatelessWidget {
                 '2 курс нельзя смешать с другой группой того же названия.',
             primaryLabel: 'Проверить группы и дубли',
             onPrimary: onOpenGroups,
-            secondaryLabel: 'Existing students XLSX',
+            secondaryLabel: 'Студенты из XLSX',
             onSecondary: onOpenStudents,
             footer:
                 'Студенческий XLSX обновляет существующих Auth-пользователей '
@@ -592,7 +589,7 @@ class _DomainHub extends StatelessWidget {
             step: 3,
             icon: Icons.date_range_outlined,
             title: 'График учебного процесса',
-            status: 'Review + server preview',
+            status: 'Проверка учебных данных',
             statusColor: Color(0xFF3157C8),
             description:
                 'Загрузите официальный PDF или изображение и вручную проверьте '
@@ -1269,7 +1266,7 @@ class _ImportSourceStepState extends State<_ImportSourceStep> {
                   ? const SizedBox(
                       width: 16,
                       height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                      child: ProductLoadingIndicator(),
                     )
                   : const Icon(Icons.play_arrow_rounded),
               label: const Text('Dry-run'),
@@ -1403,6 +1400,9 @@ class _MappingDialogState extends State<_MappingDialog> {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: DropdownButtonFormField<String?>(
+                    borderRadius: ProductTheme.selectionMenuRadius,
+                    elevation: ProductTheme.selectionMenuElevation,
+                    icon: const Icon(Icons.keyboard_arrow_down_rounded),
                     initialValue: _mapping[entry.key],
                     decoration: InputDecoration(labelText: entry.value),
                     items: [
@@ -1657,7 +1657,7 @@ class _ConfirmStep extends StatelessWidget {
                   ? const SizedBox(
                       width: 16,
                       height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                      child: ProductLoadingIndicator(),
                     )
                   : const Icon(Icons.check_rounded),
               label: const Text('Confirm apply'),

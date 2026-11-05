@@ -1,3 +1,5 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
+import '../../guest/guest_presentation_theme.dart';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
@@ -111,166 +113,201 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = guestPresentationTheme(Theme.of(context));
     final keyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
-    final animationHeight = keyboardVisible ? 88.0 : 200.0;
+    final animationHeight = keyboardVisible ? 72.0 : 146.0;
     final contentTopPadding = keyboardVisible ? 10.0 : 0.0;
     final buttonTopGap = keyboardVisible ? 10.0 : 12.0;
 
-    return Scaffold(
-      resizeToAvoidBottomInset: true,
-      appBar: AppBar(
-        title: const Text('Вход'),
-        centerTitle: true,
-      ),
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            return Form(
-              key: _formKey,
-              child: SingleChildScrollView(
-                keyboardDismissBehavior:
-                    ScrollViewKeyboardDismissBehavior.onDrag,
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                  child: AnimatedAlign(
-                    duration: const Duration(milliseconds: 260),
-                    curve: Curves.easeOutCubic,
-                    alignment: keyboardVisible
-                        ? Alignment.topCenter
-                        : Alignment.center,
-                    child: AnimatedPadding(
-                      duration: const Duration(milliseconds: 260),
-                      curve: Curves.easeOutCubic,
-                      padding: EdgeInsets.only(
-                        top: contentTopPadding,
-                        bottom: keyboardVisible ? 16 : 0,
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          SizedBox(height: keyboardVisible ? 4 : 8),
-                          AnimatedContainer(
-                            duration: const Duration(milliseconds: 220),
-                            curve: Curves.easeOutCubic,
-                            height: animationHeight,
-                            child: Lottie.asset(
-                              'assets/lottie/cat_sleeping.json',
-                            ),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: theme.cardColor,
-                                borderRadius: BorderRadius.circular(12),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.05),
-                                    blurRadius: 10,
+    return Theme(
+        data: theme,
+        child: Scaffold(
+          resizeToAvoidBottomInset: true,
+          backgroundColor: theme.scaffoldBackgroundColor,
+          appBar: AppBar(
+            backgroundColor: Colors.transparent,
+            surfaceTintColor: Colors.transparent,
+            elevation: 0,
+          ),
+          body: SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return Align(
+                    alignment: Alignment.topCenter,
+                    child: SizedBox(
+                        width: 520,
+                        child: Form(
+                          key: _formKey,
+                          child: SingleChildScrollView(
+                            keyboardDismissBehavior:
+                                ScrollViewKeyboardDismissBehavior.onDrag,
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                  minHeight: constraints.maxHeight),
+                              child: AnimatedAlign(
+                                duration: const Duration(milliseconds: 260),
+                                curve: Curves.easeOutCubic,
+                                alignment: keyboardVisible
+                                    ? Alignment.topCenter
+                                    : Alignment.center,
+                                child: AnimatedPadding(
+                                  duration: const Duration(milliseconds: 260),
+                                  curve: Curves.easeOutCubic,
+                                  padding: EdgeInsets.only(
+                                    top: contentTopPadding,
+                                    bottom: keyboardVisible ? 16 : 0,
                                   ),
-                                ],
-                              ),
-                              child: Column(
-                                children: [
-                                  const SizedBox(height: 8),
-                                  _buildField(
-                                    label: 'Логин или email',
-                                    controller: _loginCtrl,
-                                    keyboardType: TextInputType.text,
-                                    validator: (v) =>
-                                        (v == null || v.trim().isEmpty)
-                                            ? 'Введите логин'
-                                            : null,
-                                  ),
-                                  const Divider(height: 1),
-                                  _buildField(
-                                    label: 'Пароль',
-                                    controller: _passCtrl,
-                                    obscure: _hidePassword,
-                                    validator: (v) =>
-                                        (v == null || v.trim().length < 4)
-                                            ? 'Минимум 4 символа'
-                                            : null,
-                                    suffix: IconButton(
-                                      onPressed: () => setState(
-                                        () => _hidePassword = !_hidePassword,
-                                      ),
-                                      icon: Icon(
-                                        _hidePassword
-                                            ? Icons.visibility_off
-                                            : Icons.visibility,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                ],
-                              ),
-                            ),
-                          ),
-                          SizedBox(height: buttonTopGap),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            child: SizedBox(
-                              width: double.infinity,
-                              height: 48,
-                              child: FilledButton(
-                                onPressed: _loading ? null : _doLogin,
-                                child: _loading
-                                    ? const SizedBox(
-                                        width: 20,
-                                        height: 20,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    : const Text('Войти'),
-                              ),
-                            ),
-                          ),
-                          AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 180),
-                            child: keyboardVisible
-                                ? const SizedBox.shrink()
-                                : Column(
-                                    key: const ValueKey('loginFooter'),
+                                  child: Column(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      const SizedBox(height: 12),
-                                      TextButton(
-                                        onPressed: widget.toggleView,
-                                        child: const Text(
-                                          'Нет аккаунта? Зарегистрироваться',
+                                      SizedBox(height: keyboardVisible ? 4 : 8),
+                                      AnimatedContainer(
+                                        duration:
+                                            const Duration(milliseconds: 220),
+                                        curve: Curves.easeOutCubic,
+                                        height: animationHeight,
+                                        child: Lottie.asset(
+                                          'assets/lottie/cat_sleeping.json',
                                         ),
                                       ),
-                                      TextButton(
-                                          onPressed: () => context.go('/guest'),
-                                          child: const Text(
-                                              'Продолжить без входа')),
-                                      const SizedBox(height: 6),
+                                      if (!keyboardVisible) ...[
+                                        Text('С возвращением',
+                                            style: theme.textTheme.headlineSmall
+                                                ?.copyWith(
+                                                    fontWeight:
+                                                        FontWeight.w800)),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                            'Твоя группа и учебные дела — здесь.',
+                                            style: TextStyle(
+                                                color: theme.colorScheme.onSurfaceVariant)),
+                                        const SizedBox(height: 28),
+                                      ],
                                       Padding(
-                                        padding:
-                                            const EdgeInsets.only(bottom: 12),
-                                        child: Text(
-                                          '© ${DateTime.now().year} Student Platform',
-                                          style: theme.textTheme.bodySmall,
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 24),
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            color: theme.cardColor,
+                                            borderRadius:
+                                                BorderRadius.circular(22),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black
+                                                    .withValues(alpha: 0.05),
+                                                blurRadius: 10,
+                                              ),
+                                            ],
+                                          ),
+                                          child: Column(
+                                            children: [
+                                              const SizedBox(height: 8),
+                                              _buildField(
+                                                label: 'Логин или email',
+                                                controller: _loginCtrl,
+                                                keyboardType:
+                                                    TextInputType.text,
+                                                validator: (v) => (v == null ||
+                                                        v.trim().isEmpty)
+                                                    ? 'Введите логин'
+                                                    : null,
+                                              ),
+                                              const Divider(height: 1),
+                                              _buildField(
+                                                label: 'Пароль',
+                                                controller: _passCtrl,
+                                                obscure: _hidePassword,
+                                                validator: (v) => (v == null ||
+                                                        v.trim().length < 4)
+                                                    ? 'Минимум 4 символа'
+                                                    : null,
+                                                suffix: IconButton(
+                                                  onPressed: () => setState(
+                                                    () => _hidePassword =
+                                                        !_hidePassword,
+                                                  ),
+                                                  icon: Icon(
+                                                    _hidePassword
+                                                        ? Icons.visibility_off
+                                                        : Icons.visibility,
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(height: 8),
+                                            ],
+                                          ),
                                         ),
                                       ),
-                                      const SizedBox(height: 8),
+                                      SizedBox(height: buttonTopGap),
+                                      Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 24),
+                                        child: SizedBox(
+                                          width: double.infinity,
+                                          height: 48,
+                                          child: FilledButton(
+                                            onPressed:
+                                                _loading ? null : _doLogin,
+                                            child: _loading
+                                                ? const SizedBox(
+                                                    width: 20,
+                                                    height: 20,
+                                                    child:
+                                                        ProductLoadingIndicator(),
+                                                  )
+                                                : const Text('Войти'),
+                                          ),
+                                        ),
+                                      ),
+                                      AnimatedSwitcher(
+                                        duration:
+                                            const Duration(milliseconds: 180),
+                                        child: keyboardVisible
+                                            ? const SizedBox.shrink()
+                                            : Column(
+                                                key: const ValueKey(
+                                                    'loginFooter'),
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  const SizedBox(height: 12),
+                                                  TextButton(
+                                                    onPressed:
+                                                        widget.toggleView,
+                                                    child: const Text(
+                                                      'Нет аккаунта? Зарегистрироваться',
+                                                    ),
+                                                  ),
+                                                  TextButton(
+                                                      onPressed: () =>
+                                                          context.go('/guest'),
+                                                      child: const Text(
+                                                          'Пока посмотреть приложение')),
+                                                  const SizedBox(height: 6),
+                                                  Padding(
+                                                    padding:
+                                                        const EdgeInsets.only(
+                                                            bottom: 12),
+                                                    child: Text(
+                                                      '© ${DateTime.now().year} Student Platform',
+                                                      style: theme
+                                                          .textTheme.bodySmall,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 8),
+                                                ],
+                                              ),
+                                      ),
                                     ],
                                   ),
+                                ),
+                              ),
+                            ),
                           ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
-      ),
-    );
+                        )));
+              },
+            ),
+          ),
+        ));
   }
 
   Widget _buildField({

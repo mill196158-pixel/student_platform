@@ -19,9 +19,9 @@ class GuestPanel extends StatelessWidget {
         padding: padding,
         decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surface,
-          gradient: colors == null ? null : LinearGradient(colors: colors!),
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: guestPurple.withValues(alpha: .06)),
+          borderRadius: BorderRadius.circular(16),
+          border:
+              Border.all(color: Theme.of(context).colorScheme.outlineVariant),
         ),
         child: child,
       );
@@ -42,50 +42,51 @@ class GuestActionTile extends StatelessWidget {
   final Widget? trailing;
   final List<Color>? colors;
   @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: onTap,
-              borderRadius: BorderRadius.circular(18),
-              child: Ink(
-                  decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: .82),
-                      gradient: colors == null
-                          ? null
-                          : LinearGradient(colors: colors!),
-                      borderRadius: BorderRadius.circular(18)),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                  child: Row(children: [
-                    Container(
-                        padding: const EdgeInsets.all(9),
-                        decoration: BoxDecoration(
-                            color: guestPurple.withValues(alpha: .08),
-                            borderRadius: BorderRadius.circular(13)),
-                        child: Icon(icon, size: 22, color: guestPurple)),
-                    const SizedBox(width: 12),
-                    Expanded(
-                        child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                          Text(title,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.w700, fontSize: 14)),
-                          if (subtitle.isNotEmpty) ...[
-                            const SizedBox(height: 4),
-                            Text(subtitle,
-                                style: const TextStyle(
-                                    fontSize: 12, color: Color(0xFF676575)),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis)
-                          ]
-                        ])),
-                    trailing ??
-                        const Icon(Icons.chevron_right,
-                            color: Color(0xFF747581)),
-                  ])),
-            )),
-      );
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(12),
+            child: Ink(
+                decoration: BoxDecoration(
+                    color: scheme.surface,
+                    borderRadius: BorderRadius.circular(12)),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                child: Row(children: [
+                  Container(
+                      padding: const EdgeInsets.all(9),
+                      decoration: BoxDecoration(
+                          color: scheme.primaryContainer,
+                          borderRadius: BorderRadius.circular(13)),
+                      child: Icon(icon,
+                          size: 22, color: scheme.onPrimaryContainer)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                        Text(title,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w700, fontSize: 14)),
+                        if (subtitle.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(subtitle,
+                              style: TextStyle(
+                                  fontSize: 12, color: scheme.onSurfaceVariant),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis)
+                        ]
+                      ])),
+                  trailing ??
+                      Icon(Icons.chevron_right_rounded,
+                          color: scheme.onSurfaceVariant),
+                ])),
+          )),
+    );
+  }
 }

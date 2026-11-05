@@ -27,8 +27,6 @@ class _InAppToastHostState extends State<InAppToastHost>
   DateTime? _lastAt;
   final Map<String, DateTime> _seenNotificationIds = {};
 
-  static const _lavender = Color(0xFF7C63D8);
-
   @override
   void initState() {
     super.initState();
@@ -137,6 +135,7 @@ class _InAppToastHostState extends State<InAppToastHost>
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     final top = MediaQuery.paddingOf(context).top;
     final event = _event;
 
@@ -176,17 +175,17 @@ class _InAppToastHostState extends State<InAppToastHost>
                       borderRadius: BorderRadius.circular(20),
                       child: Ink(
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: colors.surface,
                           borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: const Color(0xFFE8E4F0)),
+                          border: Border.all(color: colors.outlineVariant),
                           boxShadow: [
                             BoxShadow(
-                              color: _lavender.withValues(alpha: 0.22),
+                              color: colors.shadow.withValues(alpha: 0.16),
                               blurRadius: 22,
                               offset: const Offset(0, 10),
                             ),
                             BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.06),
+                              color: colors.shadow.withValues(alpha: 0.06),
                               blurRadius: 16,
                               offset: const Offset(0, 6),
                             ),
@@ -200,19 +199,12 @@ class _InAppToastHostState extends State<InAppToastHost>
                                 width: 40,
                                 height: 40,
                                 decoration: BoxDecoration(
-                                  gradient: const LinearGradient(
-                                    colors: [
-                                      Color(0xFFDCD0FA),
-                                      Color(0xFFC9B8F3),
-                                    ],
-                                    begin: Alignment.topLeft,
-                                    end: Alignment.bottomRight,
-                                  ),
+                                  color: colors.primaryContainer,
                                   borderRadius: BorderRadius.circular(13),
                                 ),
                                 child: Icon(
                                   _iconFor(event.type),
-                                  color: _lavender,
+                                  color: colors.onPrimaryContainer,
                                   size: 20,
                                 ),
                               ),
@@ -226,10 +218,10 @@ class _InAppToastHostState extends State<InAppToastHost>
                                       event.title,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontWeight: FontWeight.w800,
                                         fontSize: 14,
-                                        color: Color(0xFF1C1B1F),
+                                        color: colors.onSurface,
                                       ),
                                     ),
                                     if (event.body.trim().isNotEmpty) ...[
@@ -238,10 +230,10 @@ class _InAppToastHostState extends State<InAppToastHost>
                                         event.body,
                                         maxLines: 2,
                                         overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           fontSize: 13,
                                           height: 1.2,
-                                          color: Color(0xFF6B6578),
+                                          color: colors.onSurfaceVariant,
                                         ),
                                       ),
                                     ],
@@ -252,7 +244,7 @@ class _InAppToastHostState extends State<InAppToastHost>
                               TextButton(
                                 onPressed: _open,
                                 style: TextButton.styleFrom(
-                                  foregroundColor: _lavender,
+                                  foregroundColor: colors.primary,
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 8,
                                   ),

@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -64,7 +65,7 @@ void main() {
       await t.pump();
       expect(service.writes, 1);
       expect(find.text('В работе'), findsOneWidget);
-      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.byType(ProductLoadingIndicator), findsNothing);
       if (fail) {
         service.mutation.completeError(StateError('offline'));
       } else {
@@ -73,7 +74,7 @@ void main() {
       await t.pump();
       await t.pump(const Duration(milliseconds: 500));
       expect(find.text('Test task'), findsOneWidget);
-      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.byType(ProductLoadingIndicator), findsNothing);
       expect(find.text(fail ? 'Нужно сделать' : 'В работе'), findsOneWidget);
       if (fail)
         expect(find.text('Не удалось сохранить статус. Повторите.'),
@@ -81,7 +82,7 @@ void main() {
       service.refresh.complete(service.data);
       await t.pump();
       await t.pump();
-      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.byType(ProductLoadingIndicator), findsNothing);
       // A fresh canonical response supersedes the optimistic value.
       expect(find.text('Нужно сделать'), findsOneWidget);
       expect(t.takeException(), isNull);

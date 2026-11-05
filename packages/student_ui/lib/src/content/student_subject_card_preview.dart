@@ -12,15 +12,46 @@ class StudentSubjectCardPreview extends StatelessWidget {
     required this.payload,
     this.width = 320,
     this.height = 640,
+    this.fitContent = false,
   });
 
   final SubjectCardPayload payload;
   final double width;
   final double height;
 
+  /// Actual detail pages use their parent scroll view, without a phone frame.
+  final bool fitContent;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    if (fitContent) {
+      final sections = <Widget>[
+        if ((payload.department ?? '').isNotEmpty)
+          _Section(
+            themeAware: true,
+            title: 'Кафедра',
+            child: Text(payload.department!),
+          ),
+        ..._assetWidgets(context),
+        for (final key in payload.sectionOrder)
+          ..._sectionWidgets(context, key),
+      ];
+      if (sections.isEmpty) return const SizedBox.shrink();
+      return Container(
+        width: width,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: sections,
+        ),
+      );
+    }
     return Container(
       width: width,
       height: height,
@@ -91,6 +122,7 @@ class StudentSubjectCardPreview extends StatelessWidget {
     if (hero != null) {
       out.add(
         _Section(
+          themeAware: fitContent,
           title: 'Обложка',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -129,6 +161,7 @@ class StudentSubjectCardPreview extends StatelessWidget {
     if (assets.attachments.isNotEmpty) {
       out.add(
         _Section(
+          themeAware: fitContent,
           title: 'Файлы',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -152,7 +185,9 @@ class StudentSubjectCardPreview extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              file.title.isNotEmpty ? file.title : file.mimeType,
+                              file.title.isNotEmpty
+                                  ? file.title
+                                  : file.mimeType,
                               style: const TextStyle(
                                 fontWeight: FontWeight.w600,
                               ),
@@ -193,6 +228,7 @@ class StudentSubjectCardPreview extends StatelessWidget {
         if (payload.usefulLinks.isEmpty) return const [];
         return [
           _Section(
+            themeAware: fitContent,
             title: title,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -216,6 +252,7 @@ class StudentSubjectCardPreview extends StatelessWidget {
         if (payload.teachers.isEmpty) return const [];
         return [
           _Section(
+            themeAware: fitContent,
             title: title,
             child: Text(
               payload.teachers.map((t) => t.displayName).join(', '),
@@ -226,13 +263,17 @@ class StudentSubjectCardPreview extends StatelessWidget {
         if (!payload.hoursCreditsAvailable) {
           return [
             _Section(
+              themeAware: fitContent,
               title: title,
-              child: const Text('Недоступно без выбранного offering'),
+              child: Text(fitContent
+                  ? 'Часы и зачётные единицы пока не указаны'
+                  : 'Недоступно без выбранного offering'),
             ),
           ];
         }
         return [
           _Section(
+            themeAware: fitContent,
             title: title,
             child: Text(
               [
@@ -246,12 +287,17 @@ class StudentSubjectCardPreview extends StatelessWidget {
         if (payload.relevanceDate == null) return const [];
         final d = payload.relevanceDate!.toIso8601String().substring(0, 10);
         return [
-          _Section(title: title, child: Text('Актуально на $d')),
+          _Section(
+              themeAware: fitContent,
+              title: title,
+              child: Text('Актуально на $d')),
         ];
       default:
         final text = payload.textForSection(key);
         if (text == null || text.isEmpty) return const [];
-        return [_Section(title: title, child: Text(text))];
+        return [
+          _Section(themeAware: fitContent, title: title, child: Text(text))
+        ];
     }
   }
 }
@@ -277,9 +323,11 @@ class _Chip extends StatelessWidget {
 }
 
 class _Section extends StatelessWidget {
-  const _Section({required this.title, required this.child});
+  const _Section(
+      {required this.title, required this.child, this.themeAware = false});
   final String title;
   final Widget child;
+  final bool themeAware;
 
   @override
   Widget build(BuildContext context) {
@@ -292,13 +340,17 @@ class _Section extends StatelessWidget {
             title,
             style: Theme.of(context).textTheme.labelLarge?.copyWith(
                   fontWeight: FontWeight.w800,
-                  color: const Color(0xFF312E81),
+                  color: themeAware
+                      ? Theme.of(context).colorScheme.primary
+                      : const Color(0xFF312E81),
                 ),
           ),
           const SizedBox(height: 4),
           DefaultTextStyle(
             style: Theme.of(context).textTheme.bodyMedium!.copyWith(
-                  color: const Color(0xFF1F2937),
+                  color: themeAware
+                      ? Theme.of(context).colorScheme.onSurface
+                      : const Color(0xFF1F2937),
                   height: 1.35,
                 ),
             child: child,

@@ -251,7 +251,7 @@ class ChatComposerBar extends StatelessWidget {
   }
 
   String _replyPreview(Message message) {
-    final text = ChatCardPreview.forMessage(message).trim();
+    final text = ChatCardPreview.forPreview(message).trim();
     if (text.isNotEmpty) return text;
 
     if (message.type == MessageType.assignmentDraft ||

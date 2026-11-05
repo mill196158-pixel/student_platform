@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
@@ -47,6 +48,7 @@ class CalendarIconButton extends StatelessWidget {
       final picked = await showModalBottomSheet<DateTime>(
         context: context,
         isScrollControlled: true,
+        showDragHandle: false,
         useSafeArea: true,
         backgroundColor: theme.colorScheme.surface,
         shape: const RoundedRectangleBorder(
@@ -58,7 +60,7 @@ class CalendarIconButton extends StatelessWidget {
             eventColors: eventColors,
             legendItems: legendItems,
             firstDate: firstDate ?? DateTime(DateTime.now().year - 1, 1, 1),
-            lastDate:  lastDate  ?? DateTime(DateTime.now().year + 2, 12, 31),
+            lastDate: lastDate ?? DateTime(DateTime.now().year + 2, 12, 31),
             onEnsureMonthLoaded: onEnsureMonthLoaded,
           );
         },
@@ -66,21 +68,16 @@ class CalendarIconButton extends StatelessWidget {
       if (picked != null) onPicked(picked);
     }
 
-    return InkWell(
-      onTap: _openCustomSheet,
-      borderRadius: BorderRadius.circular(100),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.primary.withOpacity(0.10),
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 12, offset: const Offset(0, 4)),
-            BoxShadow(color: Colors.white.withOpacity(0.85), blurRadius: 8, offset: const Offset(-2, -2)),
-          ],
-        ),
-        child: Icon(Icons.calendar_today_rounded, color: theme.colorScheme.primary, size: size * 0.6),
+    return IconButton(
+      tooltip: 'Выбрать дату',
+      onPressed: _openCustomSheet,
+      style: IconButton.styleFrom(
+        backgroundColor:
+            theme.colorScheme.primaryContainer.withValues(alpha: .45),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
+      icon: Icon(Icons.calendar_today_outlined,
+          color: theme.colorScheme.primary, size: size * .55),
     );
   }
 }
@@ -109,7 +106,7 @@ class _CalendarPickerSheet extends StatefulWidget {
 
 class _CalendarPickerSheetState extends State<_CalendarPickerSheet> {
   late DateTime _visibleMonth; // всегда 1-е число месяца
-  late DateTime _selected;     // выбранный день
+  late DateTime _selected; // выбранный день
   bool _loadingMonth = false;
 
   @override
@@ -119,21 +116,25 @@ class _CalendarPickerSheetState extends State<_CalendarPickerSheet> {
     _visibleMonth = DateTime(_selected.year, _selected.month, 1);
 
     // обеспечить данные для первого видимого месяца (сразу отрисуем точки)
-    WidgetsBinding.instance.addPostFrameCallback((_) => _ensureMonthAndRefresh());
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _ensureMonthAndRefresh());
   }
 
   DateTime _stripTime(DateTime d) => DateTime(d.year, d.month, d.day);
-  bool _sameDate(DateTime a, DateTime b) => a.year == b.year && a.month == b.month && a.day == b.day;
+  bool _sameDate(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
 
   List<DateTime> _daysGrid(DateTime monthAnchor) {
     final first = DateTime(monthAnchor.year, monthAnchor.month, 1);
     // ПН=1..ВС=7 → смещение от понедельника (0..6)
     final int shift = (first.weekday + 6) % 7;
     final start = first.subtract(Duration(days: shift));
-    return List.generate(42, (i) => DateTime(start.year, start.month, start.day + i)); // 6×7
+    return List.generate(
+        42, (i) => DateTime(start.year, start.month, start.day + i)); // 6×7
   }
 
-  bool _isInRange(DateTime d) => !d.isBefore(widget.firstDate) && !d.isAfter(widget.lastDate);
+  bool _isInRange(DateTime d) =>
+      !d.isBefore(widget.firstDate) && !d.isAfter(widget.lastDate);
 
   Future<void> _ensureMonthAndRefresh() async {
     setState(() => _loadingMonth = true);
@@ -144,13 +145,27 @@ class _CalendarPickerSheetState extends State<_CalendarPickerSheet> {
 
   Future<void> _shiftMonth(int delta) async {
     setState(() {
-      _visibleMonth = DateTime(_visibleMonth.year, _visibleMonth.month + delta, 1);
+      _visibleMonth =
+          DateTime(_visibleMonth.year, _visibleMonth.month + delta, 1);
     });
     await _ensureMonthAndRefresh();
   }
 
   String _monthName(int m) {
-    const ru = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+    const ru = [
+      'Январь',
+      'Февраль',
+      'Март',
+      'Апрель',
+      'Май',
+      'Июнь',
+      'Июль',
+      'Август',
+      'Сентябрь',
+      'Октябрь',
+      'Ноябрь',
+      'Декабрь'
+    ];
     return ru[m - 1];
   }
 
@@ -158,8 +173,9 @@ class _CalendarPickerSheetState extends State<_CalendarPickerSheet> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final days = _daysGrid(_visibleMonth);
-    const daysShort = ['ПН','ВТ','СР','ЧТ','ПТ','СБ','ВС'];
-    final maxHeight = math.min(MediaQuery.of(context).size.height * 0.86, 640.0);
+    const daysShort = ['ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ', 'ВС'];
+    final maxHeight =
+        math.min(MediaQuery.of(context).size.height * 0.86, 640.0);
 
     return SizedBox(
       height: maxHeight,
@@ -169,8 +185,12 @@ class _CalendarPickerSheetState extends State<_CalendarPickerSheet> {
           children: [
             // grab handle
             Container(
-              width: 40, height: 4, margin: const EdgeInsets.only(bottom: 12),
-              decoration: BoxDecoration(color: theme.dividerColor, borderRadius: BorderRadius.circular(100)),
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                  color: theme.dividerColor,
+                  borderRadius: BorderRadius.circular(100)),
             ),
 
             // HEADER: стрелки + анимированный заголовок месяца
@@ -189,14 +209,18 @@ class _CalendarPickerSheetState extends State<_CalendarPickerSheet> {
                       switchInCurve: Curves.easeOutQuad,
                       switchOutCurve: Curves.easeInQuad,
                       transitionBuilder: (child, anim) => SlideTransition(
-                        position: Tween<Offset>(begin: const Offset(0.0, .3), end: Offset.zero).animate(anim),
+                        position: Tween<Offset>(
+                                begin: const Offset(0.0, .3), end: Offset.zero)
+                            .animate(anim),
                         child: FadeTransition(opacity: anim, child: child),
                       ),
                       child: Text(
-                        key: ValueKey('${_visibleMonth.year}-${_visibleMonth.month}'),
+                        key: ValueKey(
+                            '${_visibleMonth.year}-${_visibleMonth.month}'),
                         '${_monthName(_visibleMonth.month)} ${_visibleMonth.year}',
                         style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w800, color: Colors.black,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.black,
                         ),
                       ),
                     ),
@@ -216,12 +240,14 @@ class _CalendarPickerSheetState extends State<_CalendarPickerSheet> {
             // Weekdays
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: List.generate(7, (i) =>
-                Expanded(
+              children: List.generate(
+                7,
+                (i) => Expanded(
                   child: Center(
                     child: Text(
                       daysShort[i],
-                      style: theme.textTheme.labelSmall?.copyWith(color: Colors.black.withOpacity(0.60)),
+                      style: theme.textTheme.labelSmall
+                          ?.copyWith(color: Colors.black.withOpacity(0.60)),
                     ),
                   ),
                 ),
@@ -237,15 +263,18 @@ class _CalendarPickerSheetState extends State<_CalendarPickerSheet> {
                   GridView.builder(
                     padding: const EdgeInsets.only(top: 4),
                     physics: const NeverScrollableScrollPhysics(),
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 7, mainAxisSpacing: 6, crossAxisSpacing: 6),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 7,
+                            mainAxisSpacing: 6,
+                            crossAxisSpacing: 6),
                     itemCount: days.length,
                     itemBuilder: (_, i) {
                       final d = days[i];
                       final inThisMonth = d.month == _visibleMonth.month;
-                      final isSelected  = _sameDate(d, _selected);
-                      final isToday     = _sameDate(d, _stripTime(DateTime.now()));
-                      final enabled     = _isInRange(d);
+                      final isSelected = _sameDate(d, _selected);
+                      final isToday = _sameDate(d, _stripTime(DateTime.now()));
+                      final enabled = _isInRange(d);
 
                       // ВАЖНО: точки вычисляем по функциям родителя — после await они уже актуальные
                       final dots = widget.eventColors(d);
@@ -255,22 +284,34 @@ class _CalendarPickerSheetState extends State<_CalendarPickerSheet> {
                       if (!enabled) opacity = 0.25;
 
                       return InkWell(
-                        onTap: enabled ? () {
-                          setState(() => _selected = d);
-                          Navigator.of(context).pop<DateTime>(d);
-                        } : null,
+                        onTap: enabled
+                            ? () {
+                                setState(() => _selected = d);
+                                Navigator.of(context).pop<DateTime>(d);
+                              }
+                            : null,
                         borderRadius: BorderRadius.circular(12),
                         child: Container(
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(12),
-                            color: isSelected ? theme.colorScheme.primary : null,
+                            color:
+                                isSelected ? theme.colorScheme.primary : null,
                             border: Border.all(
                               color: isSelected
                                   ? theme.colorScheme.primary
-                                  : (isToday ? theme.colorScheme.primary.withOpacity(0.55) : theme.dividerColor),
+                                  : (isToday
+                                      ? theme.colorScheme.primary
+                                          .withOpacity(0.55)
+                                      : theme.dividerColor),
                             ),
                             boxShadow: isSelected
-                                ? [BoxShadow(color: theme.colorScheme.primary.withOpacity(0.18), blurRadius: 10, offset: const Offset(0, 4))]
+                                ? [
+                                    BoxShadow(
+                                        color: theme.colorScheme.primary
+                                            .withOpacity(0.18),
+                                        blurRadius: 10,
+                                        offset: const Offset(0, 4))
+                                  ]
                                 : null,
                           ),
                           padding: const EdgeInsets.symmetric(vertical: 6),
@@ -280,8 +321,14 @@ class _CalendarPickerSheetState extends State<_CalendarPickerSheet> {
                               Text(
                                 '${d.day}',
                                 style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: isSelected ? theme.colorScheme.onPrimary : fg.withOpacity(opacity),
-                                  fontWeight: isSelected ? FontWeight.w800 : (isToday ? FontWeight.w700 : FontWeight.w500),
+                                  color: isSelected
+                                      ? theme.colorScheme.onPrimary
+                                      : fg.withOpacity(opacity),
+                                  fontWeight: isSelected
+                                      ? FontWeight.w800
+                                      : (isToday
+                                          ? FontWeight.w700
+                                          : FontWeight.w500),
                                 ),
                               ),
                               const SizedBox(height: 4),
@@ -292,10 +339,19 @@ class _CalendarPickerSheetState extends State<_CalendarPickerSheet> {
                                   opacity: dots.isNotEmpty ? 1 : 0.35,
                                   child: Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
-                                    children: dots.take(3).map((c) => Container(
-                                      width: 6, height: 6, margin: const EdgeInsets.symmetric(horizontal: 1.5),
-                                      decoration: BoxDecoration(color: c, shape: BoxShape.circle),
-                                    )).toList(),
+                                    children: dots
+                                        .take(3)
+                                        .map((c) => Container(
+                                              width: 6,
+                                              height: 6,
+                                              margin:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 1.5),
+                                              decoration: BoxDecoration(
+                                                  color: c,
+                                                  shape: BoxShape.circle),
+                                            ))
+                                        .toList(),
                                   ),
                                 ),
                               ),
@@ -305,7 +361,6 @@ class _CalendarPickerSheetState extends State<_CalendarPickerSheet> {
                       );
                     },
                   ),
-
                   if (_loadingMonth)
                     Positioned.fill(
                       child: IgnorePointer(
@@ -314,7 +369,11 @@ class _CalendarPickerSheetState extends State<_CalendarPickerSheet> {
                             color: Colors.white.withOpacity(0.6),
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          child: const Center(child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))),
+                          child: const Center(
+                              child: SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: ProductLoadingIndicator())),
                         ),
                       ),
                     ),
@@ -331,14 +390,22 @@ class _CalendarPickerSheetState extends State<_CalendarPickerSheet> {
                 child: Wrap(
                   spacing: 10,
                   runSpacing: 6,
-                  children: widget.legendItems!.entries.map((e) => Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(width: 10, height: 10, decoration: BoxDecoration(color: e.key, shape: BoxShape.circle)),
-                      const SizedBox(width: 6),
-                      Text(e.value, style: theme.textTheme.labelMedium?.copyWith(color: Colors.black)),
-                    ],
-                  )).toList(),
+                  children: widget.legendItems!.entries
+                      .map((e) => Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                  width: 10,
+                                  height: 10,
+                                  decoration: BoxDecoration(
+                                      color: e.key, shape: BoxShape.circle)),
+                              const SizedBox(width: 6),
+                              Text(e.value,
+                                  style: theme.textTheme.labelMedium
+                                      ?.copyWith(color: Colors.black)),
+                            ],
+                          ))
+                      .toList(),
                 ),
               ),
 

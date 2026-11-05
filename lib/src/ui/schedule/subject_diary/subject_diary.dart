@@ -1,12 +1,13 @@
 library subject_diary;
 
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'dart:async';
 import 'dart:convert' as convert;
 import 'dart:io' as io;
-import 'dart:ui' as ui;
 import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
+import '../../shared/workspace_page_header.dart';
 import 'package:flutter/services.dart'; // rootBundle
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';

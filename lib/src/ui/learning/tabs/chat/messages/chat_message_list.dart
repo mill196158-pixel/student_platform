@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -210,7 +211,7 @@ class ChatMessageList extends StatelessWidget {
               if (_isBlockedAuthorContentHidden(reply)) {
                 replyPreviewText = 'Сообщение заблокированного пользователя';
               } else {
-                final t = ChatCardPreview.forMessage(reply).trim();
+                final t = ChatCardPreview.forPreview(reply).trim();
                 if (t.isNotEmpty) {
                   replyPreviewText = t;
                 } else {
@@ -532,13 +533,9 @@ class _InitialChatLoadingState extends StatelessWidget {
             ),
             child: index == 0
                 ? Center(
-                    child: SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: theme.colorScheme.primary,
-                      ),
+                    child: ProductLoadingIndicator(
+                      size: 45,
+                      color: scheme.primary,
                     ),
                   )
                 : null,

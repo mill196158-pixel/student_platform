@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:student_platform/src/ui/learning/widgets/authorized_file_image.dart';
 import 'package:student_platform/src/services/chat_file_access.dart';
 // ignore_for_file: unnecessary_import, unused_import, unused_field, unused_element, dead_null_aware_expression, invalid_null_aware_operator, unused_local_variable, deprecated_member_use, unnecessary_null_comparison
@@ -1920,7 +1921,7 @@ class _ChatTabState extends State<ChatTab> {
                             child: SizedBox(
                               width: 22,
                               height: 22,
-                              child: CircularProgressIndicator(strokeWidth: 2),
+                              child: ProductLoadingIndicator(),
                             ),
                           ),
                         ),
@@ -2482,23 +2483,7 @@ class _ChatTabState extends State<ChatTab> {
         p.endsWith('.webp');
   }
 
-  String? _forwardComposerPreview() {
-    final payload = _stagedForward;
-    if (payload == null || payload.items.isEmpty) return null;
-    final first = payload.items.first;
-    final author =
-        first.authorName.trim().isEmpty ? 'Сообщение' : first.authorName.trim();
-    final text = first.text.trim();
-    if (text.isNotEmpty) {
-      final normalized = text.replaceAll(RegExp(r'\s+'), ' ');
-      return '$author: $normalized';
-    }
-    if (first.files.isNotEmpty) {
-      final fileName = first.files.first.name.trim();
-      return '$author: ${fileName.isEmpty ? 'вложение' : fileName}';
-    }
-    return author;
-  }
+  String? _forwardComposerPreview() => _stagedForward?.composerPreview();
 
   Future<void> _startForwardSelection(List<Message> selected) async {
     if (selected.isEmpty) return;

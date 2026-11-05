@@ -18,6 +18,7 @@
 import 'dart:convert';
 
 import '../../../models/message.dart';
+import 'package:student_platform/src/ui/chats/core/forward_payload.dart';
 
 enum ChatCardKind { assignment, topicSelection, groupCollection }
 
@@ -257,6 +258,13 @@ class ChatCardPreview {
   /// Never returns JSON. Uses the recognized envelope's human preview when
   /// [Message.text] still looks like card JSON (defensive, e.g. stale local
   /// cache), otherwise falls back to the already-sanitized message text.
+  /// Short, display-only text for reply and pinned-message previews.
+  /// Keep [forMessage] unchanged for callers that need the original payload.
+  static String forPreview(Message m) {
+    final text = forMessage(m);
+    return text.contains('__FG__:') ? ForwardPayload.displayText(text) : text;
+  }
+
   static String forMessage(Message m) {
     final text = m.text;
 

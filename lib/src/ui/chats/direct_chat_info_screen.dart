@@ -34,7 +34,7 @@ class DirectChatInfoScreen extends StatelessWidget {
         children: [
           Stack(
             children: [
-              _GradientHeader(
+              _IdentityHeader(
                 topPadding: media.padding.top,
                 child: _HeaderIdentity(
                   name: displayName,
@@ -88,8 +88,8 @@ class DirectChatInfoScreen extends StatelessWidget {
   }
 }
 
-class _GradientHeader extends StatelessWidget {
-  const _GradientHeader({
+class _IdentityHeader extends StatelessWidget {
+  const _IdentityHeader({
     required this.topPadding,
     required this.child,
   });
@@ -105,24 +105,8 @@ class _GradientHeader extends StatelessWidget {
       width: double.infinity,
       padding: EdgeInsets.fromLTRB(24, topPadding + 50, 24, 20),
       decoration: BoxDecoration(
-        borderRadius: const BorderRadius.vertical(
-          bottom: Radius.circular(30),
-        ),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color.alphaBlend(scheme.primary.withAlpha(32), scheme.surface),
-            Color.alphaBlend(
-              scheme.primaryContainer.withAlpha(180),
-              scheme.surface,
-            ),
-            Color.alphaBlend(
-              scheme.secondaryContainer.withAlpha(96),
-              scheme.surface,
-            ),
-          ],
-        ),
+        color: scheme.surface,
+        border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
       ),
       child: child,
     );
@@ -201,13 +185,6 @@ class _LargePeerAvatar extends StatelessWidget {
           color: scheme.onSurface.withAlpha(22),
           width: 1,
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withAlpha(28),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
-          ),
-        ],
       ),
       child: Material(
         color: Colors.transparent,
@@ -311,15 +288,6 @@ class _DialogMediaCard extends StatelessWidget {
         color: scheme.surface,
         borderRadius: radius,
         border: Border.all(color: scheme.outlineVariant.withAlpha(115)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withAlpha(
-              theme.brightness == Brightness.dark ? 42 : 14,
-            ),
-            blurRadius: 14,
-            offset: const Offset(0, 5),
-          ),
-        ],
       ),
       child: Material(
         color: Colors.transparent,

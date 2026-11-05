@@ -26,6 +26,7 @@ Future<TopicOptionDraftResult?> showTopicOptionEditSheet(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
+    constraints: const BoxConstraints(maxWidth: 600),
     backgroundColor: Colors.transparent,
     builder: (_) => _TopicOptionEditSheet(
       initialTitle: initialTitle,
@@ -138,7 +139,7 @@ class _TopicOptionEditSheetState extends State<_TopicOptionEditSheet> {
         child: KeyboardDismissScope(
           child: SafeArea(
             top: false,
-            child: Padding(
+            child: SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -155,13 +156,16 @@ class _TopicOptionEditSheetState extends State<_TopicOptionEditSheet> {
                       ),
                     ),
                   ),
-                  Text(
-                    widget.isNew ? 'Новая тема' : 'Изменить тему',
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      height: 1.15,
-                    ),
-                  ),
+                  Row(children: [
+                    Expanded(
+                        child: Text(
+                            widget.isNew ? 'Новая тема' : 'Изменить тему',
+                            style: theme.textTheme.titleMedium)),
+                    IconButton(
+                        tooltip: 'Закрыть',
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close_rounded)),
+                  ]),
                   const SizedBox(height: 6),
                   Text(
                     widget.isNew

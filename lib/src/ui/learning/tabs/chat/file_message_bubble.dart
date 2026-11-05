@@ -51,14 +51,17 @@ class FileMessageBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    final Color baseBg = isMe
-        ? theme.colorScheme.primary.withValues(alpha: 0.22)
-        : theme.colorScheme.surfaceContainerHighest;
+    final colors = theme.colorScheme;
     final Color bg = selected
-        ? theme.colorScheme.surface.withValues(alpha: isMe ? 0.92 : 0.86)
-        : baseBg;
-
-    final textColor = theme.colorScheme.onSurface;
+        ? colors.secondaryContainer
+        : isMe
+            ? colors.primaryContainer
+            : colors.surface;
+    final textColor = selected
+        ? colors.onSecondaryContainer
+        : isMe
+            ? colors.onPrimaryContainer
+            : colors.onSurface;
     final captionText = _realCaption(file, caption);
     final hasCaption = captionText != null;
     final displayTime = formatMessageTimeLabel(
@@ -134,7 +137,7 @@ class FileMessageBubble extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (!isMe && showAuthorLine && hasCaption)
+                        if (!isMe && showAuthorLine)
                           Padding(
                             padding: const EdgeInsets.only(bottom: 2),
                             child: Text(
@@ -171,8 +174,7 @@ class FileMessageBubble extends StatelessWidget {
                             compact: true,
                             maxNameLines: 1,
                             statusLabel: displayTime,
-                            statusColor:
-                                textColor.withValues(alpha: isMe ? .66 : .6),
+                            statusColor: textColor,
                             backgroundColor: bg,
                             borderColor: theme.colorScheme.outlineVariant
                                 .withValues(alpha: .18),
@@ -213,8 +215,7 @@ class FileMessageBubble extends StatelessWidget {
                                     compact: true,
                                     maxNameLines: 1,
                                     statusLabel: displayTime,
-                                    statusColor: textColor.withValues(
-                                        alpha: isMe ? .66 : .6),
+                                    statusColor: textColor,
                                     backgroundColor: Colors.transparent,
                                     borderColor: Colors.transparent,
                                     onTap: () => _handleFileTap(context),
@@ -239,8 +240,7 @@ class FileMessageBubble extends StatelessWidget {
                                       Text(
                                         displayTime,
                                         style: TextStyle(
-                                          color:
-                                              textColor.withValues(alpha: .6),
+                                          color: textColor,
                                           fontSize: 11,
                                           height: 1,
                                         ),

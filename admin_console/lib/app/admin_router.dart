@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -113,7 +114,7 @@ GoRouter createAdminRouter(AdminSessionController session) {
       GoRoute(
         path: '/loading',
         builder: (context, state) =>
-            const Scaffold(body: Center(child: CircularProgressIndicator())),
+            const Scaffold(body: Center(child: ProductLoadingIndicator())),
       ),
       ShellRoute(
         builder: (context, state, child) => AdminShell(

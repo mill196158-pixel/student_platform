@@ -1,20 +1,22 @@
 import 'package:flutter/material.dart';
 
 import 'content_icon_catalog.dart';
+import 'visual_editor_states.dart';
 
-/// Opens a modal dialog and returns the selected icon key, or null if cleared.
+/// Returns the selected key, the original on dismissal, or null if cleared.
 Future<String?> showContentIconPickerDialog({
   required BuildContext context,
   String? selectedKey,
   Color? previewColor,
-}) {
-  return showDialog<String?>(
+}) async {
+  final result = await showDialog<String>(
     context: context,
     builder: (dialogContext) => _ContentIconPickerDialog(
       selectedKey: selectedKey,
       previewColor: previewColor,
     ),
   );
+  return result == '' ? null : result ?? selectedKey;
 }
 
 /// Inline field that opens the icon picker dialog.
@@ -82,6 +84,7 @@ class _ContentIconPickerDialog extends StatefulWidget {
 }
 
 class _ContentIconPickerDialogState extends State<_ContentIconPickerDialog> {
+  final _searchController = TextEditingController();
   late String? _selectedKey;
   String _query = '';
   ContentIconCategory? _categoryFilter;
@@ -90,6 +93,12 @@ class _ContentIconPickerDialogState extends State<_ContentIconPickerDialog> {
   void initState() {
     super.initState();
     _selectedKey = widget.selectedKey;
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   List<ContentIconEntry> get _visibleIcons {
@@ -103,6 +112,7 @@ class _ContentIconPickerDialogState extends State<_ContentIconPickerDialog> {
   @override
   Widget build(BuildContext context) {
     final previewColor = widget.previewColor ?? const Color(0xFF6656D9);
+    final visibleIcons = _visibleIcons;
 
     return AlertDialog(
       title: const Text('Выбор иконки'),
@@ -113,6 +123,7 @@ class _ContentIconPickerDialogState extends State<_ContentIconPickerDialog> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             TextField(
+              controller: _searchController,
               decoration: const InputDecoration(
                 labelText: 'Поиск',
                 hintText: 'Название на русском',
@@ -148,47 +159,66 @@ class _ContentIconPickerDialogState extends State<_ContentIconPickerDialog> {
             ),
             const SizedBox(height: 8),
             Expanded(
-              child: GridView.builder(
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 6,
-                  mainAxisSpacing: 8,
-                  crossAxisSpacing: 8,
-                ),
-                itemCount: _visibleIcons.length,
-                itemBuilder: (context, index) {
-                  final entry = _visibleIcons[index];
-                  final selected = entry.key == _selectedKey;
-                  return Tooltip(
-                    message: entry.labelRu,
-                    child: InkWell(
-                      onTap: () => setState(() => _selectedKey = entry.key),
-                      borderRadius: BorderRadius.circular(12),
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: selected
-                              ? Theme.of(context).colorScheme.primaryContainer
-                              : const Color(0xFFF4F5FA),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: selected
-                                ? Theme.of(context).colorScheme.primary
-                                : const Color(0xFFD8DCE8),
-                            width: selected ? 2 : 1,
-                          ),
-                        ),
-                        child: Icon(entry.iconData, color: previewColor),
+              child: visibleIcons.isEmpty
+                  ? SingleChildScrollView(
+                      child: VisualEditorEmptyState(
+                        message: 'Иконки не найдены',
+                        icon: Icons.search_off_outlined,
+                        actionLabel: 'Сбросить фильтры',
+                        onAction: () {
+                          _searchController.clear();
+                          setState(() {
+                            _query = '';
+                            _categoryFilter = null;
+                          });
+                        },
                       ),
+                    )
+                  : GridView.builder(
+                      gridDelegate:
+                          const SliverGridDelegateWithMaxCrossAxisExtent(
+                            maxCrossAxisExtent: 84,
+                            mainAxisSpacing: 8,
+                            crossAxisSpacing: 8,
+                          ),
+                      itemCount: visibleIcons.length,
+                      itemBuilder: (context, index) {
+                        final entry = visibleIcons[index];
+                        final selected = entry.key == _selectedKey;
+                        return Tooltip(
+                          message: entry.labelRu,
+                          child: InkWell(
+                            onTap: () =>
+                                setState(() => _selectedKey = entry.key),
+                            borderRadius: BorderRadius.circular(12),
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: selected
+                                    ? Theme.of(
+                                        context,
+                                      ).colorScheme.primaryContainer
+                                    : const Color(0xFFF4F5FA),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: selected
+                                      ? Theme.of(context).colorScheme.primary
+                                      : const Color(0xFFD8DCE8),
+                                  width: selected ? 2 : 1,
+                                ),
+                              ),
+                              child: Icon(entry.iconData, color: previewColor),
+                            ),
+                          ),
+                        );
+                      },
                     ),
-                  );
-                },
-              ),
             ),
           ],
         ),
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.of(context).pop(null),
+          onPressed: () => Navigator.of(context).pop(''),
           child: const Text('Без иконки'),
         ),
         TextButton(

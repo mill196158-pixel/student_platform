@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/typing_line.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_card_envelope.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/composer.dart'
     show AttachedFile, Composer;
 
@@ -84,7 +85,7 @@ class DmComposerBar extends StatelessWidget {
                 const Icon(Icons.reply, size: 18),
                 const SizedBox(width: 8),
                 Expanded(
-                    child: Text(replyTo!.text,
+                    child: Text(ChatCardPreview.forPreview(replyTo!),
                         maxLines: 2, overflow: TextOverflow.ellipsis)),
                 IconButton(
                     icon: const Icon(Icons.close), onPressed: onCloseReply),
@@ -315,7 +316,7 @@ class _DmPlusButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Material(
-      color: theme.colorScheme.surface,
+      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: .78),
       shape: const CircleBorder(),
       child: InkWell(
         customBorder: const CircleBorder(),
@@ -354,9 +355,10 @@ class _DmPlusButton extends StatelessWidget {
             ),
           );
         },
-        child: const Padding(
-          padding: EdgeInsets.all(10),
-          child: Icon(Icons.add, size: 22),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Icon(Icons.add,
+              size: 24, color: theme.colorScheme.onSurfaceVariant),
         ),
       ),
     );

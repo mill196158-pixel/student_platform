@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../../services/file_service.dart';
@@ -218,7 +219,7 @@ class PlusButton extends StatelessWidget {
         builder: (context) => const AlertDialog(
           content: Row(
             children: [
-              CircularProgressIndicator(),
+              ProductLoadingIndicator(),
               SizedBox(width: 16),
               Text('Тестируем подключение к Яндекс Storage...'),
             ],

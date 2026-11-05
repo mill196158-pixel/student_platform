@@ -1,4 +1,5 @@
 // lib/src/ui/learning/tabs/chat/assignment_bubble.dart
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'dart:math' as math;
@@ -448,7 +449,7 @@ class _MissingAssignmentBubble extends StatelessWidget {
                     SizedBox(
                       width: 18,
                       height: 18,
-                      child: const CircularProgressIndicator(strokeWidth: 2),
+                      child: const ProductLoadingIndicator(),
                     ),
                     const SizedBox(width: 10),
                     Expanded(

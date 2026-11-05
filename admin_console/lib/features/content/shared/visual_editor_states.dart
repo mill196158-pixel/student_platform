@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 
 /// Shared loading indicator for visual content editors.
@@ -6,7 +7,7 @@ class VisualEditorLoadingState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Center(child: CircularProgressIndicator());
+    return const Center(child: ProductLoadingIndicator());
   }
 }
 
@@ -49,12 +50,16 @@ class VisualEditorErrorState extends StatelessWidget {
 class VisualEditorEmptyState extends StatelessWidget {
   const VisualEditorEmptyState({
     required this.message,
+    this.icon,
+    this.supportingText,
     this.actionLabel,
     this.onAction,
     super.key,
   });
 
   final String message;
+  final IconData? icon;
+  final String? supportingText;
   final String? actionLabel;
   final VoidCallback? onAction;
 
@@ -68,7 +73,31 @@ class VisualEditorEmptyState extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(message, textAlign: TextAlign.center),
+              if (icon != null) ...[
+                Icon(
+                  icon,
+                  size: 36,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(height: 12),
+              ],
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: icon == null
+                    ? null
+                    : Theme.of(context).textTheme.titleMedium,
+              ),
+              if (supportingText != null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  supportingText!,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
               if (actionLabel != null && onAction != null) ...[
                 const SizedBox(height: 16),
                 FilledButton(onPressed: onAction, child: Text(actionLabel!)),

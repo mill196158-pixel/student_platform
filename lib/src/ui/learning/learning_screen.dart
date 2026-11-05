@@ -1,9 +1,10 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import '../shared/student_section_headers.dart';
 // =============================
 // FILE: lib/src/ui/learning/learning_screen.dart
 // =============================
 
- // для мягких свечений
+// для мягких свечений
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -136,7 +137,7 @@ class _BodyState extends State<_Body> {
                           state.viewMode == ViewMode.grid
                               ? Icons.view_list
                               : Icons.grid_view_rounded,
-                          color: Colors.black87,
+                          color: Theme.of(context).colorScheme.onSurface,
                         ),
                         onPressed: () =>
                             context.read<LearningCubit>().toggleViewMode(),
@@ -150,7 +151,7 @@ class _BodyState extends State<_Body> {
                 child: Builder(
                   builder: (_) {
                     if (state.loading) {
-                      return const Center(child: CircularProgressIndicator());
+                      return const Center(child: ProductLoadingIndicator.page());
                     }
 
                     final cubit = context.read<LearningCubit>();
@@ -168,28 +169,32 @@ class _BodyState extends State<_Body> {
                     }
 
                     if (state.viewMode == ViewMode.grid) {
-                      return GridView.builder(
-                        padding: _kContentPadding,
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount:
-                              MediaQuery.sizeOf(context).width >= 700 ? 3 : 2,
-                          mainAxisSpacing: 12,
-                          crossAxisSpacing: 12,
-                          childAspectRatio: 1.6,
-                        ),
-                        itemCount: items.length + (groupChat != null ? 1 : 0),
-                        itemBuilder: (_, i) {
-                          if (groupChat != null && i == 0) {
-                            return _GroupChatGridCard(
-                              key: const ValueKey('learning-group-chat-grid'),
-                              team: groupChat,
-                              groupName: groupName,
-                            );
-                          }
-                          final idx = groupChat != null ? i - 1 : i;
-                          return _TeamGridCard(items[idx]);
-                        },
-                      );
+                      return LayoutBuilder(
+                          builder: (context, gridSize) => GridView.builder(
+                                padding: _kContentPadding,
+                                gridDelegate:
+                                    SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount:
+                                      gridSize.maxWidth >= 700 ? 3 : 2,
+                                  mainAxisSpacing: 12,
+                                  crossAxisSpacing: 12,
+                                  childAspectRatio: 1.6,
+                                ),
+                                itemCount:
+                                    items.length + (groupChat != null ? 1 : 0),
+                                itemBuilder: (_, i) {
+                                  if (groupChat != null && i == 0) {
+                                    return _GroupChatGridCard(
+                                      key: const ValueKey(
+                                          'learning-group-chat-grid'),
+                                      team: groupChat,
+                                      groupName: groupName,
+                                    );
+                                  }
+                                  final idx = groupChat != null ? i - 1 : i;
+                                  return _TeamGridCard(items[idx]);
+                                },
+                              ));
                     }
 
                     return ListView.separated(
@@ -247,20 +252,14 @@ class _GroupChatCard extends StatelessWidget {
           ),
         ),
       ),
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(12),
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(12),
           // Match other team tiles — no special purple border.
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.06),
-              blurRadius: 14,
-              offset: const Offset(0, 3),
-            ),
-          ],
+          boxShadow: const [],
         ),
         child: Row(
           children: [
@@ -335,19 +334,13 @@ class _GroupChatGridCard extends StatelessWidget {
               ),
             ),
           ),
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(12),
           child: Container(
             decoration: BoxDecoration(
               color: theme.colorScheme.surface,
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: BorderRadius.circular(12),
               // Match other team tiles — no special purple border.
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.06),
-                  blurRadius: 14,
-                  offset: const Offset(0, 3),
-                ),
-              ],
+              boxShadow: const [],
             ),
             padding: EdgeInsets.all(compact ? 9 : 11),
             child: Stack(
@@ -414,22 +407,18 @@ class StudentTeamTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return InkWell(
-      onTap: onTap ?? () => Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => TeamDetailsScreen(team: team)),
-      ),
-      borderRadius: BorderRadius.circular(18),
+      onTap: onTap ??
+          () => Navigator.of(context).push(
+                MaterialPageRoute(
+                    builder: (_) => TeamDetailsScreen(team: team)),
+              ),
+      borderRadius: BorderRadius.circular(12),
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.06),
-              blurRadius: 14,
-              offset: const Offset(0, 3),
-            ),
-          ],
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: const [],
         ),
         child: Row(
           children: [
@@ -445,7 +434,7 @@ class StudentTeamTile extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w800,
-                      color: Colors.black,
+                      color: Theme.of(context).colorScheme.onSurface,
                       height: 1.12,
                     ),
                   ),
@@ -455,39 +444,13 @@ class StudentTeamTile extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.black.withValues(alpha: 0.62),
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ],
               ),
             ),
-            if (team.unread > 0)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [theme.colorScheme.primary, Colors.black],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.12),
-                      blurRadius: 10,
-                      offset: const Offset(0, 3),
-                    ),
-                  ],
-                ),
-                child: Text(
-                  '${team.unread}',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.2,
-                  ),
-                ),
-              ),
+            if (team.unread > 0) _UnreadBadge(count: team.unread),
           ],
         ),
       ),
@@ -511,18 +474,12 @@ class _TeamGridCard extends StatelessWidget {
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => TeamDetailsScreen(team: team)),
           ),
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(12),
           child: Container(
             decoration: BoxDecoration(
               color: theme.colorScheme.surface,
-              borderRadius: BorderRadius.circular(18),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.06),
-                  blurRadius: 14,
-                  offset: const Offset(0, 3),
-                ),
-              ],
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: const [],
             ),
             padding: EdgeInsets.all(compact ? 9 : 11),
             child: Stack(
@@ -547,7 +504,7 @@ class _TeamGridCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w800,
-                        color: Colors.black,
+                        color: Theme.of(context).colorScheme.onSurface,
                         height: 1.08,
                         fontSize: compact ? 13 : 14,
                       ),
@@ -560,7 +517,7 @@ class _TeamGridCard extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: Colors.black.withValues(alpha: 0.58),
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                         height: 1.1,
                         fontSize: compact ? 11 : 12,
                       ),
@@ -594,24 +551,14 @@ class _UnreadBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [theme.colorScheme.primary, Colors.black],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        color: theme.colorScheme.primary,
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.12),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
-          ),
-        ],
+        boxShadow: const [],
       ),
       child: Text(
         '$count',
-        style: const TextStyle(
-          color: Colors.white,
+        style: TextStyle(
+          color: theme.colorScheme.onPrimary,
           fontWeight: FontWeight.w800,
           letterSpacing: 0.2,
         ),
@@ -619,10 +566,6 @@ class _UnreadBadge extends StatelessWidget {
     );
   }
 }
-
-
-
-
 
 class _AcademicContextInfoButton extends StatelessWidget {
   final AcademicContext? contextData;
@@ -637,7 +580,8 @@ class _AcademicContextInfoButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return IconButton(
       tooltip: 'Учебный контекст',
-      icon: const Icon(Icons.info_outline_rounded, color: Colors.black87),
+      icon: Icon(Icons.info_outline_rounded,
+          color: Theme.of(context).colorScheme.onSurface),
       onPressed: () => _showAcademicContextSheet(context),
     );
   }
@@ -661,7 +605,7 @@ class _AcademicContextInfoButton extends StatelessWidget {
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       builder: (sheetContext) {
         final theme = Theme.of(sheetContext);
         return SafeArea(
@@ -690,7 +634,7 @@ class _AcademicContextInfoButton extends StatelessWidget {
                       child: Text(
                         'Моя учебная группа',
                         style: theme.textTheme.titleMedium?.copyWith(
-                          color: Colors.black,
+                          color: Theme.of(context).colorScheme.onSurface,
                           fontWeight: FontWeight.w800,
                         ),
                       ),
@@ -701,7 +645,7 @@ class _AcademicContextInfoButton extends StatelessWidget {
                 Text(
                   'Команды — чаты по предметам вашей учебной группы: обсуждения, файлы и задания в одном месте.',
                   style: theme.textTheme.bodyMedium?.copyWith(
-                    color: Colors.black.withOpacity(0.68),
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                     height: 1.35,
                   ),
                 ),
@@ -752,7 +696,7 @@ class _AcademicContextLine extends StatelessWidget {
           child: Text(
             '$label:',
             style: theme.textTheme.bodyMedium?.copyWith(
-              color: Colors.black.withOpacity(0.55),
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
         ),
@@ -760,7 +704,7 @@ class _AcademicContextLine extends StatelessWidget {
           child: Text(
             value,
             style: theme.textTheme.bodyMedium?.copyWith(
-              color: Colors.black,
+              color: Theme.of(context).colorScheme.onSurface,
               fontWeight: FontWeight.w600,
             ),
           ),

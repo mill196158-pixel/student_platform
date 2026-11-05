@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:student_ui/student_ui.dart' show ProductTheme;
 
 import '../news_item.dart';
 import '../news_repository.dart';
@@ -132,6 +133,9 @@ class _NewsAudiencePanelState extends State<NewsAudiencePanel> {
           ),
         const SizedBox(height: 8),
         DropdownButtonFormField<NewsAudienceMode>(
+          borderRadius: ProductTheme.selectionMenuRadius,
+          elevation: ProductTheme.selectionMenuElevation,
+          icon: const Icon(Icons.keyboard_arrow_down_rounded),
           initialValue:
               (_mode == NewsAudienceMode.all ||
                   _mode == NewsAudienceMode.groups ||

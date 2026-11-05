@@ -63,7 +63,8 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
 
   /// Cache-first: paint last-good card ASAP, then refresh from network.
   Future<void> _bootstrap() async {
-    final cached = await SubjectCardService().loadCached(widget.subjectOfferingId);
+    final cached =
+        await SubjectCardService().loadCached(widget.subjectOfferingId);
     if (cached != null && mounted) {
       final cachedData = _SubjectInfoData.fromManagedCard(
         card: cached,
@@ -298,7 +299,7 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.black54,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                           fontWeight: FontWeight.w600,
                         ),
                   ),
@@ -357,8 +358,7 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
                     ),
                   )
               : null,
-          onRateSubject:
-              data.canVoteSubject ? () => _rateSubject(data) : null,
+          onRateSubject: data.canVoteSubject ? () => _rateSubject(data) : null,
         ),
         const SizedBox(height: 10),
         if (data.subjectId != null && data.subjectId!.trim().isNotEmpty)
@@ -378,8 +378,7 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
           const SizedBox(height: 10),
         _QuickActions(
           canOpenChat: data.canOpenChat,
-          onChatTap:
-              data.canOpenChat ? () => _openChat(context, data) : null,
+          onChatTap: data.canOpenChat ? () => _openChat(context, data) : null,
           onDiaryTap: () => _openDiary(context, data),
           onFilesTap: _scrollToFiles,
         ),
@@ -389,7 +388,7 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
             child: StudentSubjectCardPreview(
               payload: data.cardPayload!,
               width: MediaQuery.of(context).size.width - 48,
-              height: 420,
+              fitContent: true,
             ),
           ),
           const SizedBox(height: 12),
@@ -439,10 +438,10 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
   Widget build(BuildContext context) {
     final data = _data;
     return Scaffold(
-      backgroundColor: const Color(0xFFFBFAFF),
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
       appBar: AppBar(title: const Text('Информация о предмете')),
       body: data == null && _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: ProductLoadingIndicator.page())
           : _buildBody(
               data ??
                   _SubjectInfoData.fallback(
@@ -870,13 +869,11 @@ class _SubjectInfoData {
         'Информация по предмету будет добавлена позже.';
   }
 
-  bool get hasDescription => _cleanHumanText(description) != null;
 
   String get displayControlForm {
     return _cleanHumanText(controlForm) ?? 'Тип контроля уточняется';
   }
 
-  bool get hasControlForm => _cleanHumanText(controlForm) != null;
 
   String get displayTeacherName {
     return _cleanHumanText(teacherName) ?? 'Преподаватель будет указан позже.';
@@ -992,9 +989,8 @@ class _SubjectInfoData {
           ? fallbackTitle
           : card.canonicalName,
       subjectOfferingId: subjectOfferingId,
-      subjectId: card.subjectId.trim().isEmpty
-          ? fallbackSubjectId
-          : card.subjectId,
+      subjectId:
+          card.subjectId.trim().isEmpty ? fallbackSubjectId : card.subjectId,
       groupId: fallbackGroupId,
       semesterNumber: fallbackSemesterNumber,
       description: card.description ?? card.shortDescription ?? '',
@@ -1050,21 +1046,9 @@ class _HeroCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFF3ECFF), Color(0xFFFFFFFF)],
-        ),
-        borderRadius: BorderRadius.circular(22),
-        border:
-            Border.all(color: const Color(0xFF6A4BBC).withValues(alpha: 0.08)),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF6A4BBC).withValues(alpha: 0.08),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
-          ),
-        ],
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1084,7 +1068,7 @@ class _HeroCard extends StatelessWidget {
               width: 64,
               height: 64,
               child: Center(
-                child: CircularProgressIndicator(strokeWidth: 2),
+                child: ProductLoadingIndicator(),
               ),
             )
           else
@@ -1100,7 +1084,7 @@ class _HeroCard extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w900,
-                    color: Colors.black,
+                    color: theme.colorScheme.onSurface,
                     height: 1.12,
                   ),
                 ),
@@ -1111,7 +1095,7 @@ class _HeroCard extends StatelessWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.black.withValues(alpha: 0.58),
+                      color: theme.colorScheme.onSurfaceVariant,
                       fontWeight: FontWeight.w700,
                       height: 1.2,
                     ),
@@ -1195,7 +1179,9 @@ class _QuickActionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final color = enabled ? const Color(0xFF6A4BBC) : Colors.black38;
+    final color = enabled
+        ? theme.colorScheme.primary
+        : theme.colorScheme.onSurface.withValues(alpha: 0.38);
     return InkWell(
       onTap: enabled ? onTap : null,
       borderRadius: BorderRadius.circular(22),
@@ -1203,18 +1189,9 @@ class _QuickActionCard extends StatelessWidget {
         constraints: const BoxConstraints(minHeight: 82),
         padding: const EdgeInsets.fromLTRB(11, 10, 11, 10),
         decoration: BoxDecoration(
-          color: enabled
-              ? theme.colorScheme.surface
-              : Colors.white.withValues(alpha: 0.72),
+          color: theme.colorScheme.surface,
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: enabled ? 0.035 : 0.02),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
+          border: Border.all(color: theme.colorScheme.outlineVariant),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1226,7 +1203,9 @@ class _QuickActionCard extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.labelLarge?.copyWith(
-                color: enabled ? Colors.black : Colors.black45,
+                color: enabled
+                    ? theme.colorScheme.onSurface
+                    : theme.colorScheme.onSurfaceVariant,
                 fontWeight: FontWeight.w900,
               ),
             ),
@@ -1236,7 +1215,7 @@ class _QuickActionCard extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.labelSmall?.copyWith(
-                color: enabled ? Colors.black54 : Colors.black38,
+                color: theme.colorScheme.onSurfaceVariant,
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -1259,15 +1238,6 @@ class _SummaryCard extends StatelessWidget {
       title: 'Краткая информация',
       child: Column(
         children: [
-          if (!data.hasDescription && !data.hasControlForm) ...[
-            const _EmptyContentCallout(
-              icon: Icons.auto_stories_outlined,
-              title: 'Информация будет добавлена',
-              subtitle:
-                  'Здесь появятся описание предмета, формат сдачи, материалы и заметки.',
-            ),
-            const SizedBox(height: 10),
-          ],
           _InfoTile(
             title: 'Описание',
             value: data.displayDescription,
@@ -1357,7 +1327,7 @@ class _TeacherDifficultyGlance extends StatelessWidget {
                   height: 36,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: const Color(0xFF6A4BBC).withValues(alpha: 0.10),
+                    color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.10),
                   ),
                   child: const Icon(
                     Icons.person_outline_rounded,
@@ -1375,7 +1345,7 @@ class _TeacherDifficultyGlance extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.titleSmall?.copyWith(
-                          color: Colors.black,
+                          color: Theme.of(context).colorScheme.onSurface,
                           fontWeight: FontWeight.w900,
                         ),
                       ),
@@ -1385,7 +1355,7 @@ class _TeacherDifficultyGlance extends StatelessWidget {
                             ? 'Сдача: ${data.teacherDifficultyLabel}'
                             : 'Преподаватель пока не указан',
                         style: theme.textTheme.labelSmall?.copyWith(
-                          color: Colors.black54,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -1393,8 +1363,8 @@ class _TeacherDifficultyGlance extends StatelessWidget {
                   ),
                 ),
                 if (onOpenTeacher != null)
-                  const Icon(Icons.chevron_right_rounded,
-                      color: Colors.black38, size: 22),
+                  Icon(Icons.chevron_right_rounded,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant, size: 22),
               ],
             ),
           ),
@@ -1411,7 +1381,7 @@ class _TeacherDifficultyGlance extends StatelessWidget {
               const SizedBox(width: 8),
               if (onRateSubject != null)
                 Material(
-                  color: const Color(0xFF6A4BBC).withValues(alpha: 0.10),
+                  color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(999),
                   child: InkWell(
                     onTap: ratingBusy ? null : onRateSubject,
@@ -1429,7 +1399,7 @@ class _TeacherDifficultyGlance extends StatelessWidget {
                                 ? Icons.star_border_rounded
                                 : Icons.star_rounded,
                             size: 18,
-                            color: const Color(0xFF6A4BBC),
+                            color: Theme.of(context).colorScheme.primary,
                           ),
                           const SizedBox(width: 5),
                           Text(
@@ -1437,7 +1407,7 @@ class _TeacherDifficultyGlance extends StatelessWidget {
                                 ? 'Оценить'
                                 : 'Моя: ${data.mySubjectScore}',
                             style: theme.textTheme.labelMedium?.copyWith(
-                              color: const Color(0xFF6A4BBC),
+                              color: Theme.of(context).colorScheme.primary,
                               fontWeight: FontWeight.w800,
                             ),
                           ),
@@ -1470,12 +1440,12 @@ class _GlanceStatChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8F5FF),
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(14),
       ),
       child: Row(
         children: [
-          Icon(icon, size: 16, color: const Color(0xFF6A4BBC)),
+          Icon(icon, size: 16, color: Theme.of(context).colorScheme.primary),
           const SizedBox(width: 6),
           Expanded(
             child: Text(
@@ -1483,7 +1453,7 @@ class _GlanceStatChip extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: Colors.black87,
+                    color: Theme.of(context).colorScheme.onSurface,
                     fontWeight: FontWeight.w800,
                   ),
             ),
@@ -1519,13 +1489,13 @@ class _CompactRatingCircles extends StatelessWidget {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: i <= value
-                    ? const Color(0xFF6A4BBC)
-                    : const Color(0xFFF0ECF8),
+                    ? Theme.of(context).colorScheme.primary
+                    : Theme.of(context).colorScheme.surfaceContainerHighest,
               ),
               child: Text(
                 '$i',
                 style: TextStyle(
-                  color: i <= value ? Colors.white : Colors.black54,
+                  color: i <= value ? Theme.of(context).colorScheme.onPrimary : Theme.of(context).colorScheme.onSurfaceVariant,
                   fontWeight: FontWeight.w900,
                 ),
               ),
@@ -1614,7 +1584,7 @@ class _LargeActionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final color = enabled ? const Color(0xFF6A4BBC) : Colors.black38;
+    final color = enabled ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.onSurfaceVariant;
     return InkWell(
       onTap: enabled ? onTap : null,
       borderRadius: BorderRadius.circular(24),
@@ -1651,7 +1621,7 @@ class _LargeActionCard extends StatelessWidget {
                   Text(
                     title,
                     style: theme.textTheme.titleMedium?.copyWith(
-                      color: enabled ? Colors.black : Colors.black45,
+                      color: enabled ? Theme.of(context).colorScheme.onSurface : Theme.of(context).colorScheme.onSurfaceVariant,
                       fontWeight: FontWeight.w900,
                     ),
                   ),
@@ -1659,7 +1629,7 @@ class _LargeActionCard extends StatelessWidget {
                   Text(
                     subtitle,
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: enabled ? Colors.black54 : Colors.black38,
+                      color: enabled ? Theme.of(context).colorScheme.onSurfaceVariant : Theme.of(context).colorScheme.onSurfaceVariant,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -1670,7 +1640,7 @@ class _LargeActionCard extends StatelessWidget {
             ),
             Icon(
               Icons.chevron_right_rounded,
-              color: enabled ? Colors.black38 : Colors.black26,
+              color: enabled ? Theme.of(context).colorScheme.onSurfaceVariant : Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ],
         ),
@@ -1688,14 +1658,10 @@ class _HelpCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFEFF4FF), Color(0xFFFFFFFF)],
-        ),
+        color: theme.colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(26),
         border:
-            Border.all(color: const Color(0xFF6A4BBC).withValues(alpha: 0.06)),
+            Border.all(color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.06)),
       ),
       child: Row(
         children: [
@@ -1703,7 +1669,7 @@ class _HelpCard extends StatelessWidget {
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: const Color(0xFF6A4BBC).withValues(alpha: 0.10),
+              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.10),
               borderRadius: BorderRadius.circular(16),
             ),
             child: const Icon(Icons.volunteer_activism_outlined,
@@ -1717,7 +1683,7 @@ class _HelpCard extends StatelessWidget {
                 Text(
                   'Сложно с предметом?',
                   style: theme.textTheme.titleMedium?.copyWith(
-                    color: Colors.black,
+                    color: Theme.of(context).colorScheme.onSurface,
                     fontWeight: FontWeight.w900,
                   ),
                 ),
@@ -1725,7 +1691,7 @@ class _HelpCard extends StatelessWidget {
                 Text(
                   'Можно разобрать задание, подготовиться к сдаче или задать вопрос.',
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: Colors.black54,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                     height: 1.25,
                   ),
                 ),
@@ -1777,17 +1743,17 @@ class _ContentCard extends StatelessWidget {
                 width: 34,
                 height: 34,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF6A4BBC).withValues(alpha: 0.10),
+                  color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(icon, color: const Color(0xFF6A4BBC), size: 19),
+                child: Icon(icon, color: Theme.of(context).colorScheme.primary, size: 19),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   title,
                   style: theme.textTheme.titleMedium?.copyWith(
-                    color: Colors.black,
+                    color: Theme.of(context).colorScheme.onSurface,
                     fontWeight: FontWeight.w900,
                   ),
                 ),
@@ -1820,13 +1786,13 @@ class _InfoTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFFFBFAFF),
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(18),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 18, color: const Color(0xFF6A4BBC)),
+          Icon(icon, size: 18, color: Theme.of(context).colorScheme.primary),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -1835,7 +1801,7 @@ class _InfoTile extends StatelessWidget {
                 Text(
                   title,
                   style: theme.textTheme.labelMedium?.copyWith(
-                    color: Colors.black54,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.w900,
                   ),
                 ),
@@ -1843,7 +1809,7 @@ class _InfoTile extends StatelessWidget {
                 Text(
                   value,
                   style: theme.textTheme.bodyMedium?.copyWith(
-                    color: Colors.black87,
+                    color: Theme.of(context).colorScheme.onSurface,
                     height: 1.28,
                   ),
                 ),
@@ -1873,14 +1839,10 @@ class _EmptyContentCallout extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFF7F1FF), Color(0xFFFFFFFF)],
-        ),
+        color: theme.colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: const Color(0xFF6A4BBC).withValues(alpha: 0.08),
+          color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
         ),
       ),
       child: Row(
@@ -1890,10 +1852,10 @@ class _EmptyContentCallout extends StatelessWidget {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: const Color(0xFF6A4BBC).withValues(alpha: 0.10),
+              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.10),
               borderRadius: BorderRadius.circular(14),
             ),
-            child: Icon(icon, size: 20, color: const Color(0xFF6A4BBC)),
+            child: Icon(icon, size: 20, color: Theme.of(context).colorScheme.primary),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -1903,7 +1865,7 @@ class _EmptyContentCallout extends StatelessWidget {
                 Text(
                   title,
                   style: theme.textTheme.titleMedium?.copyWith(
-                    color: Colors.black,
+                    color: Theme.of(context).colorScheme.onSurface,
                     fontWeight: FontWeight.w900,
                   ),
                 ),
@@ -1911,7 +1873,7 @@ class _EmptyContentCallout extends StatelessWidget {
                 Text(
                   subtitle,
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: Colors.black54,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                     height: 1.25,
                   ),
                 ),
@@ -1950,7 +1912,7 @@ class _SubjectIcon extends StatelessWidget {
         ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF6A4BBC).withValues(alpha: 0.22),
+            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.22),
             blurRadius: 16,
             offset: const Offset(0, 6),
           ),
@@ -1980,7 +1942,7 @@ class _InlineAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = enabled ? const Color(0xFF6A4BBC) : Colors.black38;
+    final color = enabled ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.onSurfaceVariant;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [

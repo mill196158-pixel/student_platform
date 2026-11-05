@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import '../shared/student_section_headers.dart';
 // lib/src/ui/schedule/schedule_screen.dart
 import 'dart:async';
@@ -788,7 +789,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
   Widget _buildBody(BuildContext context) {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: ProductLoadingIndicator.page());
     }
     return _weekMode ? _buildWeekBody(context) : _buildDayBody(context);
   }
@@ -1142,8 +1143,7 @@ class _ScheduleAssignmentDetailsRouteState
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
             return const Scaffold(
-              backgroundColor: Color(0xFFFAF8FC),
-              body: Center(child: CircularProgressIndicator()),
+              body: Center(child: ProductLoadingIndicator.page()),
             );
           }
 
@@ -1183,7 +1183,6 @@ class _AssignmentOpenErrorScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFFAF8FC),
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -1196,7 +1195,7 @@ class _AssignmentOpenErrorScreen extends StatelessWidget {
             text,
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Colors.black54,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                   fontWeight: FontWeight.w600,
                 ),
           ),
@@ -1347,7 +1346,7 @@ class _WeekDayHeader extends StatelessWidget {
                   Text(
                     '$dateLabel · $countText',
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.black.withValues(alpha: 0.55),
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ],

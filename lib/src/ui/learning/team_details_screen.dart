@@ -2,7 +2,7 @@
 // FILE: lib/src/ui/learning/team_details_screen.dart
 // =============================
 
-import 'dart:ui' as ui; // для мягких свечений
+// для мягких свечений
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -135,13 +135,7 @@ class _BodyState extends State<_Body> with SingleTickerProviderStateMixin {
                 decoration: BoxDecoration(
                   color: theme.colorScheme.surface,
                   borderRadius: BorderRadius.circular(8), // меньше радиус
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.06),
-                      blurRadius: 8, // меньше тень
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
+                  boxShadow: const [],
                 ),
                 padding: const EdgeInsets.all(1), // было 6 → 1 (еще компактнее)
                 child: Theme(
@@ -163,17 +157,12 @@ class _BodyState extends State<_Body> with SingleTickerProviderStateMixin {
                       indicator: BoxDecoration(
                         color: theme.colorScheme.primary,
                         borderRadius: BorderRadius.circular(6),
-                        boxShadow: [
-                          BoxShadow(
-                            color: theme.colorScheme.primary.withOpacity(0.14),
-                            blurRadius: 6,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
+                        boxShadow: const [],
                       ),
                       indicatorSize: TabBarIndicatorSize.tab,
-                      labelColor: Colors.white,
-                      unselectedLabelColor: Colors.black.withOpacity(0.64),
+                      labelColor: Theme.of(context).colorScheme.onPrimary,
+                      unselectedLabelColor:
+                          Theme.of(context).colorScheme.onSurfaceVariant,
                       tabs: const [
                         _MiniTab('Задания'),
                         _MiniTab('Чат'),
@@ -267,14 +256,6 @@ class _TeamChatHeaderActions extends StatelessWidget {
       },
       position: PopupMenuPosition.under,
       offset: const Offset(0, 10),
-      elevation: 18,
-      color: Colors.white,
-      surfaceTintColor: Colors.white,
-      shadowColor: Colors.black.withValues(alpha: 0.18),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(22),
-        side: BorderSide(color: primary.withValues(alpha: 0.08)),
-      ),
       constraints: const BoxConstraints(minWidth: 244),
       itemBuilder: (ctx) => const [
         PopupMenuItem(
@@ -303,16 +284,10 @@ class _TeamChatHeaderActions extends StatelessWidget {
         width: 40,
         height: 40,
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.78),
+          color: Theme.of(context).colorScheme.surfaceContainerHigh,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: primary.withValues(alpha: 0.10)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
-              blurRadius: 18,
-              offset: const Offset(0, 8),
-            ),
-          ],
+          boxShadow: const [],
         ),
         child: Icon(Icons.more_horiz_rounded, color: primary, size: 24),
       ),
@@ -345,16 +320,10 @@ class _HeaderRoundButton extends StatelessWidget {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.78),
+              color: Theme.of(context).colorScheme.surfaceContainerHigh,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: primary.withValues(alpha: 0.10)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.08),
-                  blurRadius: 18,
-                  offset: const Offset(0, 8),
-                ),
-              ],
+              boxShadow: const [],
             ),
             child: Icon(icon, color: primary, size: 22),
           ),
@@ -401,7 +370,7 @@ class _TeamMenuItem extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodyMedium?.copyWith(
-                  color: const Color(0xFF111827),
+                  color: theme.colorScheme.onSurface,
                   fontWeight: FontWeight.w800,
                   height: 1.05,
                 ),
@@ -412,7 +381,7 @@ class _TeamMenuItem extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: const Color(0xFF6B7280),
+                  color: theme.colorScheme.onSurfaceVariant,
                   height: 1.1,
                 ),
               ),
@@ -453,13 +422,7 @@ class _RoundBackButton extends StatelessWidget {
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         shape: BoxShape.circle,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        boxShadow: const [],
       ),
       child: IconButton(
         tooltip: 'Назад',
@@ -487,42 +450,10 @@ class _TeamHeader extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        // Градиент фона
+        // Flat header surface shared with the workspace.
         Container(
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Colors.white,
-                theme.colorScheme.primary.withOpacity(0.06),
-                theme.colorScheme.primary.withOpacity(0.12),
-              ],
-              stops: const [0.0, 0.62, 1.0],
-            ),
-          ),
-        ),
-        // Мягкие свечения
-        IgnorePointer(
-          child: Stack(
-            children: [
-              Positioned(
-                left: -40,
-                top: -20,
-                child: _GlowCircle(
-                  diameter: 140,
-                  color: theme.colorScheme.primary.withOpacity(0.10),
-                ),
-              ),
-              Positioned(
-                right: -30,
-                bottom: -30,
-                child: _GlowCircle(
-                  diameter: 160,
-                  color: Colors.white.withOpacity(0.55),
-                ),
-              ),
-            ],
+            color: Theme.of(context).colorScheme.surface,
           ),
         ),
         // Контент — плотно под статус-баром / Dynamic Island.
@@ -558,7 +489,7 @@ class _TeamHeader extends StatelessWidget {
                           style: theme.textTheme.headlineSmall?.copyWith(
                             fontSize: titleSize,
                             fontWeight: FontWeight.w800,
-                            color: Colors.black,
+                            color: theme.colorScheme.onSurface,
                             height: 1.05,
                           ),
                         ),
@@ -569,7 +500,7 @@ class _TeamHeader extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodySmall?.copyWith(
-                              color: Colors.black.withValues(alpha: 0.64),
+                              color: theme.colorScheme.onSurfaceVariant,
                               height: 1.1,
                               fontSize: 11,
                             ),
@@ -581,7 +512,7 @@ class _TeamHeader extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodySmall?.copyWith(
-                              color: Colors.black.withValues(alpha: 0.64),
+                              color: theme.colorScheme.onSurfaceVariant,
                               height: 1.1,
                               fontSize: 11,
                             ),
@@ -603,29 +534,6 @@ class _TeamHeader extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _GlowCircle extends StatelessWidget {
-  final double diameter;
-  final Color color;
-  const _GlowCircle({required this.diameter, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipOval(
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-        child: Container(
-          width: diameter,
-          height: diameter,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: color,
-          ),
-        ),
-      ),
     );
   }
 }

@@ -10,7 +10,7 @@ class DashboardScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final subtitle = AdminBackendConfig.isDemoMode
         ? 'Локальный прототип: изменения остаются только в текущей сессии.'
-        : 'Изменения сохраняются в Supabase через RPC и RBAC (без service_role).';
+        : 'Здесь можно подготовить материалы, проверить их и опубликовать для студентов.';
 
     return SingleChildScrollView(
       child: Column(

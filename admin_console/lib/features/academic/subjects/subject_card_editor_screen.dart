@@ -76,7 +76,8 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
       (AdminBackendConfig.isDemoMode
           ? LocalTeachersRepository()
           : SupabaseTeachersRepository());
-  late final SubjectMediaStore _mediaStore = widget.mediaStore ??
+  late final SubjectMediaStore _mediaStore =
+      widget.mediaStore ??
       (AdminBackendConfig.isDemoMode
           ? FakeSubjectMediaStore()
           : SupabaseSubjectMediaStore());
@@ -331,10 +332,7 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
     final teachers = <SubjectCardTeacher>[
       if (offering != null)
         for (final id in _selectedTeacherIds)
-          SubjectCardTeacher(
-            id: id,
-            displayName: _teacherLabels[id] ?? id,
-          ),
+          SubjectCardTeacher(id: id, displayName: _teacherLabels[id] ?? id),
     ];
     final description = _localDescription.text.trim().isNotEmpty
         ? _localDescription.text.trim()
@@ -361,7 +359,8 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
       department: _department.text.trim().ifEmptyAsNull,
       hoursTotal: offering?.hoursTotal ?? widget.hoursTotal,
       credits: offering?.credits ?? widget.credits,
-      hoursCreditsAvailable: offering != null &&
+      hoursCreditsAvailable:
+          offering != null &&
           ((offering.hoursTotal ?? widget.hoursTotal) != null ||
               (offering.credits ?? widget.credits) != null),
       relevanceDate: DateTime.tryParse(_relevance.text.trim()),
@@ -424,8 +423,9 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
         kind: kind,
         subjectCatalogId: useOffering ? null : subjectId,
         subjectOfferingId: useOffering ? _selectedOfferingId : null,
-        supersedesAssetId:
-            kind == SubjectCardAssetKind.heroImage ? currentHero?.id : null,
+        supersedesAssetId: kind == SubjectCardAssetKind.heroImage
+            ? currentHero?.id
+            : null,
         title: file.name,
       );
       await _loadAssets();
@@ -466,9 +466,10 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
       'png' => 'image/png',
       'webp' => 'image/webp',
       'pdf' => 'application/pdf',
-      _ => kind == SubjectCardAssetKind.heroImage
-          ? 'image/jpeg'
-          : 'application/octet-stream',
+      _ =>
+        kind == SubjectCardAssetKind.heroImage
+            ? 'image/jpeg'
+            : 'application/octet-stream',
     };
   }
 
@@ -479,8 +480,8 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
         row.kind == SubjectCardAssetKind.heroImage
             ? Icons.image_outlined
             : (row.mimeType == 'application/pdf'
-                ? Icons.picture_as_pdf_outlined
-                : Icons.attach_file),
+                  ? Icons.picture_as_pdf_outlined
+                  : Icons.attach_file),
       ),
       title: Text(row.title.isNotEmpty ? row.title : row.mimeType),
       subtitle: Text(
@@ -520,13 +521,16 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
     final offering = _selectedOffering;
     if (offering == null) return;
     try {
-      final versions =
-          await widget.repository.listOfferingProfileVersions(offering.id);
+      final versions = await widget.repository.listOfferingProfileVersions(
+        offering.id,
+      );
       if (!mounted) return;
       await showDialog<void>(
         context: context,
         builder: (context) => AlertDialog(
-          title: Text('Override versions · ${offering.displayName ?? offering.id}'),
+          title: Text(
+            'Override versions · ${offering.displayName ?? offering.id}',
+          ),
           content: SizedBox(
             width: 420,
             height: 280,
@@ -681,83 +685,90 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
           ),
         ],
       ),
-      body: Row(
-        children: [
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.all(20),
-              children: [
-                if (_banner != null) Text(_banner!),
-                const Text(
-                  '16.1: текст / ссылки / порядок. '
-                  '16.2: hero + вложения через subject-media Edge (локально).',
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final editor = ListView(
+            padding: const EdgeInsets.all(20),
+            children: [
+              if (_banner != null) Text(_banner!),
+              const Text('Описание, материалы и порядок разделов карточки.'),
+              const SizedBox(height: 12),
+              Text(
+                'Медиа карточки',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+              ),
+              const Text(
+                'Загрузка требует локальный Edge `subject-media`. '
+                'По умолчанию файлы привязаны к catalog; при выбранном offering '
+                'можно загружать offering-scoped вложения.',
+              ),
+              if (_selectedOfferingId != null)
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Загружать в offering (не catalog)'),
+                  value: _uploadToOffering,
+                  onChanged: !_canWrite
+                      ? null
+                      : (value) => setState(() => _uploadToOffering = value),
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  'Медиа карточки',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const Text(
-                  'Загрузка требует локальный Edge `subject-media`. '
-                  'По умолчанию файлы привязаны к catalog; при выбранном offering '
-                  'можно загружать offering-scoped вложения.',
-                ),
-                if (_selectedOfferingId != null)
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Загружать в offering (не catalog)'),
-                    value: _uploadToOffering,
-                    onChanged: !_canWrite
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: !_canWrite || _mediaBusy
                         ? null
-                        : (value) => setState(() => _uploadToOffering = value),
+                        : () => _pickAndUpload(
+                            kind: SubjectCardAssetKind.heroImage,
+                          ),
+                    icon: const Icon(Icons.image_outlined),
+                    label: const Text('Hero image'),
                   ),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: !_canWrite || _mediaBusy
-                          ? null
-                          : () => _pickAndUpload(
-                                kind: SubjectCardAssetKind.heroImage,
-                              ),
-                      icon: const Icon(Icons.image_outlined),
-                      label: const Text('Hero image'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: !_canWrite || _mediaBusy
-                          ? null
-                          : () => _pickAndUpload(
-                                kind: SubjectCardAssetKind.attachment,
-                              ),
-                      icon: const Icon(Icons.attach_file),
-                      label: const Text('Вложение'),
-                    ),
-                  ],
+                  OutlinedButton.icon(
+                    onPressed: !_canWrite || _mediaBusy
+                        ? null
+                        : () => _pickAndUpload(
+                            kind: SubjectCardAssetKind.attachment,
+                          ),
+                    icon: const Icon(Icons.attach_file),
+                    label: const Text('Вложение'),
+                  ),
+                ],
+              ),
+              if (_catalogAssets.isNotEmpty) ...[
+                const Text(
+                  'Catalog assets',
+                  style: TextStyle(fontWeight: FontWeight.w700),
                 ),
-                if (_catalogAssets.isNotEmpty) ...[
-                  const Text('Catalog assets', style: TextStyle(fontWeight: FontWeight.w700)),
-                  for (final row in _catalogAssets) _assetListTile(row),
-                ],
-                if (_offeringAssets.isNotEmpty) ...[
-                  const Text('Offering assets', style: TextStyle(fontWeight: FontWeight.w700)),
-                  for (final row in _offeringAssets) _assetListTile(row),
-                ],
-                if (_catalogAssets.isEmpty && _offeringAssets.isEmpty)
-                  const Text('Нет загруженных файлов.'),
-                const SizedBox(height: 16),
-                TextField(
+                for (final row in _catalogAssets) _assetListTile(row),
+              ],
+              if (_offeringAssets.isNotEmpty) ...[
+                const Text(
+                  'Offering assets',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                for (final row in _offeringAssets) _assetListTile(row),
+              ],
+              if (_catalogAssets.isEmpty && _offeringAssets.isEmpty)
+                const Text('Нет загруженных файлов.'),
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: TextField(
                   controller: _name,
                   decoration: const InputDecoration(
                     labelText: 'Название',
-                    helperText: 'Отображаемое имя; ключ — subject_id',
+                    helperText: 'Название, которое увидят студенты',
                   ),
                   enabled: _canWrite,
                   onChanged: (_) => setState(() {}),
                 ),
-                TextField(
+              ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: TextField(
                   controller: _short,
                   decoration: const InputDecoration(
                     labelText: 'Краткое описание',
@@ -765,7 +776,10 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
                   enabled: _canWrite,
                   onChanged: (_) => setState(() {}),
                 ),
-                TextField(
+              ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: TextField(
                   controller: _description,
                   decoration: const InputDecoration(
                     labelText: 'Подробное описание',
@@ -774,7 +788,10 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
                   maxLines: 3,
                   onChanged: (_) => setState(() {}),
                 ),
-                TextField(
+              ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: TextField(
                   controller: _outcomes,
                   decoration: const InputDecoration(
                     labelText: 'Чему научится студент',
@@ -783,7 +800,10 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
                   maxLines: 2,
                   onChanged: (_) => setState(() {}),
                 ),
-                TextField(
+              ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: TextField(
                   controller: _control,
                   decoration: const InputDecoration(
                     labelText: 'Форма контроля',
@@ -791,63 +811,75 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
                   enabled: _canWrite,
                   onChanged: (_) => setState(() {}),
                 ),
-                TextField(
+              ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: TextField(
                   controller: _department,
                   decoration: const InputDecoration(labelText: 'Кафедра'),
                   enabled: _canWrite,
                 ),
-                DropdownButtonFormField<String?>(
-                  key: ValueKey('offering-$_selectedOfferingId'),
-                  initialValue: _selectedOfferingId,
-                  decoration: const InputDecoration(
-                    labelText: 'Subject offering',
-                    helperText:
-                        'Часы/ЗЕ и преподаватели доступны только с offering',
+              ),
+              DropdownButtonFormField<String?>(
+                borderRadius: ProductTheme.selectionMenuRadius,
+                elevation: ProductTheme.selectionMenuElevation,
+                icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                key: ValueKey('offering-$_selectedOfferingId'),
+                initialValue: _selectedOfferingId,
+                decoration: const InputDecoration(
+                  labelText: 'Subject offering',
+                  helperText:
+                      'Часы/ЗЕ и преподаватели доступны только с offering',
+                ),
+                items: [
+                  const DropdownMenuItem<String?>(
+                    value: null,
+                    child: Text('Не выбран'),
                   ),
-                  items: [
-                    const DropdownMenuItem<String?>(
-                      value: null,
-                      child: Text('Не выбран'),
-                    ),
-                    for (final o in _offerings)
-                      DropdownMenuItem<String?>(
-                        value: o.id,
-                        child: Text(
-                          o.displayName?.trim().isNotEmpty == true
-                              ? o.displayName!
-                              : o.id,
-                        ),
+                  for (final o in _offerings)
+                    DropdownMenuItem<String?>(
+                      value: o.id,
+                      child: Text(
+                        o.displayName?.trim().isNotEmpty == true
+                            ? o.displayName!
+                            : o.id,
                       ),
-                  ],
-                  onChanged: (value) {
-                    setState(() {
-                      _selectedOfferingId = value;
-                      _uploadToOffering = value != null;
-                      _bindOffering(_selectedOffering);
-                    });
-                    _loadAssets();
-                  },
+                    ),
+                ],
+                onChanged: (value) {
+                  setState(() {
+                    _selectedOfferingId = value;
+                    _uploadToOffering = value != null;
+                    _bindOffering(_selectedOffering);
+                  });
+                  _loadAssets();
+                },
+              ),
+              InputDecorator(
+                decoration: const InputDecoration(
+                  labelText: 'Часы / зачётные единицы',
+                  helperText:
+                      'SoT = curriculum_subjects через выбранный offering',
                 ),
-                InputDecorator(
-                  decoration: const InputDecoration(
-                    labelText: 'Часы / зачётные единицы',
-                    helperText:
-                        'SoT = curriculum_subjects через выбранный offering',
-                  ),
-                  child: Text(
-                    offeringSelected && (hours != null || credits != null)
-                        ? 'Часы: ${hours ?? '—'} · ЗЕ: ${credits ?? '—'}'
-                        : 'Недоступно без выбранного offering',
-                  ),
+                child: Text(
+                  offeringSelected && (hours != null || credits != null)
+                      ? 'Часы: ${hours ?? '—'} · ЗЕ: ${credits ?? '—'}'
+                      : 'Недоступно без выбранного offering',
                 ),
-                TextField(
+              ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: TextField(
                   controller: _requirements,
                   decoration: const InputDecoration(labelText: 'Требования'),
                   enabled: _canWrite,
                   maxLines: 2,
                   onChanged: (_) => setState(() {}),
                 ),
-                TextField(
+              ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: TextField(
                   controller: _howToPass,
                   decoration: const InputDecoration(
                     labelText: 'Советы по подготовке',
@@ -856,28 +888,40 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
                   maxLines: 2,
                   onChanged: (_) => setState(() {}),
                 ),
-                TextField(
+              ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: TextField(
                   controller: _expect,
                   decoration: const InputDecoration(labelText: 'Чего ожидать'),
                   enabled: _canWrite,
                   maxLines: 2,
                   onChanged: (_) => setState(() {}),
                 ),
-                TextField(
+              ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: TextField(
                   controller: _materials,
                   decoration: const InputDecoration(
                     labelText: 'Полезные материалы (текст)',
                   ),
                   enabled: _canWrite,
                 ),
-                TextField(
+              ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: TextField(
                   controller: _pitfalls,
                   decoration: const InputDecoration(
                     labelText: 'Типичные ошибки',
                   ),
                   enabled: _canWrite,
                 ),
-                TextField(
+              ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: TextField(
                   controller: _links,
                   decoration: const InputDecoration(
                     labelText: 'Ссылки (title|url на строку)',
@@ -886,7 +930,10 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
                   maxLines: 3,
                   onChanged: (_) => setState(() {}),
                 ),
-                TextField(
+              ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: TextField(
                   controller: _relevance,
                   decoration: const InputDecoration(
                     labelText: 'Дата актуальности (YYYY-MM-DD)',
@@ -894,60 +941,66 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
                   enabled: _canWrite,
                   onChanged: (_) => setState(() {}),
                 ),
-                DropdownButtonFormField<SubjectStatus>(
-                  key: ValueKey(_status),
-                  initialValue: _status,
-                  decoration: const InputDecoration(labelText: 'Статус'),
-                  items: const [
-                    DropdownMenuItem(
-                      value: SubjectStatus.draft,
-                      child: Text('Черновик'),
-                    ),
-                    DropdownMenuItem(
-                      value: SubjectStatus.published,
-                      child: Text('Опубликовано'),
-                    ),
-                    DropdownMenuItem(
-                      value: SubjectStatus.archived,
-                      child: Text('В архиве'),
-                    ),
+              ),
+              DropdownButtonFormField<SubjectStatus>(
+                borderRadius: ProductTheme.selectionMenuRadius,
+                elevation: ProductTheme.selectionMenuElevation,
+                icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                key: ValueKey(_status),
+                initialValue: _status,
+                decoration: const InputDecoration(labelText: 'Статус'),
+                items: const [
+                  DropdownMenuItem(
+                    value: SubjectStatus.draft,
+                    child: Text('Черновик'),
+                  ),
+                  DropdownMenuItem(
+                    value: SubjectStatus.published,
+                    child: Text('Опубликовано'),
+                  ),
+                  DropdownMenuItem(
+                    value: SubjectStatus.archived,
+                    child: Text('В архиве'),
+                  ),
+                ],
+                onChanged: !_canWrite
+                    ? null
+                    : (value) {
+                        if (value == null) return;
+                        setState(() => _status = value);
+                      },
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Преподаватели / offering override',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+              ),
+              if (!offeringSelected)
+                const Text(
+                  'Выберите offering, чтобы редактировать преподавателей '
+                  'и override. Без offering список только для чтения.',
+                )
+              else ...[
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final id in _selectedTeacherIds)
+                      InputChip(
+                        label: Text(_teacherLabels[id] ?? id),
+                        onDeleted: !_canWrite
+                            ? null
+                            : () => setState(() {
+                                _selectedTeacherIds.remove(id);
+                              }),
+                      ),
                   ],
-                  onChanged: !_canWrite
-                      ? null
-                      : (value) {
-                          if (value == null) return;
-                          setState(() => _status = value);
-                        },
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  'Преподаватели / offering override',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                if (!offeringSelected)
-                  const Text(
-                    'Выберите offering, чтобы редактировать преподавателей '
-                    'и override. Без offering список только для чтения.',
-                  )
-                else ...[
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final id in _selectedTeacherIds)
-                        InputChip(
-                          label: Text(_teacherLabels[id] ?? id),
-                          onDeleted: !_canWrite
-                              ? null
-                              : () => setState(() {
-                                    _selectedTeacherIds.remove(id);
-                                  }),
-                        ),
-                    ],
-                  ),
-                  TextField(
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: TextField(
                     controller: _teacherSearch,
                     enabled: _canWrite,
                     decoration: InputDecoration(
@@ -969,47 +1022,47 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
                       }
                     },
                   ),
-                  if (_teacherHits.isNotEmpty)
-                    ...[
-                      for (final teacher in _teacherHits)
-                        ListTile(
-                          dense: true,
-                          title: Text(teacher.fullName),
-                          subtitle: Text(teacher.id),
-                          trailing: const Icon(Icons.add),
-                          onTap: !_canWrite
-                              ? null
-                              : () {
-                                  setState(() {
-                                    if (!_selectedTeacherIds
-                                        .contains(teacher.id)) {
-                                      _selectedTeacherIds.add(teacher.id);
-                                    }
-                                    _teacherLabels[teacher.id] =
-                                        teacher.fullName;
-                                    _teacherHits = const [];
-                                    _teacherSearch.clear();
-                                  });
-                                },
-                        ),
-                    ],
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Wrap(
-                      spacing: 8,
-                      children: [
-                        TextButton(
-                          onPressed: _busy ? null : _saveTeachers,
-                          child: const Text('Сохранить преподавателей'),
-                        ),
-                        TextButton(
-                          onPressed: _busy ? null : _showOfferingVersions,
-                          child: const Text('История override'),
-                        ),
-                      ],
+                ),
+                if (_teacherHits.isNotEmpty) ...[
+                  for (final teacher in _teacherHits)
+                    ListTile(
+                      dense: true,
+                      title: Text(teacher.fullName),
+                      subtitle: Text(teacher.id),
+                      trailing: const Icon(Icons.add),
+                      onTap: !_canWrite
+                          ? null
+                          : () {
+                              setState(() {
+                                if (!_selectedTeacherIds.contains(teacher.id)) {
+                                  _selectedTeacherIds.add(teacher.id);
+                                }
+                                _teacherLabels[teacher.id] = teacher.fullName;
+                                _teacherHits = const [];
+                                _teacherSearch.clear();
+                              });
+                            },
                     ),
+                ],
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Wrap(
+                    spacing: 8,
+                    children: [
+                      TextButton(
+                        onPressed: _busy ? null : _saveTeachers,
+                        child: const Text('Сохранить преподавателей'),
+                      ),
+                      TextButton(
+                        onPressed: _busy ? null : _showOfferingVersions,
+                        child: const Text('История override'),
+                      ),
+                    ],
                   ),
-                  TextField(
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: TextField(
                     controller: _localDescription,
                     decoration: const InputDecoration(
                       labelText: 'local_description (override description)',
@@ -1018,7 +1071,10 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
                     maxLines: 2,
                     onChanged: (_) => setState(() {}),
                   ),
-                  TextField(
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: TextField(
                     controller: _semesterTips,
                     decoration: const InputDecoration(
                       labelText: 'semester_tips (override how_to_pass)',
@@ -1026,7 +1082,10 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
                     enabled: _canWrite,
                     onChanged: (_) => setState(() {}),
                   ),
-                  TextField(
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: TextField(
                     controller: _teacherNote,
                     decoration: const InputDecoration(
                       labelText: 'teacher_specific_note (additive)',
@@ -1034,7 +1093,10 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
                     enabled: _canWrite,
                     onChanged: (_) => setState(() {}),
                   ),
-                  TextField(
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: TextField(
                     controller: _assessmentNote,
                     decoration: const InputDecoration(
                       labelText: 'assessment_note (additive)',
@@ -1042,7 +1104,10 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
                     enabled: _canWrite,
                     onChanged: (_) => setState(() {}),
                   ),
-                  TextField(
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: TextField(
                     controller: _workloadNote,
                     decoration: const InputDecoration(
                       labelText: 'workload_note (additive)',
@@ -1050,69 +1115,87 @@ class _SubjectCardEditorScreenState extends State<SubjectCardEditorScreen> {
                     enabled: _canWrite,
                     onChanged: (_) => setState(() {}),
                   ),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton(
-                      onPressed: _busy ? null : _saveOverride,
-                      child: const Text('Сохранить offering override'),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                Text(
-                  'Порядок секций',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
+                ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    onPressed: _busy ? null : _saveOverride,
+                    child: const Text('Сохранить offering override'),
                   ),
                 ),
-                ...[
-                  for (var i = 0; i < _sectionOrder.length; i++)
-                    ListTile(
-                      dense: true,
-                      title: Text(
-                        SubjectCardPayload.sectionTitleRu(_sectionOrder[i]),
-                      ),
-                      subtitle: Text(_sectionOrder[i]),
-                      trailing: Wrap(
-                        children: [
-                          IconButton(
-                            onPressed: !_canWrite || i == 0
-                                ? null
-                                : () => _moveSection(i, -1),
-                            icon: const Icon(Icons.arrow_upward),
-                          ),
-                          IconButton(
-                            onPressed:
-                                !_canWrite || i == _sectionOrder.length - 1
-                                ? null
-                                : () => _moveSection(i, 1),
-                            icon: const Icon(Icons.arrow_downward),
-                          ),
-                        ],
-                      ),
+              ],
+              const SizedBox(height: 16),
+              Text(
+                'Порядок секций',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+              ),
+              ...[
+                for (var i = 0; i < _sectionOrder.length; i++)
+                  ListTile(
+                    dense: true,
+                    title: Text(
+                      SubjectCardPayload.sectionTitleRu(_sectionOrder[i]),
                     ),
-                ],
-              ],
-            ),
-          ),
-          const VerticalDivider(width: 1),
-          SizedBox(
-            width: 360,
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                Text(
-                  'Preview',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
+                    subtitle: Text(_sectionOrder[i]),
+                    trailing: Wrap(
+                      children: [
+                        IconButton(
+                          onPressed: !_canWrite || i == 0
+                              ? null
+                              : () => _moveSection(i, -1),
+                          icon: const Icon(Icons.arrow_upward),
+                        ),
+                        IconButton(
+                          onPressed: !_canWrite || i == _sectionOrder.length - 1
+                              ? null
+                              : () => _moveSection(i, 1),
+                          icon: const Icon(Icons.arrow_downward),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 8),
-                StudentSubjectCardPreview(payload: preview, height: 560),
               ],
-            ),
-          ),
-        ],
+            ],
+          );
+          final previewPane = ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Text(
+                'Предпросмотр',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 8),
+              StudentSubjectCardPreview(payload: preview, height: 560),
+            ],
+          );
+          if (constraints.maxWidth < 720) {
+            return DefaultTabController(
+              length: 2,
+              child: Column(
+                children: [
+                  const TabBar(
+                    tabs: [
+                      Tab(text: 'Редактор'),
+                      Tab(text: 'Предпросмотр'),
+                    ],
+                  ),
+                  Expanded(child: TabBarView(children: [editor, previewPane])),
+                ],
+              ),
+            );
+          }
+          return Row(
+            children: [
+              Expanded(child: editor),
+              const VerticalDivider(width: 1),
+              SizedBox(width: 340, child: previewPane),
+            ],
+          );
+        },
       ),
     );
   }

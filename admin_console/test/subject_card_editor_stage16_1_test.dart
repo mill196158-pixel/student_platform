@@ -7,7 +7,7 @@ import 'package:student_ui/student_ui.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('shows shared preview and 16.1 foundation copy', (tester) async {
+  testWidgets('shows shared preview and editorial guidance', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1600, 1400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -24,10 +24,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('16.1: текст'), findsOneWidget);
-    expect(find.textContaining('subject-media Edge'), findsOneWidget);
+    expect(find.textContaining('Описание, материалы'), findsOneWidget);
+
     expect(find.byType(StudentSubjectCardPreview), findsOneWidget);
-    expect(find.text('Preview'), findsOneWidget);
+    expect(find.text('Предпросмотр'), findsOneWidget);
     expect(find.text('Не выбран'), findsOneWidget);
     expect(find.textContaining('UUID через запятую'), findsNothing);
 
@@ -80,4 +80,24 @@ void main() {
       findsOneWidget,
     );
   });
+  testWidgets('phone editor keeps draft while switching preview tabs', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(MaterialApp(theme: ProductTheme.build(), home:
+      SubjectCardEditorScreen(repository: LocalSubjectsRepository())));
+    await tester.pumpAndSettle();
+    final name = find.widgetWithText(TextField, 'Название');
+    await tester.ensureVisible(name);
+    await tester.enterText(name, 'Локальный учебный предмет');
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.tap(find.text('Предпросмотр').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Локальный учебный предмет'), findsWidgets);
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.text('Редактор'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(name).controller!.text, 'Локальный учебный предмет');
+    expect(tester.takeException(), isNull);
+  });
+
 }

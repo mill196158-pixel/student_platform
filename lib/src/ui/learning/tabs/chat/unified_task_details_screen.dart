@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:student_platform/src/services/chat_file_access.dart';
 // =============================
 // FILE: lib/src/ui/learning/tabs/chat/unified_task_details_screen.dart
@@ -61,6 +62,7 @@ Future<void> openUnifiedTaskDetails(
   void Function(String? cardMessageId)? onOpenDiscussion,
   ChatGroupActionsRepository? repository,
   ChatActionCardsCache? cache,
+
   /// Prefer the root navigator so in-chat opens match schedule/home deeplinks
   /// (otherwise a nested TeamDetails navigator can swallow the route).
   bool useRootNavigator = true,
@@ -690,7 +692,8 @@ class _UnifiedTaskDetailsScreenState extends State<UnifiedTaskDetailsScreen> {
     if (isTopic) {
       if (_canRescheduleTopic(details, canManage)) {
         final hasDeadline =
-            DateTime.tryParse((details['deadline_at'] ?? '').toString()) != null;
+            DateTime.tryParse((details['deadline_at'] ?? '').toString()) !=
+                null;
         out.add(
           hasDeadline
               ? _OverflowAction.reschedule
@@ -709,7 +712,8 @@ class _UnifiedTaskDetailsScreenState extends State<UnifiedTaskDetailsScreen> {
     } else {
       if (_canRescheduleCollection(details, canManage)) {
         final hasDeadline =
-            DateTime.tryParse((details['deadline_at'] ?? '').toString()) != null;
+            DateTime.tryParse((details['deadline_at'] ?? '').toString()) !=
+                null;
         out.add(
           hasDeadline
               ? _OverflowAction.reschedule
@@ -1026,13 +1030,10 @@ class _UnifiedTaskDetailsScreenState extends State<UnifiedTaskDetailsScreen> {
             (details['status']?.toString() ?? 'open') != 'open');
     final canManage = details?['can_manage'] == true;
     final myPick = (details?['my_pick_text'] ?? '').toString().trim();
-    final displayTitle = (!closed &&
-            isTopic &&
-            myPick.isNotEmpty)
+    final displayTitle = (!closed && isTopic && myPick.isNotEmpty)
         ? topicFollowUpTitle(myPick)
         : title;
-    final kindLabel =
-        isTopic ? kTopicKindLabel : kCollectionKindLabelLong;
+    final kindLabel = isTopic ? kTopicKindLabel : kCollectionKindLabelLong;
 
     final titleColor = cs.onSurface;
     final overflow = closed
@@ -1097,17 +1098,17 @@ class _UnifiedTaskDetailsScreenState extends State<UnifiedTaskDetailsScreen> {
                   : ListView(
                       padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
                       children: [
-                        Text(
-                          displayTitle,
-                          style: theme.textTheme.headlineSmall?.copyWith(
-                            color: titleColor,
-                            fontWeight: FontWeight.w800,
-                            height: 1.15,
+                        if (displayTitle.trim().isNotEmpty &&
+                            displayTitle.trim() != kindLabel)
+                          Text(
+                            displayTitle,
+                            style: theme.textTheme.headlineSmall?.copyWith(
+                              color: titleColor,
+                              fontWeight: FontWeight.w800,
+                              height: 1.15,
+                            ),
                           ),
-                        ),
-                        if (!closed &&
-                            isTopic &&
-                            myPick.isNotEmpty) ...[
+                        if (!closed && isTopic && myPick.isNotEmpty) ...[
                           const SizedBox(height: 6),
                           Text(
                             'Список: $title',
@@ -1182,14 +1183,6 @@ class _UnifiedTaskDetailsScreenState extends State<UnifiedTaskDetailsScreen> {
       ],
       const SizedBox(height: 16),
       Text(
-        'Темы',
-        style: theme.textTheme.titleSmall?.copyWith(
-          fontWeight: FontWeight.w800,
-          color: theme.colorScheme.onSurface,
-        ),
-      ),
-      const SizedBox(height: 4),
-      Text(
         'Отметьте тему галочкой — повторное нажатие снимет выбор',
         style: theme.textTheme.bodySmall?.copyWith(
           color: theme.colorScheme.onSurfaceVariant,
@@ -1209,7 +1202,8 @@ class _UnifiedTaskDetailsScreenState extends State<UnifiedTaskDetailsScreen> {
           padding: const EdgeInsets.symmetric(vertical: 12),
           child: Text(
             'Темы пока не добавлены',
-            style: theme.textTheme.bodyMedium?.copyWith(color: Colors.black54),
+            style: theme.textTheme.bodyMedium
+                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
           ),
         ),
     ];
@@ -1310,7 +1304,7 @@ class _UnifiedTaskDetailsScreenState extends State<UnifiedTaskDetailsScreen> {
               ? const SizedBox(
                   width: 16,
                   height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+                  child: ProductLoadingIndicator(),
                 )
               : Text(
                   _proofPath == null
@@ -1454,7 +1448,6 @@ class _UnifiedTaskDetailsScreenState extends State<UnifiedTaskDetailsScreen> {
     return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 }
-
 
 class _MetaChip extends StatelessWidget {
   const _MetaChip({required this.icon, required this.label});
@@ -1604,9 +1597,8 @@ class _TopicOptionRow extends StatelessWidget {
       }
     }
     final namesLabel = pickerNames.join(', ');
-    final occupiedLabel = pickerNames.isNotEmpty
-        ? 'Занято · $namesLabel'
-        : 'Занято';
+    final occupiedLabel =
+        pickerNames.isNotEmpty ? 'Занято · $namesLabel' : 'Занято';
     final freeLabel = capacity > 0
         ? (pickerNames.isNotEmpty
             ? 'Свободно ${capacity - taken} из $capacity · $namesLabel'

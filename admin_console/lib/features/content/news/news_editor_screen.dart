@@ -969,7 +969,7 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: ProductLoadingIndicator());
     }
     if (_loadError != null) {
       return _ErrorState(
@@ -1260,7 +1260,7 @@ class _EditorHeader extends StatelessWidget {
               const SizedBox(
                 width: 18,
                 height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
+                child: ProductLoadingIndicator(),
               ),
           ],
         ),
@@ -1886,6 +1886,9 @@ class _PropertiesPanel extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<StudentHomeNewsVariant>(
+            borderRadius: ProductTheme.selectionMenuRadius,
+            elevation: ProductTheme.selectionMenuElevation,
+            icon: const Icon(Icons.keyboard_arrow_down_rounded),
             key: ValueKey('variant-${selected.id}-${selected.variant}'),
             initialValue: selected.variant,
             isExpanded: true,
@@ -1983,8 +1986,7 @@ class _PropertiesPanel extends StatelessWidget {
                   ? const SizedBox(
                       width: 18,
                       height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
+                      child: ProductLoadingIndicator(
                         color: Colors.white,
                       ),
                     )

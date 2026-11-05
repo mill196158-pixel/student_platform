@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:student_platform/router_observer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -614,7 +613,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     if (_loading) {
       return Scaffold(
         appBar: AppBar(),
-        body: const Center(child: CircularProgressIndicator()),
+        body: const Center(child: ProductLoadingIndicator.page()),
       );
     }
 
@@ -632,18 +631,14 @@ class _ProfileScreenState extends State<ProfileScreen>
         MediaQuery.paddingOf(context).top + kToolbarHeight - 16;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFFAF8FC),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       extendBodyBehindAppBar: true,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
-        systemOverlayStyle: const SystemUiOverlayStyle(
-          statusBarColor: Colors.transparent,
-          statusBarBrightness: Brightness.light,
-          statusBarIconBrightness: Brightness.dark,
-        ),
+        systemOverlayStyle: Theme.of(context).appBarTheme.systemOverlayStyle,
         leading: IconButton(
           tooltip: 'Редактировать',
           icon: const Icon(Icons.tune),
@@ -669,9 +664,9 @@ class _ProfileScreenState extends State<ProfileScreen>
       ),
       body: Theme(
         data: Theme.of(context).copyWith(
-          textTheme: Theme.of(context)
-              .textTheme
-              .apply(bodyColor: Colors.black, displayColor: Colors.black),
+          textTheme: Theme.of(context).textTheme.apply(
+              bodyColor: Theme.of(context).colorScheme.onSurface,
+              displayColor: Theme.of(context).colorScheme.onSurface),
         ),
         child: RefreshIndicator(
           onRefresh: _refreshFromServer,
@@ -693,7 +688,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                     ? Text(
                         'Баллы временно недоступны',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: const Color(0xFF6B7280),
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
                             ),
                         textAlign: TextAlign.center,
                       )
@@ -715,7 +710,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                                   .textTheme
                                   .bodySmall
                                   ?.copyWith(
-                                    color: const Color(0xFF6B7280),
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                                   ),
                               textAlign: TextAlign.center,
                             ),

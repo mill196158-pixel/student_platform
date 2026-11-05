@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'dart:convert';
 import 'dart:io';
 
@@ -7,6 +8,8 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../themes/theme_service.dart';
+import 'theme_mode_picker.dart';
 
 class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({super.key});
@@ -170,6 +173,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     ImageProvider? avatarProvider;
     if (_avatarPath != null) {
       avatarProvider = FileImage(File(_avatarPath!));
@@ -178,9 +182,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
 
     return Scaffold(
-      backgroundColor: _EP.bg,
+      backgroundColor: colors.surfaceContainerLow,
       appBar: AppBar(
-        backgroundColor: _EP.bg,
+        backgroundColor: colors.surfaceContainerLow,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
@@ -188,12 +192,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
           onPressed: () => context.pop(),
         ),
-        title: const Text(
+        title: Text(
           'Настройки профиля',
           style: TextStyle(
             fontWeight: FontWeight.w800,
             fontSize: 18,
-            color: _EP.ink,
+            color: colors.onSurface,
           ),
         ),
         centerTitle: true,
@@ -201,16 +205,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           TextButton(
             onPressed: _saving ? null : _save,
             style: TextButton.styleFrom(
-              foregroundColor: _EP.lavender,
+              foregroundColor: colors.primary,
               textStyle: const TextStyle(fontWeight: FontWeight.w700),
             ),
             child: _saving
-                ? const SizedBox(
+                ? SizedBox(
                     width: 16,
                     height: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: _EP.lavender,
+                    child: ProductLoadingIndicator(
+                      color: colors.primary,
                     ),
                   )
                 : const Text('Готово'),
@@ -228,10 +231,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   Container(
                     width: 92,
                     height: 92,
-                    decoration: const BoxDecoration(
+                    decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       gradient: LinearGradient(
-                        colors: [_EP.lavenderSoft, _EP.lavenderMid],
+                        colors: [colors.primaryContainer, colors.secondaryContainer],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       ),
@@ -239,11 +242,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     child: Center(
                       child: CircleAvatar(
                         radius: 41,
-                        backgroundColor: Colors.white,
+                        backgroundColor: colors.surface,
                         backgroundImage: avatarProvider,
                         child: avatarProvider == null
-                            ? const Icon(Icons.person,
-                                size: 34, color: Colors.black54)
+                            ? Icon(Icons.person,
+                                size: 34, color: colors.onSurfaceVariant)
                             : null,
                       ),
                     ),
@@ -257,18 +260,18 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         width: 32,
                         height: 32,
                         decoration: BoxDecoration(
-                          color: _EP.lavender,
+                          color: colors.primary,
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
-                              color: _EP.lavender.withValues(alpha: 0.35),
+                              color: colors.primary.withValues(alpha: 0.35),
                               blurRadius: 8,
                               offset: const Offset(0, 4),
                             ),
                           ],
                         ),
-                        child: const Icon(Icons.edit,
-                            color: Colors.white, size: 16),
+                        child: Icon(Icons.edit,
+                            color: colors.onPrimary, size: 16),
                       ),
                     ),
                   ),
@@ -327,6 +330,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               ],
             ),
             const SizedBox(height: 14),
+            const _SettingsSectionLabel('Оформление'),
+            const _ProfileFieldsCard(children: [_ThemePreference()]),
+            const SizedBox(height: 14),
             const _SettingsSectionLabel('Безопасность и уведомления'),
             _ProfileFieldsCard(
               children: [
@@ -352,13 +358,44 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 }
 
-class _EP {
-  static const bg = Color(0xFFFAF8FC);
-  static const lavender = Color(0xFF7C63D8);
-  static const lavenderSoft = Color(0xFFDCD0FA);
-  static const lavenderMid = Color(0xFFC9B8F3);
-  static const ink = Color(0xFF1C1B1F);
-  static const muted = Color(0xFF6B6578);
+class _ThemePreference extends StatefulWidget {
+  const _ThemePreference();
+
+  @override
+  State<_ThemePreference> createState() => _ThemePreferenceState();
+}
+
+class _ThemePreferenceState extends State<_ThemePreference> {
+  bool _saving = false;
+
+  Future<void> _openPicker(ThemeMode current) async {
+    final mode = await showThemeModePicker(context, current);
+    if (!mounted || mode == null || mode == current) return;
+    setState(() => _saving = true);
+    try {
+      await themeService.select(mode);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось сохранить тему')),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: themeService,
+      builder: (context, mode, _) => _SettingsNavRow(
+        icon: Icons.brightness_6_outlined,
+        title: 'Тема',
+        subtitle: themeModeLabel(mode),
+        onTap: _saving ? null : () => _openPicker(mode),
+      ),
+    );
+  }
 }
 
 class _SettingsSectionLabel extends StatelessWidget {
@@ -367,15 +404,16 @@ class _SettingsSectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.only(left: 6, bottom: 8),
       child: Text(
-        text.toUpperCase(),
-        style: const TextStyle(
+        text,
+        style: TextStyle(
           fontSize: 12,
           letterSpacing: 0.6,
           fontWeight: FontWeight.w700,
-          color: _EP.muted,
+          color: colors.onSurfaceVariant,
         ),
       ),
     );
@@ -396,11 +434,12 @@ class _SettingsNavRow extends StatelessWidget {
   final Widget? iconWidget;
   final String title;
   final String subtitle;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final bool showDivider;
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Column(
       children: [
         Material(
@@ -416,12 +455,12 @@ class _SettingsNavRow extends StatelessWidget {
                     width: 36,
                     height: 36,
                     decoration: BoxDecoration(
-                      color: _EP.lavenderSoft.withValues(alpha: 0.7),
+                      color: colors.primaryContainer.withValues(alpha: 0.7),
                       borderRadius: BorderRadius.circular(11),
                     ),
                     alignment: Alignment.center,
-                    child: iconWidget ??
-                        Icon(icon, color: _EP.lavender, size: 19),
+                    child:
+                        iconWidget ?? Icon(icon, color: colors.primary, size: 19),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -432,10 +471,10 @@ class _SettingsNavRow extends StatelessWidget {
                           title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: 15,
-                            color: _EP.ink,
+                            color: colors.onSurface,
                           ),
                         ),
                         const SizedBox(height: 1),
@@ -443,17 +482,17 @@ class _SettingsNavRow extends StatelessWidget {
                           subtitle,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
-                            color: _EP.muted,
+                            color: colors.onSurfaceVariant,
                           ),
                         ),
                       ],
                     ),
                   ),
-                  const Icon(
+                  Icon(
                     Icons.chevron_right_rounded,
-                    color: _EP.muted,
+                    color: colors.onSurfaceVariant,
                   ),
                 ],
               ),
@@ -466,7 +505,7 @@ class _SettingsNavRow extends StatelessWidget {
             thickness: 1,
             indent: 60,
             endIndent: 14,
-            color: Color(0xFFEDEAF4),
+
           ),
       ],
     );
@@ -484,9 +523,10 @@ class _StatusPickerSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Container(
-      decoration: const BoxDecoration(
-        color: _EP.bg,
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerLow,
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       child: SafeArea(
@@ -503,25 +543,25 @@ class _StatusPickerSheet extends StatelessWidget {
                   height: 4,
                   margin: const EdgeInsets.only(bottom: 14),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFD8D2E6),
+                    color: colors.outlineVariant,
                     borderRadius: BorderRadius.circular(99),
                   ),
                 ),
               ),
-              const Text(
+              Text(
                 'Статус',
                 style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.w800,
-                  color: _EP.ink,
+                  color: colors.onSurface,
                 ),
               ),
               const SizedBox(height: 14),
               Container(
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: colors.surface,
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: const Color(0xFFE8E4F0)),
+                  border: Border.all(color: colors.outlineVariant),
                 ),
                 child: Column(
                   children: [
@@ -532,7 +572,7 @@ class _StatusPickerSheet extends StatelessWidget {
                           thickness: 1,
                           indent: 56,
                           endIndent: 14,
-                          color: Color(0xFFEDEAF4),
+
                         ),
                       _StatusOptionTile(
                         label: statuses[i],
@@ -573,7 +613,7 @@ class _StatusVisual {
       case 'Отошёл':
         return const _StatusVisual(Icons.schedule_rounded, Color(0xFF8E8E93));
       default:
-        return const _StatusVisual(Icons.circle, _EP.lavender);
+        return const _StatusVisual(Icons.circle, Color(0xFF7C63D8));
     }
   }
 }
@@ -591,6 +631,7 @@ class _StatusOptionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     final visual = _StatusVisual.forLabel(label);
     return Material(
       color: Colors.transparent,
@@ -616,7 +657,7 @@ class _StatusOptionTile extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 15,
                     fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-                    color: _EP.ink,
+                    color: colors.onSurface,
                   ),
                 ),
               ),
@@ -643,6 +684,7 @@ class _CompactField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
       child: Row(
@@ -653,19 +695,19 @@ class _CompactField extends StatelessWidget {
               children: [
                 Text(
                   label,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: _EP.muted,
+                    color: colors.onSurfaceVariant,
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   value.isEmpty ? '—' : value,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
-                    color: _EP.ink,
+                    color: colors.onSurface,
                     height: 1.15,
                   ),
                 ),
@@ -731,12 +773,13 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     final bottom = MediaQuery.viewInsetsOf(context).bottom;
     return Padding(
       padding: EdgeInsets.only(bottom: bottom),
       child: Container(
-        decoration: const BoxDecoration(
-          color: _EP.bg,
+        decoration: BoxDecoration(
+          color: colors.surfaceContainerLow,
           borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
         ),
         child: SafeArea(
@@ -755,7 +798,7 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
                       height: 4,
                       margin: const EdgeInsets.only(bottom: 16),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFD8D2E6),
+                        color: colors.outlineVariant,
                         borderRadius: BorderRadius.circular(99),
                       ),
                     ),
@@ -765,34 +808,34 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
                     height: 56,
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [_EP.lavenderSoft, _EP.lavenderMid],
+                      gradient: LinearGradient(
+                        colors: [colors.primaryContainer, colors.secondaryContainer],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       ),
                       borderRadius: BorderRadius.circular(18),
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.lock_rounded,
-                      color: _EP.lavender,
+                      color: colors.primary,
                       size: 26,
                     ),
                   ),
                   const SizedBox(height: 14),
-                  const Text(
+                  Text(
                     'Сменить пароль',
                     style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.w800,
-                      color: _EP.ink,
+                      color: colors.onSurface,
                     ),
                   ),
                   const SizedBox(height: 6),
-                  const Text(
+                  Text(
                     'Придумайте новый пароль — минимум 6 символов',
                     style: TextStyle(
                       fontSize: 14,
-                      color: _EP.muted,
+                      color: colors.onSurfaceVariant,
                       height: 1.3,
                     ),
                   ),
@@ -801,8 +844,7 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
                     controller: _newCtrl,
                     label: 'Новый пароль',
                     obscure: _obscureNew,
-                    onToggle: () =>
-                        setState(() => _obscureNew = !_obscureNew),
+                    onToggle: () => setState(() => _obscureNew = !_obscureNew),
                     validator: (v) {
                       final t = (v ?? '').trim();
                       if (t.length < 6) return 'Минимум 6 символов';
@@ -827,8 +869,8 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
                     const SizedBox(height: 12),
                     Text(
                       _error!,
-                      style: const TextStyle(
-                        color: Color(0xFFB42318),
+                      style: TextStyle(
+                        color: colors.error,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -837,10 +879,10 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
                   FilledButton(
                     onPressed: _busy ? null : _submit,
                     style: FilledButton.styleFrom(
-                      backgroundColor: _EP.lavender,
-                      foregroundColor: Colors.white,
+                      backgroundColor: colors.primary,
+                      foregroundColor: colors.onPrimary,
                       disabledBackgroundColor:
-                          _EP.lavender.withValues(alpha: 0.45),
+                          colors.primary.withValues(alpha: 0.45),
                       elevation: 0,
                       minimumSize: const Size.fromHeight(52),
                       shape: RoundedRectangleBorder(
@@ -852,12 +894,11 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
                       ),
                     ),
                     child: _busy
-                        ? const SizedBox(
+                        ? SizedBox(
                             width: 22,
                             height: 22,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.4,
-                              color: Colors.white,
+                            child: ProductLoadingIndicator(
+                              color: colors.onPrimary,
                             ),
                           )
                         : const Text('Сохранить пароль'),
@@ -867,7 +908,7 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
                     onPressed:
                         _busy ? null : () => Navigator.of(context).pop(false),
                     style: TextButton.styleFrom(
-                      foregroundColor: _EP.muted,
+                      foregroundColor: colors.onSurfaceVariant,
                       textStyle: const TextStyle(fontWeight: FontWeight.w600),
                     ),
                     child: const Text('Отмена'),
@@ -899,49 +940,48 @@ class _PasswordField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return TextFormField(
       controller: controller,
       obscureText: obscure,
       validator: validator,
-      style: const TextStyle(
+      style: TextStyle(
         fontSize: 16,
         fontWeight: FontWeight.w600,
-        color: _EP.ink,
+        color: colors.onSurface,
       ),
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: const TextStyle(
-          color: _EP.muted,
+        labelStyle: TextStyle(
+          color: colors.onSurfaceVariant,
           fontWeight: FontWeight.w600,
         ),
         filled: true,
-        fillColor: Colors.white,
+        fillColor: colors.surface,
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         suffixIcon: IconButton(
           onPressed: onToggle,
           icon: Icon(
-            obscure
-                ? Icons.visibility_outlined
-                : Icons.visibility_off_outlined,
-            color: _EP.muted,
+            obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+            color: colors.onSurfaceVariant,
           ),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
-          borderSide: const BorderSide(color: Color(0xFFE8E4F0)),
+          borderSide: BorderSide(color: colors.outlineVariant),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
-          borderSide: const BorderSide(color: _EP.lavender, width: 1.6),
+          borderSide: BorderSide(color: colors.primary, width: 1.6),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
-          borderSide: const BorderSide(color: Color(0xFFB42318)),
+          borderSide: BorderSide(color: colors.error),
         ),
         focusedErrorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
-          borderSide: const BorderSide(color: Color(0xFFB42318), width: 1.6),
+          borderSide: BorderSide(color: colors.error, width: 1.6),
         ),
       ),
     );
@@ -955,11 +995,12 @@ class _ProfileFieldsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colors.surface,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFE8E4F0)),
+        border: Border.all(color: colors.outlineVariant),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
@@ -980,7 +1021,7 @@ class _Divider extends StatelessWidget {
     return const Divider(
       height: 1,
       thickness: 1,
-      color: Color(0xFFEDEAF4),
+
     );
   }
 }

@@ -7,6 +7,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 // import 'package:get_storage/get_storage.dart'; // Временно отключено
 import 'package:go_router/go_router.dart';
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 // Глобальный кэш
@@ -117,18 +118,51 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   stage('binding-ready');
 
-  // Android's manifest already locks MainActivity to portrait. Waiting for
-  // the duplicate platform-channel request delays the first frame.
-  if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+  final android = !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+  if (android) {
+    // Draw the branded loader while the session and disk caches initialize.
+    await Future.wait([
+      ProductLoadingIndicator.preload(),
+      themeService.initialize(),
+    ]);
+    runApp(const _StartupApp());
+    await WidgetsBinding.instance.endOfFrame;
+    stage('loader-frame');
+  } else {
     await SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
     ]);
   }
   stage('orientation-ready');
 
-  // Временно отключаем GetStorage для избежания ошибок
-  // await GetStorage.init('student_platform');
+  try {
+    await _initializeApp(stage, initializeTheme: !android);
+  } catch (error) {
+    if (!android) rethrow;
+    debugPrint('[startup] Initialization failed: ${error.runtimeType}');
+    runApp(const _StartupApp(failed: true));
+    return;
+  }
 
+  runApp(const StudentPlatformApp());
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    stage('first-frame');
+    unawaited(WidgetsBinding.instance.waitUntilFirstFrameRasterized.then((_) {
+      stage('first-raster');
+      if (Supabase.instance.client.auth.currentSession == null) return;
+      unawaited(PushNotificationService.instance.bootstrapFirebase().then((_) {
+        stage(PushNotificationService.instance.isFirebaseReady
+            ? 'push-ready'
+            : 'push-unavailable');
+      }));
+    }));
+  });
+}
+
+Future<void> _initializeApp(
+  void Function(String) stage, {
+  required bool initializeTheme,
+}) async {
   SupabaseConfig.validate();
   await Supabase.initialize(
     url: SupabaseConfig.url,
@@ -143,9 +177,10 @@ Future<void> main() async {
   // Authenticated push startup still awaits the same single-flight initializer.
   PushNotificationService.instance.bindNavigatorKey(rootNavigatorKey);
 
-  // Поднимаем локальные данные до первого кадра: после холодного старта чаты
+  // Поднимаем локальные данные до входа в приложение: после старта чаты
   // и друзья сразу рисуются из дискового кэша, сеть обновляет их в фоне.
   await Future.wait([
+    if (initializeTheme) themeService.initialize(),
     GlobalCache().initialize(),
     ChatMessageCacheStore.initializeCurrentUser(),
     ChatSummariesCache.initializeCurrentUser(),
@@ -156,19 +191,21 @@ Future<void> main() async {
   SubjectDiaryRepository.instance = SubjectDiaryRepositorySupabase();
 
   stage('local-cache-ready');
-  runApp(const StudentPlatformApp());
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    stage('first-frame');
-  });
-  unawaited(WidgetsBinding.instance.waitUntilFirstFrameRasterized.then((_) {
-    stage('first-raster');
-    if (Supabase.instance.client.auth.currentSession == null) return;
-    unawaited(PushNotificationService.instance.bootstrapFirebase().then((_) {
-      stage(PushNotificationService.instance.isFirebaseReady
-          ? 'push-ready'
-          : 'push-unavailable');
-    }));
-  }));
+}
+
+class _StartupApp extends StatelessWidget {
+  const _StartupApp({this.failed = false});
+
+  final bool failed;
+
+  @override
+  Widget build(BuildContext context) => MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.light().data,
+        darkTheme: AppTheme.dark().data,
+        themeMode: themeService.value,
+        builder: (_, __) => SplashLoadingView(failed: failed),
+      );
 }
 
 class StudentPlatformApp extends StatelessWidget {
@@ -192,28 +229,31 @@ class StudentPlatformApp extends StatelessWidget {
         ),
       ],
       child: SessionKeeper(
-        child: MaterialApp.router(
-          title: 'Student Platform',
-          debugShowCheckedModeBanner: false,
-          theme: AppTheme.light().data,
-          darkTheme: AppTheme.dark().data,
-          themeMode: themeService.getThemeMode(),
-          routerConfig: appRouter,
-          builder: (context, child) => InAppToastHost(
-            child: child ?? const SizedBox.shrink(),
-          ),
+        child: ValueListenableBuilder<ThemeMode>(
+          valueListenable: themeService,
+          builder: (context, mode, _) => MaterialApp.router(
+            title: 'Student Platform',
+            debugShowCheckedModeBanner: false,
+            theme: AppTheme.light().data,
+            darkTheme: AppTheme.dark().data,
+            themeMode: mode,
+            routerConfig: appRouter,
+            builder: (context, child) => InAppToastHost(
+              child: child ?? const SizedBox.shrink(),
+            ),
 
-          // Локализация
-          locale: const Locale('ru', 'RU'),
-          supportedLocales: const [
-            Locale('ru', 'RU'),
-            Locale('en', 'US'),
-          ],
-          localizationsDelegates: const [
-            GlobalMaterialLocalizations.delegate,
-            GlobalCupertinoLocalizations.delegate,
-            GlobalWidgetsLocalizations.delegate,
-          ],
+            // Локализация
+            locale: const Locale('ru', 'RU'),
+            supportedLocales: const [
+              Locale('ru', 'RU'),
+              Locale('en', 'US'),
+            ],
+            localizationsDelegates: const [
+              GlobalMaterialLocalizations.delegate,
+              GlobalCupertinoLocalizations.delegate,
+              GlobalWidgetsLocalizations.delegate,
+            ],
+          ),
         ),
       ),
     );

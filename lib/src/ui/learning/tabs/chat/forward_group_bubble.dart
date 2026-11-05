@@ -3,6 +3,8 @@
 // =============================
 
 import 'dart:convert';
+import 'package:student_platform/src/ui/chats/core/forward_payload.dart';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../models/chat_file.dart';
@@ -43,12 +45,17 @@ Map<String, dynamic>? _parseForwardPayload(String raw) {
     try {
       final decoded = json.decode(jsonPart);
       if (decoded is Map && decoded['fg'] == 1) {
-        return Map<String, dynamic>.from(decoded);
+        final items = decoded['items'];
+        if (items == null ||
+            (items is List &&
+                items.every((item) => item is Map<String, dynamic>))) {
+          return Map<String, dynamic>.from(decoded);
+        }
       }
     } catch (_) {
-      searchFrom = idx + _forwardGroupMark.length;
-      continue;
+      // Continue looking for another marker below.
     }
+    searchFrom = idx + _forwardGroupMark.length;
   }
 
   return null;
@@ -92,41 +99,57 @@ class ForwardGroupBubble extends StatelessWidget {
     final items = List<Map<String, dynamic>>.from(fg['items'] ?? const []);
     final caption = (fg['caption'] as String?)?.trim() ?? '';
 
-    final baseBg = isMe
-        ? theme.colorScheme.primary.withValues(alpha: 0.22)
-        : theme.colorScheme.surfaceContainerHighest;
-    final bg =
-        selected ? Colors.white.withValues(alpha: isMe ? 0.85 : 0.78) : baseBg;
-    const textColor = Colors.black87;
+    final colors = theme.colorScheme;
+    final bg = selected
+        ? colors.secondaryContainer
+        : isMe
+            ? colors.primaryContainer
+            : colors.surface;
+    final textColor = selected
+        ? colors.onSecondaryContainer
+        : isMe
+            ? colors.onPrimaryContainer
+            : colors.onSurface;
 
     return GestureDetector(
       onLongPress: onLongPress,
       child: ConstrainedBox(
-        constraints:
-            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * .70),
+        constraints: BoxConstraints(
+            maxWidth: math.min(MediaQuery.sizeOf(context).width * .85, 560)),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
             color: bg,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: Colors.black12),
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(20),
+              topRight: const Radius.circular(20),
+              bottomLeft: Radius.circular(isMe ? 20 : 7),
+              bottomRight: Radius.circular(isMe ? 7 : 20),
+            ),
+            border: Border.all(
+                color: selected
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.outlineVariant),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Заголовок
               Row(
-                children: const [
+                children: [
                   Icon(Icons.forward, size: 16, color: textColor),
                   SizedBox(width: 6),
-                  Text(
-                    'Пересланные сообщения',
+                  Flexible(
+                      child: Text(
+                    items.length == 1
+                        ? 'Пересланное сообщение'
+                        : 'Пересланные сообщения',
                     style: TextStyle(
                       color: textColor,
                       fontWeight: FontWeight.w700,
                       fontSize: 12,
                     ),
-                  ),
+                  )),
                 ],
               ),
               const SizedBox(height: 8),
@@ -143,7 +166,7 @@ class ForwardGroupBubble extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   caption,
-                  style: const TextStyle(
+                  style: TextStyle(
                       color: textColor,
                       fontStyle: FontStyle.italic,
                       height: 1.22),
@@ -155,7 +178,7 @@ class ForwardGroupBubble extends StatelessWidget {
                 child: Text(
                   time,
                   style: TextStyle(
-                    color: textColor.withValues(alpha: .6),
+                    color: textColor,
                     fontSize: 11,
                   ),
                 ),
@@ -169,8 +192,8 @@ class ForwardGroupBubble extends StatelessWidget {
                     onPressed: onRetryFailed,
                     style: TextButton.styleFrom(
                       padding: EdgeInsets.zero,
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      minimumSize: const Size(48, 48),
+                      tapTargetSize: MaterialTapTargetSize.padded,
                       foregroundColor: Theme.of(context).colorScheme.error,
                     ),
                     child: const Text(
@@ -191,16 +214,21 @@ class ForwardGroupBubble extends StatelessWidget {
                     return GestureDetector(
                       onTap: onReact,
                       child: Container(
+                        key: ValueKey('forward-reaction-${e.key}'),
+                        constraints:
+                            const BoxConstraints(minWidth: 48, minHeight: 48),
                         padding: const EdgeInsets.symmetric(
                             horizontal: 6, vertical: 3),
                         decoration: BoxDecoration(
-                          color:
-                              Colors.black.withValues(alpha: isMe ? .15 : .08),
+                          color: theme.colorScheme.surfaceContainerHigh,
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: Text('${e.key} ${e.value}',
-                            style: const TextStyle(
-                                color: textColor, fontSize: 12)),
+                        child: Center(
+                            widthFactor: 1,
+                            heightFactor: 1,
+                            child: Text('${e.key} ${e.value}',
+                                style:
+                                    TextStyle(color: textColor, fontSize: 12))),
                       ),
                     );
                   }).toList(),
@@ -229,7 +257,7 @@ class _ForwardItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const textColor = Colors.black87;
+    final textColor = Theme.of(context).colorScheme.onSurface;
 
     final srcId = (map['id'] ?? '').toString();
     final authorId = (map['aid'] ?? '').toString();
@@ -238,7 +266,6 @@ class _ForwardItem extends StatelessWidget {
     final timeStr = (map['t'] ?? '').toString();
     final atIso = (map['at'] ?? '').toString();
     final pretty = atIso.isNotEmpty ? _fmtIsoLocal(atIso) : timeStr;
-    final prettyLong = atIso.isNotEmpty ? _fmtIsoLocal(atIso, long: true) : '';
 
     final body = (map['x'] ?? '').toString();
     final nestedForward = depth < 3 ? _parseForwardPayload(body) : null;
@@ -249,11 +276,11 @@ class _ForwardItem extends StatelessWidget {
 
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.only(left: 8, top: 4, bottom: 4),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: .04),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.black.withValues(alpha: .08)),
+        border: Border(
+            left: BorderSide(
+                color: Theme.of(context).colorScheme.outlineVariant, width: 2)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -274,9 +301,9 @@ class _ForwardItem extends StatelessWidget {
               Expanded(
                 child: Text(
                   pretty.isEmpty ? author : '$author • $pretty',
-                  maxLines: 1,
+                  maxLines: 3,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w800,
                       color: textColor),
@@ -285,9 +312,11 @@ class _ForwardItem extends StatelessWidget {
               if (srcId.isNotEmpty && onOpenOriginal != null)
                 IconButton(
                   padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  icon: const Icon(Icons.open_in_new,
-                      size: 16, color: Colors.black54),
+                  constraints:
+                      const BoxConstraints(minWidth: 48, minHeight: 48),
+                  icon: Icon(Icons.open_in_new,
+                      size: 16,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant),
                   tooltip: 'Перейти к исходному',
                   onPressed: () => onOpenOriginal!(srcId),
                 ),
@@ -306,8 +335,11 @@ class _ForwardItem extends StatelessWidget {
               onTap: (srcId.isNotEmpty && onOpenOriginal != null)
                   ? () => onOpenOriginal!(srcId)
                   : null,
-              child: Text(body,
-                  style: const TextStyle(color: textColor, height: 1.22)),
+              child: Text(
+                  body.contains('__FG__:')
+                      ? ForwardPayload.displayText(body)
+                      : body,
+                  style: TextStyle(color: textColor, height: 1.22)),
             ),
           ],
           if (fileIds.isNotEmpty || fileObjs.isNotEmpty) ...[
@@ -317,11 +349,6 @@ class _ForwardItem extends StatelessWidget {
               idToFile: idToFile,
               fileObjects: fileObjs,
             ),
-          ],
-          if (prettyLong.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text('Исходное: $prettyLong',
-                style: const TextStyle(fontSize: 11, color: Colors.black54)),
           ],
         ],
       ),
@@ -346,27 +373,30 @@ class _NestedForwardPreview extends StatelessWidget {
     final caption = (payload['caption'] as String?)?.trim() ?? '';
 
     return Container(
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.only(left: 8, top: 4),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: .38),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.black.withValues(alpha: .08)),
+        border: Border(
+            left: BorderSide(
+                color: Theme.of(context).colorScheme.outlineVariant, width: 2)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            children: const [
-              Icon(Icons.forward_rounded, size: 14, color: Colors.black54),
+            children: [
+              Icon(Icons.forward_rounded,
+                  size: 14,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant),
               SizedBox(width: 5),
-              Text(
+              Flexible(
+                  child: Text(
                 'Вложенная пересылка',
                 style: TextStyle(
-                  color: Colors.black87,
+                  color: Theme.of(context).colorScheme.onSurface,
                   fontSize: 11.5,
                   fontWeight: FontWeight.w800,
                 ),
-              ),
+              )),
             ],
           ),
           const SizedBox(height: 6),
@@ -382,8 +412,8 @@ class _NestedForwardPreview extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               caption,
-              style: const TextStyle(
-                color: Colors.black87,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface,
                 fontStyle: FontStyle.italic,
                 height: 1.22,
               ),
@@ -514,17 +544,17 @@ class _ForwardFileChip extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Material(
-        color: Colors.white.withValues(alpha: .42),
+        color: theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           onTap: canOpen ? () => _openPreview(context, displayName) : null,
           borderRadius: BorderRadius.circular(12),
           child: Container(
-            constraints: const BoxConstraints(minHeight: 44),
+            constraints: const BoxConstraints(minHeight: 48),
             padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.black.withValues(alpha: .08)),
+              border: Border.all(color: theme.colorScheme.outlineVariant),
             ),
             child: Row(
               children: [
@@ -547,8 +577,8 @@ class _ForwardFileChip extends StatelessWidget {
                         displayName,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.black87,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurface,
                           fontSize: 12.5,
                           fontWeight: FontWeight.w700,
                         ),
@@ -557,12 +587,12 @@ class _ForwardFileChip extends StatelessWidget {
                       Text(
                         [
                           if (size > 0) _formatSize(size),
-                          canOpen ? 'Нажмите, чтобы открыть' : 'Файл',
+                          if (size <= 0) 'Файл',
                         ].join(' · '),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          color: Colors.black.withValues(alpha: .56),
+                          color: theme.colorScheme.onSurfaceVariant,
                           fontSize: 10.5,
                           height: 1,
                         ),
@@ -575,7 +605,7 @@ class _ForwardFileChip extends StatelessWidget {
                   Icon(
                     Icons.visibility_rounded,
                     size: 15,
-                    color: Colors.black.withValues(alpha: .46),
+                    color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ],
               ],

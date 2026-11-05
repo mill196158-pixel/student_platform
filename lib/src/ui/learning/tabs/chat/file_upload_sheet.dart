@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
@@ -186,7 +187,7 @@ class _FileUploadSheetState extends State<FileUploadSheet> {
 
           if (_isLoading) ...[
             const SizedBox(height: 16),
-            const CircularProgressIndicator(),
+            const ProductLoadingIndicator(size: 96),
             const SizedBox(height: 8),
             Text(
               _uploadStatus ?? '',

@@ -1,5 +1,7 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
+import '../shared/workspace_page_header.dart';
+import '../common/friendly_empty_state.dart';
 import 'dart:io';
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
@@ -24,13 +26,13 @@ class DiaryEntryDetailsScreen extends StatelessWidget {
     return Scaffold(
       body: Column(
         children: [
-          SizedBox(
-            height: 128,
-            child: _HeaderSmall(title: 'Запись от ${_fmtDate(entry.date)}'),
-          ),
+          WorkspacePageHeader(title: 'Запись от ${_fmtDate(entry.date)}'),
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+              padding: EdgeInsets.symmetric(
+                  vertical: 24,
+                  horizontal: ((MediaQuery.sizeOf(context).width - 800) / 2)
+                      .clamp(16.0, double.infinity)),
               children: [
                 // Конспекты-фото
                 if (images.isNotEmpty) ...[
@@ -75,7 +77,7 @@ class DiaryEntryDetailsScreen extends StatelessWidget {
                     decoration: _cardDeco(context),
                     child: Text(entry.text!.trim(),
                         style: theme.textTheme.bodyMedium
-                            ?.copyWith(color: Colors.black)),
+                            ?.copyWith(color: theme.colorScheme.onSurface)),
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -93,14 +95,11 @@ class DiaryEntryDetailsScreen extends StatelessWidget {
                                 ? Icons.image_outlined
                                 : Icons.insert_drive_file_outlined),
                             const SizedBox(width: 10),
-                            Expanded(
-                                child: Text(f.name,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis)),
+                            Expanded(child: Text(f.name, softWrap: true)),
                             const SizedBox(width: 8),
                             Text(_fmtSize(f.size),
-                                style: theme.textTheme.labelSmall
-                                    ?.copyWith(color: Colors.black54)),
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant)),
                           ],
                         ),
                       )),
@@ -254,131 +253,6 @@ Widget _viewerIconButton(
   );
 }
 
-/// Маленькая шапка в стиле чата: круглая назад + уменьшенный заголовок
-class _HeaderSmall extends StatelessWidget {
-  final String title;
-  const _HeaderSmall({required this.title});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final base = theme.textTheme.headlineSmall?.fontSize ?? 24.0;
-    final titleSize = base / 2;
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Colors.white,
-                theme.colorScheme.primary.withOpacity(0.06),
-                theme.colorScheme.primary.withOpacity(0.12),
-              ],
-              stops: const [0.0, 0.62, 1.0],
-            ),
-          ),
-        ),
-        IgnorePointer(
-          child: Stack(children: [
-            Positioned(
-                left: -40,
-                top: -20,
-                child: _GlowCircle(
-                    diameter: 140,
-                    color: theme.colorScheme.primary.withOpacity(0.10))),
-            Positioned(
-                right: -30,
-                bottom: -30,
-                child: _GlowCircle(
-                    diameter: 160, color: Colors.white.withOpacity(0.55))),
-          ]),
-        ),
-        SafeArea(
-          bottom: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
-            child: Align(
-              alignment: const Alignment(-1, 0.25),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  const _RoundBackButton(),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontSize: titleSize,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.black,
-                        height: 1.05,
-                        shadows: [
-                          Shadow(
-                              color: Colors.black.withOpacity(0.05),
-                              offset: Offset(0, 2),
-                              blurRadius: 3)
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _GlowCircle extends StatelessWidget {
-  final double diameter;
-  final Color color;
-  const _GlowCircle({required this.diameter, required this.color});
-  @override
-  Widget build(BuildContext context) => ClipOval(
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-          child: Container(
-              width: diameter,
-              height: diameter,
-              decoration: BoxDecoration(shape: BoxShape.circle, color: color)),
-        ),
-      );
-}
-
-class _RoundBackButton extends StatelessWidget {
-  const _RoundBackButton();
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      width: 40,
-      height: 40,
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        shape: BoxShape.circle,
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.06),
-              blurRadius: 10,
-              offset: Offset(0, 3)),
-        ],
-      ),
-      child: IconButton(
-        tooltip: 'Назад',
-        icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
-        onPressed: () => Navigator.of(context).maybePop(),
-      ),
-    );
-  }
-}
-
 class AllConspectsGalleryScreen extends StatelessWidget {
   final String subjectKey;
   final Future<List<SubjectDiaryEntry>> entriesFuture;
@@ -394,13 +268,18 @@ class AllConspectsGalleryScreen extends StatelessWidget {
         future: entriesFuture,
         builder: (ctx, snap) {
           if (!snap.hasData)
-            return const Center(child: CircularProgressIndicator());
+            return const Center(child: ProductLoadingIndicator.page());
           final images = <SubjectDiaryFile>[];
           for (final e in snap.data!) {
             images.addAll(e.files.where((f) => f.mime.startsWith('image/')));
           }
-          if (images.isEmpty)
-            return const Center(child: Text('Нет фотографий конспектов'));
+          if (images.isEmpty) {
+            return const FriendlyEmptyState(
+              title: 'Нет фотографий конспектов',
+              fallbackIcon: Icons.photo_library_outlined,
+              animationHeight: 56,
+            );
+          }
           return GridView.builder(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -461,13 +340,18 @@ class AllFilesScreen extends StatelessWidget {
         future: entriesFuture,
         builder: (ctx, snap) {
           if (!snap.hasData)
-            return const Center(child: CircularProgressIndicator());
+            return const Center(child: ProductLoadingIndicator.page());
           final files = <SubjectDiaryFile>[];
           for (final e in snap.data!) {
             files.addAll(e.files);
           }
-          if (files.isEmpty)
-            return const Center(child: Text('Файлы не найдены'));
+          if (files.isEmpty) {
+            return const FriendlyEmptyState(
+              title: 'Файлы не найдены',
+              fallbackIcon: Icons.folder_open_outlined,
+              animationHeight: 56,
+            );
+          }
           return ListView.separated(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
             itemCount: files.length,
@@ -485,8 +369,8 @@ class AllFilesScreen extends StatelessWidget {
                           maxLines: 1, overflow: TextOverflow.ellipsis)),
                   const SizedBox(width: 8),
                   Text(_fmtSize(f.size),
-                      style: theme.textTheme.labelSmall
-                          ?.copyWith(color: Colors.black54)),
+                      style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant)),
                 ],
               );
             },
@@ -509,31 +393,14 @@ class _SectionTitle extends StatelessWidget {
   final String text;
   const _SectionTitle(this.text);
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Text(
-      text,
-      textAlign: TextAlign.center,
-      style: theme.textTheme.headlineSmall?.copyWith(
-        fontSize: 22,
-        fontWeight: FontWeight.w800,
-        color: Colors.black,
-        height: 1.05,
-      ),
-    );
-  }
+  Widget build(BuildContext context) =>
+      Text(text, style: Theme.of(context).textTheme.titleMedium);
 }
 
-BoxDecoration _cardDeco(BuildContext context,
-    {double radius = 16, double blur = 12}) {
+BoxDecoration _cardDeco(BuildContext context, {double radius = 16}) {
   return BoxDecoration(
     color: Theme.of(context).colorScheme.surface,
     borderRadius: BorderRadius.circular(radius),
-    boxShadow: [
-      BoxShadow(
-          color: Colors.black.withOpacity(0.06),
-          blurRadius: blur,
-          offset: const Offset(0, 3))
-    ],
+    border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
   );
 }

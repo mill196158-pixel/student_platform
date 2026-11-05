@@ -29,8 +29,16 @@ class FakeGuestService extends GuestPublicService {
       ];
     if (name == 'get_guest_groups')
       return [
-        {'id': 'test-group', 'name': 'Тестовая группа'}
+        {'id': 'test-group', 'name': 'Тестовая группа'},
+        {'id': 'other-group', 'name': 'Другая группа'},
       ];
+    if (name == 'get_guest_base') return [];
+    if (name == 'get_guest_group_subjects') {
+      final id = params['p_group'];
+      return [
+        {'id': id, 'title': id == 'test-group' ? 'Алгебра' : 'Геодезия'}
+      ];
+    }
     return [
       {
         'id': 'lesson',
@@ -85,6 +93,7 @@ void main() {
     Future<void> open(int tab) async {
       await tester.pumpWidget(const SizedBox());
       await tester.pumpWidget(MaterialApp(
+          theme: ThemeData.dark(),
           home: GuestWorkspace(tab: tab, service: FakeGuestService())));
       await tester.pumpAndSettle();
     }
@@ -93,6 +102,8 @@ void main() {
     expect(find.text('Мой дневник'), findsNothing);
     expect(find.text('Избранное'), findsNothing);
     expect(find.text('На этом устройстве'), findsNothing);
+    expect(find.byType(CircleAvatar), findsWidgets);
+    expect(find.text('Твоё место в группе'), findsNothing);
     expect(find.text('Карта СПБГАСУ'), findsOneWidget);
     await open(2);
     expect(find.text('Войти или зарегистрироваться'), findsOneWidget);
@@ -111,6 +122,50 @@ void main() {
     expect(find.text('Тестовая группа'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+  testWidgets('Base group choice scopes subjects and shares it with schedule',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final service = FakeGuestService();
+    var tab = 1;
+    late StateSetter update;
+    await tester.pumpWidget(
+      MaterialApp(home: StatefulBuilder(builder: (_, setState) {
+        update = setState;
+        return GuestWorkspace(tab: tab, service: service);
+      })),
+    );
+    await tester.pumpAndSettle();
+
+    expect(service.calls, isNot(contains('get_guest_group_subjects')));
+    await tester.tap(find.text('Выбрать группу'));
+    await tester.pumpAndSettle();
+    final groupSearch = find.widgetWithText(TextField, 'Найти группу');
+    await tester.enterText(groupSearch, 'нет такой');
+    await tester.pumpAndSettle();
+    expect(find.text('Группы не найдены'), findsOneWidget);
+    await tester.enterText(groupSearch, 'ТЕСТОВАЯ-группа');
+    await tester.pumpAndSettle();
+    expect(find.text('Другая группа'), findsNothing);
+    await tester.tap(find.text('Тестовая группа'));
+    await tester.pumpAndSettle();
+    expect(find.text('Алгебра'), findsOneWidget);
+    expect(find.text('Геодезия'), findsNothing);
+
+    await tester.tap(find.text('Тестовая группа'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Другая группа'));
+    await tester.pumpAndSettle();
+    expect(find.text('Алгебра'), findsNothing);
+    expect(find.text('Геодезия'), findsOneWidget);
+
+    update(() => tab = 3);
+    await tester.pumpAndSettle();
+    expect(find.text('Другая группа'), findsOneWidget);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('guest_selected_group_v1'), contains('other-group'));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('later news cover paints without waiting for first image',
       (tester) async {
     SharedPreferences.setMockInitialValues({});

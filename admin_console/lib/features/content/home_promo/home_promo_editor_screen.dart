@@ -2169,7 +2169,7 @@ class _ImageSkeleton extends StatelessWidget {
       child: const SizedBox(
         width: 24,
         height: 24,
-        child: CircularProgressIndicator(strokeWidth: 2),
+        child: ProductLoadingIndicator(),
       ),
     );
   }
@@ -2343,7 +2343,7 @@ class _PropertiesPanel extends StatelessWidget {
                   child: SizedBox(
                     width: 20,
                     height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    child: ProductLoadingIndicator(),
                   ),
                 ),
               ),
@@ -2516,6 +2516,9 @@ class _PropertiesPanel extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           DropdownButtonFormField<String>(
+            borderRadius: ProductTheme.selectionMenuRadius,
+            elevation: ProductTheme.selectionMenuElevation,
+            icon: const Icon(Icons.keyboard_arrow_down_rounded),
             isExpanded: true,
             initialValue: audienceMode,
             decoration: const InputDecoration(labelText: 'Кому показывать'),

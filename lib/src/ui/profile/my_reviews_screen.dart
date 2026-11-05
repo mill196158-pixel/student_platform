@@ -70,7 +70,7 @@ class _MyReviewsScreenState extends State<MyReviewsScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Мои отзывы')),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: ProductLoadingIndicator.page())
           : _loadFailed
               ? Center(
                   child: Column(

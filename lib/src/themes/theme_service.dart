@@ -1,61 +1,49 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-// import 'package:get_storage/get_storage.dart'; // Временно отключено
+import 'package:shared_preferences/shared_preferences.dart';
 
-enum ThemeOptions { light, dark }
+class ThemeService extends ValueNotifier<ThemeMode> {
+  ThemeService() : super(ThemeMode.system);
 
-class ThemeService extends ChangeNotifier {
-  static ThemeOptions themeOptions = ThemeOptions.light;
-  static ThemeMode currentTheme = ThemeMode.light;
+  static const _key = 'themeMode';
+  static const _legacyKey = 'isDarkMode';
+  SharedPreferences? _preferences;
 
-  static final systemBrightness = const SystemUiOverlayStyle(
-    statusBarColor: Colors.transparent,
-  );
+  Future<void> initialize() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _preferences = prefs;
+      final saved = prefs.getString(_key);
+      final legacy = prefs.getBool(_legacyKey);
+      value = ThemeMode.values.asNameMap()[saved] ??
+          (legacy == null
+              ? ThemeMode.system
+              : legacy
+                  ? ThemeMode.dark
+                  : ThemeMode.light);
+    } catch (error) {
+      debugPrint('[theme] Could not read preference: ${error.runtimeType}');
+    }
+  }
 
-  // final _getStorage = GetStorage(); // Временно отключено
-  final storageKey = 'isDarkMode';
+  Future<void> select(ThemeMode mode) async {
+    if (mode == value) return;
+    final prefs = _preferences ?? await SharedPreferences.getInstance();
+    final saved = await prefs.setString(_key, mode.name);
+    if (!saved) throw StateError('Theme preference could not be saved');
+    value = mode;
+  }
 
-  /// Light app chrome → dark status icons; dark chrome → light icons.
-  /// (Previously iOS light mode set [statusBarIconBrightness.light] = white icons.)
   static SystemUiOverlayStyle overlayFor({required bool darkMode}) {
-    final darkIcons = !darkMode;
     return SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
-      // iOS: brightness of the *background* behind status icons.
-      statusBarBrightness: darkIcons ? Brightness.light : Brightness.dark,
-      statusBarIconBrightness: darkIcons ? Brightness.dark : Brightness.light,
+      statusBarBrightness: darkMode ? Brightness.dark : Brightness.light,
+      statusBarIconBrightness: darkMode ? Brightness.light : Brightness.dark,
       systemNavigationBarColor: Colors.transparent,
       systemNavigationBarIconBrightness:
-          darkIcons ? Brightness.dark : Brightness.light,
+          darkMode ? Brightness.light : Brightness.dark,
     );
-  }
-
-  switchStatusColor() {
-    SystemChrome.setSystemUIOverlayStyle(
-      overlayFor(darkMode: isSavedDarkMode()),
-    );
-  }
-
-  ThemeMode getThemeMode() {
-    switchStatusColor();
-    return isSavedDarkMode() ? ThemeMode.dark : ThemeMode.light;
-  }
-
-  bool isSavedDarkMode() {
-    // return _getStorage.read(storageKey) ?? false; // Временно отключено
-    return false; // По умолчанию светлая тема
-  }
-
-  void saveThemeMode(bool isDarkMode) async {
-    // _getStorage.write(storageKey, isDarkMode); // Временно отключено
-    // Временно не сохраняем настройки темы
-  }
-
-  void changeThemeMode() {
-    saveThemeMode(!isSavedDarkMode());
-    switchStatusColor();
-    notifyListeners();
   }
 }
 
-ThemeService themeService = ThemeService();
+final themeService = ThemeService();

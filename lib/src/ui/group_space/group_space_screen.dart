@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductTheme, ProductLoadingIndicator;
 import '../../services/chat_file_access.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -31,6 +32,7 @@ class _GroupSpaceScreenState extends State<GroupSpaceScreen> {
   List<GroupCollection> _collections = const [];
   List<GroupTopicSelection> _topics = const [];
   bool _loading = true;
+  bool _hasLoadedLists = false;
   String? _error;
 
   @override
@@ -47,10 +49,12 @@ class _GroupSpaceScreenState extends State<GroupSpaceScreen> {
         _loading = false;
       });
     }
+    if (!mounted) return;
     await _reload();
   }
 
   Future<void> _reload() async {
+    if (!mounted) return;
     setState(() {
       _error = null;
       if (_space == null) _loading = true;
@@ -71,6 +75,7 @@ class _GroupSpaceScreenState extends State<GroupSpaceScreen> {
         _collections = collections;
         _topics = topics;
         _loading = false;
+        _hasLoadedLists = true;
         if (!space.exists) {
           _error = 'Общий чат группы пока недоступен';
         }
@@ -109,44 +114,22 @@ class _GroupSpaceScreenState extends State<GroupSpaceScreen> {
   Future<void> _createCollection() async {
     final space = _space;
     if (space == null || !space.isOrganizer) return;
-    final titleCtrl = TextEditingController();
-    final purposeCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Новый сбор'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: titleCtrl,
-              decoration: const InputDecoration(labelText: 'Название'),
-            ),
-            TextField(
-              controller: purposeCtrl,
-              decoration: const InputDecoration(labelText: 'Цель'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Отмена'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Создать'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    final title = titleCtrl.text.trim();
+    final values = await showDialog<List<String>>(
+        context: context,
+        builder: (_) => const _GroupFieldsDialog(
+                title: 'Новый сбор',
+                action: 'Создать',
+                fields: [
+                  _GroupField('Название', initial: '', numeric: false),
+                  _GroupField('Цель', initial: '', numeric: false),
+                ]));
+    if (!mounted || values == null) return;
+    final title = values[0].trim();
     if (title.isEmpty) return;
     try {
       await _repo.createCollection(
         title: title,
-        purpose: purposeCtrl.text.trim(),
+        purpose: values[1].trim(),
       );
       await _reload();
     } catch (_) {
@@ -191,53 +174,22 @@ class _GroupSpaceScreenState extends State<GroupSpaceScreen> {
   Future<void> _createTopic() async {
     final space = _space;
     if (space == null || !space.isOrganizer) return;
-    final titleCtrl = TextEditingController();
-    final option1Ctrl = TextEditingController();
-    final option2Ctrl = TextEditingController();
-    final capacityCtrl = TextEditingController(text: '1');
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Выбор темы'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: titleCtrl,
-              decoration: const InputDecoration(labelText: 'Название'),
-            ),
-            TextField(
-              controller: option1Ctrl,
-              decoration: const InputDecoration(labelText: 'Тема 1'),
-            ),
-            TextField(
-              controller: option2Ctrl,
-              decoration: const InputDecoration(labelText: 'Тема 2'),
-            ),
-            TextField(
-              controller: capacityCtrl,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Мест на тему'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Отмена'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Создать'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    final title = titleCtrl.text.trim();
-    final option1 = option1Ctrl.text.trim();
-    final option2 = option2Ctrl.text.trim();
-    final capacity = int.tryParse(capacityCtrl.text.trim()) ?? 0;
+    final values = await showDialog<List<String>>(
+        context: context,
+        builder: (_) => const _GroupFieldsDialog(
+                title: 'Выбор темы',
+                action: 'Создать',
+                fields: [
+                  _GroupField('Название', initial: '', numeric: false),
+                  _GroupField('Тема 1', initial: '', numeric: false),
+                  _GroupField('Тема 2', initial: '', numeric: false),
+                  _GroupField('Мест на тему', initial: '1', numeric: true),
+                ]));
+    if (!mounted || values == null) return;
+    final title = values[0].trim();
+    final option1 = values[1].trim();
+    final option2 = values[2].trim();
+    final capacity = int.tryParse(values[3].trim()) ?? 0;
     if (title.isEmpty || option1.isEmpty || option2.isEmpty || capacity < 1) {
       return;
     }
@@ -274,22 +226,28 @@ class _GroupSpaceScreenState extends State<GroupSpaceScreen> {
         title: Text(space?.title ?? 'Чат группы'),
       ),
       body: _loading && space == null
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: ProductLoadingIndicator.page())
           : RefreshIndicator(
               onRefresh: _reload,
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: EdgeInsets.symmetric(
+                    vertical: 24,
+                    horizontal: ((MediaQuery.sizeOf(context).width - 800) / 2)
+                        .clamp(16.0, double.infinity)),
                 children: [
-                  if (_error != null)
-                    Card(
-                      child: ListTile(
-                        leading: const Icon(Icons.info_outline),
-                        title: Text(_error!),
-                        subtitle: const Text(
-                          'Если вы уже в учебной группе, потяните вниз, чтобы обновить.',
-                        ),
+                  if (_error != null) ...[
+                    _GroupStatePanel(
+                      icon: Icons.info_outline,
+                      title: _error!,
+                      action: TextButton.icon(
+                        onPressed: _reload,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Повторить'),
                       ),
                     ),
+                    const SizedBox(height: 16),
+                  ],
                   if (space != null && space.exists) ...[
                     FilledButton.icon(
                       onPressed: _openChat,
@@ -302,50 +260,71 @@ class _GroupSpaceScreenState extends State<GroupSpaceScreen> {
                           ? 'Вы организатор чата группы'
                           : 'Участник учебной группы',
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: Colors.black54,
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
                     const SizedBox(height: 20),
+                    if (!_hasLoadedLists && _error == null)
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 12),
+                        child: ProductLoadingIndicator(size: 28),
+                      ),
                     _SectionHeader(
                       title: 'Сбор группы',
                       actionLabel: space.isOrganizer ? 'Создать' : null,
+                      actionTooltip: 'Создать сбор',
                       onAction: space.isOrganizer ? _createCollection : null,
                     ),
-                    if (_collections.isEmpty)
-                      const _EmptyHint('Активных сборов пока нет')
-                    else
-                      ..._collections.map(
-                        (c) => ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(c.title),
-                          subtitle: Text(
-                            [
-                              if (c.purpose.trim().isNotEmpty) c.purpose,
-                              'Статус: ${c.status}',
-                            ].join(' · '),
-                          ),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: () => _openCollection(c),
-                        ),
-                      ),
+                    if (_collections.isEmpty && _hasLoadedLists)
+                      const _GroupStatePanel(
+                        icon: Icons.receipt_long_outlined,
+                        title: 'Активных сборов пока нет',
+                      )
+                    else if (_collections.isNotEmpty)
+                      _GroupRows(
+                          children: _collections
+                              .map(
+                                (c) => ListTile(
+                                  leading:
+                                      const Icon(Icons.receipt_long_outlined),
+                                  title: Text(c.title),
+                                  subtitle: Text(
+                                    [
+                                      if (c.purpose.trim().isNotEmpty)
+                                        c.purpose,
+                                      _groupStatusLabel(c.status),
+                                    ].join(' · '),
+                                  ),
+                                  trailing: const Icon(Icons.chevron_right),
+                                  onTap: () => _openCollection(c),
+                                ),
+                              )
+                              .toList()),
                     const SizedBox(height: 16),
                     _SectionHeader(
                       title: 'Выбор темы',
                       actionLabel: space.isOrganizer ? 'Создать' : null,
+                      actionTooltip: 'Создать выбор темы',
                       onAction: space.isOrganizer ? _createTopic : null,
                     ),
-                    if (_topics.isEmpty)
-                      const _EmptyHint('Выборов темы пока нет')
-                    else
-                      ..._topics.map(
-                        (t) => ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(t.title),
-                          subtitle: Text('Статус: ${t.status}'),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: () => _openTopic(t),
-                        ),
-                      ),
+                    if (_topics.isEmpty && _hasLoadedLists)
+                      const _GroupStatePanel(
+                        icon: Icons.list_alt_outlined,
+                        title: 'Выборов темы пока нет',
+                      )
+                    else if (_topics.isNotEmpty)
+                      _GroupRows(
+                          children: _topics
+                              .map(
+                                (t) => ListTile(
+                                  leading: const Icon(Icons.list_alt_outlined),
+                                  title: Text(t.title),
+                                  subtitle: Text(_groupStatusLabel(t.status)),
+                                  trailing: const Icon(Icons.chevron_right),
+                                  onTap: () => _openTopic(t),
+                                ),
+                              )
+                              .toList()),
                   ],
                 ],
               ),
@@ -357,11 +336,13 @@ class _GroupSpaceScreenState extends State<GroupSpaceScreen> {
 class _SectionHeader extends StatelessWidget {
   const _SectionHeader({
     required this.title,
+    required this.actionTooltip,
     this.actionLabel,
     this.onAction,
   });
 
   final String title;
+  final String actionTooltip;
   final String? actionLabel;
   final VoidCallback? onAction;
 
@@ -378,25 +359,37 @@ class _SectionHeader extends StatelessWidget {
           ),
         ),
         if (actionLabel != null && onAction != null)
-          TextButton(onPressed: onAction, child: Text(actionLabel!)),
+          Tooltip(
+            message: actionTooltip,
+            child: TextButton(onPressed: onAction, child: Text(actionLabel!)),
+          ),
       ],
     );
   }
 }
 
-class _EmptyHint extends StatelessWidget {
-  const _EmptyHint(this.text);
-  final String text;
+class _GroupRows extends StatelessWidget {
+  const _GroupRows({required this.children});
+  final List<Widget> children;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Text(
-        text,
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: Colors.black45,
-            ),
+    final colors = Theme.of(context).colorScheme;
+    return Material(
+      color: colors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: colors.outlineVariant),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final (index, child) in children.indexed) ...[
+            if (index > 0) const Divider(height: 1, indent: 16, endIndent: 16),
+            child,
+          ],
+        ],
       ),
     );
   }
@@ -427,6 +420,8 @@ class _CollectionDetailScreenState extends State<_CollectionDetailScreen> {
   String? _proofPath;
   String? _proofFileId;
   List<Map<String, dynamic>> _contributions = const [];
+  bool _loadingContributions = false;
+  bool _contributionsError = false;
 
   @override
   void initState() {
@@ -461,12 +456,26 @@ class _CollectionDetailScreenState extends State<_CollectionDetailScreen> {
   }
 
   Future<void> _loadContributions() async {
+    if (!mounted) return;
+    setState(() {
+      _loadingContributions = true;
+      _contributionsError = false;
+    });
     try {
       final rows = await widget.repository
           .listCollectionContributions(widget.collection.id);
       if (!mounted) return;
-      setState(() => _contributions = rows);
-    } catch (_) {}
+      setState(() {
+        _contributions = rows;
+        _loadingContributions = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loadingContributions = false;
+        _contributionsError = true;
+      });
+    }
   }
 
   Future<void> _pickProof() async {
@@ -524,16 +533,26 @@ class _CollectionDetailScreenState extends State<_CollectionDetailScreen> {
     return Scaffold(
       appBar: AppBar(title: Text(c.title)),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.symmetric(
+            vertical: 24,
+            horizontal: ((MediaQuery.sizeOf(context).width - 800) / 2)
+                .clamp(16.0, double.infinity)),
         children: [
-          if (c.purpose.trim().isNotEmpty) Text(c.purpose),
-          if (c.description.trim().isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(c.description),
-          ],
-          const SizedBox(height: 16),
+          _GroupStatePanel(
+            icon: c.isOpen ? Icons.receipt_long_outlined : Icons.lock_outline,
+            title: _groupStatusLabel(c.status),
+            description: [
+              if (c.purpose.trim().isNotEmpty) c.purpose,
+              if (c.description.trim().isNotEmpty) c.description,
+            ].join('\n').trim(),
+          ),
+          const SizedBox(height: 20),
           DropdownButtonFormField<String>(
+            borderRadius: ProductTheme.selectionMenuRadius,
+            elevation: ProductTheme.selectionMenuElevation,
+            icon: const Icon(Icons.keyboard_arrow_down_rounded),
             initialValue: _participation,
+            isExpanded: true,
             items: const [
               DropdownMenuItem(value: 'joining', child: Text('Участвую')),
               DropdownMenuItem(value: 'declined', child: Text('Не участвую')),
@@ -553,6 +572,7 @@ class _CollectionDetailScreenState extends State<_CollectionDetailScreen> {
               labelText: 'Комментарий',
               helperText:
                   'Не указывайте платёжные реквизиты и лишние финансовые данные',
+              helperMaxLines: 3,
             ),
           ),
           const SizedBox(height: 12),
@@ -578,16 +598,29 @@ class _CollectionDetailScreenState extends State<_CollectionDetailScreen> {
                     fontWeight: FontWeight.w800,
                   ),
             ),
-            if (_contributions.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
-                child: Text('Отметок пока нет'),
+            const SizedBox(height: 8),
+            if (_loadingContributions)
+              const LinearProgressIndicator()
+            else if (_contributionsError)
+              _GroupStatePanel(
+                icon: Icons.error_outline,
+                title: 'Не удалось загрузить отметки участников',
+                action: TextButton.icon(
+                    onPressed: _loadContributions,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Повторить')),
+              )
+            else if (_contributions.isEmpty)
+              const _GroupStatePanel(
+                icon: Icons.people_outline,
+                title: 'Отметок пока нет',
               )
             else
-              ..._contributions.map((row) {
+              _GroupRows(
+                  children: _contributions.map((row) {
                 final userId = row['user_id']?.toString() ?? '';
-                final displayName = (row['display_name']?.toString() ?? '')
-                    .trim();
+                final displayName =
+                    (row['display_name']?.toString() ?? '').trim();
                 final titleLabel =
                     displayName.isNotEmpty ? displayName : 'Участник';
                 final payment = row['payment_status']?.toString() ?? 'unmarked';
@@ -595,71 +628,78 @@ class _CollectionDetailScreenState extends State<_CollectionDetailScreen> {
                 final hasProof = proofUrl.isNotEmpty ||
                     (row['proof_file_id']?.toString() ?? '').isNotEmpty;
                 final canReview = payment != 'confirmed';
-                return ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(titleLabel),
-                  subtitle: Text(
-                    '${_paymentStatusLabel(payment)}'
-                    '${hasProof ? ' · есть подтверждение' : ''}',
-                  ),
-                  trailing: Wrap(
-                    spacing: 4,
+                return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      if (proofUrl.isNotEmpty)
-                        IconButton(
-                          tooltip: 'Открыть подтверждение',
-                          onPressed: () async {
-                            final uri = Uri.tryParse(await ChatFileAccess.resolve(proofUrl));
-                            if (uri == null) return;
-                            await launchUrl(
-                              uri,
-                              mode: LaunchMode.externalApplication,
-                            );
-                          },
-                          icon: const Icon(Icons.open_in_new),
+                      ListTile(
+                        leading: const Icon(Icons.person_outline),
+                        title: Text(titleLabel),
+                        subtitle: Text(
+                          '${_paymentStatusLabel(payment)}'
+                          '${hasProof ? ' · есть подтверждение' : ''}',
                         ),
-                      if (canReview) ...[
-                        IconButton(
-                          tooltip: 'Получено',
-                          onPressed: () async {
-                            await widget.repository.confirmContribution(
-                              collectionId: c.id,
-                              userId: userId,
-                              paymentStatus: 'confirmed',
-                            );
-                            await _loadContributions();
-                          },
-                          icon: const Icon(Icons.check_circle_outline),
-                        ),
-                        IconButton(
-                          tooltip: 'Не поступило',
-                          onPressed: () async {
-                            await widget.repository.confirmContribution(
-                              collectionId: c.id,
-                              userId: userId,
-                              paymentStatus: 'not_received',
-                            );
-                            await _loadContributions();
-                          },
-                          icon: const Icon(Icons.cancel_outlined),
-                        ),
-                        IconButton(
-                          tooltip: 'Нужно уточнение',
-                          onPressed: () async {
-                            await widget.repository.confirmContribution(
-                              collectionId: c.id,
-                              userId: userId,
-                              paymentStatus: 'needs_clarification',
-                            );
-                            await _loadContributions();
-                          },
-                          icon: const Icon(Icons.help_outline),
-                        ),
-                      ],
-                    ],
-                  ),
-                );
-              }),
+                      ),
+                      Align(
+                          alignment: Alignment.centerRight,
+                          child: Wrap(
+                            spacing: 4,
+                            children: [
+                              if (proofUrl.isNotEmpty)
+                                IconButton(
+                                  tooltip: 'Открыть подтверждение',
+                                  onPressed: () async {
+                                    final uri = Uri.tryParse(
+                                        await ChatFileAccess.resolve(proofUrl));
+                                    if (uri == null) return;
+                                    await launchUrl(
+                                      uri,
+                                      mode: LaunchMode.externalApplication,
+                                    );
+                                  },
+                                  icon: const Icon(Icons.open_in_new),
+                                ),
+                              if (canReview) ...[
+                                IconButton(
+                                  tooltip: 'Получено',
+                                  onPressed: () async {
+                                    await widget.repository.confirmContribution(
+                                      collectionId: c.id,
+                                      userId: userId,
+                                      paymentStatus: 'confirmed',
+                                    );
+                                    await _loadContributions();
+                                  },
+                                  icon: const Icon(Icons.check_circle_outline),
+                                ),
+                                IconButton(
+                                  tooltip: 'Не поступило',
+                                  onPressed: () async {
+                                    await widget.repository.confirmContribution(
+                                      collectionId: c.id,
+                                      userId: userId,
+                                      paymentStatus: 'not_received',
+                                    );
+                                    await _loadContributions();
+                                  },
+                                  icon: const Icon(Icons.cancel_outlined),
+                                ),
+                                IconButton(
+                                  tooltip: 'Нужно уточнение',
+                                  onPressed: () async {
+                                    await widget.repository.confirmContribution(
+                                      collectionId: c.id,
+                                      userId: userId,
+                                      paymentStatus: 'needs_clarification',
+                                    );
+                                    await _loadContributions();
+                                  },
+                                  icon: const Icon(Icons.help_outline),
+                                ),
+                              ],
+                            ],
+                          )),
+                    ]);
+              }).toList()),
             if (c.isOpen) ...[
               const SizedBox(height: 12),
               OutlinedButton(
@@ -708,6 +748,7 @@ class _TopicDetailScreenState extends State<_TopicDetailScreen> {
   }
 
   Future<void> _load() async {
+    if (!mounted) return;
     setState(() {
       _loading = true;
       _error = null;
@@ -749,41 +790,18 @@ class _TopicDetailScreenState extends State<_TopicDetailScreen> {
   }
 
   Future<void> _addOption() async {
-    final titleCtrl = TextEditingController();
-    final capacityCtrl = TextEditingController(text: '1');
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Добавить тему'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: titleCtrl,
-              decoration: const InputDecoration(labelText: 'Название темы'),
-            ),
-            TextField(
-              controller: capacityCtrl,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Количество мест'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Отмена'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Добавить'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    final title = titleCtrl.text.trim();
-    final capacity = int.tryParse(capacityCtrl.text.trim()) ?? 0;
+    final values = await showDialog<List<String>>(
+        context: context,
+        builder: (_) => const _GroupFieldsDialog(
+                title: 'Добавить тему',
+                action: 'Добавить',
+                fields: [
+                  _GroupField('Название темы', initial: '', numeric: false),
+                  _GroupField('Количество мест', initial: '1', numeric: true),
+                ]));
+    if (!mounted || values == null) return;
+    final title = values[0].trim();
+    final capacity = int.tryParse(values[1].trim()) ?? 0;
     if (title.isEmpty || capacity < 1) return;
     try {
       await widget.repository.addTopicOption(
@@ -803,35 +821,102 @@ class _TopicDetailScreenState extends State<_TopicDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final selection = widget.selection;
+    final isOpen = selection.isOpen;
+    final cancelled = selection.status == 'cancelled';
+    final description = selection.description.trim();
+
     return Scaffold(
-      appBar: AppBar(title: Text(widget.selection.title)),
+      appBar: AppBar(title: Text(selection.title)),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: ProductLoadingIndicator.page())
           : RefreshIndicator(
               onRefresh: _load,
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: EdgeInsets.symmetric(
+                    vertical: 24,
+                    horizontal: ((MediaQuery.sizeOf(context).width - 800) / 2)
+                        .clamp(16.0, double.infinity)),
                 children: [
-                  if (_error != null) Text(_error!),
-                  if (widget.selection.description.trim().isNotEmpty)
-                    Text(widget.selection.description),
-                  const SizedBox(height: 12),
-                  ..._options.map(
-                    (o) => ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(o.title),
-                      subtitle:
-                          Text('Свободно: ${o.freeSlots} из ${o.capacity}'),
-                      trailing: _myPick == o.id
-                          ? const Icon(Icons.check_circle, color: Colors.green)
-                          : TextButton(
-                              onPressed: widget.selection.isOpen && !o.isFull
-                                  ? () => _pick(o)
-                                  : null,
-                              child: const Text('Выбрать'),
-                            ),
+                  if (_error != null) ...[
+                    _GroupStatePanel(
+                      icon: Icons.error_outline_rounded,
+                      title: _error!,
+                      action: TextButton.icon(
+                        onPressed: _load,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Повторить'),
+                      ),
                     ),
+                    const SizedBox(height: 12),
+                  ],
+                  _GroupStatePanel(
+                    icon: isOpen
+                        ? Icons.checklist_rounded
+                        : cancelled
+                            ? Icons.block_rounded
+                            : Icons.lock_outline_rounded,
+                    title: isOpen
+                        ? 'Выбор открыт'
+                        : _groupStatusLabel(selection.status),
+                    description: _options.isEmpty
+                        ? null
+                        : isOpen
+                            ? 'Выберите тему, в которой есть свободное место.'
+                            : 'Варианты доступны для просмотра.',
                   ),
+                  if (description.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    Text(description, style: theme.textTheme.bodyMedium),
+                  ],
+                  if (_options.isNotEmpty) ...[
+                    const SizedBox(height: 24),
+                    Text('Варианты тем', style: theme.textTheme.titleMedium),
+                    const SizedBox(height: 8),
+                    _GroupRows(
+                      children: [
+                        for (final option in _options)
+                          ListTile(
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 8),
+                            leading: Icon(
+                              _myPick == option.id
+                                  ? Icons.check_circle_rounded
+                                  : Icons.article_outlined,
+                              color: _myPick == option.id
+                                  ? colors.primary
+                                  : colors.onSurfaceVariant,
+                            ),
+                            title: Text(option.title,
+                                style: theme.textTheme.titleSmall),
+                            subtitle: Text([
+                              if (_myPick == option.id) 'Ваш выбор',
+                              isOpen
+                                  ? 'Свободно ${option.freeSlots} из ${option.capacity}'
+                                  : 'Занято ${option.taken} из ${option.capacity}',
+                            ].join(' · ')),
+                            trailing: isOpen && _myPick != option.id
+                                ? TextButton(
+                                    onPressed: option.isFull
+                                        ? null
+                                        : () => _pick(option),
+                                    child: const Text('Выбрать'),
+                                  )
+                                : null,
+                          ),
+                      ],
+                    ),
+                  ] else if (_error == null) ...[
+                    const SizedBox(height: 16),
+                    const _GroupStatePanel(
+                      icon: Icons.article_outlined,
+                      title: 'Темы пока не добавлены',
+                    ),
+                  ],
+                  const SizedBox(height: 12),
                   if (widget.isOrganizer && widget.selection.isOpen)
                     TextButton(
                       onPressed: _addOption,
@@ -863,4 +948,124 @@ class _TopicDetailScreenState extends State<_TopicDetailScreen> {
             ),
     );
   }
+}
+
+class _GroupStatePanel extends StatelessWidget {
+  const _GroupStatePanel({
+    required this.icon,
+    required this.title,
+    this.description,
+    this.action,
+  });
+
+  final IconData icon;
+  final String title;
+  final String? description;
+  final Widget? action;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    return Material(
+      color: colors.surfaceContainerLow,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: colors.outlineVariant),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: colors.primary, size: 22),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: theme.textTheme.titleSmall),
+                  if (description != null && description!.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(description!,
+                        style: theme.textTheme.bodyMedium
+                            ?.copyWith(color: colors.onSurfaceVariant)),
+                  ],
+                  if (action != null) action!,
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _groupStatusLabel(String status) => switch (status) {
+      'open' => 'Открыто',
+      'closed' => 'Завершено',
+      'cancelled' => 'Отменено',
+      'draft' => 'Черновик',
+      _ => status,
+    };
+
+class _GroupField {
+  const _GroupField(this.label, {this.initial = '', this.numeric = false});
+  final String label;
+  final String initial;
+  final bool numeric;
+}
+
+class _GroupFieldsDialog extends StatefulWidget {
+  const _GroupFieldsDialog(
+      {required this.title, required this.action, required this.fields});
+  final String title;
+  final String action;
+  final List<_GroupField> fields;
+  @override
+  State<_GroupFieldsDialog> createState() => _GroupFieldsDialogState();
+}
+
+class _GroupFieldsDialogState extends State<_GroupFieldsDialog> {
+  late final controllers = widget.fields
+      .map((field) => TextEditingController(text: field.initial))
+      .toList();
+  @override
+  void dispose() {
+    for (final controller in controllers) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        scrollable: true,
+        title: Text(widget.title),
+        content: SizedBox(
+            width: 440,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              for (var i = 0; i < widget.fields.length; i++)
+                Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: TextField(
+                      controller: controllers[i],
+                      keyboardType: widget.fields[i].numeric
+                          ? TextInputType.number
+                          : TextInputType.text,
+                      decoration:
+                          InputDecoration(labelText: widget.fields[i].label),
+                    )),
+            ])),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Отмена')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context,
+                  controllers.map((controller) => controller.text).toList()),
+              child: Text(widget.action)),
+        ],
+      );
 }

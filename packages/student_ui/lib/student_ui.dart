@@ -1,5 +1,7 @@
 library;
 
+export 'src/branding/product_loading_indicator.dart';
+export 'src/branding/product_owl_mark.dart';
 export 'src/content/content_icon_resolver.dart';
 export 'src/content/content_image_render_state.dart';
 export 'src/content/content_models.dart';
@@ -29,3 +31,6 @@ export 'src/home/widgets/student_news_story_sheet.dart';
 export 'src/navigation/student_bottom_nav.dart';
 export 'src/profile/student_profile_screen_preview.dart';
 export 'src/theme/student_preview_theme.dart';
+
+export 'src/theme/product_theme.dart';
+export 'src/navigation/student_workspace_frame.dart';

@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 
 import 'propose_vacancy_screen.dart';
@@ -69,7 +70,7 @@ class _MyVacancySubmissionsScreenState
     return Scaffold(
       appBar: AppBar(title: const Text('Мои заявки на вакансии')),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: ProductLoadingIndicator.page())
           : RefreshIndicator(
               onRefresh: _load,
               child: ListView(

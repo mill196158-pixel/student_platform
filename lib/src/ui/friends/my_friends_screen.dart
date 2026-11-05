@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'dart:async';
 import 'dart:convert';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -780,7 +781,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
           shadowColor: Colors.black12,
           borderRadius: BorderRadius.circular(10),
           child: SizedBox(
-            height: 38,
+            height: 48,
             child: TextField(
               key: const ValueKey('friends_search_field'),
               controller: _searchCtrl,
@@ -836,7 +837,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
             const SizedBox(
                 width: 16,
                 height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2)),
+                child: ProductLoadingIndicator()),
             const SizedBox(width: 12),
           ],
         ],
@@ -860,7 +861,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
               child: SizedBox(
                   width: 22,
                   height: 22,
-                  child: CircularProgressIndicator(strokeWidth: 2))),
+                  child: ProductLoadingIndicator())),
         ),
     ];
 
@@ -895,18 +896,19 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
                 : (_classmatesLoadFailed
                     ? 'Не удалось загрузить одногруппников'
                     : 'Одногруппники не найдены'),
-            style: const TextStyle(color: Colors.black54),
+            style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
           ),
         ),
       ));
     }
 
     if (searchingMode && !_searching && list.isEmpty) {
-      children.add(const Padding(
-        padding: EdgeInsets.symmetric(vertical: 22),
+      children.add(Padding(
+        padding: const EdgeInsets.symmetric(vertical: 22),
         child: Center(
-            child: Text('Ничего не найдено',
-                style: TextStyle(color: Colors.black54))),
+          child: Text('Ничего не найдено',
+              style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
+        ),
       ));
     }
 
@@ -974,7 +976,7 @@ class _FriendsTabSwitch extends StatelessWidget {
               label,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     fontWeight: FontWeight.w700,
-                    color: selected ? cs.primary : Colors.black87,
+                    color: selected ? cs.primary : cs.onSurfaceVariant,
                   ),
             ),
           ),
@@ -1048,7 +1050,9 @@ class _FriendRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
+    final theme = Theme.of(context);
+    final t = theme.textTheme;
+    final colors = theme.colorScheme;
     final subtitle = [
       if (data.university.isNotEmpty) data.university,
       if (data.groupName.isNotEmpty) 'группа ${data.groupName}',
@@ -1077,7 +1081,7 @@ class _FriendRow extends StatelessWidget {
                     Text(subtitle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: t.bodySmall?.copyWith(color: Colors.black54)),
+                        style: t.bodySmall?.copyWith(color: colors.onSurfaceVariant)),
                   if (data.status.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
@@ -1086,11 +1090,11 @@ class _FriendRow extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: t.bodySmall?.copyWith(
-                          color: data.isOnline
-                              ? (data.status == 'Онлайн'
-                                  ? const Color(0xFF34C759)
-                                  : const Color(0xFF5B5168))
-                              : Colors.black45,
+                          color: data.isOnline && data.status == 'Онлайн'
+                              ? (theme.brightness == Brightness.dark
+                                  ? const Color(0xFF89D8A2)
+                                  : const Color(0xFF237144))
+                              : colors.onSurfaceVariant,
                           fontWeight:
                               data.isOnline ? FontWeight.w600 : FontWeight.w400,
                         ),
@@ -1112,25 +1116,23 @@ class _MessageActionButton extends StatelessWidget {
 
   final VoidCallback onPressed;
 
-  static const _lavender = Color(0xFF7C63D8);
-  static const _lavenderSoft = Color(0xFFDCD0FA);
-
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Tooltip(
       message: 'Написать',
       child: Material(
-        color: _lavenderSoft.withValues(alpha: 0.72),
+        color: colors.primaryContainer,
         borderRadius: BorderRadius.circular(14),
         child: InkWell(
           onTap: onPressed,
           borderRadius: BorderRadius.circular(14),
-          child: const SizedBox(
+          child: SizedBox(
             width: 42,
             height: 42,
             child: Icon(
               Icons.maps_ugc_rounded,
-              color: _lavender,
+              color: colors.onPrimaryContainer,
               size: 22,
             ),
           ),
@@ -1157,7 +1159,9 @@ class _RequestRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
+    final theme = Theme.of(context);
+    final t = theme.textTheme;
+    final colors = theme.colorScheme;
     final subtitle = [
       if (data.university.isNotEmpty) data.university,
       if (data.groupName.isNotEmpty) 'группа ${data.groupName}',
@@ -1186,7 +1190,7 @@ class _RequestRow extends StatelessWidget {
                     Text(subtitle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: t.bodySmall?.copyWith(color: Colors.black54)),
+                        style: t.bodySmall?.copyWith(color: colors.onSurfaceVariant)),
                 ],
               ),
             ),
@@ -1261,7 +1265,7 @@ class _GIconChip extends StatelessWidget {
             ? const SizedBox(
                 width: 16,
                 height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2))
+                child: ProductLoadingIndicator())
             : Icon(icon, size: 18, color: fg),
       ),
     );
@@ -1410,6 +1414,7 @@ class _SkeletonList extends StatelessWidget {
   const _SkeletonList();
   @override
   Widget build(BuildContext context) {
+    final placeholder = Theme.of(context).colorScheme.outlineVariant;
     return ListView.builder(
       physics: const AlwaysScrollableScrollPhysics(),
       itemCount: 10,
@@ -1422,16 +1427,16 @@ class _SkeletonList extends StatelessWidget {
                 width: 52,
                 height: 52,
                 decoration: BoxDecoration(
-                    color: Colors.black12,
+                    color: placeholder,
                     borderRadius: BorderRadius.circular(26))),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(height: 12, width: 140, color: Colors.black12),
+                  Container(height: 12, width: 140, color: placeholder),
                   const SizedBox(height: 8),
-                  Container(height: 10, width: 220, color: Colors.black12),
+                  Container(height: 10, width: 220, color: placeholder),
                 ],
               ),
             ),

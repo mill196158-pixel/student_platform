@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductTheme, ProductLoadingIndicator;
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
@@ -5,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/auth/admin_backend_config.dart';
+import '../content/shared/visual_editor_states.dart';
 import 'academic_process_calendar_models.dart';
 import 'academic_process_calendar_repository.dart';
 
@@ -61,6 +63,10 @@ class _AcademicProcessCalendarReviewPanelState
   }
 
   Future<void> _loadReferences() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       final value = await _repository.loadReferences();
       if (!mounted) return;
@@ -207,11 +213,14 @@ class _AcademicProcessCalendarReviewPanelState
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: ProductLoadingIndicator());
     }
     final references = _references;
     if (references == null) {
-      return Center(child: Text(_error ?? 'Справочники недоступны.'));
+      return VisualEditorErrorState(
+        message: _error ?? 'Справочники недоступны.',
+        onRetry: _loadReferences,
+      );
     }
     final targets = _targets(references);
 
@@ -260,6 +269,9 @@ class _AcademicProcessCalendarReviewPanelState
                           SizedBox(
                             width: 240,
                             child: DropdownButtonFormField<String>(
+                              borderRadius: ProductTheme.selectionMenuRadius,
+                              elevation: ProductTheme.selectionMenuElevation,
+                              icon: const Icon(Icons.keyboard_arrow_down_rounded),
                               initialValue: _yearId,
                               isExpanded: true,
                               decoration: const InputDecoration(
@@ -287,6 +299,9 @@ class _AcademicProcessCalendarReviewPanelState
                                 DropdownButtonFormField<
                                   AcademicProcessAudienceKind
                                 >(
+                                  borderRadius: ProductTheme.selectionMenuRadius,
+                                  elevation: ProductTheme.selectionMenuElevation,
+                                  icon: const Icon(Icons.keyboard_arrow_down_rounded),
                                   initialValue: _audienceKind,
                                   isExpanded: true,
                                   decoration: const InputDecoration(
@@ -321,6 +336,9 @@ class _AcademicProcessCalendarReviewPanelState
                             SizedBox(
                               width: 420,
                               child: DropdownButtonFormField<String>(
+                                borderRadius: ProductTheme.selectionMenuRadius,
+                                elevation: ProductTheme.selectionMenuElevation,
+                                icon: const Icon(Icons.keyboard_arrow_down_rounded),
                                 key: ValueKey(_audienceKind),
                                 initialValue:
                                     targets.any(
@@ -431,7 +449,7 @@ class _AcademicProcessCalendarReviewPanelState
                   ? const SizedBox(
                       width: 16,
                       height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                      child: ProductLoadingIndicator(),
                     )
                   : const Icon(Icons.fact_check_outlined),
               label: const Text('Проверить dry-run'),
@@ -594,6 +612,9 @@ class _PeriodEditor extends StatelessWidget {
             SizedBox(
               width: 220,
               child: DropdownButtonFormField<AcademicProcessPeriodType>(
+                borderRadius: ProductTheme.selectionMenuRadius,
+                elevation: ProductTheme.selectionMenuElevation,
+                icon: const Icon(Icons.keyboard_arrow_down_rounded),
                 initialValue: controllers.type,
                 isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Тип'),
@@ -611,20 +632,22 @@ class _PeriodEditor extends StatelessWidget {
               ),
             ),
             _field(controllers.course, 'Курс', 70, enabled, onChanged),
-            _field(controllers.term, 'Полугодие', 100, enabled, onChanged),
+            _field(controllers.term, 'Полугодие', 124, enabled, onChanged),
             _field(
               controllers.starts,
-              'Начало ГГГГ-ММ-ДД',
+              'Начало',
               170,
               enabled,
               onChanged,
+              hint: 'ГГГГ-ММ-ДД',
             ),
             _field(
               controllers.ends,
-              'Конец ГГГГ-ММ-ДД',
+              'Конец',
               170,
               enabled,
               onChanged,
+              hint: 'ГГГГ-ММ-ДД',
             ),
             _field(controllers.note, 'Примечание', 220, enabled, onChanged),
             IconButton(
@@ -643,14 +666,15 @@ class _PeriodEditor extends StatelessWidget {
     String label,
     double width,
     bool enabled,
-    VoidCallback onChanged,
-  ) {
+    VoidCallback onChanged, {
+    String? hint,
+  }) {
     return SizedBox(
       width: width,
       child: TextField(
         controller: controller,
         enabled: enabled,
-        decoration: InputDecoration(labelText: label),
+        decoration: InputDecoration(labelText: label, hintText: hint),
         onChanged: (_) => onChanged(),
       ),
     );

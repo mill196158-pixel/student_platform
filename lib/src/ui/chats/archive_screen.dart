@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -209,7 +210,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
           ),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator())
+                ? const Center(child: ProductLoadingIndicator.page())
                 : RefreshIndicator(
                     onRefresh: _load,
                     child: _visible.isEmpty

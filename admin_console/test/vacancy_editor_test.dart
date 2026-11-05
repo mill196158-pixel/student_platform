@@ -31,7 +31,7 @@ void main() {
   testWidgets('lists local vacancies and shows shared preview', (tester) async {
     await pumpEditor(tester, LocalVacancyRepository());
 
-    expect(find.text('Вакансии'), findsWidgets);
+    expect(find.text('Список вакансий'), findsOneWidget);
     expect(find.text('Junior Flutter Developer'), findsWidgets);
     expect(find.byType(StudentVacancyCard), findsWidgets);
     expect(

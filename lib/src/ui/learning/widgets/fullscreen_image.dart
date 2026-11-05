@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:student_platform/src/ui/learning/widgets/authorized_file_image.dart';
 import 'package:student_platform/src/services/chat_file_access.dart';
 import 'package:flutter/material.dart';
@@ -388,7 +389,7 @@ class _FullscreenImageState extends State<FullscreenImage> {
           loadingBuilder: (context, child, loadingProgress) {
             if (loadingProgress == null) return child;
             return const Center(
-              child: CircularProgressIndicator(color: Colors.white),
+              child: ProductLoadingIndicator.page(color: Colors.white),
             );
           },
           errorBuilder: (context, error, stackTrace) => const Center(
@@ -431,7 +432,7 @@ class _FullscreenImageState extends State<FullscreenImage> {
           );
         },
         loadingBuilder: (context, event) => const Center(
-          child: CircularProgressIndicator(color: Colors.white),
+          child: ProductLoadingIndicator.page(color: Colors.white),
         ),
       ),
     );
@@ -600,7 +601,7 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
           return const Center(
-            child: CircularProgressIndicator(color: Colors.white),
+            child: ProductLoadingIndicator.page(color: Colors.white),
           );
         }
         if (snapshot.hasError || snapshot.data == null) {
@@ -610,7 +611,7 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
         return PdfDocumentViewBuilder.file(
           snapshot.data!.path,
           loadingBuilder: (context) => const Center(
-            child: CircularProgressIndicator(color: Colors.white),
+            child: ProductLoadingIndicator.page(color: Colors.white),
           ),
           errorBuilder: (context, error, stackTrace) => Center(
             child: Padding(
@@ -625,7 +626,7 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
           builder: (context, document) {
             if (document == null) {
               return const Center(
-                child: CircularProgressIndicator(color: Colors.white),
+                child: ProductLoadingIndicator.page(color: Colors.white),
               );
             }
             return PdfViewer.file(snapshot.data!.path);
@@ -668,7 +669,7 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
                         ? const SizedBox(
                             width: 22,
                             height: 22,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                            child: ProductLoadingIndicator(),
                           )
                         : Icon(
                             Icons.insert_drive_file_outlined,
@@ -684,7 +685,7 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
                           ? const SizedBox(
                               width: 18,
                               height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
+                              child: ProductLoadingIndicator(),
                             )
                           : const Icon(Icons.open_in_new_rounded),
                       label: Text(_opening ? 'Открываем...' : 'Открыть файл'),

@@ -182,7 +182,9 @@ class ChatMessageCacheStore {
     final uid = _resolveUserId(userId);
     if (uid == null || chatId.isEmpty) return ChatCacheSnapshot.notFound;
     final prev = peek(chatId, userId: uid);
-    final sorted = _dedupeAndSort([...prev.messages, ...messages]);
+    final incoming = messages.toList();
+    final kept = _withoutConfirmedFileLocals(prev.messages, incoming);
+    final sorted = _dedupeAndSort([...kept, ...incoming]);
     return replace(
       chatId: chatId,
       userId: uid,
@@ -212,12 +214,19 @@ class ChatMessageCacheStore {
     final uid = _resolveUserId(userId);
     if (uid == null || chatId.isEmpty) return ChatCacheSnapshot.notFound;
     final current = List<Message>.from(peek(chatId, userId: uid).messages);
+    final eligible = clientId == null || clientId.isEmpty
+        ? _withoutConfirmedFileLocals(current, [serverMessage])
+        : List<Message>.from(current);
+    current
+      ..clear()
+      ..addAll(eligible);
     current.removeWhere((message) {
       if (!message.isLocal) return false;
       if (clientId != null && clientId.isNotEmpty) {
         return message.clientId == clientId || message.id == clientId;
       }
-      return _isLikelySameLocalMessage(message, serverMessage);
+      return _attachmentsFingerprint(message).isEmpty &&
+          _isLikelySameLocalMessage(message, serverMessage);
     });
     current.add(
         serverMessage.copyWith(deliveryStatus: MessageDeliveryStatus.sent));
@@ -283,7 +292,9 @@ class ChatMessageCacheStore {
     required List<Message> serverPage,
     required int pageLimit,
   }) {
-    final locals = existing.where((m) => m.isLocal).toList();
+    final locals = _withoutConfirmedFileLocals(existing, serverPage)
+        .where((m) => m.isLocal)
+        .toList();
     if (serverPage.isEmpty) {
       return _dedupeAndSort(locals);
     }
@@ -458,17 +469,16 @@ class ChatMessageCacheStore {
     final byId = <String, Message>{};
     for (final message in messages) {
       if (message.id.isEmpty) continue;
-      if (!message.isLocal) {
+      if (!message.isLocal && _attachmentsFingerprint(message).isEmpty) {
         String? localDuplicateId;
         for (final entry in byId.entries) {
-          if (_isLikelySameLocalMessage(entry.value, message)) {
+          if (_attachmentsFingerprint(entry.value).isEmpty &&
+              _isLikelySameLocalMessage(entry.value, message)) {
             localDuplicateId = entry.key;
             break;
           }
         }
-        if (localDuplicateId != null) {
-          byId.remove(localDuplicateId);
-        }
+        if (localDuplicateId != null) byId.remove(localDuplicateId);
       }
       final previous = byId[message.id];
       byId[message.id] =
@@ -481,6 +491,42 @@ class ChatMessageCacheStore {
         return byTime != 0 ? byTime : a.id.compareTo(b.id);
       });
     return list;
+  }
+
+  // Infer a file acknowledgement only once, when its server identity first
+  // appears, and only if neither side of the match is ambiguous.
+  static List<Message> _withoutConfirmedFileLocals(
+    List<Message> existing,
+    List<Message> incoming,
+  ) {
+    final oldServers = existing.where((m) => !m.isLocal).toList();
+    final locals = existing
+        .where((m) => m.isLocal && _attachmentsFingerprint(m).isNotEmpty)
+        .toList();
+    if (locals.isEmpty) return List<Message>.from(existing);
+    final freshServers = incoming.where((server) {
+      if (server.id.isEmpty ||
+          server.isLocal ||
+          _attachmentsFingerprint(server).isEmpty) return false;
+      return !oldServers.any((old) =>
+          old.id == server.id &&
+          _attachmentsFingerprint(old) == _attachmentsFingerprint(server));
+    }).toList();
+    final removed = <String>{};
+    for (final server in freshServers) {
+      final candidates = locals
+          .where((local) => _isLikelySameLocalMessage(local, server))
+          .toList();
+      if (candidates.length != 1) continue;
+      final local = candidates.single;
+      if (freshServers
+              .where((s) => _isLikelySameLocalMessage(local, s))
+              .length !=
+          1) continue;
+      if (oldServers.any((s) => _isLikelySameLocalMessage(local, s))) continue;
+      removed.add(local.id);
+    }
+    return existing.where((m) => !removed.contains(m.id)).toList();
   }
 
   static Message _mergeSameMessage(Message previous, Message incoming) {
@@ -511,6 +557,7 @@ class ChatMessageCacheStore {
 
   static bool _isLikelySameLocalMessage(Message local, Message server) {
     if (!local.isLocal || server.isLocal) return false;
+    if (local.chatId != server.chatId) return false;
     if (local.authorId.isNotEmpty &&
         server.authorId.isNotEmpty &&
         local.authorId != server.authorId) {
@@ -518,7 +565,11 @@ class ChatMessageCacheStore {
     }
     if (local.text.trim() != server.text.trim()) return false;
     if ((local.replyToId ?? '') != (server.replyToId ?? '')) return false;
-    if (local.type != server.type) return false;
+    final localType =
+        local.type == MessageType.text && local.outboundFileIds.isNotEmpty
+            ? MessageType.file
+            : local.type;
+    if (localType != server.type) return false;
     if (_attachmentsFingerprint(local) != _attachmentsFingerprint(server)) {
       return false;
     }
@@ -529,9 +580,11 @@ class ChatMessageCacheStore {
 
   static String _attachmentsFingerprint(Message message) {
     final attachments = message.attachments ?? const [];
-    final ids = attachments
-        .map((file) => file.id)
+    final ids = (attachments.isNotEmpty
+            ? attachments.map((file) => file.id)
+            : message.outboundFileIds)
         .where((id) => id.isNotEmpty)
+        .toSet()
         .toList()
       ..sort();
     if (ids.isNotEmpty) return ids.join(',');

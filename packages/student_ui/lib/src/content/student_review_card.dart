@@ -157,14 +157,14 @@ class StudentPointsSummaryChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: const Color(0xFFF3F4F6),
+        color: theme.colorScheme.surfaceContainerHigh,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.stars_rounded, size: 18, color: Color(0xFF6A4BBC)),
+          Icon(Icons.stars_rounded, size: 18, color: theme.colorScheme.primary),
           const SizedBox(width: 6),
           Text(
             '${summary.balance} балл.',
@@ -177,7 +177,7 @@ class StudentPointsSummaryChip extends StatelessWidget {
             Text(
               'Пример',
               style: theme.textTheme.labelSmall?.copyWith(
-                color: const Color(0xFF6B21A8),
+                color: theme.colorScheme.primary,
                 fontWeight: FontWeight.w700,
               ),
             ),

@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -29,7 +30,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Не удалось загрузить отзывы'), findsOneWidget);
     expect(find.text('Вы ещё не оставляли отзывов'), findsNothing);
-    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.byType(ProductLoadingIndicator), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.tap(find.text('Повторить'));
     await tester.pumpAndSettle();

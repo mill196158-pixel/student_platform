@@ -1,8 +1,10 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../../common/friendly_empty_state.dart';
 import '../../../../friends/friend_profile_screen.dart';
 import 'team_roster_pdf_service.dart';
 
@@ -83,10 +85,10 @@ class TeamChatNoticeEvent {
     return TeamChatNoticeEvent(
       id: (json['id'] ?? '').toString(),
       actorId: (json['actor_id'] ?? '').toString(),
-      actorDisplayName: ((json['actor_display_name'] ?? '').toString().trim())
-              .isEmpty
-          ? 'Участник'
-          : (json['actor_display_name'] ?? '').toString().trim(),
+      actorDisplayName:
+          ((json['actor_display_name'] ?? '').toString().trim()).isEmpty
+              ? 'Участник'
+              : (json['actor_display_name'] ?? '').toString().trim(),
       body: (json['body'] ?? '').toString(),
       rowVersion: TeamChatNotice._asInt(json['row_version']),
       createdAt: DateTime.tryParse((json['created_at'] ?? '').toString()) ??
@@ -182,7 +184,8 @@ class TeamChatNoticeRepository {
           fromAuthoritativeRpc: true,
         );
       }
-      throw StateError('get_team_members_directory returned unexpected payload');
+      throw StateError(
+          'get_team_members_directory returned unexpected payload');
     } on PostgrestException catch (e) {
       if (!_isMissingRpc(e)) rethrow;
       // Older backend without get_team_members_directory.
@@ -255,8 +258,9 @@ class TeamMembersDirectory {
 String _formatNoticeTime(DateTime dt) {
   final local = dt.toLocal();
   final now = DateTime.now();
-  final sameDay =
-      local.year == now.year && local.month == now.month && local.day == now.day;
+  final sameDay = local.year == now.year &&
+      local.month == now.month &&
+      local.day == now.day;
   if (sameDay) return DateFormat('HH:mm', 'ru').format(local);
   if (local.year == now.year) {
     return DateFormat('d MMM, HH:mm', 'ru').format(local);
@@ -379,7 +383,7 @@ class _TeamMembersSheetState extends State<_TeamMembersSheet> {
       future: _future,
       builder: (context, snap) {
         if (snap.connectionState != ConnectionState.done) {
-          return const Center(child: CircularProgressIndicator());
+          return const Center(child: ProductLoadingIndicator.page());
         }
         if (snap.hasError) {
           return const Padding(
@@ -445,8 +449,7 @@ class _TeamMembersSheetState extends State<_TeamMembersSheet> {
                         ? const SizedBox(
                             width: 18,
                             height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
+                            child: ProductLoadingIndicator(
                               color: Colors.white,
                             ),
                           )
@@ -536,8 +539,8 @@ class _TeamMembersSheetState extends State<_TeamMembersSheet> {
                                       m.displayName,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: theme.textTheme.bodyLarge
-                                          ?.copyWith(
+                                      style:
+                                          theme.textTheme.bodyLarge?.copyWith(
                                         fontWeight: FontWeight.w800,
                                         height: 1.1,
                                       ),
@@ -558,8 +561,8 @@ class _TeamMembersSheetState extends State<_TeamMembersSheet> {
                               ),
                               Icon(
                                 Icons.chevron_right_rounded,
-                                color: cs.onSurfaceVariant
-                                    .withValues(alpha: 0.7),
+                                color:
+                                    cs.onSurfaceVariant.withValues(alpha: 0.7),
                               ),
                             ],
                           ),
@@ -716,26 +719,6 @@ class _TeamChatNoticeSheetState extends State<_TeamChatNoticeSheet> {
     final cs = theme.colorScheme;
     final bottom = MediaQuery.of(context).viewInsets.bottom;
 
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (_error != null) {
-      return Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Не удалось открыть информацию'),
-            const SizedBox(height: 12),
-            FilledButton(
-              onPressed: _reload,
-              child: const Text('Повторить'),
-            ),
-          ],
-        ),
-      );
-    }
-
     final history = _notice?.history ?? const <TeamChatNoticeEvent>[];
     final lastEdit = history.isNotEmpty ? history.first : null;
     final lastEditLabel = _lastEditLabel(
@@ -764,138 +747,151 @@ class _TeamChatNoticeSheetState extends State<_TeamChatNoticeSheet> {
               letterSpacing: -0.3,
             ),
           ),
-          const SizedBox(height: 6),
-          Text(
-            'Одна общая заметка для всей группы. Любой участник может её обновить.',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: cs.onSurfaceVariant,
-              fontWeight: FontWeight.w600,
-              height: 1.25,
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 28),
+              child: ProductLoadingIndicator.page(),
+            )
+          else if (_error != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: FriendlyEmptyState(
+                title: 'Не удалось открыть информацию',
+                fallbackIcon: Icons.cloud_off_outlined,
+                animationHeight: 56,
+                action: OutlinedButton.icon(
+                  onPressed: _reload,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Повторить'),
+                ),
+              ),
+            )
+          else ...[
+            const SizedBox(height: 6),
+            Text(
+              'Одна общая заметка для всей группы. Любой участник может её обновить.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: cs.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+                height: 1.25,
+              ),
             ),
-          ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  cs.primary.withValues(alpha: 0.08),
-                  cs.surfaceContainerHighest.withValues(alpha: 0.55),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerLow,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: cs.outlineVariant),
+              ),
+              child: TextField(
+                controller: _controller,
+                enabled: !_saving,
+                maxLines: 7,
+                minLines: 4,
+                maxLength: 2000,
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  height: 1.35,
+                ),
+                decoration: InputDecoration(
+                  hintText:
+                      'Например: сдача лаб + курсач — это зачёт. Дедлайн 15 мая.',
+                  border: InputBorder.none,
+                  counterStyle: theme.textTheme.labelSmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ),
+            if (lastEditLabel != null) ...[
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Icon(
+                    Icons.person_outline_rounded,
+                    size: 16,
+                    color: cs.primary,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      lastEditLabel,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: cs.onSurfaceVariant,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
                 ],
               ),
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(
-                color: cs.primary.withValues(alpha: 0.14),
-              ),
-            ),
-            child: TextField(
-              controller: _controller,
-              enabled: !_saving,
-              maxLines: 7,
-              minLines: 4,
-              maxLength: 2000,
-              style: theme.textTheme.bodyLarge?.copyWith(
-                fontWeight: FontWeight.w600,
-                height: 1.35,
-              ),
-              decoration: InputDecoration(
-                hintText:
-                    'Например: сдача лаб + курсач — это зачёт. Дедлайн 15 мая.',
-                border: InputBorder.none,
-                counterStyle: theme.textTheme.labelSmall?.copyWith(
-                  color: cs.onSurfaceVariant,
+            ],
+            if (_saveError != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _saveError!,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: cs.error,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
+            ],
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              children: [
+                TextButton(
+                  onPressed: _saving ? null : _reload,
+                  child: const Text('Обновить'),
+                ),
+                FilledButton(
+                  onPressed: _saving ? null : _save,
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  child: Text(_saving ? 'Сохранение…' : 'Сохранить'),
+                ),
+              ],
             ),
-          ),
-          if (lastEditLabel != null) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 22),
             Row(
               children: [
-                Icon(
-                  Icons.person_outline_rounded,
-                  size: 16,
-                  color: cs.primary,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    lastEditLabel,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: cs.onSurfaceVariant,
-                      fontWeight: FontWeight.w700,
-                    ),
+                Icon(Icons.history_rounded, size: 18, color: cs.primary),
+                const SizedBox(width: 8),
+                Text(
+                  'Кто менял',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
                   ),
                 ),
               ],
             ),
-          ],
-          if (_saveError != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              _saveError!,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: cs.error,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              TextButton(
-                onPressed: _saving ? null : _reload,
-                child: const Text('Обновить'),
-              ),
-              const Spacer(),
-              FilledButton(
-                onPressed: _saving ? null : _save,
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
+            const SizedBox(height: 10),
+            if (history.isEmpty)
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerHighest.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Text(
+                  'Пока никто не писал — станьте первым.',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: cs.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-                child: Text(_saving ? 'Сохранение…' : 'Сохранить'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 22),
-          Row(
-            children: [
-              Icon(Icons.history_rounded, size: 18, color: cs.primary),
-              const SizedBox(width: 8),
-              Text(
-                'Кто менял',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          if (history.isEmpty)
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: cs.surfaceContainerHighest.withValues(alpha: 0.45),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Text(
-                'Пока никто не писал — станьте первым.',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: cs.onSurfaceVariant,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            )
-          else
-            ...history.map((e) => _EditorHistoryTile(event: e)),
+              )
+            else
+              ...history.map((e) => _EditorHistoryTile(event: e)),
+          ],
         ],
       ),
     );

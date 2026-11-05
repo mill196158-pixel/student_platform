@@ -32,11 +32,11 @@ void main() {
     await tester.drag(find.byType(ListView), const Offset(0, -900));
     await tester.pump();
     await tester.enterText(
-      find.widgetWithText(TextField, 'Начало ГГГГ-ММ-ДД'),
+      find.widgetWithText(TextField, 'Начало'),
       '2026-09-01',
     );
     await tester.enterText(
-      find.widgetWithText(TextField, 'Конец ГГГГ-ММ-ДД'),
+      find.widgetWithText(TextField, 'Конец'),
       '2026-12-20',
     );
     await tester.tap(find.text('Проверить dry-run'));
@@ -93,11 +93,11 @@ void main() {
     await tester.drag(find.byType(ListView), const Offset(0, -900));
     await tester.pump();
     await tester.enterText(
-      find.widgetWithText(TextField, 'Начало ГГГГ-ММ-ДД'),
+      find.widgetWithText(TextField, 'Начало'),
       '2026-09-01',
     );
     await tester.enterText(
-      find.widgetWithText(TextField, 'Конец ГГГГ-ММ-ДД'),
+      find.widgetWithText(TextField, 'Конец'),
       '2026-12-20',
     );
 
@@ -132,8 +132,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.drag(find.byType(ListView), const Offset(0, -900));
     await tester.pump();
-    final startsFinder = find.widgetWithText(TextField, 'Начало ГГГГ-ММ-ДД');
-    final endsFinder = find.widgetWithText(TextField, 'Конец ГГГГ-ММ-ДД');
+    final startsFinder = find.widgetWithText(TextField, 'Начало');
+    final endsFinder = find.widgetWithText(TextField, 'Конец');
     await tester.enterText(startsFinder, '2026-09-01');
     await tester.enterText(endsFinder, '2026-12-20');
 

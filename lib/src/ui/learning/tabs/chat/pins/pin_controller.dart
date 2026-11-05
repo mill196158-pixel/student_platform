@@ -14,7 +14,7 @@ class PinController extends ChangeNotifier {
     final serverPins = <PinEntry>[];
     for (final m in st.chat) {
       if (m.isPinned) {
-        final previewText = ChatCardPreview.forMessage(m).trim();
+        final previewText = ChatCardPreview.forPreview(m).trim();
         final title = previewText.isNotEmpty
             ? previewText.split('\n').first
             : (m.attachments?.isNotEmpty == true

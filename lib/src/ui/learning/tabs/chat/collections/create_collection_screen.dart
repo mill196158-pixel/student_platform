@@ -1,6 +1,6 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'dart:async';
 import 'package:uuid/uuid.dart';
-import 'dart:ui' as ui;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -68,7 +68,8 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
     if (!_published) {
       for (final file in _files) {
         final key = file['_key'];
-        if (key != null) unawaited(_repo.discardCollectionUpload(key).catchError((_) {}));
+        if (key != null)
+          unawaited(_repo.discardCollectionUpload(key).catchError((_) {}));
       }
     }
     _titleCtrl.dispose();
@@ -161,7 +162,8 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
       final result = await FilePicker.platform.pickFiles(allowMultiple: true);
       if (result == null || result.files.isEmpty || !mounted) return;
       if (_files.length + result.files.length > 10) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Можно прикрепить до 10 файлов')));
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Можно прикрепить до 10 файлов')));
         return;
       }
       for (final file in result.files) {
@@ -214,7 +216,8 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
       for (final file in _files) {
         if (file['_id'] != null) continue;
         final path = file['path'];
-        if (path == null || path.isEmpty) throw StateError('Файл недоступен. Выберите его заново.');
+        if (path == null || path.isEmpty)
+          throw StateError('Файл недоступен. Выберите его заново.');
         final uploaded = await _repo.uploadCollectionFile(path, file['name']!);
         file['_id'] = uploaded['id']!;
         file['_key'] = uploaded['key']!;
@@ -224,8 +227,8 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
         }
       }
       await _repo.createCollection(
-        clientKey:_clientKey,
-        fileIds:_files.map((file)=>file['_id']!).toList(),
+        clientKey: _clientKey,
+        fileIds: _files.map((file) => file['_id']!).toList(),
         title: _titleCtrl.text.trim(),
         purpose: _purposeCtrl.text.trim(),
         description: _descCtrl.text.trim(),
@@ -307,9 +310,9 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
                           autofocus: true,
                           textInputAction: TextInputAction.next,
                           textCapitalization: TextCapitalization.sentences,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontWeight: FontWeight.w700,
-                            color: Colors.black87,
+                            color: cs.onSurface,
                           ),
                           decoration: _fieldDecoration(
                             label: 'Название',
@@ -337,7 +340,6 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
                           maxLines: 4,
                           textInputAction: TextInputAction.next,
                           textCapitalization: TextCapitalization.sentences,
-                          style: const TextStyle(color: Colors.black87),
                           decoration: _fieldDecoration(
                             label: 'Краткое описание',
                             hint: 'Что собираем и зачем — в двух словах',
@@ -350,7 +352,6 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
                           controller: _purposeCtrl,
                           textInputAction: TextInputAction.next,
                           textCapitalization: TextCapitalization.sentences,
-                          style: const TextStyle(color: Colors.black87),
                           decoration: _fieldDecoration(
                             label: 'Цель',
                             hint: 'Например: день рождения, экскурсия…',
@@ -396,9 +397,9 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
                               decimal: true,
                             ),
                             textInputAction: TextInputAction.next,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontWeight: FontWeight.w700,
-                              color: Colors.black87,
+                              color: cs.onSurface,
                             ),
                             decoration: _fieldDecoration(
                               label: _amountMode == _AmountMode.perPerson
@@ -480,7 +481,6 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
                           maxLines: 4,
                           textInputAction: TextInputAction.next,
                           textCapitalization: TextCapitalization.sentences,
-                          style: const TextStyle(color: Colors.black87),
                           decoration: _fieldDecoration(
                             label: 'Реквизиты',
                             hint: 'Карта, СБП, комментарий к переводу',
@@ -495,7 +495,6 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
                           maxLines: 4,
                           textInputAction: TextInputAction.done,
                           textCapitalization: TextCapitalization.sentences,
-                          style: const TextStyle(color: Colors.black87),
                           decoration: _fieldDecoration(
                             label: 'Инструкции',
                             hint: 'Когда скидываться, кому писать…',
@@ -522,7 +521,6 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
                             controller: _linkCtrl,
                             keyboardType: TextInputType.url,
                             textInputAction: TextInputAction.done,
-                            style: const TextStyle(color: Colors.black87),
                             decoration: _fieldDecoration(
                               label: 'Ссылка',
                               hint: 'https://…',
@@ -549,7 +547,8 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
                               ? 'Квитанция, скрин, документ — по желанию'
                               : 'Файлов: ${_files.length}',
                           busy: _pickingFile,
-                          onTap: _pickingFile || _saving ? null : _pickAttachments,
+                          onTap:
+                              _pickingFile || _saving ? null : _pickAttachments,
                         ),
                         if (_files.isNotEmpty) ...[
                           const SizedBox(height: 10),
@@ -562,7 +561,10 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
                                 onRemove: () {
                                   if (_saving) return;
                                   final key = _files[i]['_key'];
-                                  if (key != null) unawaited(_repo.discardCollectionUpload(key).catchError((_) {}));
+                                  if (key != null)
+                                    unawaited(_repo
+                                        .discardCollectionUpload(key)
+                                        .catchError((_) {}));
                                   setState(() => _files.removeAt(i));
                                 },
                               ),
@@ -653,8 +655,7 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
                           ? const SizedBox(
                               width: 18,
                               height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
+                              child: ProductLoadingIndicator(
                                 color: Colors.white,
                               ),
                             )
@@ -697,155 +698,31 @@ class _CreateCollectionScreenState extends State<CreateCollectionScreen> {
                     child: suffix,
                   ),
                 )),
-      filled: true,
-      fillColor: const Color(0xFFF6F7FB),
-      labelStyle: const TextStyle(color: Colors.black54),
-      floatingLabelStyle: const TextStyle(
-        color: Colors.black87,
-        fontWeight: FontWeight.w700,
-      ),
-      hintStyle: TextStyle(color: Colors.black.withValues(alpha: 0.35)),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: BorderSide.none,
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: Color(0xFFE1E5EF)),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: Colors.black87, width: 1.4),
-      ),
-      errorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: Color(0xFFE53935)),
-      ),
-      focusedErrorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: Color(0xFFE53935), width: 1.4),
-      ),
     );
   }
 }
 
 class _HeroHeader extends StatelessWidget {
   const _HeroHeader();
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(22),
-      child: Stack(
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  cs.primary.withValues(alpha: 0.14),
-                  cs.primaryContainer.withValues(alpha: 0.55),
-                  const Color(0xFFF6F7FB),
-                ],
-                stops: const [0.0, 0.45, 1.0],
-              ),
-            ),
-          ),
-          Positioned(
-            right: -24,
-            top: -28,
-            child: _GlowBlob(
-              diameter: 110,
-              color: cs.primary.withValues(alpha: 0.16),
-            ),
-          ),
-          Positioned(
-            left: -18,
-            bottom: -34,
-            child: _GlowBlob(
-              diameter: 96,
-              color: Colors.white.withValues(alpha: 0.65),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
-            child: Row(
-              children: [
-                Container(
-                  width: 52,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    color: cs.surface,
-                    borderRadius: BorderRadius.circular(18),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.06),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Icon(
-                    Icons.volunteer_activism_rounded,
-                    color: cs.primary,
-                    size: 28,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Сбор денег',
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w900,
-                          color: Colors.black,
-                          height: 1.1,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Сбор внутри группы — переводы вне приложения',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: Colors.black.withValues(alpha: 0.62),
-                          height: 1.25,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _GlowBlob extends StatelessWidget {
-  final double diameter;
-  final Color color;
-  const _GlowBlob({required this.diameter, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipOval(
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-        child: Container(
-          width: diameter,
-          height: diameter,
-          decoration: BoxDecoration(shape: BoxShape.circle, color: color),
-        ),
-      ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Icon(Icons.volunteer_activism_rounded,
+            size: 28, color: theme.colorScheme.primary),
+        const SizedBox(width: 14),
+        Expanded(
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Сбор денег', style: theme.textTheme.titleLarge),
+          const SizedBox(height: 6),
+          Text('Сбор внутри группы — переводы вне приложения',
+              style: theme.textTheme.bodyMedium
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+        ])),
+      ]),
     );
   }
 }
@@ -871,7 +748,7 @@ class _SectionLabel extends StatelessWidget {
           label,
           style: theme.textTheme.titleSmall?.copyWith(
             fontWeight: FontWeight.w800,
-            color: Colors.black87,
+            color: Theme.of(context).colorScheme.onSurface,
           ),
         ),
         if (trailing != null) ...[
@@ -879,7 +756,7 @@ class _SectionLabel extends StatelessWidget {
           Text(
             trailing!,
             style: theme.textTheme.labelMedium?.copyWith(
-              color: Colors.black45,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -913,10 +790,13 @@ class _QuickChip extends StatelessWidget {
     final bg = selected
         ? cs.primary
         : (isMuted
-            ? Colors.black.withValues(alpha: 0.05)
-            : const Color(0xFFF6F7FB));
-    final fg =
-        selected ? cs.onPrimary : (isMuted ? Colors.black54 : Colors.black87);
+            ? Theme.of(context).colorScheme.surfaceContainerHighest
+            : Theme.of(context).colorScheme.surfaceContainerLow);
+    final fg = selected
+        ? cs.onPrimary
+        : (isMuted
+            ? Theme.of(context).colorScheme.onSurfaceVariant
+            : Theme.of(context).colorScheme.onSurface);
 
     return Material(
       color: bg,
@@ -929,7 +809,9 @@ class _QuickChip extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(999),
             border: Border.all(
-              color: selected ? Colors.transparent : const Color(0xFFE1E5EF),
+              color: selected
+                  ? Colors.transparent
+                  : Theme.of(context).colorScheme.outlineVariant,
             ),
           ),
           child: Row(
@@ -976,7 +858,7 @@ class _SoftActionTile extends StatelessWidget {
     final cs = theme.colorScheme;
 
     return Material(
-      color: const Color(0xFFF6F7FB),
+      color: Theme.of(context).colorScheme.surfaceContainerLow,
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         onTap: onTap,
@@ -1001,8 +883,7 @@ class _SoftActionTile extends StatelessWidget {
                 child: busy
                     ? Padding(
                         padding: const EdgeInsets.all(10),
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
+                        child: ProductLoadingIndicator(
                           color: cs.primary,
                         ),
                       )
@@ -1017,14 +898,14 @@ class _SoftActionTile extends StatelessWidget {
                       title,
                       style: theme.textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w800,
-                        color: Colors.black87,
+                        color: Theme.of(context).colorScheme.onSurface,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       subtitle,
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: Colors.black54,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ],
@@ -1061,14 +942,7 @@ class _AttachmentTile extends StatelessWidget {
       decoration: BoxDecoration(
         color: cs.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE1E5EF)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Row(
         children: [
@@ -1096,7 +970,7 @@ class _AttachmentTile extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     fontWeight: FontWeight.w700,
-                    color: Colors.black87,
+                    color: Theme.of(context).colorScheme.onSurface,
                   ),
                 ),
                 if (path.isNotEmpty) ...[
@@ -1106,7 +980,7 @@ class _AttachmentTile extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.labelSmall?.copyWith(
-                      color: Colors.black45,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ],

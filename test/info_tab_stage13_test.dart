@@ -70,6 +70,34 @@ Map<String, dynamic> _rpcRow({
 }
 
 void main() {
+  testWidgets('subject cards wrap long titles and preserve account metadata',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    const title =
+        'Инженерно-технологическая реконструкция систем водоотведения';
+    for (final guest in [true, false]) {
+      await tester.pumpWidget(MaterialApp(
+        theme: ThemeData.dark(),
+        home: MediaQuery(
+          data: const MediaQueryData(textScaler: TextScaler.linear(1.5)),
+          child: Scaffold(
+              body: SingleChildScrollView(
+                  child: InfoSubjectCard(
+            item: _subject(id: 'long', title: title),
+            showMetadata: !guest,
+          ))),
+        ),
+      ));
+      expect(tester.takeException(), isNull);
+      expect(find.text(title), findsOneWidget);
+      expect(tester.widget<Text>(find.text(title)).maxLines, isNull);
+      expect(find.text('Экзамен'), guest ? findsNothing : findsOneWidget);
+    }
+  });
+
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() {

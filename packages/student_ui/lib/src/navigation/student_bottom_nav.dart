@@ -92,13 +92,6 @@ class _StudentBottomNavState extends State<StudentBottomNav> {
             width: .6,
           ),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: .07),
-            blurRadius: 18,
-            offset: const Offset(0, -6),
-          ),
-        ],
       ),
       child: MediaQuery(
         data: mediaQuery.copyWith(
@@ -139,8 +132,8 @@ class _StudentBottomNavState extends State<StudentBottomNav> {
                     final selected = states.contains(WidgetState.selected);
                     return TextStyle(
                       color: selected ? active : inactive,
-                      fontSize: 11.5,
-                      fontWeight: selected ? FontWeight.w800 : FontWeight.w700,
+                      fontSize: 12,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                       height: 1,
                     );
                   }),

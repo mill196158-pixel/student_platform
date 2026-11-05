@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -159,7 +160,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                         ? const SizedBox(
                             width: 20,
                             height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                            child: ProductLoadingIndicator(),
                           )
                         : const Text('Сохранить пароль'),
                   ),

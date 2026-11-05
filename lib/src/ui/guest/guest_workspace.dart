@@ -1,7 +1,8 @@
+import 'guest_presentation_theme.dart';
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_ui/student_ui.dart';
 import 'guest_surface.dart';
@@ -27,6 +28,7 @@ class _GuestWorkspaceState extends State<GuestWorkspace> {
       widget.service ?? GuestPublicService();
   bool _ready = false, _weekMode = false, _accountScreenOpen = false;
   bool _newsFailed = false, _lessonsLoading = false;
+  bool _groupPickerOpen = false;
   String? _lessonsError;
   DateTime _day = DateUtils.dateOnly(DateTime.now());
   Map<String, dynamic>? _group;
@@ -138,41 +140,99 @@ class _GuestWorkspaceState extends State<GuestWorkspace> {
   }
 
   Future<void> _chooseGroup() async {
+    if (_groupPickerOpen) return;
+    _groupPickerOpen = true;
     try {
       final groups = await _service.rpc('get_guest_groups');
       if (!mounted) return;
+      final separators = RegExp(r'[\s()\-–—]+');
+      String normalize(String value) =>
+          value.toLowerCase().replaceAll(separators, '');
+      var query = '';
       final chosen = await showModalBottomSheet<Map<String, dynamic>>(
-          context: context,
-          showDragHandle: true,
-          useSafeArea: true,
-          builder: (context) => ListView(shrinkWrap: true, children: [
-                const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Text('Выбери свою группу',
-                        style: TextStyle(
-                            fontSize: 22, fontWeight: FontWeight.w800))),
-                if (groups.isEmpty)
-                  const ListTile(title: Text('Доступных групп пока нет')),
-                for (final g in groups)
-                  ListTile(
-                      title: Text(g['name'] as String),
-                      trailing: g['id'] == _group?['id']
-                          ? const Icon(Icons.check)
-                          : null,
-                      onTap: () => Navigator.pop(context, g)),
-              ]));
+        context: context,
+        showDragHandle: true,
+        useSafeArea: true,
+        isScrollControlled: true,
+        builder: (context) => StatefulBuilder(
+          builder: (context, setSheetState) {
+            final matches = groups.where((group) {
+              return normalize(group['name'] as String).contains(query);
+            }).toList();
+            final theme = Theme.of(context);
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.viewInsetsOf(context).bottom,
+              ),
+              child: SafeArea(
+                top: false,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.sizeOf(context).height * .72,
+                  ),
+                  child: ListView(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.only(bottom: 8),
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                        child: Text('Выбери свою группу',
+                            style: theme.textTheme.titleLarge),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                        child: TextField(
+                          onChanged: (value) => setSheetState(() {
+                            query = normalize(value);
+                          }),
+                          decoration: const InputDecoration(
+                            labelText: 'Найти группу',
+                            prefixIcon: Icon(Icons.search_rounded),
+                          ),
+                        ),
+                      ),
+                      if (matches.isEmpty)
+                        ListTile(
+                          title: Text(
+                            groups.isEmpty
+                                ? 'Доступных групп пока нет'
+                                : 'Группы не найдены',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      for (final group in matches)
+                        ListTile(
+                          title: Text(group['name'] as String),
+                          selected: group['id'] == _group?['id'],
+                          trailing: group['id'] == _group?['id']
+                              ? const Icon(Icons.check)
+                              : null,
+                          onTap: () => Navigator.pop(context, group),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      );
       if (chosen == null || !mounted) return;
       final prefs = await SharedPreferences.getInstance();
       if (!await prefs.setString('guest_selected_group_v1', jsonEncode(chosen)))
         throw StateError('save');
       if (!mounted) return;
       setState(() => _group = chosen);
-      await _loadLessons();
+      unawaited(_loadLessons());
     } catch (_) {
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text(
                 'Не удалось выбрать или сохранить группу. Повтори попытку.')));
+    } finally {
+      _groupPickerOpen = false;
     }
   }
 
@@ -324,38 +384,42 @@ class _GuestWorkspaceState extends State<GuestWorkspace> {
         _loginStrip('Личный дневник и команды',
             'Войди, чтобы пользоваться личными учебными разделами'),
       ]));
-  Widget _profile() => Scaffold(
-      backgroundColor: const Color(0xFFFAF8FC),
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(
-          systemOverlayStyle: SystemUiOverlayStyle.dark,
-          backgroundColor: Colors.transparent,
-          surfaceTintColor: Colors.transparent,
-          elevation: 0,
-          leading: IconButton(
-              icon: const Icon(Icons.info_outline),
-              onPressed: () => _info('Гостевой режим',
-                  'Выбранная группа сохраняется после закрытия приложения. Аккаунт открывает личные учебные разделы.')),
-          actions: [
-            IconButton(
-                tooltip: 'Войти',
-                icon: const Icon(Icons.login),
-                onPressed: _login)
-          ]),
-      body: StudentProfileScreenPreview(
-          guest: true,
-          showDiary: false,
-          displayName: 'Гостевой режим',
-          groupLabel: _group?['name'] ?? '',
-          statusLabel: 'Без регистрации',
-          padding: EdgeInsets.fromLTRB(16,
-              MediaQuery.paddingOf(context).top + kToolbarHeight - 16, 16, 24),
-          onMessagesTap: _login,
-          onFriendsTap: _login,
-          onReviewsTap: _login,
-          onMapTap: () => Navigator.of(context)
-              .push(MaterialPageRoute<void>(builder: (_) => const MapSpbgasuScreen())),
-          footer: FilledButton(onPressed: _login, child: const Text('Войти или зарегистрироваться'))));
+  Widget _profile() => Theme(
+      data: guestPresentationTheme(Theme.of(context)),
+      child: Builder(
+          builder: (context) => Scaffold(
+              backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+              extendBodyBehindAppBar: true,
+              appBar: AppBar(
+                  systemOverlayStyle: Theme.of(context).appBarTheme.systemOverlayStyle,
+                  backgroundColor: Colors.transparent,
+                  surfaceTintColor: Colors.transparent,
+                  elevation: 0,
+                  leading: IconButton(
+                      icon: const Icon(Icons.info_outline),
+                      onPressed: () => _info('Гостевой режим', 'Выбранная группа сохраняется после закрытия приложения. Аккаунт открывает личные учебные разделы.')),
+                  actions: [
+                    IconButton(
+                        tooltip: 'Войти',
+                        icon: const Icon(Icons.login),
+                        onPressed: _login)
+                  ]),
+              body: StudentProfileScreenPreview(
+                  guest: true,
+                  showDiary: false,
+                  displayName: 'Гостевой режим',
+                  groupLabel: _group?['name'] ?? '',
+                  padding: EdgeInsets.fromLTRB(
+                      16,
+                      MediaQuery.paddingOf(context).top + kToolbarHeight - 16,
+                      16,
+                      24),
+                  onMessagesTap: _login,
+                  onFriendsTap: _login,
+                  onReviewsTap: _login,
+                  onMapTap: () => Navigator.of(context)
+                      .push(MaterialPageRoute<void>(builder: (_) => const MapSpbgasuScreen())),
+                  footer: FilledButton(onPressed: _login, child: const Text('Продолжить с аккаунтом'))))));
   @override
   Widget build(BuildContext context) {
     final height =
@@ -376,11 +440,19 @@ class _GuestWorkspaceState extends State<GuestWorkspace> {
     ];
     final Widget body;
     if (!_ready) {
-      body = const Center(child: CircularProgressIndicator());
+      body = const Center(child: ProductLoadingIndicator.page());
     } else if (widget.tab == 0) {
       body = _home();
     } else if (widget.tab == 1) {
-      body = GuestInfoScreen(onAccountInfo: _login);
+      final group = _group;
+      body = GuestInfoScreen(
+        service: _service,
+        onAccountInfo: _login,
+        onChooseGroup: _chooseGroup,
+        group: group == null
+            ? null
+            : (id: group['id'] as String, name: group['name'] as String),
+      );
     } else if (widget.tab == 4) {
       body = _profile();
     } else {
@@ -389,13 +461,13 @@ class _GuestWorkspaceState extends State<GuestWorkspace> {
               trailing: Row(mainAxisSize: MainAxisSize.min, children: [
             IconButton(
                 tooltip: 'О командах',
-                icon: const Icon(Icons.info_outline, color: Colors.black87),
+                icon: const Icon(Icons.info_outline),
                 onPressed: () => _info('Команды',
                     'Войди, чтобы открыть команды, чаты и задания своей группы.')),
             IconButton(
                 tooltip: 'Команды после входа',
                 icon:
-                    const Icon(Icons.grid_view_rounded, color: Colors.black87),
+                    const Icon(Icons.grid_view_rounded),
                 onPressed: _login),
           ])),
         _ => StudentScheduleHeader(
@@ -415,7 +487,7 @@ class _GuestWorkspaceState extends State<GuestWorkspace> {
                     }))),
       };
       body = Scaffold(
-          backgroundColor: widget.tab == 1 ? const Color(0xFFF7F7FB) : null,
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
           body:
               Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             SizedBox(height: height, child: header),

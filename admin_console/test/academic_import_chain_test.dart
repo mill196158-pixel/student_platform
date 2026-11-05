@@ -117,7 +117,7 @@ void main() {
     await tester.pumpWidget(_app());
     await tester.pumpAndSettle();
 
-    final action = find.text('Existing students XLSX');
+    final action = find.text('Студенты из XLSX');
     await tester.ensureVisible(action);
     await tester.tap(action);
     await tester.pumpAndSettle();

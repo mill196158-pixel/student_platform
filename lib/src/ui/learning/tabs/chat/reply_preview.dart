@@ -14,6 +14,7 @@ class ReplyPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final preview = ChatCardPreview.forPreview(message);
     return Container(
       padding: const EdgeInsets.all(12),
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -42,8 +43,8 @@ class ReplyPreview extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  ChatCardPreview.forMessage(message).isNotEmpty
-                      ? ChatCardPreview.forMessage(message)
+                  preview.isNotEmpty
+                      ? preview
                       : 'Сообщение с вложением',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,

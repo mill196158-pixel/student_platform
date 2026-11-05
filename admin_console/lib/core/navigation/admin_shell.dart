@@ -162,7 +162,9 @@ class AdminShell extends StatelessWidget {
                       ),
                       label: Text(
                         session.isLocalPrototype
-                            ? 'Локальный прототип'
+                            ? (constraints.maxWidth < 600
+                                  ? 'Демо'
+                                  : 'Локальный прототип')
                             : 'Подключено',
                       ),
                     ),
@@ -185,7 +187,9 @@ class AdminShell extends StatelessWidget {
                     SizedBox(width: 260, child: Material(child: navigation)),
                   Expanded(
                     child: Padding(
-                      padding: const EdgeInsets.all(24),
+                      padding: EdgeInsets.all(
+                        constraints.maxWidth < 600 ? 12 : 24,
+                      ),
                       child: child,
                     ),
                   ),
@@ -216,7 +220,12 @@ class _NavigationPanel extends StatelessWidget {
     for (final destination in destinations) {
       final section = destination.section;
       if (section != null && section != previousSection) {
-        children.add(_SectionLabel(label: section));
+        if (section != destination.label ||
+            destinations.any(
+              (other) => other.section == section && other.label != section,
+            )) {
+          children.add(_SectionLabel(label: section));
+        }
         previousSection = section;
       }
       children.add(
@@ -298,12 +307,12 @@ class _SectionLabel extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 18, 12, 6),
       child: Text(
-        label.toUpperCase(),
+        label,
         style: const TextStyle(
-          color: Colors.white38,
+          color: Colors.white70,
           fontSize: 11,
           fontWeight: FontWeight.w700,
-          letterSpacing: 0.8,
+          letterSpacing: 0,
         ),
       ),
     );
@@ -337,7 +346,7 @@ class _NavigationTile extends StatelessWidget {
           ? null
           : const Text(
               'Скоро',
-              style: TextStyle(color: Colors.white38, fontSize: 11),
+              style: TextStyle(color: Colors.white70, fontSize: 11),
             ),
       onTap: onTap,
     );

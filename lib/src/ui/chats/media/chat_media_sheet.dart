@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:student_platform/src/services/chat_file_access.dart';
 // FILE: lib/src/ui/chats/media/chat_media_sheet.dart
 import 'dart:async';
@@ -8,6 +9,7 @@ import 'package:student_platform/src/ui/learning/widgets/file_card.dart';
 import 'package:student_platform/src/ui/learning/widgets/fullscreen_image.dart';
 import 'package:student_platform/src/ui/learning/widgets/authorized_file_image.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../common/friendly_empty_state.dart';
 
 class ChatMediaSheet extends StatefulWidget {
   const ChatMediaSheet({super.key, required this.messagesStream});
@@ -21,6 +23,8 @@ class _ChatMediaSheetState extends State<ChatMediaSheet>
     with TickerProviderStateMixin {
   late final TabController _tabs;
   StreamSubscription<List<Message>>? _sub;
+  bool _loading = true;
+  bool _failed = false;
 
   final _images = <ChatFile>[];
   final _docs = <ChatFile>[];
@@ -29,7 +33,13 @@ class _ChatMediaSheetState extends State<ChatMediaSheet>
   void initState() {
     super.initState();
     _tabs = TabController(length: 2, vsync: this);
-    _sub = widget.messagesStream.listen(_rebuildMedia);
+    _sub = widget.messagesStream.listen(_rebuildMedia, onError: (Object _) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _failed = true;
+      });
+    });
   }
 
   void _rebuildMedia(List<Message> list) {
@@ -44,6 +54,8 @@ class _ChatMediaSheetState extends State<ChatMediaSheet>
       }
     }
     setState(() {
+      _loading = false;
+      _failed = false;
       _images
         ..clear()
         ..addAll(imgs.reversed);
@@ -72,6 +84,7 @@ class _ChatMediaSheetState extends State<ChatMediaSheet>
             centerTitle: true,
             automaticallyImplyLeading: false,
             leading: IconButton(
+                tooltip: 'Закрыть',
                 icon: const Icon(Icons.close),
                 onPressed: () => Navigator.pop(context)),
             bottom: TabBar(
@@ -85,13 +98,23 @@ class _ChatMediaSheetState extends State<ChatMediaSheet>
           body: Padding(
             padding:
                 EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom),
-            child: TabBarView(
-              controller: _tabs,
-              children: [
-                _ImagesGrid(files: _images),
-                _DocsList(files: _docs),
-              ],
-            ),
+            child: _loading
+                ? const Center(child: ProductLoadingIndicator.page())
+                : _failed
+                    ? const FriendlyEmptyState(
+                        title: 'Не удалось загрузить медиа',
+                        subtitle:
+                            'Закройте окно и попробуйте открыть его снова',
+                        fallbackIcon: Icons.cloud_off_outlined,
+                        animationHeight: 72,
+                      )
+                    : TabBarView(
+                        controller: _tabs,
+                        children: [
+                          _ImagesGrid(files: _images),
+                          _DocsList(files: _docs),
+                        ],
+                      ),
           ),
         ),
       ),
@@ -106,7 +129,12 @@ class _ImagesGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (files.isEmpty) {
-      return const Center(child: Text('Пока нет фото'));
+      return const FriendlyEmptyState(
+        title: 'Пока нет фото',
+        subtitle: 'Фотографии из этой переписки появятся здесь',
+        fallbackIcon: Icons.photo_library_outlined,
+        animationHeight: 72,
+      );
     }
     return GridView.builder(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
@@ -147,7 +175,7 @@ class _ImagesGrid extends StatelessWidget {
                   fit: BoxFit.cover,
                   placeholder: (_, __) => ColoredBox(
                     color: scheme.surfaceContainerHighest,
-                    child: const Center(child: CircularProgressIndicator()),
+                    child: const Center(child: ProductLoadingIndicator(size: 72)),
                   ),
                   errorWidget: (_, __, ___) => ColoredBox(
                     color: scheme.errorContainer.withValues(alpha: 0.42),
@@ -187,7 +215,12 @@ class _DocsList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (files.isEmpty) {
-      return const Center(child: Text('Пока нет файлов'));
+      return const FriendlyEmptyState(
+        title: 'Пока нет файлов',
+        subtitle: 'Документы из этой переписки появятся здесь',
+        fallbackIcon: Icons.folder_outlined,
+        animationHeight: 72,
+      );
     }
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),

@@ -74,3 +74,10 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Isolated design builds
+/design_preview/
+/lib/design_review_main.dart
+/lib/design_preview/
+/docs/design/*.tmp
+/docs/design/*.log

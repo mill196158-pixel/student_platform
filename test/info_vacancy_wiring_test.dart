@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_platform/src/data/academic_context_service.dart';
 import 'package:student_platform/src/ui/info/info_screen.dart';
+import 'package:student_platform/src/ui/info/propose_vacancy_screen.dart';
 import 'package:student_platform/src/ui/info/reference_service.dart';
 import 'package:student_platform/src/ui/info/vacancy_service.dart';
 import 'package:student_platform/src/ui/info/vacancy_submission_service.dart';
@@ -42,6 +43,16 @@ class _MissingSubmitRpc implements VacancySubmissionRpcClient {
   }
 }
 
+class _CountingSubmitRpc implements VacancySubmissionRpcClient {
+  int calls = 0;
+
+  @override
+  Future<dynamic> rpc(String function, {Map<String, dynamic>? params}) async {
+    calls++;
+    throw StateError('Invalid forms must not reach RPC');
+  }
+}
+
 VacancySubmissionService _testSubmissionService() {
   return VacancySubmissionService(
     rpcClient: _MissingSubmitRpc(),
@@ -75,6 +86,111 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     InfoScreen.debugClearMemoryCache();
   });
+
+  for (final titleFilled in [false, true]) {
+    testWidgets(
+        'invalid vacancy reveals first error from footer: title=$titleFilled',
+        (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final rpc = _CountingSubmitRpc();
+      await tester.pumpWidget(MaterialApp(
+        theme: ProductTheme.build(brightness: Brightness.light),
+        home: ProposeVacancyScreen(
+            submissionService: VacancySubmissionService(
+                rpcClient: rpc, currentUserId: () => 'user-a')),
+      ));
+      if (titleFilled) {
+        await tester.enterText(find.widgetWithText(TextFormField, 'Название *'),
+            'Тестовая вакансия');
+      }
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pumpAndSettle();
+      final submit =
+          find.widgetWithText(FilledButton, 'Отправить на модерацию');
+      await tester.scrollUntilVisible(submit, 250,
+          scrollable: find.byType(Scrollable).first);
+      await tester.ensureVisible(submit);
+      await tester.pumpAndSettle();
+      expect(submit.hitTestable(), findsOneWidget);
+      expect(find.text('Обязательное поле').hitTestable(), findsNothing);
+      await tester.tap(submit);
+      await tester.pumpAndSettle();
+      final firstInvalid = find.widgetWithText(
+          TextFormField, titleFilled ? 'Краткое описание *' : 'Название *');
+      expect(firstInvalid.hitTestable(), findsOneWidget);
+      expect(tester.getRect(firstInvalid).top,
+          greaterThanOrEqualTo(tester.getRect(find.byType(ListView)).top));
+      final error = find.descendant(
+          of: firstInvalid, matching: find.text('Обязательное поле'));
+      expect(error, findsOneWidget);
+      expect(tester.getRect(error).bottom,
+          lessThanOrEqualTo(tester.getRect(find.byType(ListView)).bottom));
+      expect(rpc.calls, 0);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  for (final size in [
+    const Size(320, 568),
+    const Size(834, 1112),
+    const Size(1440, 900)
+  ]) {
+    testWidgets(
+        'vacancy form remains reachable with large text and keyboard at $size',
+        (tester) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(MaterialApp(
+        theme: ProductTheme.build(brightness: Brightness.dark),
+        home: MediaQuery(
+          data: MediaQueryData(
+              size: size,
+              textScaler: TextScaler.linear(1.5),
+              viewInsets: const EdgeInsets.only(bottom: 280)),
+          child:
+              ProposeVacancyScreen(submissionService: _testSubmissionService()),
+        ),
+      ));
+      await tester.pump();
+      expect(
+          tester.getSize(find.byType(ListView)).width, lessThanOrEqualTo(680));
+      await tester.scrollUntilVisible(find.text('Название *'), 160,
+          scrollable: find.byType(Scrollable).first);
+      await tester.enterText(find.widgetWithText(TextFormField, 'Название *'),
+          'Тестовая вакансия');
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+          find.byKey(const ValueKey('employment-null')), 220,
+          scrollable: find.byType(Scrollable).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('employment-null')));
+      await tester.pumpAndSettle();
+      final longest = VacancyEmploymentType.values
+          .reduce((a, b) => a.labelRu.length >= b.labelRu.length ? a : b);
+      await tester.scrollUntilVisible(find.text(longest.labelRu), 100,
+          scrollable: find.byType(Scrollable).last);
+      await tester.tap(find.text(longest.labelRu).hitTestable());
+      await tester.pumpAndSettle();
+      expect(find.byKey(ValueKey('employment-$longest')), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('Телефон'), 220,
+          scrollable: find.byType(Scrollable).first);
+      await tester.scrollUntilVisible(find.text('Отправить на модерацию'), 180,
+          scrollable: find.byType(Scrollable).first);
+      final submit =
+          find.widgetWithText(FilledButton, 'Отправить на модерацию');
+      await tester.ensureVisible(submit);
+      await tester.pumpAndSettle();
+      expect(submit.hitTestable(), findsOneWidget);
+      expect(tester.getRect(submit).bottom,
+          lessThanOrEqualTo(tester.getRect(find.byType(ListView)).bottom + 1));
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   Future<void> pumpJobsSection(
     WidgetTester tester, {
@@ -134,7 +250,8 @@ void main() {
     expect(find.text('Junior Flutter Developer'), findsNothing);
   });
 
-  testWidgets('managed vacancies render via StudentVacancyCard and filter search',
+  testWidgets(
+      'managed vacancies render via StudentVacancyCard and filter search',
       (tester) async {
     final service = VacancyService(
       rpcClient: _FakeVacancyRpc(

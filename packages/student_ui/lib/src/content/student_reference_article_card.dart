@@ -6,105 +6,64 @@ import 'reference_article_models.dart';
 ///
 /// Template: `reference_article_v1`. Never pass raw JSON or HTML.
 class StudentReferenceArticleCard extends StatelessWidget {
-  const StudentReferenceArticleCard({
-    super.key,
-    required this.article,
-    this.onTap,
-    this.showDemoBadge = false,
-  });
-
+  const StudentReferenceArticleCard(
+      {super.key,
+      required this.article,
+      this.onTap,
+      this.showDemoBadge = false});
   final ManagedReferenceArticle article;
   final VoidCallback? onTap;
   final bool showDemoBadge;
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     final payload = article.payload;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(18),
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 10),
-          padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                theme.colorScheme.surface,
-                const Color(0xFFF8F4FF),
-              ],
-            ),
-            borderRadius: BorderRadius.circular(18),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.035),
-                blurRadius: 12,
-                offset: const Offset(0, 3),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Material(
+        color: cs.surface,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+            side: BorderSide(color: cs.outlineVariant)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(children: [
               Container(
-                width: 46,
-                height: 46,
+                width: 40,
+                height: 40,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF6A4BBC).withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  payload.iconData,
-                  size: 24,
-                  color: const Color(0xFF6A4BBC),
-                ),
+                    color: cs.primaryContainer.withValues(alpha: .45),
+                    borderRadius: BorderRadius.circular(10)),
+                child: Icon(payload.iconData, size: 22, color: cs.primary),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 14),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                     if (showDemoBadge || article.showDemoBadge)
-                      Text(
-                        'Пример',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          color: const Color(0xFF6A4BBC),
-                        ),
-                      ),
-                    Text(
-                      article.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        color: Colors.black,
-                        fontWeight: FontWeight.w900,
-                        height: 1.2,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      payload.shortText,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: Colors.black.withValues(alpha: 0.62),
-                        height: 1.25,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const Icon(
-                Icons.chevron_right_rounded,
-                size: 20,
-                color: Colors.black38,
-              ),
-            ],
+                      Text('Пример',
+                          style: theme.textTheme.labelSmall
+                              ?.copyWith(color: cs.primary)),
+                    Text(article.title,
+                        style: theme.textTheme.titleMedium
+                            ?.copyWith(color: cs.onSurface, height: 1.35)),
+                    const SizedBox(height: 4),
+                    Text(payload.shortText,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                            color: cs.onSurfaceVariant, height: 1.4)),
+                  ])),
+              const SizedBox(width: 8),
+              Icon(Icons.chevron_right_rounded,
+                  size: 20, color: cs.onSurfaceVariant),
+            ]),
           ),
         ),
       ),
@@ -200,7 +159,10 @@ class StudentReferenceArticleDetail extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          for (final block in payload.blocks)
+          for (final (index, block) in payload.blocks.indexed)
+            if (index != 0 ||
+                block is! ReferenceTextBlock ||
+                block.text.trim() != payload.shortText.trim())
             _ReferenceBlockTile(
               block: block,
               onOpenAsset: onOpenAsset,

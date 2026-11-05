@@ -50,14 +50,14 @@ class AppColors {
     return AppColors(
       header: colorBlack,
       primary: colorPrimary,
-      background: mC,
+      background: const Color(0xFFF5F7FB),
       accent: const Color(0xFF17c063),
       disabled: Colors.black12,
       error: const Color(0xFFFF7466),
-      divider: Colors.black26,
+      divider: const Color(0xFFDCE2EC),
       button: colorDarkGrey,
       contentText1: colorBlack,
-      contentText2: colorPrimaryBlack,
+      contentText2: const Color(0xFF606B7E),
     );
   }
 

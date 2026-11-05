@@ -574,6 +574,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
 
       expect(find.text('Подтвердить выбор'), findsNothing);
+      expect(find.text('Темы'), findsOneWidget);
       expect(find.text('Тема А'), findsOneWidget);
 
       await tester.tap(find.text('Тема А'));

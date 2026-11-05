@@ -5,6 +5,7 @@ import 'package:student_platform_admin/features/content/shared/content_action_mo
 import 'package:student_platform_admin/features/content/shared/content_action_picker.dart';
 import 'package:student_platform_admin/features/content/shared/content_color_utils.dart';
 import 'package:student_platform_admin/features/content/shared/content_icon_catalog.dart';
+import 'package:student_platform_admin/features/content/shared/content_icon_picker.dart';
 import 'package:student_platform_admin/features/content/shared/content_card_variant_picker.dart';
 import 'package:student_platform_admin/features/content/shared/content_preview_binder.dart';
 import 'package:student_platform_admin/features/content/shared/content_preview_mode.dart';
@@ -26,6 +27,46 @@ void main() {
     test('list by category returns study icons', () {
       final study = listContentIconsByCategory(ContentIconCategory.study);
       expect(study.any((e) => e.key == 'school'), isTrue);
+    });
+
+    testWidgets('icon search can reset and cancellation preserves the icon', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final changes = <String?>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ContentIconPickerField(
+              selectedKey: 'calendar_today',
+              onChanged: changes.add,
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Расписание'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'календарь');
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Расписание'), findsOneWidget);
+      await tester.enterText(find.byType(TextField), 'нет совпадений');
+      await tester.pumpAndSettle();
+      expect(find.text('Иконки не найдены'), findsOneWidget);
+      await tester.tap(find.text('Сбросить фильтры'));
+      await tester.pumpAndSettle();
+      expect(find.text('Иконки не найдены'), findsNothing);
+      await tester.tap(find.text('Отмена'));
+      await tester.pumpAndSettle();
+      expect(changes, isEmpty);
+      await tester.tap(find.text('Расписание'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Без иконки'));
+      await tester.pumpAndSettle();
+      expect(changes, [null]);
+      expect(tester.takeException(), isNull);
     });
   });
 

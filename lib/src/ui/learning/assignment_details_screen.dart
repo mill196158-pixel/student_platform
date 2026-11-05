@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' as services;
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../common/friendly_empty_state.dart';
 import 'state/team_cubit.dart';
 import 'models/assignment.dart';
 
@@ -10,51 +11,53 @@ class AssignmentDetailsScreen extends StatefulWidget {
   const AssignmentDetailsScreen({super.key, required this.assignmentId});
 
   @override
-  State<AssignmentDetailsScreen> createState() => _AssignmentDetailsScreenState();
+  State<AssignmentDetailsScreen> createState() =>
+      _AssignmentDetailsScreenState();
 }
+
 class _AssignmentDetailsScreenState extends State<AssignmentDetailsScreen> {
   bool _saving = false;
   String get assignmentId => widget.assignmentId;
-  Future<void> _save(Future<void> Function() action, {String? success, bool close = false}) async {
+  Future<void> _save(Future<void> Function() action,
+      {String? success, bool close = false}) async {
     if (_saving) return;
     setState(() => _saving = true);
     try {
       await action();
       if (!mounted) return;
-      if (success != null) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(success)));
+      if (success != null)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(success)));
       if (close) Navigator.of(context).pop();
     } catch (_) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Не удалось сохранить. Повторите.')));
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Не удалось сохранить. Повторите.')));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFFAF8FC),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text('Задание',
-            style: TextStyle(
-                fontWeight: FontWeight.w700, color: Color(0xFF1E293B))),
+        title: const Text('Задание'),
         centerTitle: true,
         actions: [
           Container(
             margin: const EdgeInsets.only(right: 8),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: Theme.of(context).colorScheme.surface,
               borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.06),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4))
-              ],
             ),
             child: IconButton(
-                icon: const Icon(Icons.more_vert, color: Color(0xFF64748B)),
+                tooltip: 'Ещё',
+                icon: Icon(Icons.more_vert,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant),
                 onPressed: () => _showMore(context)),
           ),
         ],
@@ -63,14 +66,26 @@ class _AssignmentDetailsScreenState extends State<AssignmentDetailsScreen> {
         builder: (context, state) {
           final st = state;
           final a = _pickAssignment(st, assignmentId);
-          if (a == null) return const Center(child: Text('Задание недоступно'));
+          if (a == null) {
+            return const FriendlyEmptyState(
+              title: 'Задание недоступно',
+              fallbackIcon: Icons.assignment_outlined,
+              animationHeight: 56,
+            );
+          }
           final isDraft = st.pending?.id == a.id;
           final isDone = context.read<TeamCubit>().isAssignmentDone(a.id);
           final link = _findLink(a);
           final files = _extractAttachments(a);
 
           return SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 140),
+            padding: EdgeInsets.fromLTRB(
+                ((MediaQuery.sizeOf(context).width - 800) / 2)
+                    .clamp(20.0, double.infinity),
+                16,
+                ((MediaQuery.sizeOf(context).width - 800) / 2)
+                    .clamp(20.0, double.infinity),
+                32),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -85,8 +100,6 @@ class _AssignmentDetailsScreenState extends State<AssignmentDetailsScreen> {
                   _ModernSectionCard(
                     title: 'Ссылка',
                     icon: Icons.link_rounded,
-                    gradient: const LinearGradient(
-                        colors: [Color(0xFFF6F3FA), Color(0xFFFAFAFC)]),
                     child: _ModernLinkTile(link: link),
                   ),
                   const SizedBox(height: 14),
@@ -94,8 +107,6 @@ class _AssignmentDetailsScreenState extends State<AssignmentDetailsScreen> {
                 _ModernSectionCard(
                   title: 'Описание',
                   icon: Icons.notes_rounded,
-                  gradient: const LinearGradient(
-                      colors: [Color(0xFFFBFBFD), Color(0xFFF5F2F9)]),
                   child: _ModernDescriptionTile(
                       description: a.description.trim().isEmpty
                           ? 'Описания нет.'
@@ -106,8 +117,6 @@ class _AssignmentDetailsScreenState extends State<AssignmentDetailsScreen> {
                   _ModernSectionCard(
                     title: 'Вложения',
                     icon: Icons.attach_file_rounded,
-                    gradient: const LinearGradient(
-                        colors: [Color(0xFFF3F8F6), Color(0xFFFAFAFC)]),
                     child: Column(
                         children: files
                             .map((f) => _ModernAttachmentTile(
@@ -130,68 +139,65 @@ class _AssignmentDetailsScreenState extends State<AssignmentDetailsScreen> {
 
           return Container(
             decoration: BoxDecoration(
-              color: Colors.white,
-              boxShadow: [
-                BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.08),
-                    blurRadius: 20,
-                    offset: const Offset(0, -4))
-              ],
+              color: Theme.of(context).colorScheme.surface,
             ),
             child: SafeArea(
               top: false,
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-                child: Row(
-                  children: [
-                    if (isDraft && st.isStarosta)
-                      Expanded(
-                        child: _ModernBigButton(
-                          icon: Icons.rocket_launch,
-                          label: 'Опубликовать',
-                          gradient: const LinearGradient(
-                              colors: [Color(0xFF6FA894), Color(0xFF8BB8A8)]),
-                          onPressed: _saving ? null : () => _save(() => context.read<TeamCubit>().publishAssignment(a.id), success: 'Задание опубликовано', close: true),
-                        ),
-                      ),
-                    if (isDraft && !st.isStarosta)
-                      Expanded(
-                        child: _ModernBigButton(
-                          icon: Icons.how_to_vote,
-                          label: 'Голосовать «за»',
-                          gradient: const LinearGradient(
-                              colors: [Color(0xFFC4A36A), Color(0xFFD4BE90)]),
-                          onPressed: _saving ? null : () => _save(() => context.read<TeamCubit>().voteFor(a.id, propagateError: true)),
-                        ),
-                      ),
-                    if (!isDraft)
-                      Expanded(
-                        child: _ModernBigButton(
-                          icon: isDone
-                              ? Icons.check_circle
-                              : Icons.check_circle_outline,
-                          label:
-                              isDone ? 'Выполнено' : 'Отметить как выполнено',
-                          gradient: isDone
-                              ? const LinearGradient(colors: [
-                                  Color(0xFF6FA894),
-                                  Color(0xFF8BB8A8)
-                                ])
-                              : LinearGradient(colors: [
-                                  Theme.of(context)
-                                      .colorScheme
-                                      .primary
-                                      .withValues(alpha: 0.88),
-                                  Theme.of(context)
-                                      .colorScheme
-                                      .primary
-                                      .withValues(alpha: 0.72),
-                                ]),
-                          onPressed: _saving ? null : () => _save(() => context.read<TeamCubit>().toggleCompleted(a.id), close: true),
-                        ),
-                      ),
-                  ],
-                ),
+                child: Center(
+                    heightFactor: 1,
+                    child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 680),
+                        child: Row(
+                          children: [
+                            if (isDraft && st.isStarosta)
+                              Expanded(
+                                child: _ModernBigButton(
+                                  icon: Icons.rocket_launch,
+                                  label: 'Опубликовать',
+                                  onPressed: _saving
+                                      ? null
+                                      : () => _save(
+                                          () => context
+                                              .read<TeamCubit>()
+                                              .publishAssignment(a.id),
+                                          success: 'Задание опубликовано',
+                                          close: true),
+                                ),
+                              ),
+                            if (isDraft && !st.isStarosta)
+                              Expanded(
+                                child: _ModernBigButton(
+                                  icon: Icons.how_to_vote,
+                                  label: 'Голосовать «за»',
+                                  onPressed: _saving
+                                      ? null
+                                      : () => _save(() => context
+                                          .read<TeamCubit>()
+                                          .voteFor(a.id, propagateError: true)),
+                                ),
+                              ),
+                            if (!isDraft)
+                              Expanded(
+                                child: _ModernBigButton(
+                                  icon: isDone
+                                      ? Icons.check_circle
+                                      : Icons.check_circle_outline,
+                                  label: isDone
+                                      ? 'Выполнено'
+                                      : 'Отметить как выполнено',
+                                  onPressed: _saving
+                                      ? null
+                                      : () => _save(
+                                          () => context
+                                              .read<TeamCubit>()
+                                              .toggleCompleted(a.id),
+                                          close: true),
+                                ),
+                              ),
+                          ],
+                        ))),
               ),
             ),
           );
@@ -268,11 +274,10 @@ class _AssignmentDetailsScreenState extends State<AssignmentDetailsScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      showDragHandle: true,
-      builder: (_) => Container(
-        decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      showDragHandle: false,
+      builder: (sheetContext) => Material(
+        color: Theme.of(sheetContext).colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         child: SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(20),
@@ -288,8 +293,6 @@ class _AssignmentDetailsScreenState extends State<AssignmentDetailsScreen> {
                 icon: Icons.share,
                 title: 'Поделиться',
                 subtitle: 'Отправить ссылку на задание',
-                gradient: const LinearGradient(
-                    colors: [Color(0xFFEDE7F6), Color(0xFFF7FBFA)]),
                 onTap: () => Navigator.pop(context),
               ),
             ]),
@@ -310,126 +313,47 @@ class _ModernAssignmentHeaderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final statusGradient = isDraft
-        ? const LinearGradient(colors: [Color(0xFFFAF6EF), Color(0xFFF7F5FA)])
-        : (isDone
-            ? const LinearGradient(
-                colors: [Color(0xFFF3F8F6), Color(0xFFF7F8FA)])
-            : const LinearGradient(
-                colors: [Color(0xFFF7F5FA), Color(0xFFFAFAFC)]));
-
-    final chipBg = isDraft
-        ? const Color(0xFFF4EBD8)
-        : (isDone ? const Color(0xFFE4F0EB) : const Color(0xFFEDE8F6));
-    final chipFg = isDraft
-        ? const Color(0xFF9A7B45)
-        : (isDone ? const Color(0xFF4F8A74) : const Color(0xFF6E5BAE));
-
-    return Container(
-      decoration: BoxDecoration(
-        gradient: statusGradient,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 16,
-              offset: const Offset(0, 6)),
-        ],
-      ),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.82),
-          borderRadius: BorderRadius.circular(24),
-        ),
-        padding: const EdgeInsets.all(22),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                _ModernStatusChip(
-                  icon: isDraft
-                      ? Icons.edit_note
-                      : (isDone ? Icons.check_circle : Icons.rocket_launch),
-                  label: isDraft
-                      ? 'Черновик'
-                      : (isDone ? 'Выполнено' : 'Опубликовано'),
-                  background: chipBg,
-                  foreground: chipFg,
-                ),
-                const Spacer(),
-                Container(
-                  width: 40,
-                  height: 40,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(13),
-                    color: chipFg.withValues(alpha: 0.12),
-                  ),
-                  child: Icon(Icons.assignment_rounded,
-                      color: chipFg, size: 20),
-                ),
-              ],
-            ),
-            const SizedBox(height: 18),
-            Text(
-              assignment.title,
-              style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: -0.4,
-                  color: Colors.black,
-                  height: 1.15),
-            ),
-            if (assignment.due != null &&
-                '${assignment.due}'.trim().isNotEmpty) ...[
-              const SizedBox(height: 16),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.72),
-                  borderRadius: BorderRadius.circular(16),
-                  border:
-                      Border.all(color: Colors.white.withValues(alpha: 0.3)),
-                ),
-                child: Row(
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    final color = isDraft
+        ? (dark ? Colors.amber.shade200 : Colors.orange.shade900)
+        : isDone
+            ? (dark ? Colors.green.shade200 : Colors.green.shade900)
+            : theme.colorScheme.primary;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _ModernStatusChip(
+          icon: isDraft
+              ? Icons.edit_note
+              : isDone
+                  ? Icons.check_circle
+                  : Icons.assignment_outlined,
+          label: isDraft
+              ? 'Черновик'
+              : isDone
+                  ? 'Выполнено'
+                  : 'Опубликовано',
+          background: color.withValues(alpha: .12),
+          foreground: color),
+      const SizedBox(height: 20),
+      Text(assignment.title, style: theme.textTheme.titleLarge),
+      if (assignment.due != null && '${assignment.due}'.trim().isNotEmpty) ...[
+        const SizedBox(height: 20),
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(Icons.event_outlined,
+              color: theme.colorScheme.onSurfaceVariant, size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                          color: const Color(0xFFFFF1D6),
-                          borderRadius: BorderRadius.circular(10)),
-                      child: const Icon(Icons.event,
-                          size: 18, color: Color(0xFFB58B3B)),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('Срок выполнения',
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: Color(0xFF64748B))),
-                          Text(_formatDue(assignment.due),
-                              style: const TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700,
-                                  color: Color(0xFF1E293B))),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
+                Text('Срок выполнения', style: theme.textTheme.bodySmall),
+                const SizedBox(height: 4),
+                Text(_formatDue(assignment.due),
+                    style: theme.textTheme.bodyMedium),
+              ])),
+        ]),
+      ],
+    ]);
   }
 
   static String _formatDue(dynamic due) {
@@ -462,23 +386,18 @@ class _ModernStatusChip extends StatelessWidget {
         color: background,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: foreground.withValues(alpha: 0.16)),
-        boxShadow: [
-          BoxShadow(
-              color: foreground.withValues(alpha: 0.12),
-              blurRadius: 8,
-              offset: const Offset(0, 2))
-        ],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, size: 18, color: foreground),
           const SizedBox(width: 8),
-          Text(label,
-              style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: foreground)),
+          Flexible(
+              child: Text(label,
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: foreground))),
         ],
       ),
     );
@@ -492,23 +411,14 @@ class _VoteHintBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
+        color: scheme.surface,
         borderRadius: BorderRadius.circular(20),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFF5F2F9), Color(0xFFFAFAFC)],
-        ),
-        border: Border.all(color: const Color(0xFF6E5BAE).withValues(alpha: 0.12)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        border:
+            Border.all(color: const Color(0xFF624B9C).withValues(alpha: 0.12)),
       ),
       child: Row(
         children: [
@@ -517,22 +427,22 @@ class _VoteHintBanner extends StatelessWidget {
             height: 38,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.9),
+              color: scheme.secondaryContainer,
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Icon(Icons.how_to_vote_rounded,
-                color: Color(0xFF6E5BAE), size: 20),
+                color: Color(0xFF624B9C), size: 20),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'Нужны 2 голоса одногруппников',
                   style: TextStyle(
                     fontWeight: FontWeight.w900,
-                    color: Colors.black,
+                    color: scheme.onSurface,
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -542,7 +452,7 @@ class _VoteHintBanner extends StatelessWidget {
                     fontSize: 13,
                     height: 1.25,
                     fontWeight: FontWeight.w600,
-                    color: Colors.black.withValues(alpha: 0.55),
+                    color: scheme.onSurfaceVariant,
                   ),
                 ),
               ],
@@ -557,67 +467,30 @@ class _VoteHintBanner extends StatelessWidget {
 class _ModernSectionCard extends StatelessWidget {
   final String title;
   final Widget child;
-  final Gradient gradient;
   final IconData? icon;
-
-  const _ModernSectionCard({
-    required this.title,
-    required this.child,
-    required this.gradient,
-    this.icon,
-  });
-
+  const _ModernSectionCard(
+      {required this.title, required this.child, this.icon});
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: gradient,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.06),
-              blurRadius: 16,
-              offset: const Offset(0, 4))
-        ],
-      ),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.95),
-          borderRadius: BorderRadius.circular(20),
-          border:
-              Border.all(color: Colors.white.withValues(alpha: 0.3), width: 1),
-        ),
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                if (icon != null) ...[
-                  Icon(icon, size: 18, color: const Color(0xFF6E5BAE)),
-                  const SizedBox(width: 8),
-                ],
-                Text(title,
-                    style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w900,
-                        color: Colors.black)),
-                const Spacer(),
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF6E5BAE).withValues(alpha: 0.35),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            child,
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: theme.colorScheme.outlineVariant)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          if (icon != null) ...[
+            Icon(icon, size: 20, color: theme.colorScheme.primary),
+            const SizedBox(width: 8)
           ],
-        ),
-      ),
+          Expanded(child: Text(title, style: theme.textTheme.titleMedium)),
+        ]),
+        const SizedBox(height: 12),
+        child,
+      ]),
     );
   }
 }
@@ -629,65 +502,63 @@ class _ModernLinkTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.72),
+    return Material(
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        leading: Container(
-          padding: const EdgeInsets.all(10),
+        child: Container(
           decoration: BoxDecoration(
-              color: const Color(0xFFEDE7F6),
-              borderRadius: BorderRadius.circular(12)),
-          child: const Icon(Icons.link, color: Color(0xFF7C63D8), size: 20),
-        ),
-        title: Text(link,
-            style: const TextStyle(
-                decoration: TextDecoration.underline,
-                color: Color(0xFF7C63D8),
-                fontWeight: FontWeight.w600)),
-        subtitle: const Text('Нажми, чтобы скопировать',
-            style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
-        trailing: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-              color: const Color(0xFF7C63D8),
-              borderRadius: BorderRadius.circular(10)),
-          child: const Icon(Icons.copy, color: Colors.white, size: 16),
-        ),
-        onTap: () async {
-          await services.Clipboard.setData(services.ClipboardData(text: link));
-          ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Ссылка скопирована')));
-        },
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      ),
-    );
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(16),
+            border:
+                Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+          ),
+          child: ListTile(
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            leading: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.secondaryContainer,
+                  borderRadius: BorderRadius.circular(12)),
+              child: Icon(Icons.link,
+                  color: Theme.of(context).colorScheme.primary, size: 20),
+            ),
+            title: Text(link,
+                style: TextStyle(
+                    decoration: TextDecoration.underline,
+                    color: Theme.of(context).colorScheme.primary,
+                    fontWeight: FontWeight.w600)),
+            subtitle: Text('Нажми, чтобы скопировать',
+                style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            trailing: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary,
+                  borderRadius: BorderRadius.circular(10)),
+              child: Icon(Icons.copy,
+                  color: Theme.of(context).colorScheme.onPrimary, size: 16),
+            ),
+            onTap: () async {
+              await services.Clipboard.setData(
+                  services.ClipboardData(text: link));
+              ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Ссылка скопирована')));
+            },
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          ),
+        ));
   }
 }
 
 class _ModernDescriptionTile extends StatelessWidget {
   final String description;
-
   const _ModernDescriptionTile({required this.description});
-
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.72),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
-      ),
-      child: Text(description,
-          style: const TextStyle(
-              fontSize: 16, height: 1.5, color: Color(0xFF374151))),
-    );
-  }
+  Widget build(BuildContext context) => Text(description,
+      style: Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.5));
 }
 
 class _ModernAttachmentTile extends StatelessWidget {
@@ -723,43 +594,52 @@ class _ModernAttachmentTile extends StatelessWidget {
         ? name
         : (path.isNotEmpty ? path.split('/').last.split('\\').last : 'Файл');
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.72),
+    return Material(
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        leading: Container(
-          padding: const EdgeInsets.all(10),
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 8),
           decoration: BoxDecoration(
-              color: iconColor.withValues(alpha: 0.10),
-              borderRadius: BorderRadius.circular(12)),
-          child: Icon(icon, color: iconColor, size: 20),
-        ),
-        title: Text(showName,
-            style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF1E293B))),
-        subtitle: path.isNotEmpty
-            ? Text(path,
-                style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)))
-            : null,
-        trailing: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-              color: const Color(0xFF64748B).withValues(alpha: 0.10),
-              borderRadius: BorderRadius.circular(10)),
-          child:
-              const Icon(Icons.more_horiz, color: Color(0xFF64748B), size: 16),
-        ),
-        onTap: () {},
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      ),
-    );
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(16),
+            border:
+                Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+          ),
+          child: ListTile(
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            leading: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                  color: iconColor.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(12)),
+              child: Icon(icon, color: iconColor, size: 20),
+            ),
+            title: Text(showName,
+                style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).colorScheme.onSurface)),
+            subtitle: path.isNotEmpty
+                ? Text(path,
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant))
+                : null,
+            trailing: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                  color: const Color(0xFF64748B).withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(10)),
+              child: Icon(Icons.more_horiz,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  size: 16),
+            ),
+            onTap: () {},
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          ),
+        ));
   }
 }
 
@@ -767,121 +647,34 @@ class _ModernBigButton extends StatelessWidget {
   final VoidCallback? onPressed;
   final String label;
   final IconData icon;
-  final Gradient gradient;
-
   const _ModernBigButton(
-      {required this.onPressed,
-      required this.label,
-      required this.icon,
-      required this.gradient});
-
+      {required this.onPressed, required this.label, required this.icon});
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 56,
-      decoration: BoxDecoration(
-        gradient: gradient,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.10),
-              blurRadius: 12,
-              offset: const Offset(0, 4))
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onPressed,
-          borderRadius: BorderRadius.circular(16),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(icon, color: Colors.white, size: 20),
-                const SizedBox(width: 12),
-                Text(label,
-                    style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white)),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => FilledButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon, size: 20),
+        label: Text(label, textAlign: TextAlign.center),
+        style: FilledButton.styleFrom(
+            minimumSize: const Size(0, 56),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14)),
+      );
 }
 
 class _ModernActionTile extends StatelessWidget {
   final IconData icon;
   final String title;
   final String subtitle;
-  final Gradient gradient;
   final VoidCallback onTap;
-
   const _ModernActionTile(
       {required this.icon,
       required this.title,
       required this.subtitle,
-      required this.gradient,
       required this.onTap});
-
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: gradient,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 8,
-              offset: const Offset(0, 2))
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(16),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.8),
-                      borderRadius: BorderRadius.circular(12)),
-                  child: const Icon(Icons.share,
-                      color: Color(0xFF64748B), size: 20),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(title,
-                          style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: Color(0xFF1E293B))),
-                      Text(subtitle,
-                          style: const TextStyle(
-                              fontSize: 13, color: Color(0xFF64748B))),
-                    ],
-                  ),
-                ),
-                const Icon(Icons.arrow_forward_ios,
-                    color: Color(0xFF64748B), size: 16),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => ListTile(
+      leading: Icon(icon),
+      title: Text(title),
+      subtitle: Text(subtitle),
+      trailing: const Icon(Icons.chevron_right_rounded),
+      onTap: onTap);
 }

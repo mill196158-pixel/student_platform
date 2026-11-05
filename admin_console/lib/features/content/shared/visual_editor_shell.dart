@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 
 import '../../../shared/widgets/publication_status_badge.dart';
@@ -36,7 +37,7 @@ typedef VisualEditorPanelBuilder = Widget Function(BuildContext context);
 /// Reusable 3-pane visual editor shell modeled on the News editor layout.
 class VisualEditorShell extends StatelessWidget {
   const VisualEditorShell({
-    required this.title,
+    this.title,
     required this.listTab,
     required this.tabCounts,
     required this.listBuilder,
@@ -69,7 +70,7 @@ class VisualEditorShell extends StatelessWidget {
     super.key,
   });
 
-  final String title;
+  final String? title;
   final String? selectedTitle;
   final String? statusChip;
   final bool originDemoBadge;
@@ -209,7 +210,7 @@ class _VisualEditorHeader extends StatelessWidget {
     required this.onDiscardLocalChanges,
   });
 
-  final String title;
+  final String? title;
   final String? selectedTitle;
   final String? statusChip;
   final bool originDemoBadge;
@@ -242,12 +243,13 @@ class _VisualEditorHeader extends StatelessWidget {
           spacing: 12,
           runSpacing: 8,
           children: [
-            Text(
-              title,
-              style: Theme.of(
-                context,
-              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
-            ),
+            if (title case final heading?)
+              Text(
+                heading,
+                style: Theme.of(
+                  context,
+                ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
+              ),
             if (statusChip != null) PublicationStatusBadge(status: statusChip!),
             if (originDemoBadge) const _HeaderDemoBadge(),
             if (editingWorkingDraft) const _WorkingDraftChip(),
@@ -256,7 +258,7 @@ class _VisualEditorHeader extends StatelessWidget {
               const SizedBox(
                 width: 18,
                 height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
+                child: ProductLoadingIndicator(),
               ),
           ],
         ),
@@ -303,8 +305,7 @@ class _VisualEditorHeader extends StatelessWidget {
                       ? const SizedBox(
                           width: 18,
                           height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
+                          child: ProductLoadingIndicator(
                             color: Colors.white,
                           ),
                         )
@@ -335,8 +336,7 @@ class _VisualEditorHeader extends StatelessWidget {
                       ? const SizedBox(
                           width: 18,
                           height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
+                          child: ProductLoadingIndicator(
                             color: Colors.white,
                           ),
                         )

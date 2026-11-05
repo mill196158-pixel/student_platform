@@ -1,6 +1,9 @@
+import 'package:student_ui/student_ui.dart' show ProductTheme, ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 
 import '../../data/personal_diary_service.dart';
+import '../common/friendly_empty_state.dart';
+import '../shared/workspace_page_header.dart';
 import '../learning/tabs/chat/navigation/group_action_deeplink.dart';
 import '../schedule/subject_diary/subject_diary.dart';
 import '../schedule/subject_diary_screen.dart';
@@ -73,17 +76,35 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
     final width = MediaQuery.sizeOf(context).width;
     final compact = width < 390;
     return Scaffold(
-      backgroundColor: const Color(0xFFFBFAFF),
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
       body: FutureBuilder<PersonalDiaryData>(
         future: _future,
         builder: (context, snapshot) {
           if (!snapshot.hasData && snapshot.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
+            return const Center(child: ProductLoadingIndicator.page());
           }
 
           final data = snapshot.data;
           if (data == null) {
-            return const Center(child: Text('Не удалось загрузить дневник'));
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const WorkspacePageHeader(title: 'Личный дневник'),
+                Expanded(
+                  child: FriendlyEmptyState(
+                    title: 'Не удалось загрузить дневник',
+                    fallbackIcon: Icons.cloud_off_outlined,
+                    animationHeight: 56,
+                    action: OutlinedButton.icon(
+                      onPressed: () =>
+                          setState(() => _future = _loadWithCache()),
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Повторить'),
+                    ),
+                  ),
+                ),
+              ],
+            );
           }
 
           final query = _searchController.text.trim().toLowerCase();
@@ -546,7 +567,7 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
                     'Добавить в дневник',
                     style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.w900,
-                          color: Colors.black,
+                          color: Theme.of(context).colorScheme.onSurface,
                         ),
                   ),
                   const SizedBox(height: 4),
@@ -555,7 +576,7 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
                     style: Theme.of(ctx)
                         .textTheme
                         .bodySmall
-                        ?.copyWith(color: Colors.black54),
+                        ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                   const SizedBox(height: 12),
                   _AddModeTile(
@@ -914,7 +935,7 @@ class _DiaryCalendarSheetState extends State<_DiaryCalendarSheet> {
                     child: Text(
                       'Календарь дневника',
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            color: Colors.black,
+                            color: Theme.of(context).colorScheme.onSurface,
                             fontWeight: FontWeight.w900,
                           ),
                     ),
@@ -938,7 +959,7 @@ class _DiaryCalendarSheetState extends State<_DiaryCalendarSheet> {
               Text(
                 '${_monthName(_visibleMonth.month)} ${_visibleMonth.year}',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Colors.black54, fontWeight: FontWeight.w700),
+                    color: Theme.of(context).colorScheme.onSurfaceVariant, fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 12),
               const _DiaryCalendarLegend(),
@@ -956,7 +977,7 @@ class _DiaryCalendarSheetState extends State<_DiaryCalendarSheet> {
               Text(
                 'События на ${_fmtDate(_selectedDay)}',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: Colors.black,
+                      color: Theme.of(context).colorScheme.onSurface,
                       fontWeight: FontWeight.w900,
                     ),
               ),
@@ -1231,7 +1252,7 @@ class _CalendarLegendChip extends StatelessWidget {
           style: Theme.of(context)
               .textTheme
               .labelSmall
-              ?.copyWith(color: Colors.black54, fontWeight: FontWeight.w700),
+              ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant, fontWeight: FontWeight.w700),
         ),
       ],
     );
@@ -1271,7 +1292,7 @@ class _MonthGrid extends StatelessWidget {
                       style: Theme.of(context)
                           .textTheme
                           .labelSmall
-                          ?.copyWith(color: Colors.black54),
+                          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ),
                 ),
@@ -1298,7 +1319,7 @@ class _MonthGrid extends StatelessWidget {
               borderRadius: BorderRadius.circular(12),
               child: Container(
                 decoration: BoxDecoration(
-                  color: selected ? const Color(0xFF7C63D8) : Colors.white,
+                  color: selected ? const Color(0xFF7C63D8) : Theme.of(context).colorScheme.surface,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: colors.isNotEmpty
@@ -1315,8 +1336,8 @@ class _MonthGrid extends StatelessWidget {
                         color: selected
                             ? Colors.white
                             : isCurrentMonth
-                                ? Colors.black87
-                                : Colors.black26,
+                                ? Theme.of(context).colorScheme.onSurface
+                                : Theme.of(context).colorScheme.onSurfaceVariant,
                         fontWeight: FontWeight.w800,
                         fontSize: 12,
                       ),
@@ -1369,14 +1390,14 @@ class _DiaryCalendarEventTile extends StatelessWidget {
       dense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      tileColor: const Color(0xFFF6F7FB),
+      tileColor: Theme.of(context).colorScheme.surfaceContainerHighest,
       leading: Icon(event.icon, color: const Color(0xFF7C63D8)),
       title: Text(
         event.title,
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
         style:
-            const TextStyle(color: Colors.black, fontWeight: FontWeight.w900),
+            TextStyle(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w900),
       ),
       subtitle: Text(
         event.subtitle,
@@ -1434,7 +1455,7 @@ class _PersonalTaskFormSheetState extends State<_PersonalTaskFormSheet> {
                 Text(
                   'Личная задача',
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: Colors.black,
+                        color: Theme.of(context).colorScheme.onSurface,
                         fontWeight: FontWeight.w900,
                       ),
                 ),
@@ -1444,15 +1465,15 @@ class _PersonalTaskFormSheetState extends State<_PersonalTaskFormSheet> {
                   style: Theme.of(context)
                       .textTheme
                       .bodySmall
-                      ?.copyWith(color: Colors.black54),
+                      ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
                 const SizedBox(height: 14),
                 TextField(
                   controller: _titleController,
                   autofocus: true,
-                  cursorColor: Colors.black87,
-                  style: const TextStyle(
-                    color: Colors.black87,
+                  cursorColor: Theme.of(context).colorScheme.onSurface,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
                     fontWeight: FontWeight.w700,
                   ),
                   decoration: _fieldDecoration('Название'),
@@ -1461,31 +1482,34 @@ class _PersonalTaskFormSheetState extends State<_PersonalTaskFormSheet> {
                 const SizedBox(height: 10),
                 TextField(
                   controller: _descriptionController,
-                  cursorColor: Colors.black87,
-                  style: const TextStyle(color: Colors.black87),
+                  cursorColor: Theme.of(context).colorScheme.onSurface,
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
                   minLines: 2,
                   maxLines: 4,
                   decoration: _fieldDecoration('Описание, если нужно'),
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<PersonalDiarySubject?>(
+                  borderRadius: ProductTheme.selectionMenuRadius,
+                  elevation: ProductTheme.selectionMenuElevation,
+                  icon: const Icon(Icons.keyboard_arrow_down_rounded),
                   initialValue: _subject,
                   decoration: _fieldDecoration('Предмет'),
                   isExpanded: true,
-                  dropdownColor: Colors.white,
+                  dropdownColor: Theme.of(context).colorScheme.surface,
                   menuMaxHeight: maxHeight * .45,
-                  iconEnabledColor: Colors.black87,
-                  style: const TextStyle(
-                    color: Colors.black87,
+                  iconEnabledColor: Theme.of(context).colorScheme.onSurface,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
                     fontWeight: FontWeight.w700,
                     overflow: TextOverflow.ellipsis,
                   ),
                   items: [
-                    const DropdownMenuItem<PersonalDiarySubject?>(
+                    DropdownMenuItem<PersonalDiarySubject?>(
                       value: null,
                       child: Text(
                         'Без предмета',
-                        style: TextStyle(color: Colors.black87),
+                        style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
                       ),
                     ),
                     ...widget.subjects.map(
@@ -1495,7 +1519,7 @@ class _PersonalTaskFormSheetState extends State<_PersonalTaskFormSheet> {
                           subject.title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: Colors.black87),
+                          style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
                         ),
                       ),
                     ),
@@ -1529,24 +1553,24 @@ class _PersonalTaskFormSheetState extends State<_PersonalTaskFormSheet> {
   InputDecoration _fieldDecoration(String label) {
     return InputDecoration(
       labelText: label,
-      labelStyle: const TextStyle(color: Colors.black54),
-      floatingLabelStyle: const TextStyle(
-        color: Colors.black87,
+      labelStyle: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+      floatingLabelStyle: TextStyle(
+        color: Theme.of(context).colorScheme.onSurface,
         fontWeight: FontWeight.w700,
       ),
       filled: true,
-      fillColor: const Color(0xFFF6F7FB),
+      fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
         borderSide: BorderSide.none,
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: Color(0xFFE1E5EF)),
+        borderSide: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: Colors.black87, width: 1.4),
+        borderSide: BorderSide(color: Theme.of(context).colorScheme.onSurface, width: 1.4),
       ),
     );
   }
@@ -1729,7 +1753,7 @@ class _SubjectPickerSheetState extends State<_SubjectPickerSheet> {
                   style: Theme.of(context)
                       .textTheme
                       .labelMedium
-                      ?.copyWith(color: Colors.black54),
+                      ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
                 const SizedBox(height: 8),
                 Expanded(
@@ -1873,7 +1897,7 @@ class _LessonPickerSheetState extends State<_LessonPickerSheet> {
                   style: Theme.of(context)
                       .textTheme
                       .labelMedium
-                      ?.copyWith(color: Colors.black54),
+                      ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
                 const SizedBox(height: 8),
                 Expanded(
@@ -1951,7 +1975,7 @@ class _PickerHeader extends StatelessWidget {
           style: Theme.of(context).textTheme.titleLarge?.copyWith(
                 fontSize: compact ? 20 : null,
                 fontWeight: FontWeight.w900,
-                color: Colors.black,
+                color: Theme.of(context).colorScheme.onSurface,
               ),
         ),
         const SizedBox(height: 4),
@@ -1960,7 +1984,7 @@ class _PickerHeader extends StatelessWidget {
           style: Theme.of(context)
               .textTheme
               .bodySmall
-              ?.copyWith(color: Colors.black54),
+              ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
         ),
       ],
     );
@@ -1987,7 +2011,7 @@ class _SearchField extends StatelessWidget {
         hintText: hintText,
         prefixIcon: const Icon(Icons.search_rounded),
         filled: true,
-        fillColor: Colors.white,
+        fillColor: Theme.of(context).colorScheme.surface,
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         border: OutlineInputBorder(
@@ -2018,11 +2042,11 @@ class _FilterChipButton extends StatelessWidget {
       onSelected: (_) => onTap(),
       labelStyle: TextStyle(
         fontSize: 13,
-        color: selected ? Colors.white : Colors.black87,
+        color: selected ? Colors.white : Theme.of(context).colorScheme.onSurface,
         fontWeight: FontWeight.w800,
       ),
       selectedColor: const Color(0xFF7C63D8),
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       side: BorderSide(
         color: selected
             ? const Color(0xFF7C63D8)
@@ -2043,7 +2067,7 @@ class _SubjectPickerTile extends StatelessWidget {
       dense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      tileColor: Colors.white,
+      tileColor: Theme.of(context).colorScheme.surface,
       leading: _SubjectInitial(title: subject.title),
       title: Text(
         subject.title,
@@ -2071,7 +2095,7 @@ class _LessonPickerTile extends StatelessWidget {
       dense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      tileColor: Colors.white,
+      tileColor: Theme.of(context).colorScheme.surface,
       leading: _SubjectInitial(title: lesson.subjectTitle),
       title: Text(
         lesson.subjectTitle,
@@ -2109,7 +2133,7 @@ class _PickerEmptyState extends StatelessWidget {
         style: Theme.of(context)
             .textTheme
             .bodyMedium
-            ?.copyWith(color: Colors.black54),
+            ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
       ),
     );
   }
@@ -2135,7 +2159,7 @@ class _AddModeTile extends StatelessWidget {
       dense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      tileColor: Colors.white,
+      tileColor: Theme.of(context).colorScheme.surface,
       leading: Container(
         width: 42,
         height: 42,
@@ -2160,12 +2184,11 @@ class _DiaryHeader extends StatelessWidget {
 
   const _DiaryHeader({required this.onAdd});
 
-  static const _lavender = Color(0xFF7C63D8);
-
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return ColoredBox(
-      color: const Color(0xFFFBFAFF),
+      color: colors.surfaceContainerLow,
       child: SafeArea(
         bottom: false,
         child: Padding(
@@ -2176,13 +2199,13 @@ class _DiaryHeader extends StatelessWidget {
               children: [
                 _HeaderNavButton(
                   onTap: () => Navigator.of(context).maybePop(),
-                  child: const Icon(
+                  child: Icon(
                     Icons.chevron_left_rounded,
                     size: 28,
-                    color: Color(0xFF1C1B1F),
+                    color: colors.onSurface,
                   ),
                 ),
-                const Expanded(
+                Expanded(
                   child: Text(
                     'Мой дневник',
                     maxLines: 1,
@@ -2191,17 +2214,17 @@ class _DiaryHeader extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 17,
                       fontWeight: FontWeight.w800,
-                      color: Color(0xFF1C1B1F),
+                      color: colors.onSurface,
                       height: 1.1,
                     ),
                   ),
                 ),
                 _HeaderNavButton(
                   onTap: onAdd,
-                  child: const Icon(
+                  child: Icon(
                     Icons.add_rounded,
                     size: 24,
-                    color: _lavender,
+                    color: colors.primary,
                   ),
                 ),
               ],
@@ -2226,7 +2249,7 @@ class _HeaderNavButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.white,
+      color: Theme.of(context).colorScheme.surface,
       shape: const CircleBorder(),
       child: InkWell(
         customBorder: const CircleBorder(),
@@ -2236,8 +2259,8 @@ class _HeaderNavButton extends StatelessWidget {
           height: 40,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: Colors.white,
-            border: Border.all(color: const Color(0xFFE8E4F0)),
+            color: Theme.of(context).colorScheme.surface,
+            border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.04),
@@ -2264,14 +2287,11 @@ class _DiarySummaryCard extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(22),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFEDE7F6), Color(0xFFD6F5EE)],
-        ),
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFFD9CCF5).withValues(alpha: .30),
+            color: Colors.black.withValues(alpha: .06),
             blurRadius: 18,
             offset: const Offset(0, 8),
           ),
@@ -2288,7 +2308,7 @@ class _DiarySummaryCard extends StatelessWidget {
                 child: Text(
                   'Текущий семестр',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: const Color(0xFF1F2937),
+                        color: Theme.of(context).colorScheme.onSurface,
                         fontWeight: FontWeight.w900,
                       ),
                 ),
@@ -2303,7 +2323,7 @@ class _DiarySummaryCard extends StatelessWidget {
                 ? 'Семестр не определён'
                 : '${data.selectedSemesterNumber} семестр',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: const Color(0xFF1F2937).withValues(alpha: .74),
+                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: .74),
                   fontWeight: FontWeight.w700,
                 ),
           ),
@@ -2312,7 +2332,7 @@ class _DiarySummaryCard extends StatelessWidget {
             Text(
               'Зачётка № ${data.academicContext.recordBookNumber}',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: const Color(0xFF1F2937).withValues(alpha: .74),
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: .74),
                     fontWeight: FontWeight.w700,
                   ),
             ),
@@ -2321,7 +2341,7 @@ class _DiarySummaryCard extends StatelessWidget {
           Text(
             'Личные записи, задания и материалы по предметам семестра.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: const Color(0xFF1F2937).withValues(alpha: .66),
+                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: .66),
                   height: 1.3,
                 ),
           ),
@@ -2375,7 +2395,7 @@ class _SectionTitle extends StatelessWidget {
           style: Theme.of(context).textTheme.titleLarge?.copyWith(
                 fontSize: compact ? 20 : null,
                 fontWeight: FontWeight.w900,
-                color: Colors.black,
+                color: Theme.of(context).colorScheme.onSurface,
               ),
         ),
         if (subtitle != null && subtitle!.isNotEmpty) ...[
@@ -2385,7 +2405,7 @@ class _SectionTitle extends StatelessWidget {
             style: Theme.of(context)
                 .textTheme
                 .bodySmall
-                ?.copyWith(color: Colors.black54),
+                ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
         ],
       ],
@@ -2414,7 +2434,7 @@ class _CollapsibleTasksSection extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.only(top: 4, bottom: 8),
-      decoration: _cardDecoration(),
+      decoration: _cardDecoration(context),
       child: Material(
         type: MaterialType.transparency,
         borderRadius: BorderRadius.circular(18),
@@ -2433,7 +2453,7 @@ class _CollapsibleTasksSection extends StatelessWidget {
               title,
               style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w900,
-                    color: Colors.black87,
+                    color: Theme.of(context).colorScheme.onSurface,
                   ),
             ),
             subtitle: Text(
@@ -2441,7 +2461,7 @@ class _CollapsibleTasksSection extends StatelessWidget {
               style: Theme.of(context)
                   .textTheme
                   .bodySmall
-                  ?.copyWith(color: Colors.black54),
+                  ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             children: items.map(itemBuilder).toList(),
           ),
@@ -2480,7 +2500,7 @@ class _GroupActionDiaryCard extends StatelessWidget {
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
-      decoration: _cardDecoration(),
+      decoration: _cardDecoration(context),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(18),
@@ -2518,7 +2538,7 @@ class _GroupActionDiaryCard extends StatelessWidget {
                           style:
                               Theme.of(context).textTheme.titleMedium?.copyWith(
                                     fontWeight: FontWeight.w900,
-                                    color: Colors.black,
+                                    color: Theme.of(context).colorScheme.onSurface,
                                   ),
                         ),
                         const SizedBox(height: 4),
@@ -2528,7 +2548,7 @@ class _GroupActionDiaryCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style:
                               Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: Colors.black54,
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                                     fontWeight: FontWeight.w600,
                                   ),
                         ),
@@ -2602,7 +2622,7 @@ class _CollapsibleSubjectsSection extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.only(top: 4, bottom: 8),
-      decoration: _cardDecoration(),
+      decoration: _cardDecoration(context),
       child: Material(
         type: MaterialType.transparency,
         borderRadius: BorderRadius.circular(18),
@@ -2617,7 +2637,7 @@ class _CollapsibleSubjectsSection extends StatelessWidget {
               title,
               style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w900,
-                    color: Colors.black87,
+                    color: Theme.of(context).colorScheme.onSurface,
                   ),
             ),
             subtitle: Text(
@@ -2625,7 +2645,7 @@ class _CollapsibleSubjectsSection extends StatelessWidget {
               style: Theme.of(context)
                   .textTheme
                   .bodySmall
-                  ?.copyWith(color: Colors.black54),
+                  ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             children: subjects.isEmpty
                 ? [
@@ -2667,7 +2687,7 @@ class _AssignmentDiaryCard extends StatelessWidget {
     final dueText = _assignmentDueText(assignment);
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
-      decoration: _cardDecoration(),
+      decoration: _cardDecoration(context),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(18),
@@ -2709,7 +2729,7 @@ class _AssignmentDiaryCard extends StatelessWidget {
                           style:
                               Theme.of(context).textTheme.titleMedium?.copyWith(
                                     fontWeight: FontWeight.w900,
-                                    color: Colors.black,
+                                    color: Theme.of(context).colorScheme.onSurface,
                                   ),
                         ),
                         const SizedBox(height: 4),
@@ -2719,7 +2739,7 @@ class _AssignmentDiaryCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style:
                               Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: Colors.black54,
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                                     fontWeight: FontWeight.w600,
                                   ),
                         ),
@@ -2797,7 +2817,7 @@ class _PersonalTaskCard extends StatelessWidget {
     final dueText = _dateLabel(task.dueAt);
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
-      decoration: _cardDecoration(),
+      decoration: _cardDecoration(context),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(18),
@@ -2833,7 +2853,7 @@ class _PersonalTaskCard extends StatelessWidget {
                           style:
                               Theme.of(context).textTheme.titleMedium?.copyWith(
                                     fontWeight: FontWeight.w900,
-                                    color: Colors.black,
+                                    color: Theme.of(context).colorScheme.onSurface,
                                   ),
                         ),
                         const SizedBox(height: 4),
@@ -2843,7 +2863,7 @@ class _PersonalTaskCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style:
                               Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: Colors.black54,
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                                     fontWeight: FontWeight.w600,
                                   ),
                         ),
@@ -2953,7 +2973,7 @@ class _PersonalTaskDetailsSheet extends StatelessWidget {
             Text(
               task.title,
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    color: Colors.black,
+                    color: Theme.of(context).colorScheme.onSurface,
                     fontWeight: FontWeight.w900,
                   ),
             ),
@@ -2972,7 +2992,7 @@ class _PersonalTaskDetailsSheet extends StatelessWidget {
             Text(
               task.subjectTitle,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Colors.black54,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.w700,
                   ),
             ),
@@ -2982,7 +3002,7 @@ class _PersonalTaskDetailsSheet extends StatelessWidget {
                   ? 'Описания нет.'
                   : task.description!,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Colors.black87,
+                    color: Theme.of(context).colorScheme.onSurface,
                     height: 1.35,
                   ),
             ),
@@ -3046,7 +3066,7 @@ class _AssignmentDetailsSheet extends StatelessWidget {
                   child: Text(
                     assignment.title,
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          color: Colors.black,
+                          color: Theme.of(context).colorScheme.onSurface,
                           fontWeight: FontWeight.w900,
                         ),
                   ),
@@ -3059,7 +3079,7 @@ class _AssignmentDetailsSheet extends StatelessWidget {
             Text(
               assignment.subjectTitle,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Colors.black54,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.w700,
                   ),
             ),
@@ -3079,7 +3099,7 @@ class _AssignmentDetailsSheet extends StatelessWidget {
                   ? 'Описания нет.'
                   : assignment.description,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Colors.black87,
+                    color: Theme.of(context).colorScheme.onSurface,
                     height: 1.35,
                   ),
             ),
@@ -3120,7 +3140,7 @@ class _SubjectCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         child: Container(
           padding: const EdgeInsets.all(12),
-          decoration: _cardDecoration(),
+          decoration: _cardDecoration(context),
           child: Row(
             children: [
               _SubjectInitial(title: subject.title),
@@ -3135,14 +3155,14 @@ class _SubjectCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.w800,
-                            color: Colors.black,
+                            color: Theme.of(context).colorScheme.onSurface,
                           ),
                     ),
                     const SizedBox(height: 6),
                     Text(
                       _subjectMeta(subject),
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Colors.black54,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
                             fontWeight: FontWeight.w600,
                           ),
                     ),
@@ -3155,13 +3175,13 @@ class _SubjectCard extends StatelessWidget {
                         style: Theme.of(context)
                             .textTheme
                             .bodySmall
-                            ?.copyWith(color: Colors.black87),
+                            ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
                       ),
                     ],
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right_rounded, color: Colors.black38),
+              Icon(Icons.chevron_right_rounded, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ],
           ),
         ),
@@ -3203,7 +3223,7 @@ class _LatestEntryCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
-      decoration: _cardDecoration(),
+      decoration: _cardDecoration(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -3213,7 +3233,7 @@ class _LatestEntryCard extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.w800,
-                  color: Colors.black,
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
           ),
           const SizedBox(height: 6),
@@ -3222,7 +3242,7 @@ class _LatestEntryCard extends StatelessWidget {
             style: Theme.of(context)
                 .textTheme
                 .bodySmall
-                ?.copyWith(color: Colors.black54),
+                ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
           if ((entry.preview ?? '').isNotEmpty) ...[
             const SizedBox(height: 8),
@@ -3233,7 +3253,7 @@ class _LatestEntryCard extends StatelessWidget {
               style: Theme.of(context)
                   .textTheme
                   .bodyMedium
-                  ?.copyWith(color: Colors.black87),
+                  ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
             ),
           ],
         ],
@@ -3278,13 +3298,13 @@ class _EmptyCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: _cardDecoration(),
+      decoration: _cardDecoration(context),
       child: Text(
         text,
         style: Theme.of(context)
             .textTheme
             .bodyMedium
-            ?.copyWith(color: Colors.black54),
+            ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
       ),
     );
   }
@@ -3315,9 +3335,9 @@ class _InfoChip extends StatelessWidget {
   }
 }
 
-BoxDecoration _cardDecoration() {
+BoxDecoration _cardDecoration(BuildContext context) {
   return BoxDecoration(
-    color: Colors.white,
+    color: Theme.of(context).colorScheme.surface,
     borderRadius: BorderRadius.circular(18),
     boxShadow: [
       BoxShadow(

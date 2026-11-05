@@ -71,9 +71,6 @@ class StudentProfileScreenPreview extends StatelessWidget {
   final VoidCallback? onBack;
   final EdgeInsetsGeometry padding;
 
-  static const _bg = Color(0xFFFAF8FC);
-  static const _title = Color(0xFF111827);
-  static const _muted = Color(0xFF6B7280);
   static const _lavender = Color(0xFFDCD0FA);
   static const _accent = Color(0xFF7C63D8);
 
@@ -90,7 +87,7 @@ class StudentProfileScreenPreview extends StatelessWidget {
     }
 
     return ColoredBox(
-      color: _bg,
+      color: Theme.of(context).scaffoldBackgroundColor,
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: padding,
@@ -156,7 +153,6 @@ class StudentProfileScreenPreview extends StatelessWidget {
                       : 'Записи, конспекты и файлы по предметам текущего семестра',
                   icon: Icons.menu_book_outlined,
                   iconColor: _accent,
-                  colors: const [Color(0xFFDCD0FA), Color(0xFFC5EFE5)],
                   onTap: onDiaryTap,
                 ),
               if (showDiary) const SizedBox(height: sectionGap),
@@ -164,7 +160,6 @@ class StudentProfileScreenPreview extends StatelessWidget {
                 title: 'Карта СПБГАСУ',
                 icon: Icons.map_outlined,
                 iconColor: const Color(0xFF2F9D84),
-                colors: const [Color(0xFFC5EFE5), Color(0xFFAEE3D8)],
                 onTap: onMapTap,
                 compact: true,
               ),
@@ -200,7 +195,7 @@ class _ProfileFeedDetailView extends StatelessWidget {
     final theme = Theme.of(context);
     final payload = card.payload;
     return ColoredBox(
-      color: StudentProfileScreenPreview._bg,
+      color: theme.scaffoldBackgroundColor,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -220,7 +215,7 @@ class _ProfileFeedDetailView extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w800,
-                      color: StudentProfileScreenPreview._title,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                 ),
@@ -245,7 +240,7 @@ class _ProfileFeedDetailView extends StatelessWidget {
                   payload.title,
                   style: theme.textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.w900,
-                    color: StudentProfileScreenPreview._title,
+                    color: Theme.of(context).colorScheme.onSurface,
                   ),
                 ),
                 if (payload.subtitle.isNotEmpty) ...[
@@ -253,7 +248,7 @@ class _ProfileFeedDetailView extends StatelessWidget {
                   Text(
                     payload.subtitle,
                     style: theme.textTheme.bodyLarge?.copyWith(
-                      color: StudentProfileScreenPreview._muted,
+                      color: theme.colorScheme.onSurfaceVariant,
                       fontWeight: FontWeight.w600,
                       height: 1.35,
                     ),
@@ -334,7 +329,7 @@ class _SoftHeader extends StatelessWidget {
           displayName.isEmpty ? 'Без имени' : displayName,
           style: text.titleLarge?.copyWith(
             fontWeight: FontWeight.w800,
-            color: StudentProfileScreenPreview._title,
+            color: Theme.of(context).colorScheme.onSurface,
           ),
           textAlign: TextAlign.center,
         ),
@@ -346,7 +341,7 @@ class _SoftHeader extends StatelessWidget {
                   ? 'Данные профиля не заполнены'
                   : subtitle,
           style: text.bodyMedium?.copyWith(
-            color: StudentProfileScreenPreview._title,
+            color: Theme.of(context).colorScheme.onSurface,
           ),
           textAlign: TextAlign.center,
         ),
@@ -389,13 +384,14 @@ class _ActionsRow extends StatelessWidget {
                 icon: const Icon(Icons.chat_bubble_outline, size: 18),
                 label: const Text('Сообщения'),
                 style: OutlinedButton.styleFrom(
-                  minimumSize: const Size.fromHeight(44),
-                  foregroundColor: const Color(0xFF5B4B8A),
+                  minimumSize: const Size.fromHeight(48),
+                  foregroundColor: Theme.of(context).colorScheme.primary,
                   side: BorderSide(
-                    color: const Color(0xFFD9CCF5).withValues(alpha: 0.95),
+                    color: Theme.of(context).colorScheme.outlineVariant,
                   ),
-                  backgroundColor:
-                      const Color(0xFFEDE7F6).withValues(alpha: 0.55),
+                  backgroundColor: Color.alphaBlend(
+                      const Color(0xFF7C63D8).withValues(alpha: 0.06),
+                      Theme.of(context).colorScheme.surface),
                 ),
               ),
             ),
@@ -406,13 +402,17 @@ class _ActionsRow extends StatelessWidget {
                 icon: const Icon(Icons.group_outlined, size: 18),
                 label: const Text('Друзья'),
                 style: OutlinedButton.styleFrom(
-                  minimumSize: const Size.fromHeight(44),
-                  foregroundColor: const Color(0xFF2F6B5E),
+                  minimumSize: const Size.fromHeight(48),
+                  foregroundColor:
+                      Theme.of(context).brightness == Brightness.dark
+                          ? const Color(0xFF8BD9C4)
+                          : const Color(0xFF2F6B5E),
                   side: BorderSide(
-                    color: const Color(0xFFC2ECE4).withValues(alpha: 0.95),
+                    color: Theme.of(context).colorScheme.outlineVariant,
                   ),
-                  backgroundColor:
-                      const Color(0xFFD6F5EE).withValues(alpha: 0.55),
+                  backgroundColor: Color.alphaBlend(
+                      const Color(0xFF2F9D84).withValues(alpha: 0.06),
+                      Theme.of(context).colorScheme.surface),
                 ),
               ),
             ),
@@ -450,23 +450,16 @@ class _EdgeBadge extends StatelessWidget {
       height: 22,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.primary,
         borderRadius: BorderRadius.circular(12),
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black26,
-            blurRadius: 8,
-            offset: Offset(0, 2),
-          ),
-        ],
       ),
       alignment: Alignment.center,
       child: Text(
         text,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w800,
-          color: Colors.black87,
+          color: Theme.of(context).colorScheme.onPrimary,
         ),
       ),
     );
@@ -484,7 +477,7 @@ class _SectionTitle extends StatelessWidget {
       title,
       style: Theme.of(context).textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.w700,
-            color: StudentProfileScreenPreview._title,
+            color: Theme.of(context).colorScheme.onSurface,
           ),
     );
   }
@@ -495,7 +488,6 @@ class _StudyBanner extends StatelessWidget {
     required this.title,
     required this.icon,
     required this.iconColor,
-    required this.colors,
     this.subtitle,
     this.onTap,
     this.compact = false,
@@ -505,7 +497,6 @@ class _StudyBanner extends StatelessWidget {
   final String? subtitle;
   final IconData icon;
   final Color iconColor;
-  final List<Color> colors;
   final VoidCallback? onTap;
   final bool compact;
 
@@ -524,18 +515,9 @@ class _StudyBanner extends StatelessWidget {
               : null,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
-            gradient: LinearGradient(
-              colors: colors,
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: colors.last.withValues(alpha: 0.22),
-                blurRadius: 14,
-                offset: const Offset(0, 8),
-              ),
-            ],
+            color: Theme.of(context).colorScheme.surface,
+            border:
+                Border.all(color: Theme.of(context).colorScheme.outlineVariant),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           child: Row(
@@ -551,7 +533,7 @@ class _StudyBanner extends StatelessWidget {
                       title,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.w800,
-                            color: StudentProfileScreenPreview._title,
+                            color: Theme.of(context).colorScheme.onSurface,
                           ),
                     ),
                     if (subtitle != null && subtitle!.isNotEmpty) ...[
@@ -559,7 +541,9 @@ class _StudyBanner extends StatelessWidget {
                       Text(
                         subtitle!,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Colors.black54,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
                             ),
                       ),
                     ],

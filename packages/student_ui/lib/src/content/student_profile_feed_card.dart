@@ -1,3 +1,4 @@
+import '../branding/product_loading_indicator.dart';
 import 'dart:async';
 import 'dart:typed_data';
 
@@ -279,7 +280,7 @@ class _FeedImageSkeleton extends StatelessWidget {
           child: SizedBox(
             width: 20,
             height: 20,
-            child: CircularProgressIndicator(strokeWidth: 2),
+            child: ProductLoadingIndicator(),
           ),
         ),
       ),

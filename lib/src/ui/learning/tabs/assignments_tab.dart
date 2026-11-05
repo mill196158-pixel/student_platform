@@ -286,27 +286,13 @@ class _GroupActionAssignmentTile extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onOpen,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(12),
         child: Ink(
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Colors.white,
-                accent.withValues(alpha: 0.035),
-                const Color(0xFFFBF9FE),
-              ],
-            ),
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
-                blurRadius: 12,
-                offset: const Offset(0, 5),
-              ),
-            ],
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: cs.outlineVariant),
+            boxShadow: const [],
           ),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
@@ -339,9 +325,8 @@ class _GroupActionAssignmentTile extends StatelessWidget {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.titleSmall?.copyWith(
-                          // Light card surface (same as assignment rows) —
-                          // always dark ink for readable contrast.
-                          color: Colors.black,
+                          // Follow the current surface contrast in both themes.
+                          color: cs.onSurface,
                           fontWeight: FontWeight.w800,
                         ),
                       ),
@@ -349,7 +334,7 @@ class _GroupActionAssignmentTile extends StatelessWidget {
                       Text(
                         subtitle,
                         style: theme.textTheme.bodySmall?.copyWith(
-                          color: Colors.black.withValues(alpha: 0.55),
+                          color: cs.onSurfaceVariant,
                         ),
                       ),
                     ],
@@ -357,7 +342,7 @@ class _GroupActionAssignmentTile extends StatelessWidget {
                 ),
                 Icon(
                   Icons.chevron_right,
-                  color: Colors.black.withValues(alpha: 0.45),
+                  color: cs.onSurfaceVariant,
                 ),
               ],
             ),
@@ -406,28 +391,14 @@ class _CreateAssignmentFab extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onPressed,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(12),
         child: Ink(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(22),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(color: primary.withValues(alpha: 0.16)),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                primary.withValues(alpha: 0.10),
-                primary.withValues(alpha: 0.04),
-                Colors.white,
-              ],
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
-                blurRadius: 12,
-                offset: const Offset(0, 5),
-              ),
-            ],
+            color: Theme.of(context).colorScheme.surface,
+            boxShadow: const [],
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -472,30 +443,16 @@ class _AssignmentRowTile extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(12),
         onTap: onOpen,
         child: Ink(
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Colors.white,
-                accent.withValues(alpha: 0.035),
-                const Color(0xFFFBF9FE),
-              ],
-            ),
-            borderRadius: BorderRadius.circular(22),
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: Colors.black.withValues(alpha: 0.06),
+              color: cs.outlineVariant,
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: .04),
-                blurRadius: 14,
-                offset: const Offset(0, 6),
-              ),
-            ],
+            boxShadow: const [],
           ),
           padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
           child: Row(
@@ -521,7 +478,7 @@ class _AssignmentRowTile extends StatelessWidget {
                             style: theme.textTheme.titleMedium?.copyWith(
                               fontSize: 16,
                               fontWeight: FontWeight.w900,
-                              color: Colors.black,
+                              color: cs.onSurface,
                               height: 1.12,
                             ),
                           ),
@@ -535,7 +492,7 @@ class _AssignmentRowTile extends StatelessWidget {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodyMedium?.copyWith(
-                          color: Colors.black.withValues(alpha: 0.55),
+                          color: cs.onSurfaceVariant,
                           height: 1.22,
                         ),
                       ),
@@ -598,30 +555,16 @@ class _AssignmentCardTile extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(12),
         onTap: onOpen,
         child: Ink(
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Colors.white,
-                accent.withValues(alpha: 0.035),
-                const Color(0xFFFBF9FE),
-              ],
-            ),
-            borderRadius: BorderRadius.circular(22),
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: Colors.black.withValues(alpha: 0.06),
+              color: cs.outlineVariant,
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: .04),
-                blurRadius: 14,
-                offset: const Offset(0, 6),
-              ),
-            ],
+            boxShadow: const [],
           ),
           padding: const EdgeInsets.all(13),
           child: Column(
@@ -651,7 +594,7 @@ class _AssignmentCardTile extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w900,
-                    color: Colors.black,
+                    color: cs.onSurface,
                     height: 1.12,
                   ),
                 ),

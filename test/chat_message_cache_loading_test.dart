@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -118,7 +119,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('Сообщений пока нет'), findsOneWidget);
-    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.byType(ProductLoadingIndicator), findsNothing);
   });
 
   testWidgets('2b. empty refreshing DM never flashes empty state',
@@ -154,7 +155,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('Сообщений пока нет'), findsNothing);
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.byType(ProductLoadingIndicator), findsOneWidget);
   });
 
   test('3/4. syncLatest single-flight for one chatId', () async {

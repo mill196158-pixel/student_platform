@@ -23,6 +23,8 @@ class ProposeVacancyScreen extends StatefulWidget {
 
 class _ProposeVacancyScreenState extends State<ProposeVacancyScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _titleKey = GlobalKey<FormFieldState<String>>();
+  final _summaryKey = GlobalKey<FormFieldState<String>>();
   late final VacancySubmissionService _service =
       widget.submissionService ?? VacancySubmissionService();
 
@@ -117,7 +119,21 @@ class _ProposeVacancyScreenState extends State<ProposeVacancyScreen> {
 
   Future<void> _submit() async {
     if (_busy) return;
-    if (!_formKey.currentState!.validate()) return;
+    if (!_formKey.currentState!.validate()) {
+      FocusManager.instance.primaryFocus?.unfocus();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        for (final key in [_titleKey, _summaryKey]) {
+          final fieldContext = key.currentContext;
+          if (key.currentState?.hasError == true && fieldContext != null) {
+            Scrollable.ensureVisible(fieldContext,
+                duration: const Duration(milliseconds: 250), alignment: 0.1);
+            break;
+          }
+        }
+      });
+      return;
+    }
 
     setState(() {
       _busy = true;
@@ -137,7 +153,8 @@ class _ProposeVacancyScreenState extends State<ProposeVacancyScreen> {
         );
         if (!updated.ok) {
           if (!mounted) return;
-          setState(() => _banner = updated.errorMessage ?? 'Не удалось сохранить.');
+          setState(
+              () => _banner = updated.errorMessage ?? 'Не удалось сохранить.');
           return;
         }
         _rowVersion = updated.rowVersion ?? expected + 1;
@@ -150,7 +167,8 @@ class _ProposeVacancyScreenState extends State<ProposeVacancyScreen> {
       }
       if (!mounted) return;
       if (!result.ok) {
-        setState(() => _banner = result.errorMessage ?? 'Не удалось отправить.');
+        setState(
+            () => _banner = result.errorMessage ?? 'Не удалось отправить.');
         return;
       }
       setState(() => _usedLocalFallback = result.isLocalFallback);
@@ -158,7 +176,8 @@ class _ProposeVacancyScreenState extends State<ProposeVacancyScreen> {
       await showDialog<void>(
         context: context,
         builder: (context) => AlertDialog(
-          title: Text(_isEditDraft ? 'Заявка отправлена снова' : 'Заявка отправлена'),
+          title: Text(
+              _isEditDraft ? 'Заявка отправлена снова' : 'Заявка отправлена'),
           content: Text(
             result.isLocalFallback
                 ? 'Демо-режим: заявка сохранена локально со статусом '
@@ -184,172 +203,376 @@ class _ProposeVacancyScreenState extends State<ProposeVacancyScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    OutlineInputBorder fieldBorder(Color color, {double width = 1}) =>
+        OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(color: color, width: width),
+        );
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isEditDraft ? 'Исправить вакансию' : 'Предложить вакансию'),
+        title:
+            Text(_isEditDraft ? 'Исправить вакансию' : 'Предложить вакансию'),
       ),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                _usedLocalFallback
-                    ? 'Демо: RPC submit_vacancy недоступен — заявка '
-                        'сохраняется локально.'
-                    : _isEditDraft
-                        ? 'Модератор запросил уточнение. Исправьте заявку и '
-                            'отправьте снова — публикация только после одобрения.'
-                        : 'Ваша заявка не публикуется сразу. Модератор проверит '
-                            'объявление перед публикацией.',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-            ),
-            if (_clarificationReason != null &&
-                _clarificationReason!.trim().isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFFBEB),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFFF59E0B)),
-                ),
-                child: Text(
-                  'Комментарий модератора: ${_clarificationReason!.trim()}',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: const Color(0xFF92400E),
-                        fontWeight: FontWeight.w600,
-                      ),
-                ),
-              ),
-            ],
-            if (_banner != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                _banner!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ],
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: _titleController,
-              decoration: const InputDecoration(labelText: 'Название *'),
-              validator: (v) =>
-                  (v == null || v.trim().isEmpty) ? 'Обязательное поле' : null,
-            ),
-            TextFormField(
-              controller: _companyController,
-              decoration: const InputDecoration(labelText: 'Организация'),
-            ),
-            TextFormField(
-              controller: _summaryController,
-              decoration: const InputDecoration(
-                labelText: 'Краткое описание *',
-              ),
-              maxLines: 2,
-              validator: (v) =>
-                  (v == null || v.trim().isEmpty) ? 'Обязательное поле' : null,
-            ),
-            TextFormField(
-              controller: _descriptionController,
-              decoration: const InputDecoration(labelText: 'Описание'),
-              maxLines: 4,
-            ),
-            TextFormField(
-              controller: _requirementsController,
-              decoration: const InputDecoration(labelText: 'Требования'),
-              maxLines: 3,
-            ),
-            DropdownButtonFormField<VacancyEmploymentType?>(
-              key: ValueKey('employment-$_employmentType'),
-              initialValue: _employmentType,
-              decoration: const InputDecoration(labelText: 'Формат занятости'),
-              items: [
-                const DropdownMenuItem(
-                  value: null,
-                  child: Text('— не указано —'),
-                ),
-                ...VacancyEmploymentType.values.map(
-                  (e) => DropdownMenuItem(value: e, child: Text(e.labelRu)),
-                ),
-              ],
-              onChanged: (v) => setState(() => _employmentType = v),
-            ),
-            DropdownButtonFormField<VacancyWorkFormat?>(
-              key: ValueKey('format-$_workFormat'),
-              initialValue: _workFormat,
-              decoration: const InputDecoration(
-                labelText: 'Местоположение / удалённо',
-              ),
-              items: [
-                const DropdownMenuItem(
-                  value: null,
-                  child: Text('— не указано —'),
-                ),
-                ...VacancyWorkFormat.values.map(
-                  (e) => DropdownMenuItem(value: e, child: Text(e.labelRu)),
-                ),
-              ],
-              onChanged: (v) => setState(() => _workFormat = v),
-            ),
-            TextFormField(
-              controller: _locationController,
-              decoration: const InputDecoration(
-                labelText: 'Местоположение (текст)',
-              ),
-            ),
-            TextFormField(
-              controller: _salaryController,
-              decoration: const InputDecoration(
-                labelText: 'Зарплата (необязательно)',
-              ),
-            ),
-            TextFormField(
-              controller: _urlController,
-              decoration: const InputDecoration(labelText: 'Ссылка'),
-              keyboardType: TextInputType.url,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Контакты',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-            ),
-            TextFormField(
-              controller: _emailController,
-              decoration: const InputDecoration(labelText: 'Email'),
-              keyboardType: TextInputType.emailAddress,
-            ),
-            TextFormField(
-              controller: _phoneController,
-              decoration: const InputDecoration(labelText: 'Телефон'),
-              keyboardType: TextInputType.phone,
-            ),
-            const SizedBox(height: 20),
-            FilledButton(
-              onPressed: _busy ? null : _submit,
-              child: _busy
-                  ? const SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Text(
-                      _isEditDraft
-                          ? 'Сохранить и отправить снова'
-                          : 'Отправить на модерацию',
-                    ),
-            ),
-          ],
+      body: Theme(
+        data: theme.copyWith(
+          inputDecorationTheme: theme.inputDecorationTheme.copyWith(
+            filled: true,
+            fillColor: colors.surface,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            border: fieldBorder(colors.outlineVariant),
+            enabledBorder:
+                fieldBorder(colors.outlineVariant.withValues(alpha: .75)),
+            focusedBorder: fieldBorder(colors.primary, width: 1.5),
+            errorBorder: fieldBorder(colors.error),
+            focusedErrorBorder: fieldBorder(colors.error, width: 1.5),
+          ),
         ),
+        child: Form(
+          key: _formKey,
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 680),
+                child: ListView(
+                  padding: const EdgeInsets.all(20),
+                  children: [
+                    // Keep every field registered with Form while scrolling.
+                    Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: colors.primaryContainer
+                                  .withValues(alpha: .55),
+                              borderRadius: BorderRadius.circular(18),
+                            ),
+                            child: Text(
+                              _usedLocalFallback
+                                  ? 'Демо: RPC submit_vacancy недоступен — заявка '
+                                      'сохраняется локально.'
+                                  : _isEditDraft
+                                      ? 'Модератор запросил уточнение. Исправьте заявку и '
+                                          'отправьте снова — публикация только после одобрения.'
+                                      : 'Ваша заявка не публикуется сразу. Модератор проверит '
+                                          'объявление перед публикацией.',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onPrimaryContainer),
+                            ),
+                          ),
+                          if (_clarificationReason != null &&
+                              _clarificationReason!.trim().isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFFFBEB),
+                                borderRadius: BorderRadius.circular(12),
+                                border:
+                                    Border.all(color: const Color(0xFFF59E0B)),
+                              ),
+                              child: Text(
+                                'Комментарий модератора: ${_clarificationReason!.trim()}',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodyMedium
+                                    ?.copyWith(
+                                      color: const Color(0xFF92400E),
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                              ),
+                            ),
+                          ],
+                          if (_banner != null) ...[
+                            const SizedBox(height: 12),
+                            Text(
+                              _banner!,
+                              style: TextStyle(
+                                  color: Theme.of(context).colorScheme.error),
+                            ),
+                          ],
+                          const SizedBox(height: 24),
+                          const _VacancySectionHeading(
+                            icon: Icons.article_outlined,
+                            title: 'Объявление',
+                            subtitle: 'Расскажите о вакансии',
+                          ),
+                          const SizedBox(height: 12),
+                          TextFormField(
+                            key: _titleKey,
+                            controller: _titleController,
+                            decoration:
+                                const InputDecoration(labelText: 'Название *'),
+                            validator: (v) => (v == null || v.trim().isEmpty)
+                                ? 'Обязательное поле'
+                                : null,
+                          ),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            controller: _companyController,
+                            decoration:
+                                const InputDecoration(labelText: 'Организация'),
+                          ),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            key: _summaryKey,
+                            controller: _summaryController,
+                            decoration: const InputDecoration(
+                              labelText: 'Краткое описание *',
+                              alignLabelWithHint: true,
+                            ),
+                            maxLines: 2,
+                            validator: (v) => (v == null || v.trim().isEmpty)
+                                ? 'Обязательное поле'
+                                : null,
+                          ),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            controller: _descriptionController,
+                            decoration: const InputDecoration(
+                                labelText: 'Описание',
+                                alignLabelWithHint: true),
+                            maxLines: 4,
+                          ),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            controller: _requirementsController,
+                            decoration: const InputDecoration(
+                                labelText: 'Требования',
+                                alignLabelWithHint: true),
+                            maxLines: 3,
+                          ),
+                          const SizedBox(height: 24),
+                          const _VacancySectionHeading(
+                            icon: Icons.work_outline_rounded,
+                            title: 'Условия',
+                            subtitle: 'Формат, место и оплата',
+                          ),
+                          const SizedBox(height: 12),
+                          _VacancyOptionField<VacancyEmploymentType>(
+                            key: ValueKey('employment-$_employmentType'),
+                            label: 'Формат занятости',
+                            current: _employmentType,
+                            options: VacancyEmploymentType.values
+                                .map((value) =>
+                                    (value: value, label: value.labelRu))
+                                .toList(),
+                            onChanged: (value) =>
+                                setState(() => _employmentType = value),
+                          ),
+                          const SizedBox(height: 16),
+                          _VacancyOptionField<VacancyWorkFormat>(
+                            key: ValueKey('format-$_workFormat'),
+                            label: 'Местоположение / удалённо',
+                            current: _workFormat,
+                            options: VacancyWorkFormat.values
+                                .map((value) =>
+                                    (value: value, label: value.labelRu))
+                                .toList(),
+                            onChanged: (value) =>
+                                setState(() => _workFormat = value),
+                          ),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            controller: _locationController,
+                            decoration: const InputDecoration(
+                              labelText: 'Местоположение (текст)',
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            controller: _salaryController,
+                            decoration: const InputDecoration(
+                              labelText: 'Зарплата (необязательно)',
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            controller: _urlController,
+                            decoration:
+                                const InputDecoration(labelText: 'Ссылка'),
+                            keyboardType: TextInputType.url,
+                          ),
+                          const SizedBox(height: 24),
+                          const _VacancySectionHeading(
+                            icon: Icons.alternate_email_rounded,
+                            title: 'Контакты',
+                            subtitle: 'Как с вами связаться',
+                          ),
+                          const SizedBox(height: 12),
+                          TextFormField(
+                            controller: _emailController,
+                            decoration:
+                                const InputDecoration(labelText: 'Email'),
+                            keyboardType: TextInputType.emailAddress,
+                          ),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            controller: _phoneController,
+                            decoration:
+                                const InputDecoration(labelText: 'Телефон'),
+                            keyboardType: TextInputType.phone,
+                          ),
+                          const SizedBox(height: 20),
+                          FilledButton(
+                            onPressed: _busy ? null : _submit,
+                            child: _busy
+                                ? const SizedBox(
+                                    width: 22,
+                                    height: 22,
+                                    child: ProductLoadingIndicator(),
+                                  )
+                                : Text(
+                                    _isEditDraft
+                                        ? 'Сохранить и отправить снова'
+                                        : 'Отправить на модерацию',
+                                  ),
+                          ),
+                        ]),
+                  ],
+                )),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _VacancySectionHeading extends StatelessWidget {
+  const _VacancySectionHeading({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: colors.primaryContainer.withValues(alpha: .6),
+            borderRadius: BorderRadius.circular(13),
+          ),
+          child: Icon(icon, size: 20, color: colors.primary),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title,
+                  style: theme.textTheme.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w700)),
+              Text(subtitle,
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: colors.onSurfaceVariant)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _VacancyOptionField<T> extends StatelessWidget {
+  const _VacancyOptionField(
+      {super.key,
+      required this.label,
+      required this.current,
+      required this.options,
+      required this.onChanged});
+
+  final String label;
+  final T? current;
+  final List<({T value, String label})> options;
+  final ValueChanged<T?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedLabel = options
+            .where((option) => option.value == current)
+            .map((option) => option.label)
+            .firstOrNull ??
+        '— не указано —';
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => showModalBottomSheet<void>(
+        context: context,
+        useSafeArea: true,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: (sheetContext) {
+          final colors = Theme.of(sheetContext).colorScheme;
+          return SafeArea(
+            top: false,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Row(children: [
+                      Expanded(
+                          child: Text(label,
+                              style:
+                                  Theme.of(sheetContext).textTheme.titleLarge)),
+                      IconButton(
+                          tooltip: 'Закрыть',
+                          onPressed: () => Navigator.pop(sheetContext),
+                          icon: const Icon(Icons.close_rounded)),
+                    ]),
+                  ),
+                  for (final option in [
+                    (value: null, label: '— не указано —'),
+                    ...options
+                  ])
+                    ListTile(
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                      minTileHeight: 52,
+                      title: Text(option.label),
+                      selected: option.value == current,
+                      selectedColor: colors.onPrimaryContainer,
+                      selectedTileColor: colors.primaryContainer,
+                      trailing: option.value == current
+                          ? const Icon(Icons.check_rounded, size: 20)
+                          : null,
+                      onTap: () {
+                        onChanged(option.value);
+                        Navigator.pop(sheetContext);
+                      },
+                    ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+      child: InputDecorator(
+        decoration: InputDecoration(
+            labelText: label,
+            suffixIcon: const Icon(Icons.keyboard_arrow_down_rounded)),
+        child: Text(selectedLabel),
       ),
     );
   }

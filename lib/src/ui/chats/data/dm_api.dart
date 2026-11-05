@@ -559,6 +559,7 @@ class DmApi {
       text: text,
       at: DateTime.now(),
       replyToId: replyToId,
+      type: fileIds.isEmpty ? MessageType.text : MessageType.file,
       outboundFileIds: List.unmodifiable(fileIds),
       clientId: clientId,
       deliveryStatus: MessageDeliveryStatus.sending,

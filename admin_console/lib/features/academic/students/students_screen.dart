@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductTheme, ProductLoadingIndicator;
 import 'package:admin_import_mapping/admin_import_mapping.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -90,6 +91,9 @@ class _StudentsScreenState extends State<StudentsScreen> {
                   decoration: const InputDecoration(labelText: 'Имя'),
                 ),
                 DropdownButtonFormField<String?>(
+                  borderRadius: ProductTheme.selectionMenuRadius,
+                  elevation: ProductTheme.selectionMenuElevation,
+                  icon: const Icon(Icons.keyboard_arrow_down_rounded),
                   initialValue: groupId,
                   items: [
                     const DropdownMenuItem(
@@ -432,6 +436,9 @@ class _StudentsScreenState extends State<StudentsScreen> {
               ),
             ),
             DropdownButton<bool?>(
+              borderRadius: ProductTheme.selectionMenuRadius,
+              elevation: ProductTheme.selectionMenuElevation,
+              icon: const Icon(Icons.keyboard_arrow_down_rounded),
               value: _activeFilter,
               items: const [
                 DropdownMenuItem(value: null, child: Text('Все')),
@@ -444,6 +451,9 @@ class _StudentsScreenState extends State<StudentsScreen> {
               },
             ),
             DropdownButton<String?>(
+              borderRadius: ProductTheme.selectionMenuRadius,
+              elevation: ProductTheme.selectionMenuElevation,
+              icon: const Icon(Icons.keyboard_arrow_down_rounded),
               value: _groupFilter,
               hint: const Text('Все группы'),
               items: [
@@ -462,6 +472,9 @@ class _StudentsScreenState extends State<StudentsScreen> {
             ),
             if (canWrite && _academicYears.isNotEmpty)
               DropdownButton<String>(
+                borderRadius: ProductTheme.selectionMenuRadius,
+                elevation: ProductTheme.selectionMenuElevation,
+                icon: const Icon(Icons.keyboard_arrow_down_rounded),
                 key: const Key('students-import-year'),
                 value: _importYearId,
                 hint: const Text('Учебный год для импорта'),
@@ -510,6 +523,9 @@ class _StudentsScreenState extends State<StudentsScreen> {
               ),
             if (_terms.isNotEmpty)
               DropdownButton<String?>(
+                borderRadius: ProductTheme.selectionMenuRadius,
+                elevation: ProductTheme.selectionMenuElevation,
+                icon: const Icon(Icons.keyboard_arrow_down_rounded),
                 key: const Key('students-term-filter'),
                 value: _termFilter,
                 hint: const Text('Семестр'),
@@ -598,7 +614,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
         Expanded(
           child: Card(
             child: _loading
-                ? const Center(child: CircularProgressIndicator())
+                ? const Center(child: ProductLoadingIndicator())
                 : _items.isEmpty
                 ? const Center(child: Text('Студенты не найдены'))
                 : ListView(

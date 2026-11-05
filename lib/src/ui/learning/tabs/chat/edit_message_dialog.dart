@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -47,119 +48,119 @@ String friendlyEditMessageError(Object error) {
   return 'Не удалось изменить сообщение';
 }
 
-/// Compact editor. Calls [onSave] while keeping the dialog open and
-/// blocking repeat taps until the request finishes.
+/// Calls [onSave] while keeping the editor open and blocking repeat taps.
 Future<bool> showEditMessageDialog(
   BuildContext context, {
   required String initialText,
   required Future<void> Function(String text) onSave,
-}) async {
-  final controller = TextEditingController(text: initialText);
-  controller.selection = TextSelection(
-    baseOffset: 0,
-    extentOffset: controller.text.length,
-  );
+}) async =>
+    await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) =>
+          _EditMessageDialog(initialText: initialText, onSave: onSave),
+    ) ??
+    false;
 
-  final saved = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) {
-          var saving = false;
-          String? localError;
-          return StatefulBuilder(
-            builder: (ctx, setLocal) {
-              Future<void> submit() async {
-                if (saving) return;
-                final text = controller.text.trim();
-                if (text.isEmpty) {
-                  setLocal(() => localError = 'Текст не может быть пустым');
-                  return;
-                }
-                if (text.length > kChatMessageMaxLength) {
-                  setLocal(() => localError = 'Слишком длинный текст');
-                  return;
-                }
-                if (text == initialText.trim()) {
-                  Navigator.of(ctx).pop(false);
-                  return;
-                }
+class _EditMessageDialog extends StatefulWidget {
+  const _EditMessageDialog({required this.initialText, required this.onSave});
+  final String initialText;
+  final Future<void> Function(String text) onSave;
+  @override
+  State<_EditMessageDialog> createState() => _EditMessageDialogState();
+}
 
-                setLocal(() {
-                  saving = true;
-                  localError = null;
-                });
-                try {
-                  await onSave(text);
-                  if (ctx.mounted) Navigator.of(ctx).pop(true);
-                } catch (e, st) {
-                  debugPrint('[editOwnMessage] $e\n$st');
-                  if (!ctx.mounted) return;
-                  setLocal(() {
-                    saving = false;
-                    localError = friendlyEditMessageError(e);
-                  });
-                }
-              }
+class _EditMessageDialogState extends State<_EditMessageDialog> {
+  late final TextEditingController _controller;
+  bool _saving = false;
+  String? _localError;
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialText);
+    _controller.selection =
+        TextSelection(baseOffset: 0, extentOffset: _controller.text.length);
+  }
 
-              return AlertDialog(
-                title: const Text('Изменить сообщение'),
-                content: SizedBox(
-                  width: 360,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      TextField(
-                        controller: controller,
-                        autofocus: true,
-                        maxLines: 6,
-                        minLines: 2,
-                        maxLength: kChatMessageMaxLength,
-                        enabled: !saving,
-                        decoration: const InputDecoration(
-                          hintText: 'Текст сообщения',
-                          border: OutlineInputBorder(),
-                          isDense: true,
-                        ),
-                        onSubmitted: (_) => submit(),
-                      ),
-                      if (localError != null) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          localError!,
-                          style: TextStyle(
-                            color: Theme.of(ctx).colorScheme.error,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                actions: [
-                  TextButton(
-                    onPressed:
-                        saving ? null : () => Navigator.of(ctx).pop(false),
-                    child: const Text('Отмена'),
-                  ),
-                  FilledButton(
-                    onPressed: saving ? null : submit,
-                    child: saving
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Сохранить'),
-                  ),
-                ],
-              );
-            },
-          );
-        },
-      ) ??
-      false;
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
-  controller.dispose();
-  return saved;
+  Future<void> _submit() async {
+    if (_saving) return;
+    final text = _controller.text.trim();
+    if (text.isEmpty) {
+      setState(() => _localError = 'Текст не может быть пустым');
+      return;
+    }
+    if (text.length > kChatMessageMaxLength) {
+      setState(() => _localError = 'Слишком длинный текст');
+      return;
+    }
+    if (text == widget.initialText.trim()) {
+      Navigator.of(context).pop(false);
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _localError = null;
+    });
+    try {
+      await widget.onSave(text);
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (error, stack) {
+      debugPrint('[editOwnMessage] $error\n$stack');
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _localError = friendlyEditMessageError(error);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        scrollable: true,
+        title: const Text('Изменить сообщение'),
+        content: SizedBox(
+            width: 440,
+            child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextField(
+                      controller: _controller,
+                      autofocus: true,
+                      maxLines: 6,
+                      minLines: 2,
+                      maxLength: kChatMessageMaxLength,
+                      enabled: !_saving,
+                      decoration:
+                          const InputDecoration(hintText: 'Текст сообщения'),
+                      onSubmitted: (_) => _submit()),
+                  if (_localError != null) ...[
+                    const SizedBox(height: 12),
+                    Text(_localError!,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(context).colorScheme.error)),
+                  ],
+                ])),
+        actions: [
+          TextButton(
+              onPressed:
+                  _saving ? null : () => Navigator.of(context).pop(false),
+              child: const Text('Отмена')),
+          FilledButton(
+              onPressed: _saving ? null : _submit,
+              child: _saving
+                  ? SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: ProductLoadingIndicator(
+                          color: Theme.of(context).colorScheme.onPrimary))
+                  : const Text('Сохранить')),
+        ],
+      );
 }

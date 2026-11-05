@@ -313,6 +313,9 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
                         },
                       ),
                       DropdownButtonFormField<ReferenceCategoryStatus>(
+                        borderRadius: ProductTheme.selectionMenuRadius,
+                        elevation: ProductTheme.selectionMenuElevation,
+                        icon: const Icon(Icons.keyboard_arrow_down_rounded),
                         value: status,
                         decoration: const InputDecoration(labelText: 'Статус'),
                         items: [
@@ -411,6 +414,9 @@ class _ReferenceEditorScreenState extends State<ReferenceEditorScreen> {
                       ),
                       if (mode == 'reassign' && others.isNotEmpty)
                         DropdownButtonFormField<String>(
+                          borderRadius: ProductTheme.selectionMenuRadius,
+                          elevation: ProductTheme.selectionMenuElevation,
+                          icon: const Icon(Icons.keyboard_arrow_down_rounded),
                           isExpanded: true,
                           initialValue: reassignToId ?? others.first.id,
                           decoration: const InputDecoration(
@@ -1770,6 +1776,9 @@ class _ReferencePropertiesPanel extends StatelessWidget {
           ),
           _textField(titleController, 'Заголовок'),
           DropdownButtonFormField<String>(
+            borderRadius: ProductTheme.selectionMenuRadius,
+            elevation: ProductTheme.selectionMenuElevation,
+            icon: const Icon(Icons.keyboard_arrow_down_rounded),
             isExpanded: true,
             initialValue: selectedCategoryId,
             decoration: const InputDecoration(labelText: 'Категория'),
@@ -1819,6 +1828,9 @@ class _ReferencePropertiesPanel extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           DropdownButtonFormField<String>(
+            borderRadius: ProductTheme.selectionMenuRadius,
+            elevation: ProductTheme.selectionMenuElevation,
+            icon: const Icon(Icons.keyboard_arrow_down_rounded),
             isExpanded: true,
             initialValue: audienceMode,
             decoration: const InputDecoration(labelText: 'Кому показывать'),
@@ -2377,9 +2389,7 @@ class _ReferenceBlockTileState extends State<_ReferenceBlockTile> {
                             ? const SizedBox(
                                 width: 16,
                                 height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
+                                child: ProductLoadingIndicator(),
                               )
                             : const Icon(Icons.upload_file),
                         label: Text(
@@ -2449,9 +2459,7 @@ class _ReferenceBlockTileState extends State<_ReferenceBlockTile> {
                             ? const SizedBox(
                                 width: 16,
                                 height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
+                                child: ProductLoadingIndicator(),
                               )
                             : const Icon(Icons.upload_file),
                         label: Text(
@@ -2621,6 +2629,9 @@ class _ReferenceBlockTileState extends State<_ReferenceBlockTile> {
               ReferenceListBlock() => Column(
                 children: [
                   DropdownButtonFormField<String>(
+                    borderRadius: ProductTheme.selectionMenuRadius,
+                    elevation: ProductTheme.selectionMenuElevation,
+                    icon: const Icon(Icons.keyboard_arrow_down_rounded),
                     isExpanded: true,
                     initialValue: _secondary.text.isEmpty
                         ? 'bullet'

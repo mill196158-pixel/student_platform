@@ -1,3 +1,4 @@
+import '../branding/product_loading_indicator.dart';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -406,7 +407,7 @@ class _ImageSkeleton extends StatelessWidget {
             child: SizedBox(
               width: 24,
               height: 24,
-              child: CircularProgressIndicator(strokeWidth: 2),
+              child: ProductLoadingIndicator(),
             ),
           ),
         ),

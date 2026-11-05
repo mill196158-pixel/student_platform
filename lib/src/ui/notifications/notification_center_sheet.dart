@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -275,7 +276,7 @@ class _NotificationCenterBodyState extends State<_NotificationCenterBody> {
         physics: const AlwaysScrollableScrollPhysics(),
         children: const [
           SizedBox(height: 120),
-          Center(child: CircularProgressIndicator()),
+          Center(child: ProductLoadingIndicator.page()),
         ],
       );
     }

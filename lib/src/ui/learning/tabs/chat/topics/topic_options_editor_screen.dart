@@ -23,6 +23,7 @@
 // the selection's `row_version`. A `version_conflict` from any of them
 // surfaces a dismissible banner with a "Обновить" action that re-fetches
 // fresh selection + options via `get_task_details` before the user retries.
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 
 import '../../../../common/keyboard_dismiss_scope.dart';
@@ -822,8 +823,10 @@ class _TopicOptionsEditorScreenState extends State<TopicOptionsEditorScreen> {
                             child: Text(
                               'Темы пока не добавлены',
                               textAlign: TextAlign.center,
-                              style: theme.textTheme.bodyMedium
-                                  ?.copyWith(color: Colors.black45),
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant),
                             ),
                           ),
                         )
@@ -834,8 +837,10 @@ class _TopicOptionsEditorScreenState extends State<TopicOptionsEditorScreen> {
                             child: Text(
                               'Темы не найдены',
                               textAlign: TextAlign.center,
-                              style: theme.textTheme.bodyMedium
-                                  ?.copyWith(color: Colors.black45),
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant),
                             ),
                           ),
                         )
@@ -922,7 +927,8 @@ class _TopicOptionsEditorScreenState extends State<TopicOptionsEditorScreen> {
         decoration: BoxDecoration(
           color: cs.surface,
           border: Border(
-              top: BorderSide(color: Colors.black.withValues(alpha: 0.06))),
+              top: BorderSide(
+                  color: Theme.of(context).colorScheme.outlineVariant)),
         ),
         child: Row(
           children: [
@@ -944,7 +950,8 @@ class _TopicOptionsEditorScreenState extends State<TopicOptionsEditorScreen> {
       decoration: BoxDecoration(
         color: cs.surface,
         border: Border(
-            top: BorderSide(color: Colors.black.withValues(alpha: 0.06))),
+            top: BorderSide(
+                color: Theme.of(context).colorScheme.outlineVariant)),
       ),
       // Critical: Scaffold.bottomNavigationBar gives a tall maxHeight.
       // Column defaults to MainAxisSize.max and expands to fill the screen
@@ -963,11 +970,11 @@ class _TopicOptionsEditorScreenState extends State<TopicOptionsEditorScreen> {
                 ),
               ),
               child: _savingMeta
-                  ? const SizedBox(
+                  ? SizedBox(
                       height: 20,
                       width: 20,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
+                      child: ProductLoadingIndicator(
+                          color: Theme.of(context).colorScheme.onPrimary),
                     )
                   : const Text('Сохранить изменения'),
             ),
@@ -1001,18 +1008,20 @@ class _TopicOptionsEditorScreenState extends State<TopicOptionsEditorScreen> {
       prefixIcon: Icon(icon),
       suffixIcon: suffix,
       filled: true,
-      fillColor: const Color(0xFFF6F7FB),
+      fillColor: Theme.of(context).colorScheme.surfaceContainerLow,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
         borderSide: BorderSide.none,
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: Color(0xFFE1E5EF)),
+        borderSide:
+            BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: Colors.black87, width: 1.4),
+        borderSide: BorderSide(
+            color: Theme.of(context).colorScheme.primary, width: 1.4),
       ),
     );
   }
@@ -1127,17 +1136,20 @@ class _SectionLabel extends StatelessWidget {
       children: [
         Icon(icon, size: 18, color: theme.colorScheme.primary),
         const SizedBox(width: 8),
-        Text(
+        Expanded(
+            child: Text(
           label,
-          style: theme.textTheme.titleSmall
-              ?.copyWith(fontWeight: FontWeight.w800, color: Colors.black87),
-        ),
+          style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w600,
+              color: Theme.of(context).colorScheme.onSurface),
+        )),
         if (trailing != null) ...[
-          const Spacer(),
+          const SizedBox(width: 12),
           Text(
             trailing!,
-            style: theme.textTheme.labelMedium
-                ?.copyWith(color: Colors.black45, fontWeight: FontWeight.w600),
+            style: theme.textTheme.labelMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600),
           ),
         ],
       ],
@@ -1162,9 +1174,9 @@ class _SoftSwitchTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 6, 8, 6),
       decoration: BoxDecoration(
-        color: const Color(0xFFF6F7FB),
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE1E5EF)),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Row(
         children: [
@@ -1172,7 +1184,8 @@ class _SoftSwitchTile extends StatelessWidget {
             child: Text(
               title,
               style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w800, color: Colors.black87),
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(context).colorScheme.onSurface),
             ),
           ),
           Switch(value: value, onChanged: onChanged),
@@ -1199,13 +1212,18 @@ class _WarningBanner extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(Icons.warning_amber_rounded,
-              size: 18, color: Colors.orange.shade800),
+              size: 18,
+              color: (Theme.of(context).brightness == Brightness.dark
+                  ? Colors.amber.shade200
+                  : Colors.orange.shade800)),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               text,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.orange.shade900,
+                    color: (Theme.of(context).brightness == Brightness.dark
+                        ? Colors.amber.shade200
+                        : Colors.orange.shade900),
                     fontWeight: FontWeight.w600,
                   ),
             ),
@@ -1233,22 +1251,21 @@ class _ConflictBanner extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFEBEE),
+        color: cs.errorContainer,
         borderRadius: BorderRadius.circular(16),
-        border:
-            Border.all(color: const Color(0xFFE53935).withValues(alpha: 0.35)),
+        border: Border.all(color: cs.error.withValues(alpha: 0.35)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.sync_problem_rounded,
-              color: Color(0xFFE53935), size: 20),
+          Icon(Icons.sync_problem_rounded,
+              color: cs.onErrorContainer, size: 20),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               message,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     fontWeight: FontWeight.w700,
-                    color: const Color(0xFFB71C1C),
+                    color: cs.onErrorContainer,
                   ),
             ),
           ),
@@ -1257,10 +1274,10 @@ class _ConflictBanner extends StatelessWidget {
             onPressed: loading ? null : onRefresh,
             style: FilledButton.styleFrom(backgroundColor: cs.surface),
             child: loading
-                ? const SizedBox(
+                ? SizedBox(
                     width: 16,
                     height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    child: ProductLoadingIndicator(),
                   )
                 : const Text('Обновить'),
           ),
@@ -1305,7 +1322,7 @@ class _OptionRow extends StatelessWidget {
       child: Material(
         color: selected
             ? cs.primary.withValues(alpha: 0.10)
-            : const Color(0xFFF6F7FB),
+            : Theme.of(context).colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(16),
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
@@ -1317,86 +1334,103 @@ class _OptionRow extends StatelessWidget {
               border: Border.all(
                 color: isDuplicate
                     ? Colors.orange.withValues(alpha: 0.55)
-                    : const Color(0xFFE1E5EF),
+                    : Theme.of(context).colorScheme.outlineVariant,
               ),
             ),
-            child: Row(
-              children: [
-                if (selecting)
-                  Checkbox(value: selected, onChanged: (_) => onTap?.call())
-                else
-                  Container(
-                    width: 28,
-                    height: 28,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: cs.primary.withValues(alpha: 0.10),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(
-                      '${index + 1}',
-                      style: TextStyle(
-                        color: cs.primary,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 12.5,
-                      ),
-                    ),
-                  ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        row.title.isEmpty ? 'Без названия' : row.title,
-                        style: theme.textTheme.bodyMedium
-                            ?.copyWith(fontWeight: FontWeight.w700),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        row.isOccupied
-                            ? 'Занято ${row.taken} из ${row.capacity}'
-                            : 'Мест: ${row.capacity}',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color:
-                              row.isOccupied ? cs.primary : cs.onSurfaceVariant,
-                          fontWeight: row.isOccupied ? FontWeight.w700 : null,
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(children: [
+                    if (selecting)
+                      Checkbox(value: selected, onChanged: (_) => onTap?.call())
+                    else
+                      Container(
+                        width: 28,
+                        height: 28,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: cs.primary.withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(10),
                         ),
-                      ),
-                      if (isDuplicate) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          'Похоже на другую тему в списке',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: Colors.orange.shade800,
-                            fontWeight: FontWeight.w700,
+                        child: Text(
+                          '${index + 1}',
+                          style: TextStyle(
+                            color: cs.primary,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 12.5,
                           ),
                         ),
-                      ],
-                    ],
-                  ),
-                ),
-                if (!selecting && canEdit) ...[
-                  IconButton(
-                    tooltip: 'Изменить',
-                    onPressed: onEdit,
-                    icon: const Icon(Icons.edit_outlined, size: 20),
-                  ),
-                  IconButton(
-                    tooltip: row.isOccupied ? 'Тема занята' : 'Удалить',
-                    onPressed: onDelete,
-                    icon: Icon(
-                      Icons.delete_outline,
-                      size: 20,
-                      color: row.isOccupied
-                          ? cs.onSurfaceVariant.withValues(alpha: 0.4)
-                          : cs.error,
+                      ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            row.title.isEmpty ? 'Без названия' : row.title,
+                            style: theme.textTheme.bodyMedium
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            row.isOccupied
+                                ? 'Занято ${row.taken} из ${row.capacity}'
+                                : 'Мест: ${row.capacity}',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: row.isOccupied
+                                  ? cs.primary
+                                  : cs.onSurfaceVariant,
+                              fontWeight:
+                                  row.isOccupied ? FontWeight.w700 : null,
+                            ),
+                          ),
+                          if (isDuplicate) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              'Похоже на другую тему в списке',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: (Theme.of(context).brightness ==
+                                        Brightness.dark
+                                    ? Colors.amber.shade200
+                                    : Colors.orange.shade800),
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
                     ),
-                  ),
-                  if (dragHandle != null) dragHandle!,
-                ],
-              ],
-            ),
+                  ]),
+                  Align(
+                      alignment: Alignment.centerRight,
+                      child: Wrap(
+                          spacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            if (!selecting && canEdit) ...[
+                              IconButton(
+                                key: ValueKey('topic-edit-$index'),
+                                tooltip: 'Изменить',
+                                onPressed: onEdit,
+                                icon: const Icon(Icons.edit_outlined, size: 20),
+                              ),
+                              IconButton(
+                                tooltip:
+                                    row.isOccupied ? 'Тема занята' : 'Удалить',
+                                onPressed: onDelete,
+                                icon: Icon(
+                                  Icons.delete_outline,
+                                  size: 20,
+                                  color: row.isOccupied
+                                      ? cs.onSurfaceVariant
+                                          .withValues(alpha: 0.4)
+                                      : cs.error,
+                                ),
+                              ),
+                              if (dragHandle != null) dragHandle!,
+                            ],
+                          ])),
+                ]),
           ),
         ),
       ),

@@ -779,8 +779,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    final searchFill =
-        isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF2F2F4);
+    final searchFill = theme.colorScheme.surfaceContainerHighest.withValues(alpha: .55);
     final dividerOpacity = isDark ? .24 : .35;
 
     return Scaffold(
@@ -826,7 +825,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
             child: SizedBox(
-              height: 38,
+              height: 48,
               child: TextField(
                 onChanged: (s) {
                   _searchDebounce?.cancel();
@@ -841,7 +840,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
                 },
                 textInputAction: TextInputAction.search,
                 decoration: InputDecoration(
-                  hintText: 'Поиск',
+                  hintText: 'Поиск по чатам',
                   prefixIcon: const Icon(Icons.search, size: 20),
                   isDense: true,
                   contentPadding:
@@ -849,8 +848,16 @@ class _MyChatsScreenState extends State<MyChatsScreen>
                   filled: true,
                   fillColor: searchFill,
                   border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(16),
                     borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide.none,
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide(color: theme.colorScheme.primary, width: 1.5),
                   ),
                 ),
               ),
@@ -1365,6 +1372,10 @@ class _ChatRow extends StatelessWidget {
     final unread = data.unread > 0;
     final muted = data.muted;
     final accent = Theme.of(context).colorScheme.primary;
+    final author = (data.lastAuthor?.isNotEmpty ?? false)
+        ? data.lastAuthor!
+        : (data.subtitle ?? '');
+    final preview = data.lastMsgPreview ?? '';
 
     final time = data.lastTime != null ? _formatTime(data.lastTime!) : '';
 
@@ -1375,7 +1386,7 @@ class _ChatRow extends StatelessWidget {
         child: InkWell(
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
             child: Row(
               children: [
                 _BubbleAvatar(
@@ -1384,76 +1395,79 @@ class _ChatRow extends StatelessWidget {
                     avatarUrl: data.avatarUrl),
                 const SizedBox(width: 12),
 
-                // центр: 3 строки (заголовок / автор / сообщение)
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // 1) Название
-                      Text(
-                        data.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: t.titleMedium?.copyWith(
-                          color: onSurface,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -.1,
-                          height: 1.1,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      // 2) Автор (или подпись чата, если автора нет)
-                      Text(
-                        (data.lastAuthor?.isNotEmpty ?? false)
-                            ? data.lastAuthor!
-                            : (data.subtitle ?? ''),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: t.bodySmall?.copyWith(
-                          color: onSurfaceVar,
-                          fontWeight: FontWeight.w600,
-                          height: 1.05,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      // 3) Превью сообщения
-                      Text(
-                        data.lastMsgPreview ?? '',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: t.bodySmall?.copyWith(
-                          color: unread && !muted ? onSurface : onSurfaceVar,
-                          fontWeight: unread && !muted ? FontWeight.w700 : null,
-                          height: 1.05,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(width: 8),
-
-                // справа: время + бейдж
-                SizedBox(
-                  width: 56,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      if (time.isNotEmpty)
-                        Text(
-                          time,
-                          style: t.labelSmall?.copyWith(
-                            color: unread && !muted ? accent : onSurfaceVar,
-                            fontWeight: unread && !muted
-                                ? FontWeight.w800
-                                : FontWeight.w600,
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              data.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: t.titleSmall?.copyWith(
+                                color: onSurface,
+                                fontWeight: unread ? FontWeight.w800 : FontWeight.w700,
+                              ),
+                            ),
                           ),
-                        ),
-                      const SizedBox(height: 6),
-                      if (data.unread > 0)
-                        _UnreadBadge(count: data.unread, muted: data.muted)
-                      else if (data.pinned)
-                        Icon(Icons.push_pin, size: 16, color: onSurfaceVar),
+                          if (time.isNotEmpty) ...[
+                            const SizedBox(width: 8),
+                            Text(time, style: t.labelSmall?.copyWith(
+                              color: unread && !muted ? accent : onSurfaceVar,
+                              fontWeight: unread && !muted ? FontWeight.w700 : FontWeight.w500,
+                            )),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 5),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Row(
+                              children: [
+                                if (author.isNotEmpty)
+                                  Flexible(
+                                    flex: 2,
+                                    child: Text(
+                                      author,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: t.bodyMedium?.copyWith(
+                                        color: onSurfaceVar,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                if (author.isNotEmpty && preview.isNotEmpty)
+                                  Text(data.lastAuthor?.isNotEmpty == true ? ': ' : ' · ',
+                                      style: t.bodyMedium?.copyWith(color: onSurfaceVar)),
+                                if (preview.isNotEmpty)
+                                  Expanded(
+                                    flex: 3,
+                                    child: Text(
+                                      preview,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: t.bodyMedium?.copyWith(
+                                        color: unread && !muted ? onSurface : onSurfaceVar,
+                                        fontWeight: unread && !muted ? FontWeight.w600 : FontWeight.w400,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          if (data.unread > 0) ...[
+                            const SizedBox(width: 8),
+                            _UnreadBadge(count: data.unread, muted: data.muted),
+                          ] else if (data.pinned) ...[
+                            const SizedBox(width: 8),
+                            Icon(Icons.push_pin_outlined, size: 16, color: onSurfaceVar),
+                          ],
+                        ],
+                      ),
                     ],
                   ),
                 ),

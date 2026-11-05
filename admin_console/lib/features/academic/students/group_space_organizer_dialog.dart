@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 
 import 'group_space_organizer_models.dart';
@@ -176,7 +177,7 @@ class _GroupSpaceOrganizerDialogState extends State<GroupSpaceOrganizerDialog> {
                 ],
               ),
             if (_loading)
-              const Expanded(child: Center(child: CircularProgressIndicator()))
+              const Expanded(child: Center(child: ProductLoadingIndicator()))
             else if (state == null)
               const Expanded(
                 child: Center(child: Text('Нет данных по пространству группы')),

@@ -1,4 +1,5 @@
 // FILE: lib/src/ui/chats/forward/forward_picker.dart
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -161,7 +162,7 @@ class _ForwardPickerSheetState extends State<ForwardPickerSheet> {
               ),
               Expanded(
                 child: _loading
-                    ? const Center(child: CircularProgressIndicator())
+                    ? const Center(child: ProductLoadingIndicator.page())
                     : ListView.separated(
                         padding: EdgeInsets.only(
                           left: 8, right: 8, bottom: MediaQuery.of(context).padding.bottom + 12,

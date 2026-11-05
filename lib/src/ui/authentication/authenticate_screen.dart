@@ -22,7 +22,7 @@ class _AuthenticateScreenState extends State<AuthenticateScreen> {
   @override
   Widget build(BuildContext context) {
     return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 200),
+      duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 160),
       child: _showLogin
           ? LoginScreen(key: const ValueKey('login'), toggleView: _toggle)
           : RegisterScreen(

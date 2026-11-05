@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'dart:ui' as ui;
 
 import 'package:file_picker/file_picker.dart';
@@ -793,8 +794,7 @@ class _SoftActionTile extends StatelessWidget {
                 child: busy
                     ? Padding(
                         padding: const EdgeInsets.all(10),
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
+                        child: ProductLoadingIndicator(
                           color: cs.primary,
                         ),
                       )

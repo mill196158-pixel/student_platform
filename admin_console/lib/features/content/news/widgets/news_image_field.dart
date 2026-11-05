@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -183,7 +184,7 @@ class _Thumbnail extends StatelessWidget {
                   child: SizedBox(
                     width: 22,
                     height: 22,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    child: ProductLoadingIndicator(),
                   ),
                 ),
               if (error && !hasBytes)

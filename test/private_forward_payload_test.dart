@@ -43,4 +43,16 @@ void main() {
       expect(ForwardPayload.tryParse(text), isNull);
     }
   });
+  test('composer preview never exposes nested serialization', () {
+    final nested = payload('  Первое\n сообщение  ', []);
+    expect(payload(nested.encodeForText(), []).composerPreview(),
+        'Name: Первое сообщение');
+    expect(payload('__FG__:bad', []).composerPreview(),
+        'Name: Пересланное сообщение');
+    expect(payload('Мой комментарий __FG__:bad', []).composerPreview(),
+        'Name: Мой комментарий');
+    expect(payload(payload('', [source]).encodeForText(), []).composerPreview(),
+        'Name: file.txt');
+    expect(payload('', [source]).composerPreview(), 'Name: file.txt');
+  });
 }

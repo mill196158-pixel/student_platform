@@ -1,7 +1,9 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 
 import '../../../core/auth/admin_backend_config.dart';
 import '../../../core/auth/admin_session_controller.dart';
+import '../../content/shared/visual_editor_states.dart';
 import 'terms_models.dart';
 import 'terms_repository.dart';
 
@@ -25,6 +27,7 @@ class _TermsScreenState extends State<TermsScreen> {
   List<AcademicTermView> _terms = const [];
   final Map<String, TermReadiness> _readiness = {};
   bool _loading = true;
+  bool _loadFailed = false;
   String? _busyTermId;
 
   bool get _canManage =>
@@ -38,7 +41,10 @@ class _TermsScreenState extends State<TermsScreen> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _loadFailed = false;
+    });
     try {
       final terms = await _repository.listTerms();
       final readinessEntries = <String, TermReadiness>{};
@@ -51,6 +57,8 @@ class _TermsScreenState extends State<TermsScreen> {
       _readiness
         ..clear()
         ..addAll(readinessEntries);
+    } catch (_) {
+      if (mounted) setState(() => _loadFailed = true);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -73,31 +81,67 @@ class _TermsScreenState extends State<TermsScreen> {
       await showDialog<void>(
         context: context,
         builder: (context) => AlertDialog(
+          scrollable: true,
           title: Text('Готовность · ${term.name}'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Готовность: ${readiness.readinessPercent}%'),
-              Text('Групп: ${readiness.groupsCount}'),
-              Text('Предметов: ${readiness.subjectsCount}'),
-              Text('Предметных чатов: ${readiness.subjectChatsCount}'),
-              Text('Не хватает предметов: ${readiness.missingSubjects}'),
-              Text(
-                'Не хватает предметных чатов: ${readiness.missingSubjectChats}',
-              ),
-              if (readiness.notification != null) ...[
+          content: SizedBox(
+            width: 380,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  '${readiness.readinessPercent}% подготовлено',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
                 const SizedBox(height: 8),
-                Text(readiness.notification!),
+                LinearProgressIndicator(
+                  value: (readiness.readinessPercent / 100).clamp(0.0, 1.0),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                const SizedBox(height: 16),
+                for (final (label, count) in [
+                  ('Группы', readiness.groupsCount),
+                  ('Предметы', readiness.subjectsCount),
+                  ('Предметные чаты', readiness.subjectChatsCount),
+                  ('Не хватает предметов', readiness.missingSubjects),
+                  (
+                    'Не хватает предметных чатов',
+                    readiness.missingSubjectChats,
+                  ),
+                ])
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: Text(label)),
+                        const SizedBox(width: 12),
+                        Text(
+                          '$count',
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                if (readiness.notification != null) ...[
+                  const SizedBox(height: 12),
+                  Text(readiness.notification!),
+                ],
+                if (readiness.blockers.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    'Требует внимания',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  for (final blocker in readiness.blockers) Text('• $blocker'),
+                ],
+                const SizedBox(height: 12),
+                Text(
+                  'Автоматическое переключение выключено.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
               ],
-              if (readiness.blockers.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                const Text('Проблемы:'),
-                for (final blocker in readiness.blockers) Text('• $blocker'),
-              ],
-              const SizedBox(height: 8),
-              const Text('Автоматическое переключение выключено.'),
-            ],
+            ),
           ),
           actions: [
             TextButton(
@@ -381,24 +425,30 @@ class _TermsScreenState extends State<TermsScreen> {
   @override
   Widget build(BuildContext context) {
     if (!_canManage && !widget.session.isLocalPrototype) {
-      return const Center(
-        child: Text('Недостаточно прав для управления учебными периодами'),
+      return const VisualEditorEmptyState(
+        message: 'Недостаточно прав для управления учебными периодами',
+        icon: Icons.lock_outline,
       );
     }
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: ProductLoadingIndicator());
+    }
+    if (_loadFailed) {
+      return VisualEditorErrorState(
+        message: 'Не удалось загрузить учебные периоды',
+        onRetry: _load,
+      );
+    }
+    if (_terms.isEmpty) {
+      return const VisualEditorEmptyState(
+        message: 'Учебных периодов пока нет',
+        icon: Icons.calendar_today_outlined,
+      );
     }
     final nearest = _terms.where((t) => t.isNearestNext).toList();
     final banner = nearest.isNotEmpty ? _readiness[nearest.first.id] : null;
     return ListView(
       children: [
-        Text(
-          'Учебные периоды',
-          style: Theme.of(
-            context,
-          ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
-        ),
-        const SizedBox(height: 6),
         const Text(
           'Подготовка данных отделена от запуска нового семестра. Автоматическое переключение выключено.',
         ),

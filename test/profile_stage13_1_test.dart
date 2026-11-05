@@ -69,71 +69,82 @@ void main() {
   group('Info study-plan path remains', () {
     testWidgets('Info still lists subjects and opens semester picker',
         (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          home: InfoScreen(
-            debugUserId: 'user-profile-13-1',
-            planLoader: () async => InfoPlanState(
-              contextData: const AcademicContext(
-                userId: 'user-profile-13-1',
-                groupId: 'group-1',
-                groupName: 'ВВ-2024',
-                recordBookNumber: '123',
-                currentSemesterNumber: 4,
-                hasActiveEnrollment: true,
+      final semantics = tester.ensureSemantics();
+      try {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: InfoScreen(
+              debugUserId: 'user-profile-13-1',
+              planLoader: () async => InfoPlanState(
+                contextData: const AcademicContext(
+                  userId: 'user-profile-13-1',
+                  groupId: 'group-1',
+                  groupName: 'ВВ-2024',
+                  recordBookNumber: '123',
+                  currentSemesterNumber: 4,
+                  hasActiveEnrollment: true,
+                ),
+                subjects: const [
+                  UsefulSubject(
+                    id: 'off-1',
+                    title: 'Алгебра',
+                    subjectId: 'sub-1',
+                    groupId: 'group-1',
+                    semesterNumber: 3,
+                    controlForm: 'Экзамен',
+                    description: '',
+                    teacherName: '',
+                    teamName: '',
+                    teamIcon: '',
+                    teamGroupName: '',
+                    avgDifficultyGlobal: 4.0,
+                  ),
+                  UsefulSubject(
+                    id: 'off-2',
+                    title: 'История',
+                    subjectId: 'sub-2',
+                    groupId: 'group-1',
+                    semesterNumber: 4,
+                    controlForm: 'Зачёт',
+                    description: '',
+                    teacherName: '',
+                    teamName: '',
+                    teamIcon: '',
+                    teamGroupName: '',
+                    avgDifficultyGlobal: 3.5,
+                  ),
+                ],
               ),
-              subjects: const [
-                UsefulSubject(
-                  id: 'off-1',
-                  title: 'Алгебра',
-                  subjectId: 'sub-1',
-                  groupId: 'group-1',
-                  semesterNumber: 3,
-                  controlForm: 'Экзамен',
-                  description: '',
-                  teacherName: '',
-                  teamName: '',
-                  teamIcon: '',
-                  teamGroupName: '',
-                  avgDifficultyGlobal: 4.0,
-                ),
-                UsefulSubject(
-                  id: 'off-2',
-                  title: 'История',
-                  subjectId: 'sub-2',
-                  groupId: 'group-1',
-                  semesterNumber: 4,
-                  controlForm: 'Зачёт',
-                  description: '',
-                  teacherName: '',
-                  teamName: '',
-                  teamIcon: '',
-                  teamGroupName: '',
-                  avgDifficultyGlobal: 3.5,
-                ),
-              ],
             ),
           ),
-        ),
-      );
-      // Resolve the planLoader future without pumpAndSettle (Info has ongoing frames).
-      await tester.pump();
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 16));
+        );
+        // Resolve the planLoader future without pumpAndSettle (Info has ongoing frames).
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 16));
 
-      expect(find.text('История'), findsOneWidget);
-      expect(find.text('Изменить'), findsOneWidget);
-      expect(find.text('Алгебра'), findsNothing);
+        expect(find.text('История'), findsOneWidget);
+        expect(find.text('Изменить'), findsOneWidget);
+        expect(find.text('Алгебра'), findsNothing);
 
-      await tester.tap(find.text('Изменить'));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 300));
+        await tester.tap(find.text('Изменить'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
 
-      // Past and current semesters remain reachable from Info (not only /exams).
-      expect(find.text('Предметы семестра'), findsOneWidget);
-      expect(find.text('Семестр 3'), findsOneWidget);
-      expect(find.text('Семестр 4'), findsOneWidget);
-      expect(find.text('текущий'), findsOneWidget);
+        // Past and current semesters remain reachable from Info (not only /exams).
+        expect(find.text('Предметы семестра'), findsOneWidget);
+        expect(find.bySemanticsLabel('Семестр 3'), findsOneWidget);
+        expect(find.bySemanticsLabel('Семестр 4, текущий'), findsOneWidget);
+        expect(find.text('текущий'), findsOneWidget);
+        await tester.tap(find.bySemanticsLabel('Семестр 3'));
+        await tester.pump();
+        await tester.tap(find.text('Показать предметы'));
+        await tester.pumpAndSettle();
+        expect(find.text('Алгебра'), findsOneWidget);
+        expect(find.text('История'), findsNothing);
+      } finally {
+        semantics.dispose();
+      }
     });
   });
 }

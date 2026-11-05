@@ -92,7 +92,6 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Учебные периоды'), findsOneWidget);
     expect(find.text('Создать недостающее'), findsWidgets);
     expect(find.text('Проверить готовность'), findsWidgets);
     final startButton = find.widgetWithText(

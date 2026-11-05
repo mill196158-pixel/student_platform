@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -131,9 +132,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                             ? const SizedBox(
                                 width: 16,
                                 height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
+                                child: ProductLoadingIndicator(),
                               )
                             : const Icon(Icons.save_rounded),
                         label: Text(

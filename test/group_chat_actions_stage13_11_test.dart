@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -199,7 +200,7 @@ void main() {
       expect(find.text('Создать список тем'), findsOneWidget);
       expect(find.textContaining('Проверяем'), findsNothing);
       expect(find.textContaining('Определяем доступ'), findsNothing);
-      expect(find.byType(CircularProgressIndicator), findsWidgets);
+      expect(find.byType(ProductLoadingIndicator), findsWidgets);
     });
 
     test('cached success survives structural loading overlay', () {

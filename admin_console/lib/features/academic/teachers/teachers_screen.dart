@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductTheme, ProductLoadingIndicator;
 import 'package:admin_import_mapping/admin_import_mapping.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -153,6 +154,9 @@ class _TeachersScreenState extends State<TeachersScreen> {
                     ),
                   ),
                   DropdownButtonFormField<TeacherStatus>(
+                    borderRadius: ProductTheme.selectionMenuRadius,
+                    elevation: ProductTheme.selectionMenuElevation,
+                    icon: const Icon(Icons.keyboard_arrow_down_rounded),
                     initialValue: status,
                     items: TeacherStatus.values
                         .map(
@@ -485,13 +489,6 @@ class _TeachersScreenState extends State<TeachersScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Преподаватели',
-          style: Theme.of(
-            context,
-          ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
-        ),
-        const SizedBox(height: 6),
         const Text(
           'Справочник преподавателей. Изменения выполняются только через защищённые RPC.',
         ),
@@ -515,6 +512,9 @@ class _TeachersScreenState extends State<TeachersScreen> {
               ),
             ),
             DropdownButton<TeacherStatus?>(
+              borderRadius: ProductTheme.selectionMenuRadius,
+              elevation: ProductTheme.selectionMenuElevation,
+              icon: const Icon(Icons.keyboard_arrow_down_rounded),
               value: _statusFilter,
               hint: const Text('Все статусы'),
               items: [
@@ -529,6 +529,9 @@ class _TeachersScreenState extends State<TeachersScreen> {
               },
             ),
             DropdownButton<String>(
+              borderRadius: ProductTheme.selectionMenuRadius,
+              elevation: ProductTheme.selectionMenuElevation,
+              icon: const Icon(Icons.keyboard_arrow_down_rounded),
               value: _sort,
               items: const [
                 DropdownMenuItem(value: 'name_asc', child: Text('А→Я')),
@@ -567,7 +570,7 @@ class _TeachersScreenState extends State<TeachersScreen> {
         Expanded(
           child: Card(
             child: _loading
-                ? const Center(child: CircularProgressIndicator())
+                ? const Center(child: ProductLoadingIndicator())
                 : _items.isEmpty
                 ? const Center(child: Text('Преподаватели не найдены'))
                 : ListView(
@@ -658,6 +661,9 @@ class _MappingDialogState extends State<_MappingDialog> {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: DropdownButtonFormField<String?>(
+                    borderRadius: ProductTheme.selectionMenuRadius,
+                    elevation: ProductTheme.selectionMenuElevation,
+                    icon: const Icon(Icons.keyboard_arrow_down_rounded),
                     initialValue: _mapping[entry.key],
                     decoration: InputDecoration(labelText: entry.value),
                     items: [

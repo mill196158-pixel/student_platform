@@ -1,21 +1,10 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:student_ui/student_ui.dart';
 
 import 'package:student_platform/src/services/push/notification_preferences_api.dart';
 import 'package:student_platform/src/services/push/push_notification_service.dart';
-
-/// Soft lilac palette shared with Profile.
-class _N {
-  static const bg = Color(0xFFFAF8FC);
-  static const lavender = Color(0xFF7C63D8);
-  static const lavenderSoft = Color(0xFFDCD0FA);
-  static const lavenderMid = Color(0xFFC9B8F3);
-  static const ink = Color(0xFF1C1B1F);
-  static const muted = Color(0xFF6B6578);
-  static const card = Colors.white;
-}
 
 class NotificationSettingsScreen extends StatefulWidget {
   const NotificationSettingsScreen({super.key});
@@ -74,36 +63,31 @@ class _NotificationSettingsScreenState
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final background = Theme.of(context).scaffoldBackgroundColor;
     return Scaffold(
-      backgroundColor: _N.bg,
       appBar: AppBar(
-        backgroundColor: _N.bg,
+        backgroundColor: background,
+        foregroundColor: colors.onSurface,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
-        systemOverlayStyle: const SystemUiOverlayStyle(
-          statusBarColor: Colors.transparent,
-          statusBarBrightness: Brightness.light,
-          statusBarIconBrightness: Brightness.dark,
-        ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
           onPressed: () => Navigator.of(context).maybePop(),
         ),
-        title: const Text(
+        title: Text(
           'Уведомления',
           style: TextStyle(
             fontWeight: FontWeight.w800,
-            color: _N.ink,
+            color: colors.onSurface,
             fontSize: 18,
           ),
         ),
         centerTitle: true,
       ),
       body: _loading
-          ? const Center(
-              child: CircularProgressIndicator(color: _N.lavender),
-            )
+          ? Center(child: ProductLoadingIndicator.page(color: colors.primary))
           : ListView(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 36),
               children: [
@@ -211,9 +195,9 @@ class _NotificationSettingsScreenState
                   const SizedBox(height: 20),
                   Text(
                     'OS status: $_osStatus',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
-                      color: _N.muted,
+                      color: colors.onSurfaceVariant,
                     ),
                   ),
                 ],
@@ -234,22 +218,13 @@ class _OsStatusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(22),
-        gradient: const LinearGradient(
-          colors: [_N.lavenderSoft, _N.lavenderMid],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: _N.lavenderMid.withValues(alpha: 0.35),
-            blurRadius: 18,
-            offset: const Offset(0, 10),
-          ),
-        ],
+        borderRadius: BorderRadius.circular(14),
+        color: colors.surface,
+        border: Border.all(color: colors.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -260,14 +235,17 @@ class _OsStatusCard extends StatelessWidget {
                 width: 44,
                 height: 44,
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.72),
+                  color:
+                      enabled ? colors.primaryContainer : colors.errorContainer,
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: Icon(
                   enabled
                       ? Icons.notifications_active_rounded
                       : Icons.notifications_off_outlined,
-                  color: enabled ? _N.lavender : const Color(0xFFB42318),
+                  color: enabled
+                      ? colors.onPrimaryContainer
+                      : colors.onErrorContainer,
                   size: 22,
                 ),
               ),
@@ -282,16 +260,16 @@ class _OsStatusCard extends StatelessWidget {
                           : 'Отключены на устройстве',
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.w800,
-                            color: _N.ink,
+                            color: colors.onSurface,
                           ),
                     ),
                     const SizedBox(height: 3),
                     Text(
                       enabled
                           ? 'Пуши приходят, пока разрешены в системе'
-                          : 'Разрешите уведомления в настройках iOS',
+                          : 'Разрешите уведомления в настройках устройства',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: _N.muted,
+                            color: colors.onSurfaceVariant,
                             height: 1.25,
                           ),
                     ),
@@ -306,8 +284,10 @@ class _OsStatusCard extends StatelessWidget {
             child: FilledButton(
               onPressed: onOpenSettings,
               style: FilledButton.styleFrom(
-                backgroundColor: enabled ? Colors.white : _N.lavender,
-                foregroundColor: enabled ? _N.lavender : Colors.white,
+                backgroundColor:
+                    enabled ? colors.primaryContainer : colors.primary,
+                foregroundColor:
+                    enabled ? colors.onPrimaryContainer : colors.onPrimary,
                 elevation: 0,
                 padding: const EdgeInsets.symmetric(vertical: 13),
                 shape: RoundedRectangleBorder(
@@ -319,9 +299,7 @@ class _OsStatusCard extends StatelessWidget {
                 ),
               ),
               child: Text(
-                enabled
-                    ? 'Настройки устройства'
-                    : 'Открыть настройки',
+                enabled ? 'Настройки устройства' : 'Открыть настройки',
               ),
             ),
           ),
@@ -337,15 +315,16 @@ class _SectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.only(left: 6, bottom: 8),
       child: Text(
-        text.toUpperCase(),
-        style: const TextStyle(
+        text,
+        style: TextStyle(
           fontSize: 12,
-          letterSpacing: 0.6,
+          letterSpacing: 0,
           fontWeight: FontWeight.w700,
-          color: _N.muted,
+          color: colors.onSurfaceVariant,
         ),
       ),
     );
@@ -358,18 +337,12 @@ class _PrefGroup extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Container(
       decoration: BoxDecoration(
-        color: _N.card,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFE8E4F0)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
-          ),
-        ],
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colors.outlineVariant),
       ),
       child: Column(children: children),
     );
@@ -397,6 +370,7 @@ class _PrefRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Column(
       children: [
         Padding(
@@ -407,10 +381,10 @@ class _PrefRow extends StatelessWidget {
                 width: 38,
                 height: 38,
                 decoration: BoxDecoration(
-                  color: _N.lavenderSoft.withValues(alpha: 0.65),
+                  color: colors.primary.withValues(alpha: 0.14),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(icon, color: _N.lavender, size: 20),
+                child: Icon(icon, color: colors.primary, size: 20),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -419,19 +393,19 @@ class _PrefRow extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontWeight: FontWeight.w700,
                         fontSize: 16,
-                        color: _N.ink,
+                        color: colors.onSurface,
                       ),
                     ),
                     if (subtitle != null) ...[
                       const SizedBox(height: 2),
                       Text(
                         subtitle!,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 13,
-                          color: _N.muted,
+                          color: colors.onSurfaceVariant,
                           height: 1.2,
                         ),
                       ),
@@ -442,14 +416,14 @@ class _PrefRow extends StatelessWidget {
               Switch.adaptive(
                 value: value,
                 onChanged: enabled ? onChanged : null,
-                activeThumbColor: _N.lavender,
-                activeTrackColor: _N.lavender.withValues(alpha: 0.38),
+                activeThumbColor: colors.primary,
+                activeTrackColor: colors.primary.withValues(alpha: 0.38),
               ),
             ],
           ),
         ),
         if (showDivider)
-          const Divider(
+          Divider(
             height: 1,
             thickness: 1,
             indent: 64,

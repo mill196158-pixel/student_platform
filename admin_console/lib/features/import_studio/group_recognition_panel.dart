@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:student_ui/student_ui.dart' show ProductTheme, ProductLoadingIndicator;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/auth/admin_backend_config.dart';
+import '../content/shared/visual_editor_states.dart';
 import 'group_recognition_repository.dart';
 
 class GroupRecognitionPanel extends StatefulWidget {
@@ -375,6 +377,9 @@ class _GroupRecognitionPanelState extends State<GroupRecognitionPanel> {
           const LinearProgressIndicator()
         else
           DropdownButtonFormField<GroupRecognitionAcademicYear>(
+            borderRadius: ProductTheme.selectionMenuRadius,
+            elevation: ProductTheme.selectionMenuElevation,
+            icon: const Icon(Icons.keyboard_arrow_down_rounded),
             key: ValueKey(_selectedYear?.id),
             initialValue: _selectedYear,
             decoration: const InputDecoration(
@@ -459,13 +464,23 @@ class _GroupRecognitionPanelState extends State<GroupRecognitionPanel> {
         const SizedBox(height: 10),
         Expanded(
           child: preview == null
-              ? const Center(
-                  child: Text(
-                    'Проверьте список, затем выберите и сохраните решение '
-                    'для каждой строки без ошибок.',
-                    textAlign: TextAlign.center,
-                  ),
-                )
+              ? _busy
+                    ? const Center(child: ProductLoadingIndicator())
+                    : _error != null
+                    ? const SizedBox.shrink()
+              : Center(
+                        child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 420),
+                    child: const SingleChildScrollView(
+                            child: VisualEditorEmptyState(
+                              message: 'Результаты проверки',
+                              supportingText:
+                                  'Введите названия групп выше и нажмите «Проверить».',
+                              icon: Icons.playlist_add_check_outlined,
+                            ),
+                          ),
+                        ),
+                      )
               : preview.results.isNotEmpty
               ? _ApplySummary(preview: preview)
               : _RecognitionResults(
@@ -660,6 +675,9 @@ class _DecisionEditor extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         DropdownButtonFormField<GroupRecognitionDecisionAction>(
+          borderRadius: ProductTheme.selectionMenuRadius,
+          elevation: ProductTheme.selectionMenuElevation,
+          icon: const Icon(Icons.keyboard_arrow_down_rounded),
           initialValue: action,
           decoration: const InputDecoration(
             labelText: 'Решение',
@@ -674,6 +692,9 @@ class _DecisionEditor extends StatelessWidget {
         if (needsGroup) ...[
           const SizedBox(height: 8),
           DropdownButtonFormField<String>(
+            borderRadius: ProductTheme.selectionMenuRadius,
+            elevation: ProductTheme.selectionMenuElevation,
+            icon: const Icon(Icons.keyboard_arrow_down_rounded),
             initialValue: decision?.selectedGroupId,
             decoration: const InputDecoration(
               labelText: 'Существующая группа',
@@ -703,6 +724,9 @@ class _DecisionEditor extends StatelessWidget {
                 item.classification == 'ambiguous_plan')) ...[
           const SizedBox(height: 8),
           DropdownButtonFormField<String>(
+            borderRadius: ProductTheme.selectionMenuRadius,
+            elevation: ProductTheme.selectionMenuElevation,
+            icon: const Icon(Icons.keyboard_arrow_down_rounded),
             initialValue: decision?.selectedPlanId,
             decoration: const InputDecoration(
               labelText: 'Учебный план',

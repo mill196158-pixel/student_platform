@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../../../services/chat_file_access.dart';
@@ -27,7 +28,17 @@ class AuthorizedFileImageProvider
       MultiFrameImageStreamCompleter(codec: _load(decode), scale: 1);
   Future<ui.Codec> _load(ImageDecoderCallback decode) async {
     final bytes = await ChatFileAccess.readBytes(url);
-    return decode(await ui.ImmutableBuffer.fromUint8List(bytes));
+    try {
+      return await decode(await ui.ImmutableBuffer.fromUint8List(bytes));
+    } catch (_) {
+      try {
+        await ChatFileAccess.discardUnreadableImage(url,
+            user: user, epoch: epoch);
+      } on Exception catch (error) {
+        debugPrint('[chat-image] Cache cleanup failed: ${error.runtimeType}');
+      }
+      rethrow;
+    }
   }
 
   @override
@@ -42,7 +53,7 @@ class AuthorizedFileImageProvider
   String toString() => 'AuthorizedFileImageProvider';
 }
 
-class AuthorizedFileImage extends StatelessWidget {
+class AuthorizedFileImage extends StatefulWidget {
   const AuthorizedFileImage(
       {super.key,
       required this.imageUrl,
@@ -56,18 +67,40 @@ class AuthorizedFileImage extends StatelessWidget {
   final double? width, height;
   final Widget Function(BuildContext, String)? placeholder;
   final Widget Function(BuildContext, String, Object)? errorWidget;
+
   @override
-  Widget build(BuildContext context) => Image(
-        image: AuthorizedFileImageProvider(imageUrl),
-        fit: fit,
-        width: width,
-        height: height,
-        frameBuilder: (context, child, frame, sync) => sync || frame != null
-            ? child
-            : placeholder?.call(context, imageUrl) ??
-                const Center(child: CircularProgressIndicator()),
-        errorBuilder: (context, error, stack) =>
-            errorWidget?.call(context, imageUrl, error) ??
-            const Icon(Icons.broken_image),
-      );
+  State<AuthorizedFileImage> createState() => _AuthorizedFileImageState();
+}
+
+class _AuthorizedFileImageState extends State<AuthorizedFileImage> {
+  int _attempt = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = AuthorizedFileImageProvider(widget.imageUrl);
+    return Image(
+      key: ValueKey(_attempt),
+      image: provider,
+      fit: widget.fit,
+      width: widget.width,
+      height: widget.height,
+      frameBuilder: (context, child, frame, sync) => sync || frame != null
+          ? child
+          : widget.placeholder?.call(context, widget.imageUrl) ??
+              const Center(child: ProductLoadingIndicator(size: 72)),
+      errorBuilder: (context, error, stack) => Semantics(
+        button: true,
+        label: 'Повторить загрузку изображения',
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            PaintingBinding.instance.imageCache.evict(provider);
+            setState(() => _attempt++);
+          },
+          child: widget.errorWidget?.call(context, widget.imageUrl, error) ??
+              const Icon(Icons.refresh_rounded),
+        ),
+      ),
+    );
+  }
 }

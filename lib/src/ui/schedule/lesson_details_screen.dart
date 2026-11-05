@@ -1,5 +1,6 @@
 // lib/src/ui/schedule/lesson_details_screen.dart
-import 'dart:ui' as ui;
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
+import '../shared/workspace_page_header.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -29,18 +30,16 @@ class LessonDetailsScreen extends StatelessWidget {
     return Scaffold(
       body: Column(
         children: [
-          // ——— Шапка — «Занятие» покрупнее ———
-          SizedBox(
-            height: 128,
-            child: _HeaderUnified(
-              title: 'Занятие',
-            ),
-          ),
-          const SizedBox(height: 12),
-
+          const WorkspacePageHeader(title: 'Занятие'),
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+              padding: EdgeInsets.fromLTRB(
+                  ((MediaQuery.sizeOf(context).width - 800) / 2)
+                      .clamp(16.0, double.infinity),
+                  8,
+                  ((MediaQuery.sizeOf(context).width - 800) / 2)
+                      .clamp(16.0, double.infinity),
+                  24),
               children: [
                 // Большая карточка с типом и названием предмета
                 _TypeAndTitleCard(
@@ -171,74 +170,77 @@ class _SubjectLinkCard extends StatelessWidget {
     final linked = lesson.hasSubjectLink;
     final offeringId = lesson.subjectOfferingId ?? '';
 
-    return InkWell(
-      onTap: linked
-          ? () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => SubjectInfoScreen(
-                    title: lesson.subject,
-                    subjectId: lesson.subjectId,
-                    subjectOfferingId: offeringId,
-                    lessonId: lesson.id,
-                    groupId: lesson.groupId,
-                    semesterNumber: lesson.semesterNumber,
+    return Material(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          onTap: linked
+              ? () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => SubjectInfoScreen(
+                        title: lesson.subject,
+                        subjectId: lesson.subjectId,
+                        subjectOfferingId: offeringId,
+                        lessonId: lesson.id,
+                        groupId: lesson.groupId,
+                        semesterNumber: lesson.semesterNumber,
+                      ),
+                    ),
+                  )
+              : null,
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: theme.colorScheme.outlineVariant),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.lightbulb_outline,
+                  color: linked
+                      ? const Color(0xFF1E88E5)
+                      : theme.colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Информация о предмете',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: linked
+                              ? theme.colorScheme.onSurface
+                              : theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        linked
+                            ? 'Краткая информация, материалы, чат и дневник предмета.'
+                            : 'Информация по предмету пока не доступна.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              )
-          : null,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.06),
-              blurRadius: 12,
-              offset: const Offset(0, 3),
+                const SizedBox(width: 8),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  color: linked
+                      ? theme.colorScheme.onSurfaceVariant
+                      : theme.colorScheme.onSurfaceVariant,
+                ),
+              ],
             ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Icon(
-              Icons.lightbulb_outline,
-              color: linked ? const Color(0xFF1E88E5) : Colors.black38,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Информация о предмете',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: linked ? Colors.black : Colors.black45,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    linked
-                        ? 'Краткая информация, материалы, чат и дневник предмета.'
-                        : 'Информация по предмету пока не доступна.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.black.withValues(alpha: 0.62),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Icon(
-              Icons.chevron_right_rounded,
-              color: linked ? Colors.black38 : Colors.black26,
-            ),
-          ],
-        ),
-      ),
-    );
+          ),
+        ));
   }
 }
 
@@ -247,73 +249,39 @@ class _TypeAndTitleCard extends StatelessWidget {
   final LessonType type;
   final String subject;
   const _TypeAndTitleCard({required this.type, required this.subject});
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final (bg, label) = switch (type) {
-      LessonType.lecture => (const Color(0xFFFFE6E5), 'Лекция'),
-      LessonType.practice => (const Color(0xFFE6F0FF), 'Практика'),
-      LessonType.lab => (const Color(0xFFF1E6FF), 'Лабораторная'),
-      LessonType.other => (theme.colorScheme.surface, 'Занятие'),
+    final dark = theme.brightness == Brightness.dark;
+    final label = switch (type) {
+      LessonType.lecture => 'Лекция',
+      LessonType.practice => 'Практика',
+      LessonType.lab => 'Лабораторная',
+      LessonType.other => 'Занятие'
     };
-    final chipColor = switch (type) {
-      LessonType.lecture => const Color(0xFFE53935),
-      LessonType.practice => const Color(0xFF1E88E5),
-      LessonType.lab => const Color(0xFF8E24AA),
-      LessonType.other => Colors.black54,
+    final color = switch (type) {
+      LessonType.lecture => dark ? Colors.red.shade200 : Colors.red.shade800,
+      LessonType.practice => dark ? Colors.blue.shade200 : Colors.blue.shade800,
+      LessonType.lab => theme.colorScheme.primary,
+      LessonType.other => theme.colorScheme.onSurfaceVariant,
     };
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.06),
-              blurRadius: 12,
-              offset: const Offset(0, 3))
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // чип типа
-          DecoratedBox(
-            decoration: BoxDecoration(
-              color: bg,
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              child: Text(
-                label,
-                style: TextStyle(
-                  color: chipColor,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 12,
-                  letterSpacing: .2,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            subject,
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  fontSize:
-                      (Theme.of(context).textTheme.titleLarge?.fontSize ?? 20) +
-                          2,
-                  height: 1.1,
-                  color: Colors.black,
-                ),
-          ),
-        ],
-      ),
-    );
+    return Padding(
+        padding: const EdgeInsets.only(bottom: 20),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          if (type != LessonType.other) ...[
+            Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                    color: color.withValues(alpha: .12),
+                    borderRadius: BorderRadius.circular(8)),
+                child: Text(label,
+                    style:
+                        theme.textTheme.labelMedium?.copyWith(color: color))),
+            const SizedBox(height: 12),
+          ],
+          Text(subject, style: theme.textTheme.titleLarge),
+        ]));
   }
 }
 
@@ -322,52 +290,23 @@ class _Info extends StatelessWidget {
   final String title;
   final String value;
   const _Info({required this.icon, required this.title, required this.value});
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 12,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 20, color: theme.colorScheme.primary),
-          const SizedBox(width: 10),
+    return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(icon, size: 20, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 14),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: Colors.black.withOpacity(0.55),
-                  ),
-                ),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Text(title, style: theme.textTheme.bodySmall),
                 const SizedBox(height: 4),
-                Text(
-                  value,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: Colors.black,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
+                Text(value, style: theme.textTheme.bodyMedium),
+              ])),
+        ]));
   }
 }
 
@@ -379,71 +318,67 @@ class _TeacherLinkCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return InkWell(
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => TeacherProfileScreen(
-            teacherName: lesson.teacher!,
-            subjectTitle: lesson.subject,
-            semesterNumber: lesson.semesterNumber,
-            subjectOfferingId: lesson.subjectOfferingId,
-          ),
-        ),
-      ),
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.06),
-              blurRadius: 12,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            TeacherDifficultyAvatar(
-              teacherName: lesson.teacher!,
-              size: 38,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Преподаватель',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: Colors.black.withValues(alpha: 0.55),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    lesson.teacher!,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: Colors.black,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
+    return Material(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => TeacherProfileScreen(
+                teacherName: lesson.teacher!,
+                subjectTitle: lesson.subject,
+                semesterNumber: lesson.semesterNumber,
+                subjectOfferingId: lesson.subjectOfferingId,
               ),
             ),
-            const SizedBox(width: 8),
-            const Icon(
-              Icons.chevron_right_rounded,
-              color: Colors.black38,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: theme.colorScheme.outlineVariant),
             ),
-          ],
-        ),
-      ),
-    );
+            child: Row(
+              children: [
+                TeacherDifficultyAvatar(
+                  teacherName: lesson.teacher!,
+                  size: 38,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Преподаватель',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        lesson.teacher!,
+                        softWrap: true,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurface,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ],
+            ),
+          ),
+        ));
   }
 }
 
@@ -452,87 +387,35 @@ class _RoomInfo extends StatelessWidget {
   final String value;
   final bool showMapButton;
   final VoidCallback onOpenMap;
-  const _RoomInfo({
-    required this.value,
-    required this.showMapButton,
-    required this.onOpenMap,
-  });
-
+  const _RoomInfo(
+      {required this.value,
+      required this.showMapButton,
+      required this.onOpenMap});
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 12,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
+    return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Icon(Icons.location_on_outlined,
-              size: 20, color: theme.colorScheme.primary),
-          const SizedBox(width: 10),
+              size: 20, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 14),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Аудитория',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: Colors.black.withOpacity(0.55),
-                    )),
-                const SizedBox(height: 4),
-                Row(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Flexible(
-                      child: Text(
-                        value,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: Colors.black,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    if (showMapButton) ...[
-                      const SizedBox(width: 10),
-                      FilledButton.icon(
-                        onPressed: onOpenMap,
-                        icon: const Icon(Icons.map_outlined, size: 16),
-                        label: const Text('На карте'),
-                        style: FilledButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 7,
-                          ),
-                          minimumSize: const Size(0, 32),
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          visualDensity: VisualDensity.compact,
-                          shape: const StadiumBorder(),
-                          textStyle: theme.textTheme.labelSmall?.copyWith(
-                            fontWeight: FontWeight.w800,
-                          ),
-                          elevation: 1,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
+                Text('Аудитория', style: theme.textTheme.bodySmall),
+                const SizedBox(height: 4),
+                Text(value, style: theme.textTheme.bodyMedium),
+                if (showMapButton) ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                      onPressed: onOpenMap,
+                      icon: const Icon(Icons.map_outlined),
+                      label: const Text('На карте')),
+                ],
+              ])),
+        ]));
   }
 }
 
@@ -551,189 +434,65 @@ class _ActionCloud extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.06),
-              blurRadius: 12,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: theme.colorScheme.primary.withOpacity(.10),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, size: 20, color: theme.colorScheme.primary),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: Colors.black,
-                      height: 1.1,
-                    ),
-                  ),
-                  if (subtitle != null) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      subtitle!,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: Colors.black.withOpacity(.6),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            const Icon(Icons.chevron_right_rounded, color: Colors.black54),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Унифицированная шапка
-class _HeaderUnified extends StatelessWidget {
-  final String title;
-  final String? subtitle; // не используем
-  const _HeaderUnified({required this.title, this.subtitle});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Colors.white,
-                theme.colorScheme.primary.withOpacity(0.06),
-                theme.colorScheme.primary.withOpacity(0.12)
-              ],
-              stops: const [0.0, 0.62, 1.0],
-            ),
-          ),
-        ),
-        IgnorePointer(
-          child: Stack(children: [
-            Positioned(
-                left: -40,
-                top: -20,
-                child: _GlowCircle(
-                    diameter: 140,
-                    color: theme.colorScheme.primary.withOpacity(0.10))),
-            Positioned(
-                right: -30,
-                bottom: -30,
-                child: _GlowCircle(
-                    diameter: 160, color: Colors.white.withOpacity(0.55))),
-          ]),
-        ),
-        SafeArea(
-          bottom: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
-            child: Align(
-              alignment: const Alignment(-1, 0.25),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  const _RoundBackButton(),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                      style:
-                          Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w800,
-                                color: Colors.black,
-                                height: 1.05,
-                              ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _GlowCircle extends StatelessWidget {
-  final double diameter;
-  final Color color;
-  const _GlowCircle({required this.diameter, required this.color});
-  @override
-  Widget build(BuildContext context) => ClipOval(
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-          child: Container(
-              width: diameter,
-              height: diameter,
-              decoration: BoxDecoration(shape: BoxShape.circle, color: color)),
-        ),
-      );
-}
-
-/// Круглая кнопка «Назад» как в чате
-class _RoundBackButton extends StatelessWidget {
-  const _RoundBackButton();
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      width: 40,
-      height: 40,
-      decoration: BoxDecoration(
+    return Material(
         color: theme.colorScheme.surface,
-        shape: BoxShape.circle,
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.06),
-              blurRadius: 10,
-              offset: const Offset(0, 3)),
-        ],
-      ),
-      child: IconButton(
-        tooltip: 'Назад',
-        icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
-        onPressed: () => Navigator.of(context).maybePop(),
-      ),
-    );
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: theme.colorScheme.outlineVariant),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.primary.withOpacity(.10),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, size: 20, color: theme.colorScheme.primary),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: theme.colorScheme.onSurface,
+                          height: 1.1,
+                        ),
+                      ),
+                      if (subtitle != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          subtitle!,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(Icons.chevron_right_rounded,
+                    color: theme.colorScheme.onSurfaceVariant),
+              ],
+            ),
+          ),
+        ));
   }
 }
 
-/// Встроенная карта СПбГАСУ в WebView.
 class _MapSpbgasuInlineScreen extends StatefulWidget {
   const _MapSpbgasuInlineScreen({super.key});
 
@@ -771,17 +530,12 @@ class _MapSpbgasuInlineScreenState extends State<_MapSpbgasuInlineScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        leadingWidth: 64,
-        leading: const Padding(
-          padding: EdgeInsets.only(left: 12),
-          child: _RoundBackButton(),
-        ),
         title: const Text('Карта СПБГАСУ'),
       ),
       body: Stack(
         children: [
           WebViewWidget(controller: _controller),
-          if (!_loaded) const Center(child: CircularProgressIndicator()),
+          if (!_loaded) const Center(child: ProductLoadingIndicator.page()),
         ],
       ),
     );

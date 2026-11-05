@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductTheme, ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'subject_item.dart';
@@ -72,6 +73,9 @@ class _ReviewState extends State<ScheduleSubjectReviewScreen> {
           content: SizedBox(
             width: 480,
             child: DropdownButtonFormField<String>(
+              borderRadius: ProductTheme.selectionMenuRadius,
+              elevation: ProductTheme.selectionMenuElevation,
+              icon: const Icon(Icons.keyboard_arrow_down_rounded),
               isExpanded: true,
               initialValue: selected,
               decoration: const InputDecoration(
@@ -160,7 +164,7 @@ class _ReviewState extends State<ScheduleSubjectReviewScreen> {
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Предметы из расписания')),
     body: _loading
-        ? const Center(child: CircularProgressIndicator())
+        ? const Center(child: ProductLoadingIndicator())
         : Column(
             children: [
               const Padding(

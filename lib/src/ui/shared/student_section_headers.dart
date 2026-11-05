@@ -1,484 +1,131 @@
 import 'package:lottie/lottie.dart';
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../schedule/widgets/calendar_icon_button.dart';
 
-// Original screen headers, shared verbatim between account and guest shells.
-class StudentInfoHeader extends StatelessWidget {
-  final String subtitle;
-  final IconData sectionIcon;
-  final VoidCallback onSectionTap;
-  final VoidCallback onInfoTap;
-
-  const StudentInfoHeader({
-    required this.subtitle,
-    this.sectionIcon = Icons.school_outlined,
-    required this.onSectionTap,
-    required this.onInfoTap,
-  });
-
+class _SectionHeading extends StatelessWidget {
+  const _SectionHeading(
+      {required this.title,
+      required this.subtitle,
+      required this.leading,
+      this.actions = const []});
+  final String title, subtitle;
+  final Widget leading;
+  final List<Widget> actions;
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final compact = MediaQuery.sizeOf(context).height < 760;
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Colors.white,
-                theme.colorScheme.primary.withValues(alpha: 0.06),
-                theme.colorScheme.primary.withValues(alpha: 0.12),
-              ],
-              stops: const [0.0, 0.62, 1.0],
-            ),
-          ),
-        ),
-        IgnorePointer(
-          child: Stack(
-            children: [
-              Positioned(
-                left: -40,
-                top: -20,
-                child: _GlowCircle(
-                  diameter: 140,
-                  color: theme.colorScheme.primary.withValues(alpha: 0.10),
-                ),
-              ),
-              Positioned(
-                right: -30,
-                bottom: -30,
-                child: _GlowCircle(
-                  diameter: 160,
-                  color: Colors.white.withValues(alpha: 0.55),
-                ),
-              ),
-            ],
-          ),
-        ),
-        SafeArea(
-          bottom: false,
-          child: SizedBox.expand(
+    return Material(
+        color: theme.colorScheme.surface,
+        child: SafeArea(
+            bottom: false,
             child: Padding(
-              padding: EdgeInsets.fromLTRB(16, compact ? 4 : 8, 16, 6),
-              child: Align(
-                alignment: Alignment(-1, compact ? 0.08 : 0.18),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Container(
-                      padding: EdgeInsets.all(compact ? 10 : 12),
-                      decoration: BoxDecoration(
-                        color:
-                            theme.colorScheme.primary.withValues(alpha: 0.10),
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.06),
-                            blurRadius: 12,
-                            offset: const Offset(0, 4),
-                          ),
-                          BoxShadow(
-                            color: Colors.white.withValues(alpha: 0.85),
-                            blurRadius: 8,
-                            offset: const Offset(-2, -2),
-                          ),
-                        ],
-                      ),
-                      child: Icon(
-                        Icons.lightbulb_outline_rounded,
-                        color: theme.colorScheme.primary,
-                        size: compact ? 26 : 28,
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                child: Row(children: [
+                  leading,
+                  const SizedBox(width: 16),
+                  Expanded(
                       child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'База',
-                            style: theme.textTheme.headlineSmall?.copyWith(
-                              fontSize: compact ? 30 : null,
-                              fontWeight: FontWeight.w800,
-                              color: Colors.black,
-                              height: 1.05,
-                              shadows: [
-                                Shadow(
-                                  color: Colors.black.withValues(alpha: 0.05),
-                                  offset: const Offset(0, 2),
-                                  blurRadius: 3,
-                                ),
-                              ],
-                            ),
-                          ),
-                          SizedBox(height: compact ? 2 : 4),
-                          Text(
-                            subtitle,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                        Text(title,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: (compact
-                                    ? theme.textTheme.bodySmall
-                                    : theme.textTheme.bodyMedium)
-                                ?.copyWith(
-                              color: Colors.black.withValues(alpha: 0.64),
-                              height: 1.12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    _HeaderActionButton(
-                      icon: Icons.info_outline_rounded,
-                      onTap: onInfoTap,
-                    ),
-                    const SizedBox(width: 8),
-                    _HeaderActionButton(
-                      icon: sectionIcon,
-                      onTap: onSectionTap,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
+                            style: theme.textTheme.headlineSmall),
+                        const SizedBox(height: 4),
+                        Text(subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall)
+                      ])),
+                  ...actions
+                ]))));
   }
+}
+
+class _SectionIcon extends StatelessWidget {
+  const _SectionIcon(this.icon);
+  final IconData icon;
+  @override
+  Widget build(BuildContext context) => Container(
+      width: 44,
+      height: 44,
+      decoration: BoxDecoration(
+          color: Theme.of(context)
+              .colorScheme
+              .primaryContainer
+              .withValues(alpha: .45),
+          borderRadius: BorderRadius.circular(12)),
+      child: Icon(icon, color: Theme.of(context).colorScheme.primary));
+}
+
+class StudentInfoHeader extends StatelessWidget {
+  const StudentInfoHeader(
+      {required this.subtitle,
+      this.sectionIcon = Icons.school_outlined,
+      required this.onSectionTap,
+      required this.onInfoTap});
+  final String subtitle;
+  final IconData sectionIcon;
+  final VoidCallback onSectionTap, onInfoTap;
+  @override
+  Widget build(BuildContext context) => _SectionHeading(
+          title: 'База',
+          subtitle: subtitle,
+          leading: const _SectionIcon(Icons.lightbulb_outline_rounded),
+          actions: [
+            IconButton(
+                tooltip: 'О разделе',
+                onPressed: onInfoTap,
+                icon: const Icon(Icons.info_outline_rounded)),
+            IconButton(
+                tooltip: 'Выбрать раздел',
+                onPressed: onSectionTap,
+                icon: Icon(sectionIcon))
+          ]);
 }
 
 class StudentLearningHeader extends StatelessWidget {
-  final Widget? trailing;
   const StudentLearningHeader({this.trailing});
-
+  final Widget? trailing;
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final compact = MediaQuery.sizeOf(context).height < 760;
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Colors.white,
-                theme.colorScheme.primary.withOpacity(0.06),
-                theme.colorScheme.primary.withOpacity(0.12),
-              ],
-              stops: const [0.0, 0.62, 1.0],
-            ),
-          ),
-        ),
-        IgnorePointer(
-          child: Stack(
-            children: [
-              Positioned(
-                left: -40,
-                top: -20,
-                child: _GlowCircle(
-                  diameter: 140,
-                  color: theme.colorScheme.primary.withOpacity(0.10),
-                ),
-              ),
-              Positioned(
-                right: -30,
-                bottom: -30,
-                child: _GlowCircle(
-                  diameter: 160,
-                  color: Colors.white.withOpacity(0.55),
-                ),
-              ),
-            ],
-          ),
-        ),
-        SafeArea(
-          bottom: false,
-          child: SizedBox.expand(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(16, compact ? 4 : 8, 16, 6),
-              child: Align(
-                alignment: Alignment(-1, compact ? 0.08 : 0.18),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Container(
-                      padding: EdgeInsets.all(compact ? 10 : 12),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.primary.withOpacity(0.10),
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.06),
-                            blurRadius: 12,
-                            offset: const Offset(0, 4),
-                          ),
-                          BoxShadow(
-                            color: Colors.white.withOpacity(0.85),
-                            blurRadius: 8,
-                            offset: const Offset(-2, -2),
-                          ),
-                        ],
-                      ),
-                      child: Icon(
-                        Icons.groups_rounded,
-                        color: theme.colorScheme.primary,
-                        size: compact ? 26 : 28,
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            'Команды',
-                            style: theme.textTheme.headlineSmall?.copyWith(
-                              fontSize: compact ? 30 : null,
-                              fontWeight: FontWeight.w800,
-                              color: Colors.black,
-                              height: 1.05,
-                              shadows: [
-                                Shadow(
-                                  color: Colors.black.withOpacity(0.05),
-                                  offset: const Offset(0, 2),
-                                  blurRadius: 3,
-                                ),
-                              ],
-                            ),
-                          ),
-                          SizedBox(height: compact ? 2 : 4),
-                          Text(
-                            'Чат и задания',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: (compact
-                                    ? theme.textTheme.bodySmall
-                                    : theme.textTheme.bodyMedium)
-                                ?.copyWith(
-                              color: Colors.black.withOpacity(0.64),
-                              height: 1.12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (trailing != null) ...[
-                      const SizedBox(width: 8),
-                      trailing!,
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
+  Widget build(BuildContext context) => _SectionHeading(
+      title: 'Команды',
+      subtitle: 'Чат и задания',
+      leading: const _SectionIcon(Icons.groups_rounded),
+      actions: [if (trailing != null) trailing!]);
 }
 
 class StudentScheduleHeader extends StatelessWidget {
-  final String title;
-  final String subtitle;
-
-  // НОВОЕ:
+  const StudentScheduleHeader(
+      {required this.title,
+      required this.subtitle,
+      required this.day,
+      required this.eventColors,
+      required this.onDatePicked,
+      this.legendItems,
+      this.onEnsureMonthLoaded,
+      required this.menuBuilder});
+  final String title, subtitle;
   final DateTime day;
   final List<Color> Function(DateTime) eventColors;
   final Map<Color, String>? legendItems;
   final ValueChanged<DateTime> onDatePicked;
-
   final Future<void> Function(DateTime)? onEnsureMonthLoaded;
-
   final WidgetBuilder menuBuilder;
-
-  const StudentScheduleHeader({
-    required this.title,
-    required this.subtitle,
-    required this.day,
-    required this.eventColors,
-    required this.onDatePicked,
-    this.legendItems,
-    this.onEnsureMonthLoaded,
-    required this.menuBuilder,
-  });
-
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final compact = MediaQuery.sizeOf(context).height < 760;
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                Colors.white,
-                theme.colorScheme.primary.withValues(alpha: 0.06),
-                theme.colorScheme.primary.withValues(alpha: 0.12),
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              stops: const [0.0, 0.62, 1.0],
-            ),
-          ),
-        ),
-        IgnorePointer(
-          child: Stack(children: [
-            Positioned(
-                left: -40,
-                top: -20,
-                child: _GlowCircle(
-                    diameter: 140,
-                    color: theme.colorScheme.primary.withValues(alpha: 0.10))),
-            Positioned(
-                right: -30,
-                bottom: -30,
-                child: _GlowCircle(
-                    diameter: 160,
-                    color: Colors.white.withValues(alpha: 0.55))),
-          ]),
-        ),
-        SafeArea(
-          bottom: false,
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(16, compact ? 4 : 8, 16, 6),
-            child: Align(
-              alignment: Alignment(-1, compact ? 0.08 : 0.18),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  CalendarIconButton(
-                    day: day,
-                    eventColors: eventColors,
-                    legendItems: legendItems,
-                    onPicked: onDatePicked,
-                    onEnsureMonthLoaded:
-                        onEnsureMonthLoaded ?? (DateTime _) async {},
-                  ),
-                  SizedBox(width: compact ? 12 : 14),
-                  Expanded(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          style: Theme.of(context)
-                              .textTheme
-                              .headlineSmall
-                              ?.copyWith(
-                            fontSize: compact ? 30 : null,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.black,
-                            height: 1.05,
-                            shadows: [
-                              Shadow(
-                                  color: Colors.black.withValues(alpha: 0.05),
-                                  offset: const Offset(0, 2),
-                                  blurRadius: 3)
-                            ],
-                          ),
-                        ),
-                        SizedBox(height: compact ? 2 : 4),
-                        Text(
-                          subtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: (compact
-                                  ? Theme.of(context).textTheme.bodySmall
-                                  : Theme.of(context).textTheme.bodyMedium)
-                              ?.copyWith(
-                            color: Colors.black.withValues(alpha: 0.64),
-                            height: 1.12,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  menuBuilder(context),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _HeaderActionButton extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-
-  const _HeaderActionButton({
-    required this.icon,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return InkWell(
-      onTap: onTap,
-      customBorder: const CircleBorder(),
-      child: Container(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surface.withValues(alpha: 0.86),
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.06),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Icon(icon, color: theme.colorScheme.primary),
-      ),
-    );
-  }
-}
-
-class _GlowCircle extends StatelessWidget {
-  final double diameter;
-  final Color color;
-
-  const _GlowCircle({
-    required this.diameter,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipOval(
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-        child: Container(
-          width: diameter,
-          height: diameter,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: color,
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => _SectionHeading(
+      title: title,
+      subtitle: subtitle,
+      leading: CalendarIconButton(
+          day: day,
+          eventColors: eventColors,
+          legendItems: legendItems,
+          onPicked: onDatePicked,
+          onEnsureMonthLoaded: onEnsureMonthLoaded ?? (DateTime _) async {}),
+      actions: [menuBuilder(context)]);
 }
 
 class StudentScheduleMenu extends StatelessWidget {
@@ -500,14 +147,6 @@ class StudentScheduleMenu extends StatelessWidget {
       onSelected: onSelected,
       position: PopupMenuPosition.under,
       offset: const Offset(0, 10),
-      elevation: 18,
-      color: Colors.white,
-      surfaceTintColor: Colors.white,
-      shadowColor: Colors.black.withValues(alpha: 0.18),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(22),
-        side: BorderSide(color: primary.withValues(alpha: 0.08)),
-      ),
       constraints: const BoxConstraints(minWidth: 244),
       itemBuilder: (ctx) => [
         PopupMenuItem(
@@ -551,19 +190,12 @@ class StudentScheduleMenu extends StatelessWidget {
         ),
       ],
       child: Container(
-        width: 44,
-        height: 44,
+        width: 48,
+        height: 48,
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.78),
-          borderRadius: BorderRadius.circular(16),
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(color: primary.withValues(alpha: 0.10)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
-              blurRadius: 18,
-              offset: const Offset(0, 8),
-            ),
-          ],
         ),
         child: Icon(Icons.more_horiz_rounded, color: primary, size: 26),
       ),
@@ -608,22 +240,22 @@ class _ScheduleMenuItem extends StatelessWidget {
             children: [
               Text(
                 title,
-                maxLines: 1,
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodyMedium?.copyWith(
-                  color: active ? primary : const Color(0xFF111827),
+                  color: active ? primary : theme.colorScheme.onSurface,
                   fontWeight: FontWeight.w800,
-                  height: 1.05,
+                  height: 1.25,
                 ),
               ),
               const SizedBox(height: 4),
               Text(
                 subtitle,
-                maxLines: 1,
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: const Color(0xFF6B7280),
-                  height: 1.1,
+                  color: theme.colorScheme.onSurfaceVariant,
+                  height: 1.25,
                 ),
               ),
             ],
@@ -648,9 +280,15 @@ class StudentScheduleEmptyState extends StatelessWidget {
     return Center(
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         Lottie.asset('assets/lottie/cat_sleeping.json',
-            width: 180, height: 180, repeat: true, animate: animate),
+            width: 180,
+            height: 180,
+            repeat: !MediaQuery.disableAnimationsOf(context),
+            animate: animate && !MediaQuery.disableAnimationsOf(context)),
         const SizedBox(height: 12),
-        Text(message, style: const TextStyle(fontSize: 14, color: Colors.grey)),
+        Text(message,
+            style: TextStyle(
+                fontSize: 14,
+                color: Theme.of(context).colorScheme.onSurfaceVariant)),
       ]),
     );
   }

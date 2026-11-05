@@ -1,3 +1,4 @@
+import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:student_platform/src/services/chat_file_access.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -293,7 +294,7 @@ class _FilesTabState extends State<FilesTab>
             ),
             Expanded(
               child: _loading && effectiveFiles.isEmpty
-                  ? const Center(child: CircularProgressIndicator())
+                  ? const Center(child: ProductLoadingIndicator.page())
                   : (_section == _FilesSection.images
                       ? _buildImagesGrid(images)
                       : _buildDocsList(docs)),
@@ -307,7 +308,7 @@ class _FilesTabState extends State<FilesTab>
               child: Container(
                 color: Colors.black26,
                 alignment: Alignment.center,
-                child: const CircularProgressIndicator(),
+                child: const ProductLoadingIndicator.page(),
               ),
             ),
           ),
@@ -413,7 +414,7 @@ class _FilesTabState extends State<FilesTab>
                   placeholder: (_, __) => ColoredBox(
                     color:
                         Theme.of(context).colorScheme.surfaceContainerHighest,
-                    child: const Center(child: CircularProgressIndicator()),
+                    child: const Center(child: ProductLoadingIndicator(size: 72)),
                   ),
                   errorWidget: (_, __, ___) => ColoredBox(
                     color: Theme.of(context)

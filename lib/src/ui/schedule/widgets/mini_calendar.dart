@@ -65,23 +65,9 @@ class MiniCalendar extends StatelessWidget {
               alignment: Alignment.center,
               padding: const EdgeInsets.symmetric(horizontal: 14),
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    primary.withValues(alpha: 0.12),
-                    primary.withValues(alpha: 0.04),
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(16),
+                color: theme.colorScheme.surface,
+                borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: primary.withValues(alpha: 0.16)),
-                boxShadow: [
-                  BoxShadow(
-                    color: primary.withValues(alpha: 0.10),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -96,7 +82,7 @@ class MiniCalendar extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w900,
-                        color: Colors.black,
+                        color: theme.colorScheme.onSurface,
                         letterSpacing: 0.2,
                       ),
                     ),
@@ -106,7 +92,7 @@ class MiniCalendar extends StatelessWidget {
                     Text(
                       weekYearLabel!,
                       style: theme.textTheme.labelMedium?.copyWith(
-                        color: Colors.black.withValues(alpha: 0.45),
+                        color: theme.colorScheme.onSurfaceVariant,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -125,7 +111,7 @@ class MiniCalendar extends StatelessWidget {
   /// Классическая полоса на 7 дней с индикаторами событий (режим «По дням»).
   Widget _buildDayStrip(BuildContext context) {
     final theme = Theme.of(context);
-    const daysShort = ['ПН','ВТ','СР','ЧТ','ПТ','СБ','ВС'];
+    const daysShort = ['ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ', 'ВС'];
 
     final daysRow = Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -133,55 +119,67 @@ class MiniCalendar extends StatelessWidget {
         final bool isSelected = _sameDate(d, selectedDay);
         final colors = eventColors(d);
 
-                return GestureDetector(
-                  onTap: () => onSelect(d),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(daysShort[d.weekday - 1],
-                          style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Colors.black.withValues(alpha: 0.72))),
-                      const SizedBox(height: 6),
-                      Container(
-                        width: 36, height: 36, alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: isSelected ? theme.colorScheme.primary : theme.colorScheme.surface,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: colors.isNotEmpty
-                                ? theme.colorScheme.primary.withValues(alpha: 0.55)
-                                : theme.dividerColor,
-                          ),
-                          boxShadow: isSelected
-                              ? [BoxShadow(color: theme.colorScheme.primary.withValues(alpha: 0.25), blurRadius: 12, offset: const Offset(0, 4))]
-                              : null,
-                        ),
-                        child: Text(
-                          '${d.day}',
-                          style: TextStyle(
-                            color: isSelected ? theme.colorScheme.onPrimary : Colors.black,
-                            fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      // до 3 цветных точек типов событий — фиксируем высоту,
-                      // чтобы карточки дат не «прыгали», даже если точек нет
-                      SizedBox(
-                        width: 36,
-                        height: 10,
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: colors.take(3).map((c) => Container(
-                            margin: const EdgeInsets.symmetric(horizontal: 1.5),
-                            width: 6, height: 6,
-                            decoration: BoxDecoration(color: c, shape: BoxShape.circle),
-                          )).toList(),
-                        ),
-                      ),
-                    ],
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => onSelect(d),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(daysShort[d.weekday - 1],
+                  style: Theme.of(context)
+                      .textTheme
+                      .labelSmall
+                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+              const SizedBox(height: 6),
+              Container(
+                width: 36,
+                height: 36,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? theme.colorScheme.primary
+                      : theme.colorScheme.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: colors.isNotEmpty
+                        ? theme.colorScheme.primary.withValues(alpha: 0.55)
+                        : theme.dividerColor,
                   ),
-                );
-              }).toList(),
+                ),
+                child: Text(
+                  '${d.day}',
+                  style: TextStyle(
+                    color: isSelected
+                        ? theme.colorScheme.onPrimary
+                        : theme.colorScheme.onSurface,
+                    fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              // до 3 цветных точек типов событий — фиксируем высоту,
+              // чтобы карточки дат не «прыгали», даже если точек нет
+              SizedBox(
+                width: 36,
+                height: 10,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: colors
+                      .take(3)
+                      .map((c) => Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 1.5),
+                            width: 6,
+                            height: 6,
+                            decoration:
+                                BoxDecoration(color: c, shape: BoxShape.circle),
+                          ))
+                      .toList(),
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
     );
 
     return LayoutBuilder(builder: (context, constraints) {
@@ -192,10 +190,12 @@ class MiniCalendar extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(12, 2, 12, 8),
         child: narrow
             ? Column(children: [
-                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                  _arrow(Icons.chevron_left, onPrevWeek),
-                  _arrow(Icons.chevron_right, onNextWeek),
-                ]),
+                Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _arrow(Icons.chevron_left, onPrevWeek),
+                      _arrow(Icons.chevron_right, onNextWeek),
+                    ]),
                 daysRow,
               ])
             : Row(children: [
@@ -220,7 +220,9 @@ class CalendarLegend extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final chips = items.entries.map((e) => _LegendChip(color: e.key, text: e.value)).toList();
+    final chips = items.entries
+        .map((e) => _LegendChip(color: e.key, text: e.value))
+        .toList();
     return Padding(
       padding: padding,
       child: Wrap(spacing: 10, runSpacing: 6, children: chips),
@@ -235,9 +237,16 @@ class _LegendChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(mainAxisSize: MainAxisSize.min, children: [
-      Container(width: 10, height: 10, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+      Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
       const SizedBox(width: 6),
-      Text(text, style: Theme.of(context).textTheme.labelMedium?.copyWith(color: Colors.black)),
+      Text(text,
+          style: Theme.of(context)
+              .textTheme
+              .labelMedium
+              ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
     ]);
   }
 }

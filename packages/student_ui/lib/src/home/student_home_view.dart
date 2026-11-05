@@ -1,3 +1,4 @@
+import '../branding/product_loading_indicator.dart';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -217,13 +218,7 @@ class StudentHomeView extends StatelessWidget {
       bottomNavigationBar: bottomNavigationBar,
       body: DecoratedBox(
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: isDark
-                ? const [Color(0xFF101820), Color(0xFF111827)]
-                : const [Color(0xFFFAF8FC), Color(0xFFF7FBFA)],
-          ),
+          color: Theme.of(context).scaffoldBackgroundColor,
         ),
         child: SafeArea(
           bottom: false,
@@ -333,13 +328,6 @@ class _RoundNotificationButton extends StatelessWidget {
                     ? Colors.white10
                     : Colors.black.withValues(alpha: 0.04),
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.06),
-                  blurRadius: 16,
-                  offset: const Offset(0, 8),
-                ),
-              ],
             ),
             child: Icon(
               Icons.notifications_none_rounded,
@@ -370,26 +358,15 @@ class _NotificationBadge extends StatelessWidget {
       constraints: const BoxConstraints(minWidth: 21, minHeight: 21),
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [theme.colorScheme.primary, const Color(0xFFE35D7A)],
-        ),
+        color: theme.colorScheme.error,
         borderRadius: BorderRadius.circular(999),
         border: Border.all(color: theme.colorScheme.surface, width: 2),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFFE35D7A).withValues(alpha: 0.28),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
       ),
       child: Text(
         count > 9 ? '9+' : '$count',
         textAlign: TextAlign.center,
-        style: const TextStyle(
-          color: Colors.white,
+        style: TextStyle(
+          color: theme.colorScheme.onError,
           fontSize: 11,
           fontWeight: FontWeight.w900,
           height: 1,
@@ -445,43 +422,16 @@ class _TodaySummaryCard extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(16),
           child: Ink(
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(24),
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: isDark
-                    ? const [Color(0xFF203041), Color(0xFF12202E)]
-                    : const [Color(0xFFDCD0FA), Color(0xFFC5EFE5)],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: (isDark ? Colors.black : const Color(0xFFD9CCF5))
-                      .withValues(alpha: isDark ? 0.28 : 0.36),
-                  blurRadius: 20,
-                  offset: const Offset(0, 10),
-                ),
-              ],
+              borderRadius: BorderRadius.circular(16),
+              color: Theme.of(context).colorScheme.surface,
             ),
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Stack(
                 children: [
-                  Positioned(
-                    right: -20,
-                    top: -36,
-                    child: _GlowBubble(
-                      size: 104,
-                      opacity: isDark ? 0.08 : 0.18,
-                    ),
-                  ),
-                  Positioned(
-                    right: 38,
-                    bottom: -36,
-                    child: _GlowBubble(size: 76, opacity: isDark ? 0.06 : 0.13),
-                  ),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -891,21 +841,7 @@ class _AssignmentsSection extends StatelessWidget {
             child: Ink(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(20),
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: isDark
-                      ? const [Color(0xFF2B2932), Color(0xFF182331)]
-                      : const [Color(0xFFFFF1D2), Color(0xFFEAF7F2)],
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: (isDark ? Colors.black : const Color(0xFFEFD9AC))
-                        .withValues(alpha: isDark ? 0.24 : 0.22),
-                    blurRadius: 16,
-                    offset: const Offset(0, 8),
-                  ),
-                ],
+                color: Theme.of(context).colorScheme.surface,
               ),
               child: Padding(
                 padding: const EdgeInsets.all(12),
@@ -1111,8 +1047,7 @@ class _DoneCheckButton extends StatelessWidget {
                   ? SizedBox(
                       width: compact ? 14 : 18,
                       height: compact ? 14 : 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.2,
+                      child: ProductLoadingIndicator(
                         color: iconColor,
                       ),
                     )
@@ -1138,7 +1073,7 @@ class _EmptyAssignments extends StatelessWidget {
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF182331) : Colors.white,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
         children: [
@@ -1164,25 +1099,6 @@ class _EmptyAssignments extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _GlowBubble extends StatelessWidget {
-  const _GlowBubble({required this.size, required this.opacity});
-
-  final double size;
-  final double opacity;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: Colors.white.withValues(alpha: opacity),
       ),
     );
   }

@@ -23,11 +23,13 @@ class ContentIconEntry {
     required this.key,
     required this.labelRu,
     required this.category,
+    this.aliasesRu = const [],
   });
 
   final String key;
   final String labelRu;
   final ContentIconCategory category;
+  final List<String> aliasesRu;
 
   IconData get iconData => adminContentIconForKey(key);
 }
@@ -194,6 +196,7 @@ const List<ContentIconEntry> kContentIconCatalog = [
     key: 'calendar_today',
     labelRu: 'Расписание',
     category: ContentIconCategory.navigation,
+    aliasesRu: ['календарь'],
   ),
   ContentIconEntry(
     key: 'map',
@@ -386,12 +389,16 @@ String contentIconLabelRu(String? key) {
   return contentIconEntryForKey(key)?.labelRu ?? (key ?? '—');
 }
 
-/// Filter catalog entries by Russian label substring (case-insensitive).
+/// Filter entries by Russian labels and search aliases.
 List<ContentIconEntry> searchContentIconsByRuName(String query) {
   final trimmed = query.trim().toLowerCase();
   if (trimmed.isEmpty) return kContentIconCatalog;
   return kContentIconCatalog
-      .where((e) => e.labelRu.toLowerCase().contains(trimmed))
+      .where(
+        (e) =>
+            e.labelRu.toLowerCase().contains(trimmed) ||
+            e.aliasesRu.any((alias) => alias.contains(trimmed)),
+      )
       .toList();
 }
 
