@@ -270,4 +270,131 @@ void main() {
     expect(await pending, isFalse);
     expect(storage.values, isEmpty);
   });
+  test(
+      'shared coordinator serializes stale cleanup before replacement store writes',
+      () async {
+    final coordinator = OfflineGrantCoordinator(storage);
+    final oldStore = OfflinePolicyGrantStore(
+        session: scope,
+        currentBinding: () => currentBinding,
+        coordinator: coordinator);
+    final otherScope = AuthSessionScope(
+        currentSession: () => current, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, current));
+    final replacement = OfflinePolicyGrantStore(
+        session: otherScope,
+        currentBinding: () => currentBinding,
+        coordinator: coordinator);
+    final entered = Completer<void>(), release = Completer<void>();
+    storage.writeEntered = entered;
+    storage.writeRelease = release;
+    final old = oldStore.beginLiveCheck(scope.capture()!, currentBinding)!;
+    final oldWrite = oldStore.saveAfterLiveCheck(old, grant(currentBinding));
+    await entered.future;
+    oldStore.dispose();
+    final fresh =
+        replacement.beginLiveCheck(otherScope.capture()!, currentBinding)!;
+    final newWrite =
+        replacement.saveAfterLiveCheck(fresh, grant(currentBinding));
+    storage.writeEntered = null;
+    storage.writeRelease = null;
+    release.complete();
+    expect(await oldWrite, isFalse);
+    expect(await newWrite, isTrue);
+    expect(await replacement.read(otherScope.capture()!, currentBinding),
+        isNotNull);
+    replacement.dispose();
+    otherScope.dispose();
+  });
+  test('failed old cleanup quarantines a shared replacement', () async {
+    final coordinator = OfflineGrantCoordinator(storage);
+    final oldStore = OfflinePolicyGrantStore(
+        session: scope,
+        currentBinding: () => currentBinding,
+        coordinator: coordinator);
+    final otherScope = AuthSessionScope(
+        currentSession: () => current, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, current));
+    final replacement = OfflinePolicyGrantStore(
+        session: otherScope,
+        currentBinding: () => currentBinding,
+        coordinator: coordinator);
+    final entered = Completer<void>(), release = Completer<void>();
+    storage.writeEntered = entered;
+    storage.writeRelease = release;
+    final old = oldStore.beginLiveCheck(scope.capture()!, currentBinding)!;
+    final oldWrite = oldStore.saveAfterLiveCheck(old, grant(currentBinding));
+    await entered.future;
+    oldStore.dispose();
+    final fresh =
+        replacement.beginLiveCheck(otherScope.capture()!, currentBinding)!;
+    final newWrite =
+        replacement.saveAfterLiveCheck(fresh, grant(currentBinding));
+    storage.writeEntered = null;
+    storage.writeRelease = null;
+    storage.failRemove = true;
+    release.complete();
+    await expectLater(oldWrite, throwsA(isA<OfflineGrantStorageException>()));
+    expect(await newWrite, isFalse);
+    expect(
+        await replacement.read(otherScope.capture()!, currentBinding), isNull);
+    replacement.dispose();
+    otherScope.dispose();
+  });
+  test('revoke fences both old and replacement stores during a delayed write',
+      () async {
+    final coordinator = OfflineGrantCoordinator(storage);
+    final oldStore = OfflinePolicyGrantStore(
+        session: scope,
+        currentBinding: () => currentBinding,
+        coordinator: coordinator);
+    final otherScope = AuthSessionScope(
+        currentSession: () => current, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, current));
+    final replacement = OfflinePolicyGrantStore(
+        session: otherScope,
+        currentBinding: () => currentBinding,
+        coordinator: coordinator);
+    final entered = Completer<void>(), release = Completer<void>();
+    storage.writeEntered = entered;
+    storage.writeRelease = release;
+    final old = oldStore.beginLiveCheck(scope.capture()!, currentBinding)!;
+    final oldWrite = oldStore.saveAfterLiveCheck(old, grant(currentBinding));
+    await entered.future;
+    oldStore.dispose();
+    final fresh =
+        replacement.beginLiveCheck(otherScope.capture()!, currentBinding)!;
+    final newWrite =
+        replacement.saveAfterLiveCheck(fresh, grant(currentBinding));
+    final revoke = replacement.blockAndRevoke(currentBinding);
+    storage.writeEntered = null;
+    storage.writeRelease = null;
+    release.complete();
+    expect(await oldWrite, isFalse);
+    expect(await newWrite, isFalse);
+    await revoke;
+    expect(storage.values, isEmpty);
+    replacement.dispose();
+    otherScope.dispose();
+  });
+  test('disposed store cannot revoke a replacement store grant', () async {
+    final coordinator = OfflineGrantCoordinator(storage);
+    final oldStore = OfflinePolicyGrantStore(
+        session: scope,
+        currentBinding: () => currentBinding,
+        coordinator: coordinator);
+    final replacement = OfflinePolicyGrantStore(
+        session: scope,
+        currentBinding: () => currentBinding,
+        coordinator: coordinator);
+    oldStore.dispose();
+    final owner = scope.capture()!;
+    final attempt = replacement.beginLiveCheck(owner, currentBinding)!;
+    expect(await replacement.saveAfterLiveCheck(attempt, grant(currentBinding)),
+        isTrue);
+    await expectLater(
+        oldStore.blockAndRevoke(currentBinding), throwsStateError);
+    expect(await replacement.read(owner, currentBinding), isNotNull);
+    replacement.dispose();
+  });
 }

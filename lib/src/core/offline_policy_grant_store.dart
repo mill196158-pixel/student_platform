@@ -34,6 +34,16 @@ class OfflineGrantStorageException implements Exception {
   String toString() => 'OfflineGrantStorageException';
 }
 
+/// Shared for the full host lifetime and bound to a single storage backend.
+class OfflineGrantCoordinator {
+  OfflineGrantCoordinator(this._storage);
+  final OfflineGrantStorage _storage;
+  final Map<String, int> _revisions = {};
+  final Map<String, int> _liveRevisions = {};
+  final Map<String, Future<void>> _queue = {};
+  final Set<String> _quarantined = {};
+}
+
 /// Opaque fence captured *before* the live policy request begins.
 class OfflineGrantAttempt {
   OfflineGrantAttempt._(this._issuer, this._owner, this._binding, this._key,
@@ -53,18 +63,16 @@ class OfflinePolicyGrantStore {
   OfflinePolicyGrantStore(
       {required AuthSessionScope session,
       required OfflineSessionBinding? Function() currentBinding,
-      required OfflineGrantStorage storage})
-      : _session = session,
-        _currentBinding = currentBinding,
-        _storage = storage;
+      OfflineGrantStorage? storage,
+      OfflineGrantCoordinator? coordinator})
+      : assert((storage == null) != (coordinator == null)),
+        _coordinator = coordinator ?? OfflineGrantCoordinator(storage!),
+        _session = session,
+        _currentBinding = currentBinding;
   final AuthSessionScope _session;
   final OfflineSessionBinding? Function() _currentBinding;
-  final OfflineGrantStorage _storage;
+  final OfflineGrantCoordinator _coordinator;
   final Object _issuer = Object();
-  final Map<String, int> _revisions = {};
-  final Map<String, int> _liveRevisions = {};
-  final Map<String, Future<void>> _queue = {};
-  final Set<String> _quarantined = {};
   bool _disposed = false;
 
   String _key(OfflineSessionBinding binding) =>
@@ -84,16 +92,18 @@ class OfflinePolicyGrantStore {
       _session.isCurrent(attempt._owner) &&
       attempt._owner.userId == attempt._binding.userId &&
       _sameBinding(_currentBinding(), attempt._binding) &&
-      (_revisions[attempt._key] ?? 0) == attempt._revision &&
-      (!live || (_liveRevisions[attempt._key] ?? 0) == attempt._liveRevision) &&
-      !_quarantined.contains(attempt._key);
+      (_coordinator._revisions[attempt._key] ?? 0) == attempt._revision &&
+      (!live ||
+          (_coordinator._liveRevisions[attempt._key] ?? 0) ==
+              attempt._liveRevision) &&
+      !_coordinator._quarantined.contains(attempt._key);
 
   OfflineGrantAttempt? beginLiveCheck(
       AuthOperationScope owner, OfflineSessionBinding binding) {
     final captured = _capture(owner, binding);
     if (captured == null) return null;
-    final next = (_liveRevisions[captured._key] ?? 0) + 1;
-    _liveRevisions[captured._key] = next;
+    final next = (_coordinator._liveRevisions[captured._key] ?? 0) + 1;
+    _coordinator._liveRevisions[captured._key] = next;
     return OfflineGrantAttempt._(
         _issuer, owner, binding, captured._key, captured._revision, next);
   }
@@ -105,14 +115,19 @@ class OfflinePolicyGrantStore {
         !_session.isCurrent(owner) ||
         owner.userId != binding.userId ||
         !_sameBinding(_currentBinding(), binding) ||
-        _quarantined.contains(key)) return null;
-    return OfflineGrantAttempt._(_issuer, owner, binding, key,
-        _revisions[key] ?? 0, _liveRevisions[key] ?? 0);
+        _coordinator._quarantined.contains(key)) return null;
+    return OfflineGrantAttempt._(
+        _issuer,
+        owner,
+        binding,
+        key,
+        _coordinator._revisions[key] ?? 0,
+        _coordinator._liveRevisions[key] ?? 0);
   }
 
   Future<T> _serial<T>(String key, Future<T> Function() task) {
     final result = Completer<T>();
-    final previous = _queue[key] ?? Future<void>.value();
+    final previous = _coordinator._queue[key] ?? Future<void>.value();
     late final Future<void> next;
     next = previous.then((_) async {
       try {
@@ -121,9 +136,10 @@ class OfflinePolicyGrantStore {
         result.completeError(error, stack);
       }
     }).whenComplete(() {
-      if (identical(_queue[key], next)) _queue.remove(key);
+      if (identical(_coordinator._queue[key], next))
+        _coordinator._queue.remove(key);
     });
-    _queue[key] = next;
+    _coordinator._queue[key] = next;
     return result.future;
   }
 
@@ -141,21 +157,22 @@ class OfflinePolicyGrantStore {
     return _serial(key, () async {
       if (!_valid(attempt, live: true)) return false;
       try {
-        if (!await _storage.write(key, jsonEncode(grant.toJson()))) {
+        if (!await _coordinator._storage
+            .write(key, jsonEncode(grant.toJson()))) {
           throw const OfflineGrantStorageException();
         }
         if (!_valid(attempt, live: true)) {
-          _quarantined.add(key);
-          if (!await _storage.remove(key))
+          _coordinator._quarantined.add(key);
+          if (!await _coordinator._storage.remove(key))
             throw const OfflineGrantStorageException();
-          if ((_revisions[key] ?? 0) == attempt._revision) {
-            _quarantined.remove(key);
+          if ((_coordinator._revisions[key] ?? 0) == attempt._revision) {
+            _coordinator._quarantined.remove(key);
           }
           return false;
         }
         return true;
       } catch (_) {
-        _quarantined.add(key);
+        _coordinator._quarantined.add(key);
         throw const OfflineGrantStorageException();
       }
     });
@@ -168,7 +185,7 @@ class OfflinePolicyGrantStore {
     return _serial(attempt._key, () async {
       if (!_valid(attempt)) return null;
       try {
-        final raw = await _storage.read(attempt._key);
+        final raw = await _coordinator._storage.read(attempt._key);
         if (!_valid(attempt) || raw == null) return null;
         final grant = OfflinePolicyGrant.fromJson(jsonDecode(raw));
         if (grant == null ||
@@ -179,7 +196,7 @@ class OfflinePolicyGrantStore {
       } on FormatException {
         return null;
       } catch (_) {
-        _quarantined.add(attempt._key);
+        _coordinator._quarantined.add(attempt._key);
         throw const OfflineGrantStorageException();
       }
     });
@@ -187,17 +204,20 @@ class OfflinePolicyGrantStore {
 
   /// Revokes synchronously in this process; durable removal completes later.
   Future<void> blockAndRevoke(OfflineSessionBinding binding) {
+    if (_disposed)
+      return Future.error(StateError('Offline grant store disposed'));
     final key = _key(binding);
-    final revision = (_revisions[key] ?? 0) + 1;
-    _revisions[key] = revision;
-    _quarantined.add(key);
+    final revision = (_coordinator._revisions[key] ?? 0) + 1;
+    _coordinator._revisions[key] = revision;
+    _coordinator._quarantined.add(key);
     return _serial(key, () async {
       try {
-        if (!await _storage.remove(key))
+        if (!await _coordinator._storage.remove(key))
           throw const OfflineGrantStorageException();
-        if (_revisions[key] == revision) _quarantined.remove(key);
+        if (_coordinator._revisions[key] == revision)
+          _coordinator._quarantined.remove(key);
       } catch (_) {
-        _quarantined.add(key);
+        _coordinator._quarantined.add(key);
         throw const OfflineGrantStorageException();
       }
     });
