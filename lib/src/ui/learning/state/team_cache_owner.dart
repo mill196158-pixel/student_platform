@@ -19,6 +19,8 @@ class TeamCacheOwner {
   final Object _issuer = Object();
   bool _disposed = false;
 
+  bool belongsTo(AuthSessionScope scope) => identical(_scope, scope);
+
   TeamCacheTicket? capture() {
     if (_disposed || _scope.generation != _generation) return null;
     final current = _scope.capture();

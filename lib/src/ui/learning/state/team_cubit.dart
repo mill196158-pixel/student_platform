@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -18,6 +19,9 @@ import 'package:student_platform/src/ui/chats/core/chat_message_memory_cache.dar
 import 'package:student_platform/src/utils/safe_debug_log.dart';
 import 'package:student_platform/src/core/legacy_user_cache.dart';
 import 'team_initial_load.dart';
+import 'team_cache_owner.dart';
+import 'verified_empty_team_chat.dart';
+import 'package:student_platform/src/core/auth_session_scope.dart';
 
 class TeamState {
   final Team team;
@@ -103,11 +107,16 @@ class TeamState {
 
 class TeamCubit extends Cubit<TeamState> {
   final LearningRepository repo;
+  final AuthSessionScope? _authScope;
+  final TeamCacheOwner? _cacheOwner;
+  String? _verifiedEmptyChatId;
   static final Map<String, List<Message>> _messagesByTeamId = {};
   static final Map<String, List<Assignment>> _assignmentsByTeamId = {};
 
-  TeamCubit(Team team, {LearningRepository? repository})
+  TeamCubit(Team team, {LearningRepository? repository, AuthSessionScope? authScope})
       : repo = repository ?? SupabaseLearningRepository(),
+        _authScope = authScope,
+        _cacheOwner = authScope == null ? null : TeamCacheOwner.bind(authScope, team.id),
         super(TeamState(
           team: team,
           chat: List<Message>.unmodifiable(
@@ -119,7 +128,32 @@ class TeamCubit extends Cubit<TeamState> {
               .where((a) => a.completedByMe)
               .map((a) => a.id)
               .toSet(),
-        ));
+        )) {
+    final scope = _authScope, owner = _cacheOwner;
+    if (scope != null && owner != null && state.chat.isEmpty) {
+      final chatId = VerifiedEmptyTeamChats.instance.lookup(scope, owner);
+      if (chatId != null) {
+        final cached = ChatMessageCacheStore.peek(chatId, userId: owner.userId);
+        if (cached.found && cached.messages.isNotEmpty) {
+          VerifiedEmptyTeamChats.instance.invalidate(scope, owner);
+          emit(state.copyWith(chatHasSnapshot: false, chatRefreshing: true));
+          return;
+        }
+        _verifiedEmptyChatId = chatId;
+        emit(state.copyWith(chatHasSnapshot: true, chatRefreshing: true));
+      }
+    }
+  }
+
+  @override
+  void emit(TeamState next) {
+    final scope = _authScope, owner = _cacheOwner;
+    if (next.chat.isNotEmpty && scope != null && owner != null) {
+      VerifiedEmptyTeamChats.instance.invalidate(scope, owner);
+      _verifiedEmptyChatId = null;
+    }
+    super.emit(next);
+  }
 
   String? _myDisplayName;
   String? _myAvatarUrl;
@@ -220,6 +254,15 @@ class TeamCubit extends Cubit<TeamState> {
       return;
     }
 
+    final scope = _authScope, owner = _cacheOwner;
+    final seed = scope != null && owner != null
+        ? VerifiedEmptyTeamChats.instance.lookup(scope, owner)
+        : null;
+    if (_verifiedEmptyChatId != null && seed == _verifiedEmptyChatId && state.chat.isEmpty) {
+      emit(state.copyWith(loading: false, chatHasSnapshot: true,
+          chatRefreshing: true, chatError: false));
+      return;
+    }
     emit(state.copyWith(
       loading: true,
       chatHasSnapshot: false,
@@ -255,6 +298,9 @@ class TeamCubit extends Cubit<TeamState> {
         chatRefreshing: false,
         chatError: false,
       ));
+      if (reconciled.isEmpty && chatId != null) {
+        unawaited(_verifyEmptyChat(chatId));
+      }
       unawaited(_hydrateAssignmentIdsInChat());
     } catch (e) {
       safeDebugLog('[TeamCubit] loadChat failed: ${e.runtimeType}');
@@ -327,10 +373,22 @@ class TeamCubit extends Cubit<TeamState> {
   static Future<void> clearSessionCaches() async {
     _messagesByTeamId.clear();
     _assignmentsByTeamId.clear();
+    VerifiedEmptyTeamChats.instance.clear();
+  }
+
+  @visibleForTesting
+  static void debugRememberEmptyTeamChat(String teamId) {
+    _messagesByTeamId[teamId] = const [];
   }
 
   Future<String?> _resolveMainChatId() async {
     if (_mainChatId != null && _mainChatId!.isNotEmpty) return _mainChatId;
+    final scope = _authScope, owner = _cacheOwner;
+    if (scope != null && owner != null && _verifiedEmptyChatId != null &&
+        VerifiedEmptyTeamChats.instance.lookup(scope, owner) == _verifiedEmptyChatId) {
+      _mainChatId = _verifiedEmptyChatId;
+      return _mainChatId;
+    }
     try {
       final rows = await Supabase.instance.client
           .from('chats')
@@ -348,6 +406,27 @@ class TeamCubit extends Cubit<TeamState> {
     } catch (_) {
       return null;
     }
+  }
+
+  Future<void> _verifyEmptyChat(String expectedChatId) async {
+    final scope = _authScope, owner = _cacheOwner;
+    if (scope == null || owner == null || owner.capture() == null) return;
+    final sb = Supabase.instance.client;
+    await verifyEmptyTeamChat(
+      registry: VerifiedEmptyTeamChats.instance,
+      scope: scope,
+      owner: owner,
+      isOpenAndEmpty: () => !isClosed && state.chat.isEmpty,
+      fetchMapping: () async {
+        final rows = await sb.from('chats').select('id,team_id,type')
+            .eq('team_id', owner.teamId).eq('type', 'team_main').limit(2);
+        if (rows.length != 1 || rows.first['id'] != expectedChatId) return null;
+        return rows;
+      },
+      fetchPage: (id) => sb.rpc('get_chat_messages_page', params: {
+        'p_chat_id': id, 'p_limit': 1,
+      }),
+    );
   }
 
   List<Message> _mergeCachedChat(List<Message> messages) {
@@ -1383,6 +1462,7 @@ class TeamCubit extends Cubit<TeamState> {
 
   @override
   Future<void> close() async {
+    _cacheOwner?.dispose();
     try {
       await _rtChat?.unsubscribe();
       await _rtReactions?.unsubscribe();

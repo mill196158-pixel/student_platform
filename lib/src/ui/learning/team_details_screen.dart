@@ -5,6 +5,7 @@
 // для мягких свечений
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:student_platform/src/core/auth_session_scope_host.dart';
 
 import 'models/team.dart';
 import 'state/team_cubit.dart';
@@ -36,7 +37,7 @@ class TeamDetailsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return BlocProvider<TeamCubit>(
       create: (_) {
-        final c = TeamCubit(team);
+        final c = TeamCubit(team, authScope: AuthSessionScopeHost.maybeRead(context));
         c.init();
         return c;
       },
