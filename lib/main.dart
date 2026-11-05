@@ -36,7 +36,7 @@ import 'src/core/session_keeper.dart';
 import 'src/core/auth_session_scope_host.dart';
 import 'src/core/session_capabilities_host.dart';
 import 'src/core/offline_policy_grant_host.dart';
-import 'src/core/password_policy.dart';
+import 'src/core/guarded_policy_redirect.dart';
 import 'src/services/push/push_notification_service.dart';
 import 'src/navigation/root_nav.dart';
 import 'router_observer.dart';
@@ -51,18 +51,23 @@ final GoRouter appRouter = GoRouter(
   navigatorKey: rootNavigatorKey,
   initialLocation: '/splash',
   observers: [routeObserver],
-  redirect: (_, state) {
+  redirect: (context, state) {
     final client = Supabase.instance.client;
-    return authRouteRedirect(
+    return guardedPolicyRedirect(
       path: state.uri.path,
-      hasSession: client.auth.currentSession != null,
-      passwordChangeRequired: () => loadPasswordChangeRequired(client),
+      hasSession: () => client.auth.currentSession != null,
+      currentAccess: () =>
+          context.mounted ? OfflinePolicyGrantHost.maybeRead(context) : null,
     );
   },
   routes: [
     GoRoute(
       path: '/splash',
-      builder: (_, __) => const SplashScreen(),
+      builder: (_, state) {
+        final manualRetry = state.uri.queryParameters['retry'] == '1';
+        return SplashScreen(
+            key: ValueKey(manualRetry), manualRetry: manualRetry);
+      },
     ),
     GoRoute(
       path: '/login',
@@ -232,8 +237,9 @@ class StudentPlatformApp extends StatelessWidget {
         ),
       ],
       child: AuthSessionScopeHost(
-          child: OfflinePolicyGrantHost(child: SessionCapabilitiesHost(
-              child: SessionKeeper(
+          child: OfflinePolicyGrantHost(
+              child: SessionCapabilitiesHost(
+                  child: SessionKeeper(
         child: ValueListenableBuilder<ThemeMode>(
           valueListenable: themeService,
           builder: (context, mode, _) => MaterialApp.router(

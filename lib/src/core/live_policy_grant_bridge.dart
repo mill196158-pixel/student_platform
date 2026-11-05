@@ -10,6 +10,14 @@ class PolicyCheckStale implements Exception {
   const PolicyCheckStale();
 }
 
+class LivePolicyDecision {
+  const LivePolicyDecision._(
+      this.passwordChangeRequired, this._revision, this._issuer);
+  final bool passwordChangeRequired;
+  final int _revision;
+  final Object _issuer;
+}
+
 /// Records a live policy result; this does not grant offline access. The host
 /// must retain one bridge per scope, and the router must recheck both scope
 /// and bridge identity after awaiting a decision.
@@ -28,8 +36,15 @@ class LivePolicyGrantBridge {
   final Future<bool> Function() readLivePolicy;
   final DateTime Function() _clock;
   int _revision = 0;
+  final Object _issuer = Object();
+  int get revision => _revision;
 
-  Future<bool> check() async {
+  Future<bool> check() async => (await checkDecision()).passwordChangeRequired;
+
+  bool isCurrentDecision(LivePolicyDecision decision) =>
+      identical(decision._issuer, _issuer) && decision._revision == _revision;
+
+  Future<LivePolicyDecision> checkDecision() async {
     final owner = scope.capture();
     if (owner == null) throw const PolicyCheckStale();
     final revision = ++_revision;
@@ -59,7 +74,7 @@ class LivePolicyGrantBridge {
           _ignoreStorage(() => store.saveAfterLiveCheck(attempt!, grant));
         }
       }
-      return required;
+      return LivePolicyDecision._(required, revision, _issuer);
     } catch (error) {
       if (!current()) throw const PolicyCheckStale();
       if (attempt != null && _isConfirmedDenial(error)) {

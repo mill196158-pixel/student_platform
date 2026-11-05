@@ -5,9 +5,14 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:student_platform/src/core/auth_session.dart';
 
 class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key, this.restoreSession, this.restoreStatus});
+  const SplashScreen(
+      {super.key,
+      this.restoreSession,
+      this.restoreStatus,
+      this.manualRetry = false});
   final Future<bool> Function()? restoreSession;
   final Future<SessionRestoreStatus> Function()? restoreStatus;
+  final bool manualRetry;
 
   @override
   State<SplashScreen> createState() => _SplashScreenState();
@@ -19,7 +24,11 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    _bootstrap();
+    if (widget.manualRetry) {
+      _needsRetry = true;
+    } else {
+      _bootstrap();
+    }
   }
 
   Future<void> _bootstrap() async {
@@ -32,7 +41,8 @@ class _SplashScreenState extends State<SplashScreen> {
             ? SessionRestoreStatus.restored
             : SessionRestoreStatus.rejected;
       } else {
-        status = await AuthSession.restoreSessionStatus(Supabase.instance.client);
+        status =
+            await AuthSession.restoreSessionStatus(Supabase.instance.client);
       }
       // GoRouter awaits the live password policy before building /home.
       // Do not repeat that network request or populate unused legacy state here.
@@ -54,7 +64,8 @@ class _SplashScreenState extends State<SplashScreen> {
       if (status == SessionRestoreStatus.transportFailure) {
         context.go('/login');
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Нет соединения. Подключитесь к сети и повторите вход.'),
+          content:
+              Text('Нет соединения. Подключитесь к сети и повторите вход.'),
         ));
         return;
       }
@@ -75,7 +86,7 @@ class _SplashScreenState extends State<SplashScreen> {
         failed: _needsRetry,
         onRetry: () {
           setState(() {
-            _needsRetry = false;
+            _needsRetry = widget.manualRetry;
             _staleRetries = 0;
           });
           _bootstrap();
@@ -106,7 +117,8 @@ class SplashLoadingView extends StatelessWidget {
                     textAlign: TextAlign.center,
                   ),
                   if (onRetry != null)
-                    TextButton(onPressed: onRetry, child: const Text('Повторить')),
+                    TextButton(
+                        onPressed: onRetry, child: const Text('Повторить')),
                 ]),
               )
             : Column(
