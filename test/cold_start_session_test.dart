@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:async';
+import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -28,6 +30,99 @@ Map<String, dynamic> sessionFixture(int expiry) {
 }
 
 void main() {
+  test('classifies transport separately from server rejections', () async {
+    final client = SupabaseClient('https://example.com', 'test-public-key',
+        authOptions: const AuthClientOptions(autoRefreshToken: false));
+    addTearDown(client.dispose);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    await client.auth.setInitialSession(jsonEncode(sessionFixture(now - 60)));
+    for (final error in [
+      const SocketException('offline'),
+      http.ClientException('offline'),
+      TimeoutException('offline'),
+      AuthRetryableFetchException(statusCode: '503'),
+    ]) {
+      expect(await AuthSession.restoreSessionStatus(client,
+          refresh: () async => throw error), SessionRestoreStatus.transportFailure);
+    }
+    for (final error in [
+      const AuthApiException('invalid', statusCode: '400'),
+      const AuthApiException('denied', statusCode: '401'),
+      const AuthApiException('denied', statusCode: '403'),
+      StateError('invalid data'),
+    ]) {
+      expect(await AuthSession.restoreSessionStatus(client,
+          refresh: () async => throw error), SessionRestoreStatus.rejected);
+    }
+  });
+
+  test('a delayed network failure from an old session is ignored', () async {
+    final client = SupabaseClient('https://example.com', 'test-public-key',
+        authOptions: const AuthClientOptions(autoRefreshToken: false));
+    addTearDown(client.dispose);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    await client.auth.setInitialSession(jsonEncode(sessionFixture(now - 60)));
+    final delayed = Completer<AuthResponse>();
+    final result = AuthSession.restoreSessionStatus(client, refresh: () => delayed.future);
+    final newer = sessionFixture(now + 3600);
+    (newer['user'] as Map<String, dynamic>)['id'] = 'other-user';
+    await client.auth.setInitialSession(jsonEncode(newer));
+    delayed.completeError(TimeoutException('offline'));
+    expect(await result, SessionRestoreStatus.stale);
+  });
+
+  test('late rejection and success from old session cannot replace new account', () async {
+    for (final success in [false, true]) {
+      final client = SupabaseClient('https://example.com', 'test-public-key',
+          authOptions: const AuthClientOptions(autoRefreshToken: false));
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      await client.auth.setInitialSession(jsonEncode(sessionFixture(now - 60)));
+      final delayed = Completer<AuthResponse>();
+      final pending = AuthSession.restoreSessionStatus(client, refresh: () => delayed.future);
+      final newer = sessionFixture(now + 3600);
+      (newer['user'] as Map<String, dynamic>)['id'] = 'other-user';
+      await client.auth.setInitialSession(jsonEncode(newer));
+      if (success) {
+        delayed.complete(AuthResponse(session: Session.fromJson(
+            jsonDecode(jsonEncode(sessionFixture(now + 3600))) as Map<String, dynamic>)));
+      } else {
+        delayed.completeError(const AuthApiException('denied', statusCode: '401'));
+      }
+      expect(await pending, SessionRestoreStatus.stale);
+      expect(client.auth.currentUser?.id, 'other-user');
+      await client.dispose();
+    }
+  });
+
+  test('real SDK delayed refresh cannot redirect after a new sign-in', () async {
+    for (final status in [200, 401]) {
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final entered = Completer<void>();
+      final oldResponse = Completer<http.Response>();
+      final newer = sessionFixture(now + 3600);
+      (newer['user'] as Map<String, dynamic>)['id'] = 'other-user';
+      final client = SupabaseClient('https://example.com', 'test-public-key',
+          authOptions: const AuthClientOptions(autoRefreshToken: false),
+          httpClient: MockClient((request) {
+        if (request.url.queryParameters['grant_type'] == 'refresh_token') {
+          entered.complete();
+          return oldResponse.future;
+        }
+        return Future.value(http.Response(jsonEncode(newer), 200,
+            headers: {'content-type': 'application/json'}));
+      }));
+      await client.auth.setInitialSession(jsonEncode(sessionFixture(now - 60)));
+      final pending = AuthSession.restoreSessionStatus(client);
+      await entered.future;
+      await client.auth.signInWithPassword(email: 'test@example.com', password: 'test');
+      oldResponse.complete(http.Response(
+          jsonEncode(status == 200 ? sessionFixture(now + 3600) : {'msg': 'denied'}),
+          status, headers: {'content-type': 'application/json'}));
+      expect(await pending, SessionRestoreStatus.stale);
+      expect(client.auth.currentUser?.id, 'other-user');
+      await client.dispose();
+    }
+  });
   for (final scenario in ['valid', 'expired', 'rejected', 'missing']) {
     test('cold session restore: $scenario', () async {
       var requests = 0;

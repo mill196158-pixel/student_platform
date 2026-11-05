@@ -4,7 +4,7 @@ import 'dart:convert';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:student_platform/src/core/legacy_user_cache.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:student_platform/src/services/image_cache_service.dart';
 import 'package:student_platform/src/ui/friends/data/friends_snapshot_cache.dart';
@@ -650,13 +650,13 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
     final me = _sb.auth.currentUser?.id;
     String myGroup = '';
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final userJson = prefs.getString('user');
-      if (userJson != null) {
-        final meMap = jsonDecode(userJson) as Map<String, dynamic>;
+      final meMap = await LegacyUserCache.read(currentSession: () => _sb.auth.currentSession);
+      if (meMap != null && _sb.auth.currentUser?.id == me) {
         myGroup = (meMap['group_name'] ?? '').toString();
       }
     } catch (_) {}
+
+    if (_sb.auth.currentUser?.id != me) return;
 
     try {
       final res = await _sb.rpc('search_users_global', params: {'p_q': q});

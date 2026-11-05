@@ -1,10 +1,8 @@
 import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lottie/lottie.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ChangePasswordScreen extends StatefulWidget {
@@ -43,17 +41,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
       await sb.auth.updateUser(UserAttributes(password: _passwordCtrl.text));
       // must_change_password is cleared server-side by an auth.users password trigger.
 
-      final prefs = await SharedPreferences.getInstance();
-      final cachedUser = prefs.getString('user');
-      if (cachedUser != null) {
-        final decoded = jsonDecode(cachedUser);
-        if (decoded is Map<String, dynamic>) {
-          decoded['must_change_password'] = false;
-          await prefs.setString('user', jsonEncode(decoded));
-        }
-      }
-
-      if (!mounted) return;
+      if (!mounted || sb.auth.currentUser?.id != userId) return;
       context.go('/home');
     } on AuthException catch (e) {
       if (!mounted) return;

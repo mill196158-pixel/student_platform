@@ -1,4 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'transport_failure.dart';
+
+enum SessionRestoreStatus { restored, rejected, transportFailure, stale }
 
 /// Keeps Supabase auth session alive: proactive refresh + restore on boot.
 class AuthSession {
@@ -24,15 +27,40 @@ class AuthSession {
 
   /// Restores a valid session from the stored refresh token (app cold start).
   static Future<bool> tryRestoreSession(SupabaseClient client) async {
+    return await restoreSessionStatus(client) == SessionRestoreStatus.restored;
+  }
+
+  static Future<SessionRestoreStatus> restoreSessionStatus(
+      SupabaseClient client, {Future<AuthResponse> Function()? refresh}) async {
+    final initial = client.auth.currentSession;
+    (String, String, String?)? identity(Session? session) => session == null
+        ? null
+        : (session.user.id, session.accessToken, session.refreshToken);
+    final captured = identity(initial);
     try {
-      final session = client.auth.currentSession;
+      final session = initial;
       if (session != null && !session.isExpired) {
-        return true;
+        return SessionRestoreStatus.restored;
       }
-      final response = await client.auth.refreshSession();
-      return response.session != null;
-    } catch (_) {
-      return false;
+      final response = await (refresh?.call() ?? client.auth.refreshSession());
+      final refreshed = response.session;
+      final current = identity(client.auth.currentSession);
+      if (refreshed == null) {
+        return current == captured
+            ? SessionRestoreStatus.rejected
+            : SessionRestoreStatus.stale;
+      }
+      if (captured == null || refreshed.isExpired || refreshed.user.id != captured.$1 ||
+          identity(refreshed) != current) return SessionRestoreStatus.stale;
+      return SessionRestoreStatus.restored;
+    } catch (error) {
+      if (identity(client.auth.currentSession) != captured) {
+        return SessionRestoreStatus.stale;
+      }
+      if (isTemporaryTransportFailure(error)) {
+        return SessionRestoreStatus.transportFailure;
+      }
+      return SessionRestoreStatus.rejected;
     }
   }
 

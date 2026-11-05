@@ -16,6 +16,7 @@ import 'package:student_platform/src/ui/learning/models/team.dart';
 import 'package:student_platform/src/ui/chats/core/chat_message_cache_store.dart';
 import 'package:student_platform/src/ui/chats/core/chat_message_memory_cache.dart';
 import 'package:student_platform/src/utils/safe_debug_log.dart';
+import 'package:student_platform/src/core/legacy_user_cache.dart';
 
 class TeamState {
   final Team team;
@@ -121,6 +122,20 @@ class TeamCubit extends Cubit<TeamState> {
 
   String? _myDisplayName;
   String? _myAvatarUrl;
+  (String, String, String?)? _profileOwner;
+
+  (String, String, String?)? _currentProfileOwner() {
+    final session = Supabase.instance.client.auth.currentSession;
+    if (session == null) return null;
+    return (session.user.id, session.accessToken, session.refreshToken);
+  }
+
+  void _setProfileOwner((String, String, String?)? owner) {
+    if (_profileOwner == owner) return;
+    _profileOwner = owner;
+    _myDisplayName = null;
+    _myAvatarUrl = null;
+  }
   String? _mainChatId;
 
   // realtime
@@ -548,14 +563,17 @@ class TeamCubit extends Cubit<TeamState> {
 
   // ----------------------------- Профиль (имя/аватар) -----------------------------
   Future<String> _getMyDisplayName() async {
+    final owner = _currentProfileOwner();
+    _setProfileOwner(owner);
+    if (owner == null) return 'Я';
     if (_myDisplayName != null && _myDisplayName!.isNotEmpty) {
       return _myDisplayName!;
     }
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString('user');
-      if (raw != null && raw.isNotEmpty) {
-        final m = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+      final m = await LegacyUserCache.read(
+          currentSession: () => Supabase.instance.client.auth.currentSession);
+      if (_currentProfileOwner() != owner) return 'Я';
+      if (m != null) {
         final first = (m['name'] ?? '').toString();
         final last = (m['surname'] ?? '').toString();
         final full = [first, last].where((s) => s.isNotEmpty).join(' ').trim();
@@ -570,6 +588,7 @@ class TeamCubit extends Cubit<TeamState> {
             .select('name, surname')
             .eq('id', uid)
             .maybeSingle();
+        if (_currentProfileOwner() != owner) return 'Я';
         if (row != null) {
           final mm = Map<String, dynamic>.from(row as Map);
           final full = [
@@ -580,18 +599,21 @@ class TeamCubit extends Cubit<TeamState> {
         }
       }
     } catch (_) {}
-    return _myDisplayName = 'Я';
+    return _currentProfileOwner() == owner ? (_myDisplayName = 'Я') : 'Я';
   }
 
   Future<String?> _getMyAvatarUrl() async {
+    final owner = _currentProfileOwner();
+    _setProfileOwner(owner);
+    if (owner == null) return null;
     if (_myAvatarUrl != null && _myAvatarUrl!.isNotEmpty) {
       return _myAvatarUrl;
     }
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString('user');
-      if (raw != null && raw.isNotEmpty) {
-        final m = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+      final m = await LegacyUserCache.read(
+          currentSession: () => Supabase.instance.client.auth.currentSession);
+      if (_currentProfileOwner() != owner) return null;
+      if (m != null) {
         final url = (m['avatar_url'] ?? m['avatarUrl'] ?? '').toString();
         if (url.isNotEmpty) return _myAvatarUrl = url;
       }
@@ -604,6 +626,7 @@ class TeamCubit extends Cubit<TeamState> {
             .select('avatar_url')
             .eq('id', uid)
             .maybeSingle();
+        if (_currentProfileOwner() != owner) return null;
         if (row != null) {
           final mm = Map<String, dynamic>.from(row as Map);
           final url = (mm['avatar_url'] ?? '').toString();
@@ -611,7 +634,7 @@ class TeamCubit extends Cubit<TeamState> {
         }
       }
     } catch (_) {}
-    return _myAvatarUrl;
+    return _currentProfileOwner() == owner ? _myAvatarUrl : null;
   }
 
   // ----------------------------- ЧАТ -----------------------------

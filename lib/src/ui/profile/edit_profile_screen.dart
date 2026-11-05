@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:student_platform/src/core/legacy_user_cache.dart';
 import '../../themes/theme_service.dart';
 import 'theme_mode_picker.dart';
 
@@ -53,10 +54,16 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Future<void> _bootstrap() async {
-    final prefs = await SharedPreferences.getInstance();
-    final userJson = prefs.getString('user');
-    if (userJson != null) {
-      _user = jsonDecode(userJson) as Map<String, dynamic>;
+    final initial = _sb.auth.currentSession;
+    if (initial == null) return;
+    final owner = (initial.user.id, initial.accessToken, initial.refreshToken);
+    final user = await LegacyUserCache.read(currentSession: () => _sb.auth.currentSession);
+    if (!mounted) return;
+    final current = _sb.auth.currentSession;
+    if (current == null ||
+        (current.user.id, current.accessToken, current.refreshToken) != owner) return;
+    if (user != null) {
+      _user = user;
       _firstName.text = (_user?['name'] ?? '') as String;
       _lastName.text = (_user?['surname'] ?? '') as String;
       _university.text = _fixedUniversity;

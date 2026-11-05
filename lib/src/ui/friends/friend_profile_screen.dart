@@ -1,10 +1,8 @@
 import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'dart:async';
-import 'dart:convert';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:student_platform/src/services/image_cache_service.dart';
 import 'package:student_platform/src/ui/chats/data/blocks_api.dart';
@@ -75,16 +73,6 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
     try {
       // кто я
       _myId = _sb.auth.currentUser?.id;
-      if (_myId == null) {
-        try {
-          final prefs = await SharedPreferences.getInstance();
-          final userJson = prefs.getString('user');
-          if (userJson != null) {
-            final me = jsonDecode(userJson) as Map<String, dynamic>;
-            _myId = (me['id'] ?? '').toString();
-          }
-        } catch (_) {}
-      }
 
       // гость — через SECURITY DEFINER RPC, обходящий RLS
       final res =

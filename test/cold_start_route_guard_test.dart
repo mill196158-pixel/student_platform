@@ -4,9 +4,63 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_platform/src/core/password_policy.dart';
+import 'package:student_platform/src/core/auth_session.dart';
 import 'package:student_platform/src/ui/splash/splash_screen.dart';
 
 void main() {
+  testWidgets('stale startup retries and continues with the current session', (tester) async {
+    var calls = 0;
+    final router = GoRouter(initialLocation: '/splash', routes: [
+      GoRoute(path: '/splash', builder: (_, __) => SplashScreen(
+          restoreStatus: () async => ++calls == 1
+              ? SessionRestoreStatus.stale : SessionRestoreStatus.restored)),
+      GoRoute(path: '/home', builder: (_, __) => const Scaffold(body: Text('Home'))),
+    ]);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await tester.pumpAndSettle();
+    expect(calls, 2);
+    expect(find.text('Home'), findsOneWidget);
+  });
+
+  testWidgets('repeated stale startup shows retry instead of an endless loader', (tester) async {
+    var calls = 0;
+    final router = GoRouter(initialLocation: '/splash', routes: [
+      GoRoute(path: '/splash', builder: (_, __) => SplashScreen(
+          restoreStatus: () async { calls++; return SessionRestoreStatus.stale; })),
+    ]);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await tester.pumpAndSettle();
+    expect(calls, 2);
+    expect(find.text('Повторить'), findsOneWidget);
+    await tester.tap(find.text('Повторить'));
+    await tester.pumpAndSettle();
+    expect(calls, 4);
+    expect(find.text('Повторить'), findsOneWidget);
+  });
+  testWidgets('temporary restore failure keeps local profile and does not enter home',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'loggedIn': true, 'user': 'cached'});
+    var homeBuilds = 0;
+    final router = GoRouter(initialLocation: '/splash', routes: [
+      GoRoute(path: '/splash', builder: (_, __) => SplashScreen(
+          restoreStatus: () async => SessionRestoreStatus.transportFailure)),
+      GoRoute(path: '/login', builder: (_, __) => const Scaffold(body: Text('Login'))),
+      GoRoute(path: '/home', builder: (_, __) {
+        homeBuilds++;
+        return const Scaffold(body: Text('Protected home'));
+      }),
+    ]);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await tester.pumpAndSettle();
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('user'), 'cached');
+    expect(prefs.getBool('loggedIn'), isTrue);
+    expect(homeBuilds, 0);
+    expect(find.text('Login'), findsOneWidget);
+  });
   for (final outcome in ['allow', 'change', 'error', 'no_session']) {
     testWidgets('startup $outcome keeps one authoritative router gate',
         (tester) async {
@@ -57,8 +111,8 @@ void main() {
         expect(calls, 0);
         expect(find.text('Guest'), findsOneWidget);
         final prefs = await SharedPreferences.getInstance();
-        expect(prefs.containsKey('user'), isFalse);
-        expect(prefs.containsKey('loggedIn'), isFalse);
+        expect(prefs.getString('user'), 'legacy');
+        expect(prefs.getBool('loggedIn'), isTrue);
       } else {
         expect(calls,
             1); // Waiting on server: protected screen must still not exist.
