@@ -1,6 +1,5 @@
 import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_card_envelope.dart';
 import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
-import 'package:student_platform/src/ui/learning/widgets/authorized_file_image.dart';
 import 'package:student_platform/src/services/chat_file_access.dart';
 // FILE: lib/src/ui/chats/core/unified_chat_screen.dart
 // ignore_for_file: unnecessary_import, unused_import, unused_field, unused_element, dead_null_aware_expression, invalid_null_aware_operator, deprecated_member_use
@@ -39,7 +38,6 @@ import 'package:student_platform/src/services/file_service.dart';
 import 'package:student_platform/src/services/push/active_chat_tracker.dart';
 import 'package:student_platform/src/services/push/app_notifications_api.dart';
 import 'package:student_platform/src/ui/learning/global_cache.dart';
-import 'package:student_platform/src/services/image_cache_service.dart';
 
 import '../media/chat_media_sheet.dart';
 import '../forward/forward_picker.dart';
@@ -94,7 +92,6 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
   final FileService _fileService = FileService();
   final GlobalCache _globalCache = GlobalCache();
-  final AppImageCache _imgCache = AppImageCache();
 
   final Map<String, GlobalKey> _messageKeys = {};
   final Map<String, GlobalKey> _bubbleBoundaryKeys = {};
@@ -575,11 +572,6 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         final chatFile = ChatFile.fromJson(fileRow);
         await _globalCache.cacheFile(fileId, chatFile);
 
-        if ((chatFile.fileType).startsWith('image/') &&
-            chatFile.fileUrl.isNotEmpty) {
-          // ignore: discarded_futures
-          precacheImage(AuthorizedFileImageProvider(chatFile.fileUrl), context);
-        }
       }
     } catch (_) {}
   }

@@ -26,7 +26,6 @@ import 'chat/actions/chat_actions.dart' as ca;
 import 'chat/edit_message_dialog.dart';
 // ChatActions приходит через реэкспорт из widgets.dart
 import '../global_cache.dart';
-import '../../../services/image_cache_service.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:super_clipboard/super_clipboard.dart';
@@ -371,8 +370,6 @@ class _ChatTabState extends State<ChatTab> {
 
   // Глобальный кэш
   final GlobalCache _globalCache = GlobalCache();
-  final AppImageCache _imgCache = AppImageCache();
-  final Set<String> _prefetchedImageUrls = {};
   String? _lastAutoScrollTarget;
   String? _lastMarkedReadId; // ➜ NEW: чтобы не спамить RPC
   Timer? _seenDebounce; // ➜ NEW: debounce для автопрочтения
@@ -617,16 +614,6 @@ class _ChatTabState extends State<ChatTab> {
 
       // Асинхронно фиксируем «границу на входе» по last_read_at / first_unread_id
       _initEntryBoundary();
-
-      // Prefetch изображений для текущей ленты
-      final imgs = context
-          .read<TeamCubit>()
-          .state
-          .chat
-          .expand((m) => (m.attachments ?? const []))
-          .where((f) => f.isImage)
-          .map<String>((f) => f.fileUrl);
-      _imgCache.prefetchUrls(imgs);
 
       // Плавно скроллим вниз после инициализации
       _jumpToBottom();
@@ -2580,16 +2567,6 @@ class _ChatTabState extends State<ChatTab> {
             final chatFile = ChatFile.fromJson(fileResponse);
             // Кэшируем файл в глобальном кэше
             await _globalCache.cacheFile(fileId, chatFile);
-            // Предзагружаем картинку в диск-кэш, чтобы в ленте не мигало
-            if ((chatFile.fileType).startsWith('image/') &&
-                chatFile.fileUrl.isNotEmpty) {
-              if (!_prefetchedImageUrls.contains(chatFile.fileUrl)) {
-                _prefetchedImageUrls.add(chatFile.fileUrl);
-                // ignore: unawaited_futures
-                precacheImage(
-                    AuthorizedFileImageProvider(chatFile.fileUrl), context);
-              }
-            }
             safeDebugLog(
                 '[ChatTab] legacy file cached file=${maskDebugId(fileId)} message=${maskDebugId(msg['id'])}');
           }
