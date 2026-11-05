@@ -17,6 +17,7 @@ import 'package:student_platform/src/ui/chats/core/chat_message_cache_store.dart
 import 'package:student_platform/src/ui/chats/core/chat_message_memory_cache.dart';
 import 'package:student_platform/src/utils/safe_debug_log.dart';
 import 'package:student_platform/src/core/legacy_user_cache.dart';
+import 'team_initial_load.dart';
 
 class TeamState {
   final Team team;
@@ -152,35 +153,37 @@ class TeamCubit extends Cubit<TeamState> {
       emit(state.copyWith(chatRefreshing: true, chatError: false));
     }
 
-    if (state.assignments.isEmpty) {
-      final persistedAssignments = await _loadPersistedAssignmentsSnapshot();
-      if (persistedAssignments.isNotEmpty) {
-        _rememberAssignments(persistedAssignments);
-        emit(state.copyWith(
-          assignments: persistedAssignments,
-          doneAssignmentIds: persistedAssignments
-              .where((a) => a.completedByMe)
-              .map((a) => a.id)
-              .toSet(),
-        ));
-      }
-    }
+    await runTeamInitialLoad(
+      isClosed: () => isClosed,
+      restoreAssignments: _restoreInitialAssignments,
+      resolveChat: _resolveMainChatId,
+      hydrateChat: _hydrateChatSnapshot,
+      startChat: (chatId) => unawaited(_loadChatInBackground(chatId)),
+      startRole: () => unawaited(_loadRoleInBackground()),
+      subscribeChat: _subscribeToChat,
+      startAssignments: () => unawaited(_loadAssignmentsInBackground()),
+      subscribeAssignments: _subscribeToAssignments,
+    );
+  }
 
-    final chatId = await _resolveMainChatId();
-    await _hydrateChatSnapshot(chatId);
-
-    // Chat sync must not wait for files/assignments/role.
-    unawaited(_loadChatInBackground(chatId));
-    unawaited(_loadAssignmentsInBackground());
-    unawaited(_loadRoleInBackground());
-
-    _subscribeToChat();
-    _subscribeToAssignments();
+  Future<void> _restoreInitialAssignments() async {
+    if (state.assignments.isNotEmpty) return;
+    final persistedAssignments = await _loadPersistedAssignmentsSnapshot();
+    if (isClosed || state.assignments.isNotEmpty || persistedAssignments.isEmpty) return;
+    _rememberAssignments(persistedAssignments);
+    emit(state.copyWith(
+      assignments: persistedAssignments,
+      doneAssignmentIds: persistedAssignments
+          .where((a) => a.completedByMe)
+          .map((a) => a.id)
+          .toSet(),
+    ));
   }
 
   Future<void> _hydrateChatSnapshot(String? chatId) async {
     if (chatId != null) {
       final storeSnap = await ChatMessageCacheStore.read(chatId);
+      if (isClosed) return;
       if (storeSnap.found) {
         _rememberTeamChat(storeSnap.messages, allowEmpty: true);
         emit(state.copyWith(
@@ -195,6 +198,7 @@ class TeamCubit extends Cubit<TeamState> {
     }
 
     final persistedByTeam = await _loadPersistedTeamChatSnapshot();
+    if (isClosed) return;
     // Legacy team prefs may be a bare list without found flag; non-empty only.
     if (persistedByTeam.isNotEmpty) {
       if (chatId != null) {
@@ -203,6 +207,7 @@ class TeamCubit extends Cubit<TeamState> {
           messages: persistedByTeam,
           markSynced: false,
         );
+        if (isClosed) return;
       }
       _rememberTeamChat(persistedByTeam, allowEmpty: true);
       emit(state.copyWith(

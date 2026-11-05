@@ -1640,10 +1640,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         builder: (ctx, snap) {
           final view = snap.data ?? widget.service.messagesViewState;
           final list = view.messages;
-          // An empty refreshing snapshot is not yet proof that the chat is
-          // empty. Keep the loading placeholder until the server confirms it.
-          final initialLoading =
-              view.isInitialLoading || (view.isRefreshing && list.isEmpty);
+          // A known empty snapshot is still a snapshot: retain it while the
+          // latest messages load. A cold miss must not pretend to be empty.
+          final initialLoading = view.showInitialPlaceholder;
           final loadError = view.showError;
 
           if (_search.isActive) {

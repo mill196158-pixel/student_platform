@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -58,7 +59,7 @@ void main() {
     await ChatMessageCacheStore.replace(
         chatId: 'valid-after-corrupt',
         userId: 'user-a',
-        messages: [_msg('persisted')]);
+        messages: [_msg('persisted', chatId: 'valid-after-corrupt')]);
     final raw =
         prefs.getString('chat_msg_cache_v1_user-a_valid-after-corrupt')!;
     await ChatMessageCacheStore.clearOnLogout();
@@ -92,6 +93,69 @@ void main() {
     );
     expect(cold.found, isTrue);
     expect(cold.messages, isEmpty);
+  });
+
+  test('malformed or foreign disk envelopes never become empty snapshots', () async {
+    final prefs = await SharedPreferences.getInstance();
+    const chat = 'check';
+    const key = 'chat_msg_cache_v1_user-a_$chat';
+    final valid = <String, dynamic>{
+      'v': 1, 'userId': 'user-a', 'chatId': chat, 'found': true,
+      'messages': <Object>[],
+    };
+    final bad = <Map<String, dynamic>>[
+      {...valid, 'userId': 'user-b'},
+      {...valid, 'chatId': 'another-chat'},
+      {...valid}..remove('messages'),
+      {...valid, 'messages': 'not a list'},
+      {...valid, 'messages': [null]},
+      {...valid, 'messages': [{'id': 'x', 'chat_id': chat, 'created_at': 'invalid'}]},
+      {...valid, 'messages': [{'id': 'x', 'chat_id': 'another-chat', 'created_at': '2026-01-01T00:00:00Z'}]},
+      {...valid, 'messages': [{'id': '', 'chat_id': chat, 'created_at': '2026-01-01T00:00:00Z'}]},
+    ];
+    for (final envelope in bad) {
+      await ChatMessageCacheStore.clearAllMemory();
+      await prefs.setString(key, jsonEncode(envelope));
+      expect((await ChatMessageCacheStore.read(chat, userId: 'user-a')).found, isFalse);
+      expect(prefs.containsKey(key), isTrue, reason: 'invalid bytes are not deleted');
+    }
+    await ChatMessageCacheStore.clearAllMemory();
+    await prefs.setString(key, jsonEncode(valid));
+    expect((await ChatMessageCacheStore.read(chat, userId: 'user-a')).found, isTrue);
+  });
+
+  test('startup does not move a snapshot into a different chat key', () async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('chat_msg_cache_v1_user-a_wrong-key', jsonEncode({
+      'v': 1, 'userId': 'user-a', 'chatId': 'target', 'found': true, 'messages': [],
+    }));
+    await ChatMessageCacheStore.clearAllMemory();
+    await ChatMessageCacheStore.initializeCurrentUser();
+    expect(ChatMessageCacheStore.hasSnapshot('target', userId: 'user-a'), isFalse);
+    expect(prefs.containsKey('chat_msg_cache_v1_user-a_wrong-key'), isTrue);
+  });
+
+  test('wrong preference type is a cache miss without deleting other chats',
+      () async {
+    final prefs = await SharedPreferences.getInstance();
+    const badKey = 'chat_msg_cache_v1_user-a_bad-type';
+    const goodKey = 'chat_msg_cache_v1_user-a_good-type';
+    await prefs.setString(goodKey, jsonEncode({
+      'v': 1, 'userId': 'user-a', 'chatId': 'good-type',
+      'found': true, 'messages': [],
+    }));
+    for (final value in [true, 42]) {
+      if (value is bool) {
+        await prefs.setBool(badKey, value);
+      } else {
+        await prefs.setInt(badKey, value as int);
+      }
+      await ChatMessageCacheStore.clearAllMemory();
+      expect(ChatMessageCacheStore.peek('bad-type', userId: 'user-a').found, isFalse);
+      expect((await ChatMessageCacheStore.read('bad-type', userId: 'user-a')).found, isFalse);
+      expect((await ChatMessageCacheStore.read('good-type', userId: 'user-a')).found, isTrue);
+      expect(prefs.containsKey(badKey), isTrue);
+    }
   });
 
   testWidgets('2. empty cached DM does not show initial loading',
@@ -130,7 +194,7 @@ void main() {
     expect(find.byType(ProductLoadingIndicator), findsNothing);
   });
 
-  testWidgets('2b. empty refreshing DM never flashes empty state',
+  testWidgets('2b. known empty snapshot remains visible during refresh',
       (tester) async {
     const view = ChatMessagesViewState(
       phase: ChatMessagesLoadPhase.refreshing,
@@ -154,16 +218,60 @@ void main() {
             selectingMessages: false,
             selectedMessageIds: const {},
             onToggleSelect: (_) {},
-            initialLoading: view.isInitialLoading ||
-                (view.isRefreshing && view.messages.isEmpty),
+            initialLoading: view.showInitialPlaceholder,
           ),
         ),
       ),
     );
     await tester.pump();
 
+    expect(find.text('Сообщений пока нет'), findsOneWidget);
+    expect(find.byType(ProductLoadingIndicator), findsNothing);
+  });
+
+  testWidgets('2c. refreshing without any snapshot still shows loading',
+      (tester) async {
+    const view = ChatMessagesViewState(
+      phase: ChatMessagesLoadPhase.refreshing,
+      messages: [],
+      hasSnapshot: false,
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: ChatMessageList(
+          messages: view.messages,
+          controller: ScrollController(),
+          messageKeys: {},
+          search: ChatSearchController(),
+          currentUserId: 'me',
+          onReply: (_) {},
+          onLongPress: (_, __, ___, ____, _____, ______) {},
+          onReplyTap: (_) {},
+          onReact: (_, __) {},
+          selectingMessages: false,
+          selectedMessageIds: const {},
+          onToggleSelect: (_) {},
+          initialLoading: view.showInitialPlaceholder,
+        ),
+      ),
+    ));
     expect(find.text('Сообщений пока нет'), findsNothing);
     expect(find.byType(ProductLoadingIndicator), findsOneWidget);
+  });
+
+  test('2d. fresh messages replace an empty refreshing snapshot', () {
+    const cached = ChatMessagesViewState(
+      phase: ChatMessagesLoadPhase.refreshing,
+      messages: [],
+      hasSnapshot: true,
+    );
+    final fresh = cached.copyWith(
+      phase: ChatMessagesLoadPhase.ready,
+      messages: [_msg('fresh')],
+    );
+    expect(cached.showInitialPlaceholder, isFalse);
+    expect(fresh.showInitialPlaceholder, isFalse);
+    expect(fresh.messages.single.id, 'fresh');
   });
 
   test('3/4. syncLatest single-flight for one chatId', () async {

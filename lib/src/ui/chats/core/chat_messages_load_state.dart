@@ -94,6 +94,10 @@ class ChatMessagesViewState {
 
   bool get isRefreshing => phase == ChatMessagesLoadPhase.refreshing;
 
+  /// Keep known snapshots visible; only a refresh without one blocks the UI.
+  bool get showInitialPlaceholder =>
+      isInitialLoading || (!hasSnapshot && isRefreshing && messages.isEmpty);
+
   ChatMessagesViewState copyWith({
     ChatMessagesLoadPhase? phase,
     List<Message>? messages,

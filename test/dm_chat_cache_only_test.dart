@@ -161,7 +161,8 @@ void main() {
         caps.beginAuthorization(auth.capture()!)!);
     final service = DmChatService.cachedOnly(
         peerId: 'peer', initialChatId: 'bad-chat', capabilities: caps);
-    expect(service.messagesViewState.error, isA<CachedChatUnavailable>());
+    expect(service.messagesViewState.hasSnapshot, isFalse);
+    expect(service.messagesViewState.isInitialLoading, isTrue);
     final state = await service
         .watchMessagesState()
         .firstWhere((value) => value.phase == ChatMessagesLoadPhase.error);

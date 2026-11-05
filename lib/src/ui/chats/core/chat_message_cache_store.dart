@@ -66,7 +66,8 @@ class ChatMessageCacheStore {
           final envelope = Map<String, dynamic>.from(decoded);
           final chatId = (envelope['chatId'] ?? '').toString();
           if (chatId.isEmpty) continue;
-          final snap = _fromEnvelope(envelope, uid);
+          if (prefsKey != _prefsKey(uid, chatId)) continue;
+          final snap = _fromEnvelope(envelope, uid, chatId);
           if (snap.found) {
             _memory[_memKey(uid, chatId)] = snap;
           }
@@ -95,12 +96,12 @@ class ChatMessageCacheStore {
     // SharedPreferences is fully memory-backed after initialization, so this
     // remains synchronous even for a user who signed in after app startup.
     final prefs = _prefsOverride ?? _prefs;
-    final raw = prefs?.getString(_prefsKey(uid, chatId));
-    if (raw == null || raw.isEmpty) return ChatCacheSnapshot.notFound;
     try {
+      final raw = prefs?.getString(_prefsKey(uid, chatId));
+      if (raw == null || raw.isEmpty) return ChatCacheSnapshot.notFound;
       final decoded = jsonDecode(raw);
       if (decoded is! Map) return ChatCacheSnapshot.notFound;
-      final snap = _fromEnvelope(Map<String, dynamic>.from(decoded), uid);
+      final snap = _fromEnvelope(Map<String, dynamic>.from(decoded), uid, chatId);
       if (snap.found) _memory[key] = snap;
       return snap;
     } catch (_) {
@@ -130,7 +131,7 @@ class ChatMessageCacheStore {
 
       final decoded = jsonDecode(raw);
       if (decoded is! Map) return ChatCacheSnapshot.notFound;
-      final snap = _fromEnvelope(Map<String, dynamic>.from(decoded), uid);
+      final snap = _fromEnvelope(Map<String, dynamic>.from(decoded), uid, chatId);
       if (!snap.found) return ChatCacheSnapshot.notFound;
       _memory[key] = snap;
       return snap;
@@ -428,6 +429,7 @@ class ChatMessageCacheStore {
   static ChatCacheSnapshot _fromEnvelope(
     Map<String, dynamic> map,
     String expectedUserId,
+    String expectedChatId,
   ) {
     final v = (map['v'] as num?)?.toInt() ?? 0;
     if (v != envelopeVersion) return ChatCacheSnapshot.notFound;
@@ -435,17 +437,31 @@ class ChatMessageCacheStore {
     if (userId.isEmpty || userId != expectedUserId) {
       return ChatCacheSnapshot.notFound;
     }
+    if (expectedChatId.isEmpty || map['chatId'] != expectedChatId) {
+      return ChatCacheSnapshot.notFound;
+    }
     final found = map['found'] == true;
     if (!found) return ChatCacheSnapshot.notFound;
 
     final rawMessages = map['messages'];
+    if (rawMessages is! List) return ChatCacheSnapshot.notFound;
     final messages = <Message>[];
-    if (rawMessages is List) {
-      for (final item in rawMessages) {
-        if (item is! Map) continue;
-        final message = Message.fromJson(Map<String, dynamic>.from(item));
-        if (message.id.isNotEmpty) messages.add(message);
+    for (final item in rawMessages) {
+      if (item is! Map || item.keys.any((key) => key is! String)) {
+        return ChatCacheSnapshot.notFound;
       }
+      final id = item['id'];
+      final chat = item['chat_id'];
+      final timestamp = item['created_at'] ?? item['at'];
+      if (id is! String || id.trim().isEmpty || chat != expectedChatId ||
+          timestamp is! String || DateTime.tryParse(timestamp) == null) {
+        return ChatCacheSnapshot.notFound;
+      }
+      final message = Message.fromJson(Map<String, dynamic>.from(item));
+      if (message.id.isEmpty || message.chatId != expectedChatId) {
+        return ChatCacheSnapshot.notFound;
+      }
+      messages.add(message);
     }
     final sorted = _dedupeAndSort(messages);
     return ChatCacheSnapshot(
