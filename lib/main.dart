@@ -38,6 +38,7 @@ import 'src/core/session_capabilities_host.dart';
 import 'src/core/offline_policy_grant_host.dart';
 import 'src/core/guarded_policy_redirect.dart';
 import 'src/ui/chats/forward/forward_outbox_host.dart';
+import 'src/ui/learning/state/team_snapshot_host.dart';
 import 'src/services/push/push_notification_service.dart';
 import 'src/navigation/root_nav.dart';
 import 'router_observer.dart';
@@ -238,10 +239,11 @@ class StudentPlatformApp extends StatelessWidget {
         ),
       ],
       child: AuthSessionScopeHost(
-          child: ForwardOutboxHost(
-              child: OfflinePolicyGrantHost(
-                  child: SessionCapabilitiesHost(
-                      child: SessionKeeper(
+          child: TeamSnapshotHost(
+              child: ForwardOutboxHost(
+                  child: OfflinePolicyGrantHost(
+                      child: SessionCapabilitiesHost(
+                          child: SessionKeeper(
         child: ValueListenableBuilder<ThemeMode>(
           valueListenable: themeService,
           builder: (context, mode, _) => MaterialApp.router(
@@ -268,7 +270,7 @@ class StudentPlatformApp extends StatelessWidget {
             ],
           ),
         ),
-      ))))),
+      )))))),
     );
   }
 }
