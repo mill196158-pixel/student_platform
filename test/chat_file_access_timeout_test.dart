@@ -26,9 +26,23 @@ void main() {
     final pending = Completer<http.Response>();
     var denied = false;
     var offline = false;
+    var nonCacheable = false;
+    var calls = 0;
     final transport = MockClient((request) async {
       if (request.url.path.endsWith('/chat-file-access')) {
+        calls++;
         if (offline) throw const SocketException('offline');
+        if (nonCacheable) {
+          return http.Response(
+              jsonEncode({
+                'url':
+                    'https://studentsplatform.storage.yandexcloud.net/chats/test/photo.png',
+                'cacheable': false
+              }),
+              200,
+              request: request,
+              headers: {'content-type': 'application/json'});
+        }
         if (denied) {
           return http.Response('{"error":"denied"}', 403,
               request: request, headers: {'content-type': 'application/json'});
@@ -59,7 +73,10 @@ void main() {
     await file.parent.create(recursive: true);
     await file.writeAsBytes([1, 2, 3]);
 
-    expect(await ChatFileAccess.readBytes(url), [1, 2, 3]);
+    final copies = await Future.wait(
+        List.generate(3, (_) => ChatFileAccess.readBytes(url)));
+    expect(copies, everyElement([1, 2, 3]));
+    expect(calls, 1);
     pending.complete(http.Response('{"error":"denied"}', 403,
         headers: {'content-type': 'application/json'}));
     for (var i = 0; i < 30 && await file.exists(); i++) {
@@ -75,5 +92,23 @@ void main() {
     await expectLater(
         ChatFileAccess.readBytes(url), throwsA(isA<FunctionException>()));
     expect(await file.exists(), isFalse);
+
+    // A session switch while non-cacheable cleanup is waiting must not return
+    // the old signed URL, including to a caller of resolve() directly.
+    denied = false;
+    nonCacheable = true;
+    final entered = Completer<void>();
+    final resume = Completer<String>();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (_) {
+      if (!entered.isCompleted) entered.complete();
+      return resume.future;
+    });
+    final result = ChatFileAccess.resolve(url);
+    final rejected = expectLater(result, throwsStateError);
+    await entered.future;
+    ChatFileAccess.generation++;
+    resume.complete(dir.path);
+    await rejected;
   }, timeout: const Timeout(Duration(seconds: 35)));
 }

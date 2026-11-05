@@ -7,12 +7,15 @@ import 'package:crypto/crypto.dart' as crypto;
 import 'dart:convert';
 import 'package:path_provider/path_provider.dart';
 import 'chat_file_offline_policy.dart';
+import 'inflight_only.dart';
 
 /// Resolves only the application's private object namespace. Signed URLs are
 /// ephemeral and never become message metadata or persistent cache keys.
 class ChatFileAccess {
   static const storageHost = 'studentsplatform.storage.yandexcloud.net';
   static int generation = 0;
+  static final _resolving = InflightOnly<
+      (String, String, int, String, SupabaseClient), String>();
   static String? get userId {
     try {
       return Supabase.instance.client.auth.currentUser?.id;
@@ -67,6 +70,7 @@ class ChatFileAccess {
   static Future<void> clear() async {
     final uid = userId;
     generation++;
+    _resolving.clear();
     _noOffline.clear();
     for (final path in _forwardTemps.keys.toList()) {
       await releaseForwardTemp(path);
@@ -179,17 +183,31 @@ class ChatFileAccess {
     final uid = userId, epoch = generation;
     if (uid == null) throw StateError('Войдите, чтобы открыть вложение.');
     final token = _currentAccessToken();
+    if (token == null) throw StateError('Войдите, чтобы открыть вложение.');
+    final client = Supabase.instance.client;
+    final resolved = await _resolving.run((uid, token, epoch, key, client),
+        () => _resolveOnce(url, key, uid, epoch, token, client));
+    if (!identical(client, Supabase.instance.client) ||
+        uid != userId || epoch != generation || token != _currentAccessToken()) {
+      throw StateError('Сессия изменилась.');
+    }
+    return resolved;
+  }
+
+  static Future<String> _resolveOnce(String url, String key, String uid,
+      int epoch, String token, SupabaseClient client) async {
     late final FunctionResponse response;
     try {
-      final request = Supabase.instance.client.functions
+      final request = client.functions
           .invoke('chat-file-access', body: {'action': 'resolve', 'key': key});
       // Observe denials even if the waiting caller has already timed out.
       // The observer never downloads or returns data and only acts on the
       // exact session that initiated this request.
       bool current() {
         try {
-          return uid == userId && epoch == generation && token != null &&
-              Supabase.instance.client.auth.currentSession?.accessToken == token;
+          return identical(client, Supabase.instance.client) &&
+              uid == userId && epoch == generation &&
+              client.auth.currentSession?.accessToken == token;
         } catch (_) {
           return false;
         }
@@ -220,14 +238,16 @@ class ChatFileAccess {
           );
     } on FunctionException catch (error) {
       if ((error.status == 401 || error.status == 403 || error.status == 404) &&
-          uid == userId && epoch == generation && token != null &&
+          identical(client, Supabase.instance.client) &&
+          uid == userId && epoch == generation &&
           token == _currentAccessToken()) {
         _noOffline.add('$uid:$key');
         await _purge(url, uid);
       }
       rethrow;
     }
-    if (userId != uid || generation != epoch || token == null ||
+    if (!identical(client, Supabase.instance.client) ||
+        userId != uid || generation != epoch ||
         token != _currentAccessToken())
       throw StateError('Сессия изменилась.');
     if (response.data is Map && response.data['cacheable'] == false) {
