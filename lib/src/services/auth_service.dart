@@ -9,6 +9,9 @@ import 'package:student_platform/src/core/logout_cleanup.dart';
 import 'package:student_platform/src/core/auth_session_scope_host.dart';
 import 'package:student_platform/src/core/offline_policy_grant_host.dart';
 import 'package:student_platform/src/core/offline_grant_logout.dart';
+import 'package:student_platform/src/config/supabase_config.dart';
+import 'package:student_platform/src/ui/learning/state/team_snapshot_host.dart';
+import 'package:student_platform/src/ui/learning/state/team_snapshot_logout.dart';
 import 'package:student_platform/src/services/push/push_notification_service.dart';
 import 'package:student_platform/src/ui/chats/core/chat_message_cache_store.dart';
 import 'package:student_platform/src/ui/chats/data/dm_api.dart';
@@ -30,6 +33,11 @@ class AuthService {
 
   static Future<void> signOut(BuildContext context) async {
     final scope = AuthSessionScopeHost.maybeRead(context);
+    final teamCleanup = beginTeamSnapshotLogout(
+      coordinator: TeamSnapshotHost.maybeRead(context),
+      project: SupabaseConfig.url,
+      userId: _sb.auth.currentUser?.id,
+    );
     final revoke = beginOfflineGrantLogout(
       access: OfflinePolicyGrantHost.maybeRead(context),
       invalidate: () => scope?.invalidateForSignOut(),
@@ -39,6 +47,9 @@ class AuthService {
     try {
       cleanupComplete = await runLogoutCleanup(
         cleanups: [
+          () async {
+            if (!await teamCleanup) throw StateError('Team cache cleanup failed');
+          },
           () async {
             if (!await revoke) throw StateError('Local grant removal failed');
           },
