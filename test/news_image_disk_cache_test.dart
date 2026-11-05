@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -51,6 +52,26 @@ void main() {
     });
     expect(networkCalls, 0);
     expect(again, bytes);
+  });
+
+  test('disk cache hit does not rewrite index and survives a fresh instance',
+      () async {
+    final k = key('news/a.png', '1');
+    final bytes = Uint8List.fromList([1, 2, 3, 4]);
+    await disk.put(k, bytes);
+    final index = File('${tempDir.path}/index.json');
+    final original = jsonDecode(await index.readAsString()) as Map<String, dynamic>;
+    (original[k.id] as Map<String, dynamic>)['lastAccess'] = '2000-01-01T00:00:00.000Z';
+    await index.writeAsString(jsonEncode(original));
+    final before = await index.readAsBytes();
+    memory.clear();
+    expect(await disk.peek(k), bytes);
+    expect(await index.readAsBytes(), before);
+    final fresh = NewsImageDiskCache(
+      memory: NewsImageBytesCache(),
+      rootOverride: () => tempDir,
+    );
+    expect(await fresh.peek(k), bytes);
   });
 
   test('version change downloads new bytes; old path versions prune later',

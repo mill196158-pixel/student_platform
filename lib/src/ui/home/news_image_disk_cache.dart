@@ -72,7 +72,8 @@ class NewsImageDiskCache {
       if (bytes.isEmpty) return null;
       _memory.put(key, bytes);
       entry.lastAccess = DateTime.now().toUtc();
-      await _persistIndex();
+      // Persist access order with the next cache mutation. A read should not
+      // wait for a disk write before the image can be displayed.
       return bytes;
     } catch (e) {
       debugPrint('[news-img] disk peek failed type=${e.runtimeType}');
