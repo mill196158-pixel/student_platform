@@ -41,6 +41,12 @@ void main() {
         currentSession: readSession, authEvents: events.stream);
     events.add(AuthState(AuthChangeEvent.initialSession, session));
     final storage = _Storage();
+    var policyCalls = 0;
+    Future<bool> readPolicy() async {
+      policyCalls++;
+      return false;
+    }
+
     OfflinePolicyGrantAccess? seen;
     Widget build(AuthSessionScope source, Brightness brightness) => MaterialApp(
           theme: ThemeData(brightness: brightness),
@@ -49,6 +55,7 @@ void main() {
               currentSession: readSession,
               issuer: 'https://test.example/auth/v1',
               storage: storage,
+              readLivePolicy: readPolicy,
               child: Builder(builder: (context) {
                 seen = OfflinePolicyGrantHost.maybeRead(context);
                 return const SizedBox();
@@ -56,18 +63,22 @@ void main() {
         );
     await tester.pumpWidget(build(a, Brightness.light));
     final first = seen!;
+    final firstBridge = first.bridge;
     expect(first.scope, same(a));
     expect(first.currentBinding(), isNull);
     await tester.pumpWidget(build(a, Brightness.dark));
     expect(seen, same(first));
+    expect(seen!.bridge, same(firstBridge));
     session = fakeSession('b');
     events.add(AuthState(AuthChangeEvent.signedIn, session));
     await tester.pump();
     expect(seen, same(first));
     await tester.pumpWidget(build(b, Brightness.dark));
     expect(seen, isNot(same(first)));
+    expect(seen!.bridge, isNot(same(firstBridge)));
     expect(seen!.scope, same(b));
     expect(storage.calls, 0);
+    expect(policyCalls, 0);
     await tester.pumpWidget(const SizedBox());
     a.dispose();
     b.dispose();

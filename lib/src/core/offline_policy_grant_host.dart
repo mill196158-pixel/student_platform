@@ -6,13 +6,16 @@ import 'auth_session_scope.dart';
 import 'auth_session_scope_host.dart';
 import 'offline_policy_grant.dart';
 import 'offline_policy_grant_store.dart';
+import 'live_policy_grant_bridge.dart';
+import 'password_policy.dart';
 
 /// Passive storage owner. It neither checks policy nor grants offline access.
 class OfflinePolicyGrantAccess {
   const OfflinePolicyGrantAccess(
-      this.scope, this.store, this._currentSession, this._issuer);
+      this.scope, this.store, this.bridge, this._currentSession, this._issuer);
   final AuthSessionScope scope;
   final OfflinePolicyGrantStore store;
+  final LivePolicyGrantBridge bridge;
   final Session? Function() _currentSession;
   final String _issuer;
 
@@ -31,6 +34,7 @@ class OfflinePolicyGrantHost extends StatefulWidget {
       this.source,
       this.currentSession,
       this.storage,
+      this.readLivePolicy,
       this.issuer});
   final Widget child;
   @visibleForTesting
@@ -39,6 +43,8 @@ class OfflinePolicyGrantHost extends StatefulWidget {
   final Session? Function()? currentSession;
   @visibleForTesting
   final OfflineGrantStorage? storage;
+  @visibleForTesting
+  final Future<bool> Function()? readLivePolicy;
   @visibleForTesting
   final String? issuer;
 
@@ -73,6 +79,7 @@ class _OfflinePolicyGrantHostState extends State<OfflinePolicyGrantHost> {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.source, widget.source) ||
         oldWidget.currentSession != widget.currentSession ||
+        oldWidget.readLivePolicy != widget.readLivePolicy ||
         oldWidget.issuer != widget.issuer) _bind(force: true);
   }
 
@@ -98,7 +105,15 @@ class _OfflinePolicyGrantHostState extends State<OfflinePolicyGrantHost> {
 
     final store = OfflinePolicyGrantStore(
         session: scope, currentBinding: binding, coordinator: _coordinator);
-    _access = OfflinePolicyGrantAccess(scope, store, readSession, issuer);
+    final bridge = LivePolicyGrantBridge(
+      scope: scope,
+      store: store,
+      currentBinding: binding,
+      readLivePolicy: widget.readLivePolicy ??
+          () => loadPasswordChangeRequired(Supabase.instance.client),
+    );
+    _access =
+        OfflinePolicyGrantAccess(scope, store, bridge, readSession, issuer);
   }
 
   @override
