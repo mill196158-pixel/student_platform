@@ -4,6 +4,26 @@ import 'package:student_platform/src/utils/safe_debug_log.dart';
 import '../../../../../services/file_service.dart';
 import '../../../models/chat_file.dart';
 
+class UnconfirmedMessageSend implements Exception {
+  const UnconfirmedMessageSend();
+}
+
+/// A malformed response cannot be treated as confirmation of a send.
+String parseSentChatMessageId(Object? response) {
+  Object? value = response;
+  if (value is List) {
+    if (value.length != 1) throw const UnconfirmedMessageSend();
+    value = value.first;
+  }
+  if (value is Map) value = value['id'];
+  if (value is! String ||
+      !RegExp(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
+          .hasMatch(value)) {
+    throw const UnconfirmedMessageSend();
+  }
+  return value;
+}
+
 class ChatRepository {
   final SupabaseClient supabase;
   final FileService fileService;
@@ -22,14 +42,7 @@ class ChatRepository {
         'p_file_ids': fileIds,
       },
     );
-    if (response is Map && response['id'] != null) {
-      return response['id'].toString();
-    }
-    if (response is List && response.isNotEmpty) {
-      final first = Map<String, dynamic>.from(response.first as Map);
-      if (first['id'] != null) return first['id'].toString();
-    }
-    return response.toString();
+    return parseSentChatMessageId(response);
   }
 
   /// Toggle reaction (add/remove) for a message via RPC

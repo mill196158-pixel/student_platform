@@ -105,8 +105,8 @@ class TeamCubit extends Cubit<TeamState> {
   static final Map<String, List<Message>> _messagesByTeamId = {};
   static final Map<String, List<Assignment>> _assignmentsByTeamId = {};
 
-  TeamCubit(Team team)
-      : repo = SupabaseLearningRepository(),
+  TeamCubit(Team team, {LearningRepository? repository})
+      : repo = repository ?? SupabaseLearningRepository(),
         super(TeamState(
           team: team,
           chat: List<Message>.unmodifiable(
@@ -509,11 +509,14 @@ class TeamCubit extends Cubit<TeamState> {
     emit(state.copyWith(chat: _mergeCachedChat(updated)));
   }
 
-  Future<void> refreshMessageById(String messageId) async {
-    if (messageId.isEmpty) return;
-
-    final message = await repo.loadMessageById(state.team.id, messageId);
-    if (message == null) return;
+  Future<void> refreshMessageById(String messageId, {bool Function()? isCurrent}) async {
+    if (messageId.isEmpty || (isCurrent != null && !isCurrent())) return;
+    final teamId = state.team.id;
+    final owner = _currentProfileOwner();
+    if (owner == null) return;
+    final message = await repo.loadMessageById(teamId, messageId);
+    if (message == null || isClosed || state.team.id != teamId ||
+        _currentProfileOwner() != owner || (isCurrent != null && !isCurrent())) return;
 
     emit(state.copyWith(chat: _reconcileCachedMessage(message)));
     await _hydrateAssignmentIdsInChat();

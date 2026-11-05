@@ -1,6 +1,7 @@
 import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:student_platform/src/ui/learning/widgets/authorized_file_image.dart';
 import 'package:student_platform/src/services/chat_file_access.dart';
+import 'package:student_platform/src/core/auth_session_scope_host.dart';
 // ignore_for_file: unnecessary_import, unused_import, unused_field, unused_element, dead_null_aware_expression, invalid_null_aware_operator, unused_local_variable, deprecated_member_use, unnecessary_null_comparison
 
 import 'dart:async';
@@ -22,6 +23,7 @@ import '../models/local_attach.dart';
 import '../assignment_details_screen.dart';
 import '../../../services/file_service.dart';
 import 'chat/data/chat_repository.dart';
+import 'chat/data/send_then_refresh.dart';
 import 'chat/actions/chat_actions.dart' as ca;
 import 'chat/edit_message_dialog.dart';
 // ChatActions приходит через реэкспорт из widgets.dart
@@ -1462,6 +1464,13 @@ class _ChatTabState extends State<ChatTab> {
       // Скрываем клавиатуру после отправки
       FocusScope.of(context).unfocus();
       shouldJumpAfterSend = true;
+    } on UnconfirmedMessageSend {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Не удалось подтвердить отправку. Проверьте чат перед повтором.')));
+      }
+    } on SendScopeInvalidated {
+      // The old screen must not start a send for another session.
     } finally {
       _isSending = false;
       if (mounted) setState(() {});
@@ -1518,6 +1527,14 @@ class _ChatTabState extends State<ChatTab> {
       _att.clear();
 
       return true;
+    } on UnconfirmedMessageSend {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Не удалось подтвердить отправку. Проверьте чат перед повтором.')));
+      }
+      return false;
+    } on SendScopeInvalidated {
+      return false;
     } catch (e) {
       safeDebugLog('[ChatTab] sendMessageWithFiles failed: ${e.runtimeType}');
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1595,11 +1612,23 @@ class _ChatTabState extends State<ChatTab> {
     String text,
     List<String> fileIds,
   ) async {
-    final messageId = await _repo.sendMessageWithFiles(teamId, text, fileIds);
-    if (messageId.isNotEmpty && mounted) {
-      await context.read<TeamCubit>().refreshMessageById(messageId);
+    final session = Supabase.instance.client.auth.currentSession;
+    final identity = session == null ? null : (session.user.id, session.accessToken, session.refreshToken);
+    final scope = AuthSessionScopeHost.maybeRead(context);
+    final owner = scope?.capture();
+    bool isCurrent() {
+      if (!mounted || identity == null) return false;
+      final current = Supabase.instance.client.auth.currentSession;
+      return current != null &&
+          (current.user.id, current.accessToken, current.refreshToken) == identity &&
+          (scope == null || (owner != null && scope.isCurrent(owner))) &&
+          context.read<TeamCubit>().state.team.id == teamId;
     }
-    return messageId;
+    return sendThenRefresh(
+      send: () => _repo.sendMessageWithFiles(teamId, text, fileIds),
+      isCurrent: isCurrent,
+      refresh: (id) => context.read<TeamCubit>().refreshMessageById(id, isCurrent: isCurrent),
+    );
   }
 
   String _baseName(String path) {
