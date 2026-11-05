@@ -178,6 +178,15 @@ class OfflinePolicyGrantStore {
     });
   }
 
+  /// Revoke only when this is still the latest, unconsumed live check.
+  Future<bool> revokeAfterLiveCheck(OfflineGrantAttempt attempt) {
+    if (!_valid(attempt, live: true) || attempt._used) {
+      return Future.value(false);
+    }
+    attempt._used = true;
+    return blockAndRevoke(attempt._binding).then((_) => true);
+  }
+
   Future<OfflinePolicyGrant?> read(
       AuthOperationScope owner, OfflineSessionBinding binding) {
     final attempt = _capture(owner, binding);

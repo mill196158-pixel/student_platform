@@ -217,6 +217,20 @@ void main() {
         await store.saveAfterLiveCheck(newer, grant(currentBinding)), isFalse);
     expect(await store.read(owner, currentBinding), isNotNull);
   });
+  test('stale denial cannot revoke a newer grant, and revoke is single-use',
+      () async {
+    final owner = scope.capture()!;
+    final old = store.beginLiveCheck(owner, currentBinding)!;
+    final fresh = store.beginLiveCheck(owner, currentBinding)!;
+    expect(
+        await store.saveAfterLiveCheck(fresh, grant(currentBinding)), isTrue);
+    expect(await store.revokeAfterLiveCheck(old), isFalse);
+    expect(await store.read(owner, currentBinding), isNotNull);
+    final deny = store.beginLiveCheck(owner, currentBinding)!;
+    expect(await store.revokeAfterLiveCheck(deny), isTrue);
+    expect(await store.revokeAfterLiveCheck(deny), isFalse);
+    expect(await store.read(owner, currentBinding), isNull);
+  });
   test('newer live check wins when old write completes late', () async {
     final entered = Completer<void>();
     final release = Completer<void>();
