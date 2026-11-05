@@ -14,6 +14,11 @@ import 'package:student_platform/src/ui/learning/models/chat_file.dart'; // ДО
 import 'package:student_platform/src/utils/safe_debug_log.dart';
 
 class SupabaseLearningRepository implements LearningRepository {
+  SupabaseLearningRepository({this.useLegacyTeamCache = true});
+
+  /// Opt out of ownerless team chat/assignment caches. Other repository
+  /// methods retain their existing error handling.
+  final bool useLegacyTeamCache;
   final SupabaseClient _sb = Supabase.instance.client;
 
   static const _kTeamsCache = 'learning_teams_cache';
@@ -270,12 +275,14 @@ class SupabaseLearningRepository implements LearningRepository {
   }
 
   Future<void> _saveChatLocal(String teamId, List<Message> messages) async {
+    if (!useLegacyTeamCache) return;
     final prefs = await SharedPreferences.getInstance();
     final raw = jsonEncode(messages.map((e) => e.toJson()).toList());
     await prefs.setString('$_chatPrefix$teamId', raw);
   }
 
   Future<List<Message>> _loadChatLocal(String teamId) async {
+    if (!useLegacyTeamCache) throw StateError('Legacy team cache disabled');
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString('$_chatPrefix$teamId');
     if (raw == null || raw.isEmpty) return [];
@@ -380,6 +387,9 @@ class SupabaseLearningRepository implements LearningRepository {
           'p_chat_id': chatId,
           'p_limit': 100,
         });
+        if (!useLegacyTeamCache && rpcRows is! List) {
+          throw const FormatException('Invalid chat response');
+        }
         final list = <Message>[];
         for (final row in rpcRows as List? ?? const []) {
           final data = Map<String, dynamic>.from(row as Map);
@@ -395,6 +405,7 @@ class SupabaseLearningRepository implements LearningRepository {
         await _saveChatLocal(teamId, list);
         return list;
       } catch (e) {
+        if (!useLegacyTeamCache && e is FormatException) rethrow;
         debugPrint(
             '[loadChat] get_chat_messages_page failed, trying team rpc: $e');
       }
@@ -458,6 +469,7 @@ class SupabaseLearningRepository implements LearningRepository {
       final me = _sb.auth.currentUser;
       final chatId = await _getTeamMainChatId(teamId);
       if (chatId == null || chatId.isEmpty) {
+        if (!useLegacyTeamCache) throw StateError('Unable to verify team chat');
         await _saveChatLocal(teamId, const []);
         return const [];
       }
@@ -506,6 +518,7 @@ class SupabaseLearningRepository implements LearningRepository {
       return list;
     } catch (e, st) {
       debugPrint('[loadChat] error: $e\n$st');
+      if (!useLegacyTeamCache) rethrow;
       return _loadChatLocal(teamId);
     }
   }
@@ -859,13 +872,15 @@ class SupabaseLearningRepository implements LearningRepository {
           .toList();
 
       // кэш для оффлайна
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('$_assignPrefix$teamId',
-          jsonEncode(list.map((e) => e.toJson()).toList()));
+      if (useLegacyTeamCache) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('$_assignPrefix$teamId',
+            jsonEncode(list.map((e) => e.toJson()).toList()));
+      }
       return list;
     } catch (e, st) {
       debugPrint('[loadAssignments] error: $e\n$st');
-      if (strict) rethrow;
+      if (strict || !useLegacyTeamCache) rethrow;
       // оффлайн-кэш
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString('$_assignPrefix$teamId');
@@ -878,6 +893,7 @@ class SupabaseLearningRepository implements LearningRepository {
 
   @override
   Future<void> saveAssignments(String teamId, List<Assignment> items) async {
+    if (!useLegacyTeamCache) return;
     // Истина — на сервере (через RPC в Cubit), здесь только локальный кэш для оффлайна
     final prefs = await SharedPreferences.getInstance();
     final raw = jsonEncode(items.map((e) => e.toJson()).toList());
