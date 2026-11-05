@@ -36,6 +36,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(rpc.calls, 2);
     expect(find.text('Вы ещё не оставляли отзывов'), findsOneWidget);
+    expect(find.text('Отзывы проходят проверку перед публикацией.'), findsOneWidget);
+    expect(find.textContaining('балл'), findsNothing);
     expect(find.text('Не удалось загрузить отзывы'), findsNothing);
     expect(tester.takeException(), isNull);
   });

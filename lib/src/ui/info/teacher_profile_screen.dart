@@ -973,7 +973,7 @@ class _TeacherReviewEntry extends StatelessWidget {
       child: ListTile(
         contentPadding: EdgeInsets.zero,
         title: Text('Оставить или изменить отзыв'),
-        subtitle: Text('После модерации начисляется 1 балл'),
+        subtitle: Text('Отзыв будет проверен перед публикацией'),
         trailing: Icon(Icons.chevron_right_rounded),
         onTap: () => Navigator.of(context).push(
           MaterialPageRoute(

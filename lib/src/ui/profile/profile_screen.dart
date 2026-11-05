@@ -19,7 +19,6 @@ import 'package:student_platform/src/ui/info/content_media_service.dart';
 import 'package:student_platform/src/ui/profile/profile_feed_service.dart';
 import 'package:student_platform/src/ui/profile/profile_card_media_loader.dart';
 import 'package:student_platform/src/ui/profile/profile_avatar_image.dart';
-import 'package:student_platform/src/ui/profile/student_points_service.dart';
 import 'package:student_platform/src/ui/profile/my_reviews_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -43,11 +42,6 @@ class _ProfileScreenState extends State<ProfileScreen>
       ContentMediaService(persistBytes: true);
   ProfileFeedLoadResult _feed =
       const ProfileFeedLoadResult(intentionallyEmpty: true);
-  final StudentPointsService _pointsService = StudentPointsService();
-  StudentPointsLoadResult _points =
-      const StudentPointsLoadResult(isDemoFallback: true);
-  int _pointsLoadGeneration = 0;
-  bool _pointsLoadInFlight = false;
   final Set<String> _recordedFeedImpressions = {};
   int _feedLoadGeneration = 0;
   int _feedMediaGeneration = 0;
@@ -86,29 +80,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       debugPrint('${_ts()} [Profile] initState -> postFrame boot()');
       _boot(); // без автозапуска таймера
       unawaited(_loadFeed());
-      unawaited(_loadPoints());
     });
-  }
-
-  Future<void> _loadPoints() async {
-    if (_pointsLoadInFlight) return;
-    final generation = ++_pointsLoadGeneration;
-    _pointsLoadInFlight = true;
-    try {
-      final next = await _pointsService.load();
-      if (!mounted || generation != _pointsLoadGeneration) return;
-      setState(() => _points = next);
-    } catch (error) {
-      debugPrint('[profile] points load failed: $error');
-      if (!mounted || generation != _pointsLoadGeneration) return;
-      setState(
-        () => _points = const StudentPointsLoadResult(loadError: true),
-      );
-    } finally {
-      if (generation == _pointsLoadGeneration) {
-        _pointsLoadInFlight = false;
-      }
-    }
   }
 
   Future<void> _loadFeed() async {
@@ -350,7 +322,6 @@ class _ProfileScreenState extends State<ProfileScreen>
       // ignore: discarded_futures
       _pollOnce();
       unawaited(_loadFeed());
-      unawaited(_loadPoints());
     } else {
       debugPrint('${_ts()} [Profile] active=false -> stop polling');
       _stopPolling();
@@ -573,7 +544,6 @@ class _ProfileScreenState extends State<ProfileScreen>
 
       await _pollOnce(); // подтянуть бейджи сразу
       await _loadFeed();
-      await _loadPoints();
     } catch (e) {
       debugPrint('[Profile] refreshFromServer error: $e');
     }
@@ -683,41 +653,6 @@ class _ProfileScreenState extends State<ProfileScreen>
                 avatar),
             messagesBadge: _unreadTotal,
             friendsBadge: _requestsCount,
-            pointsChip: (!_points.hidePoints || _points.showLoadError)
-                ? (_points.showLoadError
-                    ? Text(
-                        'Баллы временно недоступны',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
-                        textAlign: TextAlign.center,
-                      )
-                    : Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          StudentPointsSummaryChip(
-                            summary: _points.displaySummary,
-                            showDemoBadge: _points.isDemoFallback &&
-                                _points.rpcUnavailable,
-                          ),
-                          if (_points.displaySummary.entries.isNotEmpty) ...[
-                            const SizedBox(height: 6),
-                            Text(
-                              _formatLatestPointsEntry(
-                                _points.displaySummary.entries.first,
-                              ),
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(
-                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                  ),
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
-                        ],
-                      ))
-                : null,
             feedCards: _feed.hideFeed
                 ? const []
                 : readyProfileFeedCards(_feed.displayCards),
@@ -759,10 +694,6 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
   }
 
-  String _formatLatestPointsEntry(StudentPointsEntry entry) {
-    final label = entry.reasonCode.labelRu;
-    return 'Последнее: ${entry.signedLabel} · $label';
-  }
 }
 
 // ===== banners =====

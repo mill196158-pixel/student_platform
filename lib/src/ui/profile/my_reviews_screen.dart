@@ -96,7 +96,7 @@ class _MyReviewsScreenState extends State<MyReviewsScreen> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'После модерации одобренного отзыва начисляется 1 балл.',
+                        'Отзывы проходят проверку перед публикацией.',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                               color: const Color(0xFF6B7280),
                             ),

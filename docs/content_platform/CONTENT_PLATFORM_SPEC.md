@@ -841,3 +841,5 @@ Guest account explanation (2026-10-30): protected guest actions open a shared ex
 
 
 2026-10-30 follow-up: groups client DML/DDL-like table privileges and column write grants revoked; RLS enabled with authenticated read policy. Existing capability-checked SECURITY DEFINER admin/import flows remain. Actual admin UI create/rename and guest API verified; disposable fixtures removed. Guest Base now shares the original three-way selector (Subjects / Reference / Vacancies), with account explanation under info icon only; fabricated bundled material cards removed. Selection survives tab changes. Public catalogue endpoints/content are not implemented in this slice; these guest sections currently show account gates. Evidence: GUEST_PUBLIC_RUNTIME_2026_10_30.md.
+
+2026-11-06 product decision: defer the student-facing points feature. The mobile profile does not request or display points, and review screens do not promise points. Existing ledger, server behavior, administrative functionality, and historical acceptance records remain unchanged; restoring the UI requires a separate product decision.

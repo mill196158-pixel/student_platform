@@ -73,6 +73,7 @@ void main() {
                 subjectDifficultyAvg: 3.5)));
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
+        expect(find.textContaining('балл'), findsNothing);
         expect(tester.getSize(find.byType(ListView).first).width,
             lessThanOrEqualTo(760));
         final rate = find.widgetWithText(FilledButton, 'Оценить');
