@@ -9,6 +9,7 @@
 //  * ChatActionCardsCache merge/tombstone/invalidate semantics.
 //  * Deep-link args + UnifiedTaskDetailsScreen constructor/route smoke.
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -18,10 +19,35 @@ import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/data/chat_action_cards_cache.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/data/chat_group_actions_repository.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/message_builder.dart';
-import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_card_envelope.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/navigation/group_action_deeplink.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/topics/topic_selection_card.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/unified_task_details_screen.dart';
+import 'package:student_platform/src/core/auth_session_scope.dart';
+import 'package:student_platform/src/core/auth_session_scope_host.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/data/strict_chat_card_loader.dart';
+import 'auth_session_scope_test.dart' show fakeSession;
+
+class _SeededLoader extends StrictChatCardLoader {
+  _SeededLoader(this.cache);
+  final ChatActionCardsCache cache;
+  @override
+  Future<ChatActionCardEntry> load({required AuthSessionScope? scope,
+      required String chatId, required String messageId, required String kind,
+      required String entityId}) async => cache.peek(kind, entityId)!;
+}
+
+Future<void> _pumpScopedCard(WidgetTester tester, Widget child, ChatActionCardsCache cache) async {
+  final previous = StrictChatCardLoader.instance;
+  StrictChatCardLoader.instance = _SeededLoader(cache);
+  final session = fakeSession('card-test');
+  final events = StreamController<AuthState>.broadcast(sync: true);
+  final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+  events.add(AuthState(AuthChangeEvent.initialSession, session));
+  addTearDown(() async { StrictChatCardLoader.instance = previous; await events.close(); });
+  await tester.pumpWidget(MaterialApp(home: AuthSessionScopeHost(
+      createScope: () => scope, child: Scaffold(body: child))));
+  await tester.pump();
+}
 
 const _topicUuid = '11111111-1111-1111-1111-111111111111';
 const _collectionUuid = '22222222-2222-2222-2222-222222222222';
@@ -163,7 +189,7 @@ void main() {
           })!);
 
       final m = Message(
-        id: 'm5',
+        id: '00000000-0000-4000-8000-000000000005',
         chatId: 'chat-1',
         authorId: 'u1',
         authorLogin: 'stud1',
@@ -174,12 +200,7 @@ void main() {
         cardEntityId: _topicUuid,
       );
 
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: TopicSelectionCard(message: m, cache: cache),
-        ),
-      ));
-      await tester.pump();
+      await _pumpScopedCard(tester, TopicSelectionCard(message: m, cache: cache), cache);
 
       expect(find.text('Темы закрыты'), findsOneWidget);
       expect(find.textContaining('Темы докладов по экологии'), findsOneWidget);
@@ -200,7 +221,7 @@ void main() {
           })!);
 
       final m = Message(
-        id: 'm6',
+        id: '00000000-0000-4000-8000-000000000006',
         chatId: 'chat-1',
         authorId: 'u1',
         authorLogin: 'stud1',
@@ -211,12 +232,7 @@ void main() {
         cardEntityId: _collectionUuid,
       );
 
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: CollectionCard(message: m, cache: cache),
-        ),
-      ));
-      await tester.pump();
+      await _pumpScopedCard(tester, CollectionCard(message: m, cache: cache), cache);
 
       expect(find.text('Сбор закрыт'), findsOneWidget);
       expect(find.textContaining('Подарок преподавателю'), findsOneWidget);
@@ -237,7 +253,7 @@ void main() {
           })!);
 
       final m = Message(
-        id: 'm7',
+        id: '00000000-0000-4000-8000-000000000007',
         chatId: 'chat-1',
         authorId: 'u1',
         authorLogin: 'stud1',
@@ -248,12 +264,7 @@ void main() {
         cardEntityId: _topicUuid,
       );
 
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: TopicSelectionCard(message: m, cache: cache),
-        ),
-      ));
-      await tester.pump();
+      await _pumpScopedCard(tester, TopicSelectionCard(message: m, cache: cache), cache);
 
       expect(find.text('Темы'), findsOneWidget);
       expect(find.text('Открыть'), findsOneWidget);

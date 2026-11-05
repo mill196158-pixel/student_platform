@@ -23,6 +23,9 @@ import '../data/chat_group_actions_repository.dart';
 import '../models/group_action_labels.dart';
 import '../navigation/group_action_deeplink.dart';
 import '../unavailable_card.dart';
+import '../../../../../core/auth_session_scope_host.dart';
+import '../../../../../core/auth_session_scope.dart';
+import '../data/strict_chat_card_loader.dart';
 
 String _fmtDate(DateTime dt) {
   return '${dt.day.toString().padLeft(2, '0')}.'
@@ -75,6 +78,10 @@ class TopicSelectionCard extends StatefulWidget {
 class _TopicSelectionCardState extends State<TopicSelectionCard> {
   ChatActionCardEntry? _entry;
   bool _loading = true;
+  int _loadRevision = 0;
+  AuthSessionScope? _scope;
+  AuthOperationScope? _entryOwner;
+  bool get _entryCurrent => _entryOwner != null && _scope?.isCurrent(_entryOwner!) == true;
 
   ChatActionCardsCache get _cache =>
       widget.cache ?? ChatActionCardsCache.instance;
@@ -82,56 +89,85 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
   @override
   void initState() {
     super.initState();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final next = AuthSessionScopeHost.maybeOf(context);
+    if (identical(next, _scope) && _loadRevision != 0) return;
+    _scope?.removeListener(_ownerChanged);
+    _scope = next;
+    _scope?.addListener(_ownerChanged);
+    _entry = null; _entryOwner = null;
+    _loading = true;
     _load();
+  }
+
+  void _ownerChanged() {
+    if (!mounted) return;
+    setState(() { _entry = null; _entryOwner = null; _loading = true; });
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _loadRevision++;
+    _scope?.removeListener(_ownerChanged);
+    super.dispose();
   }
 
   @override
   void didUpdateWidget(covariant TopicSelectionCard oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.message.cardEntityId != widget.message.cardEntityId ||
-        oldWidget.message.chatId != widget.message.chatId) {
+        oldWidget.message.chatId != widget.message.chatId ||
+        oldWidget.message.id != widget.message.id) {
+      _entry = null; _entryOwner = null;
+      _loading = true;
       _load();
     }
   }
 
   Future<void> _load() async {
+    final revision = ++_loadRevision;
     final selectionId = widget.message.cardEntityId;
     final chatId = widget.message.chatId;
-    if (selectionId == null || selectionId.isEmpty || chatId.isEmpty) {
+    final messageId = widget.message.id;
+    final scope = _scope;
+    if (selectionId == null || selectionId.isEmpty || chatId.isEmpty || !_looksLikeUuid(messageId)) {
       if (mounted) setState(() => _loading = false);
       return;
     }
-
-    // Synchronous pre-fill from the in-memory cache. Assigned directly
-    // (no setState) since this always runs before the first build — either
-    // during initState's synchronous prelude or synchronously at the top of
-    // this async function on subsequent calls.
-    final cached = _cache.peek(ChatActionCardKind.topicSelection, selectionId);
-    if (cached != null) {
-      _entry = cached;
-      _loading = false;
-    }
+    if (scope != null) await scope.ready;
+    final owner = scope?.capture();
+    bool sameWidget() => mounted && revision == _loadRevision && identical(scope, _scope) &&
+        widget.message.id == messageId && widget.message.chatId == chatId &&
+        widget.message.cardEntityId == selectionId;
+    bool current() => sameWidget() && scope != null && owner != null && scope.isCurrent(owner);
 
     try {
-      final entry = await _cache.ensureLoaded(
-        chatId,
+      if (!current()) throw StateError('Сессия изменилась');
+      final entry = await StrictChatCardLoader.instance.load(
+        scope: scope, chatId: chatId,
+        messageId: messageId,
         kind: ChatActionCardKind.topicSelection,
         entityId: selectionId,
-        cardMessageId:
-            _looksLikeUuid(widget.message.id) ? widget.message.id : null,
       );
-      if (!mounted) return;
+      if (!current()) return;
       setState(() {
-        _entry = entry ?? _entry;
+        _entry = entry;
+        _entryOwner = owner;
         _loading = false;
       });
     } catch (_) {
-      if (!mounted) return;
-      setState(() => _loading = false);
+      if (!sameWidget() || (scope != null && owner != null && !scope.isCurrent(owner))) return;
+      setState(() { _entry = null; _entryOwner = null; _loading = false; });
     }
   }
 
   Future<void> _openDetail() async {
+    if (!_entryCurrent) return;
     final selectionId = widget.message.cardEntityId;
     final chatId = widget.message.chatId.trim();
     String? teamId;
@@ -163,7 +199,13 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
   }
 
   Future<void> _deleteTopic() async {
+    if (!_entryCurrent) return;
     final id = widget.message.cardEntityId;
+    final scope = _scope, owner = _entryOwner;
+    final messageId = widget.message.id, chatId = widget.message.chatId;
+    bool current() => mounted && identical(scope, _scope) && owner != null &&
+        scope?.isCurrent(owner) == true && widget.message.id == messageId &&
+        widget.message.chatId == chatId && widget.message.cardEntityId == id;
     if (id == null || id.isEmpty) return;
     if (!_canShowDelete(false)) return;
     final confirmed = await showDialog<bool>(
@@ -183,13 +225,14 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
         ],
       ),
     );
-    if (confirmed != true || !mounted) return;
+    if (confirmed != true || !current()) return;
     try {
       await (widget.repository ?? ChatGroupActionsRepository())
           .deleteGroupAction(kind: 'topic_selection', entityId: id);
+      if (!current()) return;
       _cache.markTombstone(ChatActionCardKind.topicSelection, id);
       await PersonalDiaryService.clearCachesAfterGroupActionDelete();
-      if (!mounted) return;
+      if (!current()) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Список тем удалён')),
       );
@@ -207,7 +250,7 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
   }
 
   bool _canShowDelete(bool closed) {
-    if (closed) return false;
+    if (closed || !_entryCurrent) return false;
     final entry = _entry;
     // Fail closed until hydrated; prefer batch `can_delete` (server SoT).
     if (entry == null) return false;
@@ -220,13 +263,12 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final entry = _entry;
-    final fallbackTitle = widget.message.text.replaceFirst(
-      RegExp(r'^(Темы|Запись на тему|Выбор темы):\s*'),
-      '',
-    );
+    final entry = _entryCurrent ? _entry : null;
+    if (entry == null && !_loading) return _CardLoadFailure(onRetry: () {
+      setState(() => _loading = true); _load();
+    });
     final title =
-        (entry?.title.isNotEmpty ?? false) ? entry!.title : fallbackTitle;
+        (entry?.title.isNotEmpty ?? false) ? entry!.title : 'Без названия';
     final removed = entry != null &&
         (entry.tombstoned ||
             !entry.available ||
@@ -250,7 +292,7 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
     return GestureDetector(
       key: widget.boundaryKey,
       onLongPress: widget.onLongPress,
-      onTap: _openDetail,
+      onTap: entry == null ? null : _openDetail,
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 4),
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
@@ -377,6 +419,11 @@ class _CollectionCardState extends State<CollectionCard> {
   bool _loading = true;
   bool _canManage = false;
   bool _canDelete = false;
+  int _loadRevision = 0;
+  int _capabilitiesRevision = 0;
+  AuthSessionScope? _scope;
+  AuthOperationScope? _entryOwner;
+  bool get _entryCurrent => _entryOwner != null && _scope?.isCurrent(_entryOwner!) == true;
 
   ChatActionCardsCache get _cache =>
       widget.cache ?? ChatActionCardsCache.instance;
@@ -386,8 +433,37 @@ class _CollectionCardState extends State<CollectionCard> {
     super.initState();
     _canManage = widget.canManage ?? false;
     _canDelete = widget.canDelete ?? false;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final next = AuthSessionScopeHost.maybeOf(context);
+    if (identical(next, _scope) && _loadRevision != 0) return;
+    _scope?.removeListener(_ownerChanged);
+    _scope = next;
+    _scope?.addListener(_ownerChanged);
+    _entry = null; _entryOwner = null;
+    _loading = true;
     _load();
     _resolveCapabilities();
+  }
+
+  void _ownerChanged() {
+    if (!mounted) return;
+    _capabilitiesRevision++;
+    setState(() { _entry = null; _entryOwner = null; _loading = true;
+      _canManage = widget.canManage ?? false; _canDelete = widget.canDelete ?? false; });
+    _load();
+    _resolveCapabilities();
+  }
+
+  @override
+  void dispose() {
+    _loadRevision++;
+    _capabilitiesRevision++;
+    _scope?.removeListener(_ownerChanged);
+    super.dispose();
   }
 
   @override
@@ -399,14 +475,21 @@ class _CollectionCardState extends State<CollectionCard> {
       _canDelete = widget.canDelete ?? _canDelete;
     }
     if (oldWidget.message.cardEntityId != widget.message.cardEntityId ||
-        oldWidget.message.chatId != widget.message.chatId) {
+        oldWidget.message.chatId != widget.message.chatId ||
+        oldWidget.message.id != widget.message.id) {
+      _entry = null; _entryOwner = null;
+      _loading = true;
+      _canManage = widget.canManage ?? false;
+      _canDelete = widget.canDelete ?? false;
+      _resolveCapabilities();
       _load();
     }
   }
 
   Future<void> _resolveCapabilities() async {
+    final revision = ++_capabilitiesRevision;
     if (widget.canManage != null && widget.canDelete != null) {
-      if (!mounted) return;
+      if (!mounted || revision != _capabilitiesRevision) return;
       setState(() {
         _canManage = widget.canManage!;
         _canDelete = widget.canDelete!;
@@ -414,12 +497,19 @@ class _CollectionCardState extends State<CollectionCard> {
       return;
     }
     final chatId = widget.message.chatId;
+    final messageId = widget.message.id;
+    final scope = _scope;
     if (chatId.isEmpty) return;
     try {
+      if (scope != null) await scope.ready;
+      final owner = scope?.capture();
+      if (!mounted || revision != _capabilitiesRevision || scope == null || owner == null ||
+          !scope.isCurrent(owner) || widget.message.chatId != chatId || widget.message.id != messageId) return;
       final caps = await (widget.capabilitiesRepository ??
               ChatComposerCapabilitiesRepository())
           .load(chatId);
-      if (!mounted) return;
+      if (!mounted || revision != _capabilitiesRevision || !identical(scope, _scope) ||
+          !scope.isCurrent(owner) || widget.message.chatId != chatId || widget.message.id != messageId) return;
       setState(() {
         _canManage = widget.canManage ?? caps.canModerateCollection;
         _canDelete = widget.canDelete ?? caps.canDeleteGroupAction;
@@ -428,39 +518,45 @@ class _CollectionCardState extends State<CollectionCard> {
   }
 
   Future<void> _load() async {
+    final revision = ++_loadRevision;
     final id = widget.message.cardEntityId;
     final chatId = widget.message.chatId;
-    if (id == null || id.isEmpty || chatId.isEmpty) {
+    final messageId = widget.message.id;
+    final scope = _scope;
+    if (id == null || id.isEmpty || chatId.isEmpty || !_looksLikeUuid(messageId)) {
       if (mounted) setState(() => _loading = false);
       return;
     }
 
-    final cached = _cache.peek(ChatActionCardKind.groupCollection, id);
-    if (cached != null) {
-      _entry = cached;
-      _loading = false;
-    }
+    if (scope != null) await scope.ready;
+    final owner = scope?.capture();
+    bool sameWidget() => mounted && revision == _loadRevision && identical(scope, _scope) &&
+        widget.message.id == messageId && widget.message.chatId == chatId &&
+        widget.message.cardEntityId == id;
+    bool current() => sameWidget() && scope != null && owner != null && scope.isCurrent(owner);
 
     try {
-      final entry = await _cache.ensureLoaded(
-        chatId,
+      if (!current()) throw StateError('Сессия изменилась');
+      final entry = await StrictChatCardLoader.instance.load(
+        scope: scope, chatId: chatId,
+        messageId: messageId,
         kind: ChatActionCardKind.groupCollection,
         entityId: id,
-        cardMessageId:
-            _looksLikeUuid(widget.message.id) ? widget.message.id : null,
       );
-      if (!mounted) return;
+      if (!current()) return;
       setState(() {
-        _entry = entry ?? _entry;
+        _entry = entry;
+        _entryOwner = owner;
         _loading = false;
       });
     } catch (_) {
-      if (!mounted) return;
-      setState(() => _loading = false);
+      if (!sameWidget() || (scope != null && owner != null && !scope.isCurrent(owner))) return;
+      setState(() { _entry = null; _entryOwner = null; _loading = false; });
     }
   }
 
   Future<void> _open() async {
+    if (!_entryCurrent) return;
     final id = widget.message.cardEntityId;
     final chatId = widget.message.chatId.trim();
     String? teamId;
@@ -492,7 +588,13 @@ class _CollectionCardState extends State<CollectionCard> {
   }
 
   Future<void> _deleteCollection() async {
+    if (!_entryCurrent) return;
     final id = widget.message.cardEntityId;
+    final scope = _scope, owner = _entryOwner;
+    final messageId = widget.message.id, chatId = widget.message.chatId;
+    bool current() => mounted && identical(scope, _scope) && owner != null &&
+        scope?.isCurrent(owner) == true && widget.message.id == messageId &&
+        widget.message.chatId == chatId && widget.message.cardEntityId == id;
     if (id == null || id.isEmpty) return;
     if (!_canShowDelete(false)) return;
     final confirmed = await showDialog<bool>(
@@ -512,13 +614,14 @@ class _CollectionCardState extends State<CollectionCard> {
         ],
       ),
     );
-    if (confirmed != true || !mounted) return;
+    if (confirmed != true || !current()) return;
     try {
       final repo = widget.repository ?? ChatGroupActionsRepository();
       await repo.deleteGroupAction(kind: 'collection', entityId: id);
+      if (!current()) return;
       _cache.markTombstone(ChatActionCardKind.groupCollection, id);
       await PersonalDiaryService.clearCachesAfterGroupActionDelete();
-      if (!mounted) return;
+      if (!current()) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Сбор удалён')),
       );
@@ -536,7 +639,7 @@ class _CollectionCardState extends State<CollectionCard> {
   }
 
   bool _canShowDelete(bool closed) {
-    if (closed) return false;
+    if (closed || !_entryCurrent) return false;
     final entry = _entry;
     // Fail closed until hydrated; prefer batch `can_delete` (server SoT).
     if (entry == null) return false;
@@ -549,12 +652,12 @@ class _CollectionCardState extends State<CollectionCard> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final entry = _entry;
-    final fallbackTitle = widget.message.text
-        .replaceFirst(RegExp(r'^(Сбор денег|Сбор|Скинуться):\s*'), '')
-        .trim();
+    final entry = _entryCurrent ? _entry : null;
+    if (entry == null && !_loading) return _CardLoadFailure(onRetry: () {
+      setState(() => _loading = true); _load();
+    });
     final title =
-        (entry?.title.isNotEmpty ?? false) ? entry!.title : fallbackTitle;
+        (entry?.title.isNotEmpty ?? false) ? entry!.title : 'Без названия';
     final removed = entry != null &&
         (entry.tombstoned ||
             !entry.available ||
@@ -575,7 +678,7 @@ class _CollectionCardState extends State<CollectionCard> {
     return GestureDetector(
       key: widget.boundaryKey,
       onLongPress: widget.onLongPress,
-      onTap: _open,
+      onTap: entry == null ? null : _open,
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 4),
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
@@ -707,6 +810,16 @@ class _ClosedCompactRow extends StatelessWidget {
       ],
     );
   }
+}
+
+class _CardLoadFailure extends StatelessWidget {
+  const _CardLoadFailure({required this.onRetry});
+  final VoidCallback onRetry;
+  @override
+  Widget build(BuildContext context) => TextButton.icon(
+    onPressed: onRetry, icon: const Icon(Icons.refresh_rounded),
+    label: const Text('Не удалось загрузить карточку'),
+  );
 }
 
 class _CardSkeleton extends StatelessWidget {

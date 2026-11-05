@@ -149,38 +149,8 @@ class _UnifiedTaskDetailsScreenState extends State<UnifiedTaskDetailsScreen> {
       _loading = false;
       return;
     }
-    final peeked = _cache.peek(_kind, widget.entityId);
-    if (peeked != null && peeked.available) {
-      _details = _entryToMap(peeked);
-      _loading = false;
-    }
     _load();
   }
-
-  Map<String, dynamic> _entryToMap(ChatActionCardEntry e) => {
-        'available': e.available,
-        'status': e.status,
-        'title': e.title,
-        'description': e.description,
-        'purpose': e.purpose,
-        'row_version': e.rowVersion,
-        'deadline_at': e.deadlineAt?.toIso8601String(),
-        'allow_change': e.allowChange,
-        'free_slots': e.freeSlots,
-        'taken_slots': e.takenSlots,
-        'total_capacity': e.totalCapacity,
-        'my_pick_text': e.myPickText,
-        'my_status': e.myStatus,
-        'amount_mode': e.amountMode,
-        'amount_optional': e.amountOptional,
-        'amount_total': e.amountTotal,
-        'compact_completed': e.compactCompleted,
-        'organizer_stats': e.organizerStats,
-        'can_manage': e.canManage,
-        'created_by': e.createdBy,
-        'options': e.options,
-        'card_message_id': e.cardMessageId,
-      };
 
   Future<void> _refreshCanDelete() async {
     try {
@@ -212,7 +182,8 @@ class _UnifiedTaskDetailsScreenState extends State<UnifiedTaskDetailsScreen> {
         setState(() {
           _loading = false;
           _canDeleteEntity = false;
-          if (_details == null) _error = 'Недоступно';
+          _details = null;
+          _error = 'Недоступно';
         });
         return;
       }
