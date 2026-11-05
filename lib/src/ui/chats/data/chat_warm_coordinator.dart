@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:student_platform/src/services/image_cache_service.dart';
 import 'package:student_platform/src/ui/chats/data/chat_preload_service.dart';
 import 'package:student_platform/src/ui/chats/data/chat_summaries_cache.dart';
+import 'package:student_platform/src/ui/chats/data/chat_summary_card.dart';
 import 'package:student_platform/src/ui/chats/dm_title.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_card_envelope.dart';
 import 'package:student_platform/src/utils/safe_debug_log.dart';
@@ -256,7 +257,7 @@ class ChatWarmCoordinator with WidgetsBindingObserver {
     final cardEnvelope = ChatCardEnvelope.tryParse(rawContent) ??
         ChatCardEnvelope.tryParse((row['body'] ?? '').toString());
     if (cardEnvelope != null) {
-      return cardEnvelope.humanPreview();
+      return summaryCardPreview(cardEnvelope);
     }
 
     final body = (row['body'] ?? '').toString().trim();

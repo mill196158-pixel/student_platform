@@ -24,6 +24,9 @@ import 'package:student_platform/src/ui/chats/forward/forward_session_guard.dart
 import 'package:student_platform/src/ui/chats/data/chat_archive_api.dart';
 import 'package:student_platform/src/ui/chats/data/dm_api.dart';
 import 'package:student_platform/src/ui/chats/data/chat_summaries_cache.dart';
+import 'package:student_platform/src/ui/chats/data/chat_summary_card.dart';
+import 'package:student_platform/src/core/auth_session_scope_host.dart';
+import 'package:student_platform/src/core/auth_session_scope.dart';
 import 'package:student_platform/src/ui/chats/core/chat_message_cache_store.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/widgets.dart'; // ChatMessageList
 import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_card_envelope.dart';
@@ -32,9 +35,12 @@ import 'package:student_platform/src/ui/learning/state/team_cubit.dart';
 import 'package:student_platform/src/utils/safe_debug_log.dart';
 
 class MyChatsScreen extends StatefulWidget {
-  const MyChatsScreen({super.key, this.pickMode = false, this.pickIsCurrent});
+  const MyChatsScreen({super.key, this.pickMode = false, this.pickIsCurrent,
+      this.enableRealtime = true});
   final bool pickMode;
   final bool Function()? pickIsCurrent;
+  @visibleForTesting
+  final bool enableRealtime;
   @override
   State<MyChatsScreen> createState() => _MyChatsScreenState();
 }
@@ -53,6 +59,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
   bool _summariesInFlight = false;
   bool _summariesQueued = false;
   Completer<void>? _summariesReloadCompleter;
+  int _summaryRevision = 0;
 
   bool _hydrated = false; // есть ли быстрый кеш на старте
   Timer? _searchDebounce;
@@ -112,6 +119,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
 
   @override
   void dispose() {
+    _summaryRevision++;
     ActiveChatTracker.instance.leaveMessageList();
     WidgetsBinding.instance.removeObserver(this);
     _reloadDebounce?.cancel();
@@ -140,6 +148,19 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     }
     _summariesInFlight = true;
     try {
+      final scope = AuthSessionScopeHost.maybeRead(context);
+      if (scope == null) {
+        _safeSetState(() => _loading = false);
+        return;
+      }
+      await scope.ready;
+      final owner = scope.capture();
+      final revision = ++_summaryRevision;
+      if (owner == null || !mounted) {
+        _safeSetState(() => _loading = false);
+        return;
+      }
+      bool current() => mounted && revision == _summaryRevision && scope.isCurrent(owner);
       final sb = Supabase.instance.client;
       final me = sb.auth.currentUser?.id;
       if (me == null || me.isEmpty) {
@@ -153,6 +174,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
       }
 
       final res = await sb.rpc('get_my_chat_summaries');
+      if (!current()) return;
       final rows = (res as List? ?? const [])
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
@@ -193,6 +215,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
       }
 
       if (toMigrate.isNotEmpty) {
+        if (!current()) return;
         await sb.from('chat_user_settings').upsert(
               toMigrate,
               onConflict: 'user_id,chat_id',
@@ -201,17 +224,19 @@ class _MyChatsScreenState extends State<MyChatsScreen>
 
       list.sort(_compareChats);
 
-      if (!mounted) return;
+      if (!current()) return;
       _safeSetState(() {
         _all = list;
         _applyFilter();
         _hydrated = true;
         _loading = false;
       });
-      await _saveCache(_all);
+      unawaited(_verifySummaryActions(list, scope, owner, revision));
+      await _saveCache(list, owner: me);
+      if (!current()) return;
       unawaited(_hydrateUnresolvedDmTitles());
 
-      _subscribeChatsRealtime();
+      if (widget.enableRealtime) _subscribeChatsRealtime();
     } catch (_) {
       _safeSetState(() => _loading = false);
     } finally {
@@ -228,6 +253,30 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     final aa = a.lastTime ?? DateTime.fromMillisecondsSinceEpoch(0);
     final bb = b.lastTime ?? DateTime.fromMillisecondsSinceEpoch(0);
     return bb.compareTo(aa); // новые выше
+  }
+
+  Future<void> _verifySummaryActions(List<_ChatSummary> items,
+      AuthSessionScope scope, AuthOperationScope owner, int revision) async {
+    final byCard = <SummaryActionCard, _ChatSummary>{
+      for (final item in items)
+        if (item.actionCard != null) item.actionCard!: item,
+    };
+    bool current(SummaryActionCard card) {
+      final item = byCard[card];
+      return mounted && revision == _summaryRevision && scope.isCurrent(owner) &&
+          item != null && _all.any((value) => identical(value, item)) &&
+          item.chatId == card.chatId && item.lastMessageId == card.messageId &&
+          identical(item.actionCard, card);
+    }
+
+    await verifySummaryActionCards(byCard.keys.toList(),
+        isCurrent: current,
+        fetch: (card) => Supabase.instance.client.rpc('get_chat_action_cards_batch',
+            params: {'p_chat_id': card.chatId, 'p_items': [card.rpcItem]}),
+        onUnavailable: (card) {
+          if (!current(card)) return;
+          setState(() => byCard[card]!.verifiedPreview = 'Карточка недоступна');
+        });
   }
 
   _ChatSummary _summaryFromRpcRow(Map<String, dynamic> row) {
@@ -298,6 +347,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
       muted: row['is_muted'] == true,
       chatId: chatId.isNotEmpty ? chatId : null,
       lastMessageId: hasLastMessage ? lastMessageId : null,
+      actionCard: isDm ? null : SummaryActionCard.fromRow(row),
       isDm: isDm,
       peerId: peerId.isNotEmpty ? peerId : null,
       avatarUrl: avatarRaw.isNotEmpty ? avatarRaw : null,
@@ -546,22 +596,32 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     try {
       do {
         _summariesQueued = false;
+        final scope = AuthSessionScopeHost.maybeRead(context);
+        if (scope == null) break;
+        await scope.ready;
+        final owner = scope.capture();
+        final revision = ++_summaryRevision;
+        if (owner == null || !mounted) break;
+        bool current() => mounted && revision == _summaryRevision && scope.isCurrent(owner);
         final sb = Supabase.instance.client;
         if (sb.auth.currentUser == null) break;
 
         final res = await sb.rpc('get_my_chat_summaries');
+        if (!current()) break;
         final list = (res as List? ?? const [])
             .map((e) => _summaryFromRpcRow(Map<String, dynamic>.from(e as Map)))
             .where((c) => !c.isDm || (c.peerId?.isNotEmpty ?? false))
             .toList()
           ..sort(_compareChats);
 
-        if (!mounted) break;
+        if (!current()) break;
         _safeSetState(() {
           _all = list;
           _applyFilter();
         });
-        await _saveCache(_all);
+        unawaited(_verifySummaryActions(list, scope, owner, revision));
+        await _saveCache(list, owner: owner.userId);
+        if (!current()) break;
       } while (_summariesQueued && mounted);
     } catch (e) {
       safeDebugLog(
@@ -1150,7 +1210,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     final cardEnvelope = ChatCardEnvelope.tryParse(rawContent) ??
         ChatCardEnvelope.tryParse((row['body'] ?? '').toString());
     if (cardEnvelope != null) {
-      return cardEnvelope.humanPreview();
+      return summaryCardPreview(cardEnvelope);
     }
 
     // 1) сначала пробуем body (явный текст)
@@ -1232,10 +1292,10 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     }
   }
 
-  Future<void> _saveCache(List<_ChatSummary> list) async {
+  Future<void> _saveCache(List<_ChatSummary> list, {String? owner}) async {
     try {
       final data = jsonEncode(list.map(_summaryToMap).toList());
-      await ChatSummariesCache.write(_currentUserId, data);
+      await ChatSummariesCache.write(owner ?? _currentUserId, data);
     } catch (_) {}
   }
 
@@ -1339,6 +1399,8 @@ class _ChatSummary {
   final bool isDm;
   final String? peerId;
   String? avatarUrl;
+  final SummaryActionCard? actionCard;
+  String? verifiedPreview;
 
   _ChatSummary({
     required this.team,
@@ -1355,6 +1417,7 @@ class _ChatSummary {
     this.isDm = false,
     this.peerId,
     this.avatarUrl,
+    this.actionCard,
   });
 }
 
@@ -1382,7 +1445,7 @@ class _ChatRow extends StatelessWidget {
     final author = (data.lastAuthor?.isNotEmpty ?? false)
         ? data.lastAuthor!
         : (data.subtitle ?? '');
-    final preview = data.lastMsgPreview ?? '';
+    final preview = data.verifiedPreview ?? data.lastMsgPreview ?? '';
 
     final time = data.lastTime != null ? _formatTime(data.lastTime!) : '';
 
