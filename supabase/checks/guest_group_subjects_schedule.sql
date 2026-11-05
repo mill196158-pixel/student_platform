@@ -60,7 +60,7 @@ insert into public.lessons values
  ('00000000-0000-0000-0000-000000000002',current_date,null,1,null,'pending');
 
 \ir ../migrations/20261104154646_guest_group_subjects.sql
-\ir ../migrations/20261104235554_guest_group_visibility_guard.sql
+\ir ../migrations/20261105000711_guest_group_visibility_guard.sql
 
 set role anon;
 do $$ declare scoped jsonb;
