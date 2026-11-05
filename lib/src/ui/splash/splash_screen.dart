@@ -76,13 +76,9 @@ class SplashLoadingView extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Flexible(
-                    child: Transform.translate(
-                      // Align the cat artwork with the Android launch frame.
-                      offset: const Offset(36, 30),
-                      child: const ProductLoadingIndicator(
-                        size: 260,
-                        semanticsLabel: 'Открываем приложение',
-                      ),
+                    child: const ProductLoadingIndicator(
+                      size: 260,
+                      semanticsLabel: 'Открываем приложение',
                     ),
                   ),
                   const SizedBox(height: 12),

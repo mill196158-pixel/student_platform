@@ -21,7 +21,7 @@ class ProductLoadingIndicator extends StatelessWidget {
   final double size;
   final String semanticsLabel;
 
-  static const _asset = 'assets/animations/cat_loader.json';
+  static const _asset = 'assets/animations/pigeon_loader.json';
   static const _package = 'student_ui';
 
   /// Makes the composition available for the first frame of the launch screen.
@@ -37,14 +37,14 @@ class ProductLoadingIndicator extends StatelessWidget {
   Widget build(BuildContext context) {
     final animate =
         !MediaQuery.disableAnimationsOf(context) && TickerMode.of(context);
-    final theme = Theme.of(context);
-    final needsLightArtwork = theme.brightness == Brightness.dark ||
-        (color?.computeLuminance() ?? 0) > .75;
     final fallback = Center(
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
-        child: Icon(Icons.pets_rounded,
-            size: size * .65, color: color ?? theme.colorScheme.primary),
+      child: Image.asset(
+        'assets/animations/pigeon_first_frame.png',
+        package: _package,
+        width: size,
+        height: size,
+        fit: BoxFit.contain,
+        excludeFromSemantics: true,
       ),
     );
     return Semantics(
@@ -62,14 +62,7 @@ class ProductLoadingIndicator extends StatelessWidget {
             repeat: animate,
             frameBuilder: (context, child, composition) {
               if (composition == null) return fallback;
-              if (!needsLightArtwork) return child;
-              return ColorFiltered(
-                colorFilter: const ColorFilter.mode(
-                  Color(0x55FFFFFF),
-                  BlendMode.srcATop,
-                ),
-                child: child,
-              );
+              return child;
             },
             errorBuilder: (context, error, stackTrace) => fallback,
           ),

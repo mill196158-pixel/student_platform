@@ -22,6 +22,9 @@ flutter:
   assets:
     - assets/animations/cat_loader.json
     - assets/animations/cat_loader.LICENSE.txt
+    - assets/animations/pigeon_loader.json
+    - assets/animations/pigeon_loader.LICENSE.txt
+    - assets/animations/pigeon_first_frame.png
   fonts:
     - family: WorkspaceSans
       fonts:

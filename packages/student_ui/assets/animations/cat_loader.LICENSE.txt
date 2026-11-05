@@ -1,7 +1,8 @@
 Loader cat by Diane Picchiottino, via LottieFiles
 https://lottiefiles.com/free-animation/loader-cat-dWUie0iIVk
 
-Changes: cropped the animation canvas and adapted dark-theme contrast.
+Changes: cropped the animation canvas, adapted dark-theme contrast, and removed
+the secondary tail-shadow layer to avoid the appearance of a second tail.
 The Android startup images are rendered still frames of the same animation.
 
 Lottie Simple License (FL 9.13.21)
