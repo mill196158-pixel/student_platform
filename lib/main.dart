@@ -35,6 +35,7 @@ import 'src/config/supabase_config.dart';
 import 'src/core/session_keeper.dart';
 import 'src/core/auth_session_scope_host.dart';
 import 'src/core/session_capabilities_host.dart';
+import 'src/core/offline_policy_grant_host.dart';
 import 'src/core/password_policy.dart';
 import 'src/services/push/push_notification_service.dart';
 import 'src/navigation/root_nav.dart';
@@ -231,7 +232,7 @@ class StudentPlatformApp extends StatelessWidget {
         ),
       ],
       child: AuthSessionScopeHost(
-          child: SessionCapabilitiesHost(
+          child: OfflinePolicyGrantHost(child: SessionCapabilitiesHost(
               child: SessionKeeper(
         child: ValueListenableBuilder<ThemeMode>(
           valueListenable: themeService,
@@ -259,7 +260,7 @@ class StudentPlatformApp extends StatelessWidget {
             ],
           ),
         ),
-      ))),
+      )))),
     );
   }
 }
