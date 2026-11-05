@@ -1,6 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:student_platform/src/ui/chats/core/chat_message_cache_store.dart';
 import 'package:student_platform/src/ui/chats/core/chat_messages_load_state.dart';
+import 'package:student_platform/src/ui/chats/data/chat_summaries_cache.dart';
 import 'package:student_platform/src/ui/chats/data/offline_chat_cache_reader.dart';
+import 'package:student_platform/src/ui/learning/models/message.dart';
 
 void main() {
   test('distinguishes absent, empty, and damaged lists', () async {
@@ -47,5 +51,43 @@ void main() {
     );
     expect((await reader.messages('a', 'empty')).found, isTrue);
     expect((await reader.messages('a', 'missing')).found, isFalse);
+  });
+
+  test('real local stores keep the same chat id isolated by account', () async {
+    SharedPreferences.setMockInitialValues({});
+    ChatSummariesCache.clearMemory();
+    ChatMessageCacheStore.debugSetPrefs(await SharedPreferences.getInstance());
+    await ChatSummariesCache.write(
+        'owner-a', '[{"chatId":"shared","title":"Список А"}]');
+    await ChatSummariesCache.write(
+        'owner-b', '[{"chatId":"shared","title":"Список Б"}]');
+    await ChatMessageCacheStore.replace(
+      userId: 'owner-a',
+      chatId: 'shared',
+      messages: [
+        Message(
+            id: 'a',
+            chatId: 'shared',
+            authorId: 'owner-a',
+            authorLogin: '',
+            authorName: '',
+            text: 'Private A',
+            at: DateTime.utc(2026))
+      ],
+    );
+    await ChatMessageCacheStore.replace(
+      userId: 'owner-b',
+      chatId: 'shared',
+      messages: [],
+    );
+    final reader = OfflineChatCacheReader();
+    expect((await reader.chats('owner-a')).chats.single.title, 'Список А');
+    expect((await reader.chats('owner-b')).chats.single.title, 'Список Б');
+    expect((await reader.messages('owner-a', 'shared')).messages.single.text,
+        'Private A');
+    expect((await reader.messages('owner-b', 'shared')).messages, isEmpty);
+    expect((await reader.messages('owner-c', 'shared')).found, isFalse);
+    ChatMessageCacheStore.debugSetPrefs(null);
+    ChatSummariesCache.clearMemory();
   });
 }
