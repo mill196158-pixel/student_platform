@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_platform/src/ui/guest/guest_workspace.dart';
 import 'package:student_platform/src/ui/guest/guest_public_service.dart';
@@ -81,6 +82,47 @@ class RefreshGuestService extends GuestPublicService {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  for (final brightness in [Brightness.light, Brightness.dark]) {
+    testWidgets('guest home has a direct login action in $brightness',
+        (tester) async {
+      tester.view.physicalSize = const Size(320, 740);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      SharedPreferences.setMockInitialValues({});
+      final router = GoRouter(initialLocation: '/guest', routes: [
+        GoRoute(
+            path: '/guest',
+            builder: (_, __) => StudentWorkspaceFrame(
+                index: 0,
+                onSelected: (_) {},
+                child: GuestWorkspace(tab: 0, service: FakeGuestService()))),
+        GoRoute(
+            path: '/login',
+            builder: (_, __) => const Scaffold(body: Text('Форма входа'))),
+      ]);
+      addTearDown(router.dispose);
+      await tester.pumpWidget(MaterialApp.router(
+        routerConfig: router,
+        theme: ThemeData(brightness: brightness),
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: const TextScaler.linear(1.5)),
+          child: child!,
+        ),
+      ));
+      await tester.pumpAndSettle();
+      final login = find.widgetWithText(FilledButton, 'Войти');
+      expect(login, findsOneWidget);
+      expect(tester.getSize(login).height, greaterThanOrEqualTo(48));
+      expect(tester.getBottomLeft(login).dy,
+          lessThan(tester.getTopLeft(find.byType(StudentBottomNav)).dy));
+      expect(tester.takeException(), isNull);
+      await tester.tap(login);
+      await tester.pumpAndSettle();
+      expect(find.text('Форма входа'), findsOneWidget);
+    });
+  }
   testWidgets(
       'guest tabs preserve original surfaces, remove private extras, select and restore group',
       (tester) async {

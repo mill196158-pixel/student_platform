@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_ui/student_ui.dart';
 import 'guest_surface.dart';
@@ -333,6 +334,20 @@ class _GuestWorkspaceState extends State<GuestWorkspace> {
               onNewsTap: (index) => _showNewsFeed(rows, presentation, index),
               onSummaryTap: () => _tab(MainTab.schedule),
               onAssignmentsOpen: _login)),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+        child: SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: () => context.go('/login'),
+            icon: const Icon(Icons.login_rounded),
+            label: const Text('Войти'),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(0, 48),
+            ),
+          ),
+        ),
+      ),
     ]);
   }
 
