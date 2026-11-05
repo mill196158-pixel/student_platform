@@ -120,4 +120,5 @@ class CapabilityPermit {
   final AuthOperationScope _owner;
   final int _revision;
   final SessionCapability capability;
+  String get userId => _owner.userId;
 }
