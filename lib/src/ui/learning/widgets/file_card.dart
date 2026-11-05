@@ -1,4 +1,6 @@
 import 'package:student_platform/src/ui/learning/widgets/authorized_file_image.dart';
+import 'package:student_platform/src/services/chat_file_access.dart';
+import 'chat_image_aspect_cache.dart';
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
 
@@ -229,19 +231,25 @@ class _AppNetworkImagePreviewState extends State<AppNetworkImagePreview> {
   ImageStream? _imageStream;
   ImageStreamListener? _imageListener;
   double? _aspectRatio;
+  String? _aspectUser;
+  int? _aspectEpoch;
+  int _resolveRevision = 0;
 
   @override
   void initState() {
     super.initState();
-    _resolveImage();
+    _restoreAspect();
+    if (_aspectRatio == null) _resolveImage();
   }
 
   @override
   void didUpdateWidget(covariant AppNetworkImagePreview oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.imageUrl != widget.imageUrl) {
-      _aspectRatio = null;
-      _resolveImage();
+    if (oldWidget.imageUrl != widget.imageUrl ||
+        _aspectUser != ChatFileAccess.userId || _aspectEpoch != ChatFileAccess.generation) {
+      _removeListener();
+      _restoreAspect();
+      if (_aspectRatio == null) _resolveImage();
     }
   }
 
@@ -252,6 +260,7 @@ class _AppNetworkImagePreviewState extends State<AppNetworkImagePreview> {
   }
 
   void _removeListener() {
+    _resolveRevision++;
     final stream = _imageStream;
     final listener = _imageListener;
     if (stream != null && listener != null) {
@@ -263,19 +272,37 @@ class _AppNetworkImagePreviewState extends State<AppNetworkImagePreview> {
 
   void _resolveImage() {
     _removeListener();
-    final provider = AuthorizedFileImageProvider(widget.imageUrl);
+    final url = widget.imageUrl;
+    final user = ChatFileAccess.userId;
+    final epoch = ChatFileAccess.generation;
+    final revision = _resolveRevision;
+    final provider = AuthorizedFileImageProvider(url);
     final stream = provider.resolve(const ImageConfiguration());
     final listener = ImageStreamListener((info, _) {
-      final width = info.image.width.toDouble();
-      final height = info.image.height.toDouble();
-      if (width <= 0 || height <= 0 || !mounted) return;
-      setState(() => _aspectRatio = width / height);
+      try {
+        final width = info.image.width.toDouble();
+        final height = info.image.height.toDouble();
+        if (width <= 0 || height <= 0 || !mounted || revision != _resolveRevision || widget.imageUrl != url ||
+            ChatFileAccess.userId != user || ChatFileAccess.generation != epoch) return;
+        final ratio = width / height;
+        ChatImageAspectCache.instance.remember(user: user, epoch: epoch, url: url, ratio: ratio);
+        if (_aspectRatio != ratio) setState(() => _aspectRatio = ratio);
+      } finally {
+        info.dispose();
+      }
     }, onError: (Object error, StackTrace? stack) {
       // The visible image widget renders its own access/error placeholder.
     });
     _imageStream = stream;
     _imageListener = listener;
     stream.addListener(listener);
+  }
+
+  void _restoreAspect() {
+    _aspectUser = ChatFileAccess.userId;
+    _aspectEpoch = ChatFileAccess.generation;
+    _aspectRatio = ChatImageAspectCache.instance.read(
+      user: _aspectUser, epoch: _aspectEpoch!, url: widget.imageUrl);
   }
 
   @override
@@ -293,7 +320,8 @@ class _AppNetworkImagePreviewState extends State<AppNetworkImagePreview> {
             widget.maxWidth ?? defaultMaxWidth.clamp(220.0, 360.0);
         final effectiveMaxWidth =
             availableWidth < desiredMaxWidth ? availableWidth : desiredMaxWidth;
-        final aspect = _aspectRatio;
+        final aspect = _aspectUser == ChatFileAccess.userId &&
+                _aspectEpoch == ChatFileAccess.generation ? _aspectRatio : null;
         final isSquareLike = aspect != null && aspect > .82 && aspect < 1.22;
         final maxSide = math.min(
           math.min(effectiveMaxWidth, widget.maxHeight),
