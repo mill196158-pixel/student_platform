@@ -3,6 +3,8 @@ import 'package:student_platform/src/ui/learning/widgets/authorized_file_image.d
 import 'package:student_platform/src/ui/learning/widgets/reentry_image_gate.dart';
 import 'package:student_platform/src/services/chat_file_access.dart';
 import 'package:student_platform/src/core/auth_session_scope_host.dart';
+import 'package:student_platform/src/core/session_capabilities_host.dart';
+import 'package:student_platform/src/core/qa_rotation_navigation_guard.dart';
 // ignore_for_file: unnecessary_import, unused_import, unused_field, unused_element, dead_null_aware_expression, invalid_null_aware_operator, unused_local_variable, deprecated_member_use, unnecessary_null_comparison
 
 import 'dart:async';
@@ -548,7 +550,10 @@ class _ChatTabState extends State<ChatTab> {
     _search = ChatSearchController();
     _pinsCtl = PinController();
     _att = ChatAttachmentsController(
-        _fileService, _globalCache, Supabase.instance.client)
+        _fileService, _globalCache, Supabase.instance.client,
+        authScope: AuthSessionScopeHost.maybeRead(context),
+        capabilities: SessionCapabilitiesHost.maybeRead(context),
+        rotationReceipt: QaRotationNavigationGuard.maybeRead(context))
       ..addListener(() {
         if (mounted) setState(() {});
       });
@@ -695,6 +700,7 @@ class _ChatTabState extends State<ChatTab> {
     // Уничтожаем контроллеры
     _keyboardChannel.setMethodCallHandler(null);
     _search.dispose();
+    if (const bool.fromEnvironment('CHAT_ATTACHMENT_SESSION_FENCE_QA')) _att.dispose();
     super.dispose();
   }
 
@@ -2136,6 +2142,16 @@ class _ChatTabState extends State<ChatTab> {
                     final local =
                         _att.pending.firstWhere((f) => f.localId == ui.localId);
                     final teamId = context.read<TeamCubit>().state.team.id;
+                    if (const bool.fromEnvironment('CHAT_ATTACHMENT_SESSION_FENCE_QA') &&
+                        _att.sessionInterrupted) {
+                      final target = _att.ownedTargetForRetry(local);
+                      if (target != null) await _att.retry(local, teamId: teamId, chatId: target);
+                      if (mounted && _att.sessionInterrupted) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                            content: Text('Не удалось подтвердить сессию. Выбранный файл не удалён.')));
+                      }
+                      return;
+                    }
                     final chatId = await _getChatIdForTeam(teamId);
                     await _att.retry(local, teamId: teamId, chatId: chatId);
                   },

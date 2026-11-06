@@ -70,6 +70,7 @@ class FileService {
     UploadProgressCallback? onProgress,
     CancelToken? cancelToken,
     bool Function()? isCurrent,
+    void Function()? onDispatch,
   }) async {
     try {
       final fileName = _fileNameFromPath(customFileName ?? file.path);
@@ -90,6 +91,7 @@ class FileService {
               : original;
       checkCurrent();
 
+      onDispatch?.call();
       final upload = await _createPresignedUpload(
         chatId: chatId,
         fileName: fileName,

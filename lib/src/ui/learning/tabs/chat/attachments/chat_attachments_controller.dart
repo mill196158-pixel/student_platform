@@ -8,6 +8,9 @@ import 'dart:io';
 import '../../../../../services/file_service.dart';
 import '../../../global_cache.dart';
 import '../../../models/local_attach.dart';
+import '../../../../../core/auth_session_scope.dart';
+import '../../../../../core/session_capabilities.dart';
+import '../../../../../core/qa_rotation_receipt.dart';
 
 // The exact-session fence remains experimental until safe token refresh rebind
 // is proven. Default builds retain their previous attachment-session behavior.
@@ -23,20 +26,70 @@ class ChatAttachmentsController extends ChangeNotifier {
   final Map<String, (CancelToken, LocalAttach)> _operationEntries = {};
   static const int maxFiles = 3;
 
-  late final Session? _ownerSession;
+  Session? _ownerSession;
   late final String? _ownerBinding;
-  late final int _ownerGeneration;
+  int _ownerGeneration = 0;
   bool _scopeRevoked = false;
+  bool _uncertainOldOperations = false;
+  bool get sessionInterrupted => _attachmentScopeQa && !_scopeCurrent();
+  bool _disposed = false;
+  final AuthSessionScope? authScope;
+  final SessionCapabilities? capabilities;
+  final QaRotationReceipt? rotationReceipt;
+  AuthOperationScope? _originalOwner;
+  final Set<Future<void>> _activeOperations = {};
+  final Map<String, LocalAttach> _ownedEntries = {};
+  final Map<String, (String, String?)> _ownedTargets = {};
+  final Set<String> _dispatchedEntries = {};
+  CapabilityPermit? _reboundPermit;
 
-  ChatAttachmentsController(this.fileService, this.cache, this.supabase) {
+  ChatAttachmentsController(this.fileService, this.cache, this.supabase,
+      {this.authScope, this.capabilities, this.rotationReceipt}) {
     _ownerSession = _attachmentScopeQa ? supabase.auth.currentSession : null;
     // This also installs the existing session observer before capturing epoch.
     _ownerBinding = _attachmentScopeQa ? ChatFileAccess.currentSessionBinding : null;
     _ownerGeneration = ChatFileAccess.generation;
+    if (_attachmentScopeQa && authScope != null && capabilities != null && rotationReceipt != null) {
+      _originalOwner = authScope!.capture();
+      _reboundPermit = capabilities!.capture(SessionCapability.mutation);
+      authScope!.addListener(_onAuthChanged);
+      capabilities!.addListener(_onAuthChanged);
+    }
+  }
+
+  Future<T> _track<T>(Future<T> Function() work) async {
+    final done = Completer<void>();
+    _activeOperations.add(done.future);
+    try { return await work(); } finally {
+      _activeOperations.remove(done.future);
+      done.complete();
+    }
+  }
+
+  Future<void> _releaseTemp(String path) => _attachmentScopeQa
+      ? _track(() => ChatFileAccess.releaseForwardTemp(path))
+      : ChatFileAccess.releaseForwardTemp(path);
+
+  void _onAuthChanged() {
+    if (_disposed || _scopeCurrent()) return;
+    for (final token in _cancelTokens.values) { token.cancel('session changed'); }
+    var changed = false;
+    for (var i = 0; i < pending.length; i++) {
+      final old = pending[i];
+      if (old.isUploading && identical(_ownedEntries[old.localId], old)) {
+        final next = old.copyWith(uploadStatus: LocalAttachUploadStatus.failed,
+            errorMessage: 'Сессия обновилась. Повторите загрузку.');
+        pending[i] = next;
+        _ownedEntries[old.localId] = next;
+        changed = true;
+      }
+    }
+    if (changed) notifyListeners();
   }
 
   bool _scopeCurrent() {
     if (!_attachmentScopeQa) return true;
+    if (_disposed) return false;
     if (_scopeRevoked) return false;
     var valid = false;
     try {
@@ -46,11 +99,17 @@ class ChatAttachmentsController extends ChangeNotifier {
           identical(supabase.auth.currentSession, owner) &&
           ChatFileAccess.userId == owner.user.id &&
           ChatFileAccess.currentSessionBinding == _ownerBinding &&
-          ChatFileAccess.generation == _ownerGeneration;
+          ChatFileAccess.generation == _ownerGeneration &&
+          ((authScope == null || capabilities == null || rotationReceipt == null) ||
+              (_reboundPermit != null &&
+               capabilities!.permits(_reboundPermit!, SessionCapability.mutation)));
     } catch (_) {
       valid = false;
     }
-    if (!valid) _scopeRevoked = true;
+    if (!valid) {
+      _scopeRevoked = true;
+      if (_activeOperations.isNotEmpty) _uncertainOldOperations = true;
+    }
     return valid;
   }
 
@@ -69,6 +128,66 @@ class ChatAttachmentsController extends ChangeNotifier {
         current.preserveOriginal == source.preserveOriginal;
   }
 
+  /// Only an explicit user retry can resume an in-memory item after a
+  /// policy-verified same-session rotation. A receipt does not replace drain.
+  Future<bool> _resumeForExplicitRetry(LocalAttach file, String chatId, String? teamId) async {
+    final scope = authScope, caps = capabilities, receipt = rotationReceipt;
+    final oldOwner = _originalOwner, oldSession = _ownerSession;
+    if (_disposed || _uncertainOldOperations || scope == null || caps == null || receipt == null ||
+        oldOwner == null || oldSession == null || _ownerBinding == null ||
+        _dispatchedEntries.contains(file.localId) ||
+        _ownedTargets[file.localId] != (chatId, teamId)) return false;
+    final entry = _findPending(file.localId);
+    if (entry == null || !entry.isFailed ||
+        !identical(_ownedEntries[file.localId], entry)) return false;
+    // Do not silently carry old server results or ownerless restored items.
+    // They remain intact and require a separate reviewed recovery path.
+    if (pending.any((item) => item.path != '__FG__' &&
+        (!identical(_ownedEntries[item.localId], item) ||
+         item.uploadedFileId != null))) return false;
+    final currentSession = supabase.auth.currentSession;
+    final currentOwner = scope.capture();
+    final permit = caps.capture(SessionCapability.mutation);
+    bool valid() {
+      try {
+        return !_disposed && currentSession != null && currentOwner != null &&
+            permit != null && identical(Supabase.instance.client, supabase) &&
+            identical(supabase.auth.currentSession, currentSession) &&
+            currentSession.user.id == oldSession.user.id &&
+            ChatFileAccess.userId == oldSession.user.id &&
+            ChatFileAccess.currentSessionBinding == _ownerBinding &&
+            ChatFileAccess.generation == _ownerGeneration &&
+            scope.isCurrent(currentOwner) &&
+            scope.matchesSession(currentOwner, currentSession) &&
+            caps.permits(permit, SessionCapability.mutation) &&
+            receipt.permitsResume(oldOwner, scope, caps) &&
+            !_dispatchedEntries.contains(file.localId) &&
+            _ownedTargets[file.localId] == (chatId, teamId) &&
+            !pending.any((item) => item.path != '__FG__' &&
+              (!identical(_ownedEntries[item.localId], item) || item.uploadedFileId != null)) &&
+            identical(_ownedEntries[file.localId], entry) &&
+            identical(_findPending(file.localId), entry);
+      } catch (_) { return false; }
+    }
+    if (!valid()) return false;
+    for (final token in _cancelTokens.values) { token.cancel('session changed'); }
+    final elapsed = Stopwatch()..start();
+    try {
+      while (_activeOperations.isNotEmpty) {
+        final remaining = const Duration(seconds: 10) - elapsed.elapsed;
+        if (remaining <= Duration.zero) return false;
+        await Future.wait(_activeOperations.toList()).timeout(remaining);
+        if (!valid()) return false;
+      }
+    } catch (_) { return false; }
+    if (!valid()) return false;
+    _ownerSession = currentSession;
+    _originalOwner = currentOwner;
+    _reboundPermit = permit;
+    _scopeRevoked = false;
+    return true;
+  }
+
   bool add(LocalAttach file) {
     if (!_scopeCurrent()) return false;
     if (pending.where((f)=>f.path!='__FG__').length >= maxFiles) {
@@ -84,11 +203,13 @@ class ChatAttachmentsController extends ChangeNotifier {
     final status = (file.uploadedFileId?.isNotEmpty ?? false)
         ? LocalAttachUploadStatus.uploaded
         : LocalAttachUploadStatus.queued;
-    pending.add(file.copyWith(
+    final added = file.copyWith(
       uploadStatus: status,
       progress: status == LocalAttachUploadStatus.uploaded ? 1 : file.progress,
       clearError: true,
-    ));
+    );
+    pending.add(added);
+    if (_attachmentScopeQa) _ownedEntries[file.localId] = added;
     notifyListeners();
     return true;
   }
@@ -101,7 +222,10 @@ class ChatAttachmentsController extends ChangeNotifier {
     final index = pending.indexWhere((f) => f.localId == file.localId);
     if (index != -1) {
       final removed = pending.removeAt(index);
-      unawaited(ChatFileAccess.releaseForwardTemp(removed.path));
+      _ownedEntries.remove(removed.localId);
+      _ownedTargets.remove(removed.localId);
+      _dispatchedEntries.remove(removed.localId);
+      unawaited(_releaseTemp(removed.path));
       _cancelTokens.remove(removed.localId)?.cancel('attachment removed');
       if (removed.uploadedFileId != null) {
         deleteUploaded(removed.uploadedFileId!);
@@ -126,7 +250,10 @@ class ChatAttachmentsController extends ChangeNotifier {
     final uploadedId = pending[index].uploadedFileId;
     if (uploadedId != null) unawaited(deleteUploaded(uploadedId));
     _cancelTokens.remove(file.localId)?.cancel('attachment canceled');
-    unawaited(ChatFileAccess.releaseForwardTemp(pending[index].path));
+    unawaited(_releaseTemp(pending[index].path));
+    _ownedEntries.remove(file.localId);
+    _ownedTargets.remove(file.localId);
+    _dispatchedEntries.remove(file.localId);
     pending.removeAt(index);
     notifyListeners();
   }
@@ -136,8 +263,16 @@ class ChatAttachmentsController extends ChangeNotifier {
     String? teamId,
     required String chatId,
     String? messageId,
+    bool Function()? canDispatch,
   }) async {
-    if (!_scopeCurrent()) return;
+    bool allowed() {
+      try { return canDispatch?.call() ?? true; } catch (_) { return false; }
+    }
+    if (!allowed()) return;
+    if (!_scopeCurrent()) {
+      if (!_attachmentScopeQa || !await _resumeForExplicitRetry(file, chatId, teamId)) return;
+    }
+    if (!allowed()) return;
     final index = pending.indexWhere((f) => f.localId == file.localId);
     if (index == -1) return;
     await upload(
@@ -149,7 +284,17 @@ class ChatAttachmentsController extends ChangeNotifier {
       teamId: teamId,
       chatId: chatId,
       messageId: messageId,
+      canDispatch: canDispatch,
     );
+  }
+
+  /// The original target is memory-only and exists only for entries added by
+  /// this controller. Never infer it from an ownerless restored draft.
+  String? ownedTargetForRetry(LocalAttach file) {
+    if (!_attachmentScopeQa) return null;
+    final entry = _findPending(file.localId);
+    if (entry == null || !identical(_ownedEntries[file.localId], entry)) return null;
+    return _ownedTargets[file.localId]?.$1;
   }
 
   Future<void> upload(
@@ -157,12 +302,25 @@ class ChatAttachmentsController extends ChangeNotifier {
     String? teamId,
     required String chatId,
     String? messageId,
+    bool Function()? canDispatch,
   }) async {
     if (!_attachmentScopeQa) {
       await _uploadLegacy(file, teamId: teamId, chatId: chatId, messageId: messageId);
       return;
     }
-    if (!_scopeCurrent()) return;
+    await _track(() => _uploadScoped(file, teamId: teamId, chatId: chatId, messageId: messageId, canDispatch: canDispatch));
+  }
+
+  Future<void> _uploadScoped(LocalAttach file, {
+    String? teamId,
+    required String chatId,
+    String? messageId,
+    bool Function()? canDispatch,
+  }) async {
+    bool allowed() {
+      try { return canDispatch?.call() ?? true; } catch (_) { return false; }
+    }
+    if (!_scopeCurrent() || !allowed()) return;
     final existingIndex = pending.indexWhere((f) => f.localId == file.localId);
     if (existingIndex == -1) return;
     final source = pending[existingIndex];
@@ -170,10 +328,15 @@ class ChatAttachmentsController extends ChangeNotifier {
         source.mimeType != file.mimeType || source.size != file.size ||
         source.isImage != file.isImage ||
         source.preserveOriginal != file.preserveOriginal) return;
+    if (identical(_ownedEntries[file.localId], source)) {
+      final previousTarget = _ownedTargets[file.localId];
+      if (previousTarget != null && previousTarget != (chatId, teamId)) return;
+      _ownedTargets[file.localId] = (chatId, teamId);
+    }
     final operationSession = supabase.auth.currentSession;
     final operationOwner = ChatFileAccess.userId;
     final operationEpoch = ChatFileAccess.generation;
-    bool sameOperationSession() => operationSession != null && operationOwner != null &&
+    bool sameOperationSession() => allowed() && operationSession != null && operationOwner != null &&
         operationOwner == ChatFileAccess.userId && operationEpoch == ChatFileAccess.generation;
     if (!sameOperationSession()) return;
     final uploadToken = CancelToken();
@@ -205,6 +368,7 @@ class ChatAttachmentsController extends ChangeNotifier {
         isCurrent: _attachmentScopeQa
             ? () => sameOperationSession() && _sameAttachment(source, uploadToken)
             : null,
+        onDispatch: () => _dispatchedEntries.add(file.localId),
         onProgress: (sent, total) {
           if (total <= 0 || !_sameAttachment(source, uploadToken)) return;
           final progress = (sent / total).clamp(0.0, 1.0);
@@ -246,12 +410,16 @@ class ChatAttachmentsController extends ChangeNotifier {
       // Обновляем файл в списке, если не был удалён во время загрузки
       final index = pending.indexWhere((f) => f.localId == file.localId);
       if (index != -1 && _sameAttachment(source, uploadToken)) {
-        pending[index] = pending[index].copyWith(
+        final next = pending[index].copyWith(
           uploadedFileId: savedId,
           uploadStatus: LocalAttachUploadStatus.uploaded,
           progress: 1,
           clearError: true,
         );
+        if (identical(_ownedEntries[file.localId], pending[index])) {
+          _ownedEntries[file.localId] = next;
+        }
+        pending[index] = next;
         notifyListeners();
       } else if (index == -1 && _scopeCurrent()) {
         await deleteUploaded(savedId);
@@ -392,6 +560,14 @@ class ChatAttachmentsController extends ChangeNotifier {
   }
 
   Future<void> deleteUploaded(String fileId) async {
+    if (_attachmentScopeQa) {
+      await _track(() => _deleteUploadedScoped(fileId));
+      return;
+    }
+    await _deleteUploadedScoped(fileId);
+  }
+
+  Future<void> _deleteUploadedScoped(String fileId) async {
     if (!_scopeCurrent()) return;
     try {
       final row = await supabase.from('chat_files').select('file_key').eq('id',fileId).maybeSingle();
@@ -434,7 +610,9 @@ class ChatAttachmentsController extends ChangeNotifier {
     pending.removeWhere(matches);
     for (final file in removed) {
       _cancelTokens.remove(file.localId)?.cancel('attachment already sent');
-      unawaited(ChatFileAccess.releaseForwardTemp(file.path));
+      _ownedEntries.remove(file.localId);
+      _ownedTargets.remove(file.localId);
+      unawaited(_releaseTemp(file.path));
     }
     notifyListeners();
   }
@@ -446,7 +624,9 @@ class ChatAttachmentsController extends ChangeNotifier {
       return;
     }
     for (final file in pending) {
-      unawaited(ChatFileAccess.releaseForwardTemp(file.path));
+      _ownedEntries.remove(file.localId);
+      _ownedTargets.remove(file.localId);
+      unawaited(_releaseTemp(file.path));
       _cancelTokens.remove(file.localId)?.cancel('attachments cleared');
       if (file.uploadedFileId != null) {
         deleteUploaded(file.uploadedFileId!);
@@ -480,7 +660,21 @@ class ChatAttachmentsController extends ChangeNotifier {
   void _replacePending(String localId, LocalAttach file) {
     final index = pending.indexWhere((f) => f.localId == localId);
     if (index == -1) return;
+    if (_attachmentScopeQa && identical(_ownedEntries[localId], pending[index])) {
+      _ownedEntries[localId] = file;
+    }
     pending[index] = file;
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    if (_attachmentScopeQa && authScope != null && capabilities != null && rotationReceipt != null) {
+      authScope!.removeListener(_onAuthChanged);
+      capabilities!.removeListener(_onAuthChanged);
+      for (final token in _cancelTokens.values) { token.cancel('controller disposed'); }
+    }
+    super.dispose();
   }
 }

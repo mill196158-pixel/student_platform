@@ -16,6 +16,10 @@ class QaRotationNavigationGuard extends StatefulWidget {
   final bool Function()? hasPendingRefresh;
   final Widget child;
 
+  /// Receipt is present only inside the explicitly enabled QA guard.
+  static QaRotationReceipt? maybeRead(BuildContext context) => context
+      .getInheritedWidgetOfExactType<_QaRotationReceiptProvider>()?.receipt;
+
   @override
   State<QaRotationNavigationGuard> createState() => _QaRotationNavigationGuardState();
 }
@@ -120,11 +124,19 @@ class _QaRotationNavigationGuardState extends State<QaRotationNavigationGuard> {
   @override
   Widget build(BuildContext context) {
     _evaluate();
-    return Stack(fit: StackFit.expand, children: [
+    return _QaRotationReceiptProvider(receipt: widget.receipt, child: Stack(fit: StackFit.expand, children: [
       Offstage(offstage: _locked, child: ExcludeFocus(excluding: _locked,
         child: widget.child)),
       if (_locked) const ColoredBox(color: Colors.white,
         child: Center(child: Text('Сессия проверяется.'))),
-    ]);
+    ]));
   }
+}
+
+class _QaRotationReceiptProvider extends InheritedWidget {
+  const _QaRotationReceiptProvider({required this.receipt, required super.child});
+  final QaRotationReceipt receipt;
+  @override
+  bool updateShouldNotify(_QaRotationReceiptProvider oldWidget) =>
+      !identical(receipt, oldWidget.receipt);
 }

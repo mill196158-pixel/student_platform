@@ -2,6 +2,9 @@ import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_card_enve
 import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:student_platform/src/services/chat_file_access.dart';
 import 'package:student_platform/src/core/online_side_effect_barrier.dart';
+import 'package:student_platform/src/core/auth_session_scope_host.dart';
+import 'package:student_platform/src/core/session_capabilities_host.dart';
+import 'package:student_platform/src/core/qa_rotation_navigation_guard.dart';
 import 'cached_chat_message_bubble.dart';
 import 'cached_chat_composer.dart';
 import 'scoped_forward_author_resolver.dart';
@@ -82,9 +85,12 @@ class UnifiedChatScreen extends StatefulWidget {
     this.onlineBarrier,
     this.sessionIsCurrent,
     this.cachedAuthorResolver,
+    this.debugCanComposeDm,
   });
 
   final IChatService service;
+  @visibleForTesting
+  final bool Function()? debugCanComposeDm;
   final String? title;
   final bool hideAvatars;
 
@@ -225,9 +231,15 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   bool _dmAvailable = true;
   bool _blockActionBusy = false;
 
-  bool get _canComposeDm =>
-      !_isDm ||
-      (_dmComposerReady && _dmBlockLoaded && _dmAvailable && !_blockActionBusy);
+  bool get _canComposeDm {
+    var allowed = !_isDm ||
+        (_dmComposerReady && _dmBlockLoaded && _dmAvailable && !_blockActionBusy);
+    assert(() {
+      allowed = widget.debugCanComposeDm?.call() ?? allowed;
+      return true;
+    }());
+    return allowed;
+  }
 
   Future<void> _pickPhotoForChat() async {
     if (!_canComposeDm) return;
@@ -259,6 +271,18 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     }
   }
 
+  Future<bool> _retryAfterSessionChange(LocalAttach file, {String? teamId}) async {
+    if (!_att.sessionInterrupted) return false;
+    final target = _att.ownedTargetForRetry(file);
+    if (target != null) await _att.retry(file, teamId: teamId, chatId: target,
+        canDispatch: () => mounted && _canComposeDm);
+    if (mounted && _att.sessionInterrupted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Не удалось подтвердить сессию. Выбранный файл не удалён.')));
+    }
+    return true;
+  }
+
   // якорь для «⋯»
   final GlobalKey _kebabKey = GlobalKey();
 
@@ -280,11 +304,14 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     // for a local-only service. This path is an experimental QA boundary.
     if (_initialCachedOnly) return;
     _att = ChatAttachmentsController(
-        _fileService, _globalCache, Supabase.instance.client)
+        _fileService, _globalCache, Supabase.instance.client,
+        authScope: AuthSessionScopeHost.maybeRead(context),
+        capabilities: SessionCapabilitiesHost.maybeRead(context),
+        rotationReceipt: QaRotationNavigationGuard.maybeRead(context))
       ..addListener(() {
         if (!mounted) return;
         setState(() {});
-        if (_isDm) _saveDraftDmDebounced();
+        if (_isDm && !_att.sessionInterrupted) _saveDraftDmDebounced();
       });
 
     // ignore: discarded_futures
@@ -418,6 +445,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     _ctrl.dispose();
     _composerFocus.dispose();
     _myTypingOff?.cancel();
+    if (const bool.fromEnvironment('CHAT_ATTACHMENT_SESSION_FENCE_QA')) _att.dispose();
     super.dispose();
   }
 
@@ -2553,6 +2581,10 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                                   if (!_canComposeDm) return;
                                   final local = _att.pending.firstWhere(
                                       (f) => f.localId == ui.localId);
+                                  if (const bool.fromEnvironment('CHAT_ATTACHMENT_SESSION_FENCE_QA') &&
+                                      await _retryAfterSessionChange(local)) return;
+                                  if (!mounted) return;
+                                  if (!_canComposeDm) return;
                                   final cid =
                                       await widget.service.ensureChatId();
                                   await _att.retry(local,
@@ -2670,6 +2702,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                                 onRetryFile: (ui) async {
                                   final local = _att.pending.firstWhere(
                                       (f) => f.localId == ui.localId);
+                                  if (const bool.fromEnvironment('CHAT_ATTACHMENT_SESSION_FENCE_QA') &&
+                                      await _retryAfterSessionChange(local)) return;
+                                  if (!mounted) return;
                                   final cid =
                                       await widget.service.ensureChatId();
                                   await _att.retry(local,
