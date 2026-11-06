@@ -93,14 +93,13 @@ class _FakePicker implements AdminImagePicker {
 
 void main() {
   test('new image preparation retains fallback and keeps MIME aligned', () async {
-    final source = Uint8List.fromList([137, 80, 78, 71, 1, 2, 3, 4, 5]);
+    final source = Uint8List.fromList(_pngBytes);
     final jpeg = Uint8List.fromList([255, 216, 255, 1]);
     final result = await LocalAdminImagePicker.prepareSelected(bytes: source,
       fileName: 'cover.png', mimeType: 'image/png', optimizer: (_) async => jpeg);
-    expect(result.fileName, 'cover.jpg');
-    expect(result.mimeType, 'image/jpeg');
-    expect(result.bytes, jpeg);
-    expect(source, [137, 80, 78, 71, 1, 2, 3, 4, 5]);
+    expect(result.fileName, 'cover.png');
+    expect(result.mimeType, 'image/png');
+    expect(result.bytes, source);
     final fallback = await LocalAdminImagePicker.prepareSelected(bytes: source,
       fileName: 'cover.png', mimeType: 'image/png', optimizer: (_) async => throw StateError('worker'));
     expect(fallback.bytes, source);
@@ -111,11 +110,11 @@ void main() {
   });
 
   test('large source is accepted only if safe output fits upload limit', () async {
-    final source = Uint8List(LocalAdminImagePicker.maxBytes + 1);
+    final source = Uint8List(LocalAdminImagePicker.maxBytes + 1)..setRange(0, _pngBytes.length, _pngBytes);
     final jpeg = Uint8List.fromList([255, 216, 255, 1]);
-    final result = await LocalAdminImagePicker.prepareSelected(bytes: source,
-      fileName: 'large.png', mimeType: 'image/png', optimizer: (_) async => jpeg);
-    expect(result.bytes, jpeg);
+    await expectLater(LocalAdminImagePicker.prepareSelected(bytes: source,
+      fileName: 'large.png', mimeType: 'image/png', optimizer: (_) async => jpeg),
+      throwsA(isA<AdminImagePickException>()));
     await expectLater(LocalAdminImagePicker.prepareSelected(bytes: source,
       fileName: 'large.png', mimeType: 'image/png', optimizer: (_) async => null),
       throwsA(isA<AdminImagePickException>()));

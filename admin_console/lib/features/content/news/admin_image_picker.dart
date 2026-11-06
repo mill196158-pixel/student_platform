@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'admin_photo_optimizer.dart';
+import '../shared/content_media_intent.dart' show imageUploadMime;
 
 /// Result of a local image selection for the admin prototype.
 class PickedAdminImage {
@@ -65,29 +66,85 @@ class LocalAdminImagePicker implements AdminImagePicker {
 
   /// Processes an already selected file. Injectable optimizer supports
   /// deterministic tests without starting browser workers or file dialogs.
-  static Future<PickedAdminImage> prepareSelected({required Uint8List bytes,
-      required String fileName, required String mimeType,
-      Future<Uint8List?> Function(Uint8List)? optimizer}) async {
-    final original = _validateAndWrap(bytes: bytes, fileName: fileName,
-      mimeType: mimeType, limit: maxInputBytes);
+  static Future<PickedAdminImage> prepareSelected({
+    required Uint8List bytes,
+    required String fileName,
+    required String mimeType,
+    Future<Uint8List?> Function(Uint8List)? optimizer,
+  }) async {
+    final original = _validateAndWrap(
+      bytes: Uint8List.fromList(bytes),
+      fileName: fileName,
+      mimeType: mimeType,
+      limit: maxInputBytes,
+    );
+    final String actualMime;
+    try {
+      actualMime = imageUploadMime(original.bytes);
+    } catch (_) {
+      throw const AdminImagePickException(
+        'Выберите корректное изображение JPG, PNG или WebP.',
+      );
+    }
+    final dot = original.fileName.lastIndexOf('.');
+    final stem = dot > 0
+        ? original.fileName.substring(0, dot)
+        : original.fileName;
+    final ext = switch (actualMime) {
+      'image/png' => 'png',
+      'image/webp' => 'webp',
+      _ => 'jpg',
+    };
+    final safeOriginal = PickedAdminImage(
+      bytes: original.bytes,
+      fileName: '$stem.$ext',
+      mimeType: actualMime,
+    );
     Uint8List? optimized;
     try {
-      optimized = await (optimizer ?? optimizeAdminPhoto)(original.bytes);
+      if (actualMime == 'image/png') {
+        final result = await (optimizer ?? optimizeAdminPhoto)(
+          Uint8List.fromList(original.bytes),
+        );
+        optimized = result == null ? null : Uint8List.fromList(result);
+      } else if (actualMime == 'image/jpeg' &&
+          original.bytes.length > maxBytes) {
+        // Preserve the existing Admin Web capability for oversized JPEGs.
+        // The legacy encoder is lossy; source files are never modified.
+        final result = await (optimizer ?? optimizeLargeJpegLegacy)(
+          Uint8List.fromList(original.bytes),
+        );
+        optimized = result == null ? null : Uint8List.fromList(result);
+      }
     } catch (_) {
       optimized = null;
     }
-    if (optimized == null || optimized.length < 3 || optimized.length >= original.bytes.length ||
-        optimized.length > maxBytes || optimized[0] != 0xff || optimized[1] != 0xd8 || optimized[2] != 0xff) {
+    var good = false;
+    try {
+      good =
+          optimized != null &&
+          optimized.length < original.bytes.length &&
+          optimized.length <= maxBytes &&
+          (actualMime == 'image/png'
+              ? await isLosslessAdminPhoto(original.bytes, optimized)
+              : actualMime == 'image/jpeg' &&
+                    await isValidLegacyJpeg(original.bytes, optimized));
+    } catch (_) {
+      good = false;
+    }
+    if (!good) {
       if (original.bytes.length > maxBytes) {
         throw const AdminImagePickException(
           'Не удалось уменьшить изображение до 5 МБ. Выберите другой файл.',
         );
       }
-      return original;
+      return safeOriginal;
     }
-    final dot = original.fileName.lastIndexOf('.');
-    final stem = dot > 0 ? original.fileName.substring(0, dot) : original.fileName;
-    return PickedAdminImage(bytes: optimized, fileName: '$stem.jpg', mimeType: 'image/jpeg');
+    return PickedAdminImage(
+      bytes: optimized!,
+      fileName: '$stem.${actualMime == 'image/jpeg' ? 'jpg' : 'png'}',
+      mimeType: actualMime,
+    );
   }
 
   /// Shared validation for picker and drag-and-drop paths.
@@ -95,10 +152,19 @@ class LocalAdminImagePicker implements AdminImagePicker {
     required Uint8List bytes,
     required String fileName,
     required String mimeType,
-  }) => _validateAndWrap(bytes: bytes, fileName: fileName, mimeType: mimeType, limit: maxBytes);
+  }) => _validateAndWrap(
+    bytes: bytes,
+    fileName: fileName,
+    mimeType: mimeType,
+    limit: maxBytes,
+  );
 
-  static PickedAdminImage _validateAndWrap({required Uint8List bytes,
-    required String fileName, required String mimeType, required int limit}) {
+  static PickedAdminImage _validateAndWrap({
+    required Uint8List bytes,
+    required String fileName,
+    required String mimeType,
+    required int limit,
+  }) {
     final normalizedMime = mimeType.toLowerCase().trim();
     final extension = _extensionOf(fileName);
 

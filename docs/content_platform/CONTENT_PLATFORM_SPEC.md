@@ -259,13 +259,22 @@ Admin Home Promo and Profile Feed image uploads identify PNG/JPEG/WebP by
 their file headers; unknown formats fail before upload. Custom promo icons
 accept only PNG/WebP. This does not rewrite already published assets.
 
-Local image-delivery work (not yet deployed): the Admin Web picker attempts
-best-effort, bounded background conversion for safe upright JPEG and opaque
-PNG photos. It keeps the source unchanged when orientation, transparency,
-animation, color profile, size, browser support or encoding makes conversion
-unsuitable; the accepted result must be a smaller JPEG. The picker accepts up
-to 20 MiB of source input but still enforces the 5 MiB upload ceiling after
-optimization. News, Home Promo and Profile Feed
+Local image-delivery work (not yet deployed): the Admin picker attempts
+bounded lossless recompression only for simple static 8-bit PNG images without
+metadata, up to 4 megapixels (1 megapixel and 2 MiB input on Web to bound
+main-isolate work). Input and output must decode to the same size
+and every RGBA pixel must match; the result must also be smaller. JPEG up to
+5 MiB, WebP, animated images, images with metadata and uncertain inputs remain
+unchanged. To preserve existing Admin Web behaviour, an oversized JPEG may
+still use the legacy lossy worker, subject to its EXIF/color checks. That
+worker cannot guarantee QR or fine-text preservation and its Web runtime has
+not been revalidated here. There is no automated distinction between photos
+and QR/diagrams, so general safe JPEG optimisation remains open. This does
+not store a second server-side original. The source
+file on the administrator's device is not changed. The picker accepts up to
+20 MiB of source input but still enforces the 5 MiB upload ceiling after
+optimization. VM tests pass; the Chrome test did not complete, so Web
+compatibility and responsiveness remain unverified. News, Home Promo and Profile Feed
 retain their existing upload, versioning and access-control contracts. Custom
 icons are excluded. Existing published assets require a separately reviewed
 retention and conditional-swap process; local conversion alone is not a
