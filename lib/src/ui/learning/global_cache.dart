@@ -127,14 +127,47 @@ class GlobalCache {
   }
 
   // Сохраняем черновики
-  Future<void> _saveDrafts() async {
+  Future<void> _draftWrites = Future<void>.value();
+
+  Future<void> _saveDrafts() {
+    // Snapshot both maps before yielding. A slower old save must not land
+    // after a newer clear or overwrite text typed while a send was pending.
+    String? texts;
+    String? files;
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_draftTextsKey, jsonEncode(_draftTexts));
-      await prefs.setString(_draftFilesKey, jsonEncode(_draftFiles));
+      texts = jsonEncode(_draftTexts);
     } catch (e) {
-      safeDebugLog('[GlobalCache] failed to save drafts: ${e.runtimeType}');
+      safeDebugLog(
+          '[GlobalCache] failed to encode draft texts: ${e.runtimeType}');
     }
+    try {
+      files = jsonEncode(_draftFiles);
+    } catch (e) {
+      safeDebugLog(
+          '[GlobalCache] failed to encode draft files: ${e.runtimeType}');
+    }
+    final write = _draftWrites.then((_) async {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        var textsSaved = false;
+        var filesSaved = false;
+        try {
+          if (texts != null)
+            textsSaved = await prefs.setString(_draftTextsKey, texts);
+        } catch (_) {}
+        try {
+          if (files != null)
+            filesSaved = await prefs.setString(_draftFilesKey, files);
+        } catch (_) {}
+        if (!textsSaved || !filesSaved) {
+          throw StateError('Draft persistence failed');
+        }
+      } catch (e) {
+        safeDebugLog('[GlobalCache] failed to save drafts: ${e.runtimeType}');
+      }
+    });
+    _draftWrites = write;
+    return write;
   }
 
   // Загружаем черновики
