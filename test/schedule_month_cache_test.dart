@@ -42,6 +42,27 @@ class _DelayedPreferences implements SharedPreferences {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('stuck preferences read times out and later reads recover for current owner', () async {
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    var session = fakeSession('schedule-prefs-timeout-a');
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final gate = Completer<SharedPreferences>();
+    final prefs = _DelayedPreferences();
+    final cache = ScheduleMonthCache(scope, 'prefs-timeout', preferences: () => gate.future);
+    final month = DateTime(2026, 11);
+    final a = cache.beginRead(month)!;
+    expect(await cache.read(a), isNull);
+    final old = cache.read(cache.beginRead(month)!);
+    session = fakeSession('schedule-prefs-timeout-b');
+    events.add(AuthState(AuthChangeEvent.signedIn, session));
+    gate.complete(prefs);
+    expect(await old, isNull);
+    expect(await cache.write(cache.begin(month)!, []), isTrue);
+    expect(await cache.read(cache.beginRead(month)!), isEmpty);
+    scope.dispose();
+    await events.close();
+  });
   test('stuck write times out read without cancelling it, then recovers', () async {
     final events = StreamController<AuthState>.broadcast(sync: true);
     var session = fakeSession('schedule-timeout-owner');

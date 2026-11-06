@@ -86,7 +86,7 @@ class ScheduleMonthCache {
       }
       if (!_current(attempt) || _quarantined.contains(attempt.key) ||
           _pending.containsKey(attempt.key)) return null;
-      final prefs = await _preferences();
+      final prefs = await _preferences().timeout(const Duration(seconds: 1));
       if (!_current(attempt) || _quarantined.contains(attempt.key) ||
           _pending.containsKey(attempt.key)) return null;
       final raw = prefs.getString(attempt.key);

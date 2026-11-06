@@ -417,11 +417,14 @@ class ScheduleScreen extends StatefulWidget {
       this.repository,
       this.now,
       this.subscribeRealtime = true,
+      this.cacheFactory,
       this.cachedReader});
   final CachedHomeScheduleReader? cachedReader;
   final ScheduleRepository? repository;
   final DateTime Function()? now;
   final bool subscribeRealtime;
+  @visibleForTesting
+  final ScheduleMonthCache Function(AuthSessionScope scope)? cacheFactory;
   @override
   State<ScheduleScreen> createState() => _ScheduleScreenState();
 }
@@ -540,8 +543,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     if (identical(scope, _sessionScope) && _monthCache != null) return;
     _sessionScope?.removeListener(_sessionChanged);
     _sessionScope = scope;
-    _monthCache =
-        scope == null ? null : ScheduleMonthCache(scope, SupabaseConfig.url);
+    _monthCache = scope == null ? null :
+        (widget.cacheFactory?.call(scope) ?? ScheduleMonthCache(scope, SupabaseConfig.url));
     scope?.addListener(_sessionChanged);
     _reload();
   }

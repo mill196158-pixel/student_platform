@@ -56,6 +56,33 @@ Lesson lesson(String id, DateTime date, String title) => Lesson(
   end: const TimeOfDay(hour: 10, minute: 30), subjectRaw: title);
 
 void main() {
+  testWidgets('stalled preference lookup does not prevent live schedule', (tester) async {
+    final session = fakeSession('schedule-prefs-screen');
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final gate = Completer<SharedPreferences>();
+    final repo = _Repository();
+    await tester.pumpWidget(MaterialApp(home: AuthSessionScopeHost(createScope: () => scope,
+      child: ScheduleScreen(repository: repo, subscribeRealtime: false,
+          cacheFactory: (s) => ScheduleMonthCache(s, SupabaseConfig.url, preferences: () => gate.future),
+          now: () => DateTime(2026, 11, 5)))));
+    await tester.pump();
+    expect(repo.calls, isEmpty);
+    await tester.pump(const Duration(milliseconds: 1100));
+    await tester.pump();
+    expect(repo.calls, hasLength(1));
+    repo.calls.first.complete([lesson('live', DateTime(2026, 11, 5), 'Свежая пара')]);
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Свежая пара'), findsOneWidget);
+    final prefs = _PendingPreferences();
+    prefs.release.complete();
+    gate.complete(prefs);
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await events.close();
+  });
   testWidgets('stalled cache plus network failure is unavailable, not empty', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final session = fakeSession('schedule-stalled-offline-test');
