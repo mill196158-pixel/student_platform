@@ -262,7 +262,7 @@ class ChatFileAccess {
     return Uri.decodeComponent(uri.path.substring(1));
   }
 
-  static final _forwardTemps = <String, Directory>{};
+  static final _forwardTemps = <String, (Directory, String, String?, int)>{};
   static Future<File> forwardTemp(String url) async {
     final uid = userId, epoch = generation, sid = currentSessionBinding;
     if (uid == null) throw StateError('Authentication required');
@@ -270,31 +270,44 @@ class ChatFileAccess {
         isViewerCurrent(url, user: uid, epoch: epoch, sessionBinding: sid);
     final bytes = await readBytes(url);
     if (!current()) throw StateError('Session changed.');
-    final root = await getApplicationCacheDirectory();
-    final parent = Directory('${root.path}/authorized_chat_files/$uid');
-    await parent.create(recursive: true);
-    final dir = await parent.createTemp('forward_');
-    final name = Uri.parse(url)
-        .pathSegments
-        .last
-        .replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
-    final file = File('${dir.path}/${name.isEmpty ? 'file' : name}');
-    try {
+    // Never nest this queue around readBytes: it also uses _withOwnerFiles.
+    // Creation and publication must be serialized behind a pending logout for
+    // the same owner, so an old cleanup cannot erase a new session's temp.
+    return _withOwnerFiles(uid, () async {
       if (!current()) throw StateError('Session changed.');
-      await file.writeAsBytes(bytes, flush: true);
-      await debugBeforeForwardReturn?.call();
+      final root = await getApplicationCacheDirectory();
       if (!current()) throw StateError('Session changed.');
-      _forwardTemps[file.path] = dir;
-      return file;
-    } catch (_) {
-      if (await dir.exists()) await dir.delete(recursive: true);
-      rethrow;
-    }
+      final parent = Directory('${root.path}/authorized_chat_files/$uid');
+      await parent.create(recursive: true);
+      if (!current()) throw StateError('Session changed.');
+      final dir = await parent.createTemp('forward_');
+      final name = Uri.parse(url)
+          .pathSegments
+          .last
+          .replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
+      final file = File('${dir.path}/${name.isEmpty ? 'file' : name}');
+      try {
+        if (!current()) throw StateError('Session changed.');
+        await file.writeAsBytes(bytes, flush: true);
+        await debugBeforeForwardReturn?.call();
+        if (!current()) throw StateError('Session changed.');
+        _forwardTemps[file.path] = (dir, uid, sid, epoch);
+        return file;
+      } catch (_) {
+        if (await dir.exists()) await dir.delete(recursive: true);
+        rethrow;
+      }
+    });
   }
 
   static Future<void> releaseForwardTemp(String path) async {
-    final dir = _forwardTemps.remove(path);
-    if (dir != null && await dir.exists()) await dir.delete(recursive: true);
+    final entry = _forwardTemps[path];
+    if (entry == null) return;
+    await _withOwnerFiles(entry.$2, () async {
+      if (_forwardTemps[path] != entry) return;
+      _forwardTemps.remove(path);
+      if (await entry.$1.exists()) await entry.$1.delete(recursive: true);
+    });
   }
 
   static final _noOffline = <String>{};
@@ -316,12 +329,11 @@ class ChatFileAccess {
             final root = await getApplicationCacheDirectory();
             final directory =
                 Directory('${root.path}/authorized_chat_files/$uid');
-            if (await directory.exists())
+            if (await directory.exists()) {
               await directory.delete(recursive: true);
+            }
+            _forwardTemps.removeWhere((_, entry) => entry.$2 == uid);
           });
-    for (final path in _forwardTemps.keys.toList()) {
-      await releaseForwardTemp(path);
-    }
     await cleanup;
   }
 

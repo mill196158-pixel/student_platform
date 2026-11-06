@@ -44,6 +44,7 @@ import '../forward/forward_picker.dart';
 import '../forward/forward_pick_nav.dart';
 import 'forward_payload.dart';
 import '../forward/forward_outbox.dart';
+import '../forward/forward_send_gate.dart';
 import '../data/dm_api.dart';
 import '../data/blocks_api.dart';
 import '../dm_title.dart';
@@ -143,6 +144,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   int _forwardPreparationGeneration = 0;
   final List<String> _forwardSelectedIds = [];
   final List<String> _stagedForwardFileIds = [];
+  final Set<String> _requiredForwardFileIds = {};
   ForwardPayload? _stagedForward;
 
   // Блокировка повторных отправок и индикатор фоновых загрузок
@@ -643,6 +645,10 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     final uid=ChatFileAccess.userId, epoch=ChatFileAccess.generation;
     bool sameSession()=>uid!=null && uid==ChatFileAccess.userId && epoch==ChatFileAccess.generation;
     if (!mounted || !sameSession()) return;
+    if (!forwardSourceReferencesComplete(payload, fileIds)) {
+      throw const FormatException('Не все вложения готовы к пересылке.');
+    }
+    _requiredForwardFileIds.clear();
 
     final sameChat = (payload.fromChatId == chatId);
 
@@ -712,7 +718,17 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
             name:copied.fileName,type:copied.fileType,size:copied.fileSize);
       }
       if (mounted && sameSession() && preparation == _forwardPreparationGeneration) {
-        setState(() => _stagedForward = payload.withCopiedFiles(copies));
+        final preparedIds = copies.values.map((file) => file.id).toList();
+        if (preparedIds.any((id) => id == null || id.trim().isEmpty)) {
+          throw StateError('Не все вложения готовы к пересылке.');
+        }
+        final preparedPayload = payload.withCopiedFiles(copies);
+        setState(() {
+          _requiredForwardFileIds
+            ..clear()
+            ..addAll(preparedIds.cast<String>());
+          _stagedForward = preparedPayload;
+        });
       }
     } catch (_) {
       if (mounted && sameSession() && preparation == _forwardPreparationGeneration) {
@@ -1207,7 +1223,27 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       _forceSaveDraftDm();
       // 0) если висит staged forward — отправляем в этот чат
       if (_stagedForward != null && _forwardPackageAttached) {
-        final forwardText = _stagedForward!.encodeForText();
+        final forwardPayload = _stagedForward!;
+        final owner = ChatFileAccess.userId;
+        final session = ChatFileAccess.currentSessionBinding;
+        final epoch = ChatFileAccess.generation;
+        final preparation = _forwardPreparationGeneration;
+        final composerText = _ctrl.text;
+        final capturedReplyId = _replyTo?.id;
+        final initialAttachments = ForwardAttachmentSnapshot(_att.pending);
+        ForwardAttachmentSnapshot? sentAttachments;
+        final target = _currentChatIdDm;
+        bool sameForwardOperation() => mounted && owner != null && session != null && target != null &&
+            owner == ChatFileAccess.userId && session == ChatFileAccess.currentSessionBinding &&
+            epoch == ChatFileAccess.generation && _forwardPreparationGeneration == preparation &&
+            _forwardPackageAttached && identical(_stagedForward, forwardPayload) &&
+            _currentChatIdDm == target;
+        bool currentForward() => sameForwardOperation() &&
+            _ctrl.text == composerText && _replyTo?.id == capturedReplyId &&
+            initialAttachments.sameFiles(_att.pending) &&
+            (sentAttachments?.sameState(_att.pending) ?? true);
+        if (!currentForward()) return;
+        final forwardText = forwardPayload.encodeForText();
         final replyId = _replyTo?.id;
 
         // ждём загрузки всех реальных файлов (кроме чипа '__FG__')
@@ -1237,43 +1273,70 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
             }
             tries++;
             await Future.delayed(const Duration(milliseconds: 200));
+            if (!currentForward()) return;
           }
         }
 
-        final fileIds = collectedIds.toList();
-
-        await widget.service.sendText(
-          forwardText,
-          replyToId: replyId,
-          fileIds: fileIds.isEmpty ? null : fileIds,
+        final sent = await sendPreparedForwardIfComplete(
+          requiredFiles: pending,
+          currentFiles: _att.pending,
+          stagedFileIds: _stagedForwardFileIds,
+          expectedForwardFileIds: _requiredForwardFileIds,
+          isCurrent: currentForward,
+          send: (ids) async {
+            sentAttachments = ForwardAttachmentSnapshot(_att.pending);
+            await widget.service.sendText(
+                forwardText, replyToId: replyId, fileIds: ids.isEmpty ? null : ids);
+          },
         );
-
-        _att.clear();
-        _ctrl.clear();
+        if (!sent) {
+          if (currentForward()) _showSnack('Не все вложения готовы. Дождитесь загрузки или повторите её.');
+          return;
+        }
+        if (!sameForwardOperation()) return;
+        final sentSnapshot = sentAttachments!;
+        _att.forgetConfirmedSent(sentSnapshot.containsUnchanged);
         setState(() {
-          _replyTo = null;
+          if (_replyTo?.id == capturedReplyId) _replyTo = null;
           _forwardPackageAttached = false;
-      _forwardPreparationGeneration++;
-      _preparingForward = false;
-      _forwardPreparationFailed = false;
+          _forwardPreparationGeneration++;
+          _preparingForward = false;
+          _forwardPreparationFailed = false;
           _stagedForward = null;
           _forwardSelectedIds.clear();
           _stagedForwardFileIds.clear();
+          _requiredForwardFileIds.clear();
+          if (_ctrl.text == composerText) _ctrl.clear();
         });
         FocusScope.of(context).unfocus();
-        await _clearDraftDm();
+        // Keep any newer typed text or added files in the draft.
+        if (_ctrl.text.isEmpty && _att.pending.isEmpty) await _clearDraftDm();
+        else _forceSaveDraftDm();
         return;
       }
 
       // ---------- SAME-CHAT FORWARD (DM) ----------
       if (_forwardPackageAttached && _stagedForward == null) {
-        final list = widget.service.currentMessages;
-        final selected = list
-            .where((m) => _forwardSelectedIds.contains(m.id))
-            .toList()
-          ..sort((a, b) => a.at.compareTo(b.at));
-
-        if (selected.isEmpty) return;
+        final requestedIds = List<String>.of(_forwardSelectedIds);
+        final selected = completeForwardSelection(requestedIds, widget.service.currentMessages);
+        if (selected == null) {
+          if (mounted) _showSnack('Часть сообщений или вложений недоступна. Выберите их снова.');
+          return;
+        }
+        final selectionSnapshot = ForwardSelectionSnapshot(selected);
+        final owner = ChatFileAccess.userId, session = ChatFileAccess.currentSessionBinding;
+        final epoch = ChatFileAccess.generation, preparation = _forwardPreparationGeneration;
+        final target = _currentChatIdDm, composerText = _ctrl.text, replyId = _replyTo?.id;
+        bool sameSelectionOperation() => mounted && owner != null && session != null && target != null &&
+            owner == ChatFileAccess.userId && session == ChatFileAccess.currentSessionBinding &&
+            epoch == ChatFileAccess.generation && preparation == _forwardPreparationGeneration &&
+            _forwardPackageAttached && _stagedForward == null && _currentChatIdDm == target &&
+            _forwardSelectedIds.length == requestedIds.length &&
+            _forwardSelectedIds.toSet().containsAll(requestedIds);
+        bool currentSelection() => sameSelectionOperation() && _ctrl.text == composerText &&
+            _replyTo?.id == replyId &&
+            selectionSnapshot.matches(widget.service.currentMessages);
+        if (!currentSelection()) return;
 
         // собираем мета для FG и оригинальные file_id
         final items = <ForwardItem>[];
@@ -1304,6 +1367,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         }
 
         final fromChatId = await widget.service.ensureChatId();
+        if (!currentSelection() || fromChatId != target) return;
         final caption = _ctrl.text.trim().isEmpty ? null : _ctrl.text.trim();
         final payload = ForwardPayload(
             fromChatId: fromChatId, caption: caption, items: items);
@@ -1314,20 +1378,23 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
           replyToId: _replyTo?.id,
           fileIds: uniqueFileIds.isEmpty ? null : uniqueFileIds,
         );
+        if (!sameSelectionOperation()) return;
+        final cleanup = confirmedForwardCleanup(sentText: composerText,
+            currentText: _ctrl.text, sentReplyId: replyId, currentReplyId: _replyTo?.id);
 
-        // очистка
         _att.pending.removeWhere((x) => x.path == '__FG__');
-        _ctrl.clear();
+        if (cleanup.clearText) _ctrl.clear();
         setState(() {
-          _replyTo = null;
+          if (cleanup.clearReply) _replyTo = null;
           _forwardPackageAttached = false;
-      _forwardPreparationGeneration++;
-      _preparingForward = false;
-      _forwardPreparationFailed = false;
+          _forwardPreparationGeneration++;
+          _preparingForward = false;
+          _forwardPreparationFailed = false;
           _forwardSelectedIds.clear();
         });
         FocusScope.of(context).unfocus();
-        await _clearDraftDm();
+        if (_ctrl.text.isEmpty && _att.pending.isEmpty) await _clearDraftDm();
+        else _forceSaveDraftDm();
         return;
       }
 

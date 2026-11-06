@@ -23,17 +23,12 @@ void main() {
     const uid = 'forward-user', sid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     const url =
         'https://studentsplatform.storage.yandexcloud.net/chats/test/file.bin';
-    var deny = false;
-    final transport = MockClient((req) async => deny
-        ? http.Response(
-            '{"error":"file_unavailable","reason":"access_denied_v1"}', 403,
-            request: req, headers: {'content-type': 'application/json'})
-        : http.Response(
-            jsonEncode(
-                {'url': url, 'accessPolicyVersion': 1, 'cacheable': false}),
-            200,
-            request: req,
-            headers: {'content-type': 'application/json'}));
+    final denialEntered = Completer<void>();
+    final denialResponse = Completer<http.Response>();
+    final transport = MockClient((req) async {
+      if (!denialEntered.isCompleted) denialEntered.complete();
+      return denialResponse.future;
+    });
     await Supabase.initialize(
         url: 'https://example.test',
         publishableKey: 'test',
@@ -47,6 +42,8 @@ void main() {
     addTearDown(() async {
       ChatFileAccess.debugBeforeForwardReturn = null;
       if (!resume.isCompleted) resume.complete();
+      if (!denialResponse.isCompleted)
+        denialResponse.complete(http.Response('{}', 500));
       await Supabase.instance.dispose();
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(channel, null);
@@ -59,15 +56,25 @@ void main() {
     await data.parent.create(recursive: true);
     await data.writeAsBytes([1, 2, 3]);
     await File('${data.path}.grant').writeAsString('chat-file-grant-v2:$sid');
+    // Start the network check before the temp owns the file queue. A delayed
+    // denial can then arrive while the guarded temp write is still in flight.
+    final denial = ChatFileAccess.resolve(url);
+    final rejectedDenial =
+        expectLater(denial, throwsA(isA<FunctionException>()));
+    await denialEntered.future.timeout(const Duration(seconds: 3));
     final forward = ChatFileAccess.forwardTemp(url);
     final failed = expectLater(forward, throwsStateError);
     await reached.future.timeout(const Duration(seconds: 3));
-    await Future<void>.delayed(const Duration(milliseconds: 100));
-    deny = true;
-    await expectLater(
-        ChatFileAccess.resolve(url), throwsA(isA<FunctionException>()));
+    denialResponse.complete(http.Response(
+        '{"error":"file_unavailable","reason":"access_denied_v1"}', 403,
+        headers: {'content-type': 'application/json'}));
+    for (var i = 0; i < 100 && !ChatFileAccess.isAccessRevoked(url); i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    expect(ChatFileAccess.isAccessRevoked(url), isTrue);
     resume.complete();
     await failed;
+    await rejectedDenial;
     expect(await data.readAsBytes(), [1, 2, 3]);
   });
 }

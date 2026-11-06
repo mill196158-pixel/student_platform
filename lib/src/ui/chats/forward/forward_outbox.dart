@@ -6,6 +6,7 @@ import '../../../core/auth_session_scope.dart';
 import '../core/forward_payload.dart';
 import 'forward_outbox_host.dart';
 import 'forward_outbox_store.dart';
+import 'forward_send_gate.dart';
 
 class ForwardOutboxData {
   final String? text;
@@ -104,6 +105,19 @@ class ForwardOutboxSession {
     if (target.isEmpty) return null;
     final entry = await _store.peek(_owner, target);
     if (!isCurrent || entry == null) return null;
+    if (!ForwardPayload.isForwardText(entry.text) &&
+        (entry.files.isNotEmpty || entry.fileIds.isNotEmpty)) {
+      // Current consumers cannot reconstruct these attachments from a plain
+      // text handoff. Retain the record rather than silently dropping them.
+      throw const FormatException('Не все вложения готовы к пересылке.');
+    }
+    if (ForwardPayload.isForwardText(entry.text)) {
+      final payload = ForwardPayload.tryParse(entry.text);
+      if (payload == null ||
+          !forwardSourceReferencesComplete(payload, entry.fileIds)) {
+        throw const FormatException('Не все вложения готовы к пересылке.');
+      }
+    }
     final result = await _store.acknowledge(entry);
     if (!isCurrent || result != ForwardAcknowledgeResult.removed) return null;
     return ForwardOutboxData(

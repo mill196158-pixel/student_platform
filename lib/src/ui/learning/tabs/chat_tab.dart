@@ -46,12 +46,13 @@ import 'chat/models/chat_card_envelope.dart';
 import '../../chats/core/forward_payload.dart';
 import '../../chats/data/blocks_api.dart';
 import '../../chats/forward/forward_outbox.dart';
+import '../../chats/forward/forward_send_gate.dart';
 import '../../chats/forward/forward_picker.dart';
 import '../../chats/forward/forward_pick_nav.dart';
 import '../../../services/push/active_chat_tracker.dart';
 import '../../../services/push/app_notifications_api.dart';
 import '../../../utils/safe_debug_log.dart';
-import '../utils/chat_copied_file_cache.dart';
+import '../utils/clipboard_paste_router.dart';
 
 class _ClipboardFileKind {
   final FileFormat format;
@@ -189,6 +190,7 @@ class _ChatTabState extends State<ChatTab> {
   int _forwardPreparationGeneration = 0;
   final List<String> _forwardSelectedIds = [];
   final List<String> _stagedForwardFileIds = [];
+  final Set<String> _requiredForwardFileIds = {};
   final _capsRepo = ChatComposerCapabilitiesRepository();
   ChatComposerCapabilities? _composerCaps;
   bool _capsLoading = true;
@@ -835,11 +837,14 @@ class _ChatTabState extends State<ChatTab> {
     _att.upload(attached, teamId: teamId, chatId: chatId);
   }
 
-  Future<void> _queueAndUploadAttachments(List<LocalAttach> files) async {
-    if (files.isEmpty || !mounted) return;
+  Future<void> _queueAndUploadAttachments(List<LocalAttach> files,
+      {bool Function()? guard}) async {
+    if (files.isEmpty || !mounted || !(guard?.call() ?? true)) return;
 
     final teamId = context.read<TeamCubit>().state.team.id;
     final chatId = await _getChatIdForTeam(teamId);
+    if (!mounted || !(guard?.call() ?? true) ||
+        context.read<TeamCubit>().state.team.id != teamId) return;
     var added = 0;
     var skipped = 0;
 
@@ -860,89 +865,60 @@ class _ChatTabState extends State<ChatTab> {
     }
   }
 
-  Future<void> _queueAndUploadAttachment(LocalAttach file) async {
-    await _queueAndUploadAttachments([file]);
+  Future<void> _queueAndUploadAttachment(LocalAttach file,
+      {bool Function()? guard}) async {
+    await _queueAndUploadAttachments([file], guard: guard);
   }
 
   Future<void> _pasteFileFromClipboard() async {
+    final owner = ChatFileAccess.userId;
+    final session = ChatFileAccess.currentSessionBinding;
+    final epoch = ChatFileAccess.generation;
+    final teamId = context.read<TeamCubit>().state.team.id;
+    bool current() => mounted && owner != null && session != null &&
+        owner == ChatFileAccess.userId && session == ChatFileAccess.currentSessionBinding &&
+        epoch == ChatFileAccess.generation && context.read<TeamCubit>().state.team.id == teamId;
+    if (!current()) return;
     try {
-      final plainText =
-          await services.Clipboard.getData(services.Clipboard.kTextPlain);
-      final text = plainText?.text;
-      if (text != null && text.isNotEmpty) {
-        await ChatCopiedFileCache.clear();
-        _insertPlainText(text);
-        return;
-      }
-
-      final cached = await ChatCopiedFileCache.peek();
-      if (cached != null) {
-        final file = File(cached.path);
-        safeDebugLog(
-            '[ChatTab] paste using internal copied file name=${cached.name}');
-        await _attachClipboardFile(
-          file: file,
-          name: cached.name,
-          mimeType: cached.mimeType,
-          isImage: cached.isImage,
-          existingFileId: cached.fileId,
-        );
-        return;
-      }
-
-      safeDebugLog('[ChatTab] paste fallback to system clipboard');
-      final clipboard = SystemClipboard.instance;
-      if (clipboard == null) {
-        _showSnack('Буфер обмена недоступен на этом устройстве');
-        return;
-      }
-
-      final reader = await clipboard.read();
-      final pasted = await _readClipboardFile(reader);
-      if (pasted == null) {
-        await _pastePlainTextFromClipboard();
-        return;
-      }
-
-      final dir = await getTemporaryDirectory();
-      final pasteDir =
-          Directory('${dir.path}${Platform.pathSeparator}chat_clipboard');
-      if (!await pasteDir.exists()) {
-        await pasteDir.create(recursive: true);
-      }
-
-      final fileName = _safeClipboardFileName(
-        pasted.fileName,
-        pasted.kind.extension,
-      );
-      final uniqueName = '${DateTime.now().microsecondsSinceEpoch}_$fileName';
-      final file = File('${pasteDir.path}${Platform.pathSeparator}$uniqueName');
-      await file.writeAsBytes(pasted.bytes, flush: true);
-
-      await _attachClipboardFile(
-        file: file,
-        name: fileName,
-        mimeType: pasted.kind.mimeType,
-        isImage: pasted.kind.isImage,
+      await routeClipboardPaste<_ClipboardFilePayload>(
+        isCurrent: current,
+        readFile: () async {
+          final clipboard = SystemClipboard.instance;
+          if (clipboard == null) return null;
+          final reader = await clipboard.read();
+          if (!current()) return null;
+          return _readClipboardFile(reader);
+        },
+        readText: () async => (await services.Clipboard.getData(services.Clipboard.kTextPlain))?.text,
+        insertText: _insertPlainText,
+        onEmpty: () => _showSnack('В буфере нет файла, изображения или текста'),
+        attachFile: (pasted) async {
+          if (!current()) return;
+          final dir = await getTemporaryDirectory();
+          if (!current()) return;
+          final pasteDir = Directory('${dir.path}${Platform.pathSeparator}chat_clipboard');
+          final exists = await pasteDir.exists();
+          if (!current()) return;
+          if (!exists) {
+            await pasteDir.create(recursive: true);
+            if (!current()) return;
+          }
+          final name = _safeClipboardFileName(pasted.fileName, pasted.kind.extension);
+          final file = File('${pasteDir.path}${Platform.pathSeparator}${DateTime.now().microsecondsSinceEpoch}_$name');
+          if (!current()) return;
+          await file.writeAsBytes(pasted.bytes, flush: true);
+          if (!current()) {
+            if (await file.exists()) await file.delete();
+            return;
+          }
+          await _attachClipboardFile(file:file, name:name, mimeType:pasted.kind.mimeType,
+              isImage:pasted.kind.isImage, guard:current);
+        },
       );
     } catch (e) {
       safeDebugLog('[ChatTab] paste file failed: ${e.runtimeType}');
-      if (!mounted) return;
-      _showSnack('Не удалось вставить файл из буфера');
+      if (current()) _showSnack('Не удалось вставить файл из буфера');
     }
-  }
-
-  Future<void> _pastePlainTextFromClipboard() async {
-    final data =
-        await services.Clipboard.getData(services.Clipboard.kTextPlain);
-    final text = data?.text;
-    if (text == null || text.isEmpty) {
-      _showSnack('В буфере нет файла, изображения или текста');
-      return;
-    }
-
-    await ChatCopiedFileCache.clear();
-    _insertPlainText(text);
   }
 
   void _insertPlainText(String text) {
@@ -966,35 +942,17 @@ class _ChatTabState extends State<ChatTab> {
     required String name,
     required String mimeType,
     required bool isImage,
-    String? existingFileId,
+    required bool Function() guard,
   }) async {
-    final reusedFileId = existingFileId?.trim();
+    if (!guard()) return;
+    final size = await file.length();
+    if (!guard()) return;
     final attached = LocalAttach(
-      path: file.path,
-      name: name,
-      mimeType: mimeType,
-      size: await file.length(),
-      isImage: isImage,
-      uploadStatus: (reusedFileId != null && reusedFileId.isNotEmpty)
-          ? LocalAttachUploadStatus.uploaded
-          : LocalAttachUploadStatus.queued,
-      progress: (reusedFileId != null && reusedFileId.isNotEmpty) ? 1 : 0,
-      uploadedFileId: (reusedFileId != null && reusedFileId.isNotEmpty)
-          ? reusedFileId
-          : null,
+      path: file.path, name: name, mimeType: mimeType, size: size, isImage: isImage,
+      uploadStatus: LocalAttachUploadStatus.queued,
     );
-    safeDebugLog(
-        '[ChatTab] pasted attachment queued name=$name size=${attached.size}');
-    if (reusedFileId != null && reusedFileId.isNotEmpty) {
-      if (_att.add(attached)) {
-        setState(() {});
-      } else {
-        _showSnack(
-            'Можно добавить не больше ${ChatAttachmentsController.maxFiles} файлов или это дубль');
-      }
-      return;
-    }
-    await _queueAndUploadAttachment(attached);
+    // Never reuse a file ID belonging to an existing message or another chat.
+    await _queueAndUploadAttachment(attached, guard: guard);
   }
 
   Future<_ClipboardFilePayload?> _readClipboardFile(
@@ -1003,6 +961,9 @@ class _ChatTabState extends State<ChatTab> {
     final suggestedName = await reader.getSuggestedName();
 
     for (final kind in _clipboardFileKinds) {
+      // Plain text is not a file merely because Android exposes text/plain.
+      if (kind.mimeType.startsWith('text/') &&
+          (suggestedName == null || suggestedName.trim().isEmpty)) continue;
       final bytes = await _readClipboardBytes(reader, kind.format);
       if (bytes != null && bytes.isNotEmpty) {
         return _ClipboardFilePayload(
@@ -1309,6 +1270,24 @@ class _ChatTabState extends State<ChatTab> {
       if (_stagedForward != null && _forwardPackageAttached) {
         final teamId = context.read<TeamCubit>().state.team.id;
         final forwardPayload = _stagedForward!;
+        final owner = ChatFileAccess.userId;
+        final session = ChatFileAccess.currentSessionBinding;
+        final epoch = ChatFileAccess.generation;
+        final preparation = _forwardPreparationGeneration;
+        final composerText = _ctrl.text;
+        final capturedReplyId = _replyTo?.id;
+        final initialAttachments = ForwardAttachmentSnapshot(_att.pending);
+        ForwardAttachmentSnapshot? sentAttachments;
+        bool sameForwardOperation() => mounted && owner != null && session != null &&
+            owner == ChatFileAccess.userId && session == ChatFileAccess.currentSessionBinding &&
+            epoch == ChatFileAccess.generation && _forwardPreparationGeneration == preparation &&
+            _forwardPackageAttached && identical(_stagedForward, forwardPayload) &&
+            context.read<TeamCubit>().state.team.id == teamId;
+        bool currentForward() => sameForwardOperation() &&
+            _ctrl.text == composerText && _replyTo?.id == capturedReplyId &&
+            initialAttachments.sameFiles(_att.pending) &&
+            (sentAttachments?.sameState(_att.pending) ?? true);
+        if (!currentForward()) return;
         final rawComposerText = _ctrl.text.trim();
         final caption = ForwardPayload.isForwardText(rawComposerText)
             ? null
@@ -1346,22 +1325,40 @@ class _ChatTabState extends State<ChatTab> {
             }
             tries++;
             await Future.delayed(const Duration(milliseconds: 200));
+            if (!currentForward()) return;
           }
         }
 
-        final fileIds = collectedIds.toList();
-
-        await _sendMessageWithFilesAndRefresh(teamId, forwardText, fileIds);
+        final sent = await sendPreparedForwardIfComplete(
+          requiredFiles: pending,
+          currentFiles: _att.pending,
+          stagedFileIds: _stagedForwardFileIds,
+          expectedForwardFileIds: _requiredForwardFileIds,
+          isCurrent: currentForward,
+          send: (ids) async {
+            sentAttachments = ForwardAttachmentSnapshot(_att.pending);
+            await _sendMessageWithFilesAndRefresh(teamId, forwardText, ids);
+          },
+        );
+        if (!sent) {
+          if (currentForward()) _showSnack('Не все вложения готовы. Дождитесь загрузки или повторите её.');
+          return;
+        }
+        if (!sameForwardOperation()) return;
+        final sentSnapshot = sentAttachments!;
+        _att.forgetConfirmedSent(sentSnapshot.containsUnchanged);
         setState(() {
           _forwardPackageAttached = false;
-      _forwardPreparationGeneration++;
-      _preparingForward = false;
-      _forwardPreparationFailed = false;
+          _forwardPreparationGeneration++;
+          _preparingForward = false;
+          _forwardPreparationFailed = false;
           _stagedForward = null;
           _forwardSelectedIds.clear();
           _stagedForwardFileIds.clear();
-          _att.clear();
-          _ctrl.clear();
+          _requiredForwardFileIds.clear();
+          // Do not clear attachments added/changed while the send was pending.
+          if (_ctrl.text == composerText) _ctrl.clear();
+          if (_replyTo?.id == capturedReplyId) _replyTo = null;
         });
         await _jumpToBottomAfterSend();
         return;
@@ -1369,13 +1366,27 @@ class _ChatTabState extends State<ChatTab> {
       // same-chat forward: как в ЛС — обычный ForwardPayload + encodeForText()
       if (_forwardPackageAttached && _stagedForward == null) {
         final teamId = context.read<TeamCubit>().state.team.id;
-        final all = context.read<TeamCubit>().state.chat;
-        final selected = all
-            .where((m) => _forwardSelectedIds.contains(m.id))
-            .toList()
-          ..sort((a, b) => a.at.compareTo(b.at));
-
-        if (selected.isEmpty) return;
+        final requestedIds = List<String>.of(_forwardSelectedIds);
+        final selected = completeForwardSelection(requestedIds, context.read<TeamCubit>().state.chat);
+        if (selected == null) {
+          if (mounted) _showSnack('Часть сообщений или вложений недоступна. Выберите их снова.');
+          return;
+        }
+        final selectionSnapshot = ForwardSelectionSnapshot(selected);
+        final owner = ChatFileAccess.userId, session = ChatFileAccess.currentSessionBinding;
+        final epoch = ChatFileAccess.generation, preparation = _forwardPreparationGeneration;
+        final composerText = _ctrl.text, replyId = _replyTo?.id;
+        bool sameSelectionOperation() => mounted && owner != null && session != null &&
+            owner == ChatFileAccess.userId && session == ChatFileAccess.currentSessionBinding &&
+            epoch == ChatFileAccess.generation && preparation == _forwardPreparationGeneration &&
+            _forwardPackageAttached && _stagedForward == null &&
+            context.read<TeamCubit>().state.team.id == teamId &&
+            _forwardSelectedIds.length == requestedIds.length &&
+            _forwardSelectedIds.toSet().containsAll(requestedIds);
+        bool currentSelection() => sameSelectionOperation() && _ctrl.text == composerText &&
+            _replyTo?.id == replyId &&
+            selectionSnapshot.matches(context.read<TeamCubit>().state.chat);
+        if (!currentSelection()) return;
 
         final items = <ForwardItem>[];
         final fileIds = <String>[];
@@ -1405,6 +1416,7 @@ class _ChatTabState extends State<ChatTab> {
         }
 
         final fromChatId = await _getChatIdForTeam(teamId);
+        if (!currentSelection()) return;
         final caption = _ctrl.text.trim().isEmpty ? null : _ctrl.text.trim();
         final payload = ForwardPayload(
             fromChatId: fromChatId, caption: caption, items: items);
@@ -1415,20 +1427,24 @@ class _ChatTabState extends State<ChatTab> {
           payload.encodeForText(),
           uniqueFileIds,
         );
+        if (!sameSelectionOperation()) return;
+        final cleanup = confirmedForwardCleanup(sentText: composerText,
+            currentText: _ctrl.text, sentReplyId: replyId, currentReplyId: _replyTo?.id);
 
         setState(() {
           _forwardPackageAttached = false;
-      _forwardPreparationGeneration++;
-      _preparingForward = false;
-      _forwardPreparationFailed = false;
+          _forwardPreparationGeneration++;
+          _preparingForward = false;
+          _forwardPreparationFailed = false;
           _forwardSelectedIds.clear();
           _stagedForwardFileIds.clear();
           _att.pending.removeWhere((x) => x.path == '__FG__');
-          _ctrl.clear();
-          _replyTo = null;
+          if (cleanup.clearText) _ctrl.clear();
+          if (cleanup.clearReply) _replyTo = null;
         });
         FocusScope.of(context).unfocus();
-        await _clearDraft();
+        if (_ctrl.text.isEmpty && _att.pending.isEmpty) await _clearDraft();
+        else _forceSaveDraft();
         await _jumpToBottomAfterSend();
         return;
       }
@@ -2397,6 +2413,7 @@ class _ChatTabState extends State<ChatTab> {
     final uid=ChatFileAccess.userId, epoch=ChatFileAccess.generation;
     bool sameSession()=>uid!=null && uid==ChatFileAccess.userId && epoch==ChatFileAccess.generation;
     if (!mounted || !sameSession()) return;
+    _requiredForwardFileIds.clear();
     final sameChat = payload.fromChatId == chatId;
 
     if (!_att.pending.any((x) => x.path == '__FG__')) {
@@ -2469,7 +2486,17 @@ class _ChatTabState extends State<ChatTab> {
             name:copied.fileName,type:copied.fileType,size:copied.fileSize);
       }
       if (mounted && sameSession() && preparation == _forwardPreparationGeneration) {
-        setState(() => _stagedForward = payload.withCopiedFiles(copies));
+        final preparedIds = copies.values.map((file) => file.id).toList();
+        if (preparedIds.any((id) => id == null || id.trim().isEmpty)) {
+          throw StateError('Не все вложения готовы к пересылке.');
+        }
+        final preparedPayload = payload.withCopiedFiles(copies);
+        setState(() {
+          _requiredForwardFileIds
+            ..clear()
+            ..addAll(preparedIds.cast<String>());
+          _stagedForward = preparedPayload;
+        });
       }
     } catch (_) {
       if (mounted && sameSession() && preparation == _forwardPreparationGeneration) {

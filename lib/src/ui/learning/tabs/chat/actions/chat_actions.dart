@@ -1,16 +1,13 @@
 import 'package:student_platform/src/services/chat_file_access.dart';
 // lib/src/ui/learning/tabs/chat/actions/chat_actions.dart
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui';
 
-import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter/services.dart' as services;
-import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:super_clipboard/super_clipboard.dart';
 
@@ -18,7 +15,7 @@ import '../../../models/message.dart';
 import '../../../models/assignment.dart';
 import '../../../models/chat_file.dart';
 import '../../../state/team_cubit.dart';
-import '../../../utils/chat_copied_file_cache.dart';
+import '../../../utils/chat_clipboard_copy.dart';
 import '../../../widgets/file_card.dart';
 import '../message_builder.dart';
 import '../models/chat_card_envelope.dart';
@@ -114,69 +111,42 @@ class ChatActions {
     return _copyMessageToClipboard(message);
   }
 
+  static final _clipboardCopies = ChatClipboardCopyCoordinator();
+
   static Future<void> _copyMessageToClipboard(Message message) async {
+    final owner = ChatFileAccess.userId;
+    final session = ChatFileAccess.currentSessionBinding;
+    final epoch = ChatFileAccess.generation;
+    bool sameSession() => owner != null && session != null &&
+        owner == ChatFileAccess.userId && session == ChatFileAccess.currentSessionBinding &&
+        epoch == ChatFileAccess.generation;
+    if (!sameSession()) throw StateError('Сессия изменилась.');
     final files = message.attachments ?? const <ChatFile>[];
     if (files.isNotEmpty) {
-      await _copyFileToClipboard(files.first);
+      final chatFile = files.first;
+      final clipboard = SystemClipboard.instance;
+      if (clipboard == null) throw UnsupportedError('Буфер обмена недоступен на этой платформе');
+      bool current() => sameSession() && ChatFileAccess.isViewerCurrent(chatFile.fileUrl,
+          user: owner, epoch: epoch, sessionBinding: session);
+      final name = FileUiUtils.cleanFileName(chatFile.fileName);
+      final mime = chatFile.fileType.isNotEmpty ? chatFile.fileType : _guessMimeForClipboard(name);
+      final format = _clipboardFormatForFile(name, mime);
+      await _clipboardCopies.copyFile(
+        isCurrent: current,
+        readBytes: () => ChatFileAccess.readBytes(chatFile.fileUrl),
+        write: (bytes) async {
+          final item = DataWriterItem(suggestedName: name);
+          item.add(format(bytes));
+          await clipboard.write([item]);
+        },
+      );
       return;
     }
-
     final text = _copyTextForMessage(message);
     if (text.isNotEmpty) {
-      await services.Clipboard.setData(services.ClipboardData(text: text));
+      await _clipboardCopies.copyText(isCurrent: sameSession,
+          write: () => services.Clipboard.setData(services.ClipboardData(text: text)));
     }
-  }
-
-  static Future<void> _copyFileToClipboard(ChatFile chatFile) async {
-    final clipboard = SystemClipboard.instance;
-    if (clipboard == null) {
-      throw UnsupportedError('Буфер обмена недоступен на этой платформе');
-    }
-
-    final file = await _downloadRemoteFileToCache(
-      url: chatFile.fileUrl,
-      fileName: chatFile.fileName,
-    );
-    final bytes = await file.readAsBytes();
-    final cleanName = FileUiUtils.cleanFileName(chatFile.fileName);
-    final mimeType = chatFile.fileType.isNotEmpty
-        ? chatFile.fileType
-        : _guessMimeForClipboard(cleanName);
-    final format = _clipboardFormatForFile(cleanName, mimeType);
-    final item = DataWriterItem(suggestedName: cleanName);
-    item.add(format(Uint8List.fromList(bytes)));
-    await clipboard.write([item]);
-    ChatCopiedFileCache.remember(
-      path: file.path,
-      name: cleanName,
-      mimeType: mimeType,
-      isImage: mimeType.startsWith('image/'),
-      fileId: chatFile.id.isEmpty ? null : chatFile.id,
-    );
-  }
-
-  static Future<File> _downloadRemoteFileToCache({
-    required String url,
-    required String fileName,
-  }) async {
-    final cleanName = FileUiUtils.cleanFileName(fileName);
-    await ChatFileAccess.authorize(url);
-    final digest = crypto.sha1.convert(utf8.encode('${ChatFileAccess.userId}:$url')).toString();
-    final dir = await getApplicationCacheDirectory();
-    final filesDir =
-        Directory('${dir.path}${Platform.pathSeparator}chat_files');
-    if (!await filesDir.exists()) {
-      await filesDir.create(recursive: true);
-    }
-
-    final path =
-        '${filesDir.path}${Platform.pathSeparator}${digest}_$cleanName';
-    final cached = File(path);
-    if (await cached.exists() && await cached.length() > 0) return cached;
-
-    final bytes = await ChatFileAccess.readBytes(url);
-    await cached.writeAsBytes(bytes, flush: true);
-    return cached;
   }
 
   static String _guessMimeForClipboard(String fileName) {

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
 import 'package:student_platform/src/ui/chats/forward/forward_outbox.dart';
+import 'package:student_platform/src/ui/chats/core/forward_payload.dart';
 import 'package:student_platform/src/ui/chats/forward/forward_outbox_host.dart';
 import 'package:student_platform/src/ui/chats/forward/forward_outbox_store.dart';
 import 'package:student_platform/src/ui/chats/forward/forward_session_guard.dart';
@@ -65,11 +66,10 @@ void main() {
         throwsFormatException);
     expect(await captured.tryTakeForChat(' '), isNull);
     expect(storage.calls, 0);
-    await captured
-        .putForChat(chatId: 'chat', text: 'saved', fileUrls: ['file']);
+    await captured.putForChat(chatId: 'chat', text: 'saved');
     final data = await captured.tryTakeForChat('chat');
     expect(data?.text, 'saved');
-    expect(data?.fileUrls, ['file']);
+    expect(data?.fileUrls, isEmpty);
     expect(await captured.tryTakeForChat('chat'), isNull);
     await captured.putForChat(chatId: 'chat', text: 'old');
     storage.failures.add('write-false');
@@ -88,6 +88,67 @@ void main() {
     await events.close();
   });
 
+  testWidgets('plain legacy text with unbound files remains stored',
+      (tester) async {
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final session = fakeSession('a');
+    final scope = AuthSessionScope(
+        currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final storage = Storage();
+    late ForwardOutboxSession captured;
+    await tester.pumpWidget(MaterialApp(
+        home: ForwardOutboxHost(
+            source: scope,
+            storage: storage,
+            child: Builder(builder: (context) {
+              captured = ForwardOutbox.capture(context)!;
+              return const SizedBox();
+            }))));
+    await captured
+        .putForChat(chatId: 'chat', text: 'legacy', fileUrls: ['file']);
+    final before = storage.values['forward_outbox_a_chat'];
+    await expectLater(captured.tryTakeForChat('chat'), throwsFormatException);
+    expect(storage.values['forward_outbox_a_chat'], before);
+    await tester.pumpWidget(const SizedBox());
+    scope.dispose();
+    await events.close();
+  });
+  testWidgets('ID-only payload remains in outbox on failed validation',
+      (tester) async {
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final session = fakeSession('a');
+    final scope = AuthSessionScope(
+        currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final storage = Storage();
+    late ForwardOutboxSession captured;
+    await tester.pumpWidget(MaterialApp(
+        home: ForwardOutboxHost(
+            source: scope,
+            storage: storage,
+            child: Builder(builder: (context) {
+              captured = ForwardOutbox.capture(context)!;
+              return const SizedBox();
+            }))));
+    final payload = ForwardPayload(fromChatId: 'source', items: [
+      ForwardItem(
+          messageId: 'm',
+          authorId: 'a',
+          authorName: 'A',
+          at: DateTime.utc(2026),
+          text: '',
+          files: [])
+    ]);
+    await captured.putForChat(
+        chatId: 'chat', text: payload.encodeForText(), fileIds: ['file-id']);
+    final before = storage.values['forward_outbox_a_chat'];
+    await expectLater(captured.tryTakeForChat('chat'), throwsFormatException);
+    expect(storage.values['forward_outbox_a_chat'], before);
+    await tester.pumpWidget(const SizedBox());
+    scope.dispose();
+    await events.close();
+  });
   testWidgets('rebind during take never returns old data to new host',
       (tester) async {
     final events = StreamController<AuthState>.broadcast(sync: true);

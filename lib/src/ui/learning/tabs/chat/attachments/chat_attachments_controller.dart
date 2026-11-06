@@ -234,6 +234,19 @@ class ChatAttachmentsController extends ChangeNotifier {
     return response.toString();
   }
 
+  /// Forget only attachments confirmed as sent. The server owns those files
+  /// now; unlike cancellation this must never discard uploaded objects.
+  void forgetConfirmedSent(bool Function(LocalAttach) matches) {
+    final removed = pending.where(matches).toList(growable: false);
+    if (removed.isEmpty) return;
+    pending.removeWhere(matches);
+    for (final file in removed) {
+      _cancelTokens.remove(file.localId)?.cancel('attachment already sent');
+      unawaited(ChatFileAccess.releaseForwardTemp(file.path));
+    }
+    notifyListeners();
+  }
+
   void clear() {
     for (final file in pending) {
       unawaited(ChatFileAccess.releaseForwardTemp(file.path));
