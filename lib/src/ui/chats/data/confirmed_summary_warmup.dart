@@ -1,6 +1,6 @@
 import 'package:student_platform/src/core/online_side_effect_barrier.dart';
 import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
-import 'package:student_platform/src/ui/chats/core/forward_payload.dart';
+import 'package:student_platform/src/ui/chats/data/chat_summary_card.dart';
 
 /// Saves only a complete, validated server result under the current project's
 /// scoped ticket. No legacy cache import and no partial writes on bad input.
@@ -27,16 +27,11 @@ Future<bool> warmConfirmedSummaries({
           row['is_pinned'] is! bool || row['is_muted'] is! bool) return false;
       final mapped = mapRow(row);
       if (mapped == null) return false;
-      final body = row['body'];
-      final candidate = body is String && body.trim().isNotEmpty ? body : row['content'];
-      if (candidate is String) {
-        final forward = ForwardPayload.tryParse(candidate.trim());
-        if (forward != null && forward.fromChatId.isNotEmpty &&
-            forward.items.isNotEmpty && forward.items.every((item) => item.messageId.isNotEmpty)) {
-          final count = forward.items.length;
-          mapped['lastMsgPreview'] = count > 1
-              ? 'Пересланные сообщения ($count)' : 'Пересланное сообщение';
-        }
+      final forward = summaryForwardPreview(row['body']) ??
+          summaryForwardPreview(row['content']);
+      if (forward != null) mapped['lastMsgPreview'] = forward;
+      if (mapped['isDm'] == false && isSummaryActionCard(row)) {
+        mapped['lastActionCard'] = true;
       }
       final kind = row['team_kind'];
       if (mapped['isDm'] == false && (kind == 'subject' || kind == 'group_space')) {

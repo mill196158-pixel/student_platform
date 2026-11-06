@@ -1,6 +1,32 @@
 import 'dart:convert';
 
 import '../../learning/tabs/chat/models/chat_card_envelope.dart';
+import '../core/forward_payload.dart';
+
+/// Returns a neutral preview only when the complete forward envelope is valid.
+String? summaryForwardPreview(Object? value) {
+  if (value is Map) return summaryForwardPreview(value['text']);
+  if (value is! String) return null;
+  final text = value.trim();
+  final forward = ForwardPayload.tryParse(text);
+  if (forward != null && forward.fromChatId.isNotEmpty &&
+      forward.items.isNotEmpty &&
+      forward.items.every((item) => item.messageId.isNotEmpty)) {
+    final count = forward.items.length;
+    return count > 1 ? 'Пересланные сообщения ($count)' : 'Пересланное сообщение';
+  }
+  try {
+    final decoded = jsonDecode(text);
+    if (decoded is Map) return summaryForwardPreview(decoded['text']);
+  } catch (_) {}
+  return null;
+}
+
+bool isSummaryActionCard(Map row) {
+  final envelope = ChatCardEnvelope.tryParse(row['content']) ??
+      ChatCardEnvelope.tryParse(row['body']);
+  return envelope != null && envelope.kind != ChatCardKind.assignment;
+}
 
 /// Only structured action messages participate; ordinary text stays untouched.
 String summaryCardPreview(ChatCardEnvelope envelope) {

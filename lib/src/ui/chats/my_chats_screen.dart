@@ -382,6 +382,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
                 ? titleRaw
                 : (teamName.isNotEmpty ? teamName : 'Чат')));
 
+    final actionCard = isDm ? null : SummaryActionCard.fromRow(row);
     return _ChatSummary(
       team: Team(
         id: isDm ? '' : teamId,
@@ -413,7 +414,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
       muted: row['is_muted'] == true,
       chatId: chatId.isNotEmpty ? chatId : null,
       lastMessageId: hasLastMessage ? lastMessageId : null,
-      actionCard: isDm ? null : SummaryActionCard.fromRow(row),
+      actionCard: actionCard,
       isDm: isDm,
       peerId: peerId.isNotEmpty ? peerId : null,
       avatarUrl: avatarRaw.isNotEmpty ? avatarRaw : null,
@@ -1294,19 +1295,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
 
   // билдер превью по ряду messages / RPC summary
   String _buildPreviewFromRow(Map row) {
-    String? fgPreviewFromText(String s) {
-      final idx = s.indexOf('__FG__:');
-      if (idx < 0) return null;
-      final payload = s.substring(idx + '__FG__:'.length).trim();
-      try {
-        final decoded = jsonDecode(payload);
-        if (decoded is Map && decoded['items'] is List) {
-          final n = (decoded['items'] as List).length;
-          return n > 1 ? 'Пересланные сообщения ($n)' : 'Пересланное сообщение';
-        }
-      } catch (_) {}
-      return 'Пересланные сообщения';
-    }
+    String? fgPreviewFromText(String s) => summaryForwardPreview(s);
 
     // 0) карточка (topic_selection / collection / assignment) — никогда не
     // показываем сырой JSON, только человекочитаемый превью.
@@ -1608,7 +1597,8 @@ class _MyChatsScreenState extends State<MyChatsScreen>
       title: isDm ? normalizeDmTitle(titleRaw) : titleRaw,
       subtitle: m['subtitle'] as String?,
       lastAuthor: m['lastAuthor'] as String?,
-      lastMsgPreview: m['lastMsgPreview'] as String?,
+      lastMsgPreview: summaryForwardPreview(m['lastMsgPreview']) ??
+          m['lastMsgPreview'] as String?,
       lastTime: m['lastTime'] != null
           ? DateTime.tryParse(m['lastTime'] as String)
           : null,

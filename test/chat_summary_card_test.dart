@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:student_platform/src/ui/chats/data/chat_summary_card.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_card_envelope.dart';
@@ -16,6 +17,23 @@ void main() {
           if (kind == 'collection') 'collection_id': entity,
         },
       };
+
+  test('forward preview handles nested content and preserves literal text', () {
+    final envelope = '__FG__:${jsonEncode({'fg': 1, 'from': chat, 'items': [
+      {'id': message, 'text': 'Hello'}
+    ]})}';
+    expect(summaryForwardPreview(envelope), 'Пересланное сообщение');
+    expect(summaryForwardPreview('Подпись $envelope'), isNull);
+    expect(summaryForwardPreview({'text': envelope}), 'Пересланное сообщение');
+    expect(summaryForwardPreview(jsonEncode({'text': envelope})), 'Пересланное сообщение');
+    expect(summaryForwardPreview('Буквальный __FG__: текст'), isNull);
+    // Old snapshots may contain a truncated envelope indistinguishable from
+    // literal user text. Preserve it until an authoritative refresh.
+    expect(summaryForwardPreview('__FG__:{"from":"source","items":['), isNull);
+    expect(isSummaryActionCard(summary('topic_selection')), isTrue);
+    expect(isSummaryActionCard(summary('collection')), isTrue);
+    expect(isSummaryActionCard({'content': 'Карточка тем'}), isFalse);
+  });
 
   test('only structured cards get neutral summary labels', () {
     expect(

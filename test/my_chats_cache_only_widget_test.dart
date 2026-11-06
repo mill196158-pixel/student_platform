@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
@@ -47,7 +48,13 @@ class _Cache implements ProjectChatServerCache {
           'unread': 0,
           'pinned': false,
           'muted': false,
-        }
+        },
+      {
+        'team': {'id': 'f', 'name': 'Пересылка', 'teacher': '', 'groupCode': '', 'icon': ''},
+        'title': 'Пересылка', 'chatId': 'f', 'isDm': false,
+        'lastMsgPreview': '__FG__:${jsonEncode({'from': 'source', 'items': [{'id': 'm', 'text': 'hello'}]})}',
+        'unread': 0, 'pinned': false, 'muted': false,
+      }
     ];
   }
 
@@ -75,6 +82,7 @@ void main() {
     expect(find.text('Группа сбора'), findsOneWidget);
     expect(find.text('Карточка тем'), findsOneWidget);
     expect(find.text('Карточка сбора'), findsNothing);
+    expect(find.text('Пересланное сообщение'), findsOneWidget);
     expect(find.text('Автор'), findsOneWidget);
     expect(cache.calls, 1);
     expect(find.byTooltip('Ещё'), findsNothing);

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 
@@ -48,8 +49,14 @@ void main() {
     Future<bool> warm(Future<Object?> Function() fetch) => warmConfirmedSummaries(
       cache: cache, barrier: barrier, isCurrent: () => scope.isCurrent(owner),
       fetch: fetch, mapRow: mapRow);
-    expect(await warm(() async { calls++; return [raw('original')]; }), isTrue);
+    final forward = '__FG__:${jsonEncode({'from': 'source', 'items': [{'id': 'm', 'text': 'hello'}]})}';
+    expect(await warmConfirmedSummaries(cache: cache, barrier: barrier,
+      isCurrent: () => scope.isCurrent(owner),
+      fetch: () async => [{...raw('nested'), 'content': {'text': forward}}],
+      mapRow: mapRow), isTrue);
     expect(caps.grant(SessionCapabilityMode.cacheOnly, caps.beginAuthorization(owner)!), isTrue);
+    expect((await cache.readSummaries(caps))!.single['lastMsgPreview'], 'Пересланное сообщение');
+    expect(await warm(() async { calls++; return [raw('original')]; }), isTrue);
     expect((await cache.readSummaries(caps))!.single['chatId'], 'original');
     expect(await warm(() async { calls++; return [raw('new'), {'chat_id': 'bad'}]; }), isFalse);
     expect((await cache.readSummaries(caps))!.single['chatId'], 'original');
