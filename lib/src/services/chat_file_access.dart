@@ -11,6 +11,11 @@ import 'package:flutter/foundation.dart';
 import 'inflight_only.dart';
 import '../core/offline_auth_error_receipt.dart';
 
+/// A captured private-file operation no longer belongs to the current session.
+class ChatFileSessionChanged extends StateError {
+  ChatFileSessionChanged() : super('Сессия изменилась.');
+}
+
 /// Resolves only the application's private object namespace. Signed URLs are
 /// ephemeral and never become message metadata or persistent cache keys.
 class ChatFileAccess {
@@ -274,26 +279,26 @@ class ChatFileAccess {
   static Future<void> _beginRevalidation(
           String url, String uid, String? sid, bool Function() current) =>
       _withOwnerFiles(uid, () async {
-        if (!current()) throw StateError('Session changed.');
+        if (!current()) throw ChatFileSessionChanged();
         final file = await _cachedFile(url, uid);
-        if (file == null || !current()) throw StateError('Session changed.');
+        if (file == null || !current()) throw ChatFileSessionChanged();
         final grant = _receiptFile(file);
         final pending = _pendingFile(file);
         await file.parent.create(recursive: true);
-        if (!current()) throw StateError('Session changed.');
+        if (!current()) throw ChatFileSessionChanged();
         if (!await grant.exists()) {
           if (await FileSystemEntity.type(pending.path, followLinks: false) ==
               FileSystemEntityType.notFound) {
             final tmp = File('${pending.path}.tmp.${_temporaryFileSequence++}');
             try {
               await tmp.writeAsString('chat-file-pending-v1', flush: true);
-              if (!current()) throw StateError('Session changed.');
+              if (!current()) throw ChatFileSessionChanged();
               await tmp.rename(pending.path);
             } finally {
               if (await tmp.exists()) await tmp.delete();
             }
           }
-          if (!current()) throw StateError('Session changed.');
+          if (!current()) throw ChatFileSessionChanged();
           return;
         }
         final mayRead = sid != null && await _hasReceipt(file, sid);
@@ -304,7 +309,7 @@ class ChatFileAccess {
           await grant.rename(pending.path);
           if (mayRead && current()) _pendingTickets[pending.path] = sid;
         }
-        if (!current()) throw StateError('Session changed.');
+        if (!current()) throw ChatFileSessionChanged();
       });
 
   // A completed transport failure carries no denial. Restore only the
@@ -376,17 +381,17 @@ class ChatFileAccess {
     bool current() =>
         isViewerCurrent(url, user: uid, epoch: epoch, sessionBinding: sid);
     final bytes = await readBytes(url);
-    if (!current()) throw StateError('Session changed.');
+    if (!current()) throw ChatFileSessionChanged();
     // Never nest this queue around readBytes: it also uses _withOwnerFiles.
     // Creation and publication must be serialized behind a pending logout for
     // the same owner, so an old cleanup cannot erase a new session's temp.
     return _withOwnerFiles(uid, () async {
-      if (!current()) throw StateError('Session changed.');
+      if (!current()) throw ChatFileSessionChanged();
       final root = await getApplicationCacheDirectory();
-      if (!current()) throw StateError('Session changed.');
+      if (!current()) throw ChatFileSessionChanged();
       final parent = Directory('${root.path}/authorized_chat_files/$uid');
       await parent.create(recursive: true);
-      if (!current()) throw StateError('Session changed.');
+      if (!current()) throw ChatFileSessionChanged();
       final dir = await parent.createTemp('forward_');
       final name = Uri.parse(url)
           .pathSegments
@@ -394,10 +399,10 @@ class ChatFileAccess {
           .replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
       final file = File('${dir.path}/${name.isEmpty ? 'file' : name}');
       try {
-        if (!current()) throw StateError('Session changed.');
+        if (!current()) throw ChatFileSessionChanged();
         await file.writeAsBytes(bytes, flush: true);
         await debugBeforeForwardReturn?.call();
-        if (!current()) throw StateError('Session changed.');
+        if (!current()) throw ChatFileSessionChanged();
         _forwardTemps[file.path] = (dir, uid, sid, epoch);
         return file;
       } catch (_) {
@@ -743,7 +748,7 @@ class ChatFileAccess {
     try {
       final sid = _sessionId(authClient?.auth.currentSession);
       if (await _receiptAvailable(url, uid, sid, current)) {
-        if (!current()) throw StateError('Сессия изменилась.');
+        if (!current()) throw ChatFileSessionChanged();
         if (decodedImageExperimentEnabled && uid != null && sid != null && token != null && key != null && authClient != null) {
           _decodedImageTickets.add((authClient, uid, sid, epoch, token, key));
           while (_decodedImageTickets.length > 128) {
@@ -754,7 +759,7 @@ class ChatFileAccess {
         return;
       }
       await resolve(url);
-      if (!current()) throw StateError('Сессия изменилась.');
+      if (!current()) throw ChatFileSessionChanged();
     } catch (error) {
       if (!current()) rethrow;
       final cached = await _cachedFile(url, uid);
@@ -794,7 +799,7 @@ class ChatFileAccess {
         epoch != generation ||
         token != _currentAccessToken() ||
         (_revisions[id] ?? 0) != revision) {
-      throw StateError('Сессия изменилась.');
+      throw ChatFileSessionChanged();
     }
     return resolved;
   }
@@ -949,7 +954,7 @@ class ChatFileAccess {
         generation != epoch ||
         token != _currentAccessToken() ||
         (_revisions[id] ?? 0) != revision)
-      throw StateError('Сессия изменилась.');
+      throw ChatFileSessionChanged();
     final resolved = response.data is Map ? response.data['url'] : null;
     final uri = resolved is String ? Uri.tryParse(resolved) : null;
     if (uri == null ||
@@ -977,7 +982,7 @@ class ChatFileAccess {
     } catch (_) {
       // Local receipt persistence failure never invalidates a server grant.
     }
-    if (!stillCurrent()) throw StateError('Сессия изменилась.');
+    if (!stillCurrent()) throw ChatFileSessionChanged();
     final changed = _noOffline.remove('$uid:$key') |
         _unsupportedProtocol.remove('$uid:$key');
     if (changed) accessChanges.value++;
@@ -1029,7 +1034,7 @@ class ChatFileAccess {
     final cached = await _cachedFile(url, uid);
     final client = debugHttpClientFactory?.call() ?? http.Client();
     try {
-      if (!current()) throw StateError('Сессия изменилась.');
+      if (!current()) throw ChatFileSessionChanged();
       final sid = _sessionId(authClient?.auth.currentSession);
       if (uid != null &&
           sid != null &&
@@ -1061,12 +1066,12 @@ class ChatFileAccess {
         }
       }
       final resolved = await resolve(url);
-      if (!current()) throw StateError('Сессия изменилась.');
+      if (!current()) throw ChatFileSessionChanged();
       if (cached != null &&
           !_unsupportedProtocol.contains('$uid:$key') &&
           await cached.exists()) {
         final bytes = await cached.readAsBytes();
-        if (!current()) throw StateError('Сессия изменилась.');
+        if (!current()) throw ChatFileSessionChanged();
         return bytes;
       }
       final response = await client
@@ -1084,7 +1089,7 @@ class ChatFileAccess {
           throw StateError('Файл слишком большой.');
         bytes.add(chunk);
       }
-      if (!current()) throw StateError('Сессия изменилась.');
+      if (!current()) throw ChatFileSessionChanged();
       final result = bytes.takeBytes();
       if (cached != null &&
           uid != null &&
@@ -1092,21 +1097,21 @@ class ChatFileAccess {
           !isAccessRevoked(url)) {
         await _withOwnerFiles(uid, () async {
           if (!current() || isAccessRevoked(url))
-            throw StateError('Сессия изменилась.');
+            throw ChatFileSessionChanged();
           await cached.parent.create(recursive: true);
           final tmp = File('${cached.path}.tmp.${_temporaryFileSequence++}');
           try {
             await tmp.writeAsBytes(result, flush: true);
             if (!current() || isAccessRevoked(url))
-              throw StateError('Сессия изменилась.');
+              throw ChatFileSessionChanged();
             await tmp.rename(cached.path);
             if (!current() || isAccessRevoked(url))
-              throw StateError('Сессия изменилась.');
+              throw ChatFileSessionChanged();
             if (sid != null && (_liveChecks['$uid:$key'] ?? 0) == 0) {
               try {
                 await _writeReceipt(cached, sid);
                 if (!current() || isAccessRevoked(url))
-                  throw StateError('Session changed.');
+                  throw ChatFileSessionChanged();
                 final pending = _pendingFile(cached);
                 if (await pending.exists()) await pending.delete();
                 _pendingTickets.remove(pending.path);
@@ -1119,7 +1124,7 @@ class ChatFileAccess {
           }
         });
       }
-      if (!current()) throw StateError('Сессия изменилась.');
+      if (!current()) throw ChatFileSessionChanged();
       return result;
     } catch (error) {
       if (!current() ||
@@ -1130,7 +1135,7 @@ class ChatFileAccess {
           !await _offlineCopy(error, url, cached, uid, epoch) ||
           !current() ||
           !_offlineOwnerCurrent(url, uid, epoch, token))
-        throw StateError('Сессия изменилась.');
+        throw ChatFileSessionChanged();
       return bytes;
     } finally {
       client.close();

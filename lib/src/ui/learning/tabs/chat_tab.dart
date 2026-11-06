@@ -1,5 +1,6 @@
 import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:student_platform/src/ui/learning/widgets/authorized_file_image.dart';
+import 'package:student_platform/src/ui/learning/widgets/reentry_image_gate.dart';
 import 'package:student_platform/src/services/chat_file_access.dart';
 import 'package:student_platform/src/core/auth_session_scope_host.dart';
 // ignore_for_file: unnecessary_import, unused_import, unused_field, unused_element, dead_null_aware_expression, invalid_null_aware_operator, unused_local_variable, deprecated_member_use, unnecessary_null_comparison
@@ -197,6 +198,14 @@ class _ChatTabState extends State<ChatTab> {
   bool _loadingOlderMessages = false;
   bool _hasMoreOlderMessages = true;
   String? _trackedChatId;
+  Widget _qaReentryGate(bool readyForReveal, Widget child) {
+    if (!const bool.fromEnvironment('CHAT_REENTRY_GATE_QA')) return child;
+    return ReentryImageGate(
+      key: ValueKey('${context.read<TeamCubit>().state.team.id}:${ChatFileAccess.userId}:${ChatFileAccess.generation}'),
+      readyForReveal: readyForReveal,
+      child: child,
+    );
+  }
   // флаг и чип превью «пакет сообщений» в композере
   bool _forwardPackageAttached = false;
   bool _preparingForward = false;
@@ -1895,7 +1904,7 @@ class _ChatTabState extends State<ChatTab> {
                     children: [
                       Padding(
                         padding: EdgeInsets.only(bottom: listPadBottom),
-                        child: ChatMessageList(
+                        child: _qaReentryGate(state.chatHasSnapshot || state.chatError, ChatMessageList(
                           messages: state.chat,
                           controller: _scroll,
                           messageKeys: _messageKeys,
@@ -1987,7 +1996,7 @@ class _ChatTabState extends State<ChatTab> {
                               _setSelecting(false);
                             }
                           },
-                        ),
+                        )),
                       ),
                       if (_loadingOlderMessages)
                         const Positioned(

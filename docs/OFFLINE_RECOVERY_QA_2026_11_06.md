@@ -145,3 +145,22 @@ The recorded candidate APK SHA-256 starts with `08F1`; the data archive hash
 starts with `b796`. The archive was read and its hash checked, but restoration
 was not tested. These are flagged QA observations on previously warmed data,
 not proof of clean-install prewarming or complete offline coverage.
+
+## QA7 chat re-entry observations
+
+On one previously opened team chat, re-entry was recorded online and then
+again after disabling Wi-Fi and mobile data without restarting the app:
+`qa7-online-chat-reopen-20261106.mp4` and
+`qa7-offline-chat-reopen-20261106.mp4`. The QA build included the earlier QA
+defines and `CHAT_REENTRY_GATE_QA`.
+
+In the inspected 10 fps frames (`qa7-reopen-10fps` and
+`qa7-offline-reopen-10fps`), the loading dove appeared briefly before the
+content. From frame 12 through frame 30, the chat and QR remained visible;
+no separate image loader was visible in those inspected frames. These are two
+scenarios for one chat, not proof about every frame, every chat, or cold-start
+paths. The network was restored after the check.
+
+The QA7 candidate SHA-256 starts with `804EC`; the data archive hash starts
+with `8310`. The archive was read and its hash checked; restoration was not
+tested.
