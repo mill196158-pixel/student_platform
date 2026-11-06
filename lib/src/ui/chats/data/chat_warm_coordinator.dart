@@ -287,6 +287,25 @@ class ChatWarmCoordinator with WidgetsBindingObserver {
   }
 
   static String _buildPreviewFromRow(Map<String, dynamic> row) {
+    String? confirmedForward(Object? value) {
+      if (value is Map) return confirmedForward(value['text']);
+      if (value is! String) return null;
+      final text = value.trim();
+      if (!text.startsWith('__FG__:')) {
+        try { return confirmedForward(jsonDecode(text)); } catch (_) { return null; }
+      }
+      try {
+        final raw = jsonDecode(text.substring('__FG__:'.length));
+        if (raw is! Map || raw['fg'] != 1 || raw['from'] is! String ||
+            (raw['from'] as String).trim().isEmpty || raw['items'] is! List ||
+            (raw['items'] as List).isEmpty) return null;
+        for (final item in raw['items'] as List) {
+          if (item is! Map || item['id'] is! String ||
+              (item['id'] as String).trim().isEmpty) return null;
+        }
+        return summaryForwardPreview(text);
+      } catch (_) { return null; }
+    }
     final rawContent = row['content'];
     final cardEnvelope = ChatCardEnvelope.tryParse(rawContent) ??
         ChatCardEnvelope.tryParse((row['body'] ?? '').toString());
@@ -296,8 +315,12 @@ class ChatWarmCoordinator with WidgetsBindingObserver {
 
     final body = (row['body'] ?? '').toString().trim();
     if (body.isNotEmpty && !ChatCardPreview.looksLikeCardJson(body)) {
+      final forward = confirmedForward(body);
+      if (forward != null) return forward;
       return body.length > 120 ? '${body.substring(0, 120)}…' : body;
     }
+    final forward = confirmedForward(rawContent);
+    if (forward != null) return forward;
     if (rawContent is String &&
         rawContent.trim().isNotEmpty &&
         !ChatCardPreview.looksLikeCardJson(rawContent)) {
