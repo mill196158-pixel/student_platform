@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:sqlite3/open.dart';
 import 'package:student_platform/src/core/cache_budget_policy_experiment.dart';
+import 'package:student_platform/src/core/cache_reservation_arbiter_experiment.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -40,6 +41,14 @@ void main() {
       expect(estimate.protectedOrMixedBytes, estimate.measuredBytes);
       expect(estimate.budgetClassificationComplete, isFalse);
       expect(estimate.confirmedReclaimableBytes, 0);
+      final arbiter = CacheReservationArbiterExperiment();
+      expect(await arbiter.reserve(peakAdditionalBytes: 4096, ownerIsCurrent: () => true,
+        measure: () async => CacheReservationSnapshot(
+          components: [for (var i = 0; i < files.length; i++)
+            CacheFootprintObservation(physicalIdentity: 'synthetic-physical-$i', bytes: sizes[i],
+              classification: CacheFootprintClass.mixed, kind: CacheFootprintKind.conversation)],
+          complete: true, isCurrent: () => true)), isNull,
+        reason: 'unpartitionable SQLite must not authorize a reservation');
     } finally {
       await db.close();
       final root = await Directory.systemTemp.resolveSymbolicLinks();
