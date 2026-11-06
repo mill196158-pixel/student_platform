@@ -23,7 +23,8 @@ class RefreshPolicyGrantObserver {
       required this.fence,
       required this.policy,
       required this.backend,
-      required this.publicKey})
+      required this.publicKey,
+      this.closePreviousOnline})
       : _clientTrusted = (() =>
             identical(client, SupabaseConfig.client) &&
             backend.origin == Uri.parse(SupabaseConfig.url).origin) {
@@ -38,7 +39,8 @@ class RefreshPolicyGrantObserver {
       required this.fence,
       required this.policy,
       required this.backend,
-      required this.publicKey})
+      required this.publicKey,
+      this.closePreviousOnline})
       : _clientTrusted = (() => true) {
     _listen();
   }
@@ -50,6 +52,8 @@ class RefreshPolicyGrantObserver {
   final SettledPolicyTransport policy;
   final Uri backend;
   final String publicKey;
+  /// QA only: close and drain the previous online UI before issuing a permit.
+  final Future<bool> Function()? closePreviousOnline;
   final bool Function() _clientTrusted;
   late final StreamSubscription<AuthState> _subscription;
   OfflineSessionBinding? _armed;
@@ -197,6 +201,7 @@ class RefreshPolicyGrantObserver {
         scope.matchesSession(owner, client.auth.currentSession) &&
         fence.unchangedSince(fenceRevision);
     var keepArmed = false;
+    var reauthorize = false;
     await gate.runTrackedPolicy(() async {
       if (!current()) return;
       final attempt = await store.beginLiveCheck(owner, binding);
@@ -223,12 +228,43 @@ class RefreshPolicyGrantObserver {
                     now.add(OfflinePolicyGrant.maximumLocalSnapshotLifetime)),
             stillCurrent: current);
         keepArmed = saved && unchanged && current();
+        reauthorize = saved && !unchanged && current();
       } else if (result == SettledPolicyStatus.denied ||
           result == SettledPolicyStatus.passwordChangeRequired) {
         final revoked = await store.revokeAfterLiveCheck(attempt);
         if (revoked && current()) caps.block();
       }
     });
+    if (reauthorize && current() && closePreviousOnline != null) {
+      var drained = false;
+      try {
+        drained = await closePreviousOnline!();
+      } catch (_) {
+        // A failed or indeterminate drain cannot authorize a new UI.
+      }
+      if (drained && current()) {
+        // beginAuthorization and grant synchronously notify arbitrary
+        // listeners. Explicit blocks or session changes at either point win.
+        caps.removeListener(_capsChanged);
+        bool identityCurrent() =>
+            !_disposed && revision == _revision &&
+            identical(caps, _capabilities) &&
+            _armed != null && _sameSession(_armed!, binding) &&
+            _clientTrusted() && scope.isCurrent(owner) &&
+            scope.matchesSession(owner, client.auth.currentSession) &&
+            fence.unchangedSince(fenceRevision);
+        final attempt = caps.beginAuthorization(owner);
+        if (attempt != null && identityCurrent() &&
+            caps.revision == capsRevision + 1 &&
+            caps.mode == SessionCapabilityMode.blocked &&
+            caps.grant(SessionCapabilityMode.online, attempt) &&
+            identityCurrent() && caps.revision == capsRevision + 2 &&
+            caps.mode == SessionCapabilityMode.online &&
+            this.arm(owner, binding, caps)) return;
+        if (identityCurrent() && caps.revision == capsRevision + 2 &&
+            caps.mode == SessionCapabilityMode.online) caps.block();
+      }
+    }
     if (revision == _revision) {
       if (keepArmed && current()) {
         _handlingRefresh = false;

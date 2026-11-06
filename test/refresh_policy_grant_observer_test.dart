@@ -13,6 +13,7 @@ import 'package:student_platform/src/core/coordinated_refresh_client.dart';
 import 'package:student_platform/src/core/offline_policy_grant.dart';
 import 'package:student_platform/src/core/refresh_policy_grant_observer.dart';
 import 'package:student_platform/src/core/refresh_security_fence.dart';
+import 'package:student_platform/src/core/qa_online_side_effect_coordinator.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:student_platform/src/core/settled_policy_transport.dart';
 import 'package:student_platform/src/core/sqlite_policy_grant_store.dart';
@@ -54,6 +55,7 @@ void main() {
     'between',
     'late401',
     'drain'
+    ,'resume', 'resume_drain', 'resume_block_drain', 'resume_fail'
   ]) {
     test('SDK refresh and $scenario policy survive SQLite reopen safely',
         () async {
@@ -194,6 +196,18 @@ void main() {
         if (scenario == 'between' &&
             event.event == AuthChangeEvent.tokenRefreshed) caps.block();
       });
+      final onlineCoordinator = QaOnlineSideEffectCoordinator();
+      final oldWorkStarted = Completer<void>();
+      final oldWorkRelease = Completer<void>();
+      final reentryStarted = Completer<void>();
+      if (scenario == 'resume_drain' || scenario == 'resume_block_drain') {
+        final old = onlineCoordinator.open(() => true)!;
+        unawaited(old.run(() async {
+          oldWorkStarted.complete();
+          await oldWorkRelease.future;
+        }));
+        await oldWorkStarted.future;
+      }
       final observer = RefreshPolicyGrantObserver.forTesting(
           client: client,
           scope: scope,
@@ -203,9 +217,20 @@ void main() {
           policy: SettledPolicyTransport.forTesting(
               inner, Uri.parse('https://a.invalid')),
           backend: Uri.parse('https://a.invalid'),
-          publicKey: 'qa');
+          publicKey: 'qa',
+          closePreviousOnline: scenario.startsWith('resume') ? () async {
+            reentryStarted.complete();
+            if (scenario == 'resume_fail') return false;
+            return onlineCoordinator.closeAndWait(timeout: const Duration(seconds: 5));
+          } : null);
       expect(observer.arm(owner, initial, caps), true);
       await client.auth.refreshSession();
+      if (scenario == 'resume_drain' || scenario == 'resume_block_drain') {
+        await reentryStarted.future;
+        expect(caps.mode, SessionCapabilityMode.blocked);
+        if (scenario == 'resume_block_drain') caps.block();
+        oldWorkRelease.complete();
+      }
       if (scenario == 'stale' ||
           scenario == 'explicit' ||
           scenario == 'unchanged_block' ||
@@ -247,6 +272,11 @@ void main() {
       }
       await Future<void>.delayed(Duration.zero);
       await observer.settled();
+      if (scenario.startsWith('resume')) {
+        expect(caps.mode,
+            scenario == 'resume' || scenario == 'resume_drain'
+                ? SessionCapabilityMode.online : SessionCapabilityMode.blocked);
+      }
       if (scenario == 'unchanged_twice') {
         await client.auth.refreshSession();
         await Future<void>.delayed(Duration.zero);
@@ -275,7 +305,7 @@ void main() {
               scenario == 'unchanged' ||
               scenario == 'unchanged_twice' ||
               scenario == 'drain' ||
-              scenario == 'late401');
+              scenario == 'late401' || scenario.startsWith('resume'));
       await observer.dispose();
       await interleaved.cancel();
       store.dispose();
@@ -292,7 +322,7 @@ void main() {
               scenario == 'unchanged' ||
               scenario == 'unchanged_twice' ||
               scenario == 'drain' ||
-              scenario == 'late401');
+              scenario == 'late401' || scenario.startsWith('resume'));
       caps.dispose();
       store.dispose();
       scope.dispose();

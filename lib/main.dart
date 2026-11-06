@@ -57,6 +57,7 @@ import 'src/ui/schedule/schedule_month_cache.dart';
 import 'src/core/offline_policy_grant_host.dart';
 import 'src/core/guarded_policy_redirect.dart';
 import 'src/core/qa_capability_view.dart';
+import 'src/core/qa_online_side_effect_coordinator.dart';
 import 'src/ui/chats/forward/forward_outbox_host.dart';
 import 'src/ui/learning/state/team_snapshot_host.dart';
 import 'src/services/push/push_notification_service.dart';
@@ -350,7 +351,9 @@ Future<void> _initializeApp(
         _qaRefreshGrantObserver = RefreshPolicyGrantObserver(client: client,
           scope: scope, store: store, gate: gate, fence: refreshFence,
           policy: SettledPolicyTransport(inner), backend: Uri.parse(SupabaseConfig.url),
-          publicKey: SupabaseConfig.anonKey);
+          publicKey: SupabaseConfig.anonKey,
+          closePreviousOnline: () => QaOnlineSideEffectCoordinator.instance
+              .closeAndWait(timeout: const Duration(seconds: 10)));
       }
       if (owner != null && sessionBinding != null) {
         _policyQaAdmission = OfflineStartupAdmission(
