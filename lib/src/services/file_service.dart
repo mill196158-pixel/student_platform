@@ -1,5 +1,6 @@
 import 'chat_file_access.dart';
 import 'chat_png_optimizer.dart';
+import 'chat_jpeg_photo_optimizer.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:crypto/crypto.dart' as crypto;
 import 'dart:convert';
@@ -77,7 +78,9 @@ class FileService {
       _checkUploadSession(session, cancelToken);
       final bytes = !preserveOriginal && contentType == 'image/png'
           ? await optimizeNewChatPng(original, cancelToken: cancelToken)
-          : original;
+          : !preserveOriginal && contentType == 'image/jpeg'
+              ? await optimizeChatPhoto(original, cancelToken: cancelToken)
+              : original;
       _checkUploadSession(session, cancelToken);
 
       final upload = await _createPresignedUpload(
@@ -130,7 +133,9 @@ class FileService {
       _checkUploadSession(session, cancelToken);
       final bytes = !preserveOriginal && contentType == 'image/png'
           ? await optimizeNewChatPng(original, cancelToken: cancelToken)
-          : original;
+          : !preserveOriginal && contentType == 'image/jpeg'
+              ? await optimizeChatPhoto(original, cancelToken: cancelToken)
+              : original;
       _checkUploadSession(session, cancelToken);
 
       final upload = await _createPresignedUpload(

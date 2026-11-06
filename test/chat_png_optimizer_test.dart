@@ -8,6 +8,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:image/image.dart' as image;
 import 'package:student_platform/src/services/chat_png_optimizer.dart';
 import 'package:student_platform/src/services/file_service.dart';
 import 'package:student_platform/src/ui/learning/models/local_attach.dart';
@@ -135,6 +136,54 @@ String _session(String uid) {
 }
 
 void main() {
+  test('explicit JPEG photo uses actual uploaded bytes while file preserves source', () async {
+    final photo = image.Image(width: 640, height: 480);
+    for (var y = 0; y < photo.height; y++) {
+      for (var x = 0; x < photo.width; x++) {
+        photo.setPixelRgb(x, y, (x ~/ 3) % 256, (y ~/ 2) % 256, ((x + y) ~/ 5) % 256);
+      }
+    }
+    final original = image.encodeJpg(photo, quality: 98);
+    final dir = await Directory.systemTemp.createTemp('chat_photo_upload_');
+    final file = File('${dir.path}/photo.jpg');
+    await file.writeAsBytes(original);
+    final requests = <Map<String, dynamic>>[];
+    final client = SupabaseClient('https://example.invalid', 'qa',
+        httpClient: MockClient((request) async {
+      if (request.url.path.endsWith('generate-upload-url')) {
+        requests.add(Map<String, dynamic>.from(jsonDecode(request.body) as Map));
+        return http.Response(jsonEncode({
+          'uploadUrl': 'https://upload.invalid/object',
+          'fileKey': 'chats/test/object',
+          'fileUrl': 'https://example.invalid/object',
+          'headers': <String, String>{}
+        }), 200, headers: {'content-type': 'application/json'}, request: request);
+      }
+      return http.Response('{"confirmed":true}', 200,
+          headers: {'content-type': 'application/json'}, request: request);
+    }));
+    await client.auth.setInitialSession(_session('a'));
+    final adapter = _Adapter(), dio = Dio()..httpClientAdapter = adapter;
+    final service = FileService(supabase: client, dio: dio);
+    final compressed = await service.uploadFileToChat(
+        file: file, chatId: 'chat', messageId: '', uploadedBy: 'a', preserveOriginal: false);
+    expect(compressed.fileType, 'image/jpeg');
+    expect(compressed.fileName, 'photo.jpg');
+    expect(compressed.fileSize, adapter.bodies[0].length);
+    expect(compressed.fileSize, lessThan(original.length));
+    expect(requests[0]['fileSize'], compressed.fileSize);
+    expect(requests[0]['contentType'], 'image/jpeg');
+    expect(await file.readAsBytes(), orderedEquals(original));
+    final asFile = await service.uploadFile(file: file, chatId: 'chat');
+    expect(asFile.success, isTrue);
+    expect(adapter.bodies[1], orderedEquals(original));
+    expect(asFile.fileSize, original.length);
+    service.dispose();
+    dio.close(force: true);
+    await client.dispose();
+    await file.delete();
+    await dir.delete();
+  });
   TestWidgetsFlutterBinding.ensureInitialized();
   test('retry keeps forward original flag', () {
     final item = LocalAttach(

@@ -27,6 +27,7 @@ import 'chat/data/chat_repository.dart';
 import 'chat/data/send_then_refresh.dart';
 import 'chat/actions/chat_actions.dart' as ca;
 import 'chat/edit_message_dialog.dart';
+import 'chat/photo_send_choice.dart';
 // ChatActions приходит через реэкспорт из widgets.dart
 import '../global_cache.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -1645,7 +1646,7 @@ class _ChatTabState extends State<ChatTab> {
 
       final uploadResult = await _fileService.uploadFileToChat(
         file: file, chatId: chatId, messageId: messageId ?? '', uploadedBy: user.id,
-        preserveOriginal: false,
+        preserveOriginal: true,
       );
       if (!sameSession()) return;
       final savedChatFile = await _saveChatFileToDatabase(
@@ -2150,20 +2151,33 @@ class _ChatTabState extends State<ChatTab> {
                     }
                   },
                   onPickImage: () async {
+                    final owner = ChatFileAccess.userId;
+                    final epoch = ChatFileAccess.generation;
+                    final teamId = context.read<TeamCubit>().state.team.id;
+                    bool current() => mounted && owner != null &&
+                        ChatFileAccess.userId == owner &&
+                        ChatFileAccess.generation == epoch &&
+                        context.read<TeamCubit>().state.team.id == teamId;
+                    final compress = await choosePhotoSendMode(context);
+                    if (compress == null || !current()) return;
                     final images = await _fileService.pickImages();
+                    if (!current()) return;
                     final attachments = <LocalAttach>[];
                     for (final image in images) {
+                      final size = await image.length();
+                      if (!current()) return;
                       attachments.add(
                         LocalAttach(
                           path: image.path,
                           name: image.path.split(RegExp(r'[\\/]')).last,
                           mimeType: 'image/jpeg',
-                          size: await image.length(),
+                          size: size,
                           isImage: true,
+                          preserveOriginal: !compress,
                         ),
                       );
                     }
-                    await _queueAndUploadAttachments(attachments);
+                    await _queueAndUploadAttachments(attachments, guard: current);
                   },
                   onOpenEmoji: () {
                     _composerFocus.requestFocus();

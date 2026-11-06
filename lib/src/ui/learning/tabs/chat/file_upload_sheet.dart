@@ -57,7 +57,7 @@ class _FileUploadSheetState extends State<FileUploadSheet> {
       final result = await _fileService.uploadFile(
         file: file,
         chatId: widget.chatId,
-        preserveOriginal: false,
+        preserveOriginal: true,
       );
 
       setState(() {
@@ -102,7 +102,7 @@ class _FileUploadSheetState extends State<FileUploadSheet> {
       final result = await _fileService.uploadFile(
         file: file,
         chatId: widget.chatId,
-        preserveOriginal: false,
+        preserveOriginal: true,
       );
 
       setState(() {

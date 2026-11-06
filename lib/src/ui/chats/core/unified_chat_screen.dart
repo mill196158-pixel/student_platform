@@ -30,6 +30,7 @@ import 'package:student_platform/src/ui/learning/tabs/chat/search/chat_search_co
 import 'package:student_platform/src/ui/learning/tabs/chat/search/inline_search_bar.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/selection_bars.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/composer.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/photo_send_choice.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/topics/create_topic_selection_screen.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/collections/create_collection_screen.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/data/chat_composer_capabilities_repository.dart';
@@ -191,6 +192,36 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   bool get _canComposeDm =>
       !_isDm ||
       (_dmComposerReady && _dmBlockLoaded && _dmAvailable && !_blockActionBusy);
+
+  Future<void> _pickPhotoForChat() async {
+    if (!_canComposeDm) return;
+    final owner = ChatFileAccess.userId;
+    final epoch = ChatFileAccess.generation;
+    final service = widget.service;
+    bool current() => mounted && owner != null &&
+        ChatFileAccess.userId == owner && ChatFileAccess.generation == epoch &&
+        identical(widget.service, service) && _canComposeDm;
+    final compress = await choosePhotoSendMode(context);
+    if (compress == null || !current()) return;
+    final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
+    if (picked == null || !current()) return;
+    final size = await File(picked.path).length();
+    if (!current()) return;
+    final chatId = await service.ensureChatId();
+    if (!current()) return;
+    final file = LocalAttach(
+      path: picked.path,
+      name: picked.name,
+      mimeType: _guessMime(picked.path),
+      size: size,
+      isImage: true,
+      preserveOriginal: !compress,
+    );
+    if (_att.add(file)) {
+      unawaited(_att.upload(file, teamId: null, chatId: chatId));
+      if (_isDm) _saveDraftDmDebounced();
+    }
+  }
 
   // якорь для «⋯»
   final GlobalKey _kebabKey = GlobalKey();
@@ -2485,26 +2516,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                                   _saveDraftDmDebounced();
                                 },
                                 onSend: () => _send(_ctrl.text),
-                                onPickImage: () async {
-                                  if (!_canComposeDm) return;
-                                  final res = await ImagePicker()
-                                      .pickImage(source: ImageSource.gallery);
-                                  if (res != null) {
-                                    final file = LocalAttach(
-                                      path: res.path,
-                                      name: res.path.split('/').last,
-                                      mimeType: 'image/jpeg',
-                                      size: await File(res.path).length(),
-                                      isImage: true,
-                                    );
-                                    _att.add(file);
-                                    final cid =
-                                        await widget.service.ensureChatId();
-                                    _att.upload(file,
-                                        teamId: null, chatId: cid);
-                                    _saveDraftDmDebounced();
-                                  }
-                                },
+                                onPickImage: _pickPhotoForChat,
                                 onOpenEmoji: () {
                                   if (!_canComposeDm) return;
                                   _composerFocus.requestFocus();
@@ -2620,24 +2632,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                                       teamId: null, chatId: cid);
                                 },
                                 onSend: () => _send(_ctrl.text),
-                                onPickImage: () async {
-                                  final res = await ImagePicker()
-                                      .pickImage(source: ImageSource.gallery);
-                                  if (res != null) {
-                                    final file = LocalAttach(
-                                      path: res.path,
-                                      name: res.path.split('/').last,
-                                      mimeType: 'image/jpeg',
-                                      size: await File(res.path).length(),
-                                      isImage: true,
-                                    );
-                                    _att.add(file);
-                                    final cid =
-                                        await widget.service.ensureChatId();
-                                    _att.upload(file,
-                                        teamId: null, chatId: cid);
-                                  }
-                                },
+                                onPickImage: _pickPhotoForChat,
                                 onOpenEmoji: () =>
                                     _composerFocus.requestFocus(),
                                 onAttachFile: () async {

@@ -28,7 +28,7 @@ class LocalAttach {
     required this.mimeType,
     required this.size,
     required this.isImage,
-    this.preserveOriginal = false,
+    this.preserveOriginal = true,
     this.uploadStatus = LocalAttachUploadStatus.queued,
     this.progress = 0,
     this.errorMessage,
