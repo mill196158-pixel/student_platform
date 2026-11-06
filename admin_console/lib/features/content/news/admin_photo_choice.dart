@@ -13,6 +13,7 @@ Future<PickedAdminImage?> pickAdminImageForEditor(
   required bool Function() isCurrent,
   Listenable? invalidation,
   Stream<AuthState>? authEvents,
+  void Function(PickedAdminImage)? validateSelected,
 }) async {
   if (!isCurrent()) return null;
   var revoked = false;
@@ -33,7 +34,10 @@ Future<PickedAdminImage?> pickAdminImageForEditor(
   try {
     picked = picker is LocalAdminImagePicker
         ? await LocalAdminImagePicker(photoMode: true, automatic: true,
-            isCurrent: current, invalidation: changes).pickImage()
+            isCurrent: current, invalidation: changes,
+            sourceExtensions: picker.sourceExtensions,
+            sourceMaxBytes: picker.sourceMaxBytes,
+            sourceMimeTypes: picker.sourceMimeTypes).pickImage()
         : await picker.pickImage();
   } finally {
     invalidation?.removeListener(check);
@@ -42,6 +46,7 @@ Future<PickedAdminImage?> pickAdminImageForEditor(
     changes.dispose();
   }
   if (picked == null || !current() || !context.mounted) return null;
+  validateSelected?.call(picked);
   return reviewAdminImage(context, picked, isCurrent: isCurrent,
       invalidation: invalidation, authEvents: authEvents);
 }

@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:student_ui/student_ui.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -46,6 +45,7 @@ class HomePromoEditorScreen extends StatefulWidget {
     this.newsRepository,
     this.mediaStore,
     this.imagePicker,
+    this.iconPicker,
     this.studentsRepository,
     this.session,
   });
@@ -54,6 +54,7 @@ class HomePromoEditorScreen extends StatefulWidget {
   final NewsRepository? newsRepository;
   final ContentMediaStore? mediaStore;
   final AdminImagePicker? imagePicker;
+  final AdminImagePicker? iconPicker;
   final StudentsRepository? studentsRepository;
   final AdminSessionController? session;
 
@@ -1299,58 +1300,54 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
   Future<void> _pickIcon() async {
     final selected = _selected;
     if (selected == null || !_canWrite || selected.isArchived) return;
+    _invalidateImagePick();
+    final revision = _imagePickRevision;
+    final session = widget.session;
+    final auth = _tryClient()?.auth.currentSession;
+    bool current() {
+      final now = _tryClient()?.auth.currentSession;
+      return mounted && revision == _imagePickRevision && _selectedId == selected.id &&
+          identical(session, widget.session) && _canWrite && !(_selected?.isArchived ?? true) &&
+          auth?.user.id == now?.user.id && auth?.accessToken == now?.accessToken &&
+          auth?.refreshToken == now?.refreshToken;
+    }
     try {
-      final picked = await FilePicker.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: const ['png', 'webp'],
-        withData: true,
-        allowMultiple: false,
-      );
-      if (picked == null || picked.files.isEmpty) return;
-      final file = picked.files.single;
-      final bytes = file.bytes;
-      if (bytes == null || bytes.isEmpty) {
-        throw const AdminImagePickException(
-          'Не удалось прочитать файл. Выберите изображение ещё раз.',
-        );
+      const formats = {'image/png', 'image/webp'};
+      const extensions = ['png', 'webp'];
+      void validate(PickedAdminImage selectedImage) {
+        final original = selectedImage.originalBytes ?? selectedImage.bytes;
+        final originalName = selectedImage.originalFileName ?? selectedImage.fileName;
+        LocalAdminImagePicker.validateSource(original, originalName,
+            extensions: extensions, byteLimit: LocalAdminImagePicker.maxBytes,
+            mimeTypes: formats);
+        LocalAdminImagePicker.validateSource(selectedImage.bytes, selectedImage.fileName,
+            extensions: extensions, byteLimit: LocalAdminImagePicker.maxBytes,
+            mimeTypes: formats);
       }
-      if (bytes.length > LocalAdminImagePicker.maxBytes) {
-        throw const AdminImagePickException(
-          'Изображение слишком большое. Максимум 5 МБ.',
-        );
-      }
-      final ext = (file.extension ?? '').toLowerCase();
-      if (ext != 'png' && ext != 'webp') {
-        throw const AdminImagePickException(
-          'Для своей иконки поддерживаются только PNG и WebP.',
-        );
-      }
-      String mimeType;
-      try {
-        mimeType = imageUploadMime(bytes);
-      } on StateError {
-        throw const AdminImagePickException(
-          'Для своей иконки поддерживаются только PNG и WebP.',
-        );
-      }
-      if (mimeType != 'image/png' && mimeType != 'image/webp') {
-        throw const AdminImagePickException(
-          'Для своей иконки поддерживаются только PNG и WebP.',
-        );
-      }
+      final picked = await pickAdminImageForEditor(context,
+          widget.iconPicker ?? const LocalAdminImagePicker(
+              sourceExtensions: extensions, sourceMaxBytes: LocalAdminImagePicker.maxBytes,
+              sourceMimeTypes: formats),
+          isCurrent: current, invalidation: _imagePickChanges,
+          authEvents: _tryClient()?.auth.onAuthStateChange, validateSelected: validate);
+      if (picked == null || !current()) return;
+      validate(picked);
+      final mimeType = imageUploadMime(picked.bytes);
       setState(() {
         _iconIntent[selected.id] =
             (_iconIntent[selected.id] ?? ContentMediaIntentState.untouched)
-                .pickLocal(bytes, mimeType: mimeType);
+                .pickLocal(picked.bytes, mimeType: mimeType);
         _iconError = null;
       });
       _markDirty();
     } on AdminImagePickException catch (error) {
+      if (!current()) return;
       setState(() => _iconError = error.message);
     }
   }
 
   void _clearIcon() {
+    _invalidateImagePick();
     final selected = _selected;
     if (selected == null || !_canWrite || selected.isArchived) return;
     setState(() {
@@ -1905,6 +1902,10 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
                 titleController: _titleController,
                 subtitleController: _subtitleController,
                 iconController: _iconController,
+                onIconChoiceChanged: () {
+                  _invalidateImagePick();
+                  _markDirty();
+                },
                 gradientAController: _gradientAController,
                 gradientBController: _gradientBController,
                 ctaLabelController: _ctaLabelController,
@@ -2246,6 +2247,7 @@ class _PropertiesPanel extends StatelessWidget {
     required this.titleController,
     required this.subtitleController,
     required this.iconController,
+    required this.onIconChoiceChanged,
     required this.gradientAController,
     required this.gradientBController,
     required this.ctaLabelController,
@@ -2307,6 +2309,7 @@ class _PropertiesPanel extends StatelessWidget {
   final TextEditingController titleController;
   final TextEditingController subtitleController;
   final TextEditingController iconController;
+  final VoidCallback onIconChoiceChanged;
   final TextEditingController gradientAController;
   final TextEditingController gradientBController;
   final TextEditingController ctaLabelController;
@@ -2384,7 +2387,7 @@ class _PropertiesPanel extends StatelessWidget {
               enabled: _editable,
               onChanged: (key) {
                 iconController.text = key ?? '';
-                onChanged();
+                onIconChoiceChanged();
               },
             ),
           ),

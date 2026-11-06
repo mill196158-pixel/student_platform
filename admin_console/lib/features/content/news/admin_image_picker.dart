@@ -44,7 +44,9 @@ abstract class AdminImagePicker {
 }
 
 class LocalAdminImagePicker implements AdminImagePicker {
-  const LocalAdminImagePicker({this.photoMode, this.isCurrent, this.invalidation, this.automatic = false});
+  const LocalAdminImagePicker({this.photoMode, this.isCurrent, this.invalidation,
+    this.automatic = false, this.sourceExtensions, this.sourceMaxBytes,
+    this.sourceMimeTypes});
 
   /// Null retains legacy behavior. True is explicit photo compression; false
   /// preserves the original bytes, including QR codes and documents.
@@ -52,6 +54,9 @@ class LocalAdminImagePicker implements AdminImagePicker {
   final bool Function()? isCurrent;
   final Listenable? invalidation;
   final bool automatic;
+  final List<String>? sourceExtensions;
+  final int? sourceMaxBytes;
+  final Set<String>? sourceMimeTypes;
   static const allowedExtensions = ['jpg', 'jpeg', 'png', 'webp'];
   static const allowedMimeTypes = {'image/jpeg', 'image/png', 'image/webp'};
   static const maxBytes = 5 * 1024 * 1024;
@@ -62,7 +67,7 @@ class LocalAdminImagePicker implements AdminImagePicker {
     if (!(isCurrent?.call() ?? true)) return null;
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
-      allowedExtensions: allowedExtensions,
+      allowedExtensions: sourceExtensions ?? allowedExtensions,
       withData: true,
       allowMultiple: false,
     );
@@ -76,6 +81,10 @@ class LocalAdminImagePicker implements AdminImagePicker {
       );
     }
 
+    validateSource(bytes, file.name,
+        extension: file.extension, extensions: sourceExtensions,
+        byteLimit: sourceMaxBytes, mimeTypes: sourceMimeTypes);
+
     final selected = await prepareSelected(
       bytes: bytes,
       fileName: file.name,
@@ -86,6 +95,31 @@ class LocalAdminImagePicker implements AdminImagePicker {
       automatic: automatic,
     );
     return (isCurrent?.call() ?? true) ? selected : null;
+  }
+
+  /// Validate the original selection before any automatic conversion.
+  static void validateSource(Uint8List bytes, String fileName,
+      {String? extension, List<String>? extensions, int? byteLimit,
+      Set<String>? mimeTypes}) {
+    if (byteLimit != null && bytes.length > byteLimit) {
+      throw const AdminImagePickException(
+          'Изображение слишком большое. Максимум 5 МБ.');
+    }
+    if (extensions != null) {
+      final ext = (extension ?? (fileName.contains('.') ? fileName.split('.').last : '')).toLowerCase();
+      if (!extensions.contains(ext)) {
+        throw const AdminImagePickException('Для своей иконки поддерживаются только PNG и WebP.');
+      }
+    }
+    if (mimeTypes != null) {
+      String actual;
+      try { actual = imageUploadMime(bytes); } catch (_) {
+        throw const AdminImagePickException('Для своей иконки поддерживаются только PNG и WebP.');
+      }
+      if (!mimeTypes.contains(actual)) {
+        throw const AdminImagePickException('Для своей иконки поддерживаются только PNG и WebP.');
+      }
+    }
   }
 
   /// Processes an already selected file. Injectable optimizer supports
