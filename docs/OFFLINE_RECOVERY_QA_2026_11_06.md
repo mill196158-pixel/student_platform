@@ -164,3 +164,43 @@ paths. The network was restored after the check.
 The QA7 candidate SHA-256 starts with `804EC`; the data archive hash starts
 with `8310`. The archive was read and its hash checked; restoration was not
 tested.
+
+## Shared UI golden investigation
+
+`packages/student_ui/test/visual_parity_golden_test.dart` ran without updating
+goldens: 8 cases passed and 12 pixel comparisons failed. The failures cover
+home image-full, image-overlay and end-of-page promo, jobs board and detail,
+and help article at both 390×844 and 430×932. An initial `--no-pub` run could
+not resolve the package-local `lottie` configuration; `flutter pub get
+--offline` restored dependencies before the reported run.
+
+All six inspected 390×844 golden files were last changed in `ef2e1a3`. The
+later `e2b883f` replaced the preview theme with `ProductTheme` while updating
+only the profile and help-browse golden images. In the home image-full,
+image-overlay and help-article comparisons, a background pixel changed from
+RGB (245, 245, 245), the earlier `#F5F5F5` theme, to RGB (245, 247, 251),
+the current `#F5F7FB` canvas. This explains a large portion of those pixel
+diffs. Jobs board keeps the same sampled background but visibly differs in
+text styling; correctness and the full cause of each mismatch are not proven.
+
+The test images show square glyphs and the harness does not explicitly load a
+font, so these captures do not verify real typography or establish a
+Windows/Mac difference. Review the current real screens and set up a stable
+test font/environment before intentionally updating any baselines. No golden
+was updated in this investigation.
+
+Evidence SHA-256, recorded at inspection:
+
+- `test/goldens/home_image_full_390x844.png`:
+  `75f4718a12ee2180874fc05d6624e9ca1bd9e691c7fdbae5011f9f3a7a41b009`.
+- `test/failures/home_image_full_390x844_testImage.png`:
+  `178663b046f2179a141ab5a7326a447ef4b394b034f77de56fe896cf31afe564`.
+- `design_preview/optimizer_qa/golden_comparison.png`:
+  `76b7c9b367ff381a640d7c3772667e4bfe878fb6a4736c0f00006dfc8e458bee`.
+
+The first two paths above are relative to `packages/student_ui`; the last is
+relative to the repository root. Before the run, the existing 64 failure
+artifacts were copied to
+`design_preview/optimizer_qa/student_ui_failures_backup_6e312277ca0341f9b0fad7778f5f08d1`
+and each copy matched its source SHA-256. Those artifacts contain prior runs
+as well as the current failures and should not be counted as a test result.
