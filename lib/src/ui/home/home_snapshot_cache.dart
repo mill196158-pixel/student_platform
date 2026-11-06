@@ -59,15 +59,27 @@ class HomeSnapshotCache {
     final identity = _sessionIdentity();
     if (!_isCurrent(uid, generation, identity)) return null;
     final key = _key(uid, section);
-    if (project != null) {
-      final pending = _pendingWrites[key];
-      if (pending != null) await pending;
-      if (!_isCurrent(uid, generation, identity) || _quarantined.contains(key))
-        return null;
+    final pending = _pendingWrites[key];
+    if (pending != null) {
+      if (project == null) {
+        try {
+          await pending.timeout(const Duration(seconds: 1));
+        } on TimeoutException {
+          return null;
+        }
+      } else {
+        await pending;
+      }
     }
+    if (!_isCurrent(uid, generation, identity) ||
+        _quarantined.contains(key) ||
+        _pendingWrites.containsKey(key))
+      return null;
     final prefs = await _preferences();
     if (!_isCurrent(uid, generation, identity) ||
-        (project != null && _quarantined.contains(key))) return null;
+        _quarantined.contains(key) ||
+        _pendingWrites.containsKey(key))
+      return null;
     final raw = prefs.getString(key);
     if (raw == null) return null;
     try {
@@ -129,12 +141,6 @@ class HomeSnapshotCache {
       if (!_isCurrent(uid, generation, identity) ||
           _writeVersions[key] != version) {
         return false;
-      }
-      if (project == null) {
-        final saved = await prefs.setString(key, raw);
-        return saved &&
-            _isCurrent(uid, generation, identity) &&
-            _writeVersions[key] == version;
       }
       final previousValue = prefs.getString(key);
       final previouslyQuarantined = _quarantined.contains(key);
