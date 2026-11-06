@@ -54,21 +54,23 @@ class AppNotificationsApi {
   final SupabaseClient _sb;
 
   Future<List<AppNotificationItem>> listMine({int limit = 50}) async {
-    try {
-      final res = await _sb.rpc(
-        'get_my_app_notifications',
-        params: {'p_limit': limit},
-      );
-      if (res is! List) return const [];
-      return res
-          .whereType<Map>()
-          .map((row) => AppNotificationItem.fromJson(
-                Map<String, dynamic>.from(row),
-              ))
-          .toList();
-    } catch (_) {
-      return const [];
-    }
+    final res = await _sb.rpc(
+      'get_my_app_notifications',
+      params: {'p_limit': limit},
+    );
+    if (res is! List) throw const FormatException('Invalid notification list');
+    return res.map((row) {
+      if (row is! Map) throw const FormatException('Invalid notification row');
+      if (row['id'] is! String || (row['id'] as String).trim().isEmpty ||
+          row['event_type'] is! String || (row['event_type'] as String).trim().isEmpty ||
+          row['title'] is! String || row['body'] is! String ||
+          row['created_at'] is! String || DateTime.tryParse(row['created_at'] as String) == null ||
+          (row['read_at'] != null && (row['read_at'] is! String ||
+              DateTime.tryParse(row['read_at'] as String) == null))) {
+        throw const FormatException('Invalid notification row');
+      }
+      return AppNotificationItem.fromJson(Map<String, dynamic>.from(row));
+    }).toList();
   }
 
   Future<int> unreadCount() async {
