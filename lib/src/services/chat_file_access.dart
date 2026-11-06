@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:isolate';
 import '../ui/learning/widgets/qa_reentry_timing.dart';
+import 'qa_receipt_probe.dart';
 import 'dart:collection';
 import 'dart:io';
 import 'dart:typed_data';
@@ -285,6 +287,8 @@ class ChatFileAccess {
   static http.Client Function()? debugHttpClientFactory;
   @visibleForTesting
   static Future<void> Function()? debugBeforeForwardReturn;
+  @visibleForTesting
+  static Future<void> Function(QaReceiptProbeResult)? debugAfterQaReceiptProbe;
 
   static Future<bool> _hasDenyMarker(File file) async {
     try {
@@ -299,6 +303,15 @@ class ChatFileAccess {
 
   static Future<bool> _hasReceipt(File file, String sid) async {
     try {
+      if (kDebugMode && !kIsWeb && const bool.fromEnvironment('QA_RECEIPT_ISOLATE')) {
+        final path = file.path;
+        qaReentryTiming('isolate_probe_start');
+        final result = await Isolate.run(() => qaReceiptProbeSync(path, sid));
+        qaReentryTiming('isolate_probe_done');
+        if (debugAfterQaReceiptProbe != null) await debugAfterQaReceiptProbe!(result);
+        if (result != QaReceiptProbeResult.pending) return result == QaReceiptProbeResult.allowed;
+      }
+      qaReentryTiming('legacy_probe_start');
       final receipt = _receiptFile(file);
       final pending = _pendingFile(file);
       final hasPending =
@@ -307,10 +320,12 @@ class ChatFileAccess {
       final proof = hasPending
           ? (_pendingTickets[pending.path] == sid ? pending : null)
           : receipt;
-      return !await _hasDenyMarker(file) &&
+      final allowed = !await _hasDenyMarker(file) &&
           proof != null &&
           await proof.readAsString() == 'chat-file-grant-v2:$sid' &&
           await file.length() > 0;
+      qaReentryTiming('legacy_probe_done');
+      return allowed;
     } catch (_) {
       // Missing, corrupted or unreadable receipts never authorize local reads.
       return false;
