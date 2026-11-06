@@ -2,7 +2,7 @@
 
 Статус: локальный draft для review; к удалённой БД не применялся. Для применения требуется отдельное явно выраженное разрешение владельца с указанием проекта и объёма.
 
-Read-only catalog audit подтвердил `public.get_team_assignments(uuid)`: SECURITY DEFINER, владелец postgres с BYPASSRLS; исходный WHERE ограничен team_id, EXECUTE был у PUBLIC, anon, authenticated и service_role. Нормализованный fingerprint `pg_get_functiondef` на момент проверки: `c278bc64bdcd0c88e849580c52d346e0`. Возвращаемый контракт содержит 19 полей; код миграции сохраняет их типы, порядок и исходную выборку.
+Read-only catalog audit подтвердил `public.get_team_assignments(uuid)`: SECURITY DEFINER, владелец postgres с BYPASSRLS; исходный WHERE ограничен team_id, EXECUTE был у PUBLIC, anon, authenticated и service_role. Нормализованный fingerprint `pg_get_functiondef` на момент проверки: `c278bc64bdcd0c88e849580c52d346e0`. Возвращаемый контракт содержит 20 полей; код миграции сохраняет их типы, порядок и исходную выборку.
 
 Миграция добавляет проверку `auth.uid()` и прямого `public.team_members(team_id,user_id)`, как действующие live RLS-политики SELECT для assignments и teams, отзывает PUBLIC/anon EXECUTE, сохраняет authenticated/service_role EXECUTE и задаёт пустой search_path с квалифицированными именами. Результат для недоступной команды — пустой набор. Отдельный service_role без пользовательского UID теперь также получает пустой набор; требуется отдельно выяснить внешние сервисные вызовы до возможного применения.
 
