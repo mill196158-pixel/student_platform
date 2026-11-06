@@ -33,6 +33,21 @@ class NewsImageDiskCache {
   Directory? _root;
   Map<String, _IndexEntry>? _index;
   bool _ready = false;
+  int _clearEpoch = 0;
+  final Map<String, int> _pathEpoch = {};
+  Future<void> _mutations = Future<void>.value();
+  @visibleForTesting
+  Future<void> Function()? debugAfterFileWrite;
+
+  Future<T> _mutate<T>(Future<T> Function() action) {
+    final operation = _mutations.then((_) => action());
+    _mutations =
+        operation.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+    return operation;
+  }
+
+  bool _current(String path, int clearEpoch, int pathEpoch) =>
+      _clearEpoch == clearEpoch && (_pathEpoch[path] ?? 0) == pathEpoch;
 
   Future<void>? _initializing;
   Future<void> ensureReady() {
@@ -56,21 +71,28 @@ class NewsImageDiskCache {
 
   /// Instant memory/disk peek — never hits the network.
   Future<Uint8List?> peek(NewsImageCacheKey key) async {
+    final clearEpoch = _clearEpoch;
+    final pathEpoch = _pathEpoch[key.path] ?? 0;
     final mem = _memory.peek(key);
     if (mem != null) return mem;
+    await _mutations;
+    if (!_current(key.path, clearEpoch, pathEpoch)) return null;
     await ensureReady();
+    if (!_current(key.path, clearEpoch, pathEpoch)) return null;
     final entry = _index?[key.id];
     if (entry == null) return null;
     try {
       final file = File('${_root!.path}/${entry.file}');
       if (!await file.exists()) {
+        if (!_current(key.path, clearEpoch, pathEpoch)) return null;
         _index!.remove(key.id);
         // Persist the removal with the next mutation, just like access time.
         // Reads can run concurrently without racing index file writes.
         return null;
       }
       final bytes = await file.readAsBytes();
-      if (bytes.isEmpty) return null;
+      if (bytes.isEmpty || !_current(key.path, clearEpoch, pathEpoch))
+        return null;
       _memory.put(key, bytes);
       entry.lastAccess = DateTime.now().toUtc();
       // Persist access order with the next cache mutation. A read should not
@@ -87,31 +109,49 @@ class NewsImageDiskCache {
     NewsImageCacheKey key,
     Future<Uint8List?> Function() fetch,
   ) async {
+    final clearEpoch = _clearEpoch;
+    final pathEpoch = _pathEpoch[key.path] ?? 0;
+    bool current() => _current(key.path, clearEpoch, pathEpoch);
     final peeked = await peek(key);
+    if (!current()) return null;
     if (peeked != null) return peeked;
 
     return _memory.getOrFetch(key, () async {
+      if (!current()) return null;
       final bytes = await fetch();
+      if (!current()) return null;
       if (bytes != null && bytes.isNotEmpty) {
-        await put(key, bytes);
+        await _putGuarded(key, bytes, current);
       }
-      return bytes;
+      return current() ? bytes : null;
     });
   }
 
-  Future<void> put(NewsImageCacheKey key, Uint8List bytes) async {
-    if (bytes.isEmpty) return;
+  Future<void> put(NewsImageCacheKey key, Uint8List bytes) {
+    if (bytes.isEmpty) return Future.value();
     _memory.put(key, bytes);
+    return _mutate(() => _write(key, bytes));
+  }
+
+  Future<void> _putGuarded(
+          NewsImageCacheKey key, Uint8List bytes, bool Function() current) =>
+      _mutate(() async {
+        if (!current()) return;
+        await ensureReady();
+        if (!current()) return;
+        _memory.put(key, bytes);
+        await _write(key, bytes);
+      });
+
+  Future<void> _write(NewsImageCacheKey key, Uint8List bytes) async {
     await ensureReady();
-    // A new image that cannot fit would otherwise evict every older entry
-    // before the LRU eventually evicts the image itself. Keep it in memory
-    // for this view without discarding the existing offline image cache.
-    // Existing keys retain their replacement semantics.
+    // Do not evict existing entries for a new image that cannot fit.
     if (bytes.length > maxTotalBytes && !_index!.containsKey(key.id)) return;
     final fileName = '${_fileId(key.id)}.bin';
     try {
       final file = File('${_root!.path}/$fileName');
       await file.writeAsBytes(bytes, flush: true);
+      await debugAfterFileWrite?.call();
       _index![key.id] = _IndexEntry(
         file: fileName,
         bytes: bytes.length,
@@ -126,8 +166,13 @@ class NewsImageDiskCache {
     }
   }
 
-  Future<void> invalidatePath(String path) async {
+  Future<void> invalidatePath(String path) {
+    _pathEpoch[path] = (_pathEpoch[path] ?? 0) + 1;
     _memory.invalidatePath(path);
+    return _mutate(() => _invalidatePath(path));
+  }
+
+  Future<void> _invalidatePath(String path) async {
     await ensureReady();
     final toRemove = _index!.entries
         .where((e) => e.value.path == path)
@@ -140,7 +185,12 @@ class NewsImageDiskCache {
   }
 
   /// Drops older versions for [path], keeping [keepVersion] if present.
-  Future<void> pruneOtherVersions(String path, String keepVersion) async {
+  Future<void> pruneOtherVersions(String path, String keepVersion) {
+    _pathEpoch[path] = (_pathEpoch[path] ?? 0) + 1;
+    return _mutate(() => _pruneOtherVersions(path, keepVersion));
+  }
+
+  Future<void> _pruneOtherVersions(String path, String keepVersion) async {
     await ensureReady();
     final toRemove = _index!.entries
         .where(
@@ -160,8 +210,13 @@ class NewsImageDiskCache {
     if (toRemove.isNotEmpty) await _persistIndex();
   }
 
-  Future<void> clear() async {
+  Future<void> clear() {
+    _clearEpoch++;
     _memory.clear();
+    return _mutate(_clear);
+  }
+
+  Future<void> _clear() async {
     await ensureReady();
     try {
       if (await _root!.exists()) {
