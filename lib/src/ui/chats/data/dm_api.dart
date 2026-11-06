@@ -64,7 +64,17 @@ class DmApi {
   static final Map<String, ChatSyncRealtimeGate> _syncGates = {};
 
   /// Per-chat clear boundary for the current user (one settings fetch).
-  static final Map<String, DateTime?> _clearedAtByChat = {};
+  static final Map<(int, String, String), DateTime?> _clearedAtByChat = {};
+
+  static (int, String, String)? _clearBoundaryKey(String chatId,
+      {bool testFallback = false}) {
+    if (chatId.isEmpty) return null;
+    final owner = _currentSessionUserId;
+    if (owner == null || owner.isEmpty) {
+      return testFallback ? (_sessionGeneration, '<test-no-owner>', chatId) : null;
+    }
+    return (_sessionGeneration, owner, chatId);
+  }
 
   /// Test counters: number of initial/page message fetches per chat.
   static final Map<String, int> debugLoadMessagesCounts = {};
@@ -222,12 +232,12 @@ class DmApi {
 
   /// One settings row for auth.uid() + chat. Null = never cleared.
   static Future<DateTime?> loadClearedAt(String chatId) async {
-    if (_clearedAtByChat.containsKey(chatId)) {
-      return _clearedAtByChat[chatId];
+    final key = _clearBoundaryKey(chatId);
+    if (key != null && _clearedAtByChat.containsKey(key)) {
+      return _clearedAtByChat[key];
     }
     final me = _sb.auth.currentUser?.id;
     if (me == null || me.isEmpty || chatId.isEmpty) {
-      _clearedAtByChat[chatId] = null;
       return null;
     }
     final generation = _sessionGeneration;
@@ -244,7 +254,10 @@ class DmApi {
       if (_sb.auth.currentUser?.id != me || _sessionGeneration != generation) {
         throw StateError('Session changed while reading chat settings');
       }
-      _clearedAtByChat[chatId] = cleared;
+      if (_clearBoundaryKey(chatId) != key) {
+        throw StateError('Session changed while reading chat settings');
+      }
+      if (key != null) _clearedAtByChat[key] = cleared;
       return cleared;
     } catch (_) {
       if (_sb.auth.currentUser?.id != me || _sessionGeneration != generation)
@@ -256,17 +269,19 @@ class DmApi {
   }
 
   static void invalidateClearedAt(String chatId) {
-    _clearedAtByChat.remove(chatId);
+    final key = _clearBoundaryKey(chatId);
+    if (key != null) _clearedAtByChat.remove(key);
   }
 
   /// Test hook: seed clearedAt cache so sync can run without Supabase.
   static void debugPrimeClearedAt(String chatId, DateTime? value) {
-    _clearedAtByChat[chatId] = value;
+    final key = _clearBoundaryKey(chatId, testFallback: true);
+    if (key != null) _clearedAtByChat[key] = value;
   }
 
   @visibleForTesting
   static DateTime? debugCachedClearedAt(String chatId) =>
-      _clearedAtByChat[chatId];
+      _clearedAtByChat[_clearBoundaryKey(chatId, testFallback: true)];
 
   @visibleForTesting
   static Future<void> Function()? debugAfterSessionDetach;
