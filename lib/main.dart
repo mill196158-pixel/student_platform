@@ -113,11 +113,13 @@ final GoRouter appRouter = GoRouter(
       path: '/splash',
       builder: (context, state) {
         final manualRetry = state.uri.queryParameters['retry'] == '1';
+        final networkUnavailable = state.uri.queryParameters['offline'] == '1';
         final admission = _offlineUiQa ? _policyQaAdmission : null;
         final caps = SessionCapabilitiesHost.maybeRead(context);
         return SplashScreen(
-            key: ValueKey(manualRetry),
+            key: ValueKey('$manualRetry:$networkUnavailable'),
             manualRetry: manualRetry,
+            initialNetworkUnavailable: networkUnavailable,
             qaAdmission: admission == null || caps == null
                 ? null
                 : () => admission.resolve(caps));

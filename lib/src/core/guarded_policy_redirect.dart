@@ -1,5 +1,6 @@
 import 'live_policy_grant_bridge.dart';
 import 'offline_policy_grant_host.dart';
+import 'transport_failure.dart';
 
 /// The saved grant is recorded here, but is not used to permit offline entry.
 Future<String?> guardedPolicyRedirect({
@@ -27,9 +28,11 @@ Future<String?> guardedPolicyRedirect({
       return decision.passwordChangeRequired ? '/change-password' : null;
     } on PolicyCheckStale {
       continue;
-    } catch (_) {
+    } catch (error) {
       if (!current() || revision != access.bridge.revision) continue;
-      return '/login';
+      return isTemporaryTransportFailure(error)
+          ? '/splash?retry=1&offline=1'
+          : '/login';
     }
   }
   return '/splash?retry=1';

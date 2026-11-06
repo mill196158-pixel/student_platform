@@ -99,7 +99,71 @@ void main() {
   });
   test('online failure cannot grant access', () async {
     access = makeAccess(() async => throw TimeoutException('offline'));
+    expect(await redirect('/home'), '/splash?retry=1&offline=1');
+  });
+
+  test('confirmed policy rejection still routes to login', () async {
+    access = makeAccess(() async =>
+        throw const AuthApiException('denied', statusCode: '401'));
     expect(await redirect('/home'), '/login');
+  });
+
+  testWidgets('policy network failure offers retry and rechecks policy',
+      (tester) async {
+    var calls = 0;
+    var homeBuilds = 0;
+    final router = GoRouter(
+      initialLocation: '/home',
+      redirect: (context, state) => guardedPolicyRedirect(
+          path: state.uri.path,
+          hasSession: () => true,
+          currentAccess: () => context.mounted
+              ? OfflinePolicyGrantHost.maybeRead(context)
+              : null),
+      routes: [
+        GoRoute(path: '/home', builder: (_, __) {
+          homeBuilds++;
+          return const Scaffold(body: Text('home'));
+        }),
+        GoRoute(
+          path: '/splash',
+          builder: (_, state) {
+            final manual = state.uri.queryParameters['retry'] == '1';
+            final offline = state.uri.queryParameters['offline'] == '1';
+            return SplashScreen(
+              key: ValueKey('$manual:$offline'),
+              manualRetry: manual,
+              initialNetworkUnavailable: offline,
+              restoreSession: () async => true,
+            );
+          },
+        ),
+        GoRoute(path: '/login', builder: (_, __) => const Scaffold(body: Text('login'))),
+      ],
+    );
+    addTearDown(router.dispose);
+    await tester.pumpWidget(OfflinePolicyGrantHost(
+      source: scope,
+      currentSession: () => session,
+      issuer: 'issuer',
+      storage: MemoryStorage(),
+      readLivePolicy: () async {
+        if (++calls < 3) throw TimeoutException('offline');
+        return false;
+      },
+      child: MaterialApp.router(routerConfig: router),
+    ));
+    await tester.pumpAndSettle();
+    expect(homeBuilds, 0);
+    expect(find.text('Нет соединения.'), findsOneWidget);
+    await tester.tap(find.text('Повторить'));
+    await tester.pumpAndSettle();
+    expect(homeBuilds, 0);
+    expect(find.text('Повторить'), findsOneWidget);
+    await tester.tap(find.text('Повторить'));
+    await tester.pumpAndSettle();
+    expect(calls, 3);
+    expect(find.text('home'), findsOneWidget);
   });
 
   test('newer check invalidates an already completed allow decision', () async {

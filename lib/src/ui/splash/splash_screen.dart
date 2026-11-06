@@ -11,11 +11,13 @@ class SplashScreen extends StatefulWidget {
       this.restoreSession,
       this.restoreStatus,
       this.qaAdmission,
-      this.manualRetry = false});
+      this.manualRetry = false,
+      this.initialNetworkUnavailable = false});
   final Future<bool> Function()? restoreSession;
   final Future<SessionRestoreStatus> Function()? restoreStatus;
   final Future<OfflineStartupResult> Function()? qaAdmission;
   final bool manualRetry;
+  final bool initialNetworkUnavailable;
 
   @override
   State<SplashScreen> createState() => _SplashScreenState();
@@ -24,9 +26,12 @@ class SplashScreen extends StatefulWidget {
 class _SplashScreenState extends State<SplashScreen> {
   int _staleRetries = 0;
   bool _needsRetry = false;
+  bool _networkUnavailable = false;
+  bool _running = false;
   @override
   void initState() {
     super.initState();
+    _networkUnavailable = widget.initialNetworkUnavailable;
     if (widget.manualRetry) {
       _needsRetry = true;
     } else {
@@ -35,6 +40,17 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _bootstrap() async {
+    if (_running) return;
+    _running = true;
+    try {
+      await _bootstrapOnce();
+    } finally {
+      _running = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _bootstrapOnce() async {
     try {
       if (widget.qaAdmission != null) {
         final result = await widget.qaAdmission!();
@@ -77,18 +93,17 @@ class _SplashScreenState extends State<SplashScreen> {
 
       if (status == SessionRestoreStatus.stale) {
         if (_staleRetries++ == 0) {
-          await _bootstrap();
+          await _bootstrapOnce();
         } else {
           setState(() => _needsRetry = true);
         }
         return;
       }
       if (status == SessionRestoreStatus.transportFailure) {
-        context.go('/login');
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content:
-              Text('Нет соединения. Подключитесь к сети и повторите вход.'),
-        ));
+        setState(() {
+          _networkUnavailable = true;
+          _needsRetry = true;
+        });
         return;
       }
 
@@ -106,9 +121,13 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   Widget build(BuildContext context) => SplashLoadingView(
         failed: _needsRetry,
+        networkUnavailable: _networkUnavailable,
+        retryEnabled: !_running,
         onRetry: () {
+          if (_running) return;
           setState(() {
             _needsRetry = widget.manualRetry;
+            if (!widget.manualRetry) _networkUnavailable = false;
             _staleRetries = 0;
           });
           _bootstrap();
@@ -117,9 +136,16 @@ class _SplashScreenState extends State<SplashScreen> {
 }
 
 class SplashLoadingView extends StatelessWidget {
-  const SplashLoadingView({super.key, this.failed = false, this.onRetry});
+  const SplashLoadingView(
+      {super.key,
+      this.failed = false,
+      this.networkUnavailable = false,
+      this.retryEnabled = true,
+      this.onRetry});
 
   final bool failed;
+  final bool networkUnavailable;
+  final bool retryEnabled;
   final VoidCallback? onRetry;
 
   @override
@@ -133,14 +159,17 @@ class SplashLoadingView extends StatelessWidget {
                 padding: const EdgeInsets.all(24),
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
                   Text(
-                    onRetry == null
+                    networkUnavailable
+                        ? 'Нет соединения.'
+                        : onRetry == null
                         ? 'Не удалось открыть приложение. Закройте его и попробуйте снова.'
                         : 'Не удалось проверить текущий вход.',
                     textAlign: TextAlign.center,
                   ),
                   if (onRetry != null)
                     TextButton(
-                        onPressed: onRetry, child: const Text('Повторить')),
+                        onPressed: retryEnabled ? onRetry : null,
+                        child: const Text('Повторить')),
                 ]),
               )
             : Column(

@@ -43,9 +43,12 @@ void main() {
       (tester) async {
     SharedPreferences.setMockInitialValues({'loggedIn': true, 'user': 'cached'});
     var homeBuilds = 0;
+    var restores = 0;
     final router = GoRouter(initialLocation: '/splash', routes: [
       GoRoute(path: '/splash', builder: (_, __) => SplashScreen(
-          restoreStatus: () async => SessionRestoreStatus.transportFailure)),
+          restoreStatus: () async => ++restores == 1
+              ? SessionRestoreStatus.transportFailure
+              : SessionRestoreStatus.restored)),
       GoRoute(path: '/login', builder: (_, __) => const Scaffold(body: Text('Login'))),
       GoRoute(path: '/home', builder: (_, __) {
         homeBuilds++;
@@ -59,7 +62,40 @@ void main() {
     expect(prefs.getString('user'), 'cached');
     expect(prefs.getBool('loggedIn'), isTrue);
     expect(homeBuilds, 0);
-    expect(find.text('Login'), findsOneWidget);
+    expect(find.text('Login'), findsNothing);
+    expect(find.text('Нет соединения.'), findsOneWidget);
+    expect(find.text('Повторить'), findsOneWidget);
+    await tester.tap(find.text('Повторить'));
+    await tester.pumpAndSettle();
+    expect(restores, 2);
+    expect(find.text('Protected home'), findsOneWidget);
+  });
+  testWidgets('manual retry is single-flight and ignores results after leaving',
+      (tester) async {
+    final first = Completer<SessionRestoreStatus>();
+    var calls = 0;
+    final router = GoRouter(initialLocation: '/splash', routes: [
+      GoRoute(path: '/splash', builder: (_, __) => SplashScreen(
+          manualRetry: true,
+          initialNetworkUnavailable: true,
+          restoreStatus: () { calls++; return first.future; })),
+      GoRoute(path: '/home', builder: (_, __) => const Scaffold(body: Text('Home'))),
+      GoRoute(path: '/guest', builder: (_, __) => const Scaffold(body: Text('Guest'))),
+    ]);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Повторить'));
+    await tester.pump();
+    expect(calls, 1);
+    expect(tester.widget<TextButton>(find.byType(TextButton)).onPressed, isNull);
+    router.go('/guest');
+    await tester.pumpAndSettle();
+    first.complete(SessionRestoreStatus.restored);
+    await tester.pumpAndSettle();
+    expect(calls, 1);
+    expect(find.text('Guest'), findsOneWidget);
+    expect(find.text('Home'), findsNothing);
   });
   for (final outcome in ['allow', 'change', 'error', 'no_session']) {
     testWidgets('startup $outcome keeps one authoritative router gate',
