@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
@@ -15,7 +16,19 @@ class ChatFileAccess {
   static const storageHost = 'studentsplatform.storage.yandexcloud.net';
   static int generation = 0;
   static final _resolving = InflightOnly<
-      (String, String, int, String, SupabaseClient), String>();
+      (String, String, int, String, SupabaseClient, int), String>();
+  static final _leaseClock = Stopwatch()..start();
+  static final _leases = LinkedHashMap<
+      (String, String, int, String, SupabaseClient), (String, int)>();
+  static final _revisions =
+      <(String, String, int, String, SupabaseClient), int>{};
+
+  static void _invalidateLease(
+      (String, String, int, String, SupabaseClient) id) {
+    _leases.remove(id);
+    _revisions[id] = (_revisions[id] ?? 0) + 1;
+  }
+
   static String? get userId {
     try {
       return Supabase.instance.client.auth.currentUser?.id;
@@ -71,6 +84,8 @@ class ChatFileAccess {
     final uid = userId;
     generation++;
     _resolving.clear();
+    _leases.clear();
+    _revisions.clear();
     _noOffline.clear();
     for (final path in _forwardTemps.keys.toList()) {
       await releaseForwardTemp(path);
@@ -156,23 +171,48 @@ class ChatFileAccess {
       final session = Supabase.instance.client.auth.currentSession;
       final expiry = session?.expiresAt;
       final key = keyFor(url);
-      return uid != null && uid.isNotEmpty && key != null && token != null &&
-          uid == userId && session?.user.id == uid && generation == epoch &&
+      return uid != null &&
+          uid.isNotEmpty &&
+          key != null &&
+          token != null &&
+          uid == userId &&
+          session?.user.id == uid &&
+          generation == epoch &&
           session?.accessToken == token &&
-          expiry != null && expiry * 1000 > DateTime.now().millisecondsSinceEpoch &&
+          expiry != null &&
+          expiry * 1000 > DateTime.now().millisecondsSinceEpoch &&
           !_noOffline.contains('$uid:$key');
     } catch (_) {
       return false;
     }
   }
+
   static Future<void> authorize(String url) async {
     final uid = userId, epoch = generation;
     final token = _currentAccessToken();
+    final key = keyFor(url);
+    final authClient = key == null ? null : Supabase.instance.client;
+    final id = uid != null && token != null && key != null && authClient != null
+        ? (uid, token, epoch, key, authClient)
+        : null;
+    final revision = id == null ? 0 : (_revisions[id] ?? 0);
+    bool current() =>
+        key == null ||
+        (id != null &&
+            identical(authClient, Supabase.instance.client) &&
+            uid == userId &&
+            epoch == generation &&
+            token == _currentAccessToken() &&
+            (_revisions[id] ?? 0) == revision);
     try {
       await resolve(url);
+      if (!current()) throw StateError('Сессия изменилась.');
     } catch (error) {
+      if (!current()) rethrow;
       final cached = await _cachedFile(url, uid);
-      if (!await _offlineCopy(error, url, cached, uid, epoch) ||
+      if (!current() ||
+          !await _offlineCopy(error, url, cached, uid, epoch) ||
+          !current() ||
           !_offlineOwnerCurrent(url, uid, epoch, token)) rethrow;
     }
   }
@@ -185,18 +225,42 @@ class ChatFileAccess {
     final token = _currentAccessToken();
     if (token == null) throw StateError('Войдите, чтобы открыть вложение.');
     final client = Supabase.instance.client;
-    final resolved = await _resolving.run((uid, token, epoch, key, client),
-        () => _resolveOnce(url, key, uid, epoch, token, client));
+    final id = (uid, token, epoch, key, client);
+    final revision = _revisions[id] ?? 0;
+    final sessionExpiry = client.auth.currentSession?.expiresAt;
+    final lease = _leases[id];
+    if (lease != null &&
+        sessionExpiry != null &&
+        sessionExpiry * 1000 > DateTime.now().millisecondsSinceEpoch &&
+        _leaseClock.elapsedMilliseconds < lease.$2) return lease.$1;
+    _leases.remove(id);
+    final started = _leaseClock.elapsedMilliseconds;
+    final resolved = await _resolving.run(
+        (uid, token, epoch, key, client, revision),
+        () => _resolveOnce(
+            url, key, uid, epoch, token, client, id, revision, started));
     if (!identical(client, Supabase.instance.client) ||
-        uid != userId || epoch != generation || token != _currentAccessToken()) {
+        uid != userId ||
+        epoch != generation ||
+        token != _currentAccessToken() ||
+        (_revisions[id] ?? 0) != revision) {
       throw StateError('Сессия изменилась.');
     }
     return resolved;
   }
 
-  static Future<String> _resolveOnce(String url, String key, String uid,
-      int epoch, String token, SupabaseClient client) async {
+  static Future<String> _resolveOnce(
+      String url,
+      String key,
+      String uid,
+      int epoch,
+      String token,
+      SupabaseClient client,
+      (String, String, int, String, SupabaseClient) id,
+      int revision,
+      int started) async {
     late final FunctionResponse response;
+    var timedOut = false;
     try {
       final request = client.functions
           .invoke('chat-file-access', body: {'action': 'resolve', 'key': key});
@@ -206,14 +270,17 @@ class ChatFileAccess {
       bool current() {
         try {
           return identical(client, Supabase.instance.client) &&
-              uid == userId && epoch == generation &&
+              uid == userId &&
+              epoch == generation &&
               client.auth.currentSession?.accessToken == token;
         } catch (_) {
           return false;
         }
       }
+
       Future<void> revoke() async {
         if (!current()) return;
+        _invalidateLease(id);
         _noOffline.add('$uid:$key');
         try {
           final file = await _cachedFile(url, uid);
@@ -222,37 +289,58 @@ class ChatFileAccess {
           }
         } catch (_) {}
       }
+
       unawaited(request.then<void>((result) async {
-        if (result.data is Map && result.data['cacheable'] == false) {
+        if (timedOut &&
+            result.data is Map &&
+            result.data['cacheable'] == false) {
           await revoke();
         }
       }, onError: (Object error, StackTrace _) async {
-        if (error is FunctionException &&
-            (error.status == 401 || error.status == 403 || error.status == 404)) {
+        if (timedOut &&
+            error is FunctionException &&
+            (error.status == 401 ||
+                error.status == 403 ||
+                error.status == 404)) {
           await revoke();
         }
       }));
       response = await request.timeout(
-            const Duration(seconds: 15),
-            onTimeout: () => throw TimeoutException('Проверка доступа заняла слишком много времени.'),
-          );
+        const Duration(seconds: 15),
+        onTimeout: () {
+          timedOut = true;
+          throw TimeoutException(
+              'Проверка доступа заняла слишком много времени.');
+        },
+      );
     } on FunctionException catch (error) {
       if ((error.status == 401 || error.status == 403 || error.status == 404) &&
           identical(client, Supabase.instance.client) &&
-          uid == userId && epoch == generation &&
+          uid == userId &&
+          epoch == generation &&
           token == _currentAccessToken()) {
+        _invalidateLease(id);
         _noOffline.add('$uid:$key');
         await _purge(url, uid);
       }
       rethrow;
     }
     if (!identical(client, Supabase.instance.client) ||
-        userId != uid || generation != epoch ||
-        token != _currentAccessToken())
+        userId != uid ||
+        generation != epoch ||
+        token != _currentAccessToken() ||
+        (_revisions[id] ?? 0) != revision)
       throw StateError('Сессия изменилась.');
     if (response.data is Map && response.data['cacheable'] == false) {
+      _leases.remove(id);
       _noOffline.add('$uid:${keyFor(url) ?? url}');
       await _purge(url, uid);
+      if (!identical(client, Supabase.instance.client) ||
+          userId != uid ||
+          generation != epoch ||
+          token != _currentAccessToken() ||
+          (_revisions[id] ?? 0) != revision)
+        throw StateError('Сессия изменилась.');
     }
     final resolved = response.data is Map ? response.data['url'] : null;
     final uri = resolved is String ? Uri.tryParse(resolved) : null;
@@ -260,27 +348,67 @@ class ChatFileAccess {
         uri.scheme != 'https' ||
         uri.host != storageHost ||
         keyFor(uri.toString()) != key) throw StateError('Файл недоступен.');
-    return uri.toString();
+    final result = uri.toString();
+    final expiresIn = response.data is Map ? response.data['expiresIn'] : null;
+    final sessionExpiry = client.auth.currentSession?.expiresAt;
+    if (response.data is Map &&
+        response.data['cacheable'] == true &&
+        expiresIn is int &&
+        expiresIn > 0 &&
+        sessionExpiry != null &&
+        (_revisions[id] ?? 0) == revision) {
+      final remainingSession =
+          sessionExpiry * 1000 - DateTime.now().millisecondsSinceEpoch;
+      final ttl = [20000, expiresIn * 1000, remainingSession]
+          .reduce((a, b) => a < b ? a : b);
+      final until = started + ttl;
+      if (ttl > 0 && until > _leaseClock.elapsedMilliseconds) {
+        _leases.remove(id);
+        _leases[id] = (result, until);
+        while (_leases.length > 64) {
+          _leases.remove(_leases.keys.first);
+        }
+      }
+    }
+    return result;
   }
 
   static Future<Uint8List> readBytes(String url) async {
     final uid = userId, epoch = generation;
     final token = _currentAccessToken();
+    final key = keyFor(url);
+    final authClient = key == null ? null : Supabase.instance.client;
+    final id = uid != null && token != null && key != null && authClient != null
+        ? (uid, token, epoch, key, authClient)
+        : null;
+    final revision = id == null ? 0 : (_revisions[id] ?? 0);
+    bool current() =>
+        key == null ||
+        (id != null &&
+            identical(authClient, Supabase.instance.client) &&
+            uid == userId &&
+            epoch == generation &&
+            token == _currentAccessToken() &&
+            (_revisions[id] ?? 0) == revision);
     final cached = await _cachedFile(url, uid);
     final client = http.Client();
     try {
+      if (!current()) throw StateError('Сессия изменилась.');
       final resolved = await resolve(url);
+      if (!current()) throw StateError('Сессия изменилась.');
       if (cached != null && await cached.exists()) {
         final bytes = await cached.readAsBytes();
-        if (uid != userId || epoch != generation)
-          throw StateError('Сессия изменилась.');
+        if (!current()) throw StateError('Сессия изменилась.');
         return bytes;
       }
       final response = await client
           .send(http.Request('GET', Uri.parse(resolved)))
           .timeout(const Duration(seconds: 30));
-      if (response.statusCode != 200)
+      if (response.statusCode != 200) {
+        if (id != null && current() && _leases[id]?.$1 == resolved)
+          _invalidateLease(id);
         throw HttpException('Файл недоступен (${response.statusCode}).');
+      }
       final bytes = BytesBuilder(copy: false);
       await for (final chunk
           in response.stream.timeout(const Duration(seconds: 30))) {
@@ -288,27 +416,32 @@ class ChatFileAccess {
           throw StateError('Файл слишком большой.');
         bytes.add(chunk);
       }
-      if (keyFor(url) != null && (uid != userId || epoch != generation))
-        throw StateError('Сессия изменилась.');
+      if (!current()) throw StateError('Сессия изменилась.');
       final result = bytes.takeBytes();
       if (cached != null &&
           !_noOffline.contains('$uid:${keyFor(url) ?? url}')) {
         await cached.parent.create(recursive: true);
-        if (uid != userId || epoch != generation)
-          throw StateError('Сессия изменилась.');
+        if (!current()) throw StateError('Сессия изменилась.');
         await cached.writeAsBytes(result, flush: true);
-        if (uid != userId || epoch != generation) {
-          if (await cached.exists()) await cached.delete();
+        if (!current()) {
+          // Preserve the prior logout cleanup behavior; a token or grant
+          // revision change must not delete another request's newer copy.
+          if ((uid != userId || epoch != generation) && await cached.exists()) {
+            await cached.delete();
+          }
           throw StateError('Сессия изменилась.');
         }
       }
-      if (keyFor(url) != null && (uid != userId || epoch != generation))
-        throw StateError('Сессия изменилась.');
+      if (!current()) throw StateError('Сессия изменилась.');
       return result;
     } catch (error) {
-      if (!await _offlineCopy(error, url, cached, uid, epoch)) rethrow;
+      if (!current() ||
+          !await _offlineCopy(error, url, cached, uid, epoch) ||
+          !current()) rethrow;
       final bytes = await cached!.readAsBytes();
-      if (!await _offlineCopy(error, url, cached, uid, epoch) ||
+      if (!current() ||
+          !await _offlineCopy(error, url, cached, uid, epoch) ||
+          !current() ||
           !_offlineOwnerCurrent(url, uid, epoch, token))
         throw StateError('Сессия изменилась.');
       return bytes;

@@ -27,6 +27,7 @@ void main() {
     var denied = false;
     var offline = false;
     var nonCacheable = false;
+    var secondSuccess = false;
     var calls = 0;
     final transport = MockClient((request) async {
       if (request.url.path.endsWith('/chat-file-access')) {
@@ -38,6 +39,18 @@ void main() {
                 'url':
                     'https://studentsplatform.storage.yandexcloud.net/chats/test/photo.png',
                 'cacheable': false
+              }),
+              200,
+              request: request,
+              headers: {'content-type': 'application/json'});
+        }
+        if (secondSuccess) {
+          return http.Response(
+              jsonEncode({
+                'url':
+                    'https://studentsplatform.storage.yandexcloud.net/chats/test/photo.png',
+                'cacheable': true,
+                'expiresIn': 60,
               }),
               200,
               request: request,
@@ -77,6 +90,10 @@ void main() {
         List.generate(3, (_) => ChatFileAccess.readBytes(url)));
     expect(copies, everyElement([1, 2, 3]));
     expect(calls, 1);
+    secondSuccess = true;
+    expect(await ChatFileAccess.resolve(url), url);
+    expect(await ChatFileAccess.resolve(url), url);
+    expect(calls, 2);
     pending.complete(http.Response('{"error":"denied"}', 403,
         headers: {'content-type': 'application/json'}));
     for (var i = 0; i < 30 && await file.exists(); i++) {
@@ -88,6 +105,7 @@ void main() {
     await expectLater(
         ChatFileAccess.readBytes(url), throwsA(isA<SocketException>()));
     offline = false;
+    secondSuccess = false;
     denied = true;
     await expectLater(
         ChatFileAccess.readBytes(url), throwsA(isA<FunctionException>()));
