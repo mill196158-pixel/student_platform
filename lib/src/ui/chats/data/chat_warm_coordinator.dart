@@ -11,6 +11,10 @@ import 'package:student_platform/src/ui/chats/data/chat_summary_card.dart';
 import 'package:student_platform/src/ui/chats/dm_title.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_card_envelope.dart';
 import 'package:student_platform/src/utils/safe_debug_log.dart';
+import 'package:student_platform/src/services/push/active_chat_tracker.dart';
+import 'package:student_platform/src/core/online_side_effect_barrier.dart';
+import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
+import 'confirmed_summary_warmup.dart';
 
 /// App-level quiet warm-up while the user is in the app (not necessarily in chats).
 ///
@@ -33,9 +37,12 @@ class ChatWarmCoordinator with WidgetsBindingObserver {
   Future<void>? _refreshInFlight;
   DateTime? _lastRefreshAt;
   Timer? _pendingTimer;
+  OnlineSideEffectBarrier? _barrier;
 
   /// Call once after the main shell is up (authenticated home/nav).
-  void start() {
+  void start({OnlineSideEffectBarrier? barrier}) {
+    if (_started && !identical(_barrier, barrier)) stop();
+    _barrier = barrier;
     if (_started) {
       scheduleRefresh(delay: _initialDelay);
       return;
@@ -61,6 +68,7 @@ class ChatWarmCoordinator with WidgetsBindingObserver {
       _observerAttached = false;
     }
     _started = false;
+    _barrier = null;
   }
 
   @override
@@ -111,9 +119,35 @@ class ChatWarmCoordinator with WidgetsBindingObserver {
     final me = sb.auth.currentUser?.id;
     if (me == null || me.isEmpty) return;
     final generation = _generation;
+    final barrier = _barrier;
     bool current() =>
-        _started && generation == _generation && sb.auth.currentUser?.id == me;
+        _started && generation == _generation && sb.auth.currentUser?.id == me &&
+        identical(_barrier, barrier) && (barrier?.isOpen ?? true);
     if (!current()) return;
+
+    // In scoped QA mode the entire RPC and durable write are held by the
+    // online barrier. Do not start untracked legacy/avatar prefetches here.
+    if (barrier != null) {
+      final cache = ProjectChatServerCache.qaInstance;
+      if (cache == null) return;
+      try {
+        final saved = await warmConfirmedSummaries(cache: cache, barrier: barrier,
+          // The visible list has priority. A background attempt must not
+          // invalidate its in-flight SQLite ticket, even if warmup later fails.
+          isCurrent: () => current() && !ActiveChatTracker.instance.isViewingMessages,
+          fetch: () async => await sb.rpc('get_my_chat_summaries'),
+          mapRow: (row) {
+            final mapped = _summaryMapFromRpcRow(row);
+            if (mapped != null && mapped['isDm'] == false &&
+                SummaryActionCard.fromRow(row) != null) {
+              mapped['lastActionCard'] = true;
+            }
+            return mapped;
+          });
+        if (saved && current()) _lastRefreshAt = DateTime.now();
+      } catch (_) {/* Preserve the last confirmed scoped snapshot. */}
+      return;
+    }
 
     safeDebugLog('[ChatWarm] refresh start');
     try {

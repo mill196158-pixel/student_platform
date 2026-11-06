@@ -83,6 +83,7 @@ class AuthService {
     final sqliteStore = access?.sqliteStore;
     final sqliteBinding = sqliteStore == null ? null : access?.currentBinding();
     Object? attachmentFence;
+    PushLogoutReservation? pushReservation;
     var result = LogoutCleanupResult.blockedBeforeSignOut;
     try {
       Future<void> action() async {
@@ -90,6 +91,8 @@ class AuthService {
           isOwnerCurrent: ownerIsCurrent,
           mayClearSession: () => _sb.auth.currentSession == null,
           memoryFence: () => runLogoutMemoryFences([
+            () => pushReservation = PushNotificationService.instance.reserveGuardedLogout(
+                isOwnerCurrent: ownerIsCurrent),
             () => capabilities?.block(),
             () {
               expectedGeneration++;
@@ -136,7 +139,11 @@ class AuthService {
               }
             },
             () async {
-              await PushNotificationService.instance.onLogout();
+              try {
+                await PushNotificationService.instance.onLogout(reservation: pushReservation);
+              } finally {
+                pushReservation?.finish();
+              }
             },
             () async {
               await DmApi.clearSessionState();
@@ -227,6 +234,7 @@ class AuthService {
             });
       if (!started) result = LogoutCleanupResult.ownerChanged;
     } finally {
+      pushReservation?.finish();
       if (result == LogoutCleanupResult.blockedBeforeSignOut &&
           ownerIsCurrent()) {
         _retryOwner = LogoutRetryOwner.capture(

@@ -52,6 +52,7 @@ import 'src/ui/home/home_snapshot_cache.dart';
 import 'src/ui/schedule/schedule_month_cache.dart';
 import 'src/core/offline_policy_grant_host.dart';
 import 'src/core/guarded_policy_redirect.dart';
+import 'src/core/qa_capability_view.dart';
 import 'src/ui/chats/forward/forward_outbox_host.dart';
 import 'src/ui/learning/state/team_snapshot_host.dart';
 import 'src/services/push/push_notification_service.dart';
@@ -127,14 +128,24 @@ final GoRouter appRouter = GoRouter(
       builder: (context, __) {
         final caps = SessionCapabilitiesHost.maybeRead(context);
         final scope = AuthSessionScopeHost.maybeRead(context);
-        if (_sqlitePolicyQa &&
-            _offlineUiQa &&
-            caps?.mode == SessionCapabilityMode.cacheOnly) {
+        if (_sqlitePolicyQa && _offlineUiQa) {
           if (caps == null || scope == null)
             return const Scaffold(
                 body: Center(child: Text('Сохранённые данные недоступны.')));
-          try {
-            final reader = CachedHomeScheduleReader(
+          Widget blocked(BuildContext _) => const Scaffold(
+              body: Center(child: Text('Сохранённые данные недоступны.')));
+          return QaCapabilityView(
+              capabilities: caps,
+              blockedBuilder: blocked,
+              onlineBuilder: (_, barrier) => SessionKeeper(
+                  barrier: barrier,
+                  child: PushSessionHost(
+                      barrier: barrier,
+                      child: InAppToastHost(
+                          barrier: barrier, child: NavigationScreen(onlineBarrier: barrier)))),
+              cachedBuilder: (_) {
+                try {
+                  final reader = CachedHomeScheduleReader(
                 capabilities: caps,
                 home: HomeSnapshotCache(
                     project: SupabaseConfig.url,
@@ -143,8 +154,8 @@ final GoRouter appRouter = GoRouter(
                     sessionGeneration: () => scope.generation,
                     sessionIdentity: scope.capture),
                 schedule: ScheduleMonthCache(scope, SupabaseConfig.url));
-            final chats = ProjectChatServerCache.qaInstance;
-            return NavigationScreen(
+                  final chats = ProjectChatServerCache.qaInstance;
+                  return NavigationScreen(
                 cachedReader: reader,
                 cachedProfile: chats == null
                     ? null
@@ -152,10 +163,10 @@ final GoRouter appRouter = GoRouter(
                         cachedReader: reader,
                         cachedChats: chats,
                         cachedCapabilities: caps));
-          } catch (_) {
-            return const Scaffold(
-                body: Center(child: Text('Сохранённые данные недоступны.')));
-          }
+                } catch (_) {
+                  return blocked(context);
+                }
+              });
         }
         return const PushSessionHost(child: NavigationScreen());
       },

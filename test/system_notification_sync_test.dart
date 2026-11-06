@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:student_platform/src/services/push/system_notification_sync.dart';
+import 'package:student_platform/src/core/online_side_effect_barrier.dart';
 
 void main() {
   test('only confirmed zero clears; failure and unread preserve OS alerts',
@@ -51,5 +52,29 @@ void main() {
     pending.complete(0);
     await work;
     expect(clears, 0);
+  });
+  test('closed session cannot clear after a delayed zero result', () async {
+    final barrier = OnlineSideEffectBarrier(ownerIsCurrent: () => true);
+    final pending = Completer<int>();
+    var clears = 0;
+    final sync = SystemNotificationSync(currentUser: () => 'same-user',
+      unreadCount: () => pending.future, clear: () async { clears++; });
+    final work = barrier.run(() => sync.reconcile(isCurrent: () => barrier.isOpen));
+    barrier.close();
+    pending.complete(0);
+    await work;
+    expect(clears, 0);
+  });
+  test('already dispatched OS clear remains tracked until settled', () async {
+    final barrier = OnlineSideEffectBarrier(ownerIsCurrent: () => true);
+    final pending = Completer<void>();
+    final sync = SystemNotificationSync(currentUser: () => 'same-user',
+      unreadCount: () async => 0, clear: () => pending.future);
+    final work = barrier.run(() => sync.reconcile(isCurrent: () => barrier.isOpen));
+    await Future<void>.delayed(Duration.zero);
+    expect(await barrier.closeAndDrain(timeout: const Duration(milliseconds: 5)), isFalse);
+    pending.complete();
+    await work;
+    expect(await barrier.closeAndDrain(timeout: const Duration(seconds: 1)), isTrue);
   });
 }

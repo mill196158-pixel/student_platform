@@ -10,6 +10,7 @@ import 'package:student_ui/student_ui.dart';
 import 'package:student_platform/src/services/push/app_notifications_api.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
 import 'package:student_platform/src/core/auth_session_scope_host.dart';
+import 'package:student_platform/src/core/online_side_effect_barrier.dart';
 import 'package:student_platform/src/services/push/in_app_notification_bus.dart';
 import 'package:student_platform/src/ui/content/content_nav_executor.dart';
 import 'package:student_platform/src/ui/home/home_dashboard_service.dart';
@@ -31,7 +32,8 @@ class HomeScreen extends StatefulWidget {
       this.contentMedia,
       this.activeListenable,
       this.notificationsApi,
-      this.cachedReader});
+      this.cachedReader,
+      this.onlineBarrier});
   final HomeDashboardService? dashboardService;
   final HomePromoService? promoService;
   final ContentMediaService? contentMedia;
@@ -39,6 +41,7 @@ class HomeScreen extends StatefulWidget {
 
   /// Only passed after a separately verified cache-only admission.
   final CachedHomeScheduleReader? cachedReader;
+  final OnlineSideEffectBarrier? onlineBarrier;
   final ValueListenable<bool>? activeListenable;
 
   @override
@@ -135,6 +138,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final modeChanged = !identical(oldWidget.cachedReader, widget.cachedReader);
     final serviceChanged =
         !identical(oldWidget.dashboardService, widget.dashboardService);
+    if (_serviceInitialized && !modeChanged && !serviceChanged &&
+        !identical(oldWidget.onlineBarrier, widget.onlineBarrier) &&
+        widget.cachedReader == null && widget.onlineBarrier != null) {
+      unawaited(_service.prewarmSchedule(widget.onlineBarrier!));
+    }
     if (!_serviceInitialized || (!modeChanged && !serviceChanged)) return;
     if (modeChanged) {
       _modeRevision++;
@@ -261,6 +269,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       return;
     }
     final firstContentClock = Stopwatch()..start();
+    final onlineBarrier = widget.onlineBarrier;
+    if (onlineBarrier != null && onlineBarrier.isOpen) {
+      unawaited(_service.prewarmSchedule(onlineBarrier));
+    }
     var reportedFirstContent = false;
     final userId = _service.currentUserId;
     final hadData = _data != null;

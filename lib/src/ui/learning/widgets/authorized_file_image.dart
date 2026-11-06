@@ -1,6 +1,7 @@
 import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show SynchronousFuture;
 import 'dart:async';
 import '../../../services/chat_file_access.dart';
 
@@ -9,14 +10,27 @@ class AuthorizedFileImageProvider
   AuthorizedFileImageProvider(this.url)
       : user = ChatFileAccess.userId,
         epoch = ChatFileAccess.generation,
-        sessionBinding = ChatFileAccess.currentSessionBinding;
+        sessionBinding = ChatFileAccess.currentSessionBinding,
+        clientIdentity = ChatFileAccess.currentClientIdentity;
   final String url;
   final String? user;
   final int epoch;
   final String? sessionBinding;
+  final Object? clientIdentity;
   @override
   Future<AuthorizedFileImageProvider> obtainKey(
-      ImageConfiguration configuration) async {
+      ImageConfiguration configuration) {
+    final cache = PaintingBinding.instance.imageCache.statusForKey(this);
+    if (!cache.pending && (cache.live || cache.keepAlive) &&
+        ChatFileAccess.canShowDecodedImage(url, user: user, epoch: epoch,
+            sessionBinding: sessionBinding, clientIdentity: clientIdentity)) {
+      ChatFileAccess.revalidateDecodedImage(url);
+      return SynchronousFuture(this);
+    }
+    return _obtainAuthorizedKey();
+  }
+
+  Future<AuthorizedFileImageProvider> _obtainAuthorizedKey() async {
     // Check permission even when decoded pixels already exist in ImageCache.
     await ChatFileAccess.authorize(url);
     if (!ChatFileAccess.isViewerCurrent(url,
@@ -54,9 +68,10 @@ class AuthorizedFileImageProvider
       other.url == url &&
       other.user == user &&
       other.epoch == epoch &&
-      other.sessionBinding == sessionBinding;
+      other.sessionBinding == sessionBinding &&
+      identical(other.clientIdentity, clientIdentity);
   @override
-  int get hashCode => Object.hash(url, user, epoch, sessionBinding);
+  int get hashCode => Object.hash(url, user, epoch, sessionBinding, clientIdentity);
   @override
   String toString() => 'AuthorizedFileImageProvider';
 }
@@ -85,6 +100,7 @@ class _AuthorizedFileImageState extends State<AuthorizedFileImage> {
   bool _revoked = false;
   String? _user;
   int _generation = 0;
+  late AuthorizedFileImageProvider _provider;
 
   @override
   void initState() {
@@ -92,6 +108,7 @@ class _AuthorizedFileImageState extends State<AuthorizedFileImage> {
     _revoked = ChatFileAccess.isAccessRevoked(widget.imageUrl);
     _user = ChatFileAccess.userId;
     _generation = ChatFileAccess.generation;
+    _provider = AuthorizedFileImageProvider(widget.imageUrl);
     ChatFileAccess.accessChanges.addListener(_accessChanged);
   }
 
@@ -100,6 +117,7 @@ class _AuthorizedFileImageState extends State<AuthorizedFileImage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.imageUrl != widget.imageUrl) {
       _revoked = ChatFileAccess.isAccessRevoked(widget.imageUrl);
+      _provider = AuthorizedFileImageProvider(widget.imageUrl);
     }
   }
 
@@ -107,12 +125,26 @@ class _AuthorizedFileImageState extends State<AuthorizedFileImage> {
     final revoked = ChatFileAccess.isAccessRevoked(widget.imageUrl);
     final user = ChatFileAccess.userId;
     final generation = ChatFileAccess.generation;
-    if (mounted &&
-        (revoked != _revoked || user != _user || generation != _generation)) {
+    if (!ChatFileAccess.decodedImageExperimentEnabled) {
+      if (mounted && (revoked != _revoked || user != _user || generation != _generation)) {
+        setState(() {
+          _revoked = revoked;
+          _user = user;
+          _generation = generation;
+          _attempt++;
+        });
+      }
+      return;
+    }
+    if (mounted) {
+      if (revoked || user != _user || generation != _generation) {
+        PaintingBinding.instance.imageCache.evict(_provider);
+      }
       setState(() {
         _revoked = revoked;
         _user = user;
         _generation = generation;
+        _provider = AuthorizedFileImageProvider(widget.imageUrl);
         _attempt++;
       });
     }
@@ -126,7 +158,8 @@ class _AuthorizedFileImageState extends State<AuthorizedFileImage> {
 
   @override
   Widget build(BuildContext context) {
-    final provider = AuthorizedFileImageProvider(widget.imageUrl);
+    final provider = ChatFileAccess.decodedImageExperimentEnabled
+        ? _provider : AuthorizedFileImageProvider(widget.imageUrl);
     Widget error(Object error) => Semantics(
           button: true,
           label: 'Повторить загрузку изображения',

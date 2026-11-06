@@ -5,8 +5,8 @@ AVD backup, the original-project file backup, and the saved Git stash.
 
 ## Experimental checkpoint
 
-The unfinished integrated candidate is retained for review, not release or
-installation. Offline admission/UI and Android durable forwarding require the
+The unfinished integrated candidate is retained for QA, not release. Offline
+admission/UI and Android durable forwarding require the
 explicit defines `SQLITE_POLICY_QA`, `OFFLINE_UI_QA`, and
 `FORWARD_DURABLE_ANDROID_QA`; all default to false. Some ordinary online paths
 also changed and have not received complete end-to-end review. Do not assume a
@@ -35,11 +35,12 @@ the old APK cannot see those entries. Existing user data must be preserved.
   Its app-private directory was absent afterwards; no Android restore set was
   available. A pre-incident AVD snapshot exists, but its app data has not been
   recovered. APK files are not backups of app data.
-- Cold offline startup, previously opened chats, attachments after process death,
-  and the existing crash-during-revalidation regression remain incomplete.
-  The SQLite and transport work is isolated infrastructure, not runtime admission.
-- Both forward composer paths still need a durable handoff and safe handling of
-  an unknown send result; no exactly-once claim without server idempotency.
+- Cold offline behavior is available only in the explicitly flagged QA candidate;
+  full application coverage and the crash-during-revalidation regression remain
+  incomplete. The normal build must not be described as fully offline-ready.
+- Durable forwarding is experimental and disabled by default; an unknown send
+  result still needs explicit handling. No exactly-once claim is made without
+  verified server idempotency.
 - Fullscreen revocation and clipboard provenance, including legacy Android
   clipboard data and late results, require final integrated device verification.
 - The admin image optimization and guarded replacement are not deployed. The
@@ -54,3 +55,32 @@ The reproducible pending-file test is `test/chat_file_crash_offline_blocker_test
 It is skipped by default and can be run with
 `flutter test --dart-define=RUN_OFFLINE_CRASH_REGRESSION=true test/chat_file_crash_offline_blocker_test.dart`.
 It models a restart; it is not a real process-kill test.
+
+## QA2 device observations
+
+The QA2 Android candidate used the three explicit defines listed above. Before
+installation, two data archives were created, read in full, and checked by
+SHA-256. Restoration from those archives was not tested. They are separate
+from the earlier pre-incident AVD backup; an APK alone is not a data backup.
+
+On the emulator, a cold start without network opened the cached home, saved
+chats, a previously warmed schedule, and the previously saved QR image. The QR
+opened fullscreen on a white background, and Android Back returned from the
+viewer. Pinch-to-zoom was not checked on the device.
+
+For a non-empty schedule check, two test lessons on 19 June 2026 were opened
+online (`qa2-online-schedule-june19.png`). After force-stopping the app and
+turning the network off, the same times, teachers and rooms appeared offline
+(`qa2-offline-schedule-june19.png`). This month was warmed manually, so this
+does not establish that automatic warming works. The network was restored.
+
+News and advertising disappear offline, and the offline interface remains
+simplified. Installation used `install -r`, so these observations do not prove
+that automatic warming works from a genuinely clean cache. They also do not
+prove that every chat, attachment, or screen works after a cold offline start.
+
+In the guarded QA notification path, opening a push without a verifiable
+`notification_id` is unavailable, as are group-action deep links; chat prewarm
+from guarded push is disabled. Firebase SDK and real notification delivery were
+not verified by these observations. The normal build and the complete product
+remain unfinished; this QA candidate is not a release approval.

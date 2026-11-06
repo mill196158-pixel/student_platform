@@ -21,6 +21,9 @@ import 'package:student_platform/src/ui/learning/models/team.dart';
 import 'package:student_platform/src/ui/schedule/models/lesson.dart';
 import 'package:student_platform/src/ui/schedule/schedule_screen.dart';
 import 'package:student_platform/src/ui/schedule/utils/msk_date.dart';
+import 'package:student_platform/src/ui/schedule/schedule_month_cache.dart';
+import 'package:student_platform/src/ui/schedule/schedule_prewarm.dart';
+import 'package:student_platform/src/core/online_side_effect_barrier.dart';
 
 class HomeDashboardService {
   HomeDashboardService({
@@ -67,6 +70,19 @@ class HomeDashboardService {
         _ownsHttpClient = httpClient == null;
 
   String? get currentUserId => _sb.auth.currentUser?.id;
+
+  Future<void> prewarmSchedule(OnlineSideEffectBarrier barrier) async {
+    final scope = _sessionScope;
+    if (_disposed || scope == null || !barrier.isOpen ||
+        !const bool.fromEnvironment('SQLITE_POLICY_QA')) return;
+    await scope.ready;
+    if (_disposed || !barrier.isOpen) return;
+    final cache = ScheduleMonthCache(scope, SupabaseConfig.url);
+    await SchedulePrewarm(scope: scope, cache: cache, barrier: barrier,
+      loadMonth: (month) => _scheduleRepository.loadMonthForPrewarm(month,
+          isCurrent: () => !_disposed && barrier.isOpen))
+        .warm(MskDate.today());
+  }
 
   final SupabaseClient _sb;
   final ScheduleRepository _scheduleRepository;

@@ -28,6 +28,7 @@ import '../../config/supabase_config.dart';
 import '../../core/auth_session_scope.dart';
 import '../../core/auth_session_scope_host.dart';
 import 'schedule_month_cache.dart';
+import '../home/home_snapshot_codec.dart';
 
 class ScheduleRepository {
   ScheduleRepository({SupabaseClient? client})
@@ -41,6 +42,45 @@ class ScheduleRepository {
         DateTime(anchor.year, anchor.month + 1, 0); // последний день месяца
     final days = last.difference(first).inDays + 1;
     return loadRange(first, days: days, strict: strict);
+  }
+
+  /// Full-month prewarm, fenced between the lessons RPC and optional academic
+  /// enrichment. Never dispatch the second request after the online permit ends.
+  Future<List<Lesson>> loadMonthForPrewarm(DateTime anchor,
+      {required bool Function() isCurrent}) async {
+    if (!isCurrent()) throw StateError('Schedule prewarm revoked');
+    final first = DateTime(anchor.year, anchor.month, 1);
+    final last = DateTime(anchor.year, anchor.month + 1, 0);
+    final rows = await _sb.rpc('get_my_lessons', params: {
+      'p_from': MskDate.isoDate(first),
+      'p_days': last.difference(first).inDays + 1,
+    });
+    if (!isCurrent()) throw StateError('Schedule prewarm revoked');
+    if (rows is! List || rows.length >= 1000) {
+      throw const FormatException('Malformed schedule prewarm response');
+    }
+    final lessons = <Lesson>[];
+    for (final value in rows) {
+      if (value is! Map || value.keys.any((key) => key is! String)) {
+        throw const FormatException('Malformed schedule prewarm row');
+      }
+      final row = Map<String, dynamic>.from(value);
+      for (final key in ['time_start', 'time_end']) {
+        final time = row[key];
+        if (time is String && RegExp(r'^\d{2}:\d{2}:\d{2}(?:\.\d+)?$').hasMatch(time)) {
+          if (int.parse(time.substring(6, 8)) >= 60) {
+            throw const FormatException('Malformed schedule prewarm time');
+          }
+          row[key] = time.substring(0, 5);
+        }
+      }
+      final lesson = HomeSnapshotCodec.lessonFromMap(row);
+      if (lesson == null) throw const FormatException('Malformed schedule prewarm row');
+      lessons.add(lesson);
+    }
+    final result = await _enrichAcademicLinks(lessons, isCurrent: isCurrent);
+    if (!isCurrent()) throw StateError('Schedule prewarm revoked');
+    return result;
   }
 
   Future<List<Lesson>> loadRange(DateTime from,
@@ -73,12 +113,14 @@ class ScheduleRepository {
     }
   }
 
-  Future<List<Lesson>> _enrichAcademicLinks(List<Lesson> lessons) async {
+  Future<List<Lesson>> _enrichAcademicLinks(List<Lesson> lessons,
+      {bool Function()? isCurrent}) async {
     final ids = lessons
         .map((lesson) => lesson.id)
         .where((id) => id.isNotEmpty)
         .toList();
     if (ids.isEmpty) return lessons;
+    if (!(isCurrent?.call() ?? true)) throw StateError('Schedule prewarm revoked');
 
     try {
       final rows = await _sb
@@ -396,6 +438,13 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   int _loadRevision = 0;
   AuthSessionScope? _sessionScope;
   ScheduleMonthCache? _monthCache;
+  final _foregroundAttempts = <(ScheduleMonthCache, ScheduleMonthAttempt)>{};
+  void _releaseForeground() {
+    for (final entry in _foregroundAttempts) {
+      entry.$1.finishForeground(entry.$2);
+    }
+    _foregroundAttempts.clear();
+  }
   List<Lesson> _all = [];
   List<ScheduleAssignment> _assignments = [];
   List<ScheduleGroupActionEvent> _groupActions = [];
@@ -472,6 +521,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         oldWidget.subscribeRealtime != widget.subscribeRealtime;
     if (!changed) return;
     _loadRevision++;
+    _releaseForeground();
     _all = [];
     _assignments = [];
     _groupActions = [];
@@ -499,6 +549,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   void _sessionChanged() {
     if (!mounted) return;
     _loadRevision++;
+    _releaseForeground();
     setState(() {
       _all = [];
       _assignments = [];
@@ -512,6 +563,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   @override
   void dispose() {
     _loadRevision++;
+    _releaseForeground();
     _sessionScope?.removeListener(_sessionChanged);
     _stopRealtime();
     _liveTick?.cancel();
@@ -538,16 +590,19 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   Future<void> _loadMonth({required DateTime anchor}) async {
     if (widget.cachedReader != null) return _loadCachedMonths([anchor]);
     final revision = ++_loadRevision;
+    _releaseForeground();
     setState(() => _loading = true);
     final scope = _sessionScope;
     if (scope != null) await scope.ready;
     if (!mounted || revision != _loadRevision) return;
     final cache = _monthCache;
     final attempt = cache?.begin(anchor);
+    if (attempt != null) _foregroundAttempts.add((cache!, attempt));
     bool current() =>
         mounted &&
         revision == _loadRevision &&
         (scope == null || (attempt != null && scope.isCurrent(attempt.owner)));
+    try {
     final cached = attempt == null ? null : await cache!.read(attempt);
     if (!current()) return;
     if (cached != null) {
@@ -569,8 +624,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     ]);
     if (!current()) return;
     final lessons = data[0] as List<Lesson>?;
-    if (lessons != null && attempt != null)
-      unawaited(cache!.write(attempt, lessons));
     setState(() {
       _all = lessons ?? cached ?? [];
       _lessonsUnavailable = lessons == null && cached == null;
@@ -579,7 +632,14 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       _groupActions = data[2] as List<ScheduleGroupActionEvent>;
       _loading = false;
     });
+    if (lessons != null && attempt != null) await cache!.write(attempt, lessons, isCurrent: current);
     // ВАЖНО: не меняем _selectedDay и не «подскакиваем» к другой дате.
+    } finally {
+      if (attempt != null) {
+        cache!.finishForeground(attempt);
+        _foregroundAttempts.remove((cache, attempt));
+      }
+    }
   }
 
   /// Грузим данные для всей видимой недели. Неделя может пересекать границу
@@ -594,6 +654,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       return _loadCachedMonths(months.toList());
     }
     final revision = ++_loadRevision;
+    _releaseForeground();
     setState(() => _loading = true);
     final weekStart = _selectedWeekStart;
     final weekEnd = weekStart.add(const Duration(days: 6));
@@ -608,12 +669,17 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     final attempts = {
       for (final anchor in anchors) anchor: cache?.begin(anchor)
     };
+    for (final attempt in attempts.values) {
+      if (attempt != null) _foregroundAttempts.add((cache!, attempt));
+    }
     bool current() =>
         mounted &&
         revision == _loadRevision &&
         (scope == null ||
             attempts.values
                 .every((a) => a != null && scope.isCurrent(a.owner)));
+    final writes = <Future<bool>>[];
+    try {
     final cached = <DateTime, List<Lesson>>{};
     for (final anchor in anchors) {
       final attempt = attempts[anchor];
@@ -649,7 +715,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       final networkLessons = data[0] as List<Lesson>?;
       final attempt = attempts[anchor];
       if (networkLessons != null && attempt != null)
-        unawaited(cache!.write(attempt, networkLessons));
+        writes.add(cache!.write(attempt, networkLessons, isCurrent: current));
       for (final l in networkLessons ?? cached[anchor] ?? <Lesson>[]) {
         lessonsById[l.id] = l;
       }
@@ -675,6 +741,15 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         ..sort((a, b) => a.occursAt.compareTo(b.occursAt));
       _loading = false;
     });
+    } finally {
+      await Future.wait(writes);
+      for (final attempt in attempts.values) {
+        if (attempt != null) {
+          cache!.finishForeground(attempt);
+          _foregroundAttempts.remove((cache, attempt));
+        }
+      }
+    }
   }
 
   Future<void> _loadCachedMonths(List<DateTime> anchors) async {

@@ -74,7 +74,7 @@ void main() {
 
   for (final stale in [false, true]) {
     testWidgets(
-        'summary verification is ${stale ? 'ignored after ABA' : 'shown without persisting status'}',
+        'summary verification is ${stale ? 'ignored after ABA' : 'hidden without persisting status'}',
         (tester) async {
       final events = StreamController<AuthState>.broadcast(sync: true);
       final session = Supabase.instance.client.auth.currentSession;
@@ -114,8 +114,10 @@ void main() {
       for (var i = 0; i < 5; i++) {
         await tester.pump(const Duration(milliseconds: 50));
       }
-      expect(find.text('Карточка недоступна'),
-          stale ? findsNothing : findsOneWidget);
+      expect(find.text('Карточка недоступна'), findsNothing);
+      expect(find.text('Карточка тем'), stale ? findsOneWidget : findsNothing);
+      expect(find.text('Автор'), stale ? findsOneWidget : findsNothing);
+      expect(find.text('Тестовый чат'), findsOneWidget);
       final prefs = await SharedPreferences.getInstance();
       final cached = prefs.getString('my_chats_cache_v2_owner') ?? '';
       expect(cached, contains('Карточка тем'));

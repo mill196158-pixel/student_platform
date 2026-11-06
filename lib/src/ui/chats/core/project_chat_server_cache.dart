@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
 import 'package:student_platform/src/core/offline_policy_grant.dart';
@@ -86,12 +87,13 @@ Future<void> _validateChatSchema(Database db) async {
 
 class ProjectChatPageTicket {
   ProjectChatPageTicket._(
-      this._issuer, this._owner, this._binding, this._chat, this._version);
+      this._issuer, this._owner, this._binding, this._chat, this._version, this._guard);
   final Object _issuer;
   final AuthOperationScope _owner;
   final OfflineSessionBinding _binding;
   final String _chat;
   final int _version;
+  final bool Function()? _guard;
 }
 
 class ChatHideHold {
@@ -116,6 +118,8 @@ class ProjectChatServerCache {
   final String project;
   final Object _issuer = Object();
   static ProjectChatServerCache? qaInstance;
+  @visibleForTesting
+  Future<void> Function()? debugBeforeSummaryCommit;
   static final Map<String, int> _eventVersions = {};
   static final Set<String> _eventQuarantine = {};
   static final Map<String, Future<void>> _eventQueues = {};
@@ -132,7 +136,7 @@ class ProjectChatServerCache {
 
   /// The durable sequence commits before dispatch. A newer isolate or process
   /// invalidates an older response through the same SQLite transaction.
-  Future<ProjectChatPageTicket?> begin(String chat) async {
+  Future<ProjectChatPageTicket?> begin(String chat, {bool Function()? isCurrent}) async {
     final owner = scope.capture();
     final binding = currentBinding();
     if (owner == null ||
@@ -142,10 +146,14 @@ class ProjectChatServerCache {
         owner.userId != binding.userId ||
         binding.issuer != '$project/auth/v1' ||
         _eventQuarantine.contains(_eventKey(binding, chat))) return null;
-    bool valid() =>
-        scope.isCurrent(owner) &&
-        _matches(currentBinding(), binding) &&
-        !_eventQuarantine.contains(_eventKey(binding, chat));
+    bool valid() {
+      try {
+        return scope.isCurrent(owner) &&
+            _matches(currentBinding(), binding) &&
+            !_eventQuarantine.contains(_eventKey(binding, chat)) &&
+            (isCurrent?.call() ?? true);
+      } catch (_) { return false; }
+    }
     try {
       final seq = await db.transaction((txn) async {
         if (!valid()) throw const _StalePage();
@@ -176,17 +184,21 @@ class ProjectChatServerCache {
         return rows.single['seq'] as int;
       });
       if (!valid()) return null;
-      return ProjectChatPageTicket._(_issuer, owner, binding, chat, seq);
+      return ProjectChatPageTicket._(_issuer, owner, binding, chat, seq, isCurrent);
     } on _StalePage {
       return null;
     }
   }
 
-  bool _current(ProjectChatPageTicket t) =>
-      identical(t._issuer, _issuer) &&
-      scope.isCurrent(t._owner) &&
-      _matches(currentBinding(), t._binding) &&
-      !_eventQuarantine.contains(_eventKey(t._binding, t._chat));
+  bool _current(ProjectChatPageTicket t) {
+    try {
+      return identical(t._issuer, _issuer) &&
+          scope.isCurrent(t._owner) &&
+          _matches(currentBinding(), t._binding) &&
+          !_eventQuarantine.contains(_eventKey(t._binding, t._chat)) &&
+          (t._guard?.call() ?? true);
+    } catch (_) { return false; }
+  }
 
   List<Message>? _parse(String raw, String chat) {
     try {
@@ -358,6 +370,8 @@ class ProjectChatServerCache {
               'payload': payload
             },
             conflictAlgorithm: ConflictAlgorithm.replace);
+        final pause = debugBeforeSummaryCommit;
+        if (pause != null) await pause();
         if (!_current(ticket)) throw const _StalePage();
         return true;
       });

@@ -6,12 +6,15 @@ import 'package:student_platform/src/services/push/in_app_notification_bus.dart'
 import 'package:student_platform/src/services/push/push_navigation.dart';
 import 'package:student_platform/src/services/push/push_payload.dart';
 import 'package:student_platform/src/ui/notifications/notification_center_sheet.dart';
+import 'package:student_platform/src/core/online_side_effect_barrier.dart';
+import 'package:student_platform/src/services/push/push_notification_service.dart';
 
 /// Floating iOS-style in-app banner (not a bottom SnackBar over the tab bar).
 class InAppToastHost extends StatefulWidget {
-  const InAppToastHost({super.key, required this.child});
+  const InAppToastHost({super.key, required this.child, this.barrier});
 
   final Widget child;
+  final OnlineSideEffectBarrier? barrier;
 
   @override
   State<InAppToastHost> createState() => _InAppToastHostState();
@@ -46,6 +49,7 @@ class _InAppToastHostState extends State<InAppToastHost>
   }
 
   void _onEvent(InAppNotificationEvent event) {
+    if (!(widget.barrier?.isOpen ?? true)) return;
     if (event.type == '_session_reset' || event.type == '_dismiss') {
       if (event.type == '_session_reset') {
         _seenNotificationIds.clear();
@@ -110,6 +114,12 @@ class _InAppToastHostState extends State<InAppToastHost>
     final dismissed = await _dismiss();
     if (!dismissed || !mounted || event == null) return;
     final payload = event.payload;
+    if (widget.barrier != null) {
+      if (payload != null && widget.barrier!.isOpen) {
+        await PushNotificationService.instance.openGuardedPayload(payload);
+      }
+      return;
+    }
     if (payload != null) {
       await PushNavigation.handle(context, payload, force: true);
     } else {

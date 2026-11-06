@@ -25,13 +25,17 @@ class SystemNotificationSync {
 
   void invalidate() => _generation++;
 
-  Future<void> reconcile() async {
+  Future<void> reconcile({bool Function()? isCurrent}) async {
+    bool valid() {
+      try { return isCurrent?.call() ?? true; } catch (_) { return false; }
+    }
     final user = currentUser();
-    if (user == null) return;
+    if (user == null || !valid()) return;
     final generation = ++_generation;
     try {
       final count = await unreadCount();
-      if (count == 0 && generation == _generation && currentUser() == user) {
+      if (count == 0 && generation == _generation && currentUser() == user &&
+          valid()) {
         await clear();
       }
     } catch (_) {

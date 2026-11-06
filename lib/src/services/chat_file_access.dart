@@ -40,6 +40,7 @@ class ChatFileAccess {
     _leases.clear();
     _revisions.clear();
     _pendingTickets.clear();
+    _decodedImageTickets.clear();
     accessChanges.value++;
   }
 
@@ -74,6 +75,7 @@ class ChatFileAccess {
         _revisions.clear();
         _noOffline.clear();
         _pendingTickets.clear();
+        _decodedImageTickets.clear();
         _unsupportedProtocol.clear();
         accessChanges.value++;
       }
@@ -132,6 +134,7 @@ class ChatFileAccess {
     _leases.clear();
     _revisions.clear();
     _pendingTickets.clear();
+    _decodedImageTickets.clear();
     accessChanges.value++;
     return owner;
   }
@@ -200,8 +203,36 @@ class ChatFileAccess {
   static File _deniedFile(File file) => File('${file.path}.denied');
   static File _pendingFile(File file) => File('${file.path}.pending');
   static final _pendingTickets = <String, String>{};
+  // Proof is process-local and only issued after reading a durable receipt.
+  // It is never reconstructed from a pending write after process restart.
+  static final _decodedImageTickets = LinkedHashSet<
+      (SupabaseClient, String, String, int, String, String)>();
+  @visibleForTesting
+  static bool debugDecodedImageExperiment = false;
+  static bool get decodedImageExperimentEnabled =>
+      const bool.fromEnvironment('CHAT_IMAGE_HOT_EXPERIMENT') ||
+      (kDebugMode && debugDecodedImageExperiment);
   static final _unsupportedProtocol = <String>{};
   static final _liveChecks = <String, int>{};
+
+  static Object? get currentClientIdentity {
+    try { return Supabase.instance.client; } catch (_) { return null; }
+  }
+
+  static bool canShowDecodedImage(String url,
+      {required String? user, required int epoch,
+      required String? sessionBinding, required Object? clientIdentity}) {
+    final key = keyFor(url), token = _currentAccessToken();
+    final client = currentClientIdentity;
+    return decodedImageExperimentEnabled && key != null && token != null && user != null && sessionBinding != null &&
+        client is SupabaseClient && identical(client, clientIdentity) &&
+        !_unsupportedProtocol.contains('$user:$key') &&
+        isViewerCurrent(url, user: user, epoch: epoch, sessionBinding: sessionBinding) &&
+        _decodedImageTickets.contains((client, user, sessionBinding, epoch, token, key));
+  }
+
+  /// Revalidation remains single-flight and failures are observed by resolve.
+  static void revalidateDecodedImage(String url) => _revalidateInBackground(url);
   @visibleForTesting
   static bool debugFailDenialPersistence = false;
   @visibleForTesting
@@ -395,6 +426,7 @@ class ChatFileAccess {
     _revisions.clear();
     _noOffline.clear();
     _pendingTickets.clear();
+    _decodedImageTickets.clear();
     _unsupportedProtocol.clear();
     accessChanges.value++;
     // Enqueue before the first await so a fresh session for the same user
@@ -425,6 +457,7 @@ class ChatFileAccess {
     _revisions.clear();
     _noOffline.clear();
     _pendingTickets.clear();
+    _decodedImageTickets.clear();
     _unsupportedProtocol.clear();
     accessChanges.value++;
   }
@@ -436,6 +469,7 @@ class ChatFileAccess {
     required String? sessionBinding,
     required Uint8List expectedBytes,
   }) async {
+    _decodedImageTickets.clear();
     if (user == null ||
         !isViewerCurrent(url,
             user: user, epoch: epoch, sessionBinding: sessionBinding)) return;
@@ -575,6 +609,7 @@ class ChatFileAccess {
 
   static Future<void> _denyLocalCopy(String url, String uid, String key,
       (String, String, int, String, SupabaseClient) id) {
+    _decodedImageTickets.clear();
     _invalidateLease(id);
     _noOffline.add('$uid:$key');
     accessChanges.value++;
@@ -709,6 +744,12 @@ class ChatFileAccess {
       final sid = _sessionId(authClient?.auth.currentSession);
       if (await _receiptAvailable(url, uid, sid, current)) {
         if (!current()) throw StateError('Сессия изменилась.');
+        if (decodedImageExperimentEnabled && uid != null && sid != null && token != null && key != null && authClient != null) {
+          _decodedImageTickets.add((authClient, uid, sid, epoch, token, key));
+          while (_decodedImageTickets.length > 128) {
+            _decodedImageTickets.remove(_decodedImageTickets.first);
+          }
+        }
         _revalidateInBackground(url);
         return;
       }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -12,10 +13,30 @@ import 'package:student_platform/src/ui/learning/models/team.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/navigation/group_action_deeplink.dart';
 import 'package:student_platform/src/ui/learning/team_details_screen.dart';
 import 'package:student_platform/src/ui/navigation/main_tab_scope.dart';
+import 'package:student_platform/src/core/online_side_effect_barrier.dart';
 
 /// Resolves push payloads to known screens. Never trusts server route strings.
 class PushNavigation {
   PushNavigation._();
+
+  static Future<void> _pushRoute(NavigatorState navigator, Route<dynamic> route,
+      {required bool guarded, OnlineSideEffectBarrier? barrier}) async {
+    if (guarded && (barrier == null || !barrier.isOpen)) return;
+    final result = navigator.push(route);
+    if (guarded) {
+      final removeHook = barrier!.onClose(() {
+        if (navigator.mounted && route.isActive) navigator.removeRoute(route);
+      });
+      unawaited(result.whenComplete(removeHook));
+    } else {
+      await result;
+    }
+  }
+
+  @visibleForTesting
+  static Future<void> debugPushGuarded(NavigatorState navigator,
+          Route<dynamic> route, OnlineSideEffectBarrier barrier) =>
+      _pushRoute(navigator, route, guarded: true, barrier: barrier);
 
   static PushPayload? _pending;
   static String? _lastOpenedKey;
@@ -35,7 +56,19 @@ class PushNavigation {
     PushPayload payload, {
     bool fromColdStart = false,
     bool force = false,
+    bool Function()? isCurrent,
+    OnlineSideEffectBarrier? barrier,
   }) async {
+    bool current() {
+      try {
+        return isCurrent?.call() ?? true;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    if (!current() ||
+        (isCurrent != null && (barrier == null || !barrier.isOpen))) return;
     final key = payload.dedupeKey;
     final now = DateTime.now();
     if (!force &&
@@ -47,7 +80,7 @@ class PushNavigation {
     }
 
     if (!_ready || Supabase.instance.client.auth.currentUser == null) {
-      stash(payload);
+      if (isCurrent == null) stash(payload);
       return;
     }
 
@@ -55,7 +88,7 @@ class PushNavigation {
         (context != null && context.mounted) ? context : rootNavigatorContext;
     final pushContext = rootNavigatorContext ?? tabContext;
     if (tabContext == null && pushContext == null) {
-      stash(payload);
+      if (isCurrent == null) stash(payload);
       return;
     }
 
@@ -65,15 +98,18 @@ class PushNavigation {
 
     switch (payload.type) {
       case 'dm_message':
-        await _openDm(pushContext ?? tabContext!, payload);
+        await _openDm(pushContext ?? tabContext!, payload, current,
+            isCurrent != null, barrier);
         break;
       case 'team_message':
       case 'team_reply':
-        await _openTeamChat(pushContext ?? tabContext!, payload, tabContext);
+        await _openTeamChat(pushContext ?? tabContext!, payload, tabContext,
+            current, isCurrent != null, barrier);
         break;
       case 'friend_request':
       case 'friend_accepted':
-        await _openFriend(pushContext ?? tabContext!, payload);
+        await _openFriend(
+            pushContext ?? tabContext!, payload, isCurrent != null, barrier);
         break;
       case 'assignment':
         final ctx = pushContext ?? tabContext;
@@ -97,6 +133,8 @@ class PushNavigation {
       case 'collection_created':
       case 'collection_deadline_soon':
       case 'collection_contribution_private':
+        // Deep-link helper has asynchronous work without an owner guard.
+        if (isCurrent != null) return;
         await _openGroupAction(pushContext ?? tabContext!, payload, tabContext);
         break;
       default:
@@ -178,13 +216,19 @@ class PushNavigation {
     return PushPayload.tryParse(raw) ?? payload;
   }
 
-  static Future<void> _openDm(BuildContext context, PushPayload payload) async {
+  static Future<void> _openDm(
+      BuildContext context,
+      PushPayload payload,
+      bool Function() current,
+      bool guarded,
+      OnlineSideEffectBarrier? barrier) async {
     var peerId = payload.peerId;
     final chatId = payload.chatId;
     if ((peerId == null || peerId.isEmpty) &&
         chatId != null &&
         chatId.isNotEmpty) {
       peerId = await _resolveDmPeerId(chatId);
+      if (!current()) return;
     }
     if (peerId == null || peerId.isEmpty) {
       if (context.mounted) {
@@ -202,6 +246,7 @@ class PushNavigation {
     String? avatar;
 
     final profile = await resolvePeerProfile(resolvedPeerId);
+    if (!current()) return;
     if (!isUnresolvedDmTitle(profile.name)) {
       peerName = profile.name;
     }
@@ -209,22 +254,27 @@ class PushNavigation {
 
     final navContext = rootNavigatorContext ?? context;
     if (!navContext.mounted) return;
-    await Navigator.of(navContext).push(
-      MaterialPageRoute(
-        builder: (_) => DirectChatScreen(
-          peerId: resolvedPeerId,
-          peerName: peerName,
-          peerAvatarUrl: avatar,
-          initialChatId: chatId,
+    await _pushRoute(
+        Navigator.of(navContext),
+        MaterialPageRoute(
+          builder: (_) => DirectChatScreen(
+            peerId: resolvedPeerId,
+            peerName: peerName,
+            peerAvatarUrl: avatar,
+            initialChatId: chatId,
+          ),
         ),
-      ),
-    );
+        guarded: guarded,
+        barrier: barrier);
   }
 
   static Future<void> _openTeamChat(
     BuildContext pushContext,
     PushPayload payload,
     BuildContext? tabContext,
+    bool Function() current,
+    bool guarded,
+    OnlineSideEffectBarrier? barrier,
   ) async {
     var teamId = payload.teamId;
     final chatId = payload.chatId;
@@ -238,6 +288,7 @@ class PushNavigation {
             .select('team_id')
             .eq('id', chatId)
             .maybeSingle();
+        if (!current()) return;
         teamId = (row?['team_id'] ?? '').toString();
         if (teamId.isEmpty) teamId = null;
       } catch (_) {}
@@ -260,6 +311,7 @@ class PushNavigation {
           .select('id, name, teacher, icon, group_name')
           .eq('id', teamId)
           .maybeSingle();
+      if (!current()) return;
       if (row != null) {
         name = (row['name'] ?? name).toString();
         teacher = (row['teacher'] ?? '').toString();
@@ -267,6 +319,7 @@ class PushNavigation {
         groupName = (row['group_name'] ?? '').toString();
       }
     } catch (_) {}
+    if (!current()) return;
 
     final team = Team(
       id: teamId,
@@ -279,11 +332,13 @@ class PushNavigation {
     final navContext = rootNavigatorContext ?? pushContext;
     if (!navContext.mounted) return;
 
-    await Navigator.of(navContext).push(
-      MaterialPageRoute(
-        builder: (_) => TeamDetailsScreen(team: team, initialTabIndex: 1),
-      ),
-    );
+    await _pushRoute(
+        Navigator.of(navContext),
+        MaterialPageRoute(
+          builder: (_) => TeamDetailsScreen(team: team, initialTabIndex: 1),
+        ),
+        guarded: guarded,
+        barrier: barrier);
   }
 
   /// Opens team chat for group-action cards and scrolls to [cardMessageId].
@@ -322,22 +377,26 @@ class PushNavigation {
   static Future<void> _openFriend(
     BuildContext context,
     PushPayload payload,
+    bool guarded,
+    OnlineSideEffectBarrier? barrier,
   ) async {
     final friendId = payload.friendUserId;
     final navContext = rootNavigatorContext ?? context;
     if (!navContext.mounted) return;
 
     if (friendId != null && friendId.isNotEmpty) {
-      await Navigator.of(navContext).push(
-        MaterialPageRoute(
-          builder: (_) => FriendProfileScreen(userId: friendId),
-        ),
-      );
+      await _pushRoute(
+          Navigator.of(navContext),
+          MaterialPageRoute(
+            builder: (_) => FriendProfileScreen(userId: friendId),
+          ),
+          guarded: guarded,
+          barrier: barrier);
       return;
     }
 
-    await Navigator.of(navContext).push(
-      MaterialPageRoute(builder: (_) => const MyFriendsScreen()),
-    );
+    await _pushRoute(Navigator.of(navContext),
+        MaterialPageRoute(builder: (_) => const MyFriendsScreen()),
+        guarded: guarded, barrier: barrier);
   }
 }

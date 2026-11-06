@@ -153,18 +153,19 @@ void main() {
     ProjectChatServerCache makeCache() => ProjectChatServerCache(db: db, scope: scope,
       currentBinding: () => binding, project: 'https://example.invalid');
     var cache = makeCache();
-    ChatFile file(String name, String mime) => ChatFile(id: name, chatId: 'chat',
-      messageId: 'message', fileName: name, fileKey: name,
+    ChatFile file(String name, String mime, {String chat = 'chat', String message = 'message'}) => ChatFile(id: name, chatId: chat,
+      messageId: message, fileName: name, fileKey: name,
       fileUrl: 'https://studentsplatform.storage.yandexcloud.net/chats/test/$name',
       fileType: mime, fileSize: 3, uploadedBy: uid, uploadedAt: now);
     final png = file('qa.png', 'image/png'), pdf = file('qa.pdf', 'application/pdf');
+    final teamPng = file('team.png', 'image/png', chat: 'team-chat', message: 'team-message');
     final imageBytes = base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/afoAAAAASUVORK5CYII=');
     await tester.runAsync(() async {
-      for (final item in [png, pdf]) {
+      for (final item in [png, pdf, teamPng]) {
         final key = ChatFileAccess.keyFor(item.fileUrl)!;
         final f = File('${dir.path}/authorized_chat_files/$uid/${sha256.convert(utf8.encode('$uid:$key'))}');
         await f.parent.create(recursive: true);
-        await f.writeAsBytes(item == png ? imageBytes : [37, 80, 68, 70]);
+        await f.writeAsBytes(item == pdf ? [37, 80, 68, 70] : imageBytes);
         await File('${f.path}.grant').writeAsString('chat-file-grant-v2:$sid');
       }
       final summary = (await cache.begin(ProjectChatServerCache.summaryChatKey))!;
@@ -186,7 +187,7 @@ void main() {
       final teamTicket = (await cache.begin('team-chat'))!;
       expect(await cache.saveServerPage(teamTicket, [Message(id: 'team-message',
         chatId: 'team-chat', authorId: uid, authorLogin: uid, authorName: 'QA',
-        text: 'Сообщение команды QA', at: now)], hasMore: false), isTrue);
+        text: 'Сообщение команды QA', at: now, attachments: [teamPng])], hasMore: false), isTrue);
       await db.close();
       db = await openProjectChatServerDatabase('${dir.path}/chats.sqlite', factory: databaseFactoryFfi);
       cache = makeCache();
@@ -279,6 +280,15 @@ void main() {
       await tester.pump(const Duration(milliseconds: 20));
     }
     expect(find.text('Сообщение команды QA'), findsOneWidget);
+    for (var i = 0; i < 100 && tester.widgetList<Image>(find.byType(Image))
+        .where((image) => image.image is MemoryImage &&
+            listEquals((image.image as MemoryImage).bytes, imageBytes)).isEmpty; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(tester.widgetList<Image>(find.byType(Image))
+        .where((image) => image.image is MemoryImage &&
+            listEquals((image.image as MemoryImage).bytes, imageBytes)), isNotEmpty);
     await tester.runAsync(() async {
       final originalBinding = binding;
       binding = OfflineSessionBinding(issuer: 'https://example.invalid/auth/v1',

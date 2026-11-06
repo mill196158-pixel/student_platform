@@ -30,7 +30,24 @@ class _Cache implements ProjectChatServerCache {
         'unread': 0,
         'pinned': false,
         'muted': false
-      }
+      },
+      for (final entry in [
+        ('Группа тем', 'Карточка тем', true),
+        ('Группа сбора', 'Карточка сбора', true),
+        ('Обычный текст', 'Карточка тем', false),
+      ])
+        {
+          'team': {'id': entry.$1, 'name': entry.$1, 'teacher': '', 'groupCode': '', 'icon': ''},
+          'title': entry.$1,
+          'chatId': entry.$1,
+          'isDm': false,
+          'lastAuthor': 'Автор',
+          'lastMsgPreview': entry.$2,
+          if (entry.$3) 'lastActionCard': true,
+          'unread': 0,
+          'pinned': false,
+          'muted': false,
+        }
     ];
   }
 
@@ -54,6 +71,11 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(find.text('Сохранённый чат'), findsOneWidget);
+    expect(find.text('Группа тем'), findsOneWidget);
+    expect(find.text('Группа сбора'), findsOneWidget);
+    expect(find.text('Карточка тем'), findsOneWidget);
+    expect(find.text('Карточка сбора'), findsNothing);
+    expect(find.text('Автор'), findsOneWidget);
     expect(cache.calls, 1);
     expect(find.byTooltip('Ещё'), findsNothing);
     caps.block();

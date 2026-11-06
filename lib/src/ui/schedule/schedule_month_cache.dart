@@ -20,6 +20,7 @@ class ScheduleMonthCache {
   static final _versions = <String, int>{};
   static final _pending = <String, Future<void>>{};
   static final _quarantined = <String>{};
+  static final _foreground = <String, ScheduleMonthAttempt>{};
 
   String _month(DateTime value) =>
       '${value.year.toString().padLeft(4, '0')}-${value.month.toString().padLeft(2, '0')}';
@@ -36,7 +37,26 @@ class ScheduleMonthCache {
     final key = _key(owner.userId, month);
     final version = (_versions[key] ?? 0) + 1;
     _versions[key] = version;
+    final attempt = ScheduleMonthAttempt._(owner, key, _month(month), version, true);
+    _foreground[key] = attempt;
+    return attempt;
+  }
+
+  /// A background request never invalidates an active foreground load.
+  ScheduleMonthAttempt? beginBackground(DateTime month) {
+    final owner = scope.capture();
+    if (owner == null) return null;
+    final key = _key(owner.userId, month);
+    final active = _foreground[key];
+    if (active != null && scope.isCurrent(active.owner)) return null;
+    if (active != null) _foreground.remove(key);
+    final version = (_versions[key] ?? 0) + 1;
+    _versions[key] = version;
     return ScheduleMonthAttempt._(owner, key, _month(month), version, true);
+  }
+
+  void finishForeground(ScheduleMonthAttempt attempt) {
+    if (identical(_foreground[attempt.key], attempt)) _foreground.remove(attempt.key);
   }
 
   /// Captures the current version without invalidating in-flight writes or
@@ -85,9 +105,14 @@ class ScheduleMonthCache {
     }
   }
 
-  Future<bool> write(ScheduleMonthAttempt attempt, List<Lesson> lessons) async {
+  Future<bool> write(ScheduleMonthAttempt attempt, List<Lesson> lessons,
+      {bool Function()? isCurrent}) async {
+    bool current() {
+      try { return _current(attempt) && (isCurrent?.call() ?? true); }
+      catch (_) { return false; }
+    }
     if (!attempt._writable ||
-        !_current(attempt) ||
+        !current() ||
         lessons.any((lesson) =>
             !MskDate.isoDate(lesson.date).startsWith('${attempt.month}-')))
       return false;
@@ -105,15 +130,15 @@ class ScheduleMonthCache {
     _pending[attempt.key] = done.future;
     try {
       if (previous != null) await previous;
-      if (!_current(attempt)) return false;
+      if (!current()) return false;
       final prefs = await _preferences();
-      if (!_current(attempt)) return false;
+      if (!current()) return false;
       final previousValue = prefs.getString(attempt.key);
       final wasQuarantined = _quarantined.contains(attempt.key);
       _quarantined.add(attempt.key);
       try {
         final saved = await prefs.setString(attempt.key, raw);
-        if (saved && _current(attempt)) {
+        if (saved && current()) {
           _quarantined.remove(attempt.key);
           return true;
         }

@@ -86,8 +86,28 @@ void main() {
     final shown = tester.widget<Image>(find.byType(Image).first).image as MemoryImage;
     expect(shown.bytes, secondPng);
     await tester.tap(find.byType(Image).first);
+    // A second tap before the overlay frame must not add another back entry.
+    await tester.tap(find.byType(Image).first);
     await tester.pumpAndSettle();
     expect(find.byType(InteractiveViewer), findsOneWidget);
+    expect(find.byTooltip('Назад'), findsOneWidget);
+    expect(tester.widget<Material>(find.ancestor(
+      of: find.byType(InteractiveViewer), matching: find.byType(Material)).first).color,
+      Colors.white);
+    await tester.tap(find.byTooltip('Назад'));
+    await tester.pump();
+    expect(find.byType(InteractiveViewer), findsNothing);
+    expect(tester.state<NavigatorState>(find.byType(Navigator)).canPop(), isFalse);
+    await tester.tap(find.byType(Image).first);
+    await tester.pumpAndSettle();
+    expect(find.byType(InteractiveViewer), findsOneWidget);
+    final viewerSize = tester.getSize(find.byType(InteractiveViewer));
+    expect(viewerSize, tester.view.physicalSize / tester.view.devicePixelRatio);
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+    expect(find.byType(InteractiveViewer), findsNothing);
+    await tester.tap(find.byType(Image).first);
+    await tester.pumpAndSettle();
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: CachedChatAttachment(
       file: makeFile('second.png', 'image/png', deleted: true), service: service))));
     expect(find.byType(InteractiveViewer), findsNothing);
@@ -124,13 +144,18 @@ void main() {
     revokedRead.complete();
     await tester.pump();
     expect(find.byType(Image), findsNothing);
-    final revokedAgain = Completer<void>();
-    await mount(first, beforeRead: () => revokedAgain.future);
+    await mount(second);
+    await tester.tap(find.byType(Image).first);
+    await tester.pumpAndSettle();
+    expect(find.byType(InteractiveViewer), findsOneWidget);
+    final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+    expect(navigator.canPop(), isTrue);
     caps.block();
-    revokedAgain.complete();
     await tester.pump();
     await tester.pump();
     expect(find.byType(Image), findsNothing);
+    expect(find.byType(InteractiveViewer), findsNothing);
+    expect(navigator.canPop(), isFalse);
     expect(requests, 0);
     await tester.pumpWidget(const SizedBox.shrink());
     await service.dispose();

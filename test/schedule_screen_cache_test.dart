@@ -35,6 +35,29 @@ Lesson lesson(String id, DateTime date, String title) => Lesson(
   end: const TimeOfDay(hour: 10, minute: 30), subjectRaw: title);
 
 void main() {
+  testWidgets('disposing a pending screen releases foreground reservation', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final session = fakeSession('schedule-screen-release');
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final repo = _Repository(), cache = ScheduleMonthCache(scope, SupabaseConfig.url);
+    Widget host(Widget child) => MaterialApp(home: AuthSessionScopeHost(
+      key: const ValueKey('scope'), createScope: () => scope, child: child));
+    await tester.pumpWidget(host(ScheduleScreen(repository: repo,
+      subscribeRealtime: false, now: () => DateTime(2026, 11, 5))));
+    await tester.pump();
+    await tester.pump();
+    expect(repo.calls, hasLength(1));
+    expect(cache.beginBackground(DateTime(2026, 11)), isNull);
+    await tester.pumpWidget(host(const SizedBox.shrink()));
+    expect(cache.beginBackground(DateTime(2026, 11)), isNotNull);
+    repo.calls.first.complete([lesson('late', DateTime(2026, 11, 5), 'Позднее')]);
+    await tester.pump();
+    expect(await cache.read(cache.beginRead(DateTime(2026, 11))!), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await events.close();
+  });
   testWidgets('screen shows both cached months, ignores old request and clears on account change', (tester) async {
     SharedPreferences.setMockInitialValues({});
     var session = fakeSession('schedule-screen-a');

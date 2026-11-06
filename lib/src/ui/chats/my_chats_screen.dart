@@ -339,7 +339,9 @@ class _MyChatsScreenState extends State<MyChatsScreen>
             }),
         onUnavailable: (card) {
           if (!current(card)) return;
-          setState(() => byCard[card]!.verifiedPreview = 'Карточка недоступна');
+          // The card is hidden in the chat as well. The summary RPC does not
+          // provide an earlier visible message, so leave its preview empty.
+          setState(() => byCard[card]!.verifiedPreview = '');
         });
   }
 
@@ -1444,7 +1446,12 @@ class _MyChatsScreenState extends State<MyChatsScreen>
       return;
     }
     try {
-      final list = rows.map(_summaryFromMap).toList()..sort(_compareChats);
+      final list = rows.map((row) {
+        final item = _summaryFromMap(row);
+        // The cache contains no live availability proof for action cards.
+        if (row['lastActionCard'] == true) item.verifiedPreview = '';
+        return item;
+      }).toList()..sort(_compareChats);
       setState(() {
         _all = list;
         _visible = List.of(list);
@@ -1570,6 +1577,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
         'subtitle': c.subtitle,
         'lastAuthor': c.lastAuthor,
         'lastMsgPreview': c.lastMsgPreview,
+        if (c.actionCard != null) 'lastActionCard': true,
         'lastTime': c.lastTime?.toIso8601String(),
         'unread': c.unread,
         'pinned': c.pinned,
@@ -1707,7 +1715,9 @@ class _ChatRow extends StatelessWidget {
     final unread = data.unread > 0;
     final muted = data.muted;
     final accent = Theme.of(context).colorScheme.primary;
-    final author = (data.lastAuthor?.isNotEmpty ?? false)
+    final author = data.verifiedPreview == ''
+        ? (data.subtitle ?? '')
+        : (data.lastAuthor?.isNotEmpty ?? false)
         ? data.lastAuthor!
         : (data.subtitle ?? '');
     final preview = data.verifiedPreview ?? data.lastMsgPreview ?? '';

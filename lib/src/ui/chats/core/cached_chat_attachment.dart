@@ -30,7 +30,9 @@ class _CachedChatAttachmentState extends State<CachedChatAttachment> {
   int _generation = 0;
   int _revision = 0;
   bool _expanded = false;
-  late Listenable _changes;
+  final OverlayPortalController _viewer = OverlayPortalController();
+  LocalHistoryEntry? _history;
+  Listenable? _changes;
   late Future<Uint8List?> _bytes;
 
   @override
@@ -49,8 +51,14 @@ class _CachedChatAttachmentState extends State<CachedChatAttachment> {
   }
 
   void _bind() {
+    _changes?.removeListener(_onAccessChanged);
     final revision = ++_revision;
     _expanded = false;
+    final oldHistory = _history;
+    _history = null;
+    if (oldHistory != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => oldHistory.remove());
+    }
     final url = widget.file.fileUrl;
     final file = widget.file;
     _owner = ChatFileAccess.userId;
@@ -59,6 +67,7 @@ class _CachedChatAttachmentState extends State<CachedChatAttachment> {
     _changes = Listenable.merge([
       widget.service.cachedAccessChanges!, ChatFileAccess.accessChanges,
     ]);
+    _changes!.addListener(_onAccessChanged);
     bool current() => mounted && revision == _revision &&
         widget.file.fileUrl == url && _allowed();
     final debugRead = widget.debugRead, debugBeforeRead = widget.debugBeforeRead;
@@ -79,12 +88,31 @@ class _CachedChatAttachmentState extends State<CachedChatAttachment> {
   @override
   void dispose() {
     _revision++;
+    _changes?.removeListener(_onAccessChanged);
+    final oldHistory = _history;
+    _history = null;
+    if (oldHistory != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => oldHistory.remove());
+    }
     super.dispose();
   }
 
   bool _allowed() => !widget.file.isDeleted && widget.service.canReadCached &&
       ChatFileAccess.isViewerCurrent(widget.file.fileUrl, user: _owner,
           epoch: _generation, sessionBinding: _session);
+
+  void _onAccessChanged() {
+    if (_allowed()) return;
+    _expanded = false;
+    final history = _history;
+    if (history == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (identical(_history, history)) {
+        _history = null;
+        history.remove();
+      }
+    });
+  }
 
   Future<void> _openDocument(int revision) async {
     bool current() => mounted && revision == _revision && _allowed();
@@ -109,7 +137,7 @@ class _CachedChatAttachmentState extends State<CachedChatAttachment> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: _changes,
+    listenable: _changes!,
     builder: (context, _) {
       if (!_allowed()) return const SizedBox.shrink();
       return FutureBuilder<Uint8List?>(key: ValueKey(_revision), future: _bytes, builder: (context, snapshot) {
@@ -122,19 +150,57 @@ class _CachedChatAttachmentState extends State<CachedChatAttachment> {
             onPressed: () => _openDocument(revision),
             icon: Icon(widget.file.fileIcon), label: Text(widget.file.fileName));
         }
-        return GestureDetector(
-          onTap: () {
-            if (!_allowed() || revision != _revision) return;
-            setState(() => _expanded = !_expanded);
-          },
-          child: ClipRRect(borderRadius: BorderRadius.circular(12),
-            child: _expanded
-                ? SizedBox(height: MediaQuery.sizeOf(context).height * .65,
-                    width: MediaQuery.sizeOf(context).width * .8,
-                    child: InteractiveViewer(child: Image.memory(bytes,
-                      errorBuilder: (_, __, ___) => Text('Вложение: ${widget.file.fileName}'))))
-                : Image.memory(bytes, width: 220, fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => Text('Вложение: ${widget.file.fileName}'))),
+        void closeViewer() {
+          _expanded = false;
+          final history = _history;
+          _history = null;
+          history?.remove();
+          _viewer.hide();
+        }
+        return OverlayPortal.targetsRootOverlay(
+          controller: _viewer,
+          overlayChildBuilder: (context) => ListenableBuilder(
+            listenable: _changes!,
+            builder: (context, _) {
+              if (!_expanded || revision != _revision || !_allowed()) {
+                return const SizedBox.shrink();
+              }
+              return Material(
+                  color: Colors.white,
+                  child: SafeArea(child: Stack(children: [
+                    Positioned.fill(child: InteractiveViewer(
+                      minScale: 1, maxScale: 5,
+                      child: Center(child: Image.memory(bytes, fit: BoxFit.contain,
+                        errorBuilder: (_, __, ___) => const Text('Не удалось открыть изображение'))))),
+                    Positioned(top: 4, left: 4, child: IconButton(
+                      tooltip: 'Назад', onPressed: closeViewer,
+                      icon: const Icon(Icons.arrow_back, color: Colors.black87))),
+                  ])),
+              );
+            },
+          ),
+          child: GestureDetector(
+            onTap: () {
+              if (_expanded || !_allowed() || revision != _revision) return;
+              _expanded = true;
+              final route = ModalRoute.of(context);
+              if (route != null) {
+                late final LocalHistoryEntry history;
+                history = LocalHistoryEntry(onRemove: () {
+                  if (!identical(_history, history)) return;
+                  _history = null;
+                  _expanded = false;
+                  _viewer.hide();
+                });
+                _history = history;
+                route.addLocalHistoryEntry(history);
+              }
+              _viewer.show();
+            },
+            child: ClipRRect(borderRadius: BorderRadius.circular(12),
+              child: Image.memory(bytes, width: 220, fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => Text('Вложение: ${widget.file.fileName}'))),
+          ),
         );
       });
     },

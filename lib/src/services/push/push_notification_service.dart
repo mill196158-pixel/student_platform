@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:student_platform/src/core/single_flight_initialization.dart';
+import 'package:student_platform/src/core/online_side_effect_barrier.dart';
+import 'guarded_push_open.dart';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -40,12 +42,25 @@ class PushNotificationService {
   bool _firebaseReady = false;
   bool _localReady = false;
   bool _sessionActive = false;
+  int _sessionRevision = 0;
+  OnlineSideEffectBarrier? _guardedBarrier;
+  bool _strictPushGuard = false;
+  bool Function()? _guardedCurrent;
+  (PushPayload, OnlineSideEffectBarrier)? _guardedPending;
   bool _promptInFlight = false;
   String? _installationId;
   bool get isSupportedPlatform =>
       !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
   bool get isFirebaseReady => _firebaseReady;
+
+  /// Reserve the guarded logout cleanup before the synchronous session fence.
+  /// The reservation itself performs no network or filesystem work.
+  PushLogoutReservation? reserveGuardedLogout({required bool Function() isOwnerCurrent}) {
+    final barrier = _guardedBarrier;
+    if (barrier == null || !barrier.isOpen) return null;
+    return PushLogoutReservation._(barrier, isOwnerCurrent);
+  }
 
   void bindNavigatorKey(GlobalKey<NavigatorState> key) {
     // Kept for call-site compatibility; navigation uses [rootNavigatorKey].
@@ -80,14 +95,21 @@ class PushNotificationService {
     }
   }
 
-  Future<void> onAuthenticated(BuildContext? context) async {
+  Future<void> onAuthenticated(BuildContext? context,
+      {OnlineSideEffectBarrier? barrier, bool Function()? isCurrent}) async {
     if (!isSupportedPlatform) return;
     final userId = Supabase.instance.client.auth.currentUser?.id;
     if (userId == null) return;
+    final revision = ++_sessionRevision;
+    _guardedBarrier = barrier;
+    _strictPushGuard = barrier != null;
     bool sameSession() =>
         _sessionActive &&
+        _sessionRevision == revision &&
+        (barrier?.isOpen ?? true) && (isCurrent?.call() ?? true) &&
         Supabase.instance.client.auth.currentUser?.id == userId;
     _sessionActive = true;
+    _guardedCurrent = barrier == null ? null : sameSession;
     PushNavigation.markReady();
 
     await bootstrapFirebase();
@@ -95,32 +117,45 @@ class PushNotificationService {
 
     await _ensureInstallationId();
     if (!sameSession()) return;
-    await _attachListeners();
+    await _attachListeners(isCurrent: sameSession, barrier: barrier);
     if (!sameSession()) return;
     await _handleInitialMessage(sameSession);
     if (!sameSession()) return;
 
     if (context != null && context.mounted) {
-      await maybeShowPermissionPrompt(context);
+      await maybeShowPermissionPrompt(context, isCurrent: sameSession);
     }
-
+    if (!sameSession()) return;
     final settings = await FirebaseMessaging.instance.getNotificationSettings();
     if (sameSession() && _isAuthorized(settings.authorizationStatus)) {
-      await _registerCurrentToken();
+      await _registerCurrentToken(isCurrent: sameSession);
     }
   }
 
-  Future<void> onLogout() async {
+  Future<void> onLogout({PushLogoutReservation? reservation}) async {
+    if (reservation != null && !reservation.isOwnerCurrent) return;
     PushNavigation.markNotReady();
     _sessionActive = false;
+    final revision = ++_sessionRevision;
+    final original = Supabase.instance.client.auth.currentSession;
+    bool sameOwner() {
+      final current = Supabase.instance.client.auth.currentSession;
+      return (reservation?.isOwnerCurrent ?? true) && _sessionRevision == revision &&
+          current?.user.id == original?.user.id &&
+          current?.accessToken == original?.accessToken &&
+          current?.refreshToken == original?.refreshToken;
+    }
     try {
       if (_localReady) await _local.cancelAll();
+      if (!sameOwner()) return;
       if (!kIsWeb && Platform.isAndroid) {
         await const MethodChannel('student_platform/notifications')
             .invokeMethod<void>('clearNotifications');
       }
     } catch (_) {}
+    if (!sameOwner()) return;
     final installationId = await _ensureInstallationId();
+    if (!sameOwner()) return;
 
     if (Supabase.instance.client.auth.currentUser != null) {
       try {
@@ -132,31 +167,58 @@ class PushNotificationService {
         if (kDebugMode) debugPrint('[Push] disable token on logout: $e');
       }
     }
-
+    if (!sameOwner()) return;
     await disposeListeners();
+    if (!sameOwner()) return;
     _sessionActive = false;
   }
 
   Future<void> disposeListeners() async {
-    await _onMessageSub?.cancel();
-    await _onOpenedSub?.cancel();
-    await _tokenRefreshSub?.cancel();
+    final message = _onMessageSub, opened = _onOpenedSub, token = _tokenRefreshSub;
     _onMessageSub = null;
     _onOpenedSub = null;
     _tokenRefreshSub = null;
+    await message?.cancel();
+    await opened?.cancel();
+    await token?.cancel();
   }
 
-  Future<void> maybeShowPermissionPrompt(BuildContext context) async {
+  /// Synchronously invalidates this guarded session before detaching its
+  /// listeners. Cancellation remains tracked by its old barrier.
+  void closeGuardedSession(OnlineSideEffectBarrier barrier) {
+    if (!identical(_guardedBarrier, barrier)) return;
+    _guardedBarrier = null;
+    _guardedPending = null;
+    _sessionActive = false;
+    _guardedCurrent = null;
+    _sessionRevision++;
+    final message = _onMessageSub, opened = _onOpenedSub, token = _tokenRefreshSub;
+    _onMessageSub = null;
+    _onOpenedSub = null;
+    _tokenRefreshSub = null;
+    unawaited(barrier.trackTeardown(() async {
+      await message?.cancel();
+      await opened?.cancel();
+      await token?.cancel();
+    }));
+  }
+
+  Future<void> maybeShowPermissionPrompt(BuildContext context,
+      {bool Function()? isCurrent}) async {
+    bool current() => isCurrent?.call() ?? true;
+    if (!current()) return;
     if (!isSupportedPlatform || !_firebaseReady) return;
     if (_promptInFlight) return;
 
     final prefs = await SharedPreferences.getInstance();
+    if (!current()) return;
     if (prefs.getBool(_kPermissionPromptSeenKey) == true) return;
 
     final settings = await FirebaseMessaging.instance.getNotificationSettings();
+    if (!current()) return;
     if (_isAuthorized(settings.authorizationStatus)) {
       await prefs.setBool(_kPermissionPromptSeenKey, true);
-      await _registerCurrentToken();
+      if (current()) await _registerCurrentToken(isCurrent: current);
       return;
     }
 
@@ -167,17 +229,19 @@ class PushNotificationService {
     _promptInFlight = true;
     try {
       final enable = await showPushPermissionPrompt(context);
+      if (!current()) return;
       await prefs.setBool(_kPermissionPromptSeenKey, true);
-      if (enable == true) {
-        await requestSystemPermissionAndRegister();
+      if (enable == true && current()) {
+        await requestSystemPermissionAndRegister(isCurrent: current);
       }
     } finally {
       _promptInFlight = false;
     }
   }
 
-  Future<bool> requestSystemPermissionAndRegister() async {
+  Future<bool> requestSystemPermissionAndRegister({bool Function()? isCurrent}) async {
     if (!isSupportedPlatform || !_firebaseReady) return false;
+    if (!(isCurrent?.call() ?? true)) return false;
 
     final settings = await FirebaseMessaging.instance.requestPermission(
       alert: true,
@@ -190,8 +254,8 @@ class PushNotificationService {
     );
 
     final granted = _isAuthorized(settings.authorizationStatus);
-    if (granted) {
-      await _registerCurrentToken();
+    if (granted && (isCurrent?.call() ?? true)) {
+      await _registerCurrentToken(isCurrent: isCurrent);
     }
     return granted;
   }
@@ -216,16 +280,30 @@ class PushNotificationService {
     }
   }
 
-  Future<void> _attachListeners() async {
-    if (_onMessageSub != null) return;
-
-    _onMessageSub = FirebaseMessaging.onMessage.listen(_onForegroundMessage);
+  Future<void> _attachListeners({bool Function()? isCurrent,
+      OnlineSideEffectBarrier? barrier}) async {
+    bool current() => isCurrent?.call() ?? true;
+    // Existing callbacks capture the former session. Remove them before
+    // replacing and never attach a stale continuation after the await.
+    await disposeListeners();
+    if (!current()) return;
+    void dispatch(Future<void> Function() operation) {
+      if (!current()) return;
+      if (barrier == null) {
+        unawaited(operation());
+      } else {
+        unawaited(barrier.run(operation));
+      }
+    }
+    _onMessageSub = FirebaseMessaging.onMessage.listen((message) =>
+        dispatch(() => _onForegroundMessage(message, isCurrent: current)));
     _onOpenedSub =
-        FirebaseMessaging.onMessageOpenedApp.listen(_onMessageOpened);
+        FirebaseMessaging.onMessageOpenedApp.listen((message) =>
+            dispatch(() => _onMessageOpened(message, isCurrent: current)));
     _tokenRefreshSub =
-        FirebaseMessaging.instance.onTokenRefresh.listen((token) async {
-      if (!_sessionActive) return;
-      await _upsertToken(token);
+        FirebaseMessaging.instance.onTokenRefresh.listen((token) {
+      if (!_sessionActive || !current()) return;
+      dispatch(() => _upsertToken(token, isCurrent: current));
     });
   }
 
@@ -234,14 +312,26 @@ class PushNotificationService {
     if (initial == null || !sameSession()) return;
     final payload = PushPayload.tryParse(initial.data);
     if (payload == null) return;
+    if (_strictPushGuard) {
+      final barrier = _guardedBarrier;
+      if (barrier != null && sameSession()) _guardedPending = (payload, barrier);
+      return;
+    }
     PushNavigation.stash(payload);
   }
 
-  Future<void> _onForegroundMessage(RemoteMessage message) async {
+  Future<void> flushGuardedPending(OnlineSideEffectBarrier barrier) async {
+    final pending = _guardedPending;
+    if (pending == null || !identical(pending.$2, barrier) || !barrier.isOpen) return;
+    _guardedPending = null;
+    await openGuardedPayload(pending.$1);
+  }
+
+  Future<void> _onForegroundMessage(RemoteMessage message, {bool Function()? isCurrent}) async {
     final payload = PushPayload.tryParse(message.data);
     final chatId = payload?.chatId ?? message.data['chat_id']?.toString();
     final eventType = payload?.type ?? message.data['type']?.toString() ?? '';
-    if (!_sessionActive ||
+    if (!_sessionActive || !(isCurrent?.call() ?? true) ||
         InAppNotificationBus.instance.wasDismissed(payload?.notificationId) ||
         ActiveChatTracker.instance.isActive(chatId)) {
       return;
@@ -265,7 +355,7 @@ class PushNotificationService {
         // Realtime can still deliver fresh events; do not display an unverifiable delayed push.
         return;
       }
-      if (!_sessionActive ||
+      if (!_sessionActive || !(isCurrent?.call() ?? true) ||
           Supabase.instance.client.auth.currentUser?.id != uid ||
           InAppNotificationBus.instance.wasDismissed(payload.notificationId) ||
           ActiveChatTracker.instance.isActive(chatId)) return;
@@ -291,7 +381,7 @@ class PushNotificationService {
     );
 
     // Quietly warm that thread so opening the chat is instant.
-    if (chatId != null && chatId.isNotEmpty) {
+    if (chatId != null && chatId.isNotEmpty && _guardedBarrier == null) {
       ChatWarmCoordinator.instance.prioritizeChat(chatId);
     }
 
@@ -307,15 +397,44 @@ class PushNotificationService {
     );
   }
 
-  Future<void> _onMessageOpened(RemoteMessage message) async {
+  Future<void> _onMessageOpened(RemoteMessage message, {bool Function()? isCurrent}) async {
+    if (!(isCurrent?.call() ?? true)) return;
     final payload = PushPayload.tryParse(message.data);
     if (payload == null) return;
+    if (_strictPushGuard) {
+      await openGuardedPayload(payload);
+      return;
+    }
     final context = rootNavigatorContext;
     if (context == null) {
       PushNavigation.stash(payload);
       return;
     }
     await PushNavigation.handle(context, payload);
+  }
+
+  /// Opens a guarded payload only after confirming it belongs to this owner.
+  /// Payloads without a server notification id remain unavailable offline.
+  Future<void> openGuardedPayload(PushPayload payload) async {
+    final barrier = _guardedBarrier, guard = _guardedCurrent;
+    final user = Supabase.instance.client.auth.currentUser?.id;
+    final id = payload.notificationId;
+    if (barrier == null || guard == null || user == null || id == null || id.isEmpty) return;
+    bool current() => barrier.isOpen && identical(_guardedBarrier, barrier) &&
+        guard() && Supabase.instance.client.auth.currentUser?.id == user;
+    await openVerifiedPush(barrier: barrier, isCurrent: current, verify: () async {
+      try {
+        final row = await Supabase.instance.client.from('app_notifications')
+            .select('id,recipient_id,deleted_at').eq('id', id)
+            .eq('recipient_id', user).maybeSingle();
+        return row != null && row['deleted_at'] == null && row['recipient_id'] == user;
+      } catch (_) { return false; }
+    }, open: () async {
+        final context = rootNavigatorContext;
+        if (context == null || !context.mounted || !current()) return;
+        await PushNavigation.handle(context, payload, force: true,
+            isCurrent: current, barrier: barrier);
+    });
   }
 
   Future<void> _showLocalNotification({
@@ -370,12 +489,25 @@ class PushNotificationService {
       onDidReceiveNotificationResponse: (response) {
         final parsed = PushPayload.tryParseLocalPayload(response.payload);
         if (parsed == null) return;
+        if (_strictPushGuard) {
+          unawaited(openGuardedPayload(parsed));
+          return;
+        }
+        final barrier = _guardedBarrier;
         final context = rootNavigatorContext;
         if (context == null) {
           PushNavigation.stash(parsed);
           return;
         }
-        unawaited(PushNavigation.handle(context, parsed, force: true));
+        if (barrier == null) {
+          unawaited(PushNavigation.handle(context, parsed, force: true));
+        } else {
+          unawaited(barrier.run(() async {
+            if (_guardedCurrent?.call() ?? false) {
+              await PushNavigation.handle(context, parsed, force: true);
+            }
+          }));
+        }
       },
     );
 
@@ -409,14 +541,16 @@ class PushNotificationService {
     _localReady = true;
   }
 
-  Future<void> _registerCurrentToken() async {
-    if (!_firebaseReady || !_sessionActive) return;
+  Future<void> _registerCurrentToken({bool Function()? isCurrent}) async {
+    bool current() => _sessionActive && (isCurrent?.call() ?? true);
+    if (!_firebaseReady || !current()) return;
 
     for (var attempt = 1; attempt <= 5; attempt++) {
-      if (!_sessionActive) return;
+      if (!current()) return;
       try {
         if (Platform.isIOS) {
           final apns = await FirebaseMessaging.instance.getAPNSToken();
+          if (!current()) return;
           if (apns == null || apns.isEmpty) {
             if (kDebugMode) {
               debugPrint('[Push] APNs token is not ready, retry $attempt/5');
@@ -427,6 +561,7 @@ class PushNotificationService {
         }
 
         final token = await FirebaseMessaging.instance.getToken();
+        if (!current()) return;
         if (token == null || token.isEmpty) {
           if (kDebugMode) {
             debugPrint('[Push] FCM token is empty, retry $attempt/5');
@@ -434,7 +569,7 @@ class PushNotificationService {
           await Future<void>.delayed(Duration(seconds: attempt));
           continue;
         }
-        await _upsertToken(token);
+        await _upsertToken(token, isCurrent: current);
         return;
       } catch (e) {
         if (kDebugMode)
@@ -444,16 +579,19 @@ class PushNotificationService {
     }
   }
 
-  Future<void> _upsertToken(String token) async {
-    if (Supabase.instance.client.auth.currentUser == null) return;
+  Future<void> _upsertToken(String token, {bool Function()? isCurrent}) async {
+    bool current() => isCurrent?.call() ?? true;
+    if (!current() || Supabase.instance.client.auth.currentUser == null) return;
 
     final installationId = await _ensureInstallationId();
+    if (!current()) return;
     final platform = Platform.isIOS ? 'ios' : 'android';
     String? appVersion;
     try {
       final info = await PackageInfo.fromPlatform();
       appVersion = '${info.version}+${info.buildNumber}';
     } catch (_) {}
+    if (!current()) return;
 
     final locale = PlatformDispatcher.instance.locale.toLanguageTag();
     final timezone = DateTime.now().timeZoneName;
@@ -539,4 +677,18 @@ class PushNotificationService {
     final rand = UniqueKey().hashCode.toUnsigned(32).toRadixString(16);
     return '$now-$rand';
   }
+}
+
+class PushLogoutReservation {
+  PushLogoutReservation._(OnlineSideEffectBarrier barrier, this._current) {
+    unawaited(barrier.trackTeardown(() => _done.future));
+  }
+  @visibleForTesting
+  factory PushLogoutReservation.forTesting(OnlineSideEffectBarrier barrier,
+      {bool Function()? isOwnerCurrent}) =>
+      PushLogoutReservation._(barrier, isOwnerCurrent ?? (() => true));
+  final Completer<void> _done = Completer<void>();
+  final bool Function() _current;
+  bool get isOwnerCurrent { try { return _current(); } catch (_) { return false; } }
+  void finish() { if (!_done.isCompleted) _done.complete(); }
 }

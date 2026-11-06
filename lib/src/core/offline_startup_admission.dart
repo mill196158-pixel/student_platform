@@ -144,7 +144,24 @@ class OfflineStartupAdmission {
         }
         if (!scope.isCurrent(owner) || !fence.unchangedSince(fenceRevision))
           return OfflineStartupResult.unavailable;
+        final authorization = caps.beginAuthorization(owner);
+        if (authorization == null || !scope.isCurrent(owner) ||
+            !fence.unchangedSince(fenceRevision)) {
+          return OfflineStartupResult.unavailable;
+        }
         gate.resume();
+        if (!caps.grant(SessionCapabilityMode.online, authorization)) {
+          unawaited(gate.suspendAndDrain());
+          return OfflineStartupResult.unavailable;
+        }
+        // grant() notifies listeners synchronously; one may invalidate the
+        // owner or capability during that notification.
+        if (!scope.isCurrent(owner) || !fence.unchangedSince(fenceRevision) ||
+            caps.mode != SessionCapabilityMode.online) {
+          caps.block();
+          unawaited(gate.suspendAndDrain());
+          return OfflineStartupResult.unavailable;
+        }
         return OfflineStartupResult.online;
       case SettledPolicyStatus.passwordChangeRequired:
       case SettledPolicyStatus.denied:

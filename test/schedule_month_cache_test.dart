@@ -87,6 +87,44 @@ void main() {
     scope.dispose();
     await events.close();
   });
+  test('prewarm revocation during persistence restores previous snapshot', () async {
+    final session = fakeSession('schedule-a');
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final prefs = _DelayedPreferences();
+    final cache = ScheduleMonthCache(scope, 'project', preferences: () async => prefs);
+    final month = DateTime(2026, 11);
+    final foreground = cache.begin(month)!;
+    expect(await cache.write(foreground, []), isTrue);
+    cache.finishForeground(foreground);
+    prefs.delayNext = true;
+    var current = true;
+    final lesson = Lesson(id: 'l', date: DateTime(2026, 11, 5), week: 1, day: 'ЧТ',
+      pairNum: 1, start: const TimeOfDay(hour: 9, minute: 0),
+      end: const TimeOfDay(hour: 10, minute: 0), subjectRaw: 'Предмет');
+    final writing = cache.write(cache.beginBackground(month)!, [lesson], isCurrent: () => current);
+    await prefs.started.future;
+    current = false;
+    prefs.finish.complete();
+    expect(await writing, isFalse);
+    expect(await cache.read(cache.beginRead(month)!), isEmpty);
+    scope.dispose(); await events.close();
+  });
+  test('older foreground cannot release a newer foreground reservation', () async {
+    final session = fakeSession('schedule-a');
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final cache = ScheduleMonthCache(scope, 'project'), month = DateTime(2026, 11);
+    final first = cache.begin(month)!;
+    final second = cache.begin(month)!;
+    cache.finishForeground(first);
+    expect(cache.beginBackground(month), isNull);
+    cache.finishForeground(second);
+    expect(cache.beginBackground(month), isNotNull);
+    scope.dispose(); await events.close();
+  });
   test('month snapshots distinguish empty, missing, account and stale attempts',
       () async {
     SharedPreferences.setMockInitialValues({});

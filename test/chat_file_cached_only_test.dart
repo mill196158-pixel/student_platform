@@ -52,6 +52,23 @@ void main() {
     expect(await ChatFileAccess.cachedPathForOpen(url, permit: () => true), file.path);
     expect(await ChatFileAccess.readCachedOnly(url, permit: () => false), isNull);
     expect(await ChatFileAccess.cachedPathForOpen(url, permit: () => false), isNull);
+    // A process restart loses the in-memory proof for an unfinished check.
+    // Keep the original bytes but do not infer a grant or use the network.
+    await File('${file.path}.grant').rename('${file.path}.pending');
+    ChatFileAccess.debugResetProcessMemory();
+    expect(await ChatFileAccess.readCachedOnly(url, permit: () => true), isNull);
+    expect(await ChatFileAccess.cachedPathForOpen(url, permit: () => true), isNull);
+    expect(await file.readAsBytes(), [1, 2, 3]);
+    await File('${file.path}.pending').rename('${file.path}.grant');
+    await File('${file.path}.denied').writeAsString('revoked');
+    expect(await ChatFileAccess.readCachedOnly(url, permit: () => true), isNull);
+    expect(await ChatFileAccess.cachedPathForOpen(url, permit: () => true), isNull);
+    expect(await file.readAsBytes(), [1, 2, 3]);
+    await File('${file.path}.denied').delete();
+    expect(await ChatFileAccess.readCachedOnly(url, permit: () => true), [1, 2, 3]);
+    var permitChecks = 0;
+    expect(await ChatFileAccess.readCachedOnly(url, permit: () => ++permitChecks < 3), isNull);
+    expect(permitChecks, greaterThanOrEqualTo(3));
     await signInWithFileSession(Supabase.instance.client, 'other-owner',
         'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
     expect(await ChatFileAccess.readCachedOnly(url, permit: () => true), isNull);

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:student_ui/student_ui.dart';
+import 'package:student_platform/src/core/online_side_effect_barrier.dart';
 
 // Импорты по текущей структуре
 import '../home/home_screen.dart';
@@ -23,8 +24,10 @@ class NavigationScreen extends StatefulWidget {
       this.cachedReader,
       this.cachedInfo,
       this.cachedLearning,
-      this.cachedProfile});
+      this.cachedProfile,
+      this.onlineBarrier});
   final bool guest;
+  final OnlineSideEffectBarrier? onlineBarrier;
 
   /// Non-null only after a cache-only admission. Other tabs must supply their
   /// own local-only implementation before they can be opened in this mode.
@@ -51,7 +54,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
     if (shouldRun == _backgroundStarted) return;
     _backgroundStarted = shouldRun;
     if (shouldRun) {
-      ChatWarmCoordinator.instance.start();
+      ChatWarmCoordinator.instance.start(barrier: widget.onlineBarrier);
       PresenceService.instance.start();
     } else {
       PresenceService.instance.stop();
@@ -70,6 +73,10 @@ class _NavigationScreenState extends State<NavigationScreen> {
   @override
   void didUpdateWidget(covariant NavigationScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (_backgroundStarted && !widget.guest && !_cacheOnly &&
+        !identical(oldWidget.onlineBarrier, widget.onlineBarrier)) {
+      ChatWarmCoordinator.instance.start(barrier: widget.onlineBarrier);
+    }
     _syncBackground();
   }
 
@@ -126,7 +133,8 @@ class _NavigationScreenState extends State<NavigationScreen> {
                               storageKey: 'tab_home',
                               child: HomeScreen(
                                   activeListenable: _homeActive,
-                                  cachedReader: widget.cachedReader))),
+                                  cachedReader: widget.cachedReader,
+                                  onlineBarrier: widget.onlineBarrier))),
                       VisitedTab(
                           active: _currentIndex == 1,
                           builder: (context) => _KeepAlive(

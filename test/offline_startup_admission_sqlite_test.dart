@@ -266,6 +266,241 @@ void main() {
     await databaseFactoryFfi.deleteDatabase(path);
     await dir.delete();
   }, timeout: const Timeout(Duration(seconds: 55)));
+  test(
+      'verified live policy grants online capability after SQLite commit',
+      () async {
+    if (Platform.isWindows)
+      open.overrideFor(
+          OperatingSystem.windows, () => DynamicLibrary.open('winsqlite3.dll'));
+    sqfliteFfiInit();
+    final dir = await Directory.systemTemp.createTemp('startup_policy_'),
+        path = '${dir.path}/p.db';
+    final now = DateTime.now().toUtc();
+    String part(Object v) =>
+        base64Url.encode(utf8.encode(jsonEncode(v))).replaceAll('=', '');
+    final token = '${part({'alg': 'HS256'})}.${part({
+          'iss': 'https://a.invalid/auth/v1',
+          'sub': 'a',
+          'session_id': 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          'role': 'authenticated',
+          'aud': 'authenticated',
+          'iat':
+              now.subtract(const Duration(minutes: 5)).millisecondsSinceEpoch ~/
+                  1000,
+          'exp':
+              now.add(const Duration(hours: 1)).millisecondsSinceEpoch ~/ 1000
+        })}.sig';
+    var requests = 0;
+    final inner = MockClient((_) async {
+      requests++;
+      return http.Response('[{"id":"a","must_change_password":false}]', 200, headers: {'content-type': 'application/json'});
+    });
+    final fence = RefreshSecurityFence(), monitor = RefreshTransportMonitor();
+    final gate = RefreshAdmissionClient(inner,
+        backend: Uri.parse('https://a.invalid'), securityFence: fence);
+    final client = SupabaseClient('https://a.invalid', 'test',
+        authOptions: const AuthClientOptions(autoRefreshToken: false),
+        httpClient: gate);
+    await client.auth.setInitialSession(jsonEncode({
+      'access_token': token,
+      'refresh_token': 'synthetic',
+      'token_type': 'bearer',
+      'expires_in': 3600,
+      'expires_at':
+          now.add(const Duration(hours: 1)).millisecondsSinceEpoch ~/ 1000,
+      'user': {
+        'id': 'a',
+        'aud': 'authenticated',
+        'app_metadata': {},
+        'user_metadata': {},
+        'created_at': '2026-01-01T00:00:00Z'
+      }
+    }));
+    final scope = AuthSessionScope(
+        currentSession: () => client.auth.currentSession,
+        authEvents: client.auth.onAuthStateChange);
+    await scope.ready;
+    OfflineSessionBinding? binding() => client.auth.currentSession == null
+        ? null
+        : OfflineSessionBinding.fromSession(
+            client.auth.currentSession!, 'https://a.invalid/auth/v1');
+    final b = binding()!;
+    final db = await openPolicyGrantDatabase(path, factory: databaseFactoryFfi);
+    final store = SqlitePolicyGrantStore(
+        scope: scope,
+        currentBinding: binding,
+        coordinator: SqlitePolicyGrantCoordinator(db));
+    final attempt = (await store.beginLiveCheck(scope.capture()!, b))!;
+    final checked = now.subtract(const Duration(minutes: 2));
+    expect(
+        await store.saveAllowed(
+            attempt,
+            OfflinePolicyGrant(
+                issuer: b.issuer,
+                userId: b.userId,
+                sessionId: b.sessionId,
+                checkedAt: checked,
+                validUntil: now.add(const Duration(hours: 1)))),
+        isTrue);
+    final prior = await store.capturePriorGrant(scope.capture()!, b);
+    final owner = scope.capture()!, revision = fence.revision;
+    gate.bind(CoordinatedRefreshClient.forTesting(
+        inner, store, Uri.parse('https://a.invalid'),
+        currentRefreshToken: () => client.auth.currentSession?.refreshToken,
+        securityFence: fence,
+        monitor: monitor));
+    final admission = OfflineStartupAdmission(
+        client: client,
+        scope: scope,
+        store: store,
+        gate: gate,
+        monitor: monitor,
+        fence: fence,
+        owner: owner,
+        binding: b,
+        prior: prior,
+        fenceRevision: revision,
+        policy: SettledPolicyTransport.forTesting(
+            inner, Uri.parse('https://a.invalid')),
+        backend: Uri.parse('https://a.invalid'),
+        publicKey: 'test');
+    final capabilities = SessionCapabilities(scope);
+    expect(
+        await admission.resolve(capabilities), OfflineStartupResult.online);
+    expect(requests, greaterThan(0));
+    expect(capabilities.capture(SessionCapability.cachedRead), isNotNull);
+    expect(capabilities.capture(SessionCapability.mutation), isNotNull);
+    expect(capabilities.mode, SessionCapabilityMode.online);
+    expect((await store.readCandidate(scope.capture()!, b)).status,
+        SqliteGrantReadStatus.found);
+    capabilities.dispose();
+    store.dispose();
+    scope.dispose();
+    await client.dispose();
+    await db.close();
+    await databaseFactoryFfi.deleteDatabase(path);
+    await dir.delete();
+  }, timeout: const Timeout(Duration(seconds: 55)));
+  test(
+      'owner invalidation during online grant blocks admission and transport',
+      () async {
+    if (Platform.isWindows)
+      open.overrideFor(
+          OperatingSystem.windows, () => DynamicLibrary.open('winsqlite3.dll'));
+    sqfliteFfiInit();
+    final dir = await Directory.systemTemp.createTemp('startup_policy_'),
+        path = '${dir.path}/p.db';
+    final now = DateTime.now().toUtc();
+    String part(Object v) =>
+        base64Url.encode(utf8.encode(jsonEncode(v))).replaceAll('=', '');
+    final token = '${part({'alg': 'HS256'})}.${part({
+          'iss': 'https://a.invalid/auth/v1',
+          'sub': 'a',
+          'session_id': 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          'role': 'authenticated',
+          'aud': 'authenticated',
+          'iat':
+              now.subtract(const Duration(minutes: 5)).millisecondsSinceEpoch ~/
+                  1000,
+          'exp':
+              now.add(const Duration(hours: 1)).millisecondsSinceEpoch ~/ 1000
+        })}.sig';
+    var requests = 0;
+    final inner = MockClient((_) async {
+      requests++;
+      return http.Response('[{"id":"a","must_change_password":false}]', 200, headers: {'content-type': 'application/json'});
+    });
+    final fence = RefreshSecurityFence(), monitor = RefreshTransportMonitor();
+    final gate = RefreshAdmissionClient(inner,
+        backend: Uri.parse('https://a.invalid'), securityFence: fence);
+    final client = SupabaseClient('https://a.invalid', 'test',
+        authOptions: const AuthClientOptions(autoRefreshToken: false),
+        httpClient: gate);
+    await client.auth.setInitialSession(jsonEncode({
+      'access_token': token,
+      'refresh_token': 'synthetic',
+      'token_type': 'bearer',
+      'expires_in': 3600,
+      'expires_at':
+          now.add(const Duration(hours: 1)).millisecondsSinceEpoch ~/ 1000,
+      'user': {
+        'id': 'a',
+        'aud': 'authenticated',
+        'app_metadata': {},
+        'user_metadata': {},
+        'created_at': '2026-01-01T00:00:00Z'
+      }
+    }));
+    final scope = AuthSessionScope(
+        currentSession: () => client.auth.currentSession,
+        authEvents: client.auth.onAuthStateChange);
+    await scope.ready;
+    OfflineSessionBinding? binding() => client.auth.currentSession == null
+        ? null
+        : OfflineSessionBinding.fromSession(
+            client.auth.currentSession!, 'https://a.invalid/auth/v1');
+    final b = binding()!;
+    final db = await openPolicyGrantDatabase(path, factory: databaseFactoryFfi);
+    final store = SqlitePolicyGrantStore(
+        scope: scope,
+        currentBinding: binding,
+        coordinator: SqlitePolicyGrantCoordinator(db));
+    final attempt = (await store.beginLiveCheck(scope.capture()!, b))!;
+    final checked = now.subtract(const Duration(minutes: 2));
+    expect(
+        await store.saveAllowed(
+            attempt,
+            OfflinePolicyGrant(
+                issuer: b.issuer,
+                userId: b.userId,
+                sessionId: b.sessionId,
+                checkedAt: checked,
+                validUntil: now.add(const Duration(hours: 1)))),
+        isTrue);
+    final prior = await store.capturePriorGrant(scope.capture()!, b);
+    final owner = scope.capture()!, revision = fence.revision;
+    gate.bind(CoordinatedRefreshClient.forTesting(
+        inner, store, Uri.parse('https://a.invalid'),
+        currentRefreshToken: () => client.auth.currentSession?.refreshToken,
+        securityFence: fence,
+        monitor: monitor));
+    final admission = OfflineStartupAdmission(
+        client: client,
+        scope: scope,
+        store: store,
+        gate: gate,
+        monitor: monitor,
+        fence: fence,
+        owner: owner,
+        binding: b,
+        prior: prior,
+        fenceRevision: revision,
+        policy: SettledPolicyTransport.forTesting(
+            inner, Uri.parse('https://a.invalid')),
+        backend: Uri.parse('https://a.invalid'),
+        publicKey: 'test');
+    final capabilities = SessionCapabilities(scope);
+    capabilities.addListener(() {
+      if (capabilities.mode == SessionCapabilityMode.online) {
+        scope.invalidateForSignOut();
+      }
+    });
+    expect(await admission.resolve(capabilities), OfflineStartupResult.unavailable);
+    expect(requests, greaterThan(0));
+    expect(capabilities.capture(SessionCapability.cachedRead), isNull);
+    expect(capabilities.capture(SessionCapability.mutation), isNull);
+    expect(capabilities.mode, SessionCapabilityMode.blocked);
+    await expectLater(gate.send(http.Request('POST', Uri.parse(
+        'https://a.invalid/auth/v1/token?grant_type=refresh_token'))),
+        throwsA(isA<RefreshTransportSuppressed>()));
+    capabilities.dispose();
+    store.dispose();
+    scope.dispose();
+    await client.dispose();
+    await db.close();
+    await databaseFactoryFfi.deleteDatabase(path);
+    await dir.delete();
+  }, timeout: const Timeout(Duration(seconds: 55)));
   test('policy deadline then socket failure remains indeterminate', () async {
     if (Platform.isWindows)
       open.overrideFor(
