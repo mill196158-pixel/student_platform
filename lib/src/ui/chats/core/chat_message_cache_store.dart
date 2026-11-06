@@ -26,6 +26,7 @@ class ChatMessageCacheStore {
     _prefsOverride = prefs;
   }
 
+
   /// Test hook: pretend this auth user owns cache keys.
   static String? debugUserIdOverride;
 
@@ -477,8 +478,18 @@ class ChatMessageCacheStore {
   }
 
   static List<Message> _tail(List<Message> sorted) {
-    if (sorted.length <= maxCachedMessages) return sorted;
-    return sorted.sublist(sorted.length - maxCachedMessages);
+    // The history limit must never evict unconfirmed local sends.  They may
+    // carry the only remaining reference to an attachment awaiting retry.
+    final serverCount = sorted.where((message) => !message.isLocal).length;
+    var skip = serverCount > maxCachedMessages
+        ? serverCount - maxCachedMessages
+        : 0;
+    return sorted.where((message) {
+      if (message.isLocal) return true;
+      if (skip == 0) return true;
+      skip--;
+      return false;
+    }).toList();
   }
 
   static List<Message> _dedupeAndSort(Iterable<Message> messages) {

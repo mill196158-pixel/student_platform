@@ -315,7 +315,7 @@ class TeamCubit extends Cubit<TeamState> {
           serverPage: chat,
           pageLimit: 200,
         );
-        unawaited(_persistChatSnapshot(chatId, reconciled));
+        unawaited(_persistLegacyTeamChatSnapshot(reconciled));
       }
       _rememberTeamChat(reconciled, allowEmpty: true);
       emit(state.copyWith(
@@ -518,21 +518,16 @@ class TeamCubit extends Cubit<TeamState> {
     }
   }
 
-  Future<void> _persistChatSnapshot(
-    String chatId,
-    Iterable<Message> messages,
-  ) async {
+  Future<void> _persistLegacyTeamChatSnapshot(
+      Iterable<Message> messages) async {
     try {
       final stable = messages
           .where((message) => !message.isLocal && message.id.isNotEmpty)
           .toList()
         ..sort((a, b) => a.at.compareTo(b.at));
-      await ChatMessageCacheStore.replace(
-        chatId: chatId,
-        messages: stable,
-        markSynced: true,
-      );
-      // Keep legacy team-scoped key briefly for older app builds reading it.
+      // The shared cache was already updated by applyLatestServerPage.  Do not
+      // replace it here with server-only rows: a local send may be pending.
+      // Keep the legacy team-scoped key for older app builds reading it.
       final tail =
           stable.length > 120 ? stable.sublist(stable.length - 120) : stable;
       final prefs = await SharedPreferences.getInstance();
