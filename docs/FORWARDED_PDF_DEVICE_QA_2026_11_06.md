@@ -9,7 +9,7 @@ Date: 2026-11-06. Device: Android emulator. This is a limited observation, not a
 - Postflight QA archive: `design_preview/optimizer_qa/b533-device-postflight-20261106/app-data-after-b533.tar`, SHA-256 `2c9b94488645c53bd9336cc778a4d0b19693647be45a97c07e6175e0b706a81b`. All four durable queue tables, legacy queue and unclassified forward markers were empty; archive members were fully read.
 - The normal 509701a APK was restored with `adb install -r`; on-device APK SHA-256 `894b51342de486455359cf0d46e45022d68959f6e41da41405504a9b3d4ab082`, network active and home screen visible in `design_preview/optimizer_qa/b533-restored-normal-ready.png`.
 - Subsequently normal commit `4e90e21fe79d174f66b76621dd7383822407fb82` was installed with `adb install -r`. Preflight archive `design_preview/optimizer_qa/normal-4e90e21-preflight-20261106/app-data-before-normal-4e90e21.tar`, SHA-256 `7c20e396947f5834b7c6423f4f6c5479bce3832e506a3703ded0726a757182d9`, was fully read with integrity check; durable and legacy outboxes were empty and no unclassified forward markers found. APK SHA-256 verified on-device: `4bf6e5117d0145e143ac0cfe23366b719478036f37263acdfe52d19db5992a19`. Network was active and home visible: `design_preview/optimizer_qa/normal-4e90e21-ready3.png`.
-- No archive restore was performed or claimed. New resolver work is unreviewed and was not part of either installed normal build.
+- No archive restore was performed or claimed. At that point the later resolver had not yet been reviewed and was not part of either installed normal build.
 
 ## 11e486c repeat: previously opened forwarded PDF
 
