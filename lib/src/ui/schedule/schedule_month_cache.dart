@@ -77,10 +77,18 @@ class ScheduleMonthCache {
     if (!_current(attempt)) return null;
     try {
       final pending = _pending[attempt.key];
-      if (pending != null) await pending;
-      if (!_current(attempt) || _quarantined.contains(attempt.key)) return null;
+      if (pending != null) {
+        try {
+          await pending.timeout(const Duration(seconds: 1));
+        } on TimeoutException {
+          return null;
+        }
+      }
+      if (!_current(attempt) || _quarantined.contains(attempt.key) ||
+          _pending.containsKey(attempt.key)) return null;
       final prefs = await _preferences();
-      if (!_current(attempt) || _quarantined.contains(attempt.key)) return null;
+      if (!_current(attempt) || _quarantined.contains(attempt.key) ||
+          _pending.containsKey(attempt.key)) return null;
       final raw = prefs.getString(attempt.key);
       if (raw == null) return null;
       final json = jsonDecode(raw);

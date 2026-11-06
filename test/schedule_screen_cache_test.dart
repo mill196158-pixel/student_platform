@@ -29,12 +29,89 @@ class _Repository extends ScheduleRepository {
   Future<List<ScheduleGroupActionEvent>> loadMonthGroupActions(DateTime anchor) async => [];
 }
 
+class _PendingPreferences implements SharedPreferences {
+  final entered = Completer<void>();
+  final release = Completer<void>();
+  final data = <String, String>{};
+  @override
+  String? getString(String key) => data[key];
+  @override
+  Future<bool> setString(String key, String value) async {
+    if (!entered.isCompleted) {
+      entered.complete();
+      await release.future;
+    }
+    data[key] = value;
+    return true;
+  }
+  @override
+  Future<bool> remove(String key) async { data.remove(key); return true; }
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 Lesson lesson(String id, DateTime date, String title) => Lesson(
   id: id, date: date, week: 1, day: 'ПН', pairNum: 1,
   start: const TimeOfDay(hour: 9, minute: 0),
   end: const TimeOfDay(hour: 10, minute: 30), subjectRaw: title);
 
 void main() {
+  testWidgets('stalled cache plus network failure is unavailable, not empty', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final session = fakeSession('schedule-stalled-offline-test');
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final prefs = _PendingPreferences();
+    final cache = ScheduleMonthCache(scope, SupabaseConfig.url, preferences: () async => prefs);
+    final writing = cache.write(cache.begin(DateTime(2026, 11))!, []);
+    await prefs.entered.future;
+    final repo = _Repository();
+    await tester.pumpWidget(MaterialApp(home: AuthSessionScopeHost(createScope: () => scope,
+      child: ScheduleScreen(repository: repo, subscribeRealtime: false,
+          now: () => DateTime(2026, 11, 5)))));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1100));
+    await tester.pump();
+    expect(repo.calls, hasLength(1));
+    repo.calls.first.completeError(StateError('offline'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Не удалось загрузить расписание. Подключитесь к сети и повторите.'), findsOneWidget);
+    prefs.release.complete();
+    expect(await writing, isFalse);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await events.close();
+  });
+  testWidgets('stalled cache write does not prevent live schedule', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final session = fakeSession('schedule-stalled-test');
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final prefs = _PendingPreferences();
+    final cache = ScheduleMonthCache(scope, SupabaseConfig.url, preferences: () async => prefs);
+    final writing = cache.write(cache.begin(DateTime(2026, 11))!, []);
+    await prefs.entered.future;
+    final repo = _Repository();
+    await tester.pumpWidget(MaterialApp(home: AuthSessionScopeHost(
+      createScope: () => scope,
+      child: ScheduleScreen(repository: repo, subscribeRealtime: false,
+          now: () => DateTime(2026, 11, 5)))));
+    await tester.pump();
+    expect(repo.calls, isEmpty);
+    await tester.pump(const Duration(milliseconds: 1100));
+    await tester.pump();
+    expect(repo.calls, hasLength(1));
+    repo.calls.first.complete([lesson('live', DateTime(2026, 11, 5), 'Живое расписание')]);
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Живое расписание'), findsOneWidget);
+    prefs.release.complete();
+    expect(await writing, isFalse);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await events.close();
+  });
   testWidgets('disposing a pending screen releases foreground reservation', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final session = fakeSession('schedule-screen-release');

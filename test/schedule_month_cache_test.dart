@@ -42,6 +42,29 @@ class _DelayedPreferences implements SharedPreferences {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('stuck write times out read without cancelling it, then recovers', () async {
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    var session = fakeSession('schedule-timeout-owner');
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final prefs = _DelayedPreferences()..delayNext = true;
+    final cache = ScheduleMonthCache(scope, 'timeout-project', preferences: () async => prefs);
+    final month = DateTime(2026, 11);
+    final writing = cache.write(cache.begin(month)!, []);
+    await prefs.started.future;
+    expect(await cache.read(cache.beginRead(month)!), isNull);
+    session = fakeSession('other');
+    events.add(AuthState(AuthChangeEvent.signedIn, session));
+    session = fakeSession('schedule-timeout-owner');
+    events.add(AuthState(AuthChangeEvent.signedIn, session));
+    prefs.finish.complete();
+    expect(await writing, isFalse);
+    expect(await cache.read(cache.beginRead(month)!), isNull);
+    expect(await cache.write(cache.begin(month)!, []), isTrue);
+    expect(await cache.read(cache.beginRead(month)!), isEmpty);
+    scope.dispose();
+    await events.close();
+  });
   test('parallel reads do not invalidate a write before setString', () async {
     final session = fakeSession('schedule-a');
     final events = StreamController<AuthState>.broadcast(sync: true);
