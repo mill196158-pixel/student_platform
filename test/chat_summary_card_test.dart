@@ -76,6 +76,9 @@ void main() {
           'status': status,
         };
     expect(card.explicitlyUnavailable([result()]), isTrue);
+    expect(card.availability([result()]), isFalse);
+    expect(card.availability([result(available: true, status: 'open')]), isTrue);
+    expect(card.availability([]), isNull);
     expect(card.explicitlyUnavailable([result(status: 'cancelled')]), isTrue);
     expect(
         card.explicitlyUnavailable([result(available: true, status: 'open')]),

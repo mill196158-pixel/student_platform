@@ -38,6 +38,10 @@ void main() {
           {'chat_type': 'dm', 'peer_id': 'c', 'last_message_id': 'c', 'content': {'text': payload}},
           {'chat_type': 'dm', 'peer_id': 'd', 'last_message_id': 'd', 'body': legacyLookingLiteral},
           {'chat_type': 'dm', 'peer_id': 'e', 'last_message_id': 'e', 'body': noMarkerLiteral},
+          {'chat_type': 'team_main', 'team_kind': 'group_space', 'team_id': 'group',
+           'team_name': '1-См-2', 'team_group_name': '1-См-2', 'title': '1-См-2',
+           'last_message_id': 'g', 'content': {'card': 'topic_selection',
+             'selection_id': '33333333-3333-3333-3333-333333333333'}},
         ]), 200, headers: {'content-type': 'application/json'}, request: request);
       }),
     );
@@ -54,6 +58,11 @@ void main() {
       expect(previews['c'], 'Пересланное сообщение');
       expect(previews['d'], legacyLookingLiteral);
       expect(previews['e'], noMarkerLiteral);
+      final group = rows.singleWhere((row) => row['chatId'] == null &&
+          (row['team'] as Map)['id'] == 'group');
+      expect(group['title'], 'Чат группы');
+      expect((group['team'] as Map)['kind'], 'group_space');
+      expect(group['lastActionCard'], isTrue);
     } finally {
       ChatWarmCoordinator.instance.stop();
       ChatSummariesCache.clearMemory();

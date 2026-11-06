@@ -91,9 +91,9 @@ class SummaryActionCard {
       };
 
   /// Only an unambiguous matching server response can declare unavailability.
-  bool explicitlyUnavailable(Object? response) {
+  bool? availability(Object? response) {
     if (response is! List || response.length != 1 || response.single is! Map) {
-      return false;
+      return null;
     }
     final row = response.single as Map;
     final rawKind = row['kind'];
@@ -106,7 +106,7 @@ class SummaryActionCard {
         row['entity_id'] != entityId ||
         row['card_message_id'] != messageId ||
         row['available'] is! bool ||
-        row['status'] is! String) return false;
+        row['status'] is! String) return null;
     final available = row['available'] as bool;
     final status = row['status'] as String;
     if (!const {
@@ -116,13 +116,15 @@ class SummaryActionCard {
       'completed',
       'cancelled',
       'unavailable'
-    }.contains(status)) return false;
-    if (status == 'cancelled') return true;
+    }.contains(status)) return null;
+    if (status == 'cancelled') return false;
     if (available && status == 'unavailable') {
-      return false;
+      return null;
     }
-    return !available;
+    return available;
   }
+
+  bool explicitlyUnavailable(Object? response) => availability(response) == false;
 }
 
 /// Verify only the latest action per chat, with bounded concurrency.
@@ -132,6 +134,7 @@ Future<void> verifySummaryActionCards(
   required Future<Object?> Function(SummaryActionCard) fetch,
   required bool Function(SummaryActionCard) isCurrent,
   required void Function(SummaryActionCard) onUnavailable,
+  void Function(SummaryActionCard)? onAvailable,
   Duration timeout = const Duration(seconds: 8),
 }) async {
   var next = 0;
@@ -141,8 +144,10 @@ Future<void> verifySummaryActionCards(
       if (!isCurrent(card)) return;
       try {
         final result = await fetch(card).timeout(timeout);
-        if (isCurrent(card) && card.explicitlyUnavailable(result)) {
-          onUnavailable(card);
+        if (isCurrent(card)) {
+          final available = card.availability(result);
+          if (available == false) onUnavailable(card);
+          if (available == true) onAvailable?.call(card);
         }
       } catch (_) {
         // Unknown state remains a neutral card type.

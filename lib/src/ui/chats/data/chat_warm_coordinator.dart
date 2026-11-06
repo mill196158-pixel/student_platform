@@ -242,6 +242,8 @@ class ChatWarmCoordinator with WidgetsBindingObserver {
     final teamIcon = (row['team_icon'] ?? '').toString();
     final teamTeacher = (row['team_teacher'] ?? '').toString();
     final teamGroupName = (row['team_group_name'] ?? '').toString();
+    final teamKind = (row['team_kind'] ?? '').toString();
+    final isGroupSpace = !isDm && teamKind == 'group_space';
     final titleRaw = (row['title'] ?? '').toString().trim();
     final avatarRaw = (row['avatar_url'] ?? '').toString().trim();
     final chatId = (row['chat_id'] ?? '').toString();
@@ -256,7 +258,7 @@ class ChatWarmCoordinator with WidgetsBindingObserver {
     final preview =
         hasLastMessage ? _buildPreviewFromRow(row) : 'Сообщений пока нет';
 
-    final title = isDm
+    final title = isGroupSpace ? 'Чат группы' : isDm
         ? normalizeDmTitle(titleRaw)
         : (titleRaw.isNotEmpty
             ? titleRaw
@@ -265,15 +267,20 @@ class ChatWarmCoordinator with WidgetsBindingObserver {
     return {
       'team': {
         'id': isDm ? '' : teamId,
-        'name': isDm ? title : (teamName.isNotEmpty ? teamName : title),
+        'name': isGroupSpace ? title : (isDm ? title : (teamName.isNotEmpty ? teamName : title)),
         'teacher': teamTeacher,
         'groupCode': teamGroupName,
-        'icon': teamIcon,
+        'icon': isGroupSpace && teamIcon.isEmpty ? 'groups' : teamIcon,
+        if (teamKind == 'subject' || teamKind == 'group_space') 'kind': teamKind,
       },
       'title': title,
-      'subtitle': null,
+      'subtitle': isGroupSpace
+          ? '${teamGroupName.isNotEmpty ? teamGroupName : teamName} · общий чат'
+          : isDm ? null : (teamTeacher.isNotEmpty ? teamTeacher :
+              (teamGroupName.isNotEmpty ? teamGroupName : null)),
       'lastAuthor': lastAuthorName.isEmpty ? null : lastAuthorName,
       'lastMsgPreview': preview,
+      if (!isDm && isSummaryActionCard(row)) 'lastActionCard': true,
       'lastTime': lastAt?.toIso8601String(),
       'unread': unread,
       'pinned': pinned,

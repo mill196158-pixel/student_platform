@@ -46,6 +46,8 @@ class MyChatsScreen extends StatefulWidget {
       this.pickMode = false,
       this.pickIsCurrent,
       this.enableRealtime = true,
+      this.readSummaryCache,
+      this.onRealtimeSubscribe,
       this.cachedStore,
       this.cachedCapabilities});
   final ProjectChatServerCache? cachedStore;
@@ -54,6 +56,10 @@ class MyChatsScreen extends StatefulWidget {
   final bool Function()? pickIsCurrent;
   @visibleForTesting
   final bool enableRealtime;
+  @visibleForTesting
+  final Future<String?> Function(String userId)? readSummaryCache;
+  @visibleForTesting
+  final void Function(String userId)? onRealtimeSubscribe;
   @override
   State<MyChatsScreen> createState() => _MyChatsScreenState();
 }
@@ -64,6 +70,8 @@ class _MyChatsScreenState extends State<MyChatsScreen>
   bool _cachedUnavailable = false;
   bool _boundaryInvalidated = false;
   bool _startedOnline = false;
+  AuthSessionScope? _observedScope;
+  AuthOperationScope? _visibleOwner;
   bool get _cacheOnly =>
       widget.cachedStore != null || widget.cachedCapabilities != null;
 
@@ -127,11 +135,49 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     _startedOnline = true;
     ActiveChatTracker.instance.enterMessageList();
     WidgetsBinding.instance.addObserver(this);
-    final raw = ChatSummariesCache.readSync(_currentUserId);
-    if (raw != null) {
+    final scope = AuthSessionScopeHost.maybeRead(context);
+    final owner = scope?.capture();
+    _visibleOwner = owner;
+    final raw = widget.readSummaryCache == null && owner != null && owner.userId == _currentUserId
+        ? ChatSummariesCache.readSync(owner.userId)
+        : null;
+    if (raw != null && scope!.isCurrent(owner!)) {
       _applyCachedRaw(raw, notify: false);
     }
     unawaited(_initialize());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_cacheOnly || _boundaryInvalidated) return;
+    final scope = AuthSessionScopeHost.maybeOf(context);
+    if (identical(scope, _observedScope)) return;
+    _observedScope?.removeListener(_onOwnerChanged);
+    _observedScope = scope;
+    scope?.addListener(_onOwnerChanged);
+    _onOwnerChanged();
+  }
+
+  void _onOwnerChanged() {
+    if (!mounted || _cacheOnly || _boundaryInvalidated) return;
+    final next = _observedScope?.capture();
+    if (next == _visibleOwner) return;
+    _visibleOwner = next;
+    _summaryRevision++;
+    _reloadDebounce?.cancel();
+    _channel?.unsubscribe();
+    _channel = null;
+    setState(() {
+      _all = [];
+      _visible = [];
+      _hydrated = false;
+      _loading = next != null;
+    });
+    if (next != null) {
+      unawaited(_hydrateFromCache());
+      unawaited(_reloadSummariesFromRpc());
+    }
   }
 
   Future<void> _initialize() async {
@@ -149,6 +195,8 @@ class _MyChatsScreenState extends State<MyChatsScreen>
       return;
     // Session-mode transitions require a fresh route and a fresh permit.
     _boundaryInvalidated = true;
+    _observedScope?.removeListener(_onOwnerChanged);
+    _observedScope = null;
     _summaryRevision++;
     _all = [];
     _visible = [];
@@ -168,6 +216,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
 
   @override
   void dispose() {
+    _observedScope?.removeListener(_onOwnerChanged);
     _summaryRevision++;
     if (_cacheOnly)
       widget.cachedCapabilities?.removeListener(_onCachedAccessChanged);
@@ -390,6 +439,9 @@ class _MyChatsScreenState extends State<MyChatsScreen>
           // The card is hidden in the chat as well. The summary RPC does not
           // provide an earlier visible message, so leave its preview empty.
           setState(() => byCard[card]!.verifiedPreview = '');
+        }, onAvailable: (card) {
+          if (!current(card)) return;
+          setState(() => byCard[card]!.verifiedPreview = null);
         });
   }
 
@@ -431,7 +483,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
                 : (teamName.isNotEmpty ? teamName : 'Чат')));
 
     final actionCard = isDm ? null : SummaryActionCard.fromRow(row);
-    return _ChatSummary(
+    final summary = _ChatSummary(
       team: Team(
         id: isDm ? '' : teamId,
         name: isDm
@@ -463,10 +515,13 @@ class _MyChatsScreenState extends State<MyChatsScreen>
       chatId: chatId.isNotEmpty ? chatId : null,
       lastMessageId: hasLastMessage ? lastMessageId : null,
       actionCard: actionCard,
+      hasActionCard: !isDm && isSummaryActionCard(row),
       isDm: isDm,
       peerId: peerId.isNotEmpty ? peerId : null,
       avatarUrl: avatarRaw.isNotEmpty ? avatarRaw : null,
     );
+    if (summary.hasActionCard) summary.verifiedPreview = '';
+    return summary;
   }
 
   /// Resolve peer names for DMs still showing a neutral/legacy placeholder.
@@ -709,6 +764,9 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     _summariesInFlight = true;
     final completer = Completer<void>();
     _summariesReloadCompleter = completer;
+    AuthSessionScope? attemptScope;
+    AuthOperationScope? attemptOwner;
+    int? attemptRevision;
     try {
       do {
         _summariesQueued = false;
@@ -717,6 +775,9 @@ class _MyChatsScreenState extends State<MyChatsScreen>
         await scope.ready;
         final owner = scope.capture();
         final revision = ++_summaryRevision;
+        attemptScope = scope;
+        attemptOwner = owner;
+        attemptRevision = revision;
         if (owner == null || !mounted) break;
         bool current() =>
             mounted && revision == _summaryRevision && scope.isCurrent(owner);
@@ -740,14 +801,22 @@ class _MyChatsScreenState extends State<MyChatsScreen>
         _safeSetState(() {
           _all = list;
           _applyFilter();
+          _hydrated = true;
+          _loading = false;
         });
         unawaited(_verifySummaryActions(list, scope, owner, revision));
         await _saveCache(list, owner: owner.userId);
         if (!current()) break;
+        if (widget.enableRealtime) _subscribeChatsRealtime();
       } while (_summariesQueued && mounted);
     } catch (e) {
       safeDebugLog(
           '[realtime] get_my_chat_summaries failed error=${e.runtimeType}');
+      final scope = attemptScope, owner = attemptOwner;
+      if (mounted && !_boundaryInvalidated && !_cacheOnly && scope != null &&
+          owner != null && scope.isCurrent(owner) && attemptRevision == _summaryRevision) {
+        _safeSetState(() => _loading = false);
+      }
     } finally {
       final needsAnother = _summariesQueued && mounted;
       _summariesQueued = false;
@@ -772,8 +841,19 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     final uid = Supabase.instance.client.auth.currentUser?.id;
     if (uid == null || uid.isEmpty) return;
     if (_channel != null) return;
-
-    void onChange(PostgresChangePayload _) => _scheduleSummariesReload();
+    final scope = AuthSessionScopeHost.maybeRead(context);
+    final owner = scope?.capture();
+    if (scope == null || owner == null || owner.userId != uid) return;
+    final testSubscribe = widget.onRealtimeSubscribe;
+    if (testSubscribe != null) {
+      testSubscribe(uid);
+      return;
+    }
+    void onChange(PostgresChangePayload _) {
+      if (mounted && !_boundaryInvalidated && !_cacheOnly && scope.isCurrent(owner)) {
+        _scheduleSummariesReload();
+      }
+    }
 
     final userFilter = PostgresChangeFilter(
       type: PostgresChangeFilterType.eq,
@@ -1562,9 +1642,19 @@ class _MyChatsScreenState extends State<MyChatsScreen>
 
   Future<void> _hydrateFromCache() async {
     try {
-      final s = await ChatSummariesCache.read(_currentUserId);
+      final revision = _summaryRevision;
+      bool valid() => mounted && !_boundaryInvalidated && !_cacheOnly &&
+          revision == _summaryRevision && !_hydrated;
+      if (!valid()) return;
+      final scope = AuthSessionScopeHost.maybeRead(context);
+      if (scope == null) return;
+      await scope.ready;
+      if (!valid()) return;
+      final owner = scope.capture();
+      if (owner == null || owner.userId != _currentUserId) return;
+      final s = await (widget.readSummaryCache ?? ChatSummariesCache.read)(owner.userId);
       if (s == null || s.isEmpty) return;
-      if (!mounted) return;
+      if (!valid() || !scope.isCurrent(owner) || owner.userId != _currentUserId) return;
       _applyCachedRaw(s, notify: true);
       unawaited(_hydrateUnresolvedDmTitles());
     } catch (_) {}
@@ -1572,7 +1662,8 @@ class _MyChatsScreenState extends State<MyChatsScreen>
 
   void _applyCachedRaw(String rawJson, {required bool notify}) {
     final raw = (jsonDecode(rawJson) as List).cast<Map<String, dynamic>>();
-    final list = raw.map(_summaryFromMap).toList()..sort(_compareChats);
+    final list = raw.map((row) => _summaryFromMap(row, legacy: true)).toList()
+      ..sort(_compareChats);
     void apply() {
       _all = list;
       final query = _query.toLowerCase();
@@ -1609,12 +1700,14 @@ class _MyChatsScreenState extends State<MyChatsScreen>
           'teacher': c.team.teacher,
           'groupCode': c.team.groupCode,
           'icon': c.team.icon,
+          if (c.team.kind == 'subject' || c.team.kind == 'group_space')
+            'kind': c.team.kind,
         },
         'title': c.title,
         'subtitle': c.subtitle,
         'lastAuthor': c.lastAuthor,
         'lastMsgPreview': c.lastMsgPreview,
-        if (c.actionCard != null) 'lastActionCard': true,
+        if (c.hasActionCard) 'lastActionCard': true,
         'lastTime': c.lastTime?.toIso8601String(),
         'unread': c.unread,
         'pinned': c.pinned,
@@ -1626,7 +1719,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
         'avatarUrl': c.avatarUrl,
       };
 
-  _ChatSummary _summaryFromMap(Map<String, dynamic> m) {
+  _ChatSummary _summaryFromMap(Map<String, dynamic> m, {bool legacy = false}) {
     final tm = (m['team'] as Map<String, dynamic>);
     final t = Team(
       id: tm['id'] as String,
@@ -1640,9 +1733,11 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     );
     final isDm = (m['isDm'] ?? false) as bool;
     final titleRaw = (m['title'] ?? '') as String;
-    return _ChatSummary(
+    final ambiguousLegacy = legacy && !isDm && t.kind == 'unknown';
+    final summary = _ChatSummary(
       team: t,
-      title: isDm ? normalizeDmTitle(titleRaw) : titleRaw,
+      title: ambiguousLegacy ? 'Чат' : isDm ? normalizeDmTitle(titleRaw) :
+          t.kind == 'group_space' ? 'Чат группы' : titleRaw,
       subtitle: m['subtitle'] as String?,
       lastAuthor: m['lastAuthor'] as String?,
       lastMsgPreview: summaryForwardPreview(m['lastMsgPreview']) ??
@@ -1658,7 +1753,12 @@ class _MyChatsScreenState extends State<MyChatsScreen>
       isDm: isDm,
       peerId: m['peerId'] as String?,
       avatarUrl: m['avatarUrl'] as String?,
+      hasActionCard: m['lastActionCard'] == true,
     );
+    if (ambiguousLegacy || m['lastActionCard'] == true) {
+      summary.verifiedPreview = '';
+    }
+    return summary;
   }
 
   // ➜ NEW: обновить unread для одного чата по RPC и переложить в список + кэш
@@ -1709,6 +1809,7 @@ class _ChatSummary {
   final String? peerId;
   String? avatarUrl;
   final SummaryActionCard? actionCard;
+  final bool hasActionCard;
   String? verifiedPreview;
 
   _ChatSummary({
@@ -1727,6 +1828,7 @@ class _ChatSummary {
     this.peerId,
     this.avatarUrl,
     this.actionCard,
+    this.hasActionCard = false,
   });
 }
 
