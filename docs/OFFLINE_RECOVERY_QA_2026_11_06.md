@@ -74,7 +74,7 @@ turning the network off, the same times, teachers and rooms appeared offline
 (`qa2-offline-schedule-june19.png`). This month was warmed manually, so this
 does not establish that automatic warming works. The network was restored.
 
-News and advertising disappear offline, and the offline interface remains
+In QA2, news and advertising disappeared offline, and the offline interface remained
 simplified. Installation used `install -r`, so these observations do not prove
 that automatic warming works from a genuinely clean cache. They also do not
 prove that every chat, attachment, or screen works after a cold offline start.
@@ -84,3 +84,42 @@ In the guarded QA notification path, opening a push without a verifiable
 from guarded push is disabled. Firebase SDK and real notification delivery were
 not verified by these observations. The normal build and the complete product
 remain unfinished; this QA candidate is not a release approval.
+
+## QA3 and QA4 device observations
+
+Both candidates used the explicit QA defines `SQLITE_POLICY_QA`,
+`OFFLINE_UI_QA`, and `FORWARD_DURABLE_ANDROID_QA`. After a real online warm,
+QA3 failed on cold offline start because Android CursorWindow could not read a
+large image BLOB from SQLite. The snapshot used in the next check was saved
+by QA3.
+
+QA4 was installed over QA3 with `install -r`. On a cold start without network,
+the home screen opened with a news item and its image, tasks and a banner
+(`qa4-cold-offline-home.png`). The saved news opened with its text and image
+(`qa4-offline-story.png`). The network was restored after the check. Because
+QA4 reused QA3 data, this does not prove automatic prewarming from a clean
+installation or complete offline coverage.
+
+Before QA4 installation, a data archive was read and its SHA-256 checked;
+restoration from it was not tested. The guarded push limitations described
+above remain open. These observations concern a flagged QA candidate, not the
+ordinary build or a release approval.
+
+## QA5 device observations
+
+After a cold offline launch using already warmed data, the same saved subject
+chat opened through three paths: Base → subject, Learning → subject, and the
+chat list. Messages and the saved QR image were visible in all three checks
+(`qa5-offline-base-subject.png`, `qa5-offline-learning-subject.png`,
+`qa5-offline-list-subject.png`). A repeat entry produced a settled screenshot;
+frame-by-frame opening latency was not measured. The network was restored.
+
+The assignment card was unavailable, and DOCX was represented only by text;
+opening the document was not verified. On QA5 the directory header overlapped
+the Android status bar. A SafeArea fix was made after that build, but its
+appearance on the emulator has not yet been checked.
+
+The recorded candidate APK SHA-256 starts with `08F1`; the data archive hash
+starts with `b796`. The archive was read and its hash checked, but restoration
+was not tested. These are flagged QA observations on previously warmed data,
+not proof of clean-install prewarming or complete offline coverage.

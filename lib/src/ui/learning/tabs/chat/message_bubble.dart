@@ -36,6 +36,11 @@ class MessageBubble extends StatelessWidget {
   /// DM receipts: null = legacy single ✓; 0/1/2 = none/delivered/read.
   final int? receiptTicks;
 
+  /// When provided, rendering must not resolve avatars, files, or actions
+  /// through online widgets. The caller supplies already-authorised files.
+  final String? localOnlyUserId;
+  final Widget Function(ChatFile file)? localOnlyAttachmentBuilder;
+
   const MessageBubble({
     super.key,
     required this.message,
@@ -54,6 +59,8 @@ class MessageBubble extends StatelessWidget {
     this.boundaryKey,
     this.selected = false,
     this.receiptTicks,
+    this.localOnlyUserId,
+    this.localOnlyAttachmentBuilder,
   });
 
   Map<String, dynamic>? _parseForwardGroup(String text) {
@@ -70,7 +77,10 @@ class MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isMe = message.isMine(Supabase.instance.client.auth.currentUser?.id);
+    final localOnly = localOnlyUserId != null;
+    final isMe = message.isMine(localOnly
+        ? localOnlyUserId
+        : Supabase.instance.client.auth.currentUser?.id);
 
     final colors = theme.colorScheme;
     final baseBg = isMe ? colors.primaryContainer : colors.surface;
@@ -92,7 +102,7 @@ class MessageBubble extends StatelessWidget {
     );
 
     final bool hasFgMarker = message.text.contains('__FG__:');
-    final fg = _parseForwardGroup(message.text);
+    final fg = localOnly ? null : _parseForwardGroup(message.text);
     final Map<String, ChatFile> idToFile = {
       for (final f in (attachments ?? const <ChatFile>[])) f.id: f
     };
@@ -124,7 +134,7 @@ class MessageBubble extends StatelessWidget {
                   isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (!isMe && reserveAvatarSpace)
+                if (!localOnly && !isMe && reserveAvatarSpace)
                   SizedBox(
                     width: 40,
                     child: showAvatar
@@ -192,7 +202,8 @@ class MessageBubble extends StatelessWidget {
                           ),
 
                         if (replyPreview != null ||
-                            (fg == null &&
+                            (!localOnly &&
+                                fg == null &&
                                 message.attachments != null &&
                                 message.attachments!.isNotEmpty)) ...[
                           GestureDetector(
@@ -237,7 +248,9 @@ class MessageBubble extends StatelessWidget {
                           ),
                         ],
 
-                        if (!hasFgMarker && imagePath != null) ...[
+                        if (!localOnly &&
+                            !hasFgMarker &&
+                            imagePath != null) ...[
                           ClipRRect(
                             borderRadius: BorderRadius.circular(12),
                             child: Stack(
@@ -328,7 +341,19 @@ class MessageBubble extends StatelessWidget {
                         ],
 
                         // Вложения (файлы) — показываем стандартный компонент, НО только для НЕ FG сообщений
-                        if (attachments != null &&
+                        if (localOnly && localOnlyAttachmentBuilder != null)
+                          for (final file in attachments ?? const <ChatFile>[])
+                            localOnlyAttachmentBuilder!(file),
+                        if (localOnly &&
+                            message.text.isEmpty &&
+                            (attachments?.isNotEmpty ?? false))
+                          Align(
+                              alignment: Alignment.bottomRight,
+                              child: Text(displayTime,
+                                  style: TextStyle(
+                                      color: textColor, fontSize: 11))),
+                        if (!localOnly &&
+                            attachments != null &&
                             attachments!.isNotEmpty &&
                             fg == null) ...[
                           MultiFileBubble(

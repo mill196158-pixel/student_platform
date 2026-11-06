@@ -28,7 +28,9 @@ import 'package:student_platform/src/ui/home/cached_home_schedule_reader.dart';
 import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
 import 'package:student_platform/src/ui/learning/models/chat_file.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
+import 'package:student_platform/src/ui/learning/team_details_screen.dart';
 import 'package:student_platform/src/ui/navigation/navigation_screen.dart';
+import 'package:student_platform/src/ui/navigation/cached_team_chat_directory.dart';
 import 'package:student_platform/src/ui/profile/profile_screen.dart';
 import 'package:student_platform/src/ui/splash/splash_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -123,7 +125,10 @@ void main() {
       final teamTicket = (await cache.begin('team-chat'))!;
       expect(await cache.saveServerPage(teamTicket, [Message(id: 'team-message',
         chatId: 'team-chat', authorId: uid, authorLogin: uid, authorName: 'QA',
-        text: 'Сообщение команды QA', at: now)], hasMore: false), isTrue);
+        text: 'Сообщение команды QA', at: now), Message(id: 'hidden-card',
+        chatId: 'team-chat', authorId: uid, authorLogin: uid, authorName: 'QA',
+        text: '{"card":"collection","collection_id":"hidden"}',
+        at: now.add(const Duration(days: 1)))], hasMore: false), isTrue);
       await db.close();
       db = await openProjectChatServerDatabase('${dir.path}/chats.sqlite', factory: databaseFactoryFfi);
       cache = makeCache();
@@ -135,11 +140,43 @@ void main() {
         return OfflineStartupResult.cacheOnly;
       })),
       GoRoute(path: '/home', builder: (_, __) => NavigationScreen(cachedReader: reader,
+        cachedInfo: (_) => CachedTeamChatDirectory(store: cache, capabilities: caps, subjectsOnly: true),
+        cachedLearning: (_) => CachedTeamChatDirectory(store: cache, capabilities: caps, subjectsOnly: false),
         cachedProfile: (_) => ProfileScreen(cachedReader: reader, cachedChats: cache, cachedCapabilities: caps))),
     ]);
     await tester.pumpWidget(MaterialApp.router(routerConfig: router));
     await tester.pumpAndSettle();
     expect(find.textContaining('Студент QA'), findsOneWidget);
+    for (final tab in ['База', 'Обучение']) {
+      await tester.tap(find.text(tab).last);
+      await tester.pumpAndSettle();
+      for (var i = 0; i < 100 && find.text('Предмет QA').evaluate().isEmpty; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(find.text('Предмет QA'), findsOneWidget);
+      await tester.tap(find.text('Предмет QA'));
+      await tester.pumpAndSettle();
+      for (var i = 0; i < 100 && find.text('Сообщение команды QA').evaluate().isEmpty; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(find.text('Сообщение команды QA'), findsOneWidget);
+      expect(find.textContaining('hidden'), findsNothing);
+      expect(find.text('Сбор'), findsNothing);
+      if (tab == 'База') {
+        caps.block();
+        await tester.pump();
+        await tester.pump();
+        expect(find.text('Сообщение команды QA'), findsNothing);
+        expect(find.byType(TeamDetailsScreen), findsNothing);
+        caps.grant(SessionCapabilityMode.cacheOnly, caps.beginAuthorization(scope.capture()!)!);
+        await tester.pumpAndSettle();
+      } else {
+        await tester.tap(find.byTooltip('Назад').last);
+        await tester.pumpAndSettle();
+      }
+    }
     await tester.tap(find.text('Профиль').last);
     await tester.pumpAndSettle();
     tester.widget<StudentProfileScreenPreview>(find.byType(StudentProfileScreenPreview)).onMessagesTap!();

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:student_ui/student_ui.dart';
 import 'package:student_platform/src/core/online_side_effect_barrier.dart';
+import 'package:student_platform/src/core/session_capabilities.dart';
+import '../home/home_content_coordinator.dart';
 
 // Импорты по текущей структуре
 import '../home/home_screen.dart';
@@ -25,9 +27,13 @@ class NavigationScreen extends StatefulWidget {
       this.cachedInfo,
       this.cachedLearning,
       this.cachedProfile,
-      this.onlineBarrier});
+      this.onlineBarrier,
+      this.homeContent,
+      this.homeContentCapabilities});
   final bool guest;
   final OnlineSideEffectBarrier? onlineBarrier;
+  final HomeContentCoordinator? homeContent;
+  final SessionCapabilities? homeContentCapabilities;
 
   /// Non-null only after a cache-only admission. Other tabs must supply their
   /// own local-only implementation before they can be opened in this mode.
@@ -73,7 +79,9 @@ class _NavigationScreenState extends State<NavigationScreen> {
   @override
   void didUpdateWidget(covariant NavigationScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (_backgroundStarted && !widget.guest && !_cacheOnly &&
+    if (_backgroundStarted &&
+        !widget.guest &&
+        !_cacheOnly &&
         !identical(oldWidget.onlineBarrier, widget.onlineBarrier)) {
       ChatWarmCoordinator.instance.start(barrier: widget.onlineBarrier);
     }
@@ -134,6 +142,9 @@ class _NavigationScreenState extends State<NavigationScreen> {
                               child: HomeScreen(
                                   activeListenable: _homeActive,
                                   cachedReader: widget.cachedReader,
+                                  homeContent: widget.homeContent,
+                                  homeContentCapabilities:
+                                      widget.homeContentCapabilities,
                                   onlineBarrier: widget.onlineBarrier))),
                       VisitedTab(
                           active: _currentIndex == 1,

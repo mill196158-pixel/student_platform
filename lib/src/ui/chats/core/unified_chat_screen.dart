@@ -1,7 +1,7 @@
 import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_card_envelope.dart';
 import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:student_platform/src/services/chat_file_access.dart';
-import 'cached_chat_attachment.dart';
+import 'cached_chat_message_bubble.dart';
 // FILE: lib/src/ui/chats/core/unified_chat_screen.dart
 // ignore_for_file: unnecessary_import, unused_import, unused_field, unused_element, dead_null_aware_expression, invalid_null_aware_operator, deprecated_member_use
 
@@ -2722,10 +2722,15 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                 return Center(child: Text(view.showError
                     ? 'Сохранённые сообщения недоступны.' : 'Открываем сохранённые сообщения…'));
               }
-              if (view.messages.isEmpty) return const Center(child: Text('Сообщений пока нет'));
-              final colors = Theme.of(context).colorScheme;
+              final messages = view.messages.where((m) =>
+                  (m.cardKind?.trim().isEmpty ?? true) &&
+                  !ChatCardPreview.looksLikeCardJson(m.text) &&
+                  m.type != MessageType.assignmentDraft &&
+                  m.type != MessageType.assignmentPublished).toList();
+              if (messages.isEmpty) return Center(child: Text(view.messages.isEmpty
+                  ? 'Сообщений пока нет' : 'Часть сообщений пока недоступна офлайн.'));
               return ChatMessageList(
-                messages: view.messages,
+                messages: messages,
                 controller: _scroll,
                 messageKeys: _messageKeys,
                 search: _search,
@@ -2742,29 +2747,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                 onLongPress: (_, __, ___, ____, _____, ______) {},
                 onReplyTap: (_) {},
                 onReact: (_, __) {},
-                localOnlyBubbleBuilder: (message) {
-                  final own = message.authorId == service.currentUserId;
-                  return Align(
-                    alignment: own ? Alignment.centerRight : Alignment.centerLeft,
-                    child: Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      constraints: const BoxConstraints(maxWidth: 480),
-                      decoration: BoxDecoration(
-                        color: own ? colors.primaryContainer : colors.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (ChatCardPreview.forPreview(message).trim().isNotEmpty)
-                            Text(ChatCardPreview.forPreview(message).trim()),
-                          for (final attachment in message.attachments ?? const <ChatFile>[])
-                            CachedChatAttachment(file: attachment, service: service),
-                        ],
-                      ),
-                    ),
-                  );
-                },
+                localOnlyBubbleBuilder: (message) => CachedChatMessageBubble(
+                    message: message, service: service, showAuthor: false),
               );
             },
           ),

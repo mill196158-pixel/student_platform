@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:student_platform/src/core/offline_policy_grant.dart';
 
 /// App-lifetime guard for work started under a particular authenticated
 /// session. Scope values contain credentials and must never be logged.
@@ -97,6 +98,22 @@ class AuthSessionScope extends ChangeNotifier {
       scope._generation == _generation &&
       scope._identity == _observed &&
       scope._identity == _identity(_currentSession());
+
+  /// Derive a cache binding from the same credentials captured by [owner].
+  /// Parsing does not establish that the JWT or access policy is valid.
+  OfflineSessionBinding? bindingFor(
+      AuthOperationScope owner, String expectedIssuer) {
+    if (!isCurrent(owner)) return null;
+    final session = _currentSession();
+    if (session == null) return null;
+    final binding = OfflineSessionBinding.fromSession(session, expectedIssuer);
+    return isCurrent(owner) ? binding : null;
+  }
+
+  /// Compare another client's session to the exact captured credentials without
+  /// exposing them. This is an identity check, not authorization.
+  bool matchesSession(AuthOperationScope owner, Session? session) =>
+      isCurrent(owner) && _identity(session) == owner._identity;
 
   static (String, String, String?)? _identity(Session? session) {
     if (session == null ||

@@ -11,13 +11,17 @@ import 'package:student_platform/src/services/push/app_notifications_api.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
 import 'package:student_platform/src/core/auth_session_scope_host.dart';
 import 'package:student_platform/src/core/online_side_effect_barrier.dart';
+import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:student_platform/src/services/push/in_app_notification_bus.dart';
 import 'package:student_platform/src/ui/content/content_nav_executor.dart';
 import 'package:student_platform/src/ui/home/home_dashboard_service.dart';
 import 'package:student_platform/src/ui/home/cached_home_schedule_reader.dart';
 import 'package:student_platform/src/ui/home/home_promo_service.dart';
+import 'package:student_platform/src/ui/home/home_content_coordinator.dart';
+import 'package:student_platform/src/ui/home/home_content_verified_loader.dart';
 import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
 import 'package:student_platform/src/ui/info/content_media_service.dart';
+import 'package:student_platform/src/ui/info/home_content_snapshot_store.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/models/group_action_labels.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/navigation/group_action_deeplink.dart';
 import 'package:student_platform/src/ui/navigation/main_tab_scope.dart';
@@ -33,7 +37,9 @@ class HomeScreen extends StatefulWidget {
       this.activeListenable,
       this.notificationsApi,
       this.cachedReader,
-      this.onlineBarrier});
+      this.onlineBarrier,
+      this.homeContent,
+      this.homeContentCapabilities});
   final HomeDashboardService? dashboardService;
   final HomePromoService? promoService;
   final ContentMediaService? contentMedia;
@@ -42,6 +48,8 @@ class HomeScreen extends StatefulWidget {
   /// Only passed after a separately verified cache-only admission.
   final CachedHomeScheduleReader? cachedReader;
   final OnlineSideEffectBarrier? onlineBarrier;
+  final HomeContentCoordinator? homeContent;
+  final SessionCapabilities? homeContentCapabilities;
   final ValueListenable<bool>? activeListenable;
 
   @override
@@ -86,9 +94,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     widget.activeListenable?.addListener(_queuePromoImpressions);
+    widget.homeContent?.addListener(_onContentAccessChanged);
     if (widget.cachedReader == null) {
       _inAppSub = InAppNotificationBus.instance.stream.listen(_onInAppEvent);
     }
+  }
+
+  void _onContentAccessChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
@@ -135,12 +148,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void didUpdateWidget(covariant HomeScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.homeContent, widget.homeContent)) {
+      oldWidget.homeContent?.removeListener(_onContentAccessChanged);
+      widget.homeContent?.addListener(_onContentAccessChanged);
+    }
     final modeChanged = !identical(oldWidget.cachedReader, widget.cachedReader);
     final serviceChanged =
         !identical(oldWidget.dashboardService, widget.dashboardService);
-    if (_serviceInitialized && !modeChanged && !serviceChanged &&
+    if (_serviceInitialized &&
+        !modeChanged &&
+        !serviceChanged &&
         !identical(oldWidget.onlineBarrier, widget.onlineBarrier) &&
-        widget.cachedReader == null && widget.onlineBarrier != null) {
+        widget.cachedReader == null &&
+        widget.onlineBarrier != null) {
       unawaited(_service.prewarmSchedule(widget.onlineBarrier!));
     }
     if (!_serviceInitialized || (!modeChanged && !serviceChanged)) return;
@@ -182,6 +202,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.activeListenable?.removeListener(_queuePromoImpressions);
+    widget.homeContent?.removeListener(_onContentAccessChanged);
     _authScope?.removeListener(_onAuthScopeChanged);
     if (_serviceInitialized && _ownsService) _service.dispose();
     _inAppSub?.cancel();
@@ -252,9 +273,66 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (reader != null) {
       try {
         final snapshot = await reader.readDashboard();
-        if (!mounted || widget.cachedReader != reader) return;
+        final content = widget.homeContent;
+        final caps = widget.homeContentCapabilities;
+        Future<HomeContentSnapshot?> readOptional(String section) async {
+          if (content == null || caps == null) return null;
+          try {
+            return await content.read(section, caps);
+          } catch (error) {
+            debugPrint(
+                '[home-cache] $section unavailable: ${error.runtimeType}');
+            return null;
+          }
+        }
+
+        final savedNews = await readOptional('news');
+        final savedPromo = await readOptional('promo');
+        if (!mounted || widget.cachedReader != reader || !reader.canRead)
+          return;
+        final news = <HomeNewsItem>[];
+        for (final row in savedNews?.rows ?? <Map<String, dynamic>>[]) {
+          try {
+            final item = mapPublishedNews(row);
+            final key = row['_offline_image'];
+            news.add(item.copyWith(
+                imageBytes: key is String ? savedNews!.images[key] : null));
+          } catch (_) {
+            /* A malformed optional card cannot hide the dashboard. */
+          }
+        }
+        final promos = <ManagedContentCard>[];
+        for (final row in savedPromo?.rows ?? <Map<String, dynamic>>[]) {
+          final card = ManagedContentCard.tryParseHomePromo(row);
+          if (card == null) continue;
+          final imageKey = row['_offline_image'];
+          final iconKey = row['_offline_icon'];
+          final image =
+              imageKey is String ? savedPromo!.images[imageKey] : null;
+          final icon = iconKey is String ? savedPromo!.images[iconKey] : null;
+          if (image != null) {
+            _promoAssetIdentities[card.id] = _promoIdentity(card);
+            _promoImageBytes[card.id] = image;
+            _promoImageStates[card.id] = ContentImageReady(image);
+          }
+          if (icon != null) _promoIconBytes[card.id] = icon;
+          promos.add(card);
+        }
         setState(() {
-          _data = snapshot;
+          _data = HomeDashboardData(
+              profile: snapshot.profile,
+              scheduleDate: snapshot.scheduleDate,
+              todayLessons: snapshot.todayLessons,
+              assignments: snapshot.assignments,
+              news: news,
+              scheduleStatus: snapshot.scheduleStatus,
+              assignmentsStatus: snapshot.assignmentsStatus,
+              readNotificationIds: snapshot.readNotificationIds,
+              unreadMessagesCount: snapshot.unreadMessagesCount,
+              warning: snapshot.warning,
+              groupActions: snapshot.groupActions);
+          _promo = HomePromoLoadResult(
+              cards: promos, intentionallyEmpty: promos.isEmpty);
           _loading = false;
           _error = null;
         });
@@ -272,6 +350,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final onlineBarrier = widget.onlineBarrier;
     if (onlineBarrier != null && onlineBarrier.isOpen) {
       unawaited(_service.prewarmSchedule(onlineBarrier));
+      final content = widget.homeContent;
+      if (content != null) {
+        for (final section in HomeContentSection.values) {
+          unawaited(
+              content.warm(section, onlineBarrier).catchError((Object _) {}));
+        }
+      }
     }
     var reportedFirstContent = false;
     final userId = _service.currentUserId;
@@ -483,10 +568,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return Column(
       children: [
         if (widget.cachedReader != null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: Text('Без сети · новости и объявления могут быть недоступны',
-                style: Theme.of(context).textTheme.bodySmall),
+          SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Text('Без сети · новости и объявления могут быть недоступны',
+                  style: Theme.of(context).textTheme.bodySmall),
+            ),
           ),
         if (_error != null)
           TextButton(
@@ -504,9 +592,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               onRefresh: _load,
               onNotificationsTap:
                   widget.cachedReader == null ? _openNotifications : null,
-              onNewsTap: widget.cachedReader == null
-                  ? (index) => _showNewsFeed(data.news, index)
-                  : null,
+              onNewsTap: (index) => _showNewsFeed(data.news, index),
               onSummaryTap: () => MainTabScope.switchToTab(
                 context,
                 MainTab.schedule,
@@ -604,7 +690,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             dueAt: item.dueAt,
           ),
       ],
-      news: _presentationNews(data.news),
+      news: _presentationNews(
+          widget.homeContent?.isDenied('news') == true ? const [] : data.news),
       groupActions: [
         for (final action in data.groupActions)
           StudentHomeGroupAction(
@@ -879,26 +966,99 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final byId = {for (final item in news) item.id: item};
     final presentation = _presentationNews(news);
     final safeIndex = initialIndex.clamp(0, presentation.length - 1);
-    _service.markNewsSeen(presentation[safeIndex].id);
-    showModalBottomSheet<void>(
-      context: context,
+    final reader = widget.cachedReader;
+    final barrier = widget.onlineBarrier;
+    final content = widget.homeContent;
+    final scope = _authScope;
+    final owner = scope?.capture();
+    final active = ValueNotifier<bool>(true);
+    final navigator = Navigator.of(context);
+    ModalBottomSheetRoute<void>? sheetRoute;
+    bool current() =>
+        mounted &&
+        identical(widget.cachedReader, reader) &&
+        identical(widget.onlineBarrier, barrier) &&
+        identical(widget.homeContent, content) &&
+        (reader == null || reader.canRead) &&
+        (barrier == null || barrier.isOpen) &&
+        (scope == null || (owner != null && scope.isCurrent(owner))) &&
+        content?.isDenied('news') != true;
+    void check() {
+      if (!current()) {
+        active.value = false;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final target = sheetRoute;
+          if (target != null && target.isActive && navigator.mounted) {
+            navigator.removeRoute(target);
+          }
+        });
+      }
+    }
+
+    void mark(String id, {bool closed = false}) {
+      if (!current()) return;
+      if (barrier == null) {
+        unawaited(_service.markNewsSeen(id, closed: closed));
+      } else {
+        unawaited(barrier.run(() => _service.markNewsSeen(id, closed: closed)));
+      }
+    }
+
+    final removeClose = barrier?.onClose(check);
+    scope?.addListener(check);
+    reader?.accessChanges.addListener(check);
+    content?.addListener(check);
+    if (reader == null) mark(presentation[safeIndex].id);
+    sheetRoute = ModalBottomSheetRoute<void>(
       isScrollControlled: true,
       backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
       ),
-      builder: (_) => StudentNewsStorySheet(
-        news: presentation,
-        initialIndex: safeIndex,
-        onPageChanged: (id) => _service.markNewsSeen(id),
-        onClosed: (id) => _service.markNewsSeen(id, closed: true),
-        resolveImage: (item) async {
-          final source = byId[item.id];
-          if (source == null) return item.imageBytes;
-          return _service.resolveNewsImageBytes(source);
-        },
-      ),
+      builder: (_) {
+        Widget sheet() => StudentNewsStorySheet(
+              news: presentation,
+              initialIndex: safeIndex,
+              onPageChanged: reader == null ? (id) => mark(id) : null,
+              onClosed: reader == null ? (id) => mark(id, closed: true) : null,
+              // The legacy resolver uses internal timeouts and cannot prove
+              // its underlying HTTP work has settled when a barrier drains.
+              resolveImage: reader == null && barrier == null
+                  ? (item) async {
+                      if (!current()) return null;
+                      final source = byId[item.id];
+                      if (source == null) return item.imageBytes;
+                      final bytes =
+                          await _service.resolveNewsImageBytes(source);
+                      return current() ? bytes : null;
+                    }
+                  : null,
+            );
+        final changes = <Listenable>[
+          active,
+          if (reader != null) reader.accessChanges,
+          if (widget.homeContent != null) widget.homeContent!,
+        ];
+        if (changes.isEmpty) return sheet();
+        return ListenableBuilder(
+            listenable: Listenable.merge(changes),
+            builder: (_, __) => active.value &&
+                    current() &&
+                    (reader == null || reader.canRead) &&
+                    widget.homeContent?.isDenied('news') != true
+                ? sheet()
+                : const SizedBox.shrink());
+      },
     );
+    final route = navigator.push(sheetRoute);
+    if (!current()) check();
+    unawaited(route.whenComplete(() {
+      removeClose?.call();
+      scope?.removeListener(check);
+      reader?.accessChanges.removeListener(check);
+      content?.removeListener(check);
+      active.dispose();
+    }));
   }
 
   void _showAssignmentDetails(HomeAssignmentPreview item) {
@@ -1051,6 +1211,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   List<StudentHomePromoPlacement> _promoPlacements() {
+    if (widget.homeContent?.isDenied('promo') == true) return const [];
     if (_promo.hidePromoStrip) return const [];
     if (_promo.isDemoFallback) {
       final demo = HomePromoPayload.demoStuckWithAssignment;
@@ -1072,8 +1233,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             payload: card.homePromo,
             slot: card.homePromo.effectiveHomeSlot,
             showDemoBadge: card.showDemoBadge,
-            onTap: _promoTapCallback(card),
-            onDismiss: card.homePromo.dismissible
+            onTap: widget.cachedReader != null ? null : _promoTapCallback(card),
+            onDismiss: widget.cachedReader == null && card.homePromo.dismissible
                 ? () => _onHomePromoDismiss(card)
                 : null,
             imageBytes: _promoImageBytes[card.id],

@@ -9,8 +9,7 @@ import 'package:student_platform/src/core/auth_session_scope_host.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
 import 'package:student_platform/src/ui/chats/core/dm_chat_service.dart';
-import 'package:student_platform/src/ui/chats/core/cached_chat_attachment.dart';
-import 'package:student_platform/src/ui/learning/models/chat_file.dart';
+import 'package:student_platform/src/ui/chats/core/cached_chat_message_bubble.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/messages/chat_message_list.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/search/chat_search_controller.dart';
@@ -220,7 +219,8 @@ class _CachedTeamDetailsState extends State<_CachedTeamDetails>
                   }
                   final messages = snapshot.data!
                       .where((m) =>
-                          m.cardKind == null &&
+                          (m.cardKind?.trim().isEmpty ?? true) &&
+                          !ChatCardPreview.looksLikeCardJson(m.text) &&
                           m.type != MessageType.assignmentDraft &&
                           m.type != MessageType.assignmentPublished)
                       .toList();
@@ -228,7 +228,7 @@ class _CachedTeamDetailsState extends State<_CachedTeamDetails>
                     return Center(
                         child: Text(snapshot.data!.isEmpty
                             ? 'Сообщений пока нет'
-                            : 'Сохранённые карточки недоступны.'));
+                            : 'Часть сообщений пока недоступна офлайн.'));
                   return ChatMessageList(
                       messages: messages,
                       controller: _scroll,
@@ -247,44 +247,8 @@ class _CachedTeamDetailsState extends State<_CachedTeamDetails>
                       onLongPress: (_, __, ___, ____, _____, ______) {},
                       onReplyTap: (_) {},
                       onReact: (_, __) {},
-                      localOnlyBubbleBuilder: (message) {
-                        final own =
-                            message.authorId == _filePermit!.currentUserId;
-                        final text = ChatCardPreview.forPreview(message).trim();
-                        return Align(
-                            alignment: own
-                                ? Alignment.centerRight
-                                : Alignment.centerLeft,
-                            child: Container(
-                                margin: const EdgeInsets.only(bottom: 8),
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 14, vertical: 10),
-                                constraints:
-                                    const BoxConstraints(maxWidth: 480),
-                                decoration: BoxDecoration(
-                                    color: own
-                                        ? colors.primaryContainer
-                                        : colors.surfaceContainerHighest,
-                                    borderRadius: BorderRadius.circular(18)),
-                                child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      if (!own &&
-                                          message.authorName.trim().isNotEmpty)
-                                        Text(message.authorName,
-                                            style: TextStyle(
-                                                color: colors.primary)),
-                                      if (text.isNotEmpty) Text(text),
-                                      for (final attachment
-                                          in message.attachments ??
-                                              const <ChatFile>[])
-                                        CachedChatAttachment(
-                                            file: attachment,
-                                            service: _filePermit!),
-                                    ])));
-                      });
+                      localOnlyBubbleBuilder: (message) => CachedChatMessageBubble(
+                          message: message, service: _filePermit!, showAuthor: true));
                 }),
             const Center(child: Text('Сохранённый список файлов недоступен.')),
           ]))

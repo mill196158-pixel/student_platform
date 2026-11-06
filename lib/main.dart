@@ -49,6 +49,9 @@ import 'src/core/session_capabilities_host.dart';
 import 'src/core/session_capabilities.dart';
 import 'src/ui/home/cached_home_schedule_reader.dart';
 import 'src/ui/home/home_snapshot_cache.dart';
+import 'src/ui/navigation/cached_team_chat_directory.dart';
+import 'src/ui/home/home_content_coordinator.dart';
+import 'src/ui/info/home_content_snapshot_store.dart';
 import 'src/ui/schedule/schedule_month_cache.dart';
 import 'src/core/offline_policy_grant_host.dart';
 import 'src/core/guarded_policy_redirect.dart';
@@ -73,6 +76,7 @@ const _offlineUiQa = bool.fromEnvironment('OFFLINE_UI_QA');
 AuthSessionScope? _policyQaScope;
 SqlitePolicyGrantStore? _policyQaStore;
 OfflineStartupAdmission? _policyQaAdmission;
+HomeContentCoordinator? _qaHomeContent;
 
 /// ===== GoRouter =====
 final GoRouter appRouter = GoRouter(
@@ -142,27 +146,36 @@ final GoRouter appRouter = GoRouter(
                   child: PushSessionHost(
                       barrier: barrier,
                       child: InAppToastHost(
-                          barrier: barrier, child: NavigationScreen(onlineBarrier: barrier)))),
+                          barrier: barrier,
+                          child: NavigationScreen(
+                              onlineBarrier: barrier,
+                              homeContent: _qaHomeContent)))),
               cachedBuilder: (_) {
                 try {
                   final reader = CachedHomeScheduleReader(
-                capabilities: caps,
-                home: HomeSnapshotCache(
-                    project: SupabaseConfig.url,
-                    authScope: scope,
-                    currentUserId: () => scope.capture()?.userId,
-                    sessionGeneration: () => scope.generation,
-                    sessionIdentity: scope.capture),
-                schedule: ScheduleMonthCache(scope, SupabaseConfig.url));
+                      capabilities: caps,
+                      home: HomeSnapshotCache(
+                          project: SupabaseConfig.url,
+                          authScope: scope,
+                          currentUserId: () => scope.capture()?.userId,
+                          sessionGeneration: () => scope.generation,
+                          sessionIdentity: scope.capture),
+                      schedule: ScheduleMonthCache(scope, SupabaseConfig.url));
                   final chats = ProjectChatServerCache.qaInstance;
                   return NavigationScreen(
-                cachedReader: reader,
-                cachedProfile: chats == null
-                    ? null
-                    : (_) => ProfileScreen(
-                        cachedReader: reader,
-                        cachedChats: chats,
-                        cachedCapabilities: caps));
+                      cachedReader: reader,
+                      homeContent: _qaHomeContent,
+                      homeContentCapabilities: caps,
+                      cachedInfo: chats == null ? null : (_) => CachedTeamChatDirectory(
+                        store: chats, capabilities: caps, subjectsOnly: true),
+                      cachedLearning: chats == null ? null : (_) => CachedTeamChatDirectory(
+                        store: chats, capabilities: caps, subjectsOnly: false),
+                      cachedProfile: chats == null
+                          ? null
+                          : (_) => ProfileScreen(
+                              cachedReader: reader,
+                              cachedChats: chats,
+                              cachedCapabilities: caps));
                 } catch (_) {
                   return blocked(context);
                 }
@@ -305,6 +318,18 @@ Future<void> _initializeApp(
       final directory = await sqlite.getDatabasesPath();
       final chatDb = await openProjectChatServerDatabase(
           '$directory/offline_chat_qa_v1.db');
+      if (_offlineUiQa) {
+        final contentDb = await openHomeContentSnapshotDatabase(
+            '$directory/offline_home_content_qa_v1.db');
+        _qaHomeContent = HomeContentCoordinator(
+            store: HomeContentSnapshotStore(
+                db: contentDb,
+                scope: scope,
+                currentBinding: binding,
+                project: SupabaseConfig.url.replaceFirst(RegExp(r'/$'), '')),
+            scope: scope,
+            httpClient: inner);
+      }
       ProjectChatServerCache.qaInstance = ProjectChatServerCache(
           db: chatDb,
           scope: scope,
