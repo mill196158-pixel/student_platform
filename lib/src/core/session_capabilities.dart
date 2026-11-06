@@ -81,6 +81,11 @@ class SessionCapabilities extends ChangeNotifier {
       _session.isCurrent(permit._owner) &&
       _allowed(_mode, permit.capability);
 
+  /// Verifies that a cache adapter is bound to the same scope instance and
+  /// credential generation as the permit, even for two sessions of one user.
+  bool owns(CapabilityPermit permit, AuthOperationScope owner) =>
+      permits(permit, SessionCapability.cachedRead) && permit._owner == owner;
+
   void _onSessionChanged() {
     final owner = _owner;
     if (owner != null && !_session.isCurrent(owner)) block();

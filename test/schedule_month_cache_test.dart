@@ -42,6 +42,51 @@ class _DelayedPreferences implements SharedPreferences {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('parallel reads do not invalidate a write before setString', () async {
+    final session = fakeSession('schedule-a');
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final scope = AuthSessionScope(
+        currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final prefs = _DelayedPreferences();
+    final gate = Completer<SharedPreferences>();
+    final cache =
+        ScheduleMonthCache(scope, 'project', preferences: () => gate.future);
+    final month = DateTime(2026, 11);
+    final write = cache.write(cache.begin(month)!, []);
+    final one = cache.beginRead(month)!;
+    final two = cache.beginRead(month)!;
+    expect(await cache.write(one, []), isFalse);
+    final reads = Future.wait([cache.read(one), cache.read(two)]);
+    gate.complete(prefs);
+    expect(await write, isTrue);
+    expect(await reads, [isEmpty, isEmpty]);
+    scope.dispose();
+    await events.close();
+  });
+
+  test('parallel reads do not invalidate an in-flight setString', () async {
+    final session = fakeSession('schedule-a');
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final scope = AuthSessionScope(
+        currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final prefs = _DelayedPreferences()..delayNext = true;
+    final cache =
+        ScheduleMonthCache(scope, 'project', preferences: () async => prefs);
+    final month = DateTime(2026, 11);
+    final write = cache.write(cache.begin(month)!, []);
+    await prefs.started.future;
+    final reads = Future.wait([
+      cache.read(cache.beginRead(month)!),
+      cache.read(cache.beginRead(month)!),
+    ]);
+    prefs.finish.complete();
+    expect(await write, isTrue);
+    expect(await reads, [isEmpty, isEmpty]);
+    scope.dispose();
+    await events.close();
+  });
   test('month snapshots distinguish empty, missing, account and stale attempts',
       () async {
     SharedPreferences.setMockInitialValues({});

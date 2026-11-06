@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:crypto/crypto.dart';
+import 'package:student_platform/src/core/auth_session_scope.dart';
 
 /// Local snapshots for existing home sections. The caller must establish
 /// authorization before reading, and may only write a successful response.
@@ -10,6 +12,8 @@ class HomeSnapshotCache {
     required String? Function() currentUserId,
     required int Function() sessionGeneration,
     required Object? Function() sessionIdentity,
+    this.project,
+    this.authScope,
     Future<SharedPreferences> Function()? preferences,
   })  : _currentUserId = currentUserId,
         _sessionGeneration = sessionGeneration,
@@ -19,14 +23,20 @@ class HomeSnapshotCache {
   final String? Function() _currentUserId;
   final int Function() _sessionGeneration;
   final Object? Function() _sessionIdentity;
+  final String? project;
+  final AuthSessionScope? authScope;
   final Future<SharedPreferences> Function() _preferences;
   final Object _scopeIssuer = Object();
   static final Map<String, int> _writeVersions = <String, int>{};
   static final Map<String, Future<void>> _pendingWrites =
       <String, Future<void>>{};
 
-  String _key(String uid, HomeSnapshotSection section) =>
-      'home_snapshot_v1_${section.name}_$uid';
+  String _key(String uid, HomeSnapshotSection section) => project == null
+      ? 'home_snapshot_v1_${section.name}_$uid'
+      : 'home_snapshot_v2_${section.name}_${sha256.convert(utf8.encode(jsonEncode([
+              project,
+              uid
+            ])))}';
 
   /// Capture before the network request, not after its response arrives.
   HomeSnapshotScope? captureScope(String userId) {

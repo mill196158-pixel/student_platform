@@ -36,12 +36,22 @@ class ScheduleMonthCache {
     final key = _key(owner.userId, month);
     final version = (_versions[key] ?? 0) + 1;
     _versions[key] = version;
-    return ScheduleMonthAttempt._(owner, key, _month(month), version);
+    return ScheduleMonthAttempt._(owner, key, _month(month), version, true);
+  }
+
+  /// Captures the current version without invalidating in-flight writes or
+  /// other readers. A newer write still invalidates this read.
+  ScheduleMonthAttempt? beginRead(DateTime month) {
+    final owner = scope.capture();
+    if (owner == null) return null;
+    final key = _key(owner.userId, month);
+    return ScheduleMonthAttempt._(
+        owner, key, _month(month), _versions[key] ?? 0, false);
   }
 
   bool _current(ScheduleMonthAttempt attempt) =>
       scope.isCurrent(attempt.owner) &&
-      _versions[attempt.key] == attempt.version;
+      (_versions[attempt.key] ?? 0) == attempt.version;
 
   Future<List<Lesson>?> read(ScheduleMonthAttempt attempt) async {
     if (!_current(attempt)) return null;
@@ -76,7 +86,8 @@ class ScheduleMonthCache {
   }
 
   Future<bool> write(ScheduleMonthAttempt attempt, List<Lesson> lessons) async {
-    if (!_current(attempt) ||
+    if (!attempt._writable ||
+        !_current(attempt) ||
         lessons.any((lesson) =>
             !MskDate.isoDate(lesson.date).startsWith('${attempt.month}-')))
       return false;
@@ -129,9 +140,11 @@ class ScheduleMonthCache {
 }
 
 class ScheduleMonthAttempt {
-  const ScheduleMonthAttempt._(this.owner, this.key, this.month, this.version);
+  const ScheduleMonthAttempt._(
+      this.owner, this.key, this.month, this.version, this._writable);
   final AuthOperationScope owner;
   final String key;
   final String month;
   final int version;
+  final bool _writable;
 }
