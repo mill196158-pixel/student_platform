@@ -427,8 +427,25 @@ class DmApi {
       }
       if (more is bool) sawMoreFlag = true;
       hasMore = hasMore || more == true;
+      final content = data['content'];
+      if (content != null && content is! String) {
+        throw const FormatException('Invalid confirmed chat content');
+      }
+      final attachments = (data['attachments'] as List).map((raw) {
+        final attachment = Map<String, dynamic>.from(raw as Map);
+        final deleted = attachment['is_deleted'];
+        if (deleted != null && deleted is! bool) {
+          throw const FormatException('Invalid confirmed file deletion status');
+        }
+        // Only an explicit RPC boolean establishes deletion provenance. Never
+        // accept a caller-provided verification marker from the raw payload.
+        attachment.remove('deletion_verified');
+        if (deleted is bool) attachment['deletion_verified'] = true;
+        return attachment;
+      }).toList();
       final message = Message.fromJson(
-          {...data, 'content': data['text'], 'msg_type': data['type']});
+          {...data, 'content': content ?? data['text'], 'msg_type': data['type'],
+            'attachments': attachments});
       if (clearedAt == null || message.at.isAfter(clearedAt))
         messages.add(message);
     }
