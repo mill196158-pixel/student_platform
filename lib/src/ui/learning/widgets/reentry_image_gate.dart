@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
+import 'qa_reentry_timing.dart';
 
 /// QA experiment: the same image subtree is mounted behind a bounded cover.
 /// It does not authorize images, cache pixels, or change their error handling.
@@ -29,6 +30,8 @@ class _ReentryImageGateState extends State<ReentryImageGate> {
   @override
   void initState() {
     super.initState();
+    qaReentryTiming('gate_init');
+    if (widget.readyForReveal) qaReentryTiming('snapshot_ready_initial');
     _revealed = !widget.initiallyArmed;
     _observer.onChanged = _scheduleCheck;
     _timer = Timer(widget.timeout, _reveal);
@@ -47,11 +50,13 @@ class _ReentryImageGateState extends State<ReentryImageGate> {
   @override
   void didUpdateWidget(covariant ReentryImageGate oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!oldWidget.readyForReveal && widget.readyForReveal) qaReentryTiming('snapshot_ready');
     if (!oldWidget.readyForReveal && widget.readyForReveal) _scheduleCheck();
   }
 
   void _reveal() {
     if (!mounted || _revealed) return;
+    qaReentryTiming('gate_reveal');
     _timer?.cancel();
     setState(() => _revealed = true);
   }
@@ -97,12 +102,15 @@ class ReentryImageObserver {
     if (_closed || _pending.length >= 4) return null;
     final ticket = Object();
     _pending.add(ticket);
+    qaReentryTiming('image_pending');
     return ticket;
   }
 
   void finish(Object? ticket) {
-    if (ticket != null && _pending.remove(ticket) && !_closed)
+    if (ticket != null && _pending.remove(ticket) && !_closed) {
+      qaReentryTiming('image_finished');
       onChanged?.call();
+    }
   }
 
   void dispose() {

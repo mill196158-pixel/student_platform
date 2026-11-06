@@ -9,6 +9,7 @@ import 'dart:convert';
 import 'package:supabase_flutter/supabase_flutter.dart' show FunctionException, Supabase;
 import '../../../services/chat_file_access.dart';
 import 'reentry_image_gate.dart';
+import 'qa_reentry_timing.dart';
 
 class _QaContentChanged extends StateError {
   _QaContentChanged() : super('Копия файла изменилась.');
@@ -42,6 +43,7 @@ class AuthorizedFileImageProvider
         contentEpoch = ChatFileAccess.qaContentEpoch(url, ChatFileAccess.userId),
         accessEpoch = ChatFileAccess.qaAccessEpoch(url, ChatFileAccess.userId),
         _qaCredential = const bool.fromEnvironment('QA_LOCAL_IMAGE_PREWARM') ? _qaToken() : null,
+        _qaTrace = qaReentryNext(),
         _cancelledNonce = null;
   AuthorizedFileImageProvider._cancelled(AuthorizedFileImageProvider old)
       : url = old.url,
@@ -52,6 +54,7 @@ class AuthorizedFileImageProvider
         contentEpoch = old.contentEpoch,
         accessEpoch = old.accessEpoch,
         _qaCredential = old._qaCredential,
+        _qaTrace = old._qaTrace,
         _cancelledNonce = Object();
   final String url;
   final String? user;
@@ -60,6 +63,7 @@ class AuthorizedFileImageProvider
   final Object? clientIdentity;
   final int contentEpoch, accessEpoch;
   final String? _qaCredential;
+  final int? _qaTrace;
   final Object? _cancelledNonce;
   bool get _qaRevisionCurrent => !const bool.fromEnvironment('QA_LOCAL_IMAGE_PREWARM') ||
       ChatFileAccess.keyFor(url) == null ||
@@ -125,6 +129,7 @@ class AuthorizedFileImageProvider
   }
 
   Future<AuthorizedFileImageProvider> _obtainAuthorizedKey() async {
+    qaReentryTiming('key_start', _qaTrace);
     if (const bool.fromEnvironment('QA_LOCAL_IMAGE_PREWARM') && ChatFileAccess.keyFor(url) != null) {
       final status = _qaOwnerStatus;
       if (status == _QaOwnerStatus.stale) return AuthorizedFileImageProvider._cancelled(this);
@@ -146,7 +151,9 @@ class AuthorizedFileImageProvider
           debugAuthorize != null) {
         await debugAuthorize!(url);
       } else {
-        await ChatFileAccess.authorize(url);
+        qaReentryTiming('authorize_start', _qaTrace);
+        await ChatFileAccess.authorize(url, debugTrace: _qaTrace);
+        qaReentryTiming('authorize_done', _qaTrace);
       }
     } on ChatFileSessionChanged {
       if (_ownerChanged) {
@@ -173,6 +180,7 @@ class AuthorizedFileImageProvider
       }
       throw StateError('Сессия изменилась.');
     }
+    qaReentryTiming('key_done', _qaTrace);
     return this;
   }
 
@@ -198,7 +206,9 @@ class AuthorizedFileImageProvider
     }
     late final Uint8List bytes;
     try {
-      bytes = await ChatFileAccess.readBytes(url);
+      qaReentryTiming('read_start', _qaTrace);
+      bytes = await ChatFileAccess.readBytes(url, debugTrace: _qaTrace);
+      qaReentryTiming('read_done', _qaTrace);
     } catch (error) {
       if (_qaExpectedDenial(error)) return cancelled();
       rethrow;
@@ -209,9 +219,11 @@ class AuthorizedFileImageProvider
       throw ChatFileSessionChanged();
     }
     try {
+      qaReentryTiming('decode_start', _qaTrace);
       final codec = kDebugMode && const bool.fromEnvironment('QA_LOCAL_IMAGE_PREWARM') && debugQaCodec != null
           ? await debugQaCodec!()
           : await decode(await ui.ImmutableBuffer.fromUint8List(bytes));
+      qaReentryTiming('decode_done', _qaTrace);
       if (kDebugMode && const bool.fromEnvironment('QA_LOCAL_IMAGE_PREWARM') && debugQaAfterDecode != null) {
         await debugQaAfterDecode!();
       }

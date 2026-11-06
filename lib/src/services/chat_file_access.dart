@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../ui/learning/widgets/qa_reentry_timing.dart';
 import 'dart:collection';
 import 'dart:io';
 import 'dart:typed_data';
@@ -620,17 +621,21 @@ class ChatFileAccess {
   }
 
   static Future<bool> _receiptAvailable(
-      String url, String? uid, String? sid, bool Function() current) async {
+      String url, String? uid, String? sid, bool Function() current, {int? debugTrace}) async {
     if (uid == null ||
         sid == null ||
         keyFor(url) == null ||
         _unsupportedProtocol.contains('$uid:${keyFor(url)}') ||
         !current()) return false;
+    qaReentryTiming('receipt_queue_wait', debugTrace);
     return _withOwnerFiles(uid, () async {
+      qaReentryTiming('receipt_queue_entered', debugTrace);
       if (!current() || isAccessRevoked(url)) return false;
       final file = await _cachedFile(url, uid);
+      qaReentryTiming('receipt_path_done', debugTrace);
       if (file == null || !current() || isAccessRevoked(url)) return false;
       final allowed = await _hasReceipt(file, sid);
+      qaReentryTiming('receipt_marker_done', debugTrace);
       return allowed && current() && !isAccessRevoked(url);
     });
   }
@@ -781,7 +786,7 @@ class ChatFileAccess {
         resolve(url).then<void>((_) {}, onError: (Object _, StackTrace __) {}));
   }
 
-  static Future<void> authorize(String url) async {
+  static Future<void> authorize(String url, {int? debugTrace}) async {
     if (keyFor(url) != null && _logoutFenced) {
       throw StateError('Выход из аккаунта не завершён.');
     }
@@ -804,7 +809,8 @@ class ChatFileAccess {
             (_revisions[id] ?? 0) == revision);
     try {
       final sid = _sessionId(authClient?.auth.currentSession);
-      if (await _receiptAvailable(url, uid, sid, current)) {
+      if (await _receiptAvailable(url, uid, sid, current, debugTrace: debugTrace)) {
+        qaReentryTiming('authorize_receipt', debugTrace);
         if (!current()) throw ChatFileSessionChanged();
         if (decodedImageExperimentEnabled && uid != null && sid != null && token != null && key != null && authClient != null) {
           _decodedImageTickets.add((authClient, uid, sid, epoch, token, key));
@@ -815,6 +821,7 @@ class ChatFileAccess {
         _revalidateInBackground(url);
         return;
       }
+      qaReentryTiming('authorize_resolve', debugTrace);
       await resolve(url);
       if (!current()) throw ChatFileSessionChanged();
     } catch (error) {
@@ -844,7 +851,10 @@ class ChatFileAccess {
     if (lease != null &&
         sessionExpiry != null &&
         sessionExpiry * 1000 > DateTime.now().millisecondsSinceEpoch &&
-        _leaseClock.elapsedMilliseconds < lease.$2) return lease.$1;
+        _leaseClock.elapsedMilliseconds < lease.$2) {
+      qaReentryTiming('resolve_lease');
+      return lease.$1;
+    }
     _leases.remove(id);
     final started = _leaseClock.elapsedMilliseconds;
     final resolved = await _resolving.run(
@@ -886,6 +896,7 @@ class ChatFileAccess {
               (_revisions[id] ?? 0) == revision);
       final checkKey = '$uid:$key';
       _liveChecks[checkKey] = (_liveChecks[checkKey] ?? 0) + 1;
+      qaReentryTiming('resolve_http_start');
       final request = client.functions
           .invoke('chat-file-access', body: {'action': 'resolve', 'key': key});
       void finished() {
@@ -899,6 +910,10 @@ class ChatFileAccess {
 
       unawaited(request.then<void>((_) => finished(),
           onError: (Object _, StackTrace __) => finished()));
+      if (kDebugMode && const bool.fromEnvironment('QA_REENTRY_TIMING')) {
+        unawaited(request.then<void>((_) => qaReentryTiming('resolve_http_done'),
+            onError: (Object _, StackTrace __) => qaReentryTiming('resolve_http_error')));
+      }
       // Observe denials even if the waiting caller has already timed out.
       // The observer never downloads or returns data and only acts on the
       // exact session that initiated this request.
@@ -1074,7 +1089,7 @@ class ChatFileAccess {
     return result;
   }
 
-  static Future<Uint8List> readBytes(String url) async {
+  static Future<Uint8List> readBytes(String url, {int? debugTrace}) async {
     if (keyFor(url) != null && _logoutFenced) {
       throw StateError('Выход из аккаунта не завершён.');
     }
@@ -1103,7 +1118,7 @@ class ChatFileAccess {
       if (uid != null &&
           sid != null &&
           cached != null &&
-          await _receiptAvailable(url, uid, sid, current)) {
+          await _receiptAvailable(url, uid, sid, current, debugTrace: debugTrace)) {
         final local = await _withOwnerFiles<Uint8List?>(uid, () async {
           if (!current() ||
               isAccessRevoked(url) ||
@@ -1125,6 +1140,7 @@ class ChatFileAccess {
             current() &&
             !isAccessRevoked(url) &&
             !_unsupportedProtocol.contains('$uid:$key')) {
+          qaReentryTiming('read_receipt_disk', debugTrace);
           _revalidateInBackground(url);
           return local;
         }
@@ -1135,9 +1151,11 @@ class ChatFileAccess {
           !_unsupportedProtocol.contains('$uid:$key') &&
           await cached.exists()) {
         final bytes = await cached.readAsBytes();
+        qaReentryTiming('read_authorized_disk', debugTrace);
         if (!current()) throw ChatFileSessionChanged();
         return bytes;
       }
+      qaReentryTiming('read_http_start', debugTrace);
       final response = await client
           .send(http.Request('GET', Uri.parse(resolved)))
           .timeout(const Duration(seconds: 30));
@@ -1155,6 +1173,7 @@ class ChatFileAccess {
       }
       if (!current()) throw ChatFileSessionChanged();
       final result = bytes.takeBytes();
+      qaReentryTiming('read_http_done', debugTrace);
       if (cached != null &&
           uid != null &&
           !_unsupportedProtocol.contains('$uid:$key') &&
