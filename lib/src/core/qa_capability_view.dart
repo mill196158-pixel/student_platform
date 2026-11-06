@@ -12,19 +12,30 @@ class QaCapabilityView extends StatefulWidget {
       required this.cachedBuilder,
       required this.blockedBuilder,
       this.drainTimeout = const Duration(seconds: 10),
-      this.coordinator});
+      this.coordinator,
+      this.retainOnlineForRotation = false});
   final SessionCapabilities capabilities;
   final Widget Function(BuildContext, OnlineSideEffectBarrier) onlineBuilder;
   final WidgetBuilder cachedBuilder;
   final WidgetBuilder blockedBuilder;
   final Duration drainTimeout;
   final QaOnlineSideEffectCoordinator? coordinator;
+  /// Experimental: retains State while blocked; does not stop child work.
+  final bool retainOnlineForRotation;
   @override
   State<QaCapabilityView> createState() => _QaCapabilityViewState();
 }
 
 class _QaCapabilityViewState extends State<QaCapabilityView> {
   late QaOnlineSideEffectCoordinator _coordinator;
+  Widget? _retainedOnline;
+
+  Widget _retained({required bool showOnline, required Widget fallback}) =>
+      Stack(fit: StackFit.expand, children: [
+        Offstage(offstage: !showOnline,
+          child: _retainedOnline ?? const SizedBox.shrink()),
+        if (!showOnline) fallback,
+      ]);
 
   @override
   void initState() {
@@ -68,21 +79,31 @@ class _QaCapabilityViewState extends State<QaCapabilityView> {
 
   @override
   Widget build(BuildContext context) {
-    if (_coordinator.blocked) return widget.blockedBuilder(context);
+    if (_coordinator.blocked) return widget.retainOnlineForRotation
+        ? _retained(showOnline: false, fallback: widget.blockedBuilder(context))
+        : widget.blockedBuilder(context);
     final caps = widget.capabilities;
     switch (caps.mode) {
       case SessionCapabilityMode.online:
         final permit = caps.capture(SessionCapability.networkRead);
         if (permit == null ||
             !caps.permits(permit, SessionCapability.networkRead)) {
-          return widget.blockedBuilder(context);
+          return widget.retainOnlineForRotation
+              ? _retained(showOnline: false, fallback: widget.blockedBuilder(context))
+              : widget.blockedBuilder(context);
         }
         final barrier = _coordinator.open(() =>
             caps.mode == SessionCapabilityMode.online &&
             caps.permits(permit, SessionCapability.networkRead));
-        if (barrier == null || !barrier.isOpen)
-          return widget.blockedBuilder(context);
-        return widget.onlineBuilder(context, barrier);
+        if (barrier == null || !barrier.isOpen) {
+          return widget.retainOnlineForRotation
+              ? _retained(showOnline: false, fallback: widget.blockedBuilder(context))
+              : widget.blockedBuilder(context);
+        }
+        final online = widget.onlineBuilder(context, barrier);
+        if (!widget.retainOnlineForRotation) return online;
+        _retainedOnline = online;
+        return _retained(showOnline: true, fallback: const SizedBox.shrink());
       case SessionCapabilityMode.cacheOnly:
         final permit = caps.capture(SessionCapability.cachedRead);
         return permit != null &&
@@ -90,7 +111,9 @@ class _QaCapabilityViewState extends State<QaCapabilityView> {
             ? widget.cachedBuilder(context)
             : widget.blockedBuilder(context);
       case SessionCapabilityMode.blocked:
-        return widget.blockedBuilder(context);
+        return widget.retainOnlineForRotation
+            ? _retained(showOnline: false, fallback: widget.blockedBuilder(context))
+            : widget.blockedBuilder(context);
     }
   }
 }

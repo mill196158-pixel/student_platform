@@ -164,7 +164,8 @@ class CoordinatedRefreshClient extends http.BaseClient {
 /// Non-refresh traffic does not wait; this object never logs request bodies.
 class RefreshAdmissionClient extends http.BaseClient {
   RefreshAdmissionClient(this._inner,
-      {Uri? backend, RefreshSecurityFence? securityFence})
+      {Uri? backend, RefreshSecurityFence? securityFence,
+      this.trackQaRefresh = false})
       : _securityFence = securityFence ?? RefreshSecurityFence(),
         _backend = backend ?? Uri.parse(SupabaseConfig.url);
   final http.Client _inner;
@@ -177,6 +178,21 @@ class RefreshAdmissionClient extends http.BaseClient {
   int _nonRefreshAuthRevision = 0;
   int _suppressedAuthRevision = 0;
   final ValueNotifier<int> authSignals = ValueNotifier<int>(0);
+  /// QA visual guard can close before a refresh response changes SDK state.
+  /// This signal is not proof of authorization or of a completed refresh.
+  final ValueNotifier<int> refreshStarts = ValueNotifier<int>(0);
+  final bool trackQaRefresh;
+  bool _qaRefreshPending = false;
+  bool _qaRefreshAmbiguous = false;
+  bool get qaRefreshPending => _qaRefreshPending || _qaRefreshAmbiguous;
+
+  /// Only a verified policy result can settle a single observed start.
+  /// Overlapping or otherwise ambiguous starts remain closed for this process.
+  bool confirmQaRefresh() {
+    if (!trackQaRefresh || !_qaRefreshPending || _qaRefreshAmbiguous) return false;
+    _qaRefreshPending = false;
+    return true;
+  }
 
   /// Changes on every non-refresh auth dispatch, even if it later fails.
   int get nonRefreshAuthRevision => _nonRefreshAuthRevision;
@@ -273,6 +289,11 @@ class RefreshAdmissionClient extends http.BaseClient {
       _suppressedAuthRevision++;
       authSignals.value++;
       throw RefreshTransportSuppressed();
+    }
+    if (trackQaRefresh) {
+      if (_qaRefreshPending) _qaRefreshAmbiguous = true;
+      _qaRefreshPending = true;
+      refreshStarts.value++;
     }
     authSignals.value++;
     _activeAuth++;

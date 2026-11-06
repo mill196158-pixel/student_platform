@@ -24,7 +24,8 @@ class RefreshPolicyGrantObserver {
       required this.policy,
       required this.backend,
       required this.publicKey,
-      this.closePreviousOnline})
+      this.closePreviousOnline,
+      this.onVerifiedRotation})
       : _clientTrusted = (() =>
             identical(client, SupabaseConfig.client) &&
             backend.origin == Uri.parse(SupabaseConfig.url).origin) {
@@ -40,7 +41,8 @@ class RefreshPolicyGrantObserver {
       required this.policy,
       required this.backend,
       required this.publicKey,
-      this.closePreviousOnline})
+      this.closePreviousOnline,
+      this.onVerifiedRotation})
       : _clientTrusted = (() => true) {
     _listen();
   }
@@ -54,6 +56,9 @@ class RefreshPolicyGrantObserver {
   final String publicKey;
   /// QA only: close and drain the previous online UI before issuing a permit.
   final Future<bool> Function()? closePreviousOnline;
+  /// QA notification only. It does not itself authorize or drain child routes.
+  final void Function(AuthOperationScope previous, AuthOperationScope current,
+      SessionCapabilities capabilities)? onVerifiedRotation;
   final bool Function() _clientTrusted;
   late final StreamSubscription<AuthState> _subscription;
   OfflineSessionBinding? _armed;
@@ -259,8 +264,15 @@ class RefreshPolicyGrantObserver {
             caps.mode == SessionCapabilityMode.blocked &&
             caps.grant(SessionCapabilityMode.online, attempt) &&
             identityCurrent() && caps.revision == capsRevision + 2 &&
-            caps.mode == SessionCapabilityMode.online &&
-            this.arm(owner, binding, caps)) return;
+            caps.mode == SessionCapabilityMode.online) {
+          final previous = _armedOwner;
+          if (previous != null && this.arm(owner, binding, caps)) {
+            if (onVerifiedRotation != null && gate.confirmQaRefresh()) {
+              onVerifiedRotation!(previous, owner, caps);
+            }
+            return;
+          }
+        }
         if (identityCurrent() && caps.revision == capsRevision + 2 &&
             caps.mode == SessionCapabilityMode.online) caps.block();
       }
@@ -270,6 +282,9 @@ class RefreshPolicyGrantObserver {
         _handlingRefresh = false;
         _armedOwner = owner;
         _armedCapsRevision = caps.revision;
+        if (onVerifiedRotation != null && gate.confirmQaRefresh()) {
+          onVerifiedRotation!(owner, owner, caps);
+        }
       } else {
         disarm();
       }

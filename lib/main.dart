@@ -57,6 +57,8 @@ import 'src/ui/schedule/schedule_month_cache.dart';
 import 'src/core/offline_policy_grant_host.dart';
 import 'src/core/guarded_policy_redirect.dart';
 import 'src/core/qa_capability_view.dart';
+import 'src/core/qa_rotation_navigation_guard.dart';
+import 'src/core/qa_rotation_receipt.dart';
 import 'src/core/qa_online_side_effect_coordinator.dart';
 import 'src/ui/chats/forward/forward_outbox_host.dart';
 import 'src/ui/learning/state/team_snapshot_host.dart';
@@ -75,10 +77,13 @@ import 'src/ui/friends/data/friends_snapshot_cache.dart';
 const _sqlitePolicyQa = bool.fromEnvironment('SQLITE_POLICY_QA');
 // Remains off until cache ownership and all offline side effects are reviewed.
 const _offlineUiQa = bool.fromEnvironment('OFFLINE_UI_QA');
+const _qaRotationNavigation = bool.fromEnvironment('QA_ROTATION_NAVIGATION_EXPERIMENT');
+final _qaRotationReceipt = QaRotationReceipt();
 AuthSessionScope? _policyQaScope;
 SqlitePolicyGrantStore? _policyQaStore;
 OfflineStartupAdmission? _policyQaAdmission;
 RefreshPolicyGrantObserver? _qaRefreshGrantObserver;
+RefreshAdmissionClient? _qaRefreshGate;
 HomeContentCoordinator? _qaHomeContent;
 
 /// ===== GoRouter =====
@@ -143,6 +148,7 @@ final GoRouter appRouter = GoRouter(
               body: Center(child: Text('Сохранённые данные недоступны.')));
           return QaCapabilityView(
               capabilities: caps,
+              retainOnlineForRotation: _qaRotationNavigation,
               blockedBuilder: blocked,
               onlineBuilder: (_, barrier) => SessionKeeper(
                   barrier: barrier,
@@ -280,7 +286,9 @@ Future<void> _initializeApp(
   final refreshFence = RefreshSecurityFence();
   final gate = inner == null
       ? null
-      : RefreshAdmissionClient(inner, securityFence: refreshFence);
+      : RefreshAdmissionClient(inner, securityFence: refreshFence,
+          trackQaRefresh: _qaRotationNavigation);
+  if (_qaRotationNavigation) _qaRefreshGate = gate;
   sqlite.Database? policyDb;
   try {
     if (usePolicyQa) {
@@ -352,6 +360,7 @@ Future<void> _initializeApp(
           scope: scope, store: store, gate: gate, fence: refreshFence,
           policy: SettledPolicyTransport(inner), backend: Uri.parse(SupabaseConfig.url),
           publicKey: SupabaseConfig.anonKey,
+          onVerifiedRotation: _qaRotationNavigation ? _qaRotationReceipt.record : null,
           closePreviousOnline: () => QaOnlineSideEffectCoordinator.instance
               .closeAndWait(timeout: const Duration(seconds: 10)));
       }
@@ -459,11 +468,20 @@ class StudentPlatformApp extends StatelessWidget {
                                 darkTheme: AppTheme.dark().data,
                                 themeMode: mode,
                                 routerConfig: appRouter,
-                                builder: (context, child) => _sqlitePolicyQa
-                                    ? (child ?? const SizedBox.shrink())
-                                    : InAppToastHost(
-                                        child:
-                                            child ?? const SizedBox.shrink()),
+                                builder: (context, child) {
+                                  final routes = child ?? const SizedBox.shrink();
+                                  if (_sqlitePolicyQa && _offlineUiQa && _qaRotationNavigation) {
+                                    final caps = SessionCapabilitiesHost.maybeRead(context);
+                                    final scope = AuthSessionScopeHost.maybeRead(context);
+                                    if (caps == null || scope == null) return const SizedBox.shrink();
+                                    return QaRotationNavigationGuard(scope: scope,
+                                        capabilities: caps, receipt: _qaRotationReceipt,
+                                        refreshStarts: _qaRefreshGate?.refreshStarts,
+                                        hasPendingRefresh: () => _qaRefreshGate?.qaRefreshPending ?? true,
+                                        child: routes);
+                                  }
+                                  return _sqlitePolicyQa ? routes : InAppToastHost(child: routes);
+                                },
 
                                 // Локализация
                                 locale: const Locale('ru', 'RU'),

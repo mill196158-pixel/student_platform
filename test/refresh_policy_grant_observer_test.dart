@@ -41,6 +41,27 @@ class _Storage extends LocalStorage {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('process gate refuses to settle overlapping refresh starts', () async {
+    final release = Completer<void>();
+    final inner = MockClient((request) async {
+      await release.future;
+      return http.Response('{}', 200, request: request);
+    });
+    final gate = RefreshAdmissionClient(inner,
+        backend: Uri.parse('https://a.invalid'), trackQaRefresh: true);
+    gate.bind(inner);
+    final uri = Uri.parse('https://a.invalid/auth/v1/token?grant_type=refresh_token');
+    final first = gate.send(http.Request('POST', uri));
+    final second = gate.send(http.Request('POST', uri));
+    await Future<void>.delayed(Duration.zero);
+    expect(gate.refreshStarts.value, 2);
+    expect(gate.qaRefreshPending, isTrue);
+    expect(gate.confirmQaRefresh(), isFalse);
+    release.complete();
+    await Future.wait([first, second]);
+    expect(gate.confirmQaRefresh(), isFalse);
+    gate.close();
+  });
   for (final scenario in [
     'allowed',
     'unchanged',
@@ -97,12 +118,14 @@ void main() {
         };
       }
 
-      var policyCalls = 0, refreshCalls = 0;
+      var policyCalls = 0, refreshCalls = 0, refreshStarts = 0;
       final entered = Completer<void>(), release = Completer<void>();
       final inner = MockClient((request) async {
         if (request.url.path == '/auth/v1/token') {
-          if (request.url.queryParameters['grant_type'] != 'password')
+          if (request.url.queryParameters['grant_type'] != 'password') {
+            expect(refreshStarts, greaterThan(refreshCalls));
             refreshCalls++;
+          }
           return http.Response(
               jsonEncode(request.url.queryParameters['grant_type'] == 'password'
                   ? response(3, uid: 'b')
@@ -146,7 +169,9 @@ void main() {
       });
       final fence = RefreshSecurityFence();
       final gate = RefreshAdmissionClient(inner,
-          backend: Uri.parse('https://a.invalid'), securityFence: fence);
+          backend: Uri.parse('https://a.invalid'), securityFence: fence,
+          trackQaRefresh: true);
+      gate.refreshStarts.addListener(() => refreshStarts++);
       await Supabase.initialize(
           url: 'https://a.invalid',
           publishableKey: 'qa',
@@ -208,6 +233,7 @@ void main() {
         }));
         await oldWorkStarted.future;
       }
+      var rotationReceipts = 0;
       final observer = RefreshPolicyGrantObserver.forTesting(
           client: client,
           scope: scope,
@@ -218,6 +244,13 @@ void main() {
               inner, Uri.parse('https://a.invalid')),
           backend: Uri.parse('https://a.invalid'),
           publicKey: 'qa',
+          onVerifiedRotation: (previous, current, actualCaps) {
+            expect(previous, owner);
+            expect(scope.isCurrent(previous), previous == current);
+            expect(scope.isCurrent(current), isTrue);
+            expect(identical(actualCaps, caps), isTrue);
+            rotationReceipts++;
+          },
           closePreviousOnline: scenario.startsWith('resume') ? () async {
             reentryStarted.complete();
             if (scenario == 'resume_fail') return false;
@@ -276,6 +309,11 @@ void main() {
         expect(caps.mode,
             scenario == 'resume' || scenario == 'resume_drain'
                 ? SessionCapabilityMode.online : SessionCapabilityMode.blocked);
+        expect(rotationReceipts,
+            scenario == 'resume' || scenario == 'resume_drain' ? 1 : 0);
+      } else {
+        expect(rotationReceipts,
+            scenario == 'unchanged' || scenario == 'unchanged_twice' ? 1 : 0);
       }
       if (scenario == 'unchanged_twice') {
         await client.auth.refreshSession();
