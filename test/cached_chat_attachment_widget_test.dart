@@ -43,7 +43,7 @@ void main() {
     events.add(AuthState(AuthChangeEvent.initialSession, session));
     final caps = SessionCapabilities(scope);
     caps.grant(SessionCapabilityMode.cacheOnly, caps.beginAuthorization(scope.capture()!)!);
-    final service = DmChatService.cachedOnly(peerId: 'peer', initialChatId: 'chat', capabilities: caps,
+    var service = DmChatService.cachedOnly(peerId: 'peer', initialChatId: 'chat', capabilities: caps,
       cacheReader: (_, __) async => throw StateError('not used'));
     expect(service.canReadCached, isTrue);
     ChatFile makeFile(String name, String mime, {bool deleted = false}) => ChatFile(
@@ -53,6 +53,8 @@ void main() {
     final first = makeFile('first.png', 'image/png');
     final second = makeFile('second.png', 'image/png');
     final document = makeFile('document.pdf', 'application/pdf');
+    final missingDocument = makeFile('missing.docx',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     final png = base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/afoAAAAASUVORK5CYII=');
     final firstPng = Uint8List.fromList([...png, 1]);
     final secondPng = Uint8List.fromList([...png, 2]);
@@ -70,12 +72,13 @@ void main() {
     });
     final gate = Completer<void>();
     Future<void> mount(ChatFile file, {Future<void> Function()? beforeRead,
-        Future<bool> Function(String)? open, bool actualRead = false}) async {
+        Future<bool> Function(String)? open, bool actualRead = false,
+        Future<Uint8List?> Function(ChatFile)? read}) async {
       await tester.pumpWidget(MaterialApp(home: Scaffold(body: CachedChatAttachment(
         file: file, service: service, debugBeforeRead: beforeRead, debugOpen: open,
-        debugRead: actualRead ? null : (item) async => item.isImage
+        debugRead: read ?? (actualRead ? null : (item) async => item.isImage
             ? (item.id == first.id ? firstPng : secondPng)
-            : Uint8List.fromList([7, 8, 9])))));
+            : Uint8List.fromList([7, 8, 9]))))));
       await tester.pump();
     }
     await mount(first, beforeRead: () => gate.future);
@@ -113,20 +116,46 @@ void main() {
       file: makeFile('second.png', 'image/png', deleted: true), service: service))));
     expect(find.byType(InteractiveViewer), findsNothing);
     expect(find.byType(Image), findsNothing);
+    final documentReadGate = Completer<void>();
+    await mount(document, beforeRead: () => documentReadGate.future);
+    tester.widget<AppFileCard>(find.byType(AppFileCard)).onTap!();
+    await tester.pump();
+    expect(find.text('Файл ещё читается.'), findsOneWidget);
+    documentReadGate.complete();
+    await tester.pump();
+    ScaffoldMessenger.of(tester.element(find.byType(AppFileCard))).clearSnackBars();
+    await tester.pumpAndSettle();
+    final missingBytes = await tester.runAsync(() => ChatFileAccess.readCachedOnly(
+        missingDocument.fileUrl, permit: () => service.canReadCached));
+    expect(missingBytes, isNull);
+    await mount(missingDocument, read: (_) async => missingBytes);
+    await tester.pump();
+    expect(find.byType(AppFileCard), findsOneWidget);
+    tester.widget<AppFileCard>(find.byType(AppFileCard)).onTap!();
+    await tester.pump();
+    expect(find.text('Локальная копия недоступна.'), findsOneWidget);
+    ScaffoldMessenger.of(tester.element(find.byType(AppFileCard))).clearSnackBars();
+    await tester.pumpAndSettle();
     var opened = false;
-    await mount(document, actualRead: true, open: (path) async {
+    final actualDocumentRead = Completer<void>();
+    await mount(document, read: (item) async {
+      final bytes = await ChatFileAccess.readCachedOnly(item.fileUrl,
+          permit: () => service.canReadCached);
+      actualDocumentRead.complete();
+      return bytes;
+    }, open: (path) async {
       opened = true;
       expect(await File(path).readAsBytes(), [7, 8, 9]);
       return true;
     });
     expect(find.byType(InteractiveViewer), findsNothing);
     expect(find.byType(Image), findsNothing);
-    for (var i = 0; i < 100 &&
-        (find.byType(AppFileCard).evaluate().isEmpty ||
-         tester.widget<AppFileCard>(find.byType(AppFileCard)).onTap == null); i++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
-      await tester.pump(const Duration(milliseconds: 50));
+    for (var i = 0; i < 100 && !actualDocumentRead.isCompleted; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump();
     }
+    expect(actualDocumentRead.isCompleted, isTrue);
+    await tester.pump();
     final button = tester.widget<AppFileCard>(find.byType(AppFileCard));
     await tester.runAsync(() async {
       button.onTap!();
@@ -134,6 +163,40 @@ void main() {
     });
     await tester.pump();
     expect(opened, isTrue);
+    await mount(document, open: (_) async => false);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 150)));
+    await tester.pump();
+    await tester.runAsync(() async {
+      tester.widget<AppFileCard>(find.byType(AppFileCard)).onTap!();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
+    await tester.pump();
+    expect(find.text('Не удалось открыть сохранённый файл.'), findsOneWidget);
+    ScaffoldMessenger.of(tester.element(find.byType(AppFileCard))).clearSnackBars();
+    await tester.pumpAndSettle();
+    final openEntered = Completer<void>();
+    final openResult = Completer<bool>();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await mount(document, open: (_) async {
+      openEntered.complete();
+      return openResult.future;
+    });
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 150)));
+    await tester.pump();
+    await tester.runAsync(() async {
+      tester.widget<AppFileCard>(find.byType(AppFileCard)).onTap!();
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    });
+    await tester.pump();
+    expect(openEntered.isCompleted, isTrue);
+    caps.block();
+    openResult.complete(false);
+    await tester.pump();
+    expect(find.text('Не удалось открыть сохранённый файл.'), findsNothing);
+    await service.dispose();
+    caps.grant(SessionCapabilityMode.cacheOnly, caps.beginAuthorization(scope.capture()!)!);
+    service = DmChatService.cachedOnly(peerId: 'peer', initialChatId: 'chat', capabilities: caps,
+      cacheReader: (_, __) async => throw StateError('not used'));
     await mount(second, actualRead: true);
     for (var i = 0; i < 100 && find.byType(Image).evaluate().isEmpty; i++) {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));

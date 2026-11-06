@@ -117,22 +117,31 @@ class _CachedChatAttachmentState extends State<CachedChatAttachment> {
 
   Future<void> _openDocument(int revision) async {
     bool current() => mounted && revision == _revision && _allowed();
+    void notify(String message) {
+      if (current()) ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          SnackBar(content: Text(message)));
+    }
     try {
       if (!current()) return;
       final path = await ChatFileAccess.cachedPathForOpen(widget.file.fileUrl, permit: current);
-      if (path == null || !current()) return;
+      if (!current()) return;
+      if (path == null) {
+        notify('Локальная копия недоступна.');
+        return;
+      }
       final debugOpen = widget.debugOpen;
-      final bool opened;
       if (debugOpen != null) {
-        opened = await debugOpen(path);
+        if (!await debugOpen(path)) notify('Не удалось открыть сохранённый файл.');
       } else {
         final result = await OpenFilex.open(path, type: widget.file.fileType);
-        opened = result.type == ResultType.done;
+        if (result.type == ResultType.noAppToOpen) {
+          notify('Нет приложения для открытия файла.');
+        } else if (result.type != ResultType.done) {
+          notify('Не удалось открыть сохранённый файл.');
+        }
       }
-      if (!opened && current()) throw StateError('Не удалось открыть файл');
     } catch (_) {
-      if (current()) ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Не удалось открыть сохранённый файл.')));
+      notify('Не удалось открыть сохранённый файл.');
     }
   }
 
@@ -151,7 +160,18 @@ class _CachedChatAttachmentState extends State<CachedChatAttachment> {
             fileSize: widget.file.fileSize,
             mimeType: widget.file.fileType,
             compact: true,
-            onTap: bytes == null ? null : () => _openDocument(revision));
+            onTap: () {
+              if (revision != _revision || !_allowed()) return;
+              if (snapshot.connectionState != ConnectionState.done) {
+                ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                  const SnackBar(content: Text('Файл ещё читается.')));
+              } else if (bytes == null) {
+                ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                  const SnackBar(content: Text('Локальная копия недоступна.')));
+              } else {
+                _openDocument(revision);
+              }
+            });
         }
         if (bytes == null) return Text('Вложение: ${widget.file.fileName}');
         void closeViewer() {
