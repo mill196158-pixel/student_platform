@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { retainNewsMedia } from "./delete_guard.ts";
 
 type UserClient = SupabaseClient<any, "public", any>;
 type ServiceClient = SupabaseClient<any, "public", any>;
@@ -9,6 +10,7 @@ type NewsMediaRequest = {
   contentType?: unknown;
   fileSize?: unknown;
   path?: unknown;
+  purpose?: unknown;
 };
 
 const corsHeaders = {
@@ -52,6 +54,32 @@ Deno.serve(async (req) => {
     const action = asTrimmedString(body.action) || "createUpload";
     const service = createServiceClient();
 
+    if (action === "createOptimizationUpload") {
+      await assertCanManageMedia(userClient);
+      const input = parseUpload(body);
+      const purpose = asTrimmedString(body.purpose);
+      if (purpose !== "backup" && purpose !== "optimized") {
+        throw new InputError("Invalid optimization purpose");
+      }
+      const { data: reservation, error: reservationError } = await userClient.rpc(
+        "admin_reserve_news_optimization_upload",
+        { p_purpose: purpose, p_mime_type: input.contentType },
+      );
+      if (reservationError || !reservation) {
+        throw new ForbiddenError("Optimization upload not authorized");
+      }
+      const path = sanitizeStoragePath(asTrimmedString(reservation.path));
+      const reservationId = asTrimmedString(reservation.reservation_id);
+      if (!path || !reservationId) throw new Error("Invalid reservation");
+      const { data, error } = await service.storage.from(BUCKET).createSignedUploadUrl(path);
+      if (error || !data) throw new Error("Failed to create upload URL");
+      return jsonResponse({
+        action: "createOptimizationUpload", purpose, reservationId, path,
+        token: data.token, signedUrl: data.signedUrl, expiresIn: UPLOAD_EXPIRES,
+        headers: { "Content-Type": input.contentType },
+      });
+    }
+
     if (action === "createUpload") {
       await assertCanManageMedia(userClient);
       const input = parseUpload(body);
@@ -94,9 +122,8 @@ Deno.serve(async (req) => {
       await assertCanManageMedia(userClient);
       const path = sanitizeStoragePath(asTrimmedString(body.path));
       if (!path) throw new InputError("Invalid path");
-      const { error } = await service.storage.from(BUCKET).remove([path]);
-      if (error) throw new Error(error.message);
-      return jsonResponse({ action: "delete", path, ok: true });
+      // Do not check-then-delete: reference creation can race the removal.
+      return jsonResponse(retainNewsMedia(path));
     }
 
     throw new InputError("Unknown action");

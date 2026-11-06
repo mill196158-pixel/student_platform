@@ -196,8 +196,9 @@ class _FakeRemoteStore implements AdminImageStore, AdminRemoteImageGateway {
   }
 
   @override
-  Future<void> deleteRemoteStrict(String imagePath) async {
+  Future<NewsMediaDeleteResult> deleteRemoteStrict(String imagePath) async {
     invalidatePath(imagePath);
+    return NewsMediaDeleteResult.deleted;
   }
 
   @override

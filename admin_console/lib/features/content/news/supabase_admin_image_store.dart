@@ -180,10 +180,20 @@ class SupabaseAdminImageStore
 
   /// Removes a stored object and surfaces failures to the caller.
   @override
-  Future<void> deleteRemoteStrict(String imagePath) async {
-    if (imagePath.isEmpty) return;
-    await _invoke({'action': 'delete', 'path': imagePath});
+  Future<NewsMediaDeleteResult> deleteRemoteStrict(String imagePath) async {
+    if (imagePath.isEmpty) return NewsMediaDeleteResult.retained;
+    final result = await _invoke({'action': 'delete', 'path': imagePath});
+    if (result['action'] != 'delete' || result['path'] != imagePath) {
+      throw StateError('Некорректный ответ удаления медиа.');
+    }
+    if (result['retained'] == true && result['ok'] == false) {
+      return NewsMediaDeleteResult.retained;
+    }
+    if (result['ok'] != true || result['retained'] == true) {
+      throw StateError('Неизвестный результат удаления медиа.');
+    }
     _cache.invalidatePath(imagePath);
+    return NewsMediaDeleteResult.deleted;
   }
 
   Future<Uint8List?> _downloadOnce(String imagePath) async {

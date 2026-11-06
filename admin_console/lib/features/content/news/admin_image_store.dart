@@ -47,10 +47,12 @@ abstract class AdminRemoteImageGateway {
 
   /// Strict delete for hard-delete cleanup. Throws when Storage removal fails
   /// so the caller can enqueue [news_media_cleanup_queue] retry work.
-  Future<void> deleteRemoteStrict(String imagePath);
+  Future<NewsMediaDeleteResult> deleteRemoteStrict(String imagePath);
 
   void clearPrivateCache();
 }
+
+enum NewsMediaDeleteResult { deleted, retained }
 
 class AdminStoredImage {
   const AdminStoredImage({

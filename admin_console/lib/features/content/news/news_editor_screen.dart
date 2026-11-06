@@ -58,6 +58,7 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
     if (_selectedIdValue != value) _imagePickRevision++;
     _selectedIdValue = value;
   }
+
   void _invalidateImagePick() => _imagePickRevision++;
   _NewsListTab _listTab = _NewsListTab.published;
   final Map<String, Uint8List> _resolvedBytes = {};
@@ -783,12 +784,14 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
     try {
       final result = await _repository.deleteArchived(removedId);
       var cleanupFailed = false;
+      var mediaRetained = false;
       final media = _mediaStore;
       final failedPaths = <String>[];
       for (final path in result.mediaPathsToDelete) {
         try {
           if (media != null) {
-            await media.deleteRemoteStrict(path);
+            final outcome = await media.deleteRemoteStrict(path);
+            mediaRetained |= outcome == NewsMediaDeleteResult.retained;
           }
         } catch (_) {
           cleanupFailed = true;
@@ -820,6 +823,8 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
       _snack(
         cleanupFailed
             ? 'Новость удалена, очистка файла будет повторена'
+            : mediaRetained
+            ? 'Новость удалена, файл сохранён'
             : 'Новость удалена',
       );
     } on NewsRepositoryException catch (error) {
@@ -873,11 +878,16 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
     final auth = _tryClient()?.auth.currentSession;
     bool current() {
       final now = _tryClient()?.auth.currentSession;
-      return mounted && revision == _imagePickRevision && _selectedId == selected.id &&
-          identical(session, widget.session) && _canWrite &&
-          auth?.user.id == now?.user.id && auth?.accessToken == now?.accessToken &&
+      return mounted &&
+          revision == _imagePickRevision &&
+          _selectedId == selected.id &&
+          identical(session, widget.session) &&
+          _canWrite &&
+          auth?.user.id == now?.user.id &&
+          auth?.accessToken == now?.accessToken &&
           auth?.refreshToken == now?.refreshToken;
     }
+
     try {
       final picked = await _imagePicker.pickImage();
       if (picked == null || !current()) return;
@@ -888,7 +898,9 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
       );
       if (!current()) {
         if (!_items.any((item) => item.imageId == stored.id)) {
-          try { await _imageStore.remove(stored.id); } catch (_) {}
+          try {
+            await _imageStore.remove(stored.id);
+          } catch (_) {}
         }
         return;
       }
@@ -902,9 +914,13 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
         _imageIntent[selected.id] = _ImageIntent.pendingLocal;
         _dirty = true;
       });
-      if (previousLocalId != null && previousLocalId != stored.id &&
-          !_imageUploading && !_items.any((item) => item.imageId == previousLocalId)) {
-        try { await _imageStore.remove(previousLocalId); } catch (_) {}
+      if (previousLocalId != null &&
+          previousLocalId != stored.id &&
+          !_imageUploading &&
+          !_items.any((item) => item.imageId == previousLocalId)) {
+        try {
+          await _imageStore.remove(previousLocalId);
+        } catch (_) {}
       }
     } on AdminImagePickException catch (error) {
       if (!current()) return;
@@ -2025,9 +2041,7 @@ class _PropertiesPanel extends StatelessWidget {
                   ? const SizedBox(
                       width: 18,
                       height: 18,
-                      child: ProductLoadingIndicator(
-                        color: Colors.white,
-                      ),
+                      child: ProductLoadingIndicator(color: Colors.white),
                     )
                   : const Icon(Icons.delete_forever_outlined),
               label: Text(deleting ? 'Удаление…' : 'Удалить окончательно'),

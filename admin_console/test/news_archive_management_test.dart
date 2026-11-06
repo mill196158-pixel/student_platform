@@ -13,9 +13,13 @@ import 'package:student_ui/student_ui.dart';
 /// Test double that implements both local preview storage and remote gateway.
 class _FailingRemoteImageStore
     implements AdminImageStore, AdminRemoteImageGateway {
-  _FailingRemoteImageStore({this.failPaths = const {}});
+  _FailingRemoteImageStore({
+    this.failPaths = const {},
+    this.retainPaths = const {},
+  });
 
   final Set<String> failPaths;
+  final Set<String> retainPaths;
   final List<String> strictDeleteCalls = [];
 
   @override
@@ -75,11 +79,13 @@ class _FailingRemoteImageStore
   }
 
   @override
-  Future<void> deleteRemoteStrict(String imagePath) async {
+  Future<NewsMediaDeleteResult> deleteRemoteStrict(String imagePath) async {
     strictDeleteCalls.add(imagePath);
     if (failPaths.contains(imagePath)) {
       throw StateError('storage delete failed: $imagePath');
     }
+    if (retainPaths.contains(imagePath)) return NewsMediaDeleteResult.retained;
+    return NewsMediaDeleteResult.deleted;
   }
 
   @override
@@ -435,6 +441,46 @@ void main() {
       );
       expect(await repo.listNews(), hasLength(1));
       expect((await repo.listNews()).single.id, 'arch-b');
+    });
+
+    testWidgets('retained archive image is reported without cleanup retries', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1440, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      const path = 'news/retained.jpg';
+      final repo = LocalNewsRepository(
+        seed: [
+          _item(
+            id: 'retained',
+            title: 'Сохранённое изображение',
+            status: NewsStatus.archived,
+            imagePath: path,
+          ),
+        ],
+      );
+      final media = _FailingRemoteImageStore(retainPaths: {path});
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: NewsEditorScreen(repository: repo, imageStore: media),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Архив'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Сохранённое изображение').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('delete-archived-forever')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Удалить навсегда'));
+      await tester.pumpAndSettle();
+      expect(find.text('Новость удалена, файл сохранён'), findsOneWidget);
+      expect(repo.pendingMediaCleanup, isEmpty);
+      expect(media.strictDeleteCalls, [path]);
     });
 
     testWidgets(
