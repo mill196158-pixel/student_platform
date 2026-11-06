@@ -65,6 +65,7 @@ class DmApi {
 
   /// Per-chat clear boundary for the current user (one settings fetch).
   static final Map<(int, String, String), DateTime?> _clearedAtByChat = {};
+  static final Map<(int, String, String), int> _clearBoundaryRevisions = {};
 
   static (int, String, String)? _clearBoundaryKey(String chatId,
       {bool testFallback = false}) {
@@ -74,6 +75,11 @@ class DmApi {
       return testFallback ? (_sessionGeneration, '<test-no-owner>', chatId) : null;
     }
     return (_sessionGeneration, owner, chatId);
+  }
+
+  static int _clearBoundaryRevision(String chatId) {
+    final key = _clearBoundaryKey(chatId);
+    return key == null ? 0 : (_clearBoundaryRevisions[key] ?? 0);
   }
 
   /// Test counters: number of initial/page message fetches per chat.
@@ -178,19 +184,24 @@ class DmApi {
     int generation,
   ) async {
     if (!_isCurrentSession(owner, generation)) return;
+    final boundaryRevision = _clearBoundaryRevision(chatId);
     final clearedAt = await loadClearedAt(chatId);
-    if (!_isCurrentSession(owner, generation)) return;
+    if (!_isCurrentSession(owner, generation) ||
+        _clearBoundaryRevision(chatId) != boundaryRevision) return;
     final message = debugLoadMessageById != null
         ? await debugLoadMessageById!(chatId: chatId, messageId: messageId)
         : await loadMessageById(chatId: chatId, messageId: messageId);
-    if (!_isCurrentSession(owner, generation) || message == null) return;
+    if (!_isCurrentSession(owner, generation) || message == null ||
+        _clearBoundaryRevision(chatId) != boundaryRevision) return;
     if (clearedAt != null && !message.at.isAfter(clearedAt)) return;
     final snap = await ChatMessageCacheStore.reconcileUpsert(chatId, message,
         userId: owner);
-    if (!_isCurrentSession(owner, generation)) return;
+    if (!_isCurrentSession(owner, generation) ||
+        _clearBoundaryRevision(chatId) != boundaryRevision) return;
     await ChatMessageCacheStore.pruneAtOrBefore(chatId, clearedAt,
         userId: owner);
-    if (!_isCurrentSession(owner, generation)) return;
+    if (!_isCurrentSession(owner, generation) ||
+        _clearBoundaryRevision(chatId) != boundaryRevision) return;
     _emitView(
       chatId,
       ChatMessagesViewState(
@@ -241,6 +252,9 @@ class DmApi {
       return null;
     }
     final generation = _sessionGeneration;
+    final revision = key == null ? 0 : (_clearBoundaryRevisions[key] ?? 0);
+    bool invalidated() => key != null &&
+        (_clearBoundaryRevisions[key] ?? 0) != revision;
     try {
       final row = await _sb
           .from('chat_user_settings')
@@ -257,9 +271,11 @@ class DmApi {
       if (_clearBoundaryKey(chatId) != key) {
         throw StateError('Session changed while reading chat settings');
       }
+      if (invalidated()) throw StateError('Chat settings changed during read');
       if (key != null) _clearedAtByChat[key] = cleared;
       return cleared;
     } catch (_) {
+      if (invalidated()) rethrow;
       if (_sb.auth.currentUser?.id != me || _sessionGeneration != generation)
         rethrow;
       // A failed fetch is not evidence that history has never been cleared.
@@ -270,7 +286,10 @@ class DmApi {
 
   static void invalidateClearedAt(String chatId) {
     final key = _clearBoundaryKey(chatId);
-    if (key != null) _clearedAtByChat.remove(key);
+    if (key != null) {
+      _clearedAtByChat.remove(key);
+      _clearBoundaryRevisions[key] = (_clearBoundaryRevisions[key] ?? 0) + 1;
+    }
   }
 
   /// Test hook: seed clearedAt cache so sync can run without Supabase.
@@ -336,20 +355,24 @@ class DmApi {
     DateTime? beforeAt,
     String? beforeId,
     DateTime? clearedAt,
+    int? boundaryRevision,
   }) async {
     debugLoadMessagesCounts[chatId] =
         (debugLoadMessagesCounts[chatId] ?? 0) + 1;
 
     final owner = _currentSessionUserId;
     final generation = _sessionGeneration;
-    if (!_isCurrentSession(owner, generation))
+    final revision = boundaryRevision ?? _clearBoundaryRevision(chatId);
+    bool current() => _isCurrentSession(owner, generation) &&
+        _clearBoundaryRevision(chatId) == revision;
+    if (!current())
       throw StateError('Session changed');
     final clearFloor = clearedAt ?? await loadClearedAt(chatId);
-    if (!_isCurrentSession(owner, generation))
+    if (!current())
       throw StateError('Session changed');
     await ChatMessageCacheStore.pruneAtOrBefore(chatId, clearFloor,
         userId: owner);
-    if (!_isCurrentSession(owner, generation))
+    if (!current())
       throw StateError('Session changed');
 
     try {
@@ -360,7 +383,7 @@ class DmApi {
         if (beforeId != null && beforeId.isNotEmpty) 'p_before_id': beforeId,
       });
 
-      if (!_isCurrentSession(owner, generation))
+      if (!current())
         throw StateError('Session changed');
       final list = <Message>[];
       var hasMore = false;
@@ -383,7 +406,7 @@ class DmApi {
       }
       return (messages: list, hasMore: hasMore);
     } catch (e) {
-      if (!_isCurrentSession(owner, generation)) rethrow;
+      if (!current()) rethrow;
       if (kDebugMode) {
         debugPrint(
           '[DM] get_chat_messages_page fallback chat=${maskDebugId(chatId)}: $e',
@@ -396,7 +419,7 @@ class DmApi {
         beforeId: beforeId,
         clearedAt: clearFloor,
       );
-      if (!_isCurrentSession(owner, generation)) {
+      if (!current()) {
         throw StateError('Session changed');
       }
       return result;
@@ -667,10 +690,13 @@ class DmApi {
   }) async {
     final owner = _currentSessionUserId;
     final generation = _sessionGeneration;
-    if (!_isCurrentSession(owner, generation))
+    final boundaryRevision = _clearBoundaryRevision(chatId);
+    bool boundaryCurrent() => _isCurrentSession(owner, generation) &&
+        _clearBoundaryRevision(chatId) == boundaryRevision;
+    if (!boundaryCurrent())
       throw StateError('Session changed');
     final clearedAt = await loadClearedAt(chatId);
-    if (!_isCurrentSession(owner, generation))
+    if (!boundaryCurrent())
       throw StateError('Session changed');
     final page = debugOlderPageLoader != null
         ? await debugOlderPageLoader!(
@@ -681,8 +707,9 @@ class DmApi {
             beforeAt: before.at,
             beforeId: before.id,
             clearedAt: clearedAt,
+            boundaryRevision: boundaryRevision,
           );
-    if (!_isCurrentSession(owner, generation))
+    if (!boundaryCurrent())
       throw StateError('Session changed');
 
     final older = page.messages.where((m) => m.id != before.id).toList()
@@ -695,11 +722,11 @@ class DmApi {
       clearedAt: clearedAt,
       hasMoreBefore: page.hasMore,
     );
-    if (!_isCurrentSession(owner, generation))
+    if (!boundaryCurrent())
       throw StateError('Session changed');
     await ChatMessageCacheStore.pruneAtOrBefore(chatId, clearedAt,
         userId: owner);
-    if (!_isCurrentSession(owner, generation))
+    if (!boundaryCurrent())
       throw StateError('Session changed');
 
     final current = _streamMessages[chatId];
@@ -847,8 +874,11 @@ class DmApi {
           return ChatSyncResult.failure(StateError('Session changed'));
         }
         if (invalidateClearBoundary) invalidateClearedAt(chatId);
+        final boundaryRevision = _clearBoundaryRevision(chatId);
+        bool currentBoundary() => _isCurrentSession(owner, generation) &&
+            _clearBoundaryRevision(chatId) == boundaryRevision;
         final clearedAt = await loadClearedAt(chatId);
-        if (!_isCurrentSession(owner, generation)) {
+        if (!currentBoundary()) {
           return ChatSyncResult.failure(StateError('Session changed'));
         }
         final projectCache = ProjectChatServerCache.qaInstance;
@@ -857,7 +887,7 @@ class DmApi {
           final projectOwner = projectCache.scope.capture();
           bool currentProjectOwner() => projectOwner != null &&
               projectOwner.userId == owner &&
-              _isCurrentSession(owner, generation) &&
+              currentBoundary() &&
               projectCache.scope.isCurrent(projectOwner);
           unawaited(() async {
             try {
@@ -891,8 +921,9 @@ class DmApi {
                 chatId: chatId,
                 limit: limit,
                 clearedAt: clearedAt,
+                boundaryRevision: boundaryRevision,
               );
-        if (!_isCurrentSession(owner, generation)) {
+        if (!currentBoundary()) {
           return ChatSyncResult.failure(StateError('Session changed'));
         }
         // DELETE tombstones win over a page fetched before the delete.
@@ -910,7 +941,7 @@ class DmApi {
           clearedAt: clearedAt,
           hasMoreBefore: page.hasMore,
         );
-        if (!_isCurrentSession(owner, generation)) {
+        if (!currentBoundary()) {
           return ChatSyncResult.failure(StateError('Session changed'));
         }
         _emitView(
@@ -1173,6 +1204,7 @@ class DmApi {
     _syncInFlight.clear();
     _syncGates.clear();
     _clearedAtByChat.clear();
+    _clearBoundaryRevisions.clear();
     debugLoadMessagesCounts.clear();
     debugSyncPageLoader = null;
     debugOlderPageLoader = null;
