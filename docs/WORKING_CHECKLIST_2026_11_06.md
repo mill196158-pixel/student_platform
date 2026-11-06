@@ -8,6 +8,8 @@ emulator. Experiments guarded by QA flags do not satisfy ordinary-client items.
   chats, assignments and available attachments; no offline password login.
 - [ ] Repeat entry through messages, teams and materials: measure first
   frames for cached images and avoid an unnecessary loading transition.
+  The user accepted the QR re-entry in the one tested team chat on ordinary
+  APK `816c4ae`; this does not establish the other routes or images.
 - [ ] Forwarded PDF and other saved attachments: exact identity, account
   isolation, offline opening and safe behavior on denial/reconnect.
 - [ ] Preserve unconfirmed messages and attachments across trimming,
