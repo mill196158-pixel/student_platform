@@ -55,8 +55,8 @@ class CachedChatMessageBubble extends StatelessWidget {
     return MessageBubble(
         message: message.copyWith(text: text),
         time: DateFormat('HH:mm').format(message.at.toLocal()),
-        showAvatar: false,
-        reserveAvatarSpace: false,
+        showAvatar: showAuthor,
+        reserveAvatarSpace: showAuthor,
         showAuthorLine: showAuthor,
         localOnlyUserId: service.currentUserId,
         localOnlyAttachmentBuilder: (file) =>

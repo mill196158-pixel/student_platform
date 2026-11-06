@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:student_platform/src/services/chat_file_access.dart';
 import 'package:student_platform/src/ui/learning/models/chat_file.dart';
+import 'package:student_platform/src/ui/learning/widgets/file_card.dart';
 
 import 'dm_chat_service.dart';
 
@@ -143,13 +144,16 @@ class _CachedChatAttachmentState extends State<CachedChatAttachment> {
       return FutureBuilder<Uint8List?>(key: ValueKey(_revision), future: _bytes, builder: (context, snapshot) {
         if (!_allowed()) return const SizedBox.shrink();
         final bytes = snapshot.data;
-        if (bytes == null) return Text('Вложение: ${widget.file.fileName}');
         final revision = _revision;
         if (!widget.file.isImage) {
-          return TextButton.icon(
-            onPressed: () => _openDocument(revision),
-            icon: Icon(widget.file.fileIcon), label: Text(widget.file.fileName));
+          return AppFileCard(
+            fileName: widget.file.fileName,
+            fileSize: widget.file.fileSize,
+            mimeType: widget.file.fileType,
+            compact: true,
+            onTap: bytes == null ? null : () => _openDocument(revision));
         }
+        if (bytes == null) return Text('Вложение: ${widget.file.fileName}');
         void closeViewer() {
           _expanded = false;
           final history = _history;

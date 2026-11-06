@@ -44,5 +44,24 @@ failure, late responses, account and same-user session changes, barrier close
 while a child operation runs, route disposal, and no mark-read or mutation.
 Then test real device navigation without sending or changing user data.
 
-The experimental `guarded_push_target.dart` and its test are unconnected and
-are excluded from the QA checkpoint. They do not fix this user-facing issue.
+The initial experimental `guarded_push_target.dart` and its test were
+unconnected and excluded from the earlier QA checkpoint. By themselves they
+do not fix this user-facing issue.
+
+Local experimental follow-up (not enabled by default):
+When only `GUARDED_PUSH_HINT_QA=true` is enabled, a no-ID chat payload can trigger a tracked
+current-session summary lookup. If exactly one compatible chat is still
+visible, it shows a neutral page directing the user to Messages; the page
+contains no payload text, private identifiers, chat screen or network work,
+and is removed when the barrier closes. This verifies only present access,
+not the recipient of the original push. It does not open the target chat,
+restore group-action routing, or prove that target-screen child work drains.
+Production/default behaviour is unchanged and no notification is sent.
+
+### Дополнительный экспериментальный просмотр DM
+
+При одновременных `GUARDED_PUSH_HINT_QA=true` и `GUARDED_PUSH_DM_QA=true` подсказка для проверенного DM ведёт в ограниченный режим `DirectChatScreen`: одна серверная страница, только для чтения; отправка, вложения и фоновые подписки недоступны. Оба флага выключены по умолчанию. Подтверждение текущего доступа по списку чатов не доказывает адресата исходного push без notification_id. Полнофункциональные Team/group-action и обычный push этим изменением не решены; для допуска необходимы отдельные проверка и QA.
+
+### Дополнительные экспериментальные Team и group-action
+
+При `GUARDED_PUSH_HINT_QA=true` отдельные флаги `GUARDED_PUSH_TEAM_QA=true` и `GUARDED_PUSH_ACTION_QA=true` разрешают соответственно ограниченный просмотр командного чата и карточки topic/collection. По умолчанию все флаги выключены. Чат читает одну страницу без отправки и вложений; карточка загружает только подтверждённые сервером название и описание без действий. Проверка текущего доступа не подтверждает адресата исходного уведомления без notification_id. Доступность действующего серверного RPC/RLS и работа на устройстве ещё не проверены; обычные полноценные маршруты и действия остаются отдельной задачей.

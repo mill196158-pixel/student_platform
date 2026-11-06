@@ -12,6 +12,8 @@ import 'package:student_platform/src/core/online_side_effect_barrier.dart';
 import 'package:student_platform/src/services/push/push_navigation.dart';
 import 'package:student_platform/src/ui/chats/dm_title.dart';
 import 'direct_chat_info_screen.dart';
+import 'guarded_push_dm_read_only.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class DirectChatScreen extends StatefulWidget {
   const DirectChatScreen({
@@ -24,6 +26,8 @@ class DirectChatScreen extends StatefulWidget {
     this.cachedCapabilities,
     this.onlineBarrier,
     this.sessionIsCurrent,
+    this.guardedPushClient,
+    this.guardedPushUserId,
     this.debugResolveProfile,
     this.debugChatBuilder,
   });
@@ -38,6 +42,9 @@ class DirectChatScreen extends StatefulWidget {
   /// Optional route boundary. Both fields must be supplied for guarded use.
   final OnlineSideEffectBarrier? onlineBarrier;
   final bool Function()? sessionIsCurrent;
+  /// QA-only push preview; never creates the normal chat service.
+  final SupabaseClient? guardedPushClient;
+  final String? guardedPushUserId;
   @visibleForTesting
   final Future<({String name, String? avatar})> Function(String)?
       debugResolveProfile;
@@ -64,8 +71,10 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
     super.initState();
     _peerName = normalizeDmTitle(widget.peerName);
     _peerAvatarUrl = widget.peerAvatarUrl;
-    _createService();
-    if (!_wantsCached && _needsPeerProfile) _loadPeerProfile();
+    if (widget.guardedPushClient == null) {
+      _createService();
+      if (!_wantsCached && _needsPeerProfile) _loadPeerProfile();
+    }
   }
 
   void _createService() {
@@ -106,12 +115,18 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
         identical(oldWidget.cachedStore, widget.cachedStore) &&
         identical(oldWidget.cachedCapabilities, widget.cachedCapabilities) &&
         identical(oldWidget.onlineBarrier, widget.onlineBarrier) &&
-        identical(oldWidget.sessionIsCurrent, widget.sessionIsCurrent)) return;
+        identical(oldWidget.sessionIsCurrent, widget.sessionIsCurrent) &&
+        identical(oldWidget.guardedPushClient, widget.guardedPushClient) &&
+        oldWidget.guardedPushUserId == widget.guardedPushUserId) return;
     _service?.dispose();
     _peerName = normalizeDmTitle(widget.peerName);
     _peerAvatarUrl = widget.peerAvatarUrl;
-    _createService();
-    if (!_wantsCached && _needsPeerProfile) _loadPeerProfile();
+    if (widget.guardedPushClient == null) {
+      _createService();
+      if (!_wantsCached && _needsPeerProfile) _loadPeerProfile();
+    } else {
+      _service = null;
+    }
   }
 
   @override
@@ -122,6 +137,18 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.guardedPushClient != null) {
+      final client = widget.guardedPushClient, user = widget.guardedPushUserId,
+          chat = widget.initialChatId, barrier = widget.onlineBarrier,
+          current = widget.sessionIsCurrent;
+      if (client == null || user == null || chat == null || barrier == null || current == null) {
+        return const SizedBox.shrink();
+      }
+      return GuardedPushDmReadOnly(
+          key: ValueKey((client, user, chat, barrier, current)),
+          client: client, userId: user, chatId: chat,
+          barrier: barrier, isCurrent: current);
+    }
     final title = normalizeDmTitle(_peerName);
     final debugBuilder = widget.debugChatBuilder;
     if (kDebugMode && debugBuilder != null) return debugBuilder(context, title);

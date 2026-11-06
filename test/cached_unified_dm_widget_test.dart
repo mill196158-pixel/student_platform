@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
@@ -17,6 +18,9 @@ void main() {
   setUpAll(() async => initializeDateFormatting('ru'));
   testWidgets('cached DM shows local text then hides it on capability revoke',
       (tester) async {
+    const savedText = '{"chat":"сохранённый черновик"}';
+    const savedFiles = '{"chat":[{"name":"draft.pdf","path":"local"}]}';
+    SharedPreferences.setMockInitialValues({'global_draft_texts': savedText, 'global_draft_files': savedFiles});
     final events = StreamController<AuthState>.broadcast(sync: true);
     final session = fakeSession('a');
     final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
@@ -30,13 +34,18 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: UnifiedChatScreen(service: service, title: 'Чат')));
     await tester.pump();
     expect(find.text('Сохранённый текст'), findsOneWidget);
-    expect(find.byType(TextField), findsNothing);
+    expect(tester.widget<TextField>(find.byType(TextField)).enabled, isFalse);
     expect(find.byTooltip('Отправить'), findsNothing);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('global_draft_texts'), savedText);
+    expect(prefs.getString('global_draft_files'), savedFiles);
     caps.block();
     await tester.pump();
     expect(find.text('Сохранённый текст'), findsNothing);
     expect(find.text('Сохранённый чат недоступен.'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
+    expect(prefs.getString('global_draft_texts'), savedText);
+    expect(prefs.getString('global_draft_files'), savedFiles);
     await service.dispose();
     caps.dispose();
     scope.dispose();

@@ -6,6 +6,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:student_platform/src/ui/learning/widgets/file_card.dart';
 import 'package:http/testing.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -120,13 +121,15 @@ void main() {
     });
     expect(find.byType(InteractiveViewer), findsNothing);
     expect(find.byType(Image), findsNothing);
-    for (var i = 0; i < 100 && find.text('document.pdf').evaluate().isEmpty; i++) {
+    for (var i = 0; i < 100 &&
+        (find.byType(AppFileCard).evaluate().isEmpty ||
+         tester.widget<AppFileCard>(find.byType(AppFileCard)).onTap == null); i++) {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
       await tester.pump(const Duration(milliseconds: 50));
     }
-    final button = tester.widget<TextButton>(find.byType(TextButton));
+    final button = tester.widget<AppFileCard>(find.byType(AppFileCard));
     await tester.runAsync(() async {
-      button.onPressed!();
+      button.onTap!();
       await Future<void>.delayed(const Duration(milliseconds: 100));
     });
     await tester.pump();

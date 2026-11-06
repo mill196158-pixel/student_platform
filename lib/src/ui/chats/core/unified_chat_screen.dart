@@ -3,6 +3,7 @@ import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:student_platform/src/services/chat_file_access.dart';
 import 'package:student_platform/src/core/online_side_effect_barrier.dart';
 import 'cached_chat_message_bubble.dart';
+import 'cached_chat_composer.dart';
 // FILE: lib/src/ui/chats/core/unified_chat_screen.dart
 // ignore_for_file: unnecessary_import, unused_import, unused_field, unused_element, dead_null_aware_expression, invalid_null_aware_operator, deprecated_member_use
 
@@ -2747,7 +2748,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         }
         return Scaffold(
           appBar: AppBar(title: Text(normalizeDmTitle(widget.title ?? ''))),
-          body: StreamBuilder<ChatMessagesViewState>(
+          body: Column(children: [Expanded(child: StreamBuilder<ChatMessagesViewState>(
             stream: _messagesStream,
             initialData: service.messagesViewState,
             builder: (context, snapshot) {
@@ -2786,7 +2787,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                     message: message, service: service, showAuthor: false),
               );
             },
-          ),
+          )), const CachedChatComposer()]),
         );
       },
     );

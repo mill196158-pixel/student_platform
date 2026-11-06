@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:student_platform/src/core/single_flight_initialization.dart';
 import 'package:student_platform/src/core/online_side_effect_barrier.dart';
 import 'guarded_push_open.dart';
+import 'guarded_push_hint.dart';
+import 'guarded_push_qa_route.dart';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -26,6 +28,12 @@ import 'package:student_platform/src/ui/notifications/push_permission_prompt.dar
 
 const _kInstallationIdKey = 'push_installation_id';
 const _kPermissionPromptSeenKey = 'push_permission_prompt_seen';
+const _guardedPushHintQa = bool.fromEnvironment('GUARDED_PUSH_HINT_QA');
+const _guardedPushDmQa = bool.fromEnvironment('GUARDED_PUSH_DM_QA');
+const _guardedPushTeamQa = bool.fromEnvironment('GUARDED_PUSH_TEAM_QA');
+const _guardedPushActionQa = bool.fromEnvironment('GUARDED_PUSH_ACTION_QA');
+@visibleForTesting
+bool get debugGuardedPushHintQaEnabled => _guardedPushHintQa;
 
 /// Single app-wide push service. Init after auth; dispose on logout.
 class PushNotificationService {
@@ -417,11 +425,31 @@ class PushNotificationService {
   /// Payloads without a server notification id remain unavailable offline.
   Future<void> openGuardedPayload(PushPayload payload) async {
     final barrier = _guardedBarrier, guard = _guardedCurrent;
-    final user = Supabase.instance.client.auth.currentUser?.id;
+    final client = Supabase.instance.client;
+    final session = client.auth.currentSession;
+    final user = session?.user.id;
     final id = payload.notificationId;
-    if (barrier == null || guard == null || user == null || id == null || id.isEmpty) return;
+    if (barrier == null || guard == null || user == null || session == null) return;
     bool current() => barrier.isOpen && identical(_guardedBarrier, barrier) &&
-        guard() && Supabase.instance.client.auth.currentUser?.id == user;
+        guard() && identical(Supabase.instance.client, client) &&
+        client.auth.currentSession?.user.id == user &&
+        client.auth.currentSession?.accessToken == session.accessToken &&
+        client.auth.currentSession?.refreshToken == session.refreshToken;
+    if (id == null || id.isEmpty) {
+      if (!_guardedPushHintQa || !current()) return;
+      final navigator = rootNavigatorKey.currentState;
+      if (navigator == null || !navigator.mounted) return;
+      await openGuardedPushHint(navigator: navigator, payload: payload,
+          barrier: barrier, isCurrent: current,
+          fetchSummaries: () async => await client.rpc('get_my_chat_summaries'),
+          buildVerifiedTarget: (_guardedPushDmQa || _guardedPushTeamQa || _guardedPushActionQa)
+              ? (target) => buildGuardedPushQaTarget(incoming: payload, target: target,
+                  client: client, user: user, barrier: barrier, current: current,
+                  dmEnabled: _guardedPushDmQa, teamEnabled: _guardedPushTeamQa,
+                  actionEnabled: _guardedPushActionQa)
+              : null);
+      return;
+    }
     await openVerifiedPush(barrier: barrier, isCurrent: current, verify: () async {
       try {
         final row = await Supabase.instance.client.from('app_notifications')

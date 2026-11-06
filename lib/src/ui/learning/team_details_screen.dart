@@ -7,9 +7,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:student_platform/src/core/auth_session_scope_host.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
+import 'package:student_platform/src/core/online_side_effect_barrier.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:student_platform/src/ui/chats/guarded_push_dm_read_only.dart';
 import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
 import 'package:student_platform/src/ui/chats/core/dm_chat_service.dart';
 import 'package:student_platform/src/ui/chats/core/cached_chat_message_bubble.dart';
+import 'package:student_platform/src/ui/chats/core/cached_chat_composer.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/messages/chat_message_list.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/search/chat_search_controller.dart';
@@ -36,6 +40,12 @@ class TeamDetailsScreen extends StatelessWidget {
   final ProjectChatServerCache? cachedStore;
   final SessionCapabilities? cachedCapabilities;
   final String? cachedChatId;
+  /// Experimental push-only read path; never starts TeamCubit.
+  final SupabaseClient? guardedPushClient;
+  final String? guardedPushUserId;
+  final String? guardedPushChatId;
+  final OnlineSideEffectBarrier? guardedPushBarrier;
+  final bool Function()? guardedPushSessionIsCurrent;
   const TeamDetailsScreen({
     super.key,
     required this.team,
@@ -45,10 +55,30 @@ class TeamDetailsScreen extends StatelessWidget {
     this.cachedStore,
     this.cachedCapabilities,
     this.cachedChatId,
+    this.guardedPushClient,
+    this.guardedPushUserId,
+    this.guardedPushChatId,
+    this.guardedPushBarrier,
+    this.guardedPushSessionIsCurrent,
   });
 
   @override
   Widget build(BuildContext context) {
+    if (guardedPushClient != null || guardedPushUserId != null ||
+        guardedPushChatId != null || guardedPushBarrier != null ||
+        guardedPushSessionIsCurrent != null) {
+      final client = guardedPushClient, user = guardedPushUserId,
+          chat = guardedPushChatId, barrier = guardedPushBarrier,
+          current = guardedPushSessionIsCurrent;
+      if (client == null || user == null || user.isEmpty || chat == null ||
+          chat.isEmpty || barrier == null || current == null || team.id.isEmpty) {
+        return const SizedBox.shrink();
+      }
+      return GuardedPushDmReadOnly(
+          key: ValueKey((client, user, team.id, chat, barrier, current)),
+          client: client, userId: user, chatId: chat, barrier: barrier,
+          isCurrent: current, title: 'Чат команды');
+    }
     if (cachedStore != null ||
         cachedCapabilities != null ||
         cachedChatId != null) {
@@ -189,22 +219,33 @@ class _CachedTeamDetailsState extends State<_CachedTeamDetails>
                   trailing: const SizedBox.shrink())),
           Padding(
               padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
-              child: TabBar(
+              child: Container(
+                decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface,
+                    borderRadius: BorderRadius.circular(8)),
+                padding: const EdgeInsets.all(1),
+                child: Theme(data: Theme.of(context).copyWith(
+                    splashColor: Colors.transparent, highlightColor: Colors.transparent,
+                    dividerColor: Colors.transparent, materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: const VisualDensity(horizontal: -4, vertical: -4)),
+                  child: SizedBox(height: 30, child: TabBar(
                   controller: _tabs,
                   tabs: const [
-                    Tab(text: 'Задания'),
-                    Tab(text: 'Чат'),
-                    Tab(text: 'Файлы')
+                    _MiniTab('Задания'),
+                    _MiniTab('Чат'),
+                    _MiniTab('Файлы')
                   ],
+                  indicatorSize: TabBarIndicatorSize.tab,
+                  indicatorPadding: EdgeInsets.zero,
+                  labelPadding: EdgeInsets.zero,
                   indicator: BoxDecoration(
                       color: colors.primary,
                       borderRadius: BorderRadius.circular(6)),
                   labelColor: colors.onPrimary,
-                  unselectedLabelColor: colors.onSurfaceVariant)),
+                  unselectedLabelColor: colors.onSurfaceVariant))))),
           Expanded(
               child: TabBarView(controller: _tabs, children: [
             const Center(child: Text('Сохранённые задания недоступны.')),
-            FutureBuilder<List<Message>?>(
+            Column(children: [Expanded(child: FutureBuilder<List<Message>?>(
                 key: ValueKey(_revision),
                 future: _messages,
                 builder: (context, snapshot) {
@@ -249,7 +290,7 @@ class _CachedTeamDetailsState extends State<_CachedTeamDetails>
                       onReact: (_, __) {},
                       localOnlyBubbleBuilder: (message) => CachedChatMessageBubble(
                           message: message, service: _filePermit!, showAuthor: true));
-                }),
+                })), const CachedChatComposer()]),
             const Center(child: Text('Сохранённый список файлов недоступен.')),
           ]))
         ]));

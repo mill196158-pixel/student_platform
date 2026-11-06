@@ -21,6 +21,7 @@ import 'package:student_platform/src/core/offline_policy_grant.dart';
 import 'package:student_platform/src/core/offline_startup_admission.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:student_platform/src/services/chat_file_access.dart';
+import 'package:student_platform/src/ui/learning/widgets/file_card.dart';
 import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
 import 'package:student_platform/src/ui/chats/core/unified_chat_screen.dart';
 import 'package:student_platform/src/ui/chats/my_chats_screen.dart';
@@ -191,13 +192,19 @@ void main() {
         .where((avatar) => avatar.backgroundImage is NetworkImage || avatar.foregroundImage is NetworkImage), isEmpty);
     await tester.tap(find.text('Локальный чат QA'));
     await tester.pumpAndSettle();
-    for (var i = 0; i < 100 && find.text('qa.pdf').evaluate().isEmpty; i++) {
+    bool mediaReady() => tester.widgetList<Image>(find.byType(Image)).any(
+        (image) => image.image is MemoryImage &&
+            listEquals((image.image as MemoryImage).bytes, imageBytes)) &&
+        tester.widgetList<AppFileCard>(find.byType(AppFileCard))
+            .any((card) => card.fileName == 'qa.pdf' && card.onTap != null);
+    for (var i = 0; i < 100 && !mediaReady(); i++) {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
       await tester.pump(const Duration(milliseconds: 20));
     }
     expect(find.byType(UnifiedChatScreen), findsOneWidget);
     expect(find.text('Локальное сообщение QA'), findsOneWidget);
     expect(find.text('qa.pdf'), findsOneWidget);
+    expect(mediaReady(), isTrue);
     expect(tester.widgetList<Image>(find.byType(Image))
         .where((image) => image.image is MemoryImage &&
             (image.image as MemoryImage).bytes.length == imageBytes.length &&
@@ -232,12 +239,13 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Локальный чат QA'));
     await tester.pumpAndSettle();
-    for (var i = 0; i < 100 && find.text('qa.pdf').evaluate().isEmpty; i++) {
+    for (var i = 0; i < 100 && !mediaReady(); i++) {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
       await tester.pump(const Duration(milliseconds: 20));
     }
     expect(find.text('Локальное сообщение QA'), findsOneWidget);
     expect(find.text('qa.pdf'), findsOneWidget);
+    expect(mediaReady(), isTrue);
     session = fakeSession('other-owner');
     events.add(AuthState(AuthChangeEvent.signedIn, session));
     await tester.pump();

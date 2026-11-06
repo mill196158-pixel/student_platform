@@ -17,6 +17,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:student_platform/src/core/online_side_effect_barrier.dart';
+import 'guarded_push_action_read_only.dart';
 
 import '../../../../data/personal_diary_service.dart';
 import '../../assignment_details_screen.dart';
@@ -97,6 +99,9 @@ class UnifiedTaskDetailsScreen extends StatefulWidget {
     this.repository,
     this.cache,
     this.client,
+    this.guardedPushClient,
+    this.guardedPushBarrier,
+    this.guardedPushSessionIsCurrent,
   });
 
   /// `topic_selection` | `collection` / `group_collection` | `assignment`.
@@ -114,6 +119,10 @@ class UnifiedTaskDetailsScreen extends StatefulWidget {
   final ChatGroupActionsRepository? repository;
   final ChatActionCardsCache? cache;
   final SupabaseClient? client;
+  /// Experimental push-only read path; never starts the normal data graph.
+  final SupabaseClient? guardedPushClient;
+  final OnlineSideEffectBarrier? guardedPushBarrier;
+  final bool Function()? guardedPushSessionIsCurrent;
 
   @override
   State<UnifiedTaskDetailsScreen> createState() =>
@@ -121,6 +130,13 @@ class UnifiedTaskDetailsScreen extends StatefulWidget {
 }
 
 class _UnifiedTaskDetailsScreenState extends State<UnifiedTaskDetailsScreen> {
+  late final bool _guardedAtInit;
+  late final Object _guardedIdentityAtInit;
+  bool get _guarded => widget.guardedPushClient != null ||
+      widget.guardedPushBarrier != null || widget.guardedPushSessionIsCurrent != null;
+  Object get _guardedIdentity => (widget.guardedPushClient, widget.guardedPushBarrier,
+      widget.guardedPushSessionIsCurrent, widget.kind, widget.chatId,
+      widget.entityId, widget.cardMessageId);
   late final SupabaseClient _client = widget.client ?? Supabase.instance.client;
   late final ChatGroupActionsRepository _repo =
       widget.repository ?? ChatGroupActionsRepository(client: _client);
@@ -143,6 +159,9 @@ class _UnifiedTaskDetailsScreenState extends State<UnifiedTaskDetailsScreen> {
   @override
   void initState() {
     super.initState();
+    _guardedAtInit = _guarded;
+    _guardedIdentityAtInit = _guardedIdentity;
+    if (_guardedAtInit) return;
     if (_kind != ChatActionCardKind.topicSelection &&
         _kind != ChatActionCardKind.groupCollection) {
       // Assignment (or unknown) kinds render immediately without a fetch.
@@ -945,6 +964,21 @@ class _UnifiedTaskDetailsScreenState extends State<UnifiedTaskDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_guardedAtInit != _guarded) return const SizedBox.shrink();
+    if (_guardedAtInit) {
+      if (_guardedIdentityAtInit != _guardedIdentity) return const SizedBox.shrink();
+      final client = widget.guardedPushClient, barrier = widget.guardedPushBarrier,
+          current = widget.guardedPushSessionIsCurrent;
+      if (client == null || barrier == null || current == null) {
+        return const SizedBox.shrink();
+      }
+      return GuardedPushActionReadOnly(
+          key: ValueKey((client, barrier, current, widget.kind, widget.chatId,
+              widget.entityId, widget.cardMessageId)),
+          client: client, barrier: barrier, isCurrent: current,
+          kind: widget.kind, chatId: widget.chatId, entityId: widget.entityId,
+          cardMessageId: widget.cardMessageId);
+    }
     if (_kind == ChatActionCardKind.topicSelection ||
         _kind == ChatActionCardKind.groupCollection) {
       return _buildShell(context);

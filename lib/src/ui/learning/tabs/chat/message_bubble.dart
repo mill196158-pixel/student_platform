@@ -134,13 +134,15 @@ class MessageBubble extends StatelessWidget {
                   isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (!localOnly && !isMe && reserveAvatarSpace)
+                if (!isMe && reserveAvatarSpace)
                   SizedBox(
                     width: 40,
                     child: showAvatar
                         ? Row(
                             children: [
-                              InkWell(
+                              if (localOnly)
+                                ProfileAvatar(name: message.authorName, imageUrl: '')
+                              else InkWell(
                                 onTap: message.authorId.isNotEmpty
                                     ? () => Navigator.of(context).push(
                                           MaterialPageRoute(

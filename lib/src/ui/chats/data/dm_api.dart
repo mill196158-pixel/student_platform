@@ -400,7 +400,6 @@ class DmApi {
         limit: limit, clearedAt: clearedAt);
   }
 
-  @visibleForTesting
   static ConfirmedDmPage parseConfirmedMessagesPage(Object? rows, String chatId,
       {required int limit, DateTime? clearedAt}) {
     if (chatId.isEmpty || rows is! List)

@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/profile_avatar.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
@@ -68,6 +70,9 @@ void main() {
   testWidgets('team cache uses local messages and immediately hides on revoke',
       (tester) async {
     await initializeDateFormatting('ru');
+    const savedFiles = '{"chat":[{"name":"draft.pdf","path":"local"}]}';
+    SharedPreferences.setMockInitialValues({'global_draft_texts': '{"chat":"сохранённый черновик"}',
+      'global_draft_files': savedFiles});
     final session = fakeSession('owner');
     final events = StreamController<AuthState>.broadcast(sync: true);
     final scope = AuthSessionScope(
@@ -98,11 +103,26 @@ void main() {
           authorLogin: '',
           authorName: 'Участник',
           text: 'Локальное сообщение',
-          at: DateTime(2026))
+          at: DateTime(2026)),
+      Message(id: 'a', chatId: 'chat', authorId: 'peer', authorLogin: '',
+          authorName: 'Участник', text: 'Секретный заголовок',
+          type: MessageType.assignmentPublished, at: DateTime(2026)),
+      Message.fromJson({'id': 'serialized', 'chat_id': 'chat',
+        'author_id': 'peer', 'created_at': '2026-01-01T00:00:00Z',
+        'content': {'card': 'assignment',
+          'assignment_id': '33333333-3333-4333-8333-333333333333'}})
     ]);
     await tester.pump();
     await tester.pump();
     expect(find.text('Локальное сообщение'), findsOneWidget);
+    expect(find.text('Задание недоступно офлайн'), findsNothing);
+    expect(find.text('Карточка недоступна'), findsNothing);
+    expect(find.text('Секретный заголовок'), findsNothing);
+    expect(tester.widget<ProfileAvatar>(find.byType(ProfileAvatar).first).imageUrl, '');
+    expect(tester.widget<TextField>(find.byType(TextField)).enabled, isFalse);
+    expect((await SharedPreferences.getInstance()).getString('global_draft_texts'),
+        '{"chat":"сохранённый черновик"}');
+    expect((await SharedPreferences.getInstance()).getString('global_draft_files'), savedFiles);
     expect(
         find.byWidgetPredicate(
             (widget) => widget is Image && widget.image is NetworkImage),
@@ -111,6 +131,9 @@ void main() {
     await tester.pump();
     expect(find.text('Локальное сообщение'), findsNothing);
     expect(find.text('Сохранённый чат недоступен.'), findsOneWidget);
+    expect((await SharedPreferences.getInstance()).getString('global_draft_texts'),
+        '{"chat":"сохранённый черновик"}');
+    expect((await SharedPreferences.getInstance()).getString('global_draft_files'), savedFiles);
     await tester.pumpWidget(const SizedBox.shrink());
     caps.dispose();
     scope.dispose();
