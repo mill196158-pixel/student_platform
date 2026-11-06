@@ -8,6 +8,10 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
 import 'package:student_platform/src/core/auth_session_scope_host.dart';
+import 'package:student_platform/src/core/session_capabilities.dart';
+import 'package:student_platform/src/core/session_capabilities_host.dart';
+import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
+import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/chats/data/chat_summaries_cache.dart';
 import 'package:student_platform/src/ui/chats/my_chats_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -17,6 +21,18 @@ import 'home_progressive_loading_test.dart' show signIn;
 const chat = '11111111-1111-1111-1111-111111111111';
 const message = '22222222-2222-2222-2222-222222222222';
 const entity = '33333333-3333-3333-3333-333333333333';
+
+class _ThrowingPrewarmCache implements ProjectChatServerCache {
+  _ThrowingPrewarmCache(this.scope);
+  @override final AuthSessionScope scope;
+  final called = Completer<void>();
+  @override Future<ProjectChatPageTicket?> begin(String chat, {bool Function()? isCurrent}) async => null;
+  @override Future<List<Message>?> readForOnlinePrewarm(String chat, SessionCapabilities capabilities) async {
+    called.complete();
+    throw StateError('synthetic SQLite failure');
+  }
+  @override dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -71,6 +87,41 @@ void main() {
     cardRequested = Completer<void>();
   });
   tearDownAll(() => Supabase.instance.dispose());
+
+  testWidgets('optional local prewarm failure cannot break online list', (tester) async {
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final session = Supabase.instance.client.auth.currentSession;
+    final scope = AuthSessionScope(currentSession: () => Supabase.instance.client.auth.currentSession,
+        authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final cache = _ThrowingPrewarmCache(scope);
+    ProjectChatServerCache.qaInstance = cache;
+    var showList = false;
+    late StateSetter update;
+    late SessionCapabilities caps;
+    await tester.pumpWidget(MaterialApp(home: AuthSessionScopeHost(createScope: () => scope,
+      child: SessionCapabilitiesHost(source: scope, child: StatefulBuilder(builder: (context, set) {
+        update = set;
+        caps = SessionCapabilitiesHost.maybeRead(context)!;
+        return showList ? const MyChatsScreen(enableRealtime: false) : const Text('setup');
+      })))));
+    expect(caps.grant(SessionCapabilityMode.online, caps.beginAuthorization(scope.capture()!)!), isTrue);
+    update(() => showList = true);
+    for (var i = 0; i < 50 && !cache.called.isCompleted; i++) {
+      await tester.pump(const Duration(milliseconds: 20));
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
+    }
+    expect(cache.called.isCompleted, isTrue);
+    await tester.pump();
+    expect(find.text('Тестовый чат'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    cardResponse.complete(http.Response('[]', 200));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox.shrink());
+    ProjectChatServerCache.qaInstance = null;
+    await events.close();
+  }, skip: !const bool.fromEnvironment('QA_LOCAL_IMAGE_PREWARM'));
 
   for (final stale in [false, true]) {
     testWidgets(

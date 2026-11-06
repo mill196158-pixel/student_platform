@@ -563,14 +563,23 @@ class ProjectChatServerCache {
 
   /// Requires an independently issued cache-only permit; no network or writes.
   Future<List<Message>?> read(
-      String chat, SessionCapabilities capabilities) async {
+      String chat, SessionCapabilities capabilities) =>
+      _readForMode(chat, capabilities, SessionCapabilityMode.cacheOnly);
+
+  /// Read-only QA prewarm. It cannot grant offline access and never writes.
+  Future<List<Message>?> readForOnlinePrewarm(
+      String chat, SessionCapabilities capabilities) =>
+      _readForMode(chat, capabilities, SessionCapabilityMode.online);
+
+  Future<List<Message>?> _readForMode(String chat,
+      SessionCapabilities capabilities, SessionCapabilityMode mode) async {
     final permit = capabilities.capture(SessionCapability.cachedRead);
     final owner = scope.capture();
     final binding = currentBinding();
     if (permit == null ||
         owner == null ||
         binding == null ||
-        capabilities.mode != SessionCapabilityMode.cacheOnly ||
+        capabilities.mode != mode ||
         !capabilities.owns(permit, owner) ||
         owner.userId != binding.userId ||
         binding.issuer != '$project/auth/v1' ||
@@ -579,7 +588,7 @@ class ProjectChatServerCache {
     bool valid() =>
         scope.isCurrent(owner) &&
         _matches(currentBinding(), binding) &&
-        capabilities.mode == SessionCapabilityMode.cacheOnly &&
+        capabilities.mode == mode &&
         capabilities.permits(permit, SessionCapability.cachedRead) &&
         !_eventQuarantine.contains(_eventKey(binding, chat));
     return db.transaction((txn) async {

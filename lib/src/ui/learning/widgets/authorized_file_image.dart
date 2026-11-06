@@ -1,22 +1,47 @@
 import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'dart:ui' as ui;
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart'
     show SynchronousFuture, visibleForTesting, kDebugMode;
 import 'dart:async';
 import 'dart:convert';
+import 'package:supabase_flutter/supabase_flutter.dart' show FunctionException, Supabase;
 import '../../../services/chat_file_access.dart';
 import 'reentry_image_gate.dart';
 
+class _QaContentChanged extends StateError {
+  _QaContentChanged() : super('Копия файла изменилась.');
+}
+
+enum _QaOwnerStatus { current, stale, unknown }
+
 class AuthorizedFileImageProvider
     extends ImageProvider<AuthorizedFileImageProvider> {
+  static String? _qaToken() {
+    try {
+      if (kDebugMode && const bool.fromEnvironment('QA_LOCAL_IMAGE_PREWARM') && debugQaToken != null) {
+        return debugQaToken!();
+      }
+      return Supabase.instance.client.auth.currentSession?.accessToken;
+    } catch (_) { return null; }
+  }
   @visibleForTesting
   static Future<void> Function(String)? debugAuthorize;
+  @visibleForTesting
+  static String? Function()? debugQaToken;
+  @visibleForTesting
+  static Future<void> Function()? debugQaAfterDecode;
+  @visibleForTesting
+  static Future<ui.Codec> Function()? debugQaCodec;
   AuthorizedFileImageProvider(this.url)
       : user = ChatFileAccess.userId,
         epoch = ChatFileAccess.generation,
         sessionBinding = ChatFileAccess.currentSessionBinding,
         clientIdentity = ChatFileAccess.currentClientIdentity,
+        contentEpoch = ChatFileAccess.qaContentEpoch(url, ChatFileAccess.userId),
+        accessEpoch = ChatFileAccess.qaAccessEpoch(url, ChatFileAccess.userId),
+        _qaCredential = const bool.fromEnvironment('QA_LOCAL_IMAGE_PREWARM') ? _qaToken() : null,
         _cancelledNonce = null;
   AuthorizedFileImageProvider._cancelled(AuthorizedFileImageProvider old)
       : url = old.url,
@@ -24,18 +49,58 @@ class AuthorizedFileImageProvider
         epoch = old.epoch,
         sessionBinding = old.sessionBinding,
         clientIdentity = old.clientIdentity,
+        contentEpoch = old.contentEpoch,
+        accessEpoch = old.accessEpoch,
+        _qaCredential = old._qaCredential,
         _cancelledNonce = Object();
   final String url;
   final String? user;
   final int epoch;
   final String? sessionBinding;
   final Object? clientIdentity;
+  final int contentEpoch, accessEpoch;
+  final String? _qaCredential;
   final Object? _cancelledNonce;
+  bool get _qaRevisionCurrent => !const bool.fromEnvironment('QA_LOCAL_IMAGE_PREWARM') ||
+      ChatFileAccess.keyFor(url) == null ||
+      (ChatFileAccess.qaContentStable(url, user, contentEpoch) &&
+       ChatFileAccess.qaAccessEpoch(url, user) == accessEpoch);
+  _QaOwnerStatus get _qaOwnerStatus {
+    if (user == null || sessionBinding == null || clientIdentity == null ||
+        _qaCredential == null || _qaCredential!.isEmpty) return _QaOwnerStatus.unknown;
+    try {
+      final client = Supabase.instance.client;
+      final session = client.auth.currentSession;
+      final sid = ChatFileAccess.currentSessionBinding;
+      final token = _qaToken();
+      if (session == null || session.user.id.isEmpty || token == null || token.isEmpty || sid == null) {
+        return _QaOwnerStatus.unknown;
+      }
+      return !identical(client, clientIdentity) || session.user.id != user ||
+          sid != sessionBinding || ChatFileAccess.generation != epoch ||
+          token != _qaCredential ? _QaOwnerStatus.stale : _QaOwnerStatus.current;
+    } catch (_) { return _QaOwnerStatus.unknown; }
+  }
+  bool get _qaCanDisplay => _qaRevisionCurrent &&
+      (!const bool.fromEnvironment('QA_LOCAL_IMAGE_PREWARM') ||
+       ChatFileAccess.keyFor(url) == null || _qaOwnerStatus == _QaOwnerStatus.current);
+  bool _qaExpectedDenial(Object error) {
+    if (!const bool.fromEnvironment('QA_LOCAL_IMAGE_PREWARM') ||
+        user == null || sessionBinding == null || clientIdentity == null ||
+        _qaCredential == null || _qaCredential!.isEmpty || error is! FunctionException ||
+        !(error.status == 401 || (error.status == 403 && error.details is Map &&
+          (error.details as Map)['error'] == 'file_unavailable' &&
+          (error.details as Map)['reason'] == 'access_denied_v1'))) return false;
+    final status = _qaOwnerStatus;
+    return status == _QaOwnerStatus.stale ||
+        (status == _QaOwnerStatus.current && ChatFileAccess.isAccessRevoked(url));
+  }
   bool get _ownerChanged {
     try {
       return user != ChatFileAccess.userId ||
           epoch != ChatFileAccess.generation ||
           sessionBinding != ChatFileAccess.currentSessionBinding ||
+          (const bool.fromEnvironment('QA_LOCAL_IMAGE_PREWARM') && _qaCredential != _qaToken()) ||
           !identical(clientIdentity, ChatFileAccess.currentClientIdentity);
     } catch (_) {
       return false;
@@ -60,6 +125,12 @@ class AuthorizedFileImageProvider
   }
 
   Future<AuthorizedFileImageProvider> _obtainAuthorizedKey() async {
+    if (const bool.fromEnvironment('QA_LOCAL_IMAGE_PREWARM') && ChatFileAccess.keyFor(url) != null) {
+      final status = _qaOwnerStatus;
+      if (status == _QaOwnerStatus.stale) return AuthorizedFileImageProvider._cancelled(this);
+      if (status != _QaOwnerStatus.current) throw ChatFileSessionChanged();
+    }
+    if (!_qaRevisionCurrent && !_ownerChanged) return AuthorizedFileImageProvider._cancelled(this);
     // Never dispatch a request under new credentials for a provider captured
     // by an earlier session.
     if (ChatFileAccess.keyFor(url) != null && _ownerChanged) {
@@ -85,7 +156,16 @@ class AuthorizedFileImageProvider
         rethrow;
       }
       rethrow;
+    } catch (error) {
+      if (_qaExpectedDenial(error)) return AuthorizedFileImageProvider._cancelled(this);
+      rethrow;
     }
+    if (const bool.fromEnvironment('QA_LOCAL_IMAGE_PREWARM') && ChatFileAccess.keyFor(url) != null) {
+      final status = _qaOwnerStatus;
+      if (status == _QaOwnerStatus.stale) return AuthorizedFileImageProvider._cancelled(this);
+      if (status != _QaOwnerStatus.current) throw ChatFileSessionChanged();
+    }
+    if (!_qaRevisionCurrent && !_ownerChanged) return AuthorizedFileImageProvider._cancelled(this);
     if (!ChatFileAccess.isViewerCurrent(url,
         user: user, epoch: epoch, sessionBinding: sessionBinding)) {
       if (const bool.fromEnvironment('CHAT_REENTRY_GATE_QA') && _ownerChanged) {
@@ -102,17 +182,46 @@ class AuthorizedFileImageProvider
       MultiFrameImageStreamCompleter(codec: _load(decode, key), scale: 1);
   Future<ui.Codec> _load(
       ImageDecoderCallback decode, AuthorizedFileImageProvider key) async {
-    if (key._cancelledNonce != null) {
+    Future<ui.Codec> cancelled() async {
       final bytes = base64Decode(
           'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=');
       final codec = await decode(await ui.ImmutableBuffer.fromUint8List(bytes));
       scheduleMicrotask(() => PaintingBinding.instance.imageCache.evict(key));
       return codec;
     }
-    final bytes = await ChatFileAccess.readBytes(url);
+    if (key._cancelledNonce != null) return cancelled();
+    if (const bool.fromEnvironment('QA_LOCAL_IMAGE_PREWARM') &&
+        ChatFileAccess.keyFor(url) != null) {
+      final ownerStatus = _qaOwnerStatus;
+      if (ownerStatus == _QaOwnerStatus.stale) return cancelled();
+      if (ownerStatus != _QaOwnerStatus.current) throw ChatFileSessionChanged();
+    }
+    late final Uint8List bytes;
     try {
-      return await decode(await ui.ImmutableBuffer.fromUint8List(bytes));
-    } catch (_) {
+      bytes = await ChatFileAccess.readBytes(url);
+    } catch (error) {
+      if (_qaExpectedDenial(error)) return cancelled();
+      rethrow;
+    }
+    if (!_qaCanDisplay) {
+      final status = _qaOwnerStatus;
+      if (status == _QaOwnerStatus.stale || status == _QaOwnerStatus.current) return cancelled();
+      throw ChatFileSessionChanged();
+    }
+    try {
+      final codec = kDebugMode && const bool.fromEnvironment('QA_LOCAL_IMAGE_PREWARM') && debugQaCodec != null
+          ? await debugQaCodec!()
+          : await decode(await ui.ImmutableBuffer.fromUint8List(bytes));
+      if (kDebugMode && const bool.fromEnvironment('QA_LOCAL_IMAGE_PREWARM') && debugQaAfterDecode != null) {
+        await debugQaAfterDecode!();
+      }
+      if (!_qaCanDisplay) { codec.dispose(); throw _QaContentChanged(); }
+      return codec;
+    } on _QaContentChanged {
+      final status = _qaOwnerStatus;
+      if (status == _QaOwnerStatus.stale || status == _QaOwnerStatus.current) return cancelled();
+      throw ChatFileSessionChanged();
+    } catch (decodeError) {
       try {
         await ChatFileAccess.discardUnreadableImage(url,
             user: user,
@@ -133,11 +242,13 @@ class AuthorizedFileImageProvider
       other.user == user &&
       other.epoch == epoch &&
       other.sessionBinding == sessionBinding &&
+        other.contentEpoch == contentEpoch && other.accessEpoch == accessEpoch &&
+      other._qaCredential == _qaCredential &&
       identical(other.clientIdentity, clientIdentity) &&
       identical(other._cancelledNonce, _cancelledNonce);
   @override
   int get hashCode => Object.hash(
-      url, user, epoch, sessionBinding, clientIdentity, _cancelledNonce);
+      url, user, epoch, sessionBinding, clientIdentity, contentEpoch, accessEpoch, _qaCredential, _cancelledNonce);
   @override
   String toString() => 'AuthorizedFileImageProvider';
 }
@@ -166,6 +277,7 @@ class _AuthorizedFileImageState extends State<AuthorizedFileImage> {
   bool _revoked = false;
   String? _user;
   int _generation = 0;
+  int _contentEpoch = 0, _accessEpoch = 0;
   late AuthorizedFileImageProvider _provider;
   ReentryImageObserver? _reentryObserver;
   Object? _reentryTicket;
@@ -192,6 +304,8 @@ class _AuthorizedFileImageState extends State<AuthorizedFileImage> {
     _revoked = ChatFileAccess.isAccessRevoked(widget.imageUrl);
     _user = ChatFileAccess.userId;
     _generation = ChatFileAccess.generation;
+    _contentEpoch = ChatFileAccess.qaContentEpoch(widget.imageUrl, _user);
+    _accessEpoch = ChatFileAccess.qaAccessEpoch(widget.imageUrl, _user);
     _provider = AuthorizedFileImageProvider(widget.imageUrl);
     ChatFileAccess.accessChanges.addListener(_accessChanged);
   }
@@ -203,6 +317,8 @@ class _AuthorizedFileImageState extends State<AuthorizedFileImage> {
       _finishReentry();
       _reentryTicket = _reentryObserver?.begin();
       _revoked = ChatFileAccess.isAccessRevoked(widget.imageUrl);
+      _contentEpoch = ChatFileAccess.qaContentEpoch(widget.imageUrl, ChatFileAccess.userId);
+      _accessEpoch = ChatFileAccess.qaAccessEpoch(widget.imageUrl, ChatFileAccess.userId);
       _provider = AuthorizedFileImageProvider(widget.imageUrl);
     }
   }
@@ -211,13 +327,18 @@ class _AuthorizedFileImageState extends State<AuthorizedFileImage> {
     final revoked = ChatFileAccess.isAccessRevoked(widget.imageUrl);
     final user = ChatFileAccess.userId;
     final generation = ChatFileAccess.generation;
+    final contentEpoch = ChatFileAccess.qaContentEpoch(widget.imageUrl, user);
+    final accessEpoch = ChatFileAccess.qaAccessEpoch(widget.imageUrl, user);
     if (!ChatFileAccess.decodedImageExperimentEnabled) {
       if (mounted &&
-          (revoked != _revoked || user != _user || generation != _generation)) {
+          (revoked != _revoked || user != _user || generation != _generation ||
+           contentEpoch != _contentEpoch || accessEpoch != _accessEpoch)) {
         setState(() {
           _revoked = revoked;
           _user = user;
           _generation = generation;
+          _contentEpoch = contentEpoch;
+          _accessEpoch = accessEpoch;
           _attempt++;
         });
       }
@@ -231,6 +352,8 @@ class _AuthorizedFileImageState extends State<AuthorizedFileImage> {
         _revoked = revoked;
         _user = user;
         _generation = generation;
+        _contentEpoch = contentEpoch;
+        _accessEpoch = accessEpoch;
         _provider = AuthorizedFileImageProvider(widget.imageUrl);
         _attempt++;
       });
@@ -281,6 +404,10 @@ class _AuthorizedFileImageState extends State<AuthorizedFileImage> {
       height: widget.height,
       frameBuilder: (context, child, frame, sync) {
         if (sync || frame != null) {
+          if (!provider._qaCanDisplay) {
+            return widget.placeholder?.call(context, widget.imageUrl) ??
+                const Center(child: ProductLoadingIndicator(size: 72));
+          }
           _finishReentry();
           return child;
         }

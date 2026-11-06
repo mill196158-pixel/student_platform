@@ -170,6 +170,46 @@ class ChatFileAccess {
   static final Map<String, Future<void>> _ownerFileQueues = {};
   static int _temporaryFileSequence = 0;
 
+  // Experimental same-isolate file-content fence; it is not an IPC lock.
+  static const bool _qaContentEpochEnabled = bool.fromEnvironment('QA_LOCAL_IMAGE_PREWARM');
+  static final Map<String, int> _qaContentEpochs = {};
+  static final Map<String, int> _qaAccessEpochs = {};
+  static final Set<String> _qaContentMutations = {};
+  static String? _qaContentId(String url, String? uid) {
+    final key = keyFor(url);
+    return uid == null || key == null ? null : '$uid:$key';
+  }
+  static int qaContentEpoch(String url, String? uid) =>
+      _qaContentEpochs[_qaContentId(url, uid)] ?? 0;
+  static int qaAccessEpoch(String url, String? uid) =>
+      _qaAccessEpochs[_qaContentId(url, uid)] ?? 0;
+  static void _qaBumpAccessEpoch(String url, String uid) {
+    if (!_qaContentEpochEnabled) return;
+    final id = _qaContentId(url, uid);
+    if (id != null) _qaAccessEpochs[id] = (_qaAccessEpochs[id] ?? 0) + 1;
+  }
+  static bool qaContentStable(String url, String? uid, int epoch) {
+    final id = _qaContentId(url, uid);
+    return id != null && !_qaContentMutations.contains(id) &&
+        qaContentEpoch(url, uid) == epoch;
+  }
+  static void _qaBeginContentMutation(String url, String uid) {
+    if (!_qaContentEpochEnabled) return;
+    final id = _qaContentId(url, uid);
+    if (id == null) return;
+    _qaContentEpochs[id] = (_qaContentEpochs[id] ?? 0) + 1;
+    _qaContentMutations.add(id);
+    accessChanges.value++;
+  }
+  static void _qaEndContentMutation(String url, String uid) {
+    if (!_qaContentEpochEnabled) return;
+    final id = _qaContentId(url, uid);
+    if (id == null) return;
+    _qaContentEpochs[id] = (_qaContentEpochs[id] ?? 0) + 1;
+    _qaContentMutations.remove(id);
+    accessChanges.value++;
+  }
+
   /// Serializes filesystem writes, revoke and logout for one local owner.
   /// A newer session for the same account is queued behind the old logout.
   static Future<T> _withOwnerFiles<T>(String uid, Future<T> Function() run) {
@@ -493,10 +533,14 @@ class ChatFileAccess {
                 sessionBinding: sessionBinding)) return;
         // Do not delete data from a stale decoder: preserve the exact corrupt
         // copy and only quarantine it if its bytes still match this decoder.
-        await file
-            .rename('${file.path}.unreadable.${_temporaryFileSequence++}');
-        final receipt = _receiptFile(file);
-        if (await receipt.exists()) await receipt.delete();
+        _qaBeginContentMutation(url, user);
+        try {
+          await file.rename('${file.path}.unreadable.${_temporaryFileSequence++}');
+          final receipt = _receiptFile(file);
+          if (await receipt.exists()) await receipt.delete();
+        } finally {
+          _qaEndContentMutation(url, user);
+        }
       } on FileSystemException {
         // Preserve the original decoder error.
       }
@@ -515,14 +559,15 @@ class ChatFileAccess {
   /// [permit] must remain true for the entire read; callers must also hide
   /// decoded content when that permit or the attachment access is revoked.
   static Future<Uint8List?> readCachedOnly(String url,
-      {required bool Function() permit}) async {
+      {required bool Function() permit, int? maxBytes}) async {
     final uid = userId;
     final sid = currentSessionBinding;
     final epoch = generation;
     bool current() => uid != null && !_unsupportedProtocol.contains('$uid:${keyFor(url)}') &&
         permit() && isViewerCurrent(url,
         user: uid, epoch: epoch, sessionBinding: sid);
-    if (uid == null || sid == null || keyFor(url) == null || !current()) {
+    if (uid == null || sid == null || keyFor(url) == null || !current() ||
+        (maxBytes != null && maxBytes <= 0)) {
       return null;
     }
     return _withOwnerFiles(uid, () async {
@@ -532,7 +577,18 @@ class ChatFileAccess {
         if (file == null || !current() || !await _hasReceipt(file, sid) || !current()) {
           return null;
         }
-        final bytes = await file.readAsBytes();
+        Uint8List bytes;
+        if (maxBytes == null) {
+          bytes = await file.readAsBytes();
+        } else {
+          if (await file.length() > maxBytes || !current()) return null;
+          final buffer = BytesBuilder(copy: false);
+          await for (final chunk in file.openRead()) {
+            if (!current() || buffer.length + chunk.length > maxBytes) return null;
+            buffer.add(chunk);
+          }
+          bytes = buffer.takeBytes();
+        }
         return current() && await _hasReceipt(file, sid) && current() ? bytes : null;
       } on FileSystemException {
         return null;
@@ -617,6 +673,7 @@ class ChatFileAccess {
     _decodedImageTickets.clear();
     _invalidateLease(id);
     _noOffline.add('$uid:$key');
+    _qaBumpAccessEpoch(url, uid);
     accessChanges.value++;
     return _withOwnerFiles(uid, () async {
       final file = await _cachedFile(url, uid);
@@ -891,6 +948,7 @@ class ChatFileAccess {
             error.status == 403 &&
             current()) {
           _unsupportedProtocol.add('$uid:$key');
+          _qaBumpAccessEpoch(url, uid);
           accessChanges.value++;
         }
       }));
@@ -910,6 +968,7 @@ class ChatFileAccess {
           epoch == generation &&
           token == _currentAccessToken()) {
         _unsupportedProtocol.add('$uid:$key');
+        _qaBumpAccessEpoch(url, uid);
         accessChanges.value++;
       }
       if (_explicitDenial(error) &&
@@ -964,9 +1023,11 @@ class ChatFileAccess {
     final result = uri.toString();
     if (response.data is! Map || response.data['accessPolicyVersion'] != 1) {
       _unsupportedProtocol.add('$uid:$key');
+      _qaBumpAccessEpoch(url, uid);
+      if (_qaContentEpochEnabled) accessChanges.value++;
       final stale = await _cachedFile(url, uid);
       if (stale != null) _pendingTickets.remove(_pendingFile(stale).path);
-      accessChanges.value++;
+      if (!_qaContentEpochEnabled) accessChanges.value++;
       return result;
     }
     bool stillCurrent() =>
@@ -985,7 +1046,10 @@ class ChatFileAccess {
     if (!stillCurrent()) throw ChatFileSessionChanged();
     final changed = _noOffline.remove('$uid:$key') |
         _unsupportedProtocol.remove('$uid:$key');
-    if (changed) accessChanges.value++;
+    if (changed) {
+      _qaBumpAccessEpoch(url, uid);
+      accessChanges.value++;
+    }
     final expiresIn = response.data is Map ? response.data['expiresIn'] : null;
     final sessionExpiry = client.auth.currentSession?.expiresAt;
     if (response.data is Map &&
@@ -1104,7 +1168,12 @@ class ChatFileAccess {
             await tmp.writeAsBytes(result, flush: true);
             if (!current() || isAccessRevoked(url))
               throw ChatFileSessionChanged();
-            await tmp.rename(cached.path);
+            _qaBeginContentMutation(url, uid);
+            try {
+              await tmp.rename(cached.path);
+            } finally {
+              _qaEndContentMutation(url, uid);
+            }
             if (!current() || isAccessRevoked(url))
               throw ChatFileSessionChanged();
             if (sid != null && (_liveChecks['$uid:$key'] ?? 0) == 0) {

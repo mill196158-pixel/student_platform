@@ -124,12 +124,27 @@ void main() {
             cap.beginAuthorization(scope.capture()!)!),
         isTrue);
     expect((await cache.read('chat', cap))!.map((m) => m.id), ['new']);
+    expect(await cache.readForOnlinePrewarm('chat', cap), isNull);
+    expect(cap.grant(SessionCapabilityMode.online,
+        cap.beginAuthorization(scope.capture()!)!), isTrue);
+    expect((await cache.readForOnlinePrewarm('chat', cap))!.map((m) => m.id), ['new']);
+    expect(await cache.read('chat', cap), isNull);
+    final otherEvents = StreamController<AuthState>.broadcast(sync: true);
+    final otherScope = AuthSessionScope(currentSession: () => session, authEvents: otherEvents.stream);
+    otherEvents.add(AuthState(AuthChangeEvent.initialSession, session));
+    final otherCap = SessionCapabilities(otherScope);
+    expect(otherCap.grant(SessionCapabilityMode.online,
+        otherCap.beginAuthorization(otherScope.capture()!)!), isTrue);
+    expect(await cache.readForOnlinePrewarm('chat', otherCap), isNull);
+    otherCap.dispose();
+    otherScope.dispose();
+    await otherEvents.close();
     final other = ProjectChatServerCache(
         db: db,
         scope: scope,
         currentBinding: () => binding,
         project: 'https://b.invalid');
-    expect(await other.read('chat', cap), isNull);
+    expect(await other.readForOnlinePrewarm('chat', cap), isNull);
     final entered = Completer<void>();
     final resume = Completer<void>();
     db.beforeInsert = () async {

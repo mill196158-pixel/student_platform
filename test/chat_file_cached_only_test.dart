@@ -49,6 +49,9 @@ void main() {
     expect(await ChatFileAccess.readCachedOnly(url, permit: () => true), isNull);
     await File('${file.path}.grant').writeAsString('chat-file-grant-v2:$sid');
     expect(await ChatFileAccess.readCachedOnly(url, permit: () => true), [1, 2, 3]);
+    expect(await ChatFileAccess.readCachedOnly(url, permit: () => true, maxBytes: 2), isNull);
+    expect(await ChatFileAccess.readCachedOnly(url, permit: () => true, maxBytes: 3), [1, 2, 3]);
+    expect(await ChatFileAccess.readCachedOnly(url, permit: () => true, maxBytes: 0), isNull);
     expect(await ChatFileAccess.cachedPathForOpen(url, permit: () => true), file.path);
     expect(await ChatFileAccess.readCachedOnly(url, permit: () => false), isNull);
     expect(await ChatFileAccess.cachedPathForOpen(url, permit: () => false), isNull);

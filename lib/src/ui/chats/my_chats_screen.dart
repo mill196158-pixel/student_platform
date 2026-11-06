@@ -28,11 +28,14 @@ import 'package:student_platform/src/ui/chats/data/chat_summary_card.dart';
 import 'package:student_platform/src/core/auth_session_scope_host.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
+import 'package:student_platform/src/core/session_capabilities_host.dart';
+import 'package:student_platform/src/ui/learning/widgets/qa_local_image_prewarm.dart';
 import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
 import 'package:student_platform/src/ui/chats/core/chat_message_cache_store.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/widgets.dart'; // ChatMessageList
 import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_card_envelope.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart'; // модель сообщения
+import 'package:student_platform/src/ui/learning/models/chat_file.dart';
 import 'package:student_platform/src/ui/learning/state/team_cubit.dart';
 import 'package:student_platform/src/utils/safe_debug_log.dart';
 
@@ -288,6 +291,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
         _hydrated = true;
         _loading = false;
       });
+      unawaited(_qaPrewarmRecentImages(list, scope, owner, revision));
       unawaited(_verifySummaryActions(list, scope, owner, revision));
       await _saveCache(list, owner: me);
       if (!current()) return;
@@ -310,6 +314,49 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     final aa = a.lastTime ?? DateTime.fromMillisecondsSinceEpoch(0);
     final bb = b.lastTime ?? DateTime.fromMillisecondsSinceEpoch(0);
     return bb.compareTo(aa); // новые выше
+  }
+
+  static bool _qaImagePrewarmBusy = false;
+  Future<void> _qaPrewarmRecentImages(List<_ChatSummary> rows,
+      AuthSessionScope scope, AuthOperationScope owner, int revision) async {
+    if (!const bool.fromEnvironment('QA_LOCAL_IMAGE_PREWARM') ||
+        _qaImagePrewarmBusy || !mounted) return;
+    final cache = ProjectChatServerCache.qaInstance;
+    final caps = SessionCapabilitiesHost.maybeRead(context);
+    if (cache == null || caps == null || !identical(cache.scope, scope) ||
+        caps.mode != SessionCapabilityMode.online) return;
+    final permit = caps.capture(SessionCapability.cachedRead);
+    if (permit == null || !caps.owns(permit, owner)) return;
+    final client = Supabase.instance.client;
+    bool current() => mounted && !_boundaryInvalidated && !_cacheOnly &&
+        revision == _summaryRevision && scope.isCurrent(owner) &&
+        identical(client, Supabase.instance.client) &&
+        caps.mode == SessionCapabilityMode.online &&
+        caps.owns(permit, owner) && ModalRoute.of(context)?.isCurrent == true;
+    if (!current()) return;
+    _qaImagePrewarmBusy = true;
+    try {
+      final seen = <String>{};
+      for (final row in rows.take(3)) {
+        final chat = row.chatId;
+        if (!current() || chat == null || chat.isEmpty) return;
+        final messages = await cache.readForOnlinePrewarm(chat, caps);
+        if (!current()) return;
+        if (messages == null) continue;
+        for (final message in messages.reversed) {
+          for (final file in message.attachments ?? const <ChatFile>[]) {
+            if (!current()) return;
+            if (!file.isImage || file.fileUrl.isEmpty || !seen.add(file.fileUrl)) continue;
+            await qaPrewarmLocalImage(file.fileUrl, current: current);
+            if (!current() || seen.length >= 2) return;
+          }
+        }
+      }
+    } catch (_) {
+      // Optional local warmup must not affect the chat list on storage errors.
+    } finally {
+      _qaImagePrewarmBusy = false;
+    }
   }
 
   Future<void> _verifySummaryActions(List<_ChatSummary> items,
