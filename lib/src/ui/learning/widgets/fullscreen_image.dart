@@ -59,9 +59,10 @@ Future<File> _downloadRemoteFileToCache({
   required String url,
   required String fileName,
   required _ViewerAccessTicket access,
+  bool Function()? sourceCurrent,
 }) async {
   void check() {
-    if (!access.isCurrent(url))
+    if (!access.isCurrent(url) || !(sourceCurrent?.call() ?? true))
       throw StateError('Доступ к вложению изменился.');
   }
 
@@ -89,7 +90,7 @@ Future<File> _downloadRemoteFileToCache({
   final bytes = await ChatFileAccess.readBytes(url);
   check();
   final file = await writeViewerFileAtomically(cached, bytes,
-      canPublish: () => access.isCurrent(url));
+      canPublish: () => access.isCurrent(url) && (sourceCurrent?.call() ?? true));
   check();
   return file;
 }
@@ -721,17 +722,41 @@ class FullscreenFileViewer extends StatefulWidget {
 
 class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
   bool _opening = false;
-  late final Future<File> _cachedFileFuture;
-  late final _ViewerAccessTicket _access;
+  Future<File>? _namedExport;
+  late Future<File> _previewFileFuture;
+  late _ViewerAccessTicket _access;
+  late Object? _previewClient;
+  int _sourceRevision = 0;
 
   @override
   void initState() {
     super.initState();
-    _access = _ViewerAccessTicket();
     ChatFileAccess.accessChanges.addListener(_accessChanged);
-    _cachedFileFuture = _ensureCachedFile();
-    unawaited(_cachedFileFuture.then<void>((_) {},
+    _resetSource();
+  }
+
+  void _resetSource() {
+    final revision = ++_sourceRevision;
+    _access = _ViewerAccessTicket();
+    _previewClient = ChatFileAccess.currentClientIdentity;
+    _namedExport = null;
+    _opening = false;
+    // Keep named exports for share, clipboard and external viewers. A PDF
+    // preview can use an already authorized local copy without exporting it.
+    _previewFileFuture = _isPdf ? _ensurePdfPreview(revision) : _ensureCachedFile();
+    unawaited(_previewFileFuture.then<void>((_) {},
         onError: (Object _, StackTrace __) {}));
+  }
+
+  @override
+  void didUpdateWidget(covariant FullscreenFileViewer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.fileUrl != widget.fileUrl ||
+        oldWidget.fileName != widget.fileName ||
+        oldWidget.mimeType != widget.mimeType ||
+        oldWidget.sourceFileId != widget.sourceFileId) {
+      _resetSource();
+    }
   }
 
   void _accessChanged() {
@@ -751,12 +776,18 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
     return mime.contains('pdf') || name.endsWith('.pdf');
   }
 
+  bool _previewCurrent(int revision) => mounted &&
+      revision == _sourceRevision &&
+      identical(_previewClient, ChatFileAccess.currentClientIdentity) &&
+      _access.isCurrent(widget.fileUrl);
+
   Future<void> _downloadAndOpen() async {
     if (_opening || !_access.isCurrent(widget.fileUrl)) return;
+    final revision = _sourceRevision;
     setState(() => _opening = true);
     try {
-      final file = await _cachedFileFuture;
-      if (!mounted || !_access.isCurrent(widget.fileUrl)) return;
+      final file = await _ensureCachedFile();
+      if (!_previewCurrent(revision)) return;
       final res = await OpenFilex.open(file.path);
       if (res.type != ResultType.done && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -770,23 +801,47 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
         );
       }
     } finally {
-      if (mounted) setState(() => _opening = false);
+      if (mounted && revision == _sourceRevision) setState(() => _opening = false);
     }
   }
 
   Future<File> _ensureCachedFile() {
-    return _downloadRemoteFileToCache(
-      url: widget.fileUrl,
-      fileName: _fileName,
-      access: _access,
-    );
+    if (_namedExport != null) return _namedExport!;
+    final revision = _sourceRevision;
+    final url = widget.fileUrl;
+    final access = _access;
+    final client = _previewClient;
+    bool current() => mounted && revision == _sourceRevision &&
+        widget.fileUrl == url && identical(client, ChatFileAccess.currentClientIdentity) &&
+        access.isCurrent(url);
+    return _namedExport = _downloadRemoteFileToCache(
+        url: url, fileName: _fileName, access: access, sourceCurrent: current);
+  }
+
+  Future<File> _ensurePdfPreview(int revision) async {
+    final url = widget.fileUrl;
+    final access = _access;
+    final client = _previewClient;
+    bool current() => mounted &&
+        revision == _sourceRevision &&
+        widget.fileUrl == url &&
+        identical(client, ChatFileAccess.currentClientIdentity) &&
+        access.isCurrent(url);
+    if (!current()) throw StateError('Доступ к вложению изменился.');
+    final path = await ChatFileAccess.cachedPathForOpen(url, permit: current);
+    if (!current()) throw StateError('Доступ к вложению изменился.');
+    if (path != null && path.isNotEmpty) return File(path);
+    final file = await _ensureCachedFile();
+    if (!current()) throw StateError('Доступ к вложению изменился.');
+    return file;
   }
 
   Future<void> _shareCachedFile() async {
     if (!_access.isCurrent(widget.fileUrl)) return;
+    final revision = _sourceRevision;
     try {
-      final file = await _cachedFileFuture;
-      if (!mounted || !_access.isCurrent(widget.fileUrl)) return;
+      final file = await _ensureCachedFile();
+      if (!_previewCurrent(revision)) return;
       await SharePlus.instance.share(
         ShareParams(files: [XFile(file.path, name: _fileName)]),
       );
@@ -800,11 +855,11 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
 
   Future<void> _copyCachedFileToClipboard() async {
     final url = widget.fileUrl;
-    bool current() =>
-        mounted && widget.fileUrl == url && _access.isCurrent(url);
+    final revision = _sourceRevision;
+    bool current() => widget.fileUrl == url && _previewCurrent(revision);
     if (!current()) return;
     try {
-      final file = await _cachedFileFuture;
+      final file = await _ensureCachedFile();
       if (!current()) return;
       final meta = await _writeFileBytesToClipboard(
         file: file,
@@ -833,7 +888,8 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final allowed = _access.isCurrent(widget.fileUrl);
+    final allowed = _access.isCurrent(widget.fileUrl) &&
+        (!_isPdf || _previewCurrent(_sourceRevision));
 
     return Scaffold(
       backgroundColor: const Color(0xFF0D0D0F),
@@ -885,9 +941,11 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
   }
 
   Widget _buildPdfPreview() {
+    final revision = _sourceRevision;
     return FutureBuilder<File>(
-      future: _cachedFileFuture,
+      future: _previewFileFuture,
       builder: (context, snapshot) {
+        if (!_previewCurrent(revision)) return const _RevokedMedia();
         if (snapshot.connectionState != ConnectionState.done) {
           return const Center(
             child: ProductLoadingIndicator.page(color: Colors.white),
@@ -899,10 +957,12 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
         }
         return PdfDocumentViewBuilder.file(
           snapshot.data!.path,
-          loadingBuilder: (context) => const Center(
-            child: ProductLoadingIndicator.page(color: Colors.white),
-          ),
-          errorBuilder: (context, error, stackTrace) => Center(
+          loadingBuilder: (context) => !_previewCurrent(revision)
+              ? const _RevokedMedia()
+              : const Center(child: ProductLoadingIndicator.page(color: Colors.white)),
+          errorBuilder: (context, error, stackTrace) => !_previewCurrent(revision)
+              ? const _RevokedMedia()
+              : Center(
             child: Padding(
               padding: const EdgeInsets.all(24),
               child: Text(
@@ -913,6 +973,7 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
             ),
           ),
           builder: (context, document) {
+            if (!_previewCurrent(revision)) return const _RevokedMedia();
             if (document == null) {
               return const Center(
                 child: ProductLoadingIndicator.page(color: Colors.white),
