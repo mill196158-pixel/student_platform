@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ffi';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
@@ -10,12 +11,19 @@ import 'package:student_platform/src/ui/learning/widgets/file_card.dart';
 import 'package:http/testing.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:sqlite3/open.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
+import 'package:student_platform/src/core/offline_policy_grant.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:student_platform/src/services/chat_file_access.dart';
 import 'package:student_platform/src/ui/chats/core/cached_chat_attachment.dart';
+import 'package:student_platform/src/ui/chats/core/cached_chat_message_bubble.dart';
+import 'package:student_platform/src/ui/chats/core/forward_payload.dart';
+import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
 import 'package:student_platform/src/ui/chats/core/dm_chat_service.dart';
 import 'package:student_platform/src/ui/learning/models/chat_file.dart';
+import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'chat_file_durable_receipt_test.dart' show signInWithFileSession;
@@ -52,7 +60,8 @@ void main() {
       fileType: mime, fileSize: 3, uploadedBy: uid, uploadedAt: DateTime.utc(2026), isDeleted: deleted);
     final first = makeFile('first.png', 'image/png');
     final second = makeFile('second.png', 'image/png');
-    final document = makeFile('document.pdf', 'application/pdf');
+    final document = makeFile('document.pdf', 'application/pdf')
+        .copyWith(deletionVerified: true);
     final missingDocument = makeFile('missing.docx',
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     final png = base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/afoAAAAASUVORK5CYII=');
@@ -163,6 +172,97 @@ void main() {
     });
     await tester.pump();
     expect(opened, isTrue);
+    // Exercise a serialized nested forward through the real SQLite cache and
+    // the same session-scoped on-disk file/receipt used by the viewer.
+    if (Platform.isWindows) {
+      open.overrideFor(OperatingSystem.windows, () => DynamicLibrary.open('winsqlite3.dll'));
+    }
+    sqfliteFfiInit();
+    final nested = ForwardPayload(fromChatId: 'chat', items: [ForwardItem(
+      messageId: 'source', authorId: 'author', authorName: 'Автор',
+      at: DateTime.utc(2026), text: 'Текст', files: [ForwardFileRef(
+        id: document.id, url: document.fileUrl, name: document.fileName,
+        type: document.fileType, size: document.fileSize)])]);
+    final outer = ForwardPayload(fromChatId: 'chat', items: [ForwardItem(
+      messageId: 'nested', authorId: 'author', authorName: 'Автор',
+      at: DateTime.utc(2026), text: nested.encodeForText(), files: const [])]);
+    final forwarded = Message(id: 'forward-message', chatId: 'chat', authorId: 'author',
+      authorLogin: 'author', authorName: 'Автор', text: outer.encodeForText(),
+      at: DateTime.utc(2026), attachments: [document]);
+    final structured = Message.fromJson({'id': 'structured', 'chat_id': 'chat',
+      'author_id': 'author', 'author_name': '', 'author_login': '',
+      'created_at': DateTime.utc(2026, 1, 2).toIso8601String(), 'msg_type': 'forward',
+      'content': {'from_chat_id': 'chat', 'items': [{'id': 'nested',
+        'author_id': 'author', 'author_name': 'Автор', 'created_at': DateTime.utc(2026).toIso8601String(),
+        'text': 'Студент', 'attachments': [{'id': document.id, 'url': document.fileUrl,
+          'name': document.fileName, 'mime': document.fileType, 'size': document.fileSize}]}]},
+      'attachments': [document.toJson()]});
+    final snapshot = await tester.runAsync(() async {
+      var db = await openProjectChatServerDatabase('${dir.path}/chat.db', factory: databaseFactoryFfi);
+      final now = DateTime.now().toUtc();
+      final binding = OfflineSessionBinding(issuer: 'https://example.test/auth/v1',
+        userId: uid, sessionId: sid, notBefore: now.subtract(const Duration(hours: 1)),
+        expiresAt: now.add(const Duration(hours: 1)));
+      ProjectChatServerCache cache() => ProjectChatServerCache(db: db, scope: scope,
+        currentBinding: () => binding,
+        project: 'https://example.test');
+      var store = cache();
+      final ticket = (await store.begin('chat'))!;
+      expect(await store.saveServerPage(ticket, [forwarded, structured], hasMore: false), isTrue);
+      await db.close();
+      db = await openProjectChatServerDatabase('${dir.path}/chat.db', factory: databaseFactoryFfi);
+      store = cache();
+      final result = await store.read('chat', caps);
+      await db.close();
+      return result;
+    });
+    expect(snapshot, isNotNull);
+    final structuredReopened = snapshot!.firstWhere((m) => m.id == 'structured');
+    expect(structuredReopened.forward!.items.single.text, 'Студент');
+    expect(structuredReopened.authorNameVerified, isFalse);
+    var forwardedOpened = false;
+    final forwardedRead = Completer<void>();
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: CachedChatMessageBubble(
+      message: snapshot.firstWhere((m) => m.id == 'forward-message'), service: service, showAuthor: false,
+      debugForwardAttachmentBuilder: (file) => CachedChatAttachment(file: file, service: service,
+        debugRead: (file) async {
+          final bytes = await ChatFileAccess.readCachedOnly(file.fileUrl, permit: () => service.canReadCached);
+          if (!forwardedRead.isCompleted) forwardedRead.complete();
+          return bytes;
+        },
+        debugOpen: (path) async {
+          forwardedOpened = true;
+          expect(await File(path).readAsBytes(), [7, 8, 9]);
+          return true;
+        })))));
+    for (var i = 0; i < 100 && !forwardedRead.isCompleted; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump();
+    }
+    expect(forwardedRead.isCompleted, isTrue);
+    await tester.pump();
+    await tester.runAsync(() async {
+      tester.widget<AppFileCard>(find.byType(AppFileCard)).onTap!();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
+    await tester.pump();
+    expect(forwardedOpened, isTrue);
+    expect(requests, 0);
+    var forbiddenOpens = 0;
+    Future<void> showUnverified(List<ChatFile> files) async {
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: CachedChatMessageBubble(
+        message: forwarded.copyWith(attachments: files), service: service, showAuthor: false,
+        debugForwardAttachmentBuilder: (file) => CachedChatAttachment(file: file, service: service,
+          debugOpen: (_) async { forbiddenOpens++; return true; })))));
+      await tester.pump();
+    }
+    await showUnverified([document.copyWith(deletionVerified: false)]);
+    expect(find.byType(AppFileCard), findsNothing);
+    await showUnverified([document, document.copyWith(fileUrl:
+        'https://studentsplatform.storage.yandexcloud.net/chats/test/different.pdf')]);
+    expect(find.byType(AppFileCard), findsNothing);
+    expect(forbiddenOpens, 0);
+    expect(requests, 0);
     await mount(document, open: (_) async => false);
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 150)));
     await tester.pump();

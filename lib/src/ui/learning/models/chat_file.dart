@@ -15,6 +15,8 @@ class ChatFile {
   final String uploadedBy; // ID пользователя, загрузившего файл
   final DateTime uploadedAt; // Время загрузки
   final bool isDeleted; // Флаг удаления
+  /// True only when a confirmed source explicitly provided the deletion flag.
+  final bool deletionVerified;
 
   const ChatFile({
     required this.id,
@@ -28,6 +30,7 @@ class ChatFile {
     required this.uploadedBy,
     required this.uploadedAt,
     this.isDeleted = false,
+    this.deletionVerified = false,
   });
 
   // Определяем тип файла по MIME типу
@@ -105,6 +108,7 @@ class ChatFile {
         'uploaded_by': uploadedBy,
         'uploaded_at': uploadedAt.toIso8601String(),
         'is_deleted': isDeleted,
+        if (deletionVerified) 'deletion_verified': true,
       };
 
   factory ChatFile.fromJson(Map<String, dynamic> j) => ChatFile(
@@ -120,6 +124,7 @@ class ChatFile {
         uploadedAt: DateTime.tryParse((j['uploaded_at'] ?? '').toString()) ??
             DateTime.now(),
         isDeleted: _asBool(j['is_deleted']),
+        deletionVerified: j['deletion_verified'] == true,
       );
 
   static int _asInt(dynamic value) {
@@ -145,6 +150,7 @@ class ChatFile {
     String? uploadedBy,
     DateTime? uploadedAt,
     bool? isDeleted,
+    bool? deletionVerified,
   }) {
     return ChatFile(
       id: id ?? this.id,
@@ -158,6 +164,7 @@ class ChatFile {
       uploadedBy: uploadedBy ?? this.uploadedBy,
       uploadedAt: uploadedAt ?? this.uploadedAt,
       isDeleted: isDeleted ?? this.isDeleted,
+      deletionVerified: deletionVerified ?? this.deletionVerified,
     );
   }
 }

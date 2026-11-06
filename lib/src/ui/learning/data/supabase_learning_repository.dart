@@ -212,7 +212,7 @@ class SupabaseLearningRepository implements LearningRepository {
     }
   }
 
-  List<ChatFile> _parseAttachments(dynamic value) {
+  List<ChatFile> _parseAttachments(dynamic value, {bool confirmedSource = false}) {
     final attachments = <ChatFile>[];
     if (value == null) return attachments;
 
@@ -256,6 +256,8 @@ class SupabaseLearningRepository implements LearningRepository {
                         '')
                     .toString()) ??
                 DateTime.now(),
+            isDeleted: confirmedSource && it['is_deleted'] == true,
+            deletionVerified: confirmedSource && it['is_deleted'] is bool,
           ));
         }
       }
@@ -307,6 +309,7 @@ class SupabaseLearningRepository implements LearningRepository {
     Map<String, dynamic> m, {
     required String chatId,
     required String currentUserId,
+    bool preserveStructuredForward = false,
   }) {
     final authorId = (m['author_id']?.toString() ?? '');
     final amI = currentUserId.isNotEmpty && authorId == currentUserId;
@@ -322,6 +325,12 @@ class SupabaseLearningRepository implements LearningRepository {
     final String textVal = resolved.text;
     final String? cardKind = resolved.cardKind;
     final String? cardEntityId = resolved.cardEntityId;
+    final rawType = (m['type'] ?? m['msg_type'])?.toString();
+    final messageType = preserveStructuredForward && rawType == 'forward'
+        ? MessageType.forward : _typeFromServer(rawType);
+    final structuredForward = messageType == MessageType.forward
+        ? Message.fromJson({...m, 'chat_id': m['chat_id'] ?? chatId}).forward
+        : null;
 
     return Message(
       id: (m['id'] ?? '').toString(),
@@ -331,6 +340,7 @@ class SupabaseLearningRepository implements LearningRepository {
       authorName: authorName.isNotEmpty
           ? authorName
           : (authorLogin.isNotEmpty ? authorLogin : (amI ? 'Вы' : 'Студент')),
+      authorNameVerified: authorName.isNotEmpty || authorLogin.isNotEmpty,
       text: textVal,
       at: DateTime.tryParse((m['at'] ?? m['created_at'] ?? '').toString()) ??
           DateTime.now(),
@@ -338,11 +348,12 @@ class SupabaseLearningRepository implements LearningRepository {
           DateTime.tryParse((m['edited_at'] ?? m['editedAt'] ?? '').toString()),
       imagePath: _firstAttachmentUrl(m['image_path'] ?? m['attachments']),
       replyToId: m['reply_to_id']?.toString(),
-      type: _typeFromServer((m['type'] ?? m['msg_type'])?.toString()),
+      type: messageType,
+      forward: structuredForward,
       assignmentId: (m['assignment_id'] ?? m['assignmentId'])?.toString(),
       fileId: (m['file_id'] ?? m['fileId'])?.toString(),
       authorAvatarUrl: (m['author_avatar_url'] ?? m['avatar_url'])?.toString(),
-      attachments: _parseAttachments(m['attachments']),
+      attachments: _parseAttachments(m['attachments'], confirmedSource: preserveStructuredForward),
       isPinned: (m['is_pinned'] ?? false) == true,
       reactions: (m['reactions'] is Map)
           ? Map<String, int>.from(m['reactions'] as Map)
@@ -420,7 +431,8 @@ class SupabaseLearningRepository implements LearningRepository {
       if (more is bool) sawMoreFlag = true;
       hasMore = hasMore || more == true;
       messages.add(_mapMessageRow(map,
-          chatId: chatId, currentUserId: _sb.auth.currentUser?.id ?? ''));
+          chatId: chatId, currentUserId: _sb.auth.currentUser?.id ?? '',
+          preserveStructuredForward: true));
     }
     if (!sawMoreFlag) hasMore = rows.length >= 100;
     messages.sort((a, b) {

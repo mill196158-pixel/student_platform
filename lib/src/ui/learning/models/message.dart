@@ -34,6 +34,13 @@ class ForwardAttachmentModel {
             ? j['size'] as int
             : int.tryParse((j['size'] ?? '').toString()),
       );
+  Map<String, dynamic> toJson() => {
+        if (id != null) 'id': id,
+        'url': url,
+        if (name != null) 'name': name,
+        if (mime != null) 'mime': mime,
+        if (size != null) 'size': size,
+      };
 }
 
 class ForwardItemModel {
@@ -63,6 +70,14 @@ class ForwardItemModel {
                 Map<String, dynamic>.from(x as Map)))
             .toList(),
       );
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'author_id': authorId,
+        'author_name': authorName,
+        'created_at': at.toIso8601String(),
+        if (text != null) 'text': text,
+        'attachments': attachments.map((a) => a.toJson()).toList(),
+      };
 }
 
 class ForwardPayloadModel {
@@ -84,6 +99,11 @@ class ForwardPayloadModel {
           .toList(),
     );
   }
+  Map<String, dynamic> toJson() => {
+        'from_chat_id': fromChatId,
+        if (fromChatTitle != null) 'from_chat_title': fromChatTitle,
+        'items': items.map((item) => item.toJson()).toList(),
+      };
 }
 
 class Message {
@@ -93,6 +113,9 @@ class Message {
   final String authorId; // UUID автора из БД (пустая строка для system)
   final String authorLogin; // логин (например, 13015) или 'system'
   final String authorName; // имя для отображения
+  /// True only when the source explicitly supplied an author name/login.
+  /// Null denotes older snapshots with unknown provenance.
+  final bool? authorNameVerified;
   final String text; // контент сообщения
   final DateTime at; // created_at
   final DateTime? editedAt; // edited_at (null = never edited)
@@ -121,6 +144,7 @@ class Message {
     required this.authorId,
     required this.authorLogin,
     required this.authorName,
+    this.authorNameVerified,
     required this.text,
     required this.at,
     this.editedAt,
@@ -162,6 +186,7 @@ class Message {
     String? authorId,
     String? authorLogin,
     String? authorName,
+    bool? authorNameVerified,
     String? text,
     DateTime? at,
     DateTime? editedAt,
@@ -188,6 +213,7 @@ class Message {
       authorId: authorId ?? this.authorId,
       authorLogin: authorLogin ?? this.authorLogin,
       authorName: authorName ?? this.authorName,
+      authorNameVerified: authorNameVerified ?? this.authorNameVerified,
       text: text ?? this.text,
       at: at ?? this.at,
       editedAt: editedAt ?? this.editedAt,
@@ -216,6 +242,7 @@ class Message {
         'author_id': authorId,
         'author_login': authorLogin,
         'author_name': authorName,
+        if (authorNameVerified != null) 'author_name_verified': authorNameVerified,
         'content': text,
         'created_at': at.toIso8601String(),
         'edited_at': editedAt?.toIso8601String(),
@@ -225,6 +252,7 @@ class Message {
         'assignmentId': assignmentId,
         'fileId': fileId,
         'msg_type': type.name,
+        if (forward != null) 'forward_payload': forward!.toJson(),
         'attachments': attachments?.map((e) => e.toJson()).toList(),
         'is_pinned': isPinned,
         'reactions': reactions,
@@ -283,13 +311,30 @@ class Message {
     String? cardEntityId = resolved.cardEntityId;
 
     if (isForward) {
-      final content = rawContent?.toString() ?? '';
-      if (content.isNotEmpty) {
+      ForwardPayloadModel? parseForward(dynamic raw, {bool bounded = false}) {
         try {
-          final map = jsonDecode(content) as Map<String, dynamic>;
-          fwd = ForwardPayloadModel.fromJson(map);
-        } catch (_) {}
+          final decoded = raw is String ? jsonDecode(raw) : raw;
+          if (decoded is! Map) return null;
+          final map = Map<String, dynamic>.from(decoded);
+          if (bounded) {
+            final root = map['forward'] is Map
+                ? Map<String, dynamic>.from(map['forward'] as Map)
+                : map;
+            final items = root['items'];
+            if (items is! List || items.length > 30) return null;
+            for (final item in items) {
+              if (item is! Map) return null;
+              final files = item['attachments'];
+              if (files is! List || files.length > 10) return null;
+            }
+          }
+          return ForwardPayloadModel.fromJson(map);
+        } catch (_) { return null; }
       }
+      fwd = parseForward(j['forward_payload'], bounded: true) ??
+          parseForward(rawContent, bounded: true) ??
+          parseForward(j['text'], bounded: true) ??
+          parseForward(j['body'], bounded: true);
     }
 
     final authorName = (j['author_name'] ?? '').toString().trim();
@@ -303,6 +348,9 @@ class Message {
       authorName: authorName.isNotEmpty
           ? authorName
           : (authorLogin.isNotEmpty ? authorLogin : 'Студент'),
+      authorNameVerified: j['author_name_verified'] is bool
+          ? j['author_name_verified'] as bool
+          : (authorName.isEmpty && authorLogin.isEmpty ? false : null),
       text: textVal,
       at: DateTime.tryParse((j['created_at'] ?? j['at'] ?? '').toString()) ??
           DateTime.fromMillisecondsSinceEpoch(0),
