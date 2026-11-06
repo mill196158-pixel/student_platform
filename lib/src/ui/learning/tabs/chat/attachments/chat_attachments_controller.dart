@@ -128,6 +128,7 @@ class ChatAttachmentsController extends ChangeNotifier {
         messageId: messageId ?? '',
         uploadedBy: supabase.auth.currentUser!.id,
         customFileName: file.name,
+        preserveOriginal: file.preserveOriginal,
         cancelToken: uploadToken,
         onProgress: (sent, total) {
           if (total <= 0) return;

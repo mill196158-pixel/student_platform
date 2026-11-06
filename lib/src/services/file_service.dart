@@ -1,4 +1,5 @@
 import 'chat_file_access.dart';
+import 'chat_png_optimizer.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:crypto/crypto.dart' as crypto;
 import 'dart:convert';
@@ -64,13 +65,20 @@ class FileService {
     required String messageId,
     required String uploadedBy,
     String? customFileName,
+    bool preserveOriginal = true,
     UploadProgressCallback? onProgress,
     CancelToken? cancelToken,
   }) async {
     try {
       final fileName = _fileNameFromPath(customFileName ?? file.path);
       final contentType = _getContentType(fileName);
-      final bytes = await _readUploadBytes(file);
+      final session = _supabase.auth.currentSession;
+      final original = await _readUploadBytes(file);
+      _checkUploadSession(session, cancelToken);
+      final bytes = !preserveOriginal && contentType == 'image/png'
+          ? await optimizeNewChatPng(original, cancelToken: cancelToken)
+          : original;
+      _checkUploadSession(session, cancelToken);
 
       final upload = await _createPresignedUpload(
         chatId: chatId,
@@ -78,12 +86,15 @@ class FileService {
         contentType: contentType,
         fileSize: bytes.length,
       );
+      _checkUploadSession(session, cancelToken);
       await _putToPresignedUrl(
         upload,
         bytes,
         onProgress: onProgress,
         cancelToken: cancelToken,
+        checkCurrent: () => _checkUploadSession(session, cancelToken),
       );
+      _checkUploadSession(session, cancelToken);
 
       return ChatFile(
         id: '', // Будет заполнено на сервере
@@ -107,13 +118,20 @@ class FileService {
     required File file,
     required String chatId,
     String? customFileName,
+    bool preserveOriginal = true,
     UploadProgressCallback? onProgress,
     CancelToken? cancelToken,
   }) async {
     try {
       final fileName = _fileNameFromPath(customFileName ?? file.path);
       final contentType = _getContentType(fileName);
-      final bytes = await _readUploadBytes(file);
+      final session = _supabase.auth.currentSession;
+      final original = await _readUploadBytes(file);
+      _checkUploadSession(session, cancelToken);
+      final bytes = !preserveOriginal && contentType == 'image/png'
+          ? await optimizeNewChatPng(original, cancelToken: cancelToken)
+          : original;
+      _checkUploadSession(session, cancelToken);
 
       final upload = await _createPresignedUpload(
         chatId: chatId,
@@ -121,12 +139,15 @@ class FileService {
         contentType: contentType,
         fileSize: bytes.length,
       );
+      _checkUploadSession(session, cancelToken);
       await _putToPresignedUrl(
         upload,
         bytes,
         onProgress: onProgress,
         cancelToken: cancelToken,
+        checkCurrent: () => _checkUploadSession(session, cancelToken),
       );
+      _checkUploadSession(session, cancelToken);
 
       return FileUploadResult(
         success: true,
@@ -240,12 +261,26 @@ class FileService {
         return 'image/png';
       case 'gif':
         return 'image/gif';
+      case 'webp':
+        return 'image/webp';
       case 'zip':
         return 'application/zip';
       case 'rar':
         return 'application/x-rar-compressed';
       default:
         return 'application/octet-stream';
+    }
+  }
+
+  void _checkUploadSession(Session? original, CancelToken? cancelToken) {
+    if (cancelToken?.isCancelled ?? false) throw Exception('Загрузка отменена');
+    final current = _supabase.auth.currentSession;
+    if (original == null ||
+        current == null ||
+        original.user.id != current.user.id ||
+        original.accessToken != current.accessToken ||
+        original.refreshToken != current.refreshToken) {
+      throw Exception('Сессия изменилась. Повторите загрузку.');
     }
   }
 
@@ -305,6 +340,7 @@ class FileService {
     Uint8List bytes, {
     UploadProgressCallback? onProgress,
     CancelToken? cancelToken,
+    required void Function() checkCurrent,
   }) async {
     try {
       await _dio.put<dynamic>(
@@ -319,10 +355,13 @@ class FileService {
         ),
         onSendProgress: onProgress,
       );
+      checkCurrent();
       final confirmation = await _supabase.functions.invoke('chat-file-access',
           body: {'action': 'confirm', 'key': upload.fileKey});
+      checkCurrent();
       if (confirmation.data is! Map || confirmation.data['confirmed'] != true) {
-        throw Exception('Не удалось подтвердить загрузку файла. Повторите попытку.');
+        throw Exception(
+            'Не удалось подтвердить загрузку файла. Повторите попытку.');
       }
     } on DioException catch (e) {
       if (e.type == DioExceptionType.cancel) {
@@ -379,15 +418,19 @@ class FileService {
       final url = Uri.https(ChatFileAccess.storageHost, '/$fileKey').toString();
       final bytes = await ChatFileAccess.readBytes(url);
       final root = await getApplicationCacheDirectory();
-      final digest = crypto.sha256.convert(utf8.encode('${ChatFileAccess.userId}:$fileKey'));
+      final digest = crypto.sha256
+          .convert(utf8.encode('${ChatFileAccess.userId}:$fileKey'));
       final dir = Directory('${root.path}/downloaded_chat_files');
-      await dir.create(recursive:true);
+      await dir.create(recursive: true);
       final cleanName = _fileNameFromPath(fileName);
       final file = File('${dir.path}/${digest}_$cleanName');
-      await file.writeAsBytes(bytes,flush:true);
-      return FileDownloadResult(success:true,file:file,fileName:cleanName);
+      await file.writeAsBytes(bytes, flush: true);
+      return FileDownloadResult(success: true, file: file, fileName: cleanName);
     } catch (_) {
-      return FileDownloadResult(success:false,error:'Не удалось открыть файл. Проверьте подключение и права доступа.');
+      return FileDownloadResult(
+          success: false,
+          error:
+              'Не удалось открыть файл. Проверьте подключение и права доступа.');
     }
   }
 

@@ -13,6 +13,9 @@ class LocalAttach {
   final String mimeType;
   final int size;
   final bool isImage;
+
+  /// Forwarded and legacy-restored files retain their original bytes.
+  final bool preserveOriginal;
   final LocalAttachUploadStatus uploadStatus;
   final double progress;
   final String? errorMessage;
@@ -25,6 +28,7 @@ class LocalAttach {
     required this.mimeType,
     required this.size,
     required this.isImage,
+    this.preserveOriginal = false,
     this.uploadStatus = LocalAttachUploadStatus.queued,
     this.progress = 0,
     this.errorMessage,
@@ -54,6 +58,7 @@ class LocalAttach {
       mimeType: mimeType,
       size: size,
       isImage: isImage,
+      preserveOriginal: preserveOriginal,
       uploadStatus: uploadStatus ?? this.uploadStatus,
       progress: progress ?? this.progress,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),

@@ -1223,6 +1223,7 @@ class _ChatTabState extends State<ChatTab> {
                 'mimeType': f.mimeType,
                 'size': f.size,
                 'isImage': f.isImage,
+                'preserveOriginal': f.preserveOriginal,
                 'uploadStatus': f.uploadStatus.name,
                 'progress': f.progress,
                 'uploadedFileId': f.uploadedFileId,
@@ -1256,6 +1257,7 @@ class _ChatTabState extends State<ChatTab> {
             mimeType: fileData['mimeType'] as String? ?? '',
             size: fileData['size'] as int? ?? 0,
             isImage: fileData['isImage'] as bool? ?? false,
+            preserveOriginal: fileData['preserveOriginal'] as bool? ?? true,
             uploadStatus: restoredStatus,
             progress:
                 restoredStatus == LocalAttachUploadStatus.uploaded ? 1 : 0,
@@ -1632,16 +1634,23 @@ class _ChatTabState extends State<ChatTab> {
         );
         return;
       }
+      final epoch = ChatFileAccess.generation;
+      bool sameSession() => mounted && ChatFileAccess.userId == user.id &&
+          ChatFileAccess.generation == epoch;
 
       // Получаем chatId для команды
       final teamId = context.read<TeamCubit>().state.team.id;
       final chatId = await _getChatIdForTeam(teamId);
+      if (!sameSession()) return;
 
       final uploadResult = await _fileService.uploadFileToChat(
         file: file, chatId: chatId, messageId: messageId ?? '', uploadedBy: user.id,
+        preserveOriginal: false,
       );
+      if (!sameSession()) return;
       final savedChatFile = await _saveChatFileToDatabase(
           uploadResult.copyWith(messageId: messageId), user.id);
+      if (!sameSession()) return;
 
       safeDebugLog(
           '[ChatTab] uploaded file metadata saved id=${maskDebugId(savedChatFile.id)}');
@@ -2696,7 +2705,8 @@ class _ChatTabState extends State<ChatTab> {
         final attach = LocalAttach(path:tmp.path,
           name:source?.name ?? tmp.path.split(RegExp(r'[\\/]')).last,
           mimeType:source?.type ?? _guessMime(tmp.path),size:size,
-          isImage:source?.type.startsWith('image/') ?? _isImagePath(tmp.path));
+          isImage:source?.type.startsWith('image/') ?? _isImagePath(tmp.path),
+          preserveOriginal:true);
         if (!_att.add(attach)) { await ChatFileAccess.releaseForwardTemp(tmp.path); throw StateError('Слишком много вложений для одной пересылки.'); }
         await _att.upload(attach,chatId:chatId);
         if (!mounted || !sameSession() || preparation != _forwardPreparationGeneration) return;

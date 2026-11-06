@@ -537,6 +537,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
               'mimeType': f.mimeType,
               'size': f.size,
               'isImage': f.isImage,
+              'preserveOriginal': f.preserveOriginal,
               'uploadStatus': f.uploadStatus.name,
               'progress': f.progress,
               'uploadedFileId': f.uploadedFileId,
@@ -567,6 +568,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
             mimeType: m['mimeType'] as String? ?? '',
             size: m['size'] as int? ?? 0,
             isImage: m['isImage'] as bool? ?? false,
+            preserveOriginal: m['preserveOriginal'] as bool? ?? true,
             uploadStatus:
                 ((m['uploadedFileId'] as String?)?.isNotEmpty ?? false)
                     ? LocalAttachUploadStatus.uploaded
@@ -917,7 +919,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         final attach = LocalAttach(path:tmp.path,
           name:source?.name ?? tmp.path.split(RegExp(r'[\\/]')).last,
           mimeType:source?.type ?? _guessMime(tmp.path),size:size,
-          isImage:source?.type.startsWith('image/') ?? _isImagePath(tmp.path));
+          isImage:source?.type.startsWith('image/') ?? _isImagePath(tmp.path),
+          preserveOriginal:true);
         if (!_att.add(attach)) { await ChatFileAccess.releaseForwardTemp(tmp.path); throw StateError('Слишком много вложений для одной пересылки.'); }
         await _att.upload(attach,chatId:chatId);
         if (!mounted || !sameSession() || preparation != _forwardPreparationGeneration) return;
