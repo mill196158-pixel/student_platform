@@ -16,6 +16,7 @@ import '../../../services/file_service.dart';
 import '../widgets/fullscreen_image.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:path_provider/path_provider.dart';
+import 'cached_document_open.dart';
 
 enum _FilesSection { images, documents }
 
@@ -673,18 +674,51 @@ class _FilesTabState extends State<FilesTab>
 
   Future<void> _openOrDownload(ChatFile f) async {
     try {
-      final service = _fileService ??= _tryCreateFileService();
-      if (service != null) {
-        final res = await service.downloadFile(
-            fileKey: f.fileKey, fileName: f.fileName);
-        if (res.success && res.file != null) {
-          await OpenFilex.open(res.file!.path);
-          return;
-        }
-      }
-      // Фолбэк — открыть URL в браузере
-      final uri = Uri.parse(await ChatFileAccess.resolve(f.fileUrl));
-      if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      final owner = ChatFileAccess.userId;
+      final session = ChatFileAccess.currentSessionBinding;
+      final generation = ChatFileAccess.generation;
+      final client = ChatFileAccess.currentClientIdentity;
+      bool currentFile() =>
+          mounted &&
+          owner != null &&
+          session != null &&
+          identical(client, ChatFileAccess.currentClientIdentity) &&
+          f.chatId == _chatId &&
+          _files.any((item) =>
+              item.id == f.id &&
+              item.fileKey == f.fileKey &&
+              item.fileUrl == f.fileUrl &&
+              !item.isDeleted) &&
+          ChatFileAccess.isViewerCurrent(f.fileUrl,
+              user: owner, epoch: generation, sessionBinding: session);
+
+      // A cached file has no extension; use its confirmed MIME type. When it
+      // cannot be opened this way, keep the existing named export fallback.
+      final canOpenCached = f.fileType.trim().isNotEmpty &&
+          f.fileKey.isNotEmpty &&
+          ChatFileAccess.keyFor(f.fileUrl) == f.fileKey;
+      final opened = await openDocumentWithFallback(
+        isCurrent: currentFile,
+        cachedPath: () => canOpenCached
+            ? ChatFileAccess.cachedPathForOpen(f.fileUrl, permit: currentFile)
+            : Future<String?>.value(null),
+        openCached: (path) async =>
+            (await OpenFilex.open(path, type: f.fileType)).type ==
+            ResultType.done,
+        exportPath: () async {
+            final service = _fileService ??= _tryCreateFileService();
+            if (service == null) return null;
+            final res = await service.downloadFile(
+                fileKey: f.fileKey, fileName: f.fileName);
+            return res.success ? res.file?.path : null;
+        },
+        openExport: (path) async =>
+            (await OpenFilex.open(path)).type == ResultType.done,
+        resolveUrl: () async => ChatFileAccess.resolve(f.fileUrl),
+        launchUrl: (url) => launchUrl(Uri.parse(url),
+            mode: LaunchMode.externalApplication),
+      );
+      if (!opened && currentFile()) {
         _showError('Не удалось открыть файл');
       }
     } catch (e) {
