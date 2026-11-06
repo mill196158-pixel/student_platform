@@ -62,6 +62,92 @@ class _EmptyLearning implements SupabaseLearningRepository {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  for (final online in [false, true]) {
+    test('one stalled cache section preserves other saved sections, online=$online', () async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final gate = Completer<SharedPreferences>();
+      var stall = false, reads = 0;
+      final client = SupabaseClient('https://example.invalid', 'test',
+          authOptions: const AuthClientOptions(autoRefreshToken: false),
+          httpClient: MockClient((request) async => http.Response('[]', 200,
+              request: request, headers: {'content-type': 'application/json'})));
+      await signIn(client, 'partial-owner');
+      final source = AuthSessionScope(currentSession: () => client.auth.currentSession,
+          authEvents: client.auth.onAuthStateChange);
+      await source.ready;
+      final cache = HomeSnapshotCache(currentUserId: () => source.capture()?.userId,
+          sessionGeneration: () => source.generation, sessionIdentity: source.capture,
+          preferences: () { if (stall && ++reads == 1) return gate.future; return Future.value(prefs); });
+      final owner = cache.captureScope('partial-owner')!;
+      final assignment = Assignment(id: 'saved-task', title: 'Сохранённое задание',
+          description: '', published: true, votes: 0, completedByMe: false,
+          createdBy: 'student', createdAt: DateTime.utc(2026));
+      expect(await cache.write(scope: owner, section: HomeSnapshotSection.profile,
+          items: [{'id':'partial-owner', 'name':'Сохранённый профиль'}], savedAt: DateTime.now()), isTrue);
+      expect(await cache.write(scope: owner, section: HomeSnapshotSection.assignments,
+          items: [HomeSnapshotCodec.assignmentToMap(HomeAssignmentPreview(
+              assignment: assignment, teamName: 'Команда'))], savedAt: DateTime.now()), isTrue);
+      stall = true;
+      final schedule = _Schedule(), learning = _Learning();
+      final updates = <HomeDashboardData>[];
+      final service = HomeDashboardService(client: client, scheduleRepository: schedule,
+          learningRepository: learning, sessionScope: source, snapshotCache: cache);
+      final work = service.load(onUpdate: updates.add);
+      await Future<void>.delayed(const Duration(milliseconds: 1100));
+      expect(updates, isNotEmpty);
+      expect(updates.first.profile.name, 'Сохранённый профиль');
+      expect(updates.first.assignments.single.assignment.id, 'saved-task');
+      expect(updates.first.scheduleStatus, isNot('Сохранённое расписание'));
+      if (online) {
+        schedule.result.complete([Lesson(id: 'fresh', date: MskDate.today(), week: 1,
+          day: 'ПН', pairNum: 1, start: const TimeOfDay(hour: 9, minute: 0),
+          end: const TimeOfDay(hour: 10, minute: 0), subjectRaw: 'Свежий предмет')]);
+      } else {
+        schedule.result.completeError(StateError('offline'));
+      }
+      learning.teams.completeError(StateError('offline'));
+      final result = await work;
+      expect(result.profile.name, 'Сохранённый профиль');
+      expect(result.assignments.single.assignment.id, 'saved-task');
+      if (online) expect(result.todayLessons.single.id, 'fresh');
+      else expect(result.scheduleStatus, 'Не удалось обновить расписание');
+      final updateCount = updates.length;
+      gate.complete(prefs);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(updates.length, updateCount, reason: 'late cached section cannot overwrite network result');
+      service.dispose(); source.dispose(); await client.dispose();
+    });
+  }
+  test('partial cache is not published after its owner is invalidated', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final gate = Completer<SharedPreferences>();
+    var reads = 0;
+    final client = SupabaseClient('https://example.invalid', 'test',
+        authOptions: const AuthClientOptions(autoRefreshToken: false),
+        httpClient: MockClient((request) async => http.Response('[]', 200,
+            request: request, headers: {'content-type': 'application/json'})));
+    await signIn(client, 'stale-partial');
+    final source = AuthSessionScope(currentSession: () => client.auth.currentSession,
+        authEvents: client.auth.onAuthStateChange);
+    await source.ready;
+    final cache = HomeSnapshotCache(currentUserId: () => source.capture()?.userId,
+        sessionGeneration: () => source.generation, sessionIdentity: source.capture,
+        preferences: () => ++reads == 1 ? gate.future : Future.value(prefs));
+    final updates = <HomeDashboardData>[];
+    final service = HomeDashboardService(client: client, scheduleRepository: _Schedule(),
+        learningRepository: _Learning(), sessionScope: source, snapshotCache: cache);
+    final work = service.load(onUpdate: updates.add);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    source.invalidateForSignOut();
+    await expectLater(work, throwsA(isA<HomeLoadCancelled>()));
+    expect(updates, isEmpty);
+    gate.complete(prefs);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(updates, isEmpty);
+    service.dispose(); source.dispose(); await client.dispose();
+  });
   test('existing dashboard publishes cached sections before stalled requests',
       () async {
     SharedPreferences.setMockInitialValues({});

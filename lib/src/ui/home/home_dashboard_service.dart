@@ -170,7 +170,8 @@ class HomeDashboardService {
         userId != null) {
       Future<HomeSectionSnapshot?> safeRead(HomeSnapshotSection section) async {
         try {
-          return await cache.read(userId, section);
+          return await cache.read(userId, section).timeout(
+              const Duration(seconds: 1), onTimeout: () => null);
         } catch (_) {
           return null;
         }
@@ -180,8 +181,7 @@ class HomeDashboardService {
         safeRead(HomeSnapshotSection.schedule),
         safeRead(HomeSnapshotSection.assignments),
         safeRead(HomeSnapshotSection.profile),
-      ]).timeout(const Duration(seconds: 1),
-          onTimeout: () => [null, null, null]);
+      ]);
       if (!current() || !cache.isCurrent(cacheScope)) throw HomeLoadCancelled();
       final schedule = cached[0];
       if (schedule != null && schedule.date == MskDate.isoDate(scheduleDate)) {
