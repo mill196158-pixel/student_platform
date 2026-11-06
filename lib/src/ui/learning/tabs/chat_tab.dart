@@ -6,6 +6,7 @@ import 'package:student_platform/src/core/auth_session_scope_host.dart';
 // ignore_for_file: unnecessary_import, unused_import, unused_field, unused_element, dead_null_aware_expression, invalid_null_aware_operator, unused_local_variable, deprecated_member_use, unnecessary_null_comparison
 
 import 'dart:async';
+import 'package:student_platform/src/core/qa_no_automatic_writes.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -640,7 +641,7 @@ class _ChatTabState extends State<ChatTab> {
           _trackedChatId = chatId;
           ActiveChatTracker.instance.enter(chatId);
         }
-        await _consumeForwardOutboxIfAny(chatId, outbox);
+        await _consumeForwardOutboxIfAny(chatId, outbox, fromInitialization: true);
       }();
 
       // Асинхронно фиксируем «границу на входе» по last_read_at / first_unread_id
@@ -813,6 +814,7 @@ class _ChatTabState extends State<ChatTab> {
 
   // ➜ NEW: помощник для вызова RPC mark_read
   Future<void> _markReadSafely(String lastMsgId) async {
+    if (qaNoAutomaticWrites) return;
     try {
       final teamId = context.read<TeamCubit>().state.team.id;
       final chatId = await _getChatIdForTeam(teamId);
@@ -2439,7 +2441,7 @@ class _ChatTabState extends State<ChatTab> {
   }
 
   Future<void> _consumeForwardOutboxIfAny(String chatId, ForwardOutboxSession? outbox,
-      {String? expectedExistingDraft}) async {
+      {String? expectedExistingDraft, bool fromInitialization = false}) async {
     final uid=ChatFileAccess.userId, epoch=ChatFileAccess.generation;
     if (outbox == null || !outbox.isCurrent) return;
     if (ForwardOutboxHost.usesDurable(context)) {
@@ -2615,7 +2617,8 @@ class _ChatTabState extends State<ChatTab> {
     }
     ForwardOutboxData? data;
     try {
-      data = await outbox.tryTakeForChat(chatId);
+      data = await outbox.tryTakeForChat(chatId,
+          requireQaHandoff: qaNoAutomaticWrites && fromInitialization);
     } catch (_) {
       if (outbox.isCurrent) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -2941,7 +2944,7 @@ class _ChatTabState extends State<ChatTab> {
       try {
         final ready = await completeForwardHandoff(
           prepare: () => outbox.putForChat(chatId: target.chatId, text: payload.encodeForText(),
-            fileUrls: uniqueFileUrls, fileIds: uniqueFileIds),
+            fileUrls: uniqueFileUrls, fileIds: uniqueFileIds, isSourceCurrent: sourceCurrent),
           isCurrent: () => outbox.isCurrent, onPrepared: preserveNewSelection);
         if (!ready) return;
       } catch (_) {

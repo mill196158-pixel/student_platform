@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:student_platform/src/core/qa_no_automatic_writes.dart';
 
 import 'package:flutter/widgets.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -53,6 +54,7 @@ class PresenceService with WidgetsBindingObserver {
   bool _touching = false;
 
   void start() {
+    if (qaNoAutomaticWrites) return;
     if (_started) {
       unawaited(touch());
       return;
@@ -92,6 +94,7 @@ class PresenceService with WidgetsBindingObserver {
   }
 
   Future<void> touch() async {
+    if (qaNoAutomaticWrites) return;
     if (_touching) return;
     final uid = Supabase.instance.client.auth.currentUser?.id;
     if (uid == null || uid.isEmpty) return;

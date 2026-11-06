@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:student_platform/src/core/qa_no_automatic_writes.dart';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -1246,6 +1247,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _maybeRecordPromoImpression(HomePromoLoadResult promo) {
+    if (qaNoAutomaticWrites) return;
     if (widget.cachedReader != null) return;
     if (!mounted ||
         _data == null ||

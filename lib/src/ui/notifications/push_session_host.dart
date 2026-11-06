@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:student_platform/src/core/qa_no_automatic_writes.dart';
 import 'package:student_platform/src/services/push/system_notification_sync.dart';
 import 'package:student_platform/src/core/online_side_effect_barrier.dart';
 
@@ -113,6 +114,7 @@ class _PushSessionHostState extends State<PushSessionHost>
   }
 
   Future<void> _start() async {
+    if (qaNoAutomaticWrites) return;
     if (!_allowed || _started) return;
     final startingBarrier = widget.barrier;
     bool current() => _currentBarrier(startingBarrier);

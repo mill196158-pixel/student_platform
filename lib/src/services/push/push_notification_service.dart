@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:student_platform/src/core/qa_no_automatic_writes.dart';
 import 'package:student_platform/src/core/single_flight_initialization.dart';
 import 'package:student_platform/src/core/online_side_effect_barrier.dart';
 import 'guarded_push_open.dart';
@@ -76,6 +77,7 @@ class PushNotificationService {
 
   final _firebaseBootstrap = SingleFlightInitialization();
   Future<void> bootstrapFirebase() {
+    if (qaNoAutomaticWrites) return Future.value();
     if (!isSupportedPlatform || _firebaseReady) return Future.value();
     // Framework post-frame callbacks precede rasterization. Do not start the
     // secondary messaging engine while the first visible frame is rendering.
@@ -105,6 +107,7 @@ class PushNotificationService {
 
   Future<void> onAuthenticated(BuildContext? context,
       {OnlineSideEffectBarrier? barrier, bool Function()? isCurrent}) async {
+    if (qaNoAutomaticWrites) return;
     if (!isSupportedPlatform) return;
     final userId = Supabase.instance.client.auth.currentUser?.id;
     if (userId == null) return;
@@ -165,7 +168,7 @@ class PushNotificationService {
     final installationId = await _ensureInstallationId();
     if (!sameOwner()) return;
 
-    if (Supabase.instance.client.auth.currentUser != null) {
+    if (!qaNoAutomaticWrites && Supabase.instance.client.auth.currentUser != null) {
       try {
         await Supabase.instance.client.rpc(
           'disable_device_push_token',
@@ -570,6 +573,7 @@ class PushNotificationService {
   }
 
   Future<void> _registerCurrentToken({bool Function()? isCurrent}) async {
+    if (qaNoAutomaticWrites) return;
     bool current() => _sessionActive && (isCurrent?.call() ?? true);
     if (!_firebaseReady || !current()) return;
 

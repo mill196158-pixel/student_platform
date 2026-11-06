@@ -21,6 +21,7 @@ import 'package:student_platform/src/ui/chats/core/cached_chat_attachment.dart';
 import 'package:student_platform/src/ui/chats/core/cached_chat_message_bubble.dart';
 import 'package:student_platform/src/ui/chats/core/forward_payload.dart';
 import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
+import 'package:student_platform/src/ui/chats/core/scoped_forward_author_resolver.dart';
 import 'package:student_platform/src/ui/chats/core/dm_chat_service.dart';
 import 'package:student_platform/src/ui/learning/models/chat_file.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
@@ -179,8 +180,8 @@ void main() {
     }
     sqfliteFfiInit();
     final nested = ForwardPayload(fromChatId: 'chat', items: [ForwardItem(
-      messageId: 'source', authorId: 'author', authorName: 'Автор',
-      at: DateTime.utc(2026), text: 'Текст', files: [ForwardFileRef(
+      messageId: 'source', authorId: 'author', authorName: 'Студент',
+      at: DateTime.utc(2026), text: 'Студент', files: [ForwardFileRef(
         id: document.id, url: document.fileUrl, name: document.fileName,
         type: document.fileType, size: document.fileSize)])]);
     final outer = ForwardPayload(fromChatId: 'chat', items: [ForwardItem(
@@ -189,6 +190,9 @@ void main() {
     final forwarded = Message(id: 'forward-message', chatId: 'chat', authorId: 'author',
       authorLogin: 'author', authorName: 'Автор', text: outer.encodeForText(),
       at: DateTime.utc(2026), attachments: [document]);
+    final original = Message(id: 'source', chatId: 'chat', authorId: 'author',
+      authorLogin: 'author', authorName: 'Подтверждённый автор', authorNameVerified: true,
+      text: 'Студент', at: DateTime.utc(2025));
     final structured = Message.fromJson({'id': 'structured', 'chat_id': 'chat',
       'author_id': 'author', 'author_name': '', 'author_login': '',
       'created_at': DateTime.utc(2026, 1, 2).toIso8601String(), 'msg_type': 'forward',
@@ -208,22 +212,22 @@ void main() {
         project: 'https://example.test');
       var store = cache();
       final ticket = (await store.begin('chat'))!;
-      expect(await store.saveServerPage(ticket, [forwarded, structured], hasMore: false), isTrue);
+      expect(await store.saveServerPage(ticket, [original, forwarded, structured], hasMore: false), isTrue);
       await db.close();
       db = await openProjectChatServerDatabase('${dir.path}/chat.db', factory: databaseFactoryFfi);
       store = cache();
       final result = await store.read('chat', caps);
-      await db.close();
-      return result;
+      return (result, store, db);
     });
     expect(snapshot, isNotNull);
-    final structuredReopened = snapshot!.firstWhere((m) => m.id == 'structured');
+    final structuredReopened = snapshot!.$1!.firstWhere((m) => m.id == 'structured');
     expect(structuredReopened.forward!.items.single.text, 'Студент');
     expect(structuredReopened.authorNameVerified, isFalse);
     var forwardedOpened = false;
     final forwardedRead = Completer<void>();
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: CachedChatMessageBubble(
-      message: snapshot.firstWhere((m) => m.id == 'forward-message'), service: service, showAuthor: false,
+      message: snapshot.$1!.firstWhere((m) => m.id == 'forward-message'), service: service, showAuthor: false,
+      authorResolver: ScopedForwardAuthorResolver(store: snapshot.$2, capabilities: caps),
       debugForwardAttachmentBuilder: (file) => CachedChatAttachment(file: file, service: service,
         debugRead: (file) async {
           final bytes = await ChatFileAccess.readCachedOnly(file.fileUrl, permit: () => service.canReadCached);
@@ -240,6 +244,11 @@ void main() {
       await tester.pump();
     }
     expect(forwardedRead.isCompleted, isTrue);
+    for (var i = 0; i < 100 && find.textContaining('Подтверждённый автор: Студент').evaluate().isEmpty; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump();
+    }
+    expect(find.textContaining('Подтверждённый автор: Студент'), findsOneWidget);
     await tester.pump();
     await tester.runAsync(() async {
       tester.widget<AppFileCard>(find.byType(AppFileCard)).onTap!();
@@ -263,6 +272,7 @@ void main() {
     expect(find.byType(AppFileCard), findsNothing);
     expect(forbiddenOpens, 0);
     expect(requests, 0);
+    await tester.runAsync(() => snapshot.$3.close());
     await mount(document, open: (_) async => false);
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 150)));
     await tester.pump();

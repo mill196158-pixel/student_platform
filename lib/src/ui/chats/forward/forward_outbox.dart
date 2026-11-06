@@ -1,5 +1,6 @@
 // FILE: lib/src/ui/chats/forward/forward_outbox.dart
 import 'dart:convert';
+import 'package:student_platform/src/core/qa_no_automatic_writes.dart';
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/auth_session_scope.dart';
@@ -185,7 +186,8 @@ class ForwardOutboxSession {
       {required String chatId,
       String? text,
       List<String> fileUrls = const [],
-      List<String> fileIds = const []}) async {
+      List<String> fileIds = const [],
+      bool Function()? isSourceCurrent}) async {
     if (_durableMode) throw StateError('Legacy forward writer disabled');
     if (!isCurrent) throw StateError('Session changed');
     final target = chatId.trim();
@@ -195,11 +197,24 @@ class ForwardOutboxSession {
       await _store.put(_owner, target,
           text: text ?? '', files: fileUrls, fileIds: fileIds);
       if (!isCurrent) throw StateError('Session changed');
+      if (qaNoAutomaticWrites) {
+        final entry = await _store.peek(_owner, target);
+        if (entry == null || !isCurrent) throw StateError('Forward unavailable');
+        bool currentSource() {
+          try { return isCurrent && (isSourceCurrent?.call() ?? false); }
+          catch (_) { return false; }
+        }
+        if (currentSource()) {
+          _store.coordinator.recordAutoApproval('qa-legacy-handoff', _owner,
+              target, entry.migrationFingerprint, currentSource);
+        }
+      }
     });
   }
 
   /// Transitional destructive take: callers must not treat this as durable staging.
-  Future<ForwardOutboxData?> tryTakeForChat(String chatId) async {
+  Future<ForwardOutboxData?> tryTakeForChat(String chatId,
+      {bool requireQaHandoff = false}) async {
     if (_durableMode) throw StateError('Legacy forward consumer disabled');
     if (!isCurrent) return null;
     final target = chatId.trim();
@@ -208,6 +223,9 @@ class ForwardOutboxSession {
       if (!isCurrent) return null;
       final entry = await _store.peek(_owner, target);
       if (!isCurrent || entry == null) return null;
+      final proof = _store.coordinator.consumeAutoApproval('qa-legacy-handoff',
+          _owner, target, entry.migrationFingerprint);
+      if (requireQaHandoff && (proof == null || !proof())) return null;
       if (!ForwardPayload.isForwardText(entry.text) &&
           (entry.files.isNotEmpty || entry.fileIds.isNotEmpty)) {
         // Current consumers cannot reconstruct these attachments from a plain
@@ -221,8 +239,10 @@ class ForwardOutboxSession {
           throw const FormatException('Не все вложения готовы к пересылке.');
         }
       }
-      final result = await _store.acknowledge(entry);
-      if (!isCurrent || result != ForwardAcknowledgeResult.removed) return null;
+      final result = await _store.acknowledge(entry,
+          isCurrent: requireQaHandoff ? () => isCurrent && (proof?.call() ?? false) : null);
+      if (!isCurrent || (requireQaHandoff && !(proof?.call() ?? false)) ||
+          result != ForwardAcknowledgeResult.removed) return null;
       return ForwardOutboxData(
           text: entry.text, fileUrls: entry.files, fileIds: entry.fileIds);
     });

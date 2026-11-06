@@ -14,6 +14,7 @@ import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dar
 import 'package:student_platform/src/ui/chats/core/dm_chat_service.dart';
 import 'package:student_platform/src/ui/chats/core/cached_chat_message_bubble.dart';
 import 'package:student_platform/src/ui/chats/core/cached_chat_composer.dart';
+import 'package:student_platform/src/ui/chats/core/scoped_forward_author_resolver.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/messages/chat_message_list.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/search/chat_search_controller.dart';
@@ -289,7 +290,9 @@ class _CachedTeamDetailsState extends State<_CachedTeamDetails>
                       onReplyTap: (_) {},
                       onReact: (_, __) {},
                       localOnlyBubbleBuilder: (message) => CachedChatMessageBubble(
-                          message: message, service: _filePermit!, showAuthor: true));
+                          message: message, service: _filePermit!, showAuthor: true,
+                          authorResolver: ScopedForwardAuthorResolver(
+                              store: widget.store, capabilities: widget.capabilities)));
                 })), const CachedChatComposer()]),
             const Center(child: Text('Сохранённый список файлов недоступен.')),
           ]))

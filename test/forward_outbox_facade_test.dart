@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
+import 'package:student_platform/src/core/qa_no_automatic_writes.dart';
 import 'package:student_platform/src/ui/chats/forward/forward_outbox.dart';
 import 'package:student_platform/src/ui/chats/core/forward_payload.dart';
 import 'package:student_platform/src/ui/chats/forward/forward_outbox_host.dart';
@@ -12,6 +13,64 @@ import 'auth_session_scope_test.dart' show fakeSession;
 import 'forward_outbox_store_test.dart' show Storage;
 
 void main() {
+  testWidgets('QA legacy handoff requires one-shot proof for exact entry and session', (tester) async {
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    var session = fakeSession('a');
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final storage = Storage();
+    late ForwardOutboxSession captured;
+    Widget app() => MaterialApp(home: ForwardOutboxHost(source: scope, storage: storage,
+      child: Builder(builder: (context) {
+        captured = ForwardOutbox.capture(context)!;
+        return const SizedBox();
+      })));
+    await tester.pumpWidget(app());
+    await captured.putForChat(chatId: 'chat', text: 'manual', isSourceCurrent: () => true);
+    expect((await captured.tryTakeForChat('chat', requireQaHandoff: true))?.text, 'manual');
+    expect(await captured.tryTakeForChat('chat', requireQaHandoff: true), isNull);
+    await captured.putForChat(chatId: 'chat', text: 'old', isSourceCurrent: () => true);
+    final key = 'forward_outbox_a_chat';
+    final original = storage.values[key]!;
+    storage.values[key] = original.replaceFirst('old', 'replaced');
+    expect(await captured.tryTakeForChat('chat', requireQaHandoff: true), isNull);
+    expect(storage.values[key], contains('replaced'));
+    storage.values.remove(key);
+    var sourceCurrent = true;
+    await captured.putForChat(chatId: 'chat', text: 'source',
+        isSourceCurrent: () => sourceCurrent);
+    final beforeSourceChange = storage.values[key];
+    sourceCurrent = false;
+    expect(await captured.tryTakeForChat('chat', requireQaHandoff: true), isNull);
+    expect(storage.values[key], beforeSourceChange);
+    storage.values.remove(key);
+    sourceCurrent = true;
+    await captured.putForChat(chatId: 'chat', text: 'during-remove',
+        isSourceCurrent: () => sourceCurrent);
+    final beforeRemoval = storage.values[key];
+    storage.removeEntered = Completer<void>();
+    storage.removeRelease = Completer<void>();
+    final pendingTake = captured.tryTakeForChat('chat', requireQaHandoff: true);
+    await storage.removeEntered!.future;
+    sourceCurrent = false;
+    storage.removeEntered = null;
+    storage.removeRelease!.complete();
+    await expectLater(pendingTake, throwsStateError);
+    expect(storage.values[key], beforeRemoval);
+    storage.values.remove(key);
+    await captured.putForChat(chatId: 'chat', text: 'before-aba', isSourceCurrent: () => true);
+    final persisted = storage.values[key];
+    session = fakeSession('b');
+    events.add(AuthState(AuthChangeEvent.signedIn, session));
+    session = fakeSession('a');
+    events.add(AuthState(AuthChangeEvent.signedIn, session));
+    await tester.pumpWidget(app());
+    expect(await captured.tryTakeForChat('chat', requireQaHandoff: true), isNull);
+    expect(storage.values[key], persisted);
+    await tester.pumpWidget(const SizedBox());
+    scope.dispose();
+    await events.close();
+  }, skip: !qaNoAutomaticWrites);
   test('picker guard prevents dispatch for a changed session', () async {
     var calls = 0;
     expect(

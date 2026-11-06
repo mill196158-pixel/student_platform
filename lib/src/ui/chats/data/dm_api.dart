@@ -497,6 +497,7 @@ class DmApi {
       authorName: authorName.isNotEmpty
           ? authorName
           : (authorLogin.isNotEmpty ? authorLogin : 'Студент'),
+      authorNameVerified: authorName.isNotEmpty || authorLogin.isNotEmpty,
       authorAvatarUrl: (m['author_avatar_url'] ?? '').toString(),
       text: (m['text'] ?? m['content'] ?? m['body'] ?? '').toString(),
       type: _typeFromServer((m['type'] ?? m['msg_type'] ?? 'text').toString()),

@@ -249,21 +249,24 @@ class ForwardOutboxStore {
     });
   }
 
-  Future<ForwardAcknowledgeResult> acknowledge(ForwardOutboxEntry entry) {
+  Future<ForwardAcknowledgeResult> acknowledge(ForwardOutboxEntry entry,
+      {bool Function()? isCurrent}) {
     final receipt = entry._receipt;
     if (!identical(receipt.issuer, _issuer))
       return Future.value(ForwardAcknowledgeResult.changed);
     return coordinator.serial(receipt.key, () async {
       _check(receipt.owner, receipt.key);
+      if (isCurrent != null && !isCurrent()) return ForwardAcknowledgeResult.changed;
       if ((coordinator._epochs[receipt.key] ?? 0) != receipt.epoch)
         return ForwardAcknowledgeResult.changed;
       final previous = await _read(receipt.key);
       _check(receipt.owner, receipt.key);
+      if (isCurrent != null && !isCurrent()) return ForwardAcknowledgeResult.changed;
       if (previous == null) return ForwardAcknowledgeResult.missing;
       if (previous != receipt.raw) return ForwardAcknowledgeResult.changed;
       await _mutate(
           receipt.key, previous, () => coordinator.storage.remove(receipt.key));
-      if (!_isCurrent(receipt.owner)) {
+      if (!_isCurrent(receipt.owner) || (isCurrent != null && !isCurrent())) {
         await _restore(receipt.key, previous);
         throw StateError('Session changed');
       }

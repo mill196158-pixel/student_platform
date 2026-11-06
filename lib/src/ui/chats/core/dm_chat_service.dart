@@ -1,5 +1,6 @@
 // FILE: lib/src/ui/chats/core/dm_chat_service.dart
 import 'dart:async';
+import 'package:student_platform/src/core/qa_no_automatic_writes.dart';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
@@ -168,6 +169,7 @@ class DmChatService implements IChatService {
       return _chatId!;
     }
     if (_chatId != null && _chatId!.isNotEmpty) return _chatId!;
+    if (qaNoAutomaticWrites) throw const CachedChatUnavailable();
     _chatId = await DmApi.getOrCreateChatId(peerId: peerId);
     return _chatId!;
   }

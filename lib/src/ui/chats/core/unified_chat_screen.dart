@@ -4,10 +4,12 @@ import 'package:student_platform/src/services/chat_file_access.dart';
 import 'package:student_platform/src/core/online_side_effect_barrier.dart';
 import 'cached_chat_message_bubble.dart';
 import 'cached_chat_composer.dart';
+import 'scoped_forward_author_resolver.dart';
 // FILE: lib/src/ui/chats/core/unified_chat_screen.dart
 // ignore_for_file: unnecessary_import, unused_import, unused_field, unused_element, dead_null_aware_expression, invalid_null_aware_operator, deprecated_member_use
 
 import 'dart:async';
+import 'package:student_platform/src/core/qa_no_automatic_writes.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -79,6 +81,7 @@ class UnifiedChatScreen extends StatefulWidget {
     this.debugAfterDurableCancel,
     this.onlineBarrier,
     this.sessionIsCurrent,
+    this.cachedAuthorResolver,
   });
 
   final IChatService service;
@@ -91,6 +94,7 @@ class UnifiedChatScreen extends StatefulWidget {
   /// Optional guard for automatic work started by a scoped push route.
   final OnlineSideEffectBarrier? onlineBarrier;
   final bool Function()? sessionIsCurrent;
+  final ScopedForwardAuthorResolver? cachedAuthorResolver;
   @visibleForTesting
   final Future<ForwardTarget?> Function(BuildContext, bool Function())? debugPickForwardTarget;
   @visibleForTesting
@@ -347,7 +351,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         _restoreDraftDm();
         _draftRestored = true;
       }
-      await _consumeForwardOutboxIfAny(cid, outbox);
+      await _consumeForwardOutboxIfAny(cid, outbox, fromInitialization: true);
       if (!mounted) return;
       setState(() => _dmComposerReady = true);
     } catch (e) {
@@ -731,7 +735,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   }
 
   // ---------- Forward Outbox ----------
-  Future<void> _consumeForwardOutboxIfAny(String chatId, ForwardOutboxSession? outbox, {String? expectedExistingDraft}) async {
+  Future<void> _consumeForwardOutboxIfAny(String chatId, ForwardOutboxSession? outbox, {String? expectedExistingDraft, bool fromInitialization = false}) async {
     final uid=ChatFileAccess.userId, epoch=ChatFileAccess.generation;
     if (outbox == null || !outbox.isCurrent) return;
     if (_durableForwards) {
@@ -890,7 +894,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     }
     ForwardOutboxData? data;
     try {
-      data = await outbox.tryTakeForChat(chatId);
+      data = await outbox.tryTakeForChat(chatId,
+          requireQaHandoff: qaNoAutomaticWrites && fromInitialization);
     } catch (_) {
       if (outbox.isCurrent) _showSnack('Не удалось открыть сохранённую пересылку.');
       return;
@@ -1175,7 +1180,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                   isSourceCurrent: selectionCurrent);
             } else {
               await outbox.putForChat(chatId: targetChatId, text: payload.encodeForText(),
-                  fileUrls: uniqueFileUrls, fileIds: uniqueFileIds);
+                  fileUrls: uniqueFileUrls, fileIds: uniqueFileIds, isSourceCurrent: selectionCurrent);
             }
           },
           isCurrent: selectionCurrent, onPrepared: preserveNewSelection);
@@ -1370,6 +1375,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   }
 
   Future<void> _markReadSafely(String lastId) async {
+    if (qaNoAutomaticWrites) return;
     if (lastId.isEmpty || lastId.startsWith('local_')) return;
     await _runAutoWork((current) async { try {
       await widget.service.markRead(lastId);
@@ -2052,7 +2058,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
             isSourceCurrent: selectionCurrent);
       } else {
         await outbox.putForChat(chatId: targetChatId, text: payload.encodeForText(),
-            fileUrls: uniqueFileUrls, fileIds: uniqueFileIds);
+            fileUrls: uniqueFileUrls, fileIds: uniqueFileIds, isSourceCurrent: selectionCurrent);
       }
     } catch (_) {
       if (outbox.isCurrent) _showSnack('Не удалось сохранить пересылку. Попробуйте ещё раз.');
@@ -2784,7 +2790,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                 onReplyTap: (_) {},
                 onReact: (_, __) {},
                 localOnlyBubbleBuilder: (message) => CachedChatMessageBubble(
-                    message: message, service: service, showAuthor: false),
+                    message: message, service: service, showAuthor: false,
+                    authorResolver: widget.cachedAuthorResolver),
               );
             },
           )), const CachedChatComposer()]),

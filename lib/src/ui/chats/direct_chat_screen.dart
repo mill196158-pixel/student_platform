@@ -13,6 +13,7 @@ import 'package:student_platform/src/services/push/push_navigation.dart';
 import 'package:student_platform/src/ui/chats/dm_title.dart';
 import 'direct_chat_info_screen.dart';
 import 'guarded_push_dm_read_only.dart';
+import 'core/scoped_forward_author_resolver.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class DirectChatScreen extends StatefulWidget {
@@ -164,6 +165,9 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
       peerAvatarUrl: _peerAvatarUrl,
       onlineBarrier: widget.onlineBarrier,
       sessionIsCurrent: widget.sessionIsCurrent,
+      cachedAuthorResolver: _wantsCached && widget.cachedStore != null && widget.cachedCapabilities != null
+          ? ScopedForwardAuthorResolver(store: widget.cachedStore!, capabilities: widget.cachedCapabilities!)
+          : null,
       onOpenPeer: _wantsCached
           ? null
           : () {

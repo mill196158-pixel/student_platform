@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:async';
+import 'package:student_platform/src/core/qa_no_automatic_writes.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -274,7 +275,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
         list.add(item);
       }
 
-      if (toMigrate.isNotEmpty) {
+      if (toMigrate.isNotEmpty && !qaNoAutomaticWrites) {
         if (!current()) return;
         await sb.from('chat_user_settings').upsert(
               toMigrate,
