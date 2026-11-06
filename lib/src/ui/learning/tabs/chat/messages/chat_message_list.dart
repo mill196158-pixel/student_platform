@@ -14,6 +14,96 @@ import '../search/search_highlight.dart';
 import '../message_builder.dart';
 import '../message_receipt.dart';
 import '../models/chat_card_envelope.dart';
+import '../card_visibility_scope.dart';
+import '../../../../../core/auth_session_scope.dart';
+import '../../../../../core/auth_session_scope_host.dart';
+
+typedef _VisibilityBuilder = Widget Function(BuildContext context,
+    Map<String, bool> states, void Function(String, bool) report);
+
+String _cardIdentity(Message m, String? owner) =>
+    '${owner ?? ''}|${m.chatId}|${m.id}|${m.cardKind ?? ''}|${m.cardEntityId ?? ''}|${m.assignmentId ?? ''}|${m.type.name}';
+
+bool _isActionCard(Message m) => m.cardKind == 'topic_selection' ||
+    m.cardKind == 'collection' ||
+    ((m.type == MessageType.assignmentDraft || m.type == MessageType.assignmentPublished) &&
+        (m.assignmentId == null || m.assignmentId!.isEmpty));
+
+class _CardVisibilityHost extends StatefulWidget {
+  const _CardVisibilityHost({required this.messages, required this.owner, required this.builder});
+  final List<Message> messages;
+  final String? owner;
+  final _VisibilityBuilder builder;
+  @override
+  State<_CardVisibilityHost> createState() => _CardVisibilityHostState();
+}
+
+class _CardVisibilityHostState extends State<_CardVisibilityHost> {
+  final Map<String, bool> _states = {};
+  AuthSessionScope? _scope;
+  int _revision = 0;
+  int _scopeRevision = 0;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final next = AuthSessionScopeHost.maybeOf(context);
+    if (!identical(next, _scope)) {
+      _scope?.removeListener(_ownerChanged);
+      _scope = next;
+      _scope?.addListener(_ownerChanged);
+      _states.clear();
+      _revision++;
+      final scopeRevision = ++_scopeRevision;
+      if (next != null) {
+        next.ready.then((_) {
+          if (!mounted || scopeRevision != _scopeRevision ||
+              !identical(next, _scope) || next.capture() == null) return;
+          // initialSession can make capture available without notifying when
+          // the retained credentials have not changed. Refresh the reporting
+          // ticket before any card can report a visible result.
+          setState(() { _revision++; });
+        });
+      }
+    }
+  }
+
+  void _ownerChanged() {
+    if (!mounted) return;
+    setState(() { _states.clear(); _revision++; });
+  }
+
+  @override
+  void didUpdateWidget(covariant _CardVisibilityHost oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final live = widget.messages.map((m) => _cardIdentity(m, widget.owner)).toSet();
+    final previous = oldWidget.messages.map((m) => _cardIdentity(m, oldWidget.owner)).toSet();
+    if (oldWidget.owner != widget.owner || !setEquals(live, previous)) {
+      _revision++;
+      if (oldWidget.owner != widget.owner) _states.clear();
+    }
+    _states.removeWhere((key, _) => !live.contains(key));
+  }
+
+  @override
+  void dispose() { _scope?.removeListener(_ownerChanged); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) {
+    final revision = _revision;
+    final scope = _scope;
+    final ownerTicket = scope?.capture();
+    final live = widget.messages.map((m) => _cardIdentity(m, widget.owner)).toSet();
+    void report(String id, bool visible) {
+      if (!mounted || revision != _revision || !identical(scope, _scope) ||
+          (scope != null && (ownerTicket == null || !scope.isCurrent(ownerTicket))) ||
+          !live.contains(id) ||
+          (_states[id] ?? false) == visible) return;
+      setState(() => _states[id] = visible);
+    }
+    return widget.builder(context, _states, report);
+  }
+}
 
 class ChatMessageList extends StatelessWidget {
   final List<Message> messages;
@@ -164,8 +254,20 @@ class ChatMessageList extends StatelessWidget {
       );
     }
 
-    // Перестраиваем список при изменении поиска, чтобы корректно подсвечивать и скроллить к результатам
-    return AnimatedBuilder(
+    // Cards remain mounted offstage until an exact server response establishes
+    // visibility. This also keeps date separators out of empty days.
+    return _CardVisibilityHost(
+      messages: list,
+      owner: currentUserId,
+      builder: (context, visibility, reportVisibility) {
+        bool shown(Message m) => !_isActionCard(m) || _shouldCollapseBlockedMessage(m) ||
+            visibility[_cardIdentity(m, currentUserId)] == true;
+        final shownMessages = list.where(shown).toList(growable: false);
+        final positions = <String, int>{
+          for (var i = 0; i < shownMessages.length; i++)
+            _cardIdentity(shownMessages[i], currentUserId): i,
+        };
+        return AnimatedBuilder(
       animation: search,
       builder: (context, _) {
         return ListView.builder(
@@ -188,8 +290,9 @@ class ChatMessageList extends StatelessWidget {
             final key = messageKeys.putIfAbsent(m.id, () => GlobalKey());
 
             // Определяем, нужен ли разделитель даты (сравниваем с предыдущим по времени сообщением)
-            final bool isNewDay =
-                idx == 0 || !_isSameDay(list[idx - 1].at, m.at);
+            final visibleIndex = positions[_cardIdentity(m, currentUserId)] ?? -1;
+            final previous = visibleIndex > 0 ? shownMessages[visibleIndex - 1] : null;
+            final bool isNewDay = previous == null || !_isSameDay(previous.at, m.at);
 
             // reply preview (покажем имя файла, если отвечаем на файл)
             final reply = m.replyToId != null
@@ -240,11 +343,11 @@ class ChatMessageList extends StatelessWidget {
                 ? false
                 : hideSenderIdentity
                     ? false
-                    : (forceHideAvatars ? false : _shouldShowAvatar(list, idx));
+                    : (forceHideAvatars ? false : (visibleIndex <= 0 || _shouldShowAvatar(shownMessages, visibleIndex)));
             final reserveAvatarSpaceForChip =
                 !isMine && !hideSenderIdentity && !noAvatarSpacing;
             final isGroupedWithPrevious =
-                idx > 0 && !_shouldShowAvatar(list, idx);
+                visibleIndex > 0 && !_shouldShowAvatar(shownMessages, visibleIndex);
 
             final receiptTicks = dmReceiptTicks(
               isMine: isMine,
@@ -329,8 +432,8 @@ class ChatMessageList extends StatelessWidget {
             final currIsNew =
                 boundaryUtc != null && m.at.toUtc().isAfter(boundaryUtc);
             final prevIsNew = boundaryUtc != null &&
-                idx > 0 &&
-                list[idx - 1].at.toUtc().isAfter(boundaryUtc);
+                previous != null &&
+                previous.at.toUtc().isAfter(boundaryUtc);
             final bool shouldInsertNewDivider = showEntryNewBadge &&
                 boundaryUtc != null &&
                 currIsNew &&
@@ -438,12 +541,24 @@ class ChatMessageList extends StatelessWidget {
               ),
             );
 
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: children,
+            final identity = _cardIdentity(m, currentUserId);
+            return ChatCardVisibilityScope(
+              report: (visible) => reportVisibility(identity, visible),
+              child: Offstage(
+                offstage: !shown(m),
+                child: ExcludeFocus(
+                  excluding: !shown(m),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: children,
+                  ),
+                ),
+              ),
             );
           },
         );
+      },
+    );
       },
     );
   }

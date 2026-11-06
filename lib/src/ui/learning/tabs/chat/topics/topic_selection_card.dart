@@ -10,7 +10,9 @@
 // task-action destination — instead of the old chat-scoped chooser sheet
 // (topic) or [GroupSpaceScreen] (collection, which leaked peer proofs /
 // comments to participants).
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' show ClientException;
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -23,6 +25,7 @@ import '../data/chat_group_actions_repository.dart';
 import '../models/group_action_labels.dart';
 import '../navigation/group_action_deeplink.dart';
 import '../unavailable_card.dart';
+import '../card_visibility_scope.dart';
 import '../../../../../core/auth_session_scope_host.dart';
 import '../../../../../core/auth_session_scope.dart';
 import '../data/strict_chat_card_loader.dart';
@@ -78,6 +81,7 @@ class TopicSelectionCard extends StatefulWidget {
 class _TopicSelectionCardState extends State<TopicSelectionCard> {
   ChatActionCardEntry? _entry;
   bool _loading = true;
+  bool _retrying = false;
   int _loadRevision = 0;
   AuthSessionScope? _scope;
   AuthOperationScope? _entryOwner;
@@ -136,7 +140,7 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
     final messageId = widget.message.id;
     final scope = _scope;
     if (selectionId == null || selectionId.isEmpty || chatId.isEmpty || !_looksLikeUuid(messageId)) {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() { _loading = false; _retrying = false; });
       return;
     }
     if (scope != null) await scope.ready;
@@ -159,10 +163,17 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
         _entry = entry;
         _entryOwner = owner;
         _loading = false;
+        _retrying = false;
       });
-    } catch (_) {
+    } catch (error) {
       if (!sameWidget() || (scope != null && owner != null && !scope.isCurrent(owner))) return;
-      setState(() { _entry = null; _entryOwner = null; _loading = false; });
+      final retain = _entryCurrent && _entry != null &&
+          (error is TimeoutException || error is ClientException);
+      setState(() {
+        if (!retain) { _entry = null; _entryOwner = null; }
+        _loading = false;
+        _retrying = false;
+      });
     }
   }
 
@@ -264,9 +275,13 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final entry = _entryCurrent ? _entry : null;
-    if (entry == null && !_loading) return _CardLoadFailure(onRetry: () {
-      setState(() => _loading = true); _load();
-    });
+    if (entry == null && !_loading) {
+      ChatCardVisibilityScope.setVisible(context, true);
+      return _CardLoadFailure(onRetry: _retrying ? null : () {
+        setState(() => _retrying = true);
+        _load();
+      });
+    }
     final title =
         (entry?.title.isNotEmpty ?? false) ? entry!.title : 'Без названия';
     final removed = entry != null &&
@@ -277,6 +292,7 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
     if (removed) {
       return const UnavailableChatCard(key: ValueKey('topic_removed'));
     }
+    if (entry != null) ChatCardVisibilityScope.setVisible(context, true);
     final closed = entry != null && entry.available && entry.isClosed;
     final progress = (entry != null && entry.totalCapacity > 0)
         ? 'Занято ${entry.takenSlots} из ${entry.totalCapacity}'
@@ -417,6 +433,7 @@ class CollectionCard extends StatefulWidget {
 class _CollectionCardState extends State<CollectionCard> {
   ChatActionCardEntry? _entry;
   bool _loading = true;
+  bool _retrying = false;
   bool _canManage = false;
   bool _canDelete = false;
   int _loadRevision = 0;
@@ -524,7 +541,7 @@ class _CollectionCardState extends State<CollectionCard> {
     final messageId = widget.message.id;
     final scope = _scope;
     if (id == null || id.isEmpty || chatId.isEmpty || !_looksLikeUuid(messageId)) {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() { _loading = false; _retrying = false; });
       return;
     }
 
@@ -548,10 +565,17 @@ class _CollectionCardState extends State<CollectionCard> {
         _entry = entry;
         _entryOwner = owner;
         _loading = false;
+        _retrying = false;
       });
-    } catch (_) {
+    } catch (error) {
       if (!sameWidget() || (scope != null && owner != null && !scope.isCurrent(owner))) return;
-      setState(() { _entry = null; _entryOwner = null; _loading = false; });
+      final retain = _entryCurrent && _entry != null &&
+          (error is TimeoutException || error is ClientException);
+      setState(() {
+        if (!retain) { _entry = null; _entryOwner = null; }
+        _loading = false;
+        _retrying = false;
+      });
     }
   }
 
@@ -653,9 +677,13 @@ class _CollectionCardState extends State<CollectionCard> {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final entry = _entryCurrent ? _entry : null;
-    if (entry == null && !_loading) return _CardLoadFailure(onRetry: () {
-      setState(() => _loading = true); _load();
-    });
+    if (entry == null && !_loading) {
+      ChatCardVisibilityScope.setVisible(context, true);
+      return _CardLoadFailure(onRetry: _retrying ? null : () {
+        setState(() => _retrying = true);
+        _load();
+      });
+    }
     final title =
         (entry?.title.isNotEmpty ?? false) ? entry!.title : 'Без названия';
     final removed = entry != null &&
@@ -666,6 +694,7 @@ class _CollectionCardState extends State<CollectionCard> {
     if (removed) {
       return const UnavailableChatCard(key: ValueKey('collection_removed'));
     }
+    if (entry != null) ChatCardVisibilityScope.setVisible(context, true);
     final closed = entry != null && entry.available && entry.isClosed;
 
     final done = collectionParticipantIsDone(entry?.myStatus);
@@ -814,7 +843,7 @@ class _ClosedCompactRow extends StatelessWidget {
 
 class _CardLoadFailure extends StatelessWidget {
   const _CardLoadFailure({required this.onRetry});
-  final VoidCallback onRetry;
+  final VoidCallback? onRetry;
   @override
   Widget build(BuildContext context) => TextButton.icon(
     onPressed: onRetry, icon: const Icon(Icons.refresh_rounded),
