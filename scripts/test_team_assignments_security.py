@@ -51,10 +51,10 @@ try:
     fp = "select md5(replace(pg_get_functiondef('public.get_team_assignments(uuid)'::regprocedure),chr(13),''))"
     file('supabase/checks/team_assignments_security_fixture.sql')
     assert sql(fp) == 'c278bc64bdcd0c88e849580c52d346e0'
-    file('supabase/migrations/20261106141029_restrict_team_assignments_to_members.sql')
+    file('supabase/migrations/20261106145137_restrict_team_assignments_to_members.sql')
     file('supabase/checks/team_assignments_security_assertions.sql')
     assert sql(fp) == 'a73b8a9df330d6fdf767439f95901039'
-    file('supabase/migrations/20261106141029_restrict_team_assignments_to_members.sql', ok=False, error='definition differs from audited snapshot')
+    file('supabase/migrations/20261106145137_restrict_team_assignments_to_members.sql', ok=False, error='definition differs from audited snapshot')
     assert sql(fp) == 'a73b8a9df330d6fdf767439f95901039'
     sql('create role fixture_extra nologin; grant execute on function public.get_team_assignments(uuid) to fixture_extra')
     file('supabase/rollback/20261106141029_restrict_team_assignments_to_members_rollback.sql', ok=False, error='owner or grants differ from expected snapshot')
@@ -63,15 +63,15 @@ try:
     assert sql(fp) == 'c278bc64bdcd0c88e849580c52d346e0'
     assert sql("select has_function_privilege('anon','public.get_team_assignments(uuid)','EXECUTE')") == 't'
     sql('grant authenticated to anon')
-    file('supabase/migrations/20261106141029_restrict_team_assignments_to_members.sql', ok=False, error='unexpected get_team_assignments effective execution privileges')
+    file('supabase/migrations/20261106145137_restrict_team_assignments_to_members.sql', ok=False, error='unexpected get_team_assignments effective execution privileges')
     assert sql(fp) == 'c278bc64bdcd0c88e849580c52d346e0'
     sql('revoke authenticated from anon')
     sql('grant execute on function public.get_team_assignments(uuid) to fixture_extra')
-    file('supabase/migrations/20261106141029_restrict_team_assignments_to_members.sql', ok=False, error='owner or grants differ from audited snapshot')
+    file('supabase/migrations/20261106145137_restrict_team_assignments_to_members.sql', ok=False, error='owner or grants differ from audited snapshot')
     assert sql(fp) == 'c278bc64bdcd0c88e849580c52d346e0'
     sql('revoke execute on function public.get_team_assignments(uuid) from fixture_extra')
     sql("alter function public.get_team_assignments(uuid) set search_path='pg_catalog'")
-    file('supabase/migrations/20261106141029_restrict_team_assignments_to_members.sql', ok=False, error='definition differs from audited snapshot')
+    file('supabase/migrations/20261106145137_restrict_team_assignments_to_members.sql', ok=False, error='definition differs from audited snapshot')
     print('PASS: member matrix, no-UID/anon, preserved signature, rollback, ACL and definition drift')
 finally:
     if started:
