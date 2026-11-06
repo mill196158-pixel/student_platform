@@ -72,14 +72,9 @@ class AppNotificationsApi {
   }
 
   Future<int> unreadCount() async {
-    try {
-      final res = await _sb.rpc('get_my_unread_notification_count');
-      if (res is int) return res;
-      if (res is num) return res.toInt();
-      return int.tryParse('$res') ?? 0;
-    } catch (_) {
-      return 0;
-    }
+    final res = await _sb.rpc('get_my_unread_notification_count');
+    if (res is int && res >= 0) return res;
+    throw const FormatException('Invalid unread notification count');
   }
 
   Future<void> markRead(String id) async {

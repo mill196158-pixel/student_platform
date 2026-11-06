@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:student_platform/src/config/supabase_config.dart';
 import 'package:student_platform/src/core/qa_no_automatic_writes.dart';
 import 'dart:typed_data';
 
@@ -76,6 +77,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Object? _error;
   bool _loading = true;
   int _unreadNotificationCount = 0;
+  int _badgeRevision = 0;
+  String? _badgeOwner;
+  (String, String, String, int)? _badgeBinding;
   int _promoLoadGeneration = 0;
   int _modeRevision = 0;
   int _promoMediaGeneration = 0;
@@ -126,12 +130,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         widget.dashboardService ?? HomeDashboardService(sessionScope: source);
     _serviceInitialized = true;
     unawaited(_load());
+    if (source != null && source.capture() == null) {
+      unawaited(source.ready.then((_) {
+        if (mounted && identical(_authScope, source) && source.capture() != null) {
+          return _refreshUnreadBadge();
+        }
+      }));
+    }
   }
 
   void _onAuthScopeChanged() {
     if (!mounted) return;
-    final scope = _authScope?.capture();
-    if (_authScope != null && scope == null) {
+    _badgeRevision++;
+    final scope = _authScope;
+    final owner = scope?.capture();
+    final binding = owner == null ? null : scope?.bindingFor(owner, '${SupabaseConfig.url}/auth/v1');
+    final nextBinding = binding == null || scope == null ? null :
+        (binding.issuer, binding.userId, binding.sessionId, scope.generation);
+    if ((nextBinding == null || nextBinding != _badgeBinding) && _unreadNotificationCount != 0) {
+      setState(() => _unreadNotificationCount = 0);
+    }
+    if (_authScope != null && owner == null) {
       setState(() {
         _data = null;
         _error = null;
@@ -223,13 +242,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _refreshUnreadBadge() async {
     final modeRevision = _modeRevision;
+    final revision = ++_badgeRevision;
+    final scope = _authScope;
+    final owner = scope?.capture();
+    final userId = _service.currentUserId;
+    if (_badgeOwner != userId) {
+      _badgeOwner = userId;
+      if (_unreadNotificationCount != 0) {
+        setState(() => _unreadNotificationCount = 0);
+      }
+    }
     bool stillOnline() =>
-        mounted && widget.cachedReader == null && modeRevision == _modeRevision;
+        mounted && widget.cachedReader == null && modeRevision == _modeRevision &&
+        revision == _badgeRevision && userId == _service.currentUserId &&
+        (scope == null || (identical(scope, _authScope) && owner != null && scope.isCurrent(owner)));
     if (!stillOnline()) return;
     if (widget.cachedReader != null) return;
     try {
       final count = await _notificationsApi.unreadCount();
       if (!stillOnline()) return;
+      final binding = owner == null ? null : scope?.bindingFor(owner, '${SupabaseConfig.url}/auth/v1');
+      _badgeBinding = binding == null || scope == null ? null :
+          (binding.issuer, binding.userId, binding.sessionId, scope.generation);
       setState(() => _unreadNotificationCount = count);
     } catch (_) {}
   }
@@ -773,9 +807,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (widget.cachedReader != null) return;
     await showNotificationCenterSheet(context);
     if (!stillOnline()) return;
-    final count = await _notificationsApi.unreadCount();
-    if (!stillOnline()) return;
-    setState(() => _unreadNotificationCount = count);
+    await _refreshUnreadBadge();
   }
 
   Future<void> _markAssignmentDone(HomeAssignmentPreview item) async {
