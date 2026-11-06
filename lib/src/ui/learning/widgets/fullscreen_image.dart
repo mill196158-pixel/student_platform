@@ -22,7 +22,9 @@ Future<File> _downloadRemoteFileToCache({
 }) async {
   final cleanName = FileUiUtils.cleanFileName(fileName);
   await ChatFileAccess.authorize(url);
-  final digest = crypto.sha1.convert(utf8.encode('${ChatFileAccess.userId}:$url')).toString();
+  final digest = crypto.sha1
+      .convert(utf8.encode('${ChatFileAccess.userId}:$url'))
+      .toString();
   final dir = await getApplicationCacheDirectory();
   final filesDir = Directory('${dir.path}${Platform.pathSeparator}chat_files');
   if (!await filesDir.exists()) {
@@ -187,6 +189,20 @@ class FullscreenImage extends StatefulWidget {
 
   @override
   State<FullscreenImage> createState() => _FullscreenImageState();
+}
+
+/// Gives transparent pixels a readable surface without changing source bytes.
+/// Kept inside the zoom transform so the surface follows the image.
+class FullscreenImageSurface extends StatelessWidget {
+  const FullscreenImageSurface({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => ColoredBox(
+        color: Colors.white,
+        child: child,
+      );
 }
 
 class _FullscreenImageState extends State<FullscreenImage> {
@@ -386,6 +402,10 @@ class _FullscreenImageState extends State<FullscreenImage> {
         child: Image(
           image: AuthorizedFileImageProvider(_currentUrl),
           fit: BoxFit.contain,
+          frameBuilder: (context, child, frame, synchronous) =>
+              synchronous || frame != null
+                  ? FullscreenImageSurface(child: child)
+                  : child,
           loadingBuilder: (context, child, loadingProgress) {
             if (loadingProgress == null) return child;
             return const Center(
