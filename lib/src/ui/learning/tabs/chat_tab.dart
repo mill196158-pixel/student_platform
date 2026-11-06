@@ -202,11 +202,17 @@ class _ChatTabState extends State<ChatTab> {
   bool _loadingOlderMessages = false;
   bool _hasMoreOlderMessages = true;
   String? _trackedChatId;
-  Widget _qaReentryGate(bool readyForReveal, Widget child) {
-    if (!const bool.fromEnvironment('CHAT_REENTRY_GATE_QA')) return child;
+  Widget _reentryGate(TeamState state, Widget child) {
+    final cachedImage = state.chatHasSnapshot && state.chat.any((message) =>
+        (message.attachments ?? const <ChatFile>[])
+            .any((file) => file.isImage && file.fileUrl.isNotEmpty));
     return ReentryImageGate(
       key: ValueKey('${context.read<TeamCubit>().state.team.id}:${ChatFileAccess.userId}:${ChatFileAccess.generation}'),
-      readyForReveal: readyForReveal,
+      // QA retains its broader behaviour. In an ordinary build the cover is
+      // armed only when the first frame already has a snapshot with an image.
+      // ReentryImageGate decides once and never hides a visible list later.
+      initiallyArmed: const bool.fromEnvironment('CHAT_REENTRY_GATE_QA') || cachedImage,
+      readyForReveal: state.chatHasSnapshot || state.chatError,
       child: child,
     );
   }
@@ -747,7 +753,10 @@ class _ChatTabState extends State<ChatTab> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       for (final url in urls) {
-        precacheImage(AuthorizedFileImageProvider(url), context);
+        // The visible image has its own error state. A stale or denied
+        // background prefetch must not report an uncaught framework error.
+        precacheImage(AuthorizedFileImageProvider(url), context,
+            onError: (_, __) {});
       }
     });
   }
@@ -1922,7 +1931,7 @@ class _ChatTabState extends State<ChatTab> {
                     children: [
                       Padding(
                         padding: EdgeInsets.only(bottom: listPadBottom),
-                        child: _qaReentryGate(state.chatHasSnapshot || state.chatError, ChatMessageList(
+                        child: _reentryGate(state, ChatMessageList(
                           messages: state.chat,
                           controller: _scroll,
                           messageKeys: _messageKeys,

@@ -132,6 +132,64 @@ void main() {
     wait.complete();
     await tester.pump();
   });
+
+  testWidgets('ordinary gate reveals a previously authorized decoded image',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    const links = MethodChannel('com.llfbandit.app_links/events');
+    const paths = MethodChannel('plugins.flutter.io/path_provider');
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(links, (_) async => null);
+    final dir = (await tester.runAsync(
+        () => Directory.systemTemp.createTemp('reentry-gate-normal-')))!;
+    messenger.setMockMethodCallHandler(paths, (_) async => dir.path);
+    const url = 'https://studentsplatform.storage.yandexcloud.net/chats/test/normal.png';
+    const sid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const uid = 'normal-gate-user';
+    final client = MockClient((request) async => http.Response(
+      jsonEncode({'url': url, 'cacheable': true, 'accessPolicyVersion': 1, 'expiresIn': 60}),
+      200, request: request, headers: {'content-type': 'application/json'}));
+    await tester.runAsync(() async {
+      await Supabase.initialize(url: 'https://example.test', publishableKey: 'test',
+        httpClient: client, authOptions: const FlutterAuthClientOptions(autoRefreshToken: false));
+      await signInWithFileSession(Supabase.instance.client, uid, sid);
+      final digest = sha256.convert(utf8.encode('$uid:${ChatFileAccess.keyFor(url)}'));
+      final file = File('${dir.path}/authorized_chat_files/$uid/$digest');
+      await file.parent.create(recursive: true);
+      await file.writeAsBytes(await File('assets/icons/launcher_icon.png').readAsBytes());
+      await File('${file.path}.grant').writeAsString('chat-file-grant-v2:$sid');
+    });
+    addTearDown(() async {
+      messenger.setMockMethodCallHandler(links, null);
+      messenger.setMockMethodCallHandler(paths, null);
+      await Supabase.instance.dispose();
+      final tmp = await Directory.systemTemp.resolveSymbolicLinks();
+      final target = await dir.resolveSymbolicLinks();
+      if (!p.isWithin(tmp, target) || !p.basename(target).startsWith('reentry-gate-normal-')) {
+        throw StateError('Unsafe test directory');
+      }
+      await dir.delete(recursive: true);
+      ChatFileAccess.debugResetProcessMemory();
+    });
+    await tester.pumpWidget(const MaterialApp(home: Scaffold(body: ReentryImageGate(
+      timeout: Duration(seconds: 5), child: Center(child: AppNetworkImagePreview(
+        imageUrl: url, fileName: 'normal.png', maxWidth: 300))))));
+    expect(tester.widget<Opacity>(find.byType(Opacity).first).opacity, 0);
+    for (var i = 0; i < 100; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
+      await tester.pump(const Duration(milliseconds: 10));
+      if (tester.widget<Opacity>(find.byType(Opacity).first).opacity == 1) break;
+    }
+    expect(tester.widget<Opacity>(find.byType(Opacity).first).opacity, 1);
+    expect(find.byWidgetPredicate((w) => w is RawImage && w.image != null), findsWidgets);
+    expect(find.text('Загрузка...'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    // Drain the already-started revalidation before the synthetic SDK is disposed.
+    for (var i = 0; i < 20; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
+      await tester.pump();
+    }
+  });
   testWidgets('reopen reveals the same mounted authorized decoded image',
       (tester) async {
     SharedPreferences.setMockInitialValues({});
