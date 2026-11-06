@@ -20,12 +20,13 @@ class ChatMessageCacheStore {
   static final Map<String, ChatCacheSnapshot> _memory = {};
   static SharedPreferences? _prefsOverride;
   static SharedPreferences? _prefs;
+  // In-flight cold reads must not repopulate memory after it is cleared.
+  static int _memoryEpoch = 0;
 
   /// Test hook: inject prefs (or clear with null).
   static void debugSetPrefs(SharedPreferences? prefs) {
     _prefsOverride = prefs;
   }
-
 
   /// Test hook: pretend this auth user owns cache keys.
   static String? debugUserIdOverride;
@@ -51,8 +52,10 @@ class ChatMessageCacheStore {
   /// This lets a service created with an initial chat id synchronously seed its
   /// first view state instead of briefly rendering an empty/loading chat.
   static Future<void> initializeCurrentUser() async {
+    final epoch = _memoryEpoch;
     try {
       final prefs = _prefsOverride ?? await SharedPreferences.getInstance();
+      if (epoch != _memoryEpoch) return;
       _prefs = prefs;
       final uid = _resolveUserId(null);
       if (uid == null) return;
@@ -70,7 +73,7 @@ class ChatMessageCacheStore {
           if (prefsKey != _prefsKey(uid, chatId)) continue;
           final snap = _fromEnvelope(envelope, uid, chatId);
           if (snap.found) {
-            _memory[_memKey(uid, chatId)] = snap;
+            _memory.putIfAbsent(_memKey(uid, chatId), () => snap);
           }
         } catch (_) {
           // One corrupt conversation must not prevent warming other chats.
@@ -102,7 +105,8 @@ class ChatMessageCacheStore {
       if (raw == null || raw.isEmpty) return ChatCacheSnapshot.notFound;
       final decoded = jsonDecode(raw);
       if (decoded is! Map) return ChatCacheSnapshot.notFound;
-      final snap = _fromEnvelope(Map<String, dynamic>.from(decoded), uid, chatId);
+      final snap =
+          _fromEnvelope(Map<String, dynamic>.from(decoded), uid, chatId);
       if (snap.found) _memory[key] = snap;
       return snap;
     } catch (_) {
@@ -120,19 +124,25 @@ class ChatMessageCacheStore {
     if (uid == null || chatId.isEmpty) return ChatCacheSnapshot.notFound;
 
     final key = _memKey(uid, chatId);
+    final epoch = _memoryEpoch;
     final cached = peek(chatId, userId: uid);
     if (cached.found) return cached;
 
     try {
       final prefs =
           _prefsOverride ?? _prefs ?? await SharedPreferences.getInstance();
+      if (epoch != _memoryEpoch) return ChatCacheSnapshot.notFound;
       _prefs ??= prefs;
+      // An optimistic message may have arrived while preferences loaded.
+      final latest = _memory[key];
+      if (latest != null) return latest;
       final raw = prefs.getString(_prefsKey(uid, chatId));
       if (raw == null || raw.isEmpty) return ChatCacheSnapshot.notFound;
 
       final decoded = jsonDecode(raw);
       if (decoded is! Map) return ChatCacheSnapshot.notFound;
-      final snap = _fromEnvelope(Map<String, dynamic>.from(decoded), uid, chatId);
+      final snap =
+          _fromEnvelope(Map<String, dynamic>.from(decoded), uid, chatId);
       if (!snap.found) return ChatCacheSnapshot.notFound;
       _memory[key] = snap;
       return snap;
@@ -347,6 +357,7 @@ class ChatMessageCacheStore {
   static Future<void> clearChat(String chatId, {String? userId}) async {
     final uid = _resolveUserId(userId);
     if (uid == null || chatId.isEmpty) return;
+    _memoryEpoch++;
     _memory.remove(_memKey(uid, chatId));
     try {
       final prefs =
@@ -359,6 +370,7 @@ class ChatMessageCacheStore {
   /// Clear in-memory maps for the current (or given) user. Persistent keys for
   /// other users are left alone; call [clearAllMemory] on logout.
   static Future<void> clearUser(String? userId) async {
+    _memoryEpoch++;
     final uid = _resolveUserId(userId);
     if (uid == null) {
       await clearAllMemory();
@@ -369,6 +381,7 @@ class ChatMessageCacheStore {
   }
 
   static Future<void> clearAllMemory() async {
+    _memoryEpoch++;
     _memory.clear();
   }
 
@@ -454,8 +467,11 @@ class ChatMessageCacheStore {
       final id = item['id'];
       final chat = item['chat_id'];
       final timestamp = item['created_at'] ?? item['at'];
-      if (id is! String || id.trim().isEmpty || chat != expectedChatId ||
-          timestamp is! String || DateTime.tryParse(timestamp) == null) {
+      if (id is! String ||
+          id.trim().isEmpty ||
+          chat != expectedChatId ||
+          timestamp is! String ||
+          DateTime.tryParse(timestamp) == null) {
         return ChatCacheSnapshot.notFound;
       }
       final message = Message.fromJson(Map<String, dynamic>.from(item));
@@ -481,9 +497,8 @@ class ChatMessageCacheStore {
     // The history limit must never evict unconfirmed local sends.  They may
     // carry the only remaining reference to an attachment awaiting retry.
     final serverCount = sorted.where((message) => !message.isLocal).length;
-    var skip = serverCount > maxCachedMessages
-        ? serverCount - maxCachedMessages
-        : 0;
+    var skip =
+        serverCount > maxCachedMessages ? serverCount - maxCachedMessages : 0;
     return sorted.where((message) {
       if (message.isLocal) return true;
       if (skip == 0) return true;
