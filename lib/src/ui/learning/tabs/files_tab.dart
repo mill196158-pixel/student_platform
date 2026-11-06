@@ -20,6 +20,44 @@ import 'cached_document_open.dart';
 
 enum _FilesSection { images, documents }
 
+// Object identity is independent of the user-visible name and size. Storage
+// keys are case-sensitive; different objects must never be folded together.
+String? _fileIdentity(ChatFile file) {
+  final key = file.fileKey.trim();
+  final url = file.fileUrl.trim();
+  String? urlKey;
+  try {
+    urlKey = ChatFileAccess.keyFor(url);
+  } on FormatException {
+    // Malformed input is not evidence that two records are the same object.
+  }
+  if (key.isNotEmpty && urlKey != null && urlKey != key) {
+    return 'mismatch:${key.length}:$key$urlKey';
+  }
+  if (key.isNotEmpty && url.isNotEmpty && urlKey == null) {
+    // An unfamiliar URL is not proven to identify this storage key. Keep it
+    // distinct from key-only records and records with another unknown URL.
+    return 'unverified:${key.length}:$key$url';
+  }
+  if (key.isNotEmpty) return 'key:$key';
+  if (urlKey != null && urlKey.isNotEmpty) return 'key:$urlKey';
+  if (url.isNotEmpty) return 'url:$url';
+  final id = file.id.trim();
+  return id.isEmpty ? null : 'id:$id';
+}
+
+List<ChatFile> mergeFilesByObjectIdentity(
+    Iterable<ChatFile> primary, Iterable<ChatFile> fromMessages) {
+  final seen = <String>{};
+  final merged = <ChatFile>[];
+  for (final file in [...primary, ...fromMessages]) {
+    final identity = _fileIdentity(file);
+    if (identity != null && !seen.add(identity)) continue;
+    merged.add(file);
+  }
+  return merged;
+}
+
 class FilesTab extends StatefulWidget {
   const FilesTab({super.key, this.isActive = true});
 
@@ -96,16 +134,8 @@ class _FilesTabState extends State<FilesTab>
       final list = (rows as List)
           .map((e) => ChatFile.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList();
-      // Удаляем дубликаты по file_key или по имени, если ключ пуст
-      final seen = <String>{};
-      final deduped = <ChatFile>[];
-      for (final f in list) {
-        final key = (f.fileKey.isNotEmpty ? f.fileKey : 'name:${f.fileName}')
-            .toLowerCase();
-        if (seen.contains(key)) continue;
-        seen.add(key);
-        deduped.add(f);
-      }
+      // Merge repeated records only when their actual identity is known.
+      final deduped = mergeFilesByObjectIdentity(list, const []);
       _files
         ..clear()
         ..addAll(deduped);
@@ -164,7 +194,7 @@ class _FilesTabState extends State<FilesTab>
 
   List<ChatFile> _effectiveFiles([List<Message>? chat]) {
     final messages = chat ?? context.read<TeamCubit>().state.chat;
-    return _mergeFiles(_files, _attachmentsFromMessages(messages));
+    return mergeFilesByObjectIdentity(_files, _attachmentsFromMessages(messages));
   }
 
   List<ChatFile> _attachmentsFromMessages(List<Message> messages) {
@@ -177,40 +207,6 @@ class _FilesTabState extends State<FilesTab>
       }
     }
     return result;
-  }
-
-  List<ChatFile> _mergeFiles(
-    Iterable<ChatFile> primary,
-    Iterable<ChatFile> fromMessages,
-  ) {
-    final seen = <String>{};
-    final merged = <ChatFile>[];
-
-    String keyOf(ChatFile file) {
-      final name = FileUiUtils.cleanFileName(file.fileName).toLowerCase();
-      if (name.isNotEmpty && file.fileSize > 0) {
-        return 'name:$name:size:${file.fileSize}';
-      }
-      if (file.fileKey.isNotEmpty) return 'key:${file.fileKey}'.toLowerCase();
-      if (file.fileUrl.isNotEmpty) return 'url:${file.fileUrl}'.toLowerCase();
-      return 'id:${file.id}'.toLowerCase();
-    }
-
-    void add(ChatFile file) {
-      final key = keyOf(file);
-      if (seen.contains(key)) return;
-      seen.add(key);
-      merged.add(file);
-    }
-
-    for (final file in primary) {
-      add(file);
-    }
-    for (final file in fromMessages) {
-      add(file);
-    }
-
-    return merged;
   }
 
   @override
