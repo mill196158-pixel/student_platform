@@ -7,6 +7,9 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_platform/src/core/online_side_effect_barrier.dart';
+import 'package:student_platform/src/core/auth_session_scope_host.dart';
+import 'package:student_platform/src/config/supabase_config.dart';
+import 'support/scoped_draft_test_session.dart';
 import 'package:student_platform/src/ui/chats/core/chat_messages_load_state.dart';
 import 'package:student_platform/src/ui/chats/core/i_chat_service.dart';
 import 'package:student_platform/src/ui/chats/core/unified_chat_screen.dart';
@@ -67,7 +70,7 @@ void main() {
     final prefetchStarted = Completer<void>();
     final prefetchRelease = Completer<http.Response>();
     await tester.runAsync(() => Supabase.initialize(
-        url: 'https://example.invalid',
+        url: SupabaseConfig.url,
         publishableKey: 'test',
         httpClient: MockClient((request) async {
           if (request.url.path.endsWith('/messages') && blockPrefetch) {
@@ -80,15 +83,16 @@ void main() {
           return http.Response('[]', 200, request: request);
         }),
         authOptions: const FlutterAuthClientOptions(autoRefreshToken: false)));
+    await tester.runAsync(() => signInForScopedDraft(Supabase.instance.client));
     var current = true;
     final barrier = OnlineSideEffectBarrier(ownerIsCurrent: () => current);
     final service = _Service();
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(AuthSessionScopeHost(child: MaterialApp(
         home: UnifiedChatScreen(
             service: service,
             title: 'QA',
             onlineBarrier: barrier,
-            sessionIsCurrent: () => current)));
+            sessionIsCurrent: () => current))));
     await tester.pump();
     service.messages.add(Message(
         id: 'server-id',
@@ -123,13 +127,13 @@ void main() {
         text: 'synthetic',
         at: DateTime.utc(2026)));
     blockPrefetch = true;
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(AuthSessionScopeHost(child: MaterialApp(
         home: UnifiedChatScreen(
             key: const ValueKey('reused-chat'),
             service: next,
             title: 'QA',
             onlineBarrier: nextBarrier,
-            sessionIsCurrent: oldGuard)));
+            sessionIsCurrent: oldGuard))));
     for (var i = 0;
         i < 80 &&
             (!prefetchStarted.isCompleted || !next.markStarted.isCompleted);
@@ -143,13 +147,13 @@ void main() {
     final originalState = tester.state(find.byType(UnifiedChatScreen));
     current = false;
     nextBarrier.close();
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(AuthSessionScopeHost(child: MaterialApp(
         home: UnifiedChatScreen(
             key: const ValueKey('reused-chat'),
             service: next,
             title: 'QA',
             onlineBarrier: replacementBarrier,
-            sessionIsCurrent: newGuard)));
+            sessionIsCurrent: newGuard))));
     expect(tester.state(find.byType(UnifiedChatScreen)), same(originalState));
     prefetchRelease.complete(http.Response(
         jsonEncode([

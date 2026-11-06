@@ -47,16 +47,8 @@ class HomeDashboardService {
                     sessionIdentity: sessionScope.capture,
                   )),
         _projectSnapshotCache = projectSnapshotCache ??
-            (sessionScope == null ||
-                    !const bool.fromEnvironment('SQLITE_POLICY_QA')
-                ? null
-                : HomeSnapshotCache(
-                    currentUserId: () => sessionScope.capture()?.userId,
-                    sessionGeneration: () => sessionScope.generation,
-                    sessionIdentity: sessionScope.capture,
-                    project: SupabaseConfig.url,
-                    authScope: sessionScope,
-                  )),
+            _createProjectSnapshotCache(
+                client ?? Supabase.instance.client, sessionScope),
         _scheduleRepository = scheduleRepository ?? ScheduleRepository(),
         _learningRepository =
             learningRepository ?? SupabaseLearningRepository(),
@@ -69,18 +61,54 @@ class HomeDashboardService {
         _http = httpClient ?? http.Client(),
         _ownsHttpClient = httpClient == null;
 
+  static HomeSnapshotCache? _createProjectSnapshotCache(
+      SupabaseClient client, AuthSessionScope? scope) {
+    if (scope == null) return null;
+    AuthOperationScope? currentOwner() {
+      try {
+        if (!identical(client, Supabase.instance.client)) return null;
+        final owner = scope.capture();
+        if (owner == null ||
+            !scope.matchesSession(owner, client.auth.currentSession))
+          return null;
+        final issuer =
+            '${SupabaseConfig.url.replaceFirst(RegExp(r'/$'), '')}/auth/v1';
+        final binding = scope.bindingFor(owner, issuer);
+        if (binding == null ||
+            binding.issuer != issuer ||
+            binding.userId != owner.userId) return null;
+        return owner;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    return HomeSnapshotCache(
+      currentUserId: () => currentOwner()?.userId,
+      sessionGeneration: () => scope.generation,
+      sessionIdentity: currentOwner,
+      project: SupabaseConfig.url,
+      authScope: scope,
+    );
+  }
+
   String? get currentUserId => _sb.auth.currentUser?.id;
 
   Future<void> prewarmSchedule(OnlineSideEffectBarrier barrier) async {
     final scope = _sessionScope;
-    if (_disposed || scope == null || !barrier.isOpen ||
+    if (_disposed ||
+        scope == null ||
+        !barrier.isOpen ||
         !const bool.fromEnvironment('SQLITE_POLICY_QA')) return;
     await scope.ready;
     if (_disposed || !barrier.isOpen) return;
     final cache = ScheduleMonthCache(scope, SupabaseConfig.url);
-    await SchedulePrewarm(scope: scope, cache: cache, barrier: barrier,
-      loadMonth: (month) => _scheduleRepository.loadMonthForPrewarm(month,
-          isCurrent: () => !_disposed && barrier.isOpen))
+    await SchedulePrewarm(
+            scope: scope,
+            cache: cache,
+            barrier: barrier,
+            loadMonth: (month) => _scheduleRepository.loadMonthForPrewarm(month,
+                isCurrent: () => !_disposed && barrier.isOpen))
         .warm(MskDate.today());
   }
 
@@ -170,8 +198,9 @@ class HomeDashboardService {
         userId != null) {
       Future<HomeSectionSnapshot?> safeRead(HomeSnapshotSection section) async {
         try {
-          return await cache.read(userId, section).timeout(
-              const Duration(seconds: 1), onTimeout: () => null);
+          return await cache
+              .read(userId, section)
+              .timeout(const Duration(seconds: 1), onTimeout: () => null);
         } catch (_) {
           return null;
         }

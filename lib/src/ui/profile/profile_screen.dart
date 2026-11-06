@@ -708,6 +708,8 @@ class _ProfileScreenState extends State<ProfileScreen>
             widget.cachedCapabilities != null)
           TextButton(
               onPressed: _openCachedMessages, child: const Text('Сообщения')),
+        if (canRead)
+          TextButton(onPressed: _logout, child: const Text('Выйти из аккаунта')),
       ])));
     }
     final u = _user!;
@@ -726,6 +728,11 @@ class _ProfileScreenState extends State<ProfileScreen>
           widget.cachedChats == null || widget.cachedCapabilities == null
               ? null
               : _openCachedMessages,
+      footer: TextButton.icon(
+        onPressed: _logout,
+        icon: const Icon(Icons.logout),
+        label: const Text('Выйти из аккаунта'),
+      ),
     ));
   }
 

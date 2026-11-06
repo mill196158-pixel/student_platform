@@ -48,6 +48,9 @@ import 'package:student_platform/src/services/file_service.dart';
 import 'package:student_platform/src/services/push/active_chat_tracker.dart';
 import 'package:student_platform/src/services/push/app_notifications_api.dart';
 import 'package:student_platform/src/ui/learning/global_cache.dart';
+import 'package:student_platform/src/ui/learning/account_draft_store.dart';
+import 'package:student_platform/src/ui/learning/draft_session_owner.dart';
+import 'package:student_platform/src/ui/learning/draft_recovery_journal.dart';
 
 import '../media/chat_media_sheet.dart';
 import '../forward/forward_picker.dart';
@@ -183,6 +186,14 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
   // ===== DM Draft state =====
   String? _currentChatIdDm;
+  final _accountDraftStore = AccountDraftStore();
+  DraftSessionOwner? _draftOwnerDm;
+  AccountDraftWriter? _draftWriterDm;
+  int _draftRevisionDm = 0;
+  bool _draftHydratingDm = false;
+  bool _legacyDraftAvailableDm = false;
+  final _recoveryJournalDm = DraftRecoveryJournal();
+  List<Map<String, dynamic>> _recoveryDraftsDm = const [];
   Timer? _draftSaveTimerDm;
   bool _dmTextHookAttached = false;
   static const services.MethodChannel _keyboardChannel =
@@ -233,7 +244,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
   bool get _canComposeDm {
     var allowed = !_isDm ||
-        (_dmComposerReady && _dmBlockLoaded && _dmAvailable && !_blockActionBusy);
+        (_dmComposerReady && _dmBlockLoaded && _dmAvailable && !_blockActionBusy &&
+            (_draftOwnerDm?.canRead ?? false));
     assert(() {
       allowed = widget.debugCanComposeDm?.call() ?? allowed;
       return true;
@@ -311,7 +323,10 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       ..addListener(() {
         if (!mounted) return;
         setState(() {});
-        if (_isDm && !_att.sessionInterrupted) _saveDraftDmDebounced();
+        if (_isDm && !_draftHydratingDm && !_att.sessionInterrupted) {
+          _draftRevisionDm++;
+          _saveDraftDmDebounced();
+        }
       });
 
     // ignore: discarded_futures
@@ -375,7 +390,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       _currentChatIdDm = cid;
       ActiveChatTracker.instance.enter(cid);
       if (!_draftRestored) {
-        _restoreDraftDm();
+        await _restoreDraftDm();
+        if (!mounted) return;
         _draftRestored = true;
       }
       await _consumeForwardOutboxIfAny(cid, outbox, fromInitialization: true);
@@ -430,6 +446,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       if (list.isNotEmpty && _autoWorkCurrent) _markReadSafely(list.last.id);
     } catch (_) {}
     _forceSaveDraftDm();
+    _draftOwnerDm?.changes.removeListener(_onDraftOwnerChangedDm);
+    _draftWriterDm?.close();
     _seenDebounce?.cancel();
     _unsubscribeDmPeerReadReceipts();
     _scroll.removeListener(_onScroll);
@@ -612,8 +630,20 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
   // ===== DM Draft helpers =====
   void _onTextChangedDm() {
+    if (_draftHydratingDm) return;
     if (_editingMessage != null) return;
-    if (_isDm) _saveDraftDmDebounced();
+    if (_isDm) {
+      _draftRevisionDm++;
+      _saveDraftDmDebounced();
+    }
+  }
+
+  void _setDraftReply(Message? message) {
+    setState(() => _replyTo = message);
+    if (_isDm) {
+      _draftRevisionDm++;
+      _saveDraftDmDebounced();
+    }
   }
 
   void _saveDraftDmDebounced() {
@@ -638,7 +668,11 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
               'uploadedFileId': f.uploadedFileId,
             })
         .toList();
-    await _globalCache.saveDraft(_currentChatIdDm!, _ctrl.text, filesData);
+    _draftWriterDm?.save({
+      'text': _ctrl.text,
+      'files': filesData,
+      'reply': _replyTo?.toJson(),
+    });
   }
 
   void _forceSaveDraftDm() {
@@ -648,11 +682,54 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     _saveDraftDm();
   }
 
-  void _restoreDraftDm() {
+  Future<void> _restoreDraftDm() async {
     if (_currentChatIdDm == null) return;
-    final draft = _globalCache.getDraft(_currentChatIdDm!);
-    if (draft == null) return;
-    final (text, filesData) = draft;
+    final scope = AuthSessionScopeHost.maybeRead(context);
+    if (scope == null) throw StateError('Draft owner unavailable');
+    await scope.ready.timeout(const Duration(seconds: 3));
+    if (!mounted) return;
+    final owner = _draftOwnerDm ?? DraftSessionOwner.capture(scope);
+    if (owner == null || !owner.canRead) throw StateError('Draft owner unavailable');
+    if (!_draftRestored && _draftRevisionDm != 0) {
+      throw StateError('Composer changed before draft hydration');
+    }
+    if (_draftOwnerDm == null) owner.changes.addListener(_onDraftOwnerChangedDm);
+    _draftOwnerDm = owner;
+    _draftWriterDm ??= AccountDraftWriter(_accountDraftStore, owner, _currentChatIdDm!,
+        onFailure: () {
+          if (mounted) _showSnack('Не удалось сохранить черновик. Попробуйте ещё раз.');
+        }, onJournalFailure: () {
+          if (mounted) _showSnack('Не удалось сохранить резервный черновик: хранилище заполнено или недоступно.');
+        });
+    unawaited(_loadRecoveryDraftsDm(owner, _currentChatIdDm!));
+    final beforeRevision = _draftRevisionDm;
+    final beforeText = _ctrl.text;
+    final beforeFiles = _att.pending.map((f) => f.localId).toList();
+    final beforeReply = _replyTo?.id;
+    final draft = await _accountDraftStore.read(owner.project, owner.userId,
+        _currentChatIdDm!, () => owner.canRead);
+    if (!mounted || !owner.canRead) return;
+    if (_draftRevisionDm != beforeRevision) throw StateError('Composer changed during draft hydration');
+    if (_ctrl.text != beforeText || _replyTo?.id != beforeReply ||
+        !listEquals(_att.pending.map((f) => f.localId).toList(), beforeFiles)) return;
+    if (draft == null) {
+      _legacyDraftAvailableDm = _globalCache.getDraft(_currentChatIdDm!) != null;
+      return;
+    }
+    _applyAccountDraftDm(draft);
+    if (mounted) setState(() {});
+  }
+
+  void _applyAccountDraftDm(Map<String, dynamic> draft) {
+    final text = draft['text'] is String ? draft['text'] as String : '';
+    final filesData = (draft['files'] as List? ?? const [])
+        .whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+    _draftHydratingDm = true;
+    try {
+    final reply = draft['reply'];
+    if (reply is Map) {
+      try { _replyTo = Message.fromJson(Map<String, dynamic>.from(reply)); } catch (_) {}
+    }
     _ctrl.text = text;
     _att.pending
       ..clear()
@@ -676,13 +753,76 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                     : 'Не удалось загрузить',
             uploadedFileId: m['uploadedFileId'] as String?,
           )));
+    } finally { _draftHydratingDm = false; }
+  }
+
+  Future<void> _importLegacyDraftDm() async {
+    final owner = _draftOwnerDm, conversation = _currentChatIdDm;
+    if (owner == null || conversation == null || !owner.canRead) return;
+    if (_ctrl.text.isNotEmpty || _att.pending.isNotEmpty || _replyTo != null) {
+      _showSnack('Сначала сохраните или очистите текущий черновик.');
+      return;
+    }
+    final revision = _draftRevisionDm;
+    final prior = await _accountDraftStore.read(owner.project, owner.userId,
+        conversation, () => owner.canRead);
+    if (!mounted || !owner.canRead || prior != null || revision != _draftRevisionDm ||
+        _ctrl.text.isNotEmpty || _att.pending.isNotEmpty || _replyTo != null) return;
+    final legacy = _globalCache.getDraft(conversation);
+    if (legacy == null) return;
+    _applyAccountDraftDm({'text': legacy.$1, 'files': legacy.$2, 'reply': null});
+    setState(() => _legacyDraftAvailableDm = false);
+    await _saveDraftDm();
+  }
+
+  Future<void> _loadRecoveryDraftsDm(DraftSessionOwner owner, String chat) async {
+    try {
+      final entries = await _recoveryJournalDm.pending(project: owner.project,
+          owner: owner.userId, conversation: chat, permitted: () => owner.canRead);
+      if (mounted && owner.canRead && _currentChatIdDm == chat) {
+        setState(() => _recoveryDraftsDm = entries);
+      }
+    } catch (_) {}
+  }
+
+  void _onDraftOwnerChangedDm() {
+    final owner = _draftOwnerDm, chat = _currentChatIdDm;
+    if (mounted && owner != null && chat != null && owner.canRead) {
+      unawaited(_loadRecoveryDraftsDm(owner, chat));
+    }
     if (mounted) setState(() {});
   }
 
-  Future<void> _clearDraftDm() async {
-    if (_currentChatIdDm != null) {
-      await _globalCache.clearDraft(_currentChatIdDm!);
+  Future<void> _restoreRecoveryDraftDm() async {
+    final owner = _draftOwnerDm, chat = _currentChatIdDm;
+    if (owner == null || chat == null || !owner.canRead || _recoveryDraftsDm.isEmpty) return;
+    if (_ctrl.text.isNotEmpty || _att.pending.isNotEmpty || _replyTo != null) {
+      _showSnack('Сначала сохраните или очистите текущий черновик.');
+      return;
     }
+    final item = _recoveryDraftsDm.first;
+    final raw = item['draft'];
+    final id = item['operation_id'];
+    if (raw is! Map || id is! String) return;
+    final revision = _draftRevisionDm;
+    final snapshot = Map<String, dynamic>.from(raw);
+    final saved = await _accountDraftStore.write(owner.project, owner.userId,
+        chat, snapshot, () => owner.canSave);
+    if (!saved || !mounted || !owner.canRead || revision != _draftRevisionDm ||
+        _ctrl.text.isNotEmpty || _att.pending.isNotEmpty || _replyTo != null) return;
+    _applyAccountDraftDm(snapshot);
+    setState(() {});
+    await _recoveryJournalDm.markResolved(project: owner.project, owner: owner.userId,
+        conversation: chat, operationId: id, permitted: () => owner.canSave);
+    if (mounted && owner.canRead) await _loadRecoveryDraftsDm(owner, chat);
+  }
+
+  Future<void> _clearDraftDm() async {
+    if (_ctrl.text.isNotEmpty || _att.pending.isNotEmpty || _replyTo != null) {
+      await _saveDraftDm();
+      return;
+    }
+    _draftWriterDm?.save({'text': '', 'files': [], 'reply': null});
   }
 
   Future<void> _prefetchOldFilesForDm() async {
@@ -1587,7 +1727,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       _ctrl.clear();
     });
     if (restoreDraft && _isDm) {
-      _restoreDraftDm();
+      await _restoreDraftDm();
     }
   }
 
@@ -2345,7 +2485,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                           hideAuthorLine: isDm,
                           enableDmReceipts: isDm,
                           peerLastReadAt: isDm ? _peerLastReadAt : null,
-                          onReply: (m) => setState(() => _replyTo = m),
+                          onReply: _setDraftReply,
                           onLongPress:
                               (ctx, m, rect, bytes, replyPreview, fallback) =>
                                   _showMessageActions(ctx, m,
@@ -2448,6 +2588,14 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                   onCancel: _cancelInlineEdit,
                 ),
 
+              if (isDm && !_selecting && _dmComposerReady &&
+                  (_draftOwnerDm?.canRead ?? false) && _legacyDraftAvailableDm)
+                TextButton(onPressed: () => unawaited(_importLegacyDraftDm()),
+                    child: const Text('Восстановить прежний черновик')),
+              if (isDm && !_selecting && _dmComposerReady &&
+                  (_draftOwnerDm?.canRead ?? false) && _recoveryDraftsDm.isNotEmpty)
+                TextButton(onPressed: () => unawaited(_restoreRecoveryDraftDm()),
+                    child: const Text('Восстановить несохранённый черновик')),
               if (_selecting)
                 Builder(
                   builder: (_) {
@@ -2483,6 +2631,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                         busy: _blockActionBusy || _chatInitializing,
                         onUnblock: _iBlockedPeer ? _unblockPeerFromDm : null,
                       )
+                    : (isDm && _draftOwnerDm != null && !_draftOwnerDm!.canRead)
+                        ? const SafeArea(child: Padding(padding: EdgeInsets.all(12),
+                            child: Text('Сессия изменилась. Откройте чат заново.')))
                     : (isDm && !_dmComposerReady)
                         ? SafeArea(
                             child: Padding(
@@ -2512,8 +2663,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                                 controller: _ctrl,
                                 focusNode: _composerFocus,
                                 replyTo: _replyTo,
-                                onCloseReply: () =>
-                                    setState(() => _replyTo = null),
+                                onCloseReply: () => _setDraftReply(null),
                                 forwardCount: _forwardPackageAttached
                                     ? (_stagedForward?.items.length ??
                                         _forwardSelectedIds.length)
@@ -2638,8 +2788,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                                 controller: _ctrl,
                                 focusNode: _composerFocus,
                                 replyTo: _replyTo,
-                                onCloseReply: () =>
-                                    setState(() => _replyTo = null),
+                                onCloseReply: () => _setDraftReply(null),
                                 forwardCount: _forwardPackageAttached
                                     ? (_stagedForward?.items.length ??
                                         _forwardSelectedIds.length)
@@ -2975,7 +3124,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         bubbleBytes: bubbleBytes,
         replyPreview: replyPreview,
         fallbackPosition: fallbackPosition,
-        onReply: () => setState(() => _replyTo = m),
+        onReply: () => _setDraftReply(m),
         onForward: () async {
           await _startForwardSelection([m]);
         },
@@ -3007,7 +3156,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   Future<void> _handlePackageMenuAction(Message m, String action) async {
     switch (action) {
       case 'Ответить':
-        setState(() => _replyTo = m);
+        _setDraftReply(m);
         break;
       case 'Скопировать':
         await ca.ChatActions.copyMessageToClipboard(m);

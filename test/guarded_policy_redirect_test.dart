@@ -8,6 +8,7 @@ import 'package:student_platform/src/core/guarded_policy_redirect.dart';
 import 'package:student_platform/src/core/live_policy_grant_bridge.dart';
 import 'package:student_platform/src/core/offline_policy_grant_host.dart';
 import 'package:student_platform/src/core/offline_policy_grant_store.dart';
+import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:student_platform/src/ui/splash/splash_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -106,6 +107,22 @@ void main() {
     access = makeAccess(() async =>
         throw const AuthApiException('denied', statusCode: '401'));
     expect(await redirect('/home'), '/login');
+  });
+
+  test('online capability is granted only by a current allow decision', () async {
+    final caps = SessionCapabilities(scope);
+    final pending = Completer<bool>();
+    access = makeAccess(() => pending.future);
+    final result = guardedPolicyRedirect(path: '/home', hasSession: () => true,
+        currentAccess: () => access, onAllowed: (owner) {
+          final attempt = caps.beginAuthorization(owner);
+          if (attempt != null) caps.grant(SessionCapabilityMode.online, attempt);
+        });
+    expect(caps.capture(SessionCapability.networkRead), isNull);
+    pending.complete(false);
+    expect(await result, isNull);
+    expect(caps.capture(SessionCapability.networkRead), isNotNull);
+    caps.dispose();
   });
 
   testWidgets('policy network failure offers retry and rechecks policy',

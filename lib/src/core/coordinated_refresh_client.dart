@@ -184,6 +184,7 @@ class RefreshAdmissionClient extends http.BaseClient {
   final bool trackQaRefresh;
   bool _qaRefreshPending = false;
   bool _qaRefreshAmbiguous = false;
+  int _heldRefreshGeneration = 0;
   bool get qaRefreshPending => _qaRefreshPending || _qaRefreshAmbiguous;
   bool get qaRefreshAmbiguous => _qaRefreshAmbiguous;
 
@@ -237,6 +238,10 @@ class RefreshAdmissionClient extends http.BaseClient {
     _admission.complete(guardedClient);
   }
 
+  /// Reject refreshes queued before an explicit denial while permitting a
+  /// later, newly authenticated session to use the same SDK client.
+  void discardHeldRefreshes() => _heldRefreshGeneration++;
+
   void block() {
     if (!_admission.isCompleted) _admission.complete(null);
   }
@@ -284,8 +289,12 @@ class RefreshAdmissionClient extends http.BaseClient {
         _authFinished();
       }
     }
+    final heldGeneration = _heldRefreshGeneration;
     final guarded = await _admission.future;
     if (_closed || guarded == null) _securityFence.reject();
+    if (heldGeneration != _heldRefreshGeneration) {
+      throw RefreshTransportSuppressed();
+    }
     if (_suspended) {
       _suppressedAuthRevision++;
       authSignals.value++;

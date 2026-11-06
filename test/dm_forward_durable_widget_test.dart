@@ -14,6 +14,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:sqlite3/open.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
+import 'package:student_platform/src/core/auth_session_scope_host.dart';
+import 'package:student_platform/src/config/supabase_config.dart';
 import 'package:student_platform/src/ui/chats/core/chat_messages_load_state.dart';
 import 'package:student_platform/src/ui/chats/core/i_chat_service.dart';
 import 'package:student_platform/src/ui/chats/core/forward_payload.dart';
@@ -24,6 +26,8 @@ import 'package:student_platform/src/ui/chats/forward/forward_outbox_store.dart'
 import 'package:student_platform/src/ui/chats/forward/forward_picker.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/learning/models/chat_file.dart';
+import 'package:student_platform/src/ui/learning/account_draft_store.dart';
+import 'package:student_platform/src/ui/learning/global_cache.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class _Storage implements ForwardOutboxStorage {
@@ -77,14 +81,14 @@ void main() {
     late Database db;
     const uid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     await tester.runAsync(() async {
-    await Supabase.initialize(url: 'https://example.invalid', publishableKey: 'test',
+    await Supabase.initialize(url: SupabaseConfig.url, publishableKey: 'test',
         httpClient: MockClient((request) async => http.Response('[]', 200,
             request: request, headers: {'content-type': 'application/json'})),
         authOptions: const FlutterAuthClientOptions(autoRefreshToken: false));
     final client = Supabase.instance.client;
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     String part(Object value) => base64Url.encode(utf8.encode(jsonEncode(value))).replaceAll('=', '');
-    final token = '${part({'alg': 'none'})}.${part({'sub': uid, 'session_id': 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'iat': now, 'exp': now + 3600})}.sig';
+    final token = '${part({'alg': 'none'})}.${part({'iss': '${SupabaseConfig.url}/auth/v1', 'aud': 'authenticated', 'role': 'authenticated', 'sub': uid, 'session_id': 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'iat': now, 'exp': now + 3600})}.sig';
     await client.auth.setInitialSession(jsonEncode({'access_token': token, 'refresh_token': 'test', 'token_type': 'bearer', 'expires_at': now + 3600,
       'user': {'id': uid, 'aud': 'authenticated', 'app_metadata': {}, 'user_metadata': {}, 'created_at': '2026-01-01T00:00:00Z'}}));
     scopeSession = client.auth.currentSession;
@@ -123,9 +127,10 @@ void main() {
       expect(send.hitTestable(), findsOneWidget);
       await tester.tap(send.hitTestable());
     }
-    await tester.pumpWidget(ForwardOutboxHost(source: scope, storage: storage, durableMode: true,
-      openDatabaseOverride: () async => db, backendOverride: 'qa-backend',
-      child: MaterialApp(navigatorKey: navigator, home: UnifiedChatScreen(service: source, title: 'Источник', debugCopyForwardFile: copyFile,
+    Future<Database> openSourceDatabase() async => db;
+    Widget sourceScreen(Key key) => AuthSessionScopeHost(child: ForwardOutboxHost(source: scope, storage: storage, durableMode: true,
+      openDatabaseOverride: openSourceDatabase, backendOverride: 'qa-backend',
+      child: MaterialApp(navigatorKey: navigator, home: UnifiedChatScreen(key: key, service: source, title: 'Источник', debugCopyForwardFile: copyFile,
         debugAfterDurableCancel: () async { unknownCancelled.complete(); await releaseUnknown.future; },
         debugPickForwardTarget: (context, current) async =>
         ForwardTarget(chatId: sameChat ? 'source' : 'target', title: 'Получатель', mode: ChatMode.dm,
@@ -134,11 +139,41 @@ void main() {
             debugPickForwardTarget: (_, __) async => ForwardTarget(chatId: 'target', title: 'Этот чат', mode: ChatMode.dm, open: (_) async {}),
             debugAfterDurableCancel: () async { if (!cancelCommitted.isCompleted) cancelCommitted.complete(); await cancelRelease.future; },
           ))); })))));
+    await GlobalCache().saveDraft('source', 'Прежний личный черновик', []);
+    await tester.pumpWidget(sourceScreen(const ValueKey('first')));
     for (var i = 0; i < 15; i++) {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
       await tester.pump(const Duration(milliseconds: 50));
     }
     expect(find.text('Проверка пересылки'), findsOneWidget);
+    expect(find.text('Восстановить прежний черновик'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).last, 'Сохранённый черновик');
+    await tester.tap(find.text('Восстановить прежний черновик'));
+    await tester.pump();
+    expect(find.text('Сохранённый черновик'), findsOneWidget);
+    expect(find.text('Сначала сохраните или очистите текущий черновик.'), findsOneWidget);
+    for (final messenger in tester.stateList<ScaffoldMessengerState>(find.byType(ScaffoldMessenger))) {
+      messenger.clearSnackBars();
+      messenger.removeCurrentSnackBar();
+    }
+    expect(GlobalCache().getDraft('source')?.$1, 'Прежний личный черновик');
+    await tester.pump(const Duration(milliseconds: 400));
+    final draftStore = AccountDraftStore();
+    for (var i = 0; i < 10; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect((await draftStore.read(SupabaseConfig.url, uid, 'source', () => true))?['text'],
+        'Сохранённый черновик');
+    await tester.pumpWidget(sourceScreen(const ValueKey('reopen')));
+    for (var i = 0; i < 15; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(find.text('Сохранённый черновик'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).last, '');
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump(const Duration(milliseconds: 400));
     await tester.longPress(find.text('Проверка пересылки'));
     await tester.pump(const Duration(milliseconds: 300));
     await tester.tap(find.text('Переслать').last);
@@ -322,13 +357,13 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     scopeSession = old;
     var unsupportedCalls = 0, picks = 0;
-    await tester.pumpWidget(ForwardOutboxHost(source: scope, storage: storage, durableMode: true,
+    await tester.pumpWidget(AuthSessionScopeHost(child: ForwardOutboxHost(source: scope, storage: storage, durableMode: true,
       openDatabaseOverride: () async { unsupportedCalls++; throw UnsupportedError('QA unsupported'); },
       backendOverride: 'qa-backend', child: MaterialApp(home: UnifiedChatScreen(
         service: source, title: 'Источник', debugPickForwardTarget: (_, __) async {
           picks++;
           return ForwardTarget(chatId: 'target', title: 'Получатель', mode: ChatMode.dm, open: (_) async {});
-        }))));
+        })))));
     for (var i = 0; i < 15; i++) {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
       await tester.pump(const Duration(milliseconds: 50));
@@ -356,13 +391,13 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     final legacyStorage = _Storage();
     var legacyPicker = 0, legacyOpened = 0;
-    await tester.pumpWidget(ForwardOutboxHost(source: scope, storage: legacyStorage,
+    await tester.pumpWidget(AuthSessionScopeHost(child: ForwardOutboxHost(source: scope, storage: legacyStorage,
       child: MaterialApp(home: UnifiedChatScreen(service: source, title: 'Источник',
         debugPickForwardTarget: (_, __) async {
           legacyPicker++;
           return ForwardTarget(chatId: 'legacy-target', title: 'Получатель', mode: ChatMode.dm,
             open: (_) async { legacyOpened++; });
-        }))));
+        })))));
     for (var i = 0; i < 15; i++) {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
       await tester.pump(const Duration(milliseconds: 50));
@@ -392,9 +427,9 @@ void main() {
       at: DateTime.utc(2026), fileId: oldFileId,
     )]);
     var incompletePicks = 0;
-    await tester.pumpWidget(ForwardOutboxHost(source: scope, storage: _Storage(),
+    await tester.pumpWidget(AuthSessionScopeHost(child: ForwardOutboxHost(source: scope, storage: _Storage(),
       child: MaterialApp(home: UnifiedChatScreen(service: incomplete, title: 'Источник',
-        debugPickForwardTarget: (_, __) async { incompletePicks++; return null; }))));
+        debugPickForwardTarget: (_, __) async { incompletePicks++; return null; })))));
     for (var i = 0; i < 15; i++) {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
       await tester.pump(const Duration(milliseconds: 50));

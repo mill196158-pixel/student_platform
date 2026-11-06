@@ -12,9 +12,12 @@ import 'package:http/testing.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:sqlite3/open.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
+import 'package:student_platform/src/core/auth_session_scope_host.dart';
+import 'package:student_platform/src/config/supabase_config.dart';
 import 'package:student_platform/src/ui/chats/core/i_chat_service.dart';
 import 'package:student_platform/src/ui/chats/core/forward_payload.dart';
 import 'package:student_platform/src/ui/chats/forward/durable_forward_outbox.dart';
@@ -28,6 +31,8 @@ import 'package:student_platform/src/ui/learning/models/team.dart';
 import 'package:student_platform/src/ui/learning/state/team_cubit.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat_tab.dart';
 import 'package:student_platform/src/ui/learning/global_cache.dart';
+import 'package:student_platform/src/ui/learning/account_draft_store.dart';
+import 'package:student_platform/src/ui/learning/draft_recovery_journal.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/composer.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/composer/chat_composer_bar.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -46,6 +51,22 @@ class _Storage implements ForwardOutboxStorage {
   Future<bool> write(String key, String value) async {
     values[key] = value;
     return true;
+  }
+}
+
+class _DelayedDraftPreferences extends InMemorySharedPreferencesStore {
+  _DelayedDraftPreferences() : super.empty();
+  bool armed = false;
+  final started = Completer<void>();
+  final release = Completer<void>();
+  @override
+  Future<bool> setValue(String type, String key, Object value) async {
+    if (armed && key.startsWith('flutter.account_draft_v1_')) {
+      armed = false;
+      if (!started.isCompleted) started.complete();
+      await release.future;
+    }
+    return super.setValue(type, key, value);
   }
 }
 
@@ -73,7 +94,15 @@ void main() {
 
   testWidgets('team forward copies an attachment into the durable composer',
       (tester) async {
-    SharedPreferences.setMockInitialValues({});
+    final originalPreferences = SharedPreferencesStorePlatform.instance;
+    final delayedPreferences = _DelayedDraftPreferences();
+    SharedPreferences.resetStatic();
+    SharedPreferencesStorePlatform.instance = delayedPreferences;
+    addTearDown(() {
+      if (!delayedPreferences.release.isCompleted) delayedPreferences.release.complete();
+      SharedPreferences.resetStatic();
+      SharedPreferencesStorePlatform.instance = originalPreferences;
+    });
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
             const MethodChannel('com.llfbandit.app_links/events'),
@@ -93,17 +122,17 @@ void main() {
     const chat = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
     await tester.runAsync(() async {
       await Supabase.initialize(
-          url: 'https://example.invalid',
+          url: SupabaseConfig.url,
           publishableKey: 'test',
           httpClient: MockClient((request) async {
-            if (request.url.host != 'example.invalid')
+            if (request.url.host != Uri.parse(SupabaseConfig.url).host)
               throw StateError('Unexpected test network target');
             if (request.url.path
                 .endsWith('/rpc/send_chat_message_with_files')) {
               sent++;
               sentFileIds = (jsonDecode(request.body)
                   as Map<String, dynamic>)['p_file_ids'] as List<dynamic>?;
-              if (pauseFileSend != null) await pauseFileSend!.future;
+              if (pauseFileSend != null) await pauseFileSend.future;
               return http.Response(
                   '"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"', 200,
                   request: request,
@@ -122,6 +151,9 @@ void main() {
           base64Url.encode(utf8.encode(jsonEncode(value))).replaceAll('=', '');
       final token = '${part({'alg': 'none'})}.${part({
             'sub': uid,
+            'iss': '${SupabaseConfig.url}/auth/v1',
+            'aud': 'authenticated',
+            'role': 'authenticated',
             'session_id': 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
             'iat': now,
             'exp': now + 3600
@@ -146,6 +178,12 @@ void main() {
       dir = await Directory.systemTemp.createTemp('team_widget_qa_');
       db = await openDurableForwardDatabase(p.join(dir.path, 'outbox.db'),
           factory: databaseFactoryFfi);
+      DraftRecoveryJournal.debugOpen = () async => db;
+      await DraftRecoveryJournal().append(project: SupabaseConfig.url, owner: uid,
+          sessionId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+          conversation: '11111111-1111-4111-8111-111111111111',
+          draft: {'text': 'Резервный черновик', 'files': [], 'reply': null},
+          permitted: () => true);
     });
     const team = Team(
         id: '11111111-1111-4111-8111-111111111111',
@@ -195,7 +233,7 @@ void main() {
         durableMode: durable,
         openDatabaseOverride: unsupported ? unsupportedDb : openDb,
         backendOverride: 'qa-backend',
-        child: MaterialApp(
+        child: AuthSessionScopeHost(child: MaterialApp(
             home: BlocProvider.value(
                 value: cubit,
                 child: Scaffold(
@@ -226,7 +264,8 @@ void main() {
                             title: 'Команда',
                             mode: ChatMode.team,
                             open: (_) async {});
-                        })))));
+                        }))))));
+    await GlobalCache().saveDraft(team.id, 'Прежний черновик', []);
     await tester.pumpWidget(app(const ValueKey('initial')));
     for (var i = 0; i < 20; i++) {
       await tester.runAsync(
@@ -234,6 +273,101 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
     }
     expect(find.text('Сообщение для пересылки'), findsWidgets);
+    expect(find.text('Восстановить прежний черновик'), findsOneWidget);
+    await tester.tap(find.text('Восстановить прежний черновик'));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Прежний черновик'), findsOneWidget);
+    expect(GlobalCache().getDraft(team.id)?.$1, 'Прежний черновик');
+    await tester.enterText(find.byType(TextField).last, 'Новый текст');
+    expect(find.text('Восстановить несохранённый черновик'), findsOneWidget);
+    await tester.tap(find.text('Восстановить несохранённый черновик'));
+    await tester.pump();
+    expect(find.text('Новый текст'), findsOneWidget);
+    expect(find.text('Сначала сохраните или очистите текущий черновик.'), findsOneWidget);
+    for (final messenger in tester.stateList<ScaffoldMessengerState>(find.byType(ScaffoldMessenger))) {
+      messenger.clearSnackBars();
+      messenger.removeCurrentSnackBar();
+    }
+    await tester.enterText(find.byType(TextField).last, '');
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('Восстановить несохранённый черновик'));
+    for (var i = 0; i < 10; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 30));
+    }
+    expect(find.text('Резервный черновик'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).last, '');
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump(const Duration(milliseconds: 400));
+    final hydrationStore = AccountDraftStore();
+    await tester.enterText(find.byType(TextField).last, 'Старый scoped');
+    await tester.pump(const Duration(milliseconds: 400));
+    final hydrationEntered = Completer<void>();
+    final hydrationRelease = Completer<void>();
+    AccountDraftStore.debugBeforeRead = () async {
+      if (!hydrationEntered.isCompleted) hydrationEntered.complete();
+      await hydrationRelease.future;
+    };
+    addTearDown(() {
+      AccountDraftStore.debugBeforeRead = null;
+      if (!hydrationRelease.isCompleted) hydrationRelease.complete();
+    });
+    await tester.pumpWidget(app(const ValueKey('early-input')));
+    for (var i = 0; i < 20 && !hydrationEntered.isCompleted; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(hydrationEntered.isCompleted, isTrue);
+    expect(find.byType(TextField), findsWidgets,
+        reason: 'composer remains visible while scoped draft loads');
+    await tester.enterText(find.byType(TextField).last, 'Новый ранний ввод');
+    hydrationRelease.complete();
+    AccountDraftStore.debugBeforeRead = null;
+    for (var i = 0; i < 20; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(find.text('Новый ранний ввод'), findsOneWidget);
+    final hydrationSaved = await hydrationStore.read(SupabaseConfig.url, uid, team.id, () => true);
+    expect(hydrationSaved?['text'], 'Новый ранний ввод');
+    expect((hydrationSaved?['previous'] as Map)['text'], 'Старый scoped');
+    await tester.enterText(find.byType(TextField).last, '');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('Восстановить сохранённый черновик'));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Старый scoped'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).last, '');
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.enterText(find.byType(TextField).last, 'Старый до ошибки');
+    await tester.pump(const Duration(milliseconds: 400));
+    AccountDraftStore.debugBeforeRead = () async => throw TimeoutException('synthetic');
+    await tester.pumpWidget(app(const ValueKey('read-error')));
+    for (var i = 0; i < 15; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 40));
+    }
+    expect(find.text('Черновик пока не сохраняется. Повторить'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).last, 'Новый при ошибке');
+    AccountDraftStore.debugBeforeRead = null;
+    await tester.tap(find.text('Черновик пока не сохраняется. Повторить'));
+    for (var i = 0; i < 15; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 40));
+    }
+    expect(find.text('Новый при ошибке'), findsOneWidget);
+    final afterError = await hydrationStore.read(SupabaseConfig.url, uid, team.id, () => true);
+    expect(afterError?['text'], 'Новый при ошибке');
+    expect((afterError?['previous'] as Map)['text'], 'Старый до ошибки');
+    await tester.enterText(find.byType(TextField).last, '');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('Восстановить сохранённый черновик'));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Старый до ошибки'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).last, '');
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump(const Duration(milliseconds: 400));
     await tester.longPress(find.text('Сообщение для пересылки').first);
     await tester.pump(const Duration(milliseconds: 300));
     await tester.tap(find.text('Переслать').last);
@@ -389,7 +523,8 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
     }
     expect(find.text('Следующий черновик'), findsOneWidget);
-    expect(GlobalCache().getDraft(team.id)?.$1, 'Следующий черновик');
+    final accountDraft = AccountDraftStore();
+    expect((await accountDraft.read(SupabaseConfig.url, uid, team.id, () => true))?['text'], 'Следующий черновик');
     repo.pendingSave = Completer<String?>();
     await tester.enterText(find.byType(TextField).last, 'Сообщение без подтверждения');
     await tester.pump();
@@ -406,17 +541,17 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
     }
     expect(find.text('Сообщение без подтверждения'), findsWidgets);
-    expect(GlobalCache().getDraft(team.id)?.$1, 'Сообщение без подтверждения');
+    expect((await accountDraft.read(SupabaseConfig.url, uid, team.id, () => true))?['text'], 'Сообщение без подтверждения');
     await tester.enterText(find.byType(TextField).last, '');
     FocusManager.instance.primaryFocus?.unfocus();
     await tester.pump(const Duration(milliseconds: 400));
     cubit.emit(TeamState(team: team, chat: [message], chatHasSnapshot: true));
     await tester.pumpWidget(const SizedBox.shrink());
-    await GlobalCache().saveDraft(team.id, 'Файл', [{
+    await accountDraft.write(SupabaseConfig.url, uid, team.id, {'text': 'Файл', 'files': [{
       'localId': 'sent-local', 'path': '/test/sent.pdf', 'name': 'sent.pdf',
       'mimeType': 'application/pdf', 'size': 100, 'isImage': false,
       'uploadedFileId': '44444444-4444-4444-8444-444444444444',
-    }]);
+    }], 'reply': null}, () => true);
     await tester.pumpWidget(app(const ValueKey('file-race')));
     for (var i = 0; i < 15; i++) {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
@@ -445,7 +580,7 @@ void main() {
     await tester.pump();
     expect(tester.widget<ChatComposerBar>(find.byType(ChatComposerBar)).replyTo?.id,
         message.id);
-    pauseFileSend!.complete();
+    pauseFileSend.complete();
     pauseFileSend = null;
     for (var i = 0; i < 20; i++) {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
@@ -454,10 +589,14 @@ void main() {
     expect(find.text('new.pdf'), findsWidgets);
     expect(tester.widget<ChatComposerBar>(find.byType(ChatComposerBar)).replyTo?.id,
         message.id);
-    expect(GlobalCache().getDraft(team.id)?.$2.map((f) => f['name']), contains('new.pdf'));
-    expect(GlobalCache().getDraft(team.id)?.$2.map((f) => f['name']), isNot(contains('sent.pdf')));
+    final savedDraft = await accountDraft.read(SupabaseConfig.url, uid, team.id, () => true);
+    final savedFiles = savedDraft?['files'] as List;
+    expect(savedFiles.map((f) => f['name']), contains('new.pdf'));
+    expect(savedFiles.map((f) => f['name']), isNot(contains('sent.pdf')));
+    expect((savedDraft?['reply'] as Map)['id'], message.id);
     await tester.pumpWidget(const SizedBox.shrink());
-    await GlobalCache().clearDraft(team.id);
+    await accountDraft.write(SupabaseConfig.url, uid, team.id,
+        {'text': '', 'files': [], 'reply': null}, () => true);
     await tester.pump(const Duration(seconds: 1));
     await tester.pump(const Duration(seconds: 1));
     await tester.pumpWidget(const SizedBox.shrink());
@@ -530,9 +669,54 @@ void main() {
     expect(find.text('Выбрано 1'), findsOneWidget);
     expect(picks, picksBeforeIncomplete);
     expect(sent, sendsBeforeIncomplete);
+    cubit.emit(TeamState(team: team, chat: [message], chatHasSnapshot: true));
+    await tester.pumpWidget(app(const ValueKey('account-race-a1')));
+    for (var i = 0; i < 15; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 40));
+    }
+    delayedPreferences.armed = true;
+    await tester.enterText(find.byType(TextField).last, 'Первый A');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.runAsync(() => delayedPreferences.started.future);
+    final client = Supabase.instance.client;
+    final oldSessionJson = client.auth.currentSession!.toJson();
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    String encoded(Object value) => base64Url.encode(utf8.encode(jsonEncode(value))).replaceAll('=', '');
+    const otherUid = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    final otherToken = '${encoded({'alg': 'none'})}.${encoded({
+      'iss': '${SupabaseConfig.url}/auth/v1', 'sub': otherUid,
+      'session_id': 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+      'aud': 'authenticated', 'role': 'authenticated', 'iat': now, 'exp': now + 3600,
+    })}.sig';
+    await tester.runAsync(() => client.auth.setInitialSession(jsonEncode({
+      'access_token': otherToken, 'refresh_token': 'other', 'token_type': 'bearer',
+      'expires_at': now + 3600, 'user': {'id': otherUid, 'aud': 'authenticated',
+        'app_metadata': {}, 'user_metadata': {}, 'created_at': '2026-01-01T00:00:00Z'},
+    })));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Первый A'), findsNothing);
+    expect(await accountDraft.read(SupabaseConfig.url, otherUid, team.id, () => true), isNull);
+    await tester.runAsync(() => client.auth.setInitialSession(jsonEncode(oldSessionJson)));
+    await tester.pumpWidget(app(const ValueKey('account-race-a2')));
+    for (var i = 0; i < 15; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 40));
+    }
+    await tester.enterText(find.byType(TextField).last, 'Новый A');
+    delayedPreferences.release.complete();
+    for (var i = 0; i < 20; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 40));
+    }
+    expect(find.text('Новый A'), findsOneWidget);
+    final afterSwitch = await accountDraft.read(SupabaseConfig.url, uid, team.id, () => true);
+    expect(afterSwitch?['text'], 'Новый A');
+    expect((afterSwitch?['previous'] as Map)['text'], 'Первый A');
     await tester.pumpWidget(const SizedBox.shrink());
     await cubit.close();
     scope.dispose();
+    DraftRecoveryJournal.debugOpen = null;
     await tester.runAsync(() async {
       if (db.isOpen) await db.close();
       final root = await Directory.systemTemp.resolveSymbolicLinks();

@@ -12,6 +12,7 @@ import 'auth_session_scope_test.dart' show fakeSession;
 class _Db implements Database, Transaction {
   final rows = <String, Map<String, Object?>>{};
   final attempts = <String, Map<String, Object?>>{};
+  final access = <String, Map<String, Object?>>{};
   Future<void> Function()? beforeInsert;
   String key(List<Object?> a) => a.join('|');
   @override
@@ -20,6 +21,9 @@ class _Db implements Database, Transaction {
     final before = Map<String, Map<String, Object?>>.from(rows);
     final beforeAttempts = {
       for (final e in attempts.entries) e.key: Map<String, Object?>.of(e.value)
+    };
+    final beforeAccess = {
+      for (final e in access.entries) e.key: Map<String, Object?>.of(e.value)
     };
     try {
       return await action(this);
@@ -30,6 +34,9 @@ class _Db implements Database, Transaction {
       attempts
         ..clear()
         ..addAll(beforeAttempts);
+      access
+        ..clear()
+        ..addAll(beforeAccess);
       rethrow;
     }
   }
@@ -57,6 +64,8 @@ class _Db implements Database, Transaction {
         key([values['project'], values['uid'], values['sid'], values['chat']]);
     if (table == 'chat_server_attempt') {
       attempts.putIfAbsent(k, () => {...values, 'blocked': 0});
+    } else if (table == 'chat_snapshot_access') {
+      access[k] = Map.of(values);
     } else {
       await beforeInsert?.call();
       rows[k] = Map.of(values);

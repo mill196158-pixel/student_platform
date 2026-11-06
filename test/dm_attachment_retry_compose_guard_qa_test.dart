@@ -6,7 +6,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:student_platform/src/core/online_side_effect_barrier.dart';
+import 'package:student_platform/src/core/auth_session_scope_host.dart';
+import 'package:student_platform/src/config/supabase_config.dart';
 import 'package:student_platform/src/ui/chats/core/chat_messages_load_state.dart';
 import 'package:student_platform/src/ui/chats/core/i_chat_service.dart';
 import 'package:student_platform/src/ui/chats/core/unified_chat_screen.dart';
@@ -66,7 +67,7 @@ void main() {
     var presigns = 0;
     late Map<String, dynamic> session;
     await tester.runAsync(() async {
-      await Supabase.initialize(url: 'https://example.invalid', publishableKey: 'test',
+      await Supabase.initialize(url: SupabaseConfig.url, publishableKey: 'test',
         authOptions: const FlutterAuthClientOptions(autoRefreshToken: false),
         httpClient: MockClient((request) async {
           if (request.url.path.endsWith('/generate-upload-url')) presigns++;
@@ -74,7 +75,7 @@ void main() {
         }));
       String part(Object value) => base64Url.encode(utf8.encode(jsonEncode(value))).replaceAll('=', '');
       final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      final token = '${part({'alg':'none'})}.${part({'sub':'user','session_id':'cccccccc-cccc-4ccc-8ccc-cccccccccccc','iat':now,'exp':now+3600})}.sig';
+      final token = '${part({'alg':'none'})}.${part({'iss':'${SupabaseConfig.url}/auth/v1','aud':'authenticated','role':'authenticated','sub':'user','session_id':'cccccccc-cccc-4ccc-8ccc-cccccccccccc','iat':now,'exp':now+3600})}.sig';
       session = {
         'access_token': token, 'refresh_token':'synthetic', 'token_type':'bearer',
         'expires_at':now+3600, 'user': {'id':'user', 'aud':'authenticated',
@@ -84,8 +85,8 @@ void main() {
     var allowed = true;
     var guardChecks = 0;
     final service = _Service();
-    await tester.pumpWidget(MaterialApp(home: UnifiedChatScreen(service: service,
-        debugCanComposeDm: () { guardChecks++; return allowed; })));
+    await tester.pumpWidget(AuthSessionScopeHost(child: MaterialApp(home: UnifiedChatScreen(service: service,
+        debugCanComposeDm: () { guardChecks++; return allowed; }))));
     for (var i = 0; i < 30 && find.byType(DmComposerBar).evaluate().isEmpty; i++) {
       await tester.pump(const Duration(milliseconds: 20));
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));

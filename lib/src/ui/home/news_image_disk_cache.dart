@@ -1,10 +1,13 @@
 import 'dart:convert';
+import 'dart:async';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:student_ui/student_ui.dart';
+import '../../core/temporary_cache_budget.dart';
+import '../../core/news_cache_lease.dart';
 
 /// Persistent news image bytes for Mobile, keyed by path + version.
 ///
@@ -19,6 +22,8 @@ class NewsImageDiskCache {
     this.directoryName = 'news_images_v1',
     this.maxEntries = 80,
     this.maxTotalBytes = 48 * 1024 * 1024,
+    this.debugQuotaUsage,
+    this.debugUseSqliteLease = false,
   })  : _memory = memory ?? NewsImageBytesCache.instance,
         _rootOverride = rootOverride;
 
@@ -26,6 +31,10 @@ class NewsImageDiskCache {
   final Directory? Function()? _rootOverride;
   final int maxEntries;
   final int maxTotalBytes;
+  @visibleForTesting
+  final Future<int?> Function()? debugQuotaUsage;
+  @visibleForTesting
+  final bool debugUseSqliteLease;
 
   final String directoryName;
   static const _indexName = 'index.json';
@@ -35,14 +44,52 @@ class NewsImageDiskCache {
   bool _ready = false;
   int _clearEpoch = 0;
   final Map<String, int> _pathEpoch = {};
-  Future<void> _mutations = Future<void>.value();
+  static final Map<String, Future<void>> _directoryMutations = {};
+  static final Map<String, DateTime> _lastQuotaScan = {};
+  Future<void> _quotaWork = Future<void>.value();
+  @visibleForTesting
+  Future<void> debugWaitForQuota() => _quotaWork;
   @visibleForTesting
   Future<void> Function()? debugAfterFileWrite;
+  @visibleForTesting
+  Future<void> Function()? debugBeforeLease;
 
-  Future<T> _mutate<T>(Future<T> Function() action) {
-    final operation = _mutations.then((_) => action());
-    _mutations =
-        operation.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+  Future<T> _mutate<T>(Future<T> Function() action,
+      {Future<T> Function()? onLeaseUnavailable}) {
+    final queueKey = _rootOverride?.call()?.absolute.path ?? 'default:$directoryName';
+    final previous = _directoryMutations[queueKey] ?? Future<void>.value();
+    final operation = previous.then((_) async {
+      await ensureReady();
+      Future<T> execute() async {
+        // Other instances may share the same directory; use their latest index.
+        await _loadIndex();
+        return action();
+      }
+      if (!kIsWeb && (_rootOverride == null || debugUseSqliteLease)) {
+        var entered = false;
+        try {
+          await debugBeforeLease?.call();
+          return await NewsCacheLease.run(_root!, () {
+            entered = true;
+            return execute();
+          });
+        } catch (_) {
+          if (entered || onLeaseUnavailable == null) rethrow;
+          // Disable extra quota eviction durably before falling back to reads.
+          try { await NewsCacheLease.disabledMarker(_root!).writeAsString('disabled', flush: true); }
+          catch (_) { rethrow; }
+          return onLeaseUnavailable();
+        }
+      }
+      return execute();
+    });
+    final settled = operation.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+    _directoryMutations[queueKey] = settled;
+    settled.then((_) {
+      if (identical(_directoryMutations[queueKey], settled)) {
+        _directoryMutations.remove(queueKey);
+      }
+    });
     return operation;
   }
 
@@ -75,7 +122,7 @@ class NewsImageDiskCache {
     final pathEpoch = _pathEpoch[key.path] ?? 0;
     final mem = _memory.peek(key);
     if (mem != null) return mem;
-    await _mutations;
+    Future<Uint8List?> readDisk() async {
     if (!_current(key.path, clearEpoch, pathEpoch)) return null;
     await ensureReady();
     if (!_current(key.path, clearEpoch, pathEpoch)) return null;
@@ -102,6 +149,11 @@ class NewsImageDiskCache {
       debugPrint('[news-img] disk peek failed type=${e.runtimeType}');
       return null;
     }
+    }
+    return _mutate(readDisk, onLeaseUnavailable: () async {
+      await _loadIndex();
+      return readDisk();
+    });
   }
 
   /// Memory → disk → [fetch], with single-flight via [NewsImageBytesCache].
@@ -130,7 +182,7 @@ class NewsImageDiskCache {
   Future<void> put(NewsImageCacheKey key, Uint8List bytes) {
     if (bytes.isEmpty) return Future.value();
     _memory.put(key, bytes);
-    return _mutate(() => _write(key, bytes));
+    return _mutate(() => _write(key, bytes), onLeaseUnavailable: () async {});
   }
 
   Future<void> _putGuarded(
@@ -141,7 +193,7 @@ class NewsImageDiskCache {
         if (!current()) return;
         _memory.put(key, bytes);
         await _write(key, bytes);
-      });
+      }, onLeaseUnavailable: () async {});
 
   Future<void> _write(NewsImageCacheKey key, Uint8List bytes) async {
     await ensureReady();
@@ -161,6 +213,13 @@ class NewsImageDiskCache {
       );
       await _evictIfNeeded();
       await _persistIndex();
+      // Until the fallback reader and eviction protocol share an atomic
+      // lease, extra budget eviction must remain disabled in ordinary builds.
+      if (debugQuotaUsage != null) {
+        final work = _scheduleSharedBudget();
+        _quotaWork = Future.wait([_quotaWork, work]).then<void>((_) {});
+        unawaited(_quotaWork);
+      }
     } catch (e) {
       debugPrint('[news-img] disk put failed type=${e.runtimeType}');
     }
@@ -273,6 +332,46 @@ class NewsImageDiskCache {
       total -= victim.value.bytes;
       await _removeEntry(victim.key);
     }
+  }
+
+  /// Reclaims only indexed news files; never touches chat files or queues.
+  /// Other writers and other Dart isolates are not yet quota participants.
+  Future<void> _scheduleSharedBudget() async {
+    final now = DateTime.now();
+    final directory = _root!.absolute.path;
+    final lastScan = _lastQuotaScan[directory];
+    if (debugQuotaUsage == null && lastScan != null &&
+        now.difference(lastScan) < const Duration(seconds: 30)) return;
+    _lastQuotaScan[directory] = now;
+    int? usage;
+    try {
+      usage = await (debugQuotaUsage?.call() ?? TemporaryCacheBudget.measure());
+    } catch (_) {
+      return;
+    }
+    if (usage == null || usage <= TemporaryCacheBudget.limitBytes) return;
+    final measured = usage;
+    await _mutate(() => _enforceSharedBudget(usage: measured));
+  }
+
+  Future<void> _enforceSharedBudget({required int usage}) async {
+    if (await NewsCacheLease.disabledMarker(_root!).exists()) return;
+    if (_index!.isEmpty) return;
+    final keepId = _index!.entries.reduce((a, b) =>
+        a.value.lastAccess.isAfter(b.value.lastAccess) ? a : b).key;
+    var excess = usage - TemporaryCacheBudget.limitBytes;
+    final candidates = _index!.entries.where((entry) => entry.key != keepId).toList()
+      ..sort((a, b) => a.value.lastAccess.compareTo(b.value.lastAccess));
+    var changed = false;
+    for (final candidate in candidates) {
+      if (excess <= 0) break;
+      if (await NewsCacheLease.disabledMarker(_root!).exists()) return;
+      final size = candidate.value.bytes;
+      await _removeEntry(candidate.key);
+      excess -= size;
+      changed = true;
+    }
+    if (changed) await _persistIndex();
   }
 
   Future<void> _removeEntry(String id) async {

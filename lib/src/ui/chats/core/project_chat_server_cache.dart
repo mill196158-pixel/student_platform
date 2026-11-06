@@ -1,22 +1,58 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
 import 'package:student_platform/src/core/offline_policy_grant.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
+import 'package:student_platform/src/core/guarded_database.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
 
 /// A separate local DB. Transactions ensure incomplete writes do not become
 /// visible after a crash. This is not an offline authorization mechanism.
+class _DatabaseAppGuard {
+  _DatabaseAppGuard(this.token, this.file);
+  final String token;
+  final RandomAccessFile file;
+}
+
+final Map<Database, _DatabaseAppGuard> _databaseAppGuards = {};
+
+@visibleForTesting
+String? debugProjectChatDatabaseGuard(Database db) => _databaseAppGuards[db]?.token;
+
+@visibleForTesting
+Future<void> debugAbandonProjectChatDatabase(Database db) async {
+  final guard = _databaseAppGuards.remove(db);
+  if (guard == null) return;
+  if (db is GuardedDatabase) await db.inner.close();
+  await guard.file.unlock();
+  await guard.file.close();
+}
+
+String _newGuardToken() {
+  final random = Random.secure();
+  return base64UrlEncode(List<int>.generate(32, (_) => random.nextInt(256)));
+}
+
 Future<Database> openProjectChatServerDatabase(String path,
     {DatabaseFactory? factory}) async {
-  return (factory ?? databaseFactory).openDatabase(path,
+  final opener = factory ?? databaseFactory;
+  final db = await opener.openDatabase(path,
       options: OpenDatabaseOptions(
           version: 3,
           singleInstance: false,
           onConfigure: (db) async {
+            await db.execute('PRAGMA busy_timeout=3000');
+            // Existing databases are never rewritten or reconfigured here.
+            final tables = await db.rawQuery(
+                "SELECT name FROM sqlite_master WHERE type='table' LIMIT 1");
+            if (tables.isEmpty) {
+              await db.execute('PRAGMA auto_vacuum=INCREMENTAL');
+            }
             final result = await db.rawQuery('PRAGMA journal_mode=WAL');
             if (result.length != 1 ||
                 result.single.length != 1 ||
@@ -46,6 +82,64 @@ Future<Database> openProjectChatServerDatabase(String path,
           onDowngrade: (_, __, ___) =>
               throw StateError('Unknown chat database version'),
           onOpen: _validateChatSchema));
+  final token = _newGuardToken();
+  RandomAccessFile? guardFile;
+  try {
+    final directory = Directory('${db.path}.guards');
+    if (!await directory.exists()) await directory.create(recursive: true);
+    if (await FileSystemEntity.type(directory.path, followLinks: false) != FileSystemEntityType.directory) {
+      throw StateError('Unsafe cache guard directory');
+    }
+    final marker = File('${directory.path}/$token');
+    await marker.create(exclusive: true);
+    guardFile = await marker.open(mode: FileMode.append);
+    await guardFile.lock(FileLock.exclusive);
+    await guardFile.writeString(token);
+    await guardFile.flush();
+    await db.insert('chat_app_guards', {'token': token, 'project': '*',
+      'uid': pid.toString(), 'sid': '', 'database_token': token});
+    late GuardedDatabase wrapped;
+    wrapped = GuardedDatabase(db, () => _closeProjectChatServerDatabase(wrapped, db, opener));
+    _databaseAppGuards[wrapped] = _DatabaseAppGuard(token, guardFile);
+    return wrapped;
+  } catch (_) {
+    if (guardFile != null) {
+      try { await guardFile.unlock(); } catch (_) {}
+      try { await guardFile.close(); } catch (_) {}
+    }
+    await db.close();
+    rethrow;
+  }
+}
+
+/// Only after all users of this handle have stopped. A process crash leaves
+/// its guard in place and therefore conservatively prevents later eviction.
+Future<void> closeProjectChatServerDatabase(Database db) async {
+  await db.close();
+}
+
+Future<void> _closeProjectChatServerDatabase(Database wrapped, Database db,
+    DatabaseFactory factory) async {
+  final guard = _databaseAppGuards[wrapped];
+  // Keep the guard and FD if close fails: other engines must not evict.
+  await db.close();
+  if (guard != null) {
+    // The old handle is closed; use an unguarded maintenance connection only
+    // to release this exact token. Failure leaves the OS lock held fail-closed.
+    final maintenance = await factory.openDatabase(db.path,
+        options: OpenDatabaseOptions(singleInstance: false));
+    try {
+      await maintenance.transaction((txn) async {
+        await txn.delete('chat_route_leases', where: 'database_token=?', whereArgs: [guard.token]);
+        await txn.delete('chat_app_guards', where: 'database_token=?', whereArgs: [guard.token]);
+      });
+    } finally {
+      await maintenance.close();
+    }
+    _databaseAppGuards.remove(wrapped);
+    await guard.file.unlock();
+    await guard.file.close();
+  }
 }
 
 Future<void> _createAttemptTable(Database db) => db.execute(
@@ -83,6 +177,33 @@ Future<void> _validateChatSchema(Database db) async {
       }
     }
   }
+  // Separate optional metadata: version remains 3 so older clients can still
+  // open their existing snapshots after rollback. No user data is rewritten.
+  await db.execute('CREATE TABLE IF NOT EXISTS chat_snapshot_access ('
+      'project TEXT NOT NULL, uid TEXT NOT NULL, sid TEXT NOT NULL, chat TEXT NOT NULL, '
+      'access_ms INTEGER NOT NULL, PRIMARY KEY(project,uid,sid,chat))');
+  await db.execute('CREATE TABLE IF NOT EXISTS chat_route_leases ('
+      'token TEXT NOT NULL PRIMARY KEY, project TEXT NOT NULL, uid TEXT NOT NULL, '
+      'sid TEXT NOT NULL, chat TEXT NOT NULL, database_token TEXT NOT NULL)');
+  await db.execute('CREATE TABLE IF NOT EXISTS chat_app_guards ('
+      'token TEXT NOT NULL PRIMARY KEY, project TEXT NOT NULL, uid TEXT NOT NULL, sid TEXT NOT NULL, '
+      'database_token TEXT NOT NULL)');
+  for (final entry in <String, List<String>>{
+    'chat_snapshot_access': ['project', 'uid', 'sid', 'chat', 'access_ms'],
+    'chat_route_leases': ['token', 'project', 'uid', 'sid', 'chat', 'database_token'],
+    'chat_app_guards': ['token', 'project', 'uid', 'sid', 'database_token'],
+  }.entries) {
+    final columns = await db.rawQuery('PRAGMA table_info(${entry.key})');
+    if (columns.length != entry.value.length) throw StateError('Invalid chat quota schema');
+    for (var i = 0; i < columns.length; i++) {
+      final column = columns[i];
+      if (column['name'] != entry.value[i] || column['notnull'] != 1 ||
+          column['type'] != (entry.key == 'chat_snapshot_access' && i == 4 ? 'INTEGER' : 'TEXT') ||
+          column['pk'] != (entry.key == 'chat_snapshot_access' ? (i < 4 ? i + 1 : 0) : (i == 0 ? 1 : 0))) {
+        throw StateError('Invalid chat quota schema');
+      }
+    }
+  }
 }
 
 class ProjectChatPageTicket {
@@ -104,6 +225,27 @@ class ChatHideHold {
   final OfflineSessionBinding _binding;
   final String _chat;
   final int _seq;
+}
+
+class ChatHistoryRouteLease {
+  ChatHistoryRouteLease._(this.issuer, this.token, this.project, this.uid, this.sid, this.chat);
+  final Object issuer;
+  final String token, project, uid, sid, chat;
+}
+
+class ChatHistoryAppGuard {
+  ChatHistoryAppGuard._(this.issuer, this.token, this.project, this.uid, this.sid,
+      this.logicalBytesEvicted);
+  final Object issuer;
+  final String token, project, uid, sid;
+  /// Logical payload reduction only; physical DB and WAL may remain unchanged.
+  final int logicalBytesEvicted;
+}
+
+class ChatHistoryCompaction {
+  const ChatHistoryCompaction(this.beforeBytes, this.afterBytes);
+  final int beforeBytes, afterBytes;
+  int get physicallyFreedBytes => beforeBytes > afterBytes ? beforeBytes - afterBytes : 0;
 }
 
 class ProjectChatServerCache {
@@ -132,6 +274,186 @@ class ProjectChatServerCache {
   static void _endSnapshotMutation() { _snapshotMutations--; snapshotChanges.value++; }
   static final Set<String> _eventQuarantine = {};
   static final Map<String, Future<void>> _eventQueues = {};
+
+  Future<void> _touchHistory(Transaction txn, OfflineSessionBinding binding,
+      String chat) => txn.insert('chat_snapshot_access', {
+        'project': project, 'uid': binding.userId, 'sid': binding.sessionId,
+        'chat': chat, 'access_ms': DateTime.now().millisecondsSinceEpoch,
+      }, conflictAlgorithm: ConflictAlgorithm.replace).then((_) {});
+
+  /// Must be acquired before a route reads or displays the cached chat.
+  /// A crash leaves a durable lease and prevents automatic eviction.
+  Future<ChatHistoryRouteLease?> acquireHistoryRouteLease(String chat) async {
+    final owner = scope.capture(), binding = currentBinding();
+    final databaseGuard = _databaseAppGuards[db];
+    if (owner == null || binding == null || chat.isEmpty ||
+        databaseGuard == null || owner.userId != binding.userId || binding.issuer != '$project/auth/v1') return null;
+    bool current() => scope.isCurrent(owner) && _matches(currentBinding(), binding);
+    final token = _newGuardToken();
+    try {
+      return await db.transaction((txn) async {
+        if (!current()) throw const _StalePage();
+        await txn.insert('chat_route_leases', {
+          'token': token, 'project': project, 'uid': binding.userId,
+          'sid': binding.sessionId, 'chat': chat, 'database_token': databaseGuard.token,
+        });
+        if (!current()) throw const _StalePage();
+        return ChatHistoryRouteLease._(_issuer, token, project, binding.userId, binding.sessionId, chat);
+      });
+    } on _StalePage { return null; }
+  }
+
+  Future<void> releaseHistoryRouteLease(ChatHistoryRouteLease lease) async {
+    if (!identical(lease.issuer, _issuer) || lease.project != project) return;
+    await db.delete('chat_route_leases', where: 'token=? AND project=? AND uid=? AND sid=? AND chat=?',
+        whereArgs: [lease.token, lease.project, lease.uid, lease.sid, lease.chat]);
+  }
+
+  // The guard directory is private to the app. Lock files are unique and are
+  // never replaced or deleted. Same-PID guards are never probed because POSIX
+  // advisory locks are process-wide and closing another fd could unlock them.
+  Future<void> _recoverDeadHandles(Transaction txn, List<RandomAccessFile> held) async {
+    final rows = await txn.query('chat_app_guards', columns: ['token', 'uid'],
+        where: 'project=?', whereArgs: ['*']);
+    final directory = Directory('${db.path}.guards');
+    if (await FileSystemEntity.type(directory.path, followLinks: false) !=
+        FileSystemEntityType.directory) return;
+    for (final row in rows) {
+      final token = row['token'], rawPid = row['uid'];
+      if (token is! String || rawPid is! String ||
+          !RegExp(r'^[A-Za-z0-9_-]{43}=$').hasMatch(token)) continue;
+      final ownerPid = int.tryParse(rawPid);
+      if (ownerPid == null || ownerPid <= 0 || ownerPid == pid) continue;
+      final marker = File('${directory.path}/$token');
+      if (await FileSystemEntity.type(marker.path, followLinks: false) !=
+          FileSystemEntityType.file) continue;
+      RandomAccessFile? file;
+      try {
+        file = await marker.open(mode: FileMode.append);
+        await file.lock(FileLock.exclusive);
+        await file.setPosition(0);
+        if (await file.length() != token.length ||
+            utf8.decode(await file.read(token.length)) != token ||
+            await FileSystemEntity.type(marker.path, followLinks: false) != FileSystemEntityType.file) {
+          await file.unlock();
+          await file.close();
+          continue;
+        }
+        held.add(file);
+        file = null;
+        await txn.delete('chat_route_leases', where: 'database_token=?', whereArgs: [token]);
+        await txn.delete('chat_app_guards', where: 'database_token=?', whereArgs: [token]);
+      } catch (_) {
+        if (file != null) {
+          try { await file.unlock(); } catch (_) {}
+          try { await file.close(); } catch (_) {}
+        }
+        // A live process or an unverifiable guard is always retained.
+      }
+    }
+  }
+
+  /// Call before any engine can expose cached chats. All participating
+  /// engines must register a guard; stale guards deliberately stop eviction.
+  Future<ChatHistoryAppGuard?> beginHistoryAppGuard(int targetLogicalBytes,
+      {required bool allEnginesGuarded}) async {
+    final owner = scope.capture(), binding = currentBinding();
+    if (!allEnginesGuarded || targetLogicalBytes < 0 || owner == null || binding == null ||
+        owner.userId != binding.userId || binding.issuer != '$project/auth/v1') return null;
+    bool current() => scope.isCurrent(owner) && _matches(currentBinding(), binding);
+    final databaseGuard = _databaseAppGuards[db];
+    if (databaseGuard == null) return null;
+    final token = _newGuardToken();
+    final recoveredLocks = <RandomAccessFile>[];
+    try {
+      return await db.transaction((txn) async {
+        if (!current()) throw const _StalePage();
+        await _recoverDeadHandles(txn, recoveredLocks);
+        if (!current()) throw const _StalePage();
+        final guards = await txn.query('chat_app_guards', columns: ['token'],
+            where: 'token<>?', whereArgs: [databaseGuard.token], limit: 1);
+        final removed = guards.isEmpty && targetLogicalBytes > 0
+            ? await _evictServerHistory(txn, binding, current, targetLogicalBytes)
+            : 0;
+        await txn.insert('chat_app_guards', {'token': token, 'project': project,
+          'uid': binding.userId, 'sid': binding.sessionId, 'database_token': databaseGuard.token});
+        if (!current()) throw const _StalePage();
+        return ChatHistoryAppGuard._(_issuer, token, project, binding.userId,
+            binding.sessionId, removed);
+      });
+    } on _StalePage { return null; }
+    finally {
+      for (final file in recoveredLocks) {
+        try { await file.unlock(); } catch (_) {}
+        try { await file.close(); } catch (_) {}
+      }
+    }
+  }
+
+  Future<void> releaseHistoryAppGuard(ChatHistoryAppGuard guard) async {
+    if (!identical(guard.issuer, _issuer) || guard.project != project) return;
+    await db.delete('chat_app_guards', where: 'token=? AND project=? AND uid=? AND sid=?',
+        whereArgs: [guard.token, guard.project, guard.uid, guard.sid]);
+  }
+
+  /// Optional maintenance for newly created incremental-vacuum databases.
+  /// Existing databases never undergo a full VACUUM or schema rewrite.
+  Future<ChatHistoryCompaction?> compactHistory(ChatHistoryAppGuard guard) async {
+    if (!identical(guard.issuer, _issuer) || guard.project != project) return null;
+    final owner = scope.capture(), binding = currentBinding();
+    if (owner == null || binding == null || owner.userId != guard.uid ||
+        binding.userId != guard.uid || binding.sessionId != guard.sid ||
+        binding.issuer != '$project/auth/v1') return null;
+    bool current() => scope.isCurrent(owner) && _matches(currentBinding(), binding);
+    Future<int> physicalBytes() async {
+      var total = 0;
+      for (final suffix in ['', '-wal', '-shm']) {
+        final file = File('${db.path}$suffix');
+        if (await file.exists()) total += (await file.stat()).size;
+      }
+      return total;
+    }
+    try {
+      final guards = await db.query('chat_app_guards', columns: ['token']);
+      final databaseGuard = _databaseAppGuards[db];
+      final guardTokens = guards.map((row) => row['token']).toSet();
+      if (!current() || databaseGuard == null || guards.length != 2 ||
+          !guardTokens.contains(databaseGuard.token) || !guardTokens.contains(guard.token)) return null;
+      final mode = await db.rawQuery('PRAGMA auto_vacuum');
+      if (mode.length != 1 || mode.single.values.single != 2) return null;
+      final before = await physicalBytes();
+      await db.execute('PRAGMA incremental_vacuum');
+      if (!current()) return null;
+      await db.rawQuery('PRAGMA wal_checkpoint(TRUNCATE)');
+      if (!current()) return null;
+      final after = await physicalBytes();
+      return ChatHistoryCompaction(before, after);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<int> _evictServerHistory(Transaction txn, OfflineSessionBinding binding,
+      bool Function() current, int targetLogicalBytes) async {
+        final rows = await txn.rawQuery('SELECT s.chat, s.payload FROM chat_server_snapshot s '
+            'JOIN chat_snapshot_access a ON s.project=a.project AND s.uid=a.uid AND s.sid=a.sid AND s.chat=a.chat '
+            'WHERE s.project=? AND s.uid=? AND s.sid=? AND s.chat<>? '
+            'AND NOT EXISTS (SELECT 1 FROM chat_route_leases l WHERE l.project=s.project AND l.uid=s.uid AND l.sid=s.sid AND l.chat=s.chat) '
+            'ORDER BY a.access_ms ASC, s.chat ASC', [project, binding.userId, binding.sessionId, summaryChatKey]);
+        var removed = 0;
+        for (final row in rows) {
+          if (removed >= targetLogicalBytes) break;
+          if (!current()) throw const _StalePage();
+          final chat = row['chat'], payload = row['payload'];
+          if (chat is! String || payload is! String) continue;
+          final args = [project, binding.userId, binding.sessionId, chat];
+          await txn.delete('chat_server_snapshot', where: 'project=? AND uid=? AND sid=? AND chat=?', whereArgs: args);
+          await txn.delete('chat_snapshot_access', where: 'project=? AND uid=? AND sid=? AND chat=?', whereArgs: args);
+          removed += utf8.encode(payload).length;
+        }
+        if (!current()) throw const _StalePage();
+        return removed;
+  }
   String _eventKey(OfflineSessionBinding b, String chat) =>
       jsonEncode([project, b.userId, b.sessionId, chat]);
 
@@ -300,6 +622,7 @@ class ProjectChatServerCache {
               'payload': payload
             },
             conflictAlgorithm: ConflictAlgorithm.replace);
+        await _touchHistory(txn, b, t._chat);
         if (kDebugMode && debugBeforePageCommit != null) await debugBeforePageCommit!();
         if (!_current(t)) throw const _StalePage();
         return true;
@@ -626,7 +949,11 @@ class ProjectChatServerCache {
           whereArgs: args);
       if (!valid() || rows.length != 1 || rows.single['payload'] is! String)
         return null;
-      return _parse(rows.single['payload'] as String, chat);
+      final parsed = _parse(rows.single['payload'] as String, chat);
+      if (parsed == null || !valid()) return null;
+      await _touchHistory(txn, binding, chat);
+      if (!valid()) return null;
+      return parsed;
     });
   }
 }

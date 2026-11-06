@@ -33,6 +33,9 @@ import 'chat/edit_message_dialog.dart';
 import 'chat/photo_send_choice.dart';
 // ChatActions приходит через реэкспорт из widgets.dart
 import '../global_cache.dart';
+import '../account_draft_store.dart';
+import '../draft_session_owner.dart';
+import '../draft_recovery_journal.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:super_clipboard/super_clipboard.dart';
@@ -409,6 +412,18 @@ class _ChatTabState extends State<ChatTab> {
 
   // Глобальный кэш
   final GlobalCache _globalCache = GlobalCache();
+  final _accountDraftStore = AccountDraftStore();
+  DraftSessionOwner? _draftOwner;
+  AccountDraftWriter? _draftWriter;
+  int _draftRevision = 0;
+  bool _draftHydrating = false;
+  bool _draftReady = false;
+  bool _draftPreparing = false;
+  bool _draftError = false;
+  bool _legacyDraftAvailable = false;
+  Map<String, dynamic>? _recoveredScopedDraft;
+  final _recoveryJournal = DraftRecoveryJournal();
+  List<Map<String, dynamic>> _recoveryDrafts = const [];
   String? _lastAutoScrollTarget;
   String? _lastMarkedReadId; // ➜ NEW: чтобы не спамить RPC
   Timer? _seenDebounce; // ➜ NEW: debounce для автопрочтения
@@ -561,7 +576,13 @@ class _ChatTabState extends State<ChatTab> {
         capabilities: SessionCapabilitiesHost.maybeRead(context),
         rotationReceipt: QaRotationNavigationGuard.maybeRead(context))
       ..addListener(() {
-        if (mounted) setState(() {});
+        if (mounted) {
+          setState(() {});
+          if (!_draftHydrating) {
+            _draftRevision++;
+            _saveDraftDebounced();
+          }
+        }
       });
     _repo = ChatRepository(
         supabase: Supabase.instance.client, fileService: _fileService);
@@ -643,17 +664,7 @@ class _ChatTabState extends State<ChatTab> {
       // Получаем ID чата из TeamCubit
       final teamId = context.read<TeamCubit>().state.team.id;
       _currentChatId = teamId;
-      _restoreDraft();
-      final outbox = ForwardOutbox.capture(context);
-      () async {
-        final chatId = await _getChatIdForTeam(teamId);
-        if (!mounted) return;
-        if (chatId.isNotEmpty) {
-          _trackedChatId = chatId;
-          ActiveChatTracker.instance.enter(chatId);
-        }
-        await _consumeForwardOutboxIfAny(chatId, outbox, fromInitialization: true);
-      }();
+      unawaited(_initDraftAndForward());
 
       // Асинхронно фиксируем «границу на входе» по last_read_at / first_unread_id
       _initEntryBoundary();
@@ -683,6 +694,8 @@ class _ChatTabState extends State<ChatTab> {
     } catch (_) {}
     // Принудительно сохраняем черновик перед уничтожением
     _forceSaveDraft();
+    _draftOwner?.changes.removeListener(_onDraftOwnerChanged);
+    _draftWriter?.close();
 
     // Попробуем гарантированно скрыть системную клавиатуру
     try {
@@ -1125,6 +1138,8 @@ class _ChatTabState extends State<ChatTab> {
   }
 
   void _onMyTyping() {
+    if (_draftHydrating) return;
+    _draftRevision++;
     // Обновляем typing без setState для избежания лишних обновлений
     _typingUsers.add('Вы');
     _myTypingOff?.cancel();
@@ -1232,7 +1247,7 @@ class _ChatTabState extends State<ChatTab> {
 
   // Сохраняем черновик в глобальный кэш
   Future<void> _saveDraft() async {
-    if (_currentChatId != null) {
+    if (_currentChatId != null && _draftReady) {
       final filesData = _att.pending
           .map((f) => {
                 'localId': f.localId,
@@ -1248,60 +1263,213 @@ class _ChatTabState extends State<ChatTab> {
               })
           .toList();
 
-      await _globalCache.saveDraft(_currentChatId!, _ctrl.text, filesData);
+      _draftWriter?.save({
+        'text': _ctrl.text,
+        'files': filesData,
+        'reply': _replyTo?.toJson(),
+        if (_recoveredScopedDraft != null) 'previous': _recoveredScopedDraft,
+      });
       safeDebugLog(
           '[ChatTab] draft saved chat=${maskDebugId(_currentChatId)} files=${filesData.length} hasText=${_ctrl.text.trim().isNotEmpty}');
     }
   }
 
   // Восстанавливаем черновик из глобального кэша
-  void _restoreDraft() {
-    if (_currentChatId != null) {
-      final draft = _globalCache.getDraft(_currentChatId!);
-      if (draft != null) {
-        final (text, filesData) = draft;
-        _ctrl.text = text;
-        _att.pending.clear();
-
-        for (final fileData in filesData) {
-          final uploadedFileId = fileData['uploadedFileId'] as String?;
-          final restoredStatus = (uploadedFileId?.isNotEmpty ?? false)
-              ? LocalAttachUploadStatus.uploaded
-              : LocalAttachUploadStatus.failed;
-          _att.pending.add(LocalAttach(
-            localId: fileData['localId'] as String?,
-            path: fileData['path'] as String? ?? '',
-            name: fileData['name'] as String? ?? '',
-            mimeType: fileData['mimeType'] as String? ?? '',
-            size: fileData['size'] as int? ?? 0,
-            isImage: fileData['isImage'] as bool? ?? false,
-            preserveOriginal: fileData['preserveOriginal'] as bool? ?? true,
-            uploadStatus: restoredStatus,
-            progress:
-                restoredStatus == LocalAttachUploadStatus.uploaded ? 1 : 0,
-            errorMessage: restoredStatus == LocalAttachUploadStatus.failed
-                ? 'Не удалось загрузить'
-                : null,
-            uploadedFileId: uploadedFileId,
-          ));
-        }
-
-        safeDebugLog(
-            '[ChatTab] draft restored chat=${maskDebugId(_currentChatId)} files=${filesData.length} hasText=${text.trim().isNotEmpty}');
-
-        if (mounted) {
-          setState(
-              () {}); // Обновляем UI для отображения восстановленных файлов
-        }
-      }
+  void _onDraftOwnerChanged() {
+    final owner = _draftOwner, chat = _currentChatId;
+    if (mounted && owner != null && chat != null && owner.canRead) {
+      unawaited(_loadRecoveryDrafts(owner, chat));
     }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _initDraftAndForward() async {
+    if (!mounted || _currentChatId == null) return;
+    final teamId = _currentChatId!;
+    final outbox = ForwardOutbox.capture(context);
+    if (!await _restoreDraft() || !mounted) return;
+    final chatId = await _getChatIdForTeam(teamId);
+    if (!mounted || _currentChatId != teamId) return;
+    if (chatId.isNotEmpty) {
+      _trackedChatId = chatId;
+      ActiveChatTracker.instance.enter(chatId);
+    }
+    await _consumeForwardOutboxIfAny(chatId, outbox, fromInitialization: true);
+  }
+
+  bool _draftUnavailable() {
+    if (mounted) setState(() => _draftError = true);
+    return false;
+  }
+
+  Future<bool> _restoreDraft() async {
+    if (_draftPreparing) return false;
+    _draftPreparing = true;
+    try {
+    if (_currentChatId != null) {
+      final revision = _draftRevision;
+      final scope = AuthSessionScopeHost.maybeRead(context);
+      if (scope == null) return _draftUnavailable();
+      try {
+        await scope.ready.timeout(const Duration(seconds: 3));
+      } catch (_) { return _draftUnavailable(); }
+      if (!mounted) return false;
+      if (_draftOwner != null && !_draftOwner!.canRead) return _draftUnavailable();
+      final owner = _draftOwner ?? DraftSessionOwner.capture(scope);
+      if (owner == null || !owner.canRead) return _draftUnavailable();
+      if (_draftOwner == null) owner.changes.addListener(_onDraftOwnerChanged);
+      _draftOwner = owner;
+      _draftWriter ??= AccountDraftWriter(_accountDraftStore, owner, _currentChatId!,
+          onFailure: () {
+            if (mounted) ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+              const SnackBar(content: Text('Не удалось сохранить черновик. Попробуйте ещё раз.')));
+          }, onJournalFailure: () {
+            if (mounted) ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+              const SnackBar(content: Text('Не удалось сохранить резервный черновик: хранилище заполнено или недоступно.')));
+          });
+      unawaited(_loadRecoveryDrafts(owner, _currentChatId!));
+      final Map<String, dynamic>? draft;
+      try {
+        draft = await _accountDraftStore.read(owner.project, owner.userId,
+            _currentChatId!, () => owner.canRead);
+      } catch (_) { return _draftUnavailable(); }
+      if (!mounted) return false;
+      if (!owner.canRead) return _draftUnavailable();
+      if (_draftRevision != 0 || _draftRevision != revision) {
+        // The user started typing before I/O completed. Keep their new input
+        // and retain the earlier snapshot for explicit recovery.
+        _recoveredScopedDraft = draft;
+        if (mounted) setState(() { _draftReady = true; _draftError = false; });
+        await _saveDraft();
+        return true;
+      }
+      if (draft != null) {
+        _applyAccountDraft(draft);
+        final previous = draft['previous'];
+        if (previous is Map) _recoveredScopedDraft = Map<String, dynamic>.from(previous);
+      } else {
+        _legacyDraftAvailable = _globalCache.getDraft(_currentChatId!) != null;
+      }
+      if (mounted) setState(() { _draftReady = true; _draftError = false; });
+      return true;
+    }
+    return false;
+    } finally { _draftPreparing = false; }
+  }
+
+  void _applyAccountDraft(Map<String, dynamic> draft) {
+    final text = draft['text'] is String ? draft['text'] as String : '';
+    final files = (draft['files'] as List? ?? const []).whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e)).toList();
+    _draftHydrating = true;
+    try {
+      final reply = draft['reply'];
+      if (reply is Map) {
+        try { _replyTo = Message.fromJson(Map<String, dynamic>.from(reply)); } catch (_) {}
+      }
+      _ctrl.text = text;
+      _att.pending
+        ..clear()
+        ..addAll(files.map((file) {
+          final uploadedId = file['uploadedFileId'] as String?;
+          final uploaded = uploadedId?.isNotEmpty ?? false;
+          return LocalAttach(localId: file['localId'] as String?,
+              path: file['path'] as String? ?? '', name: file['name'] as String? ?? '',
+              mimeType: file['mimeType'] as String? ?? '', size: file['size'] as int? ?? 0,
+              isImage: file['isImage'] as bool? ?? false,
+              preserveOriginal: file['preserveOriginal'] as bool? ?? true,
+              uploadStatus: uploaded ? LocalAttachUploadStatus.uploaded : LocalAttachUploadStatus.failed,
+              progress: uploaded ? 1 : 0, errorMessage: uploaded ? null : 'Не удалось загрузить',
+              uploadedFileId: uploadedId);
+        }));
+    } finally { _draftHydrating = false; }
+  }
+
+  Future<void> _importLegacyDraft() async {
+    final owner = _draftOwner, conversation = _currentChatId;
+    if (owner == null || conversation == null || !owner.canRead) return;
+    if (_ctrl.text.isNotEmpty || _att.pending.isNotEmpty || _replyTo != null) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
+          content: Text('Сначала сохраните или очистите текущий черновик.')));
+      return;
+    }
+    final revision = _draftRevision;
+    final prior = await _accountDraftStore.read(owner.project, owner.userId,
+        conversation, () => owner.canRead);
+    if (!mounted || !owner.canRead || prior != null || _draftRevision != revision ||
+        _ctrl.text.isNotEmpty || _att.pending.isNotEmpty || _replyTo != null) return;
+    final legacy = _globalCache.getDraft(conversation);
+    if (legacy == null) return;
+    _applyAccountDraft({'text': legacy.$1, 'files': legacy.$2, 'reply': null});
+    setState(() => _legacyDraftAvailable = false);
+    await _saveDraft();
+  }
+
+  Future<void> _restorePreviousAccountDraft() async {
+    final owner = _draftOwner, conversation = _currentChatId;
+    final previous = _recoveredScopedDraft;
+    if (owner == null || conversation == null || previous == null || !owner.canRead) return;
+    if (_ctrl.text.isNotEmpty || _att.pending.isNotEmpty || _replyTo != null) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
+          content: Text('Сначала сохраните или очистите текущий черновик.')));
+      return;
+    }
+    final revision = _draftRevision;
+    final latest = await _accountDraftStore.read(owner.project, owner.userId,
+        conversation, () => owner.canRead);
+    if (!mounted || !owner.canRead || revision != _draftRevision ||
+        _ctrl.text.isNotEmpty || _att.pending.isNotEmpty || _replyTo != null ||
+        jsonEncode(latest?['previous']) != jsonEncode(previous)) return;
+    _applyAccountDraft(previous);
+    setState(() => _recoveredScopedDraft = null);
+    await _saveDraft();
+  }
+
+  Future<void> _loadRecoveryDrafts(DraftSessionOwner owner, String chat) async {
+    try {
+      final entries = await _recoveryJournal.pending(project: owner.project,
+          owner: owner.userId, conversation: chat, permitted: () => owner.canRead);
+      if (mounted && owner.canRead && _currentChatId == chat) {
+        setState(() => _recoveryDrafts = entries);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _restoreRecoveryDraft() async {
+    final owner = _draftOwner, chat = _currentChatId;
+    if (owner == null || chat == null || !owner.canRead || _recoveryDrafts.isEmpty) return;
+    if (_recoveredScopedDraft != null || _ctrl.text.isNotEmpty ||
+        _att.pending.isNotEmpty || _replyTo != null) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
+          content: Text('Сначала сохраните или очистите текущий черновик.')));
+      return;
+    }
+    final item = _recoveryDrafts.first;
+    final raw = item['draft'];
+    final id = item['operation_id'];
+    if (raw is! Map || id is! String) return;
+    final revision = _draftRevision;
+    final snapshot = Map<String, dynamic>.from(raw);
+    final saved = await _accountDraftStore.write(owner.project, owner.userId,
+        chat, snapshot, () => owner.canSave);
+    if (!saved || !mounted || !owner.canRead || revision != _draftRevision ||
+        _recoveredScopedDraft != null ||
+        _ctrl.text.isNotEmpty || _att.pending.isNotEmpty || _replyTo != null) return;
+    _applyAccountDraft(snapshot);
+    setState(() {});
+    await _recoveryJournal.markResolved(project: owner.project, owner: owner.userId,
+        conversation: chat, operationId: id, permitted: () => owner.canSave);
+    if (mounted && owner.canRead) await _loadRecoveryDrafts(owner, chat);
   }
 
   // Очищаем черновик
   Future<void> _clearDraft() async {
-    if (_currentChatId != null) {
-      await _globalCache.clearDraft(_currentChatId!);
+    if (_ctrl.text.isNotEmpty || _att.pending.isNotEmpty || _replyTo != null) {
+      await _saveDraft();
+      return;
     }
+    _draftWriter?.save({'text': '', 'files': [], 'reply': null,
+      if (_recoveredScopedDraft != null) 'previous': _recoveredScopedDraft});
   }
 
   void _send(BuildContext context) async {
@@ -1872,6 +2040,21 @@ class _ChatTabState extends State<ChatTab> {
 
           return Column(
             children: [
+              if (!readOnly && !_selectingMessages && _draftReady &&
+                  (_draftOwner?.canRead ?? false) && _legacyDraftAvailable)
+                TextButton(onPressed: () => unawaited(_importLegacyDraft()),
+                    child: const Text('Восстановить прежний черновик')),
+              if (!readOnly && !_selectingMessages && _draftReady &&
+                  (_draftOwner?.canRead ?? false) && _recoveredScopedDraft != null)
+                TextButton(onPressed: () => unawaited(_restorePreviousAccountDraft()),
+                    child: const Text('Восстановить сохранённый черновик')),
+              if (!readOnly && !_selectingMessages && _draftReady &&
+                  (_draftOwner?.canRead ?? false) && _recoveryDrafts.isNotEmpty)
+                TextButton(onPressed: () => unawaited(_restoreRecoveryDraft()),
+                    child: const Text('Восстановить несохранённый черновик')),
+              if (!readOnly && !_selectingMessages && _draftError)
+                TextButton(onPressed: () => unawaited(_initDraftAndForward()),
+                    child: const Text('Черновик пока не сохраняется. Повторить')),
               if (_selectingMessages)
                 TopSelectionBar(
                   count: _selectedMessageIds.length,
@@ -1980,10 +2163,12 @@ class _ChatTabState extends State<ChatTab> {
                           onRevealBlockedMessage: (id) {
                             setState(() => _revealedBlockedMessageIds.add(id));
                           },
-                          onReply: readOnly
+                          onReply: readOnly || !_draftReady || !(_draftOwner?.canRead ?? false)
                               ? (_) {}
                               : (m) {
                                   setState(() => _replyTo = m);
+                                  _draftRevision++;
+                                  _saveDraftDebounced();
                                 },
                           onLongPress: readOnly
                               ? (_, __, ___, ____, _____, ______) {}
@@ -2103,6 +2288,11 @@ class _ChatTabState extends State<ChatTab> {
                     );
                   },
                 )
+              else if (!readOnly && _draftOwner != null && !(_draftOwner?.canRead ?? false))
+                TextButton(
+                  onPressed: () => unawaited(_initDraftAndForward()),
+                  child: const Text('Подготовить черновик'),
+                )
               else if (!readOnly)
                 ChatComposerBar(
                   controller: _ctrl,
@@ -2110,6 +2300,8 @@ class _ChatTabState extends State<ChatTab> {
                   replyTo: _replyTo,
                   onCloseReply: () {
                     setState(() => _replyTo = null);
+                    _draftRevision++;
+                    _saveDraftDebounced();
                   },
                   forwardCount: _forwardPackageAttached
                       ? (_stagedForward?.items.length ??
@@ -2327,6 +2519,8 @@ class _ChatTabState extends State<ChatTab> {
         onReply: () {
           _replyTo = m;
           setState(() {});
+          _draftRevision++;
+          _saveDraftDebounced();
         },
         onForward: () async {
           await _startForwardSelection(<Message>[m]);
@@ -2350,6 +2544,8 @@ class _ChatTabState extends State<ChatTab> {
     switch (action) {
       case 'Ответить':
         setState(() => _replyTo = m);
+        _draftRevision++;
+        _saveDraftDebounced();
         break;
       case 'Скопировать':
         final text = ChatCardPreview.forMessage(m).trim();
@@ -3269,12 +3465,16 @@ class _ChatTabState extends State<ChatTab> {
   void _onReply(Message message) {
     _replyTo = message;
     setState(() {});
+    _draftRevision++;
+    _saveDraftDebounced();
   }
 
   // Обработка закрытия ответа
   void _onCloseReply() {
     _replyTo = null;
     setState(() {});
+    _draftRevision++;
+    _saveDraftDebounced();
   }
 
   // Обработка прыжка вниз

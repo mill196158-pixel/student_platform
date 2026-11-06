@@ -22,6 +22,33 @@ class ChatMessageCacheStore {
   static SharedPreferences? _prefs;
   // In-flight cold reads must not repopulate memory after it is cleared.
   static int _memoryEpoch = 0;
+  // SharedPreferences persists asynchronously. Serialize mutations so an
+  // older snapshot cannot complete after a newer one or after a clear.
+  static Future<void> _pendingClear = Future<void>.value();
+  static final Map<String, Future<void>> _pendingPersistence = {};
+
+  static Future<void> _serializePersistence(
+      String key, Future<void> Function() action) {
+    final previous = _pendingPersistence[key] ?? Future<void>.value();
+    final operation = Future.wait([_pendingClear, previous]).then((_) => action());
+    final settled = operation.then<void>((_) {},
+        onError: (Object _, StackTrace __) {});
+    _pendingPersistence[key] = settled;
+    settled.then((_) {
+      if (identical(_pendingPersistence[key], settled)) {
+        _pendingPersistence.remove(key);
+      }
+    });
+    return operation;
+  }
+
+  static Future<void> _serializeClearAll(Future<void> Function() action) {
+    final operation = Future.wait([_pendingClear, ..._pendingPersistence.values])
+        .then((_) => action());
+    _pendingClear = operation.then<void>((_) {},
+        onError: (Object _, StackTrace __) {});
+    return operation;
+  }
 
   /// Test hook: inject prefs (or clear with null).
   static void debugSetPrefs(SharedPreferences? prefs) {
@@ -359,12 +386,14 @@ class ChatMessageCacheStore {
     if (uid == null || chatId.isEmpty) return;
     _memoryEpoch++;
     _memory.remove(_memKey(uid, chatId));
-    try {
-      final prefs =
-          _prefsOverride ?? _prefs ?? await SharedPreferences.getInstance();
-      _prefs ??= prefs;
-      await prefs.remove(_prefsKey(uid, chatId));
-    } catch (_) {}
+    await _serializePersistence(_prefsKey(uid, chatId), () async {
+      try {
+        final prefs =
+            _prefsOverride ?? _prefs ?? await SharedPreferences.getInstance();
+        _prefs ??= prefs;
+        await prefs.remove(_prefsKey(uid, chatId));
+      } catch (_) {}
+    });
   }
 
   /// Clear in-memory maps for the current (or given) user. Persistent keys for
@@ -387,16 +416,18 @@ class ChatMessageCacheStore {
 
   /// Remove all versioned prefs envelopes (all users on this device).
   static Future<void> clearAllPersistent() async {
-    try {
-      final prefs =
-          _prefsOverride ?? _prefs ?? await SharedPreferences.getInstance();
-      _prefs ??= prefs;
-      final keys =
-          prefs.getKeys().where((k) => k.startsWith(_prefsPrefix)).toList();
-      for (final key in keys) {
-        await prefs.remove(key);
-      }
-    } catch (_) {}
+    await _serializeClearAll(() async {
+      try {
+        final prefs =
+            _prefsOverride ?? _prefs ?? await SharedPreferences.getInstance();
+        _prefs ??= prefs;
+        final keys =
+            prefs.getKeys().where((k) => k.startsWith(_prefsPrefix)).toList();
+        for (final key in keys) {
+          await prefs.remove(key);
+        }
+      } catch (_) {}
+    });
   }
 
   static Future<void> clearOnLogout() async {
@@ -410,15 +441,17 @@ class ChatMessageCacheStore {
     String chatId,
     ChatCacheSnapshot snap,
   ) async {
-    try {
-      final prefs =
-          _prefsOverride ?? _prefs ?? await SharedPreferences.getInstance();
-      _prefs ??= prefs;
-      await prefs.setString(
-        _prefsKey(userId, chatId),
-        jsonEncode(_toEnvelope(userId, chatId, snap)),
-      );
-    } catch (_) {}
+    await _serializePersistence(_prefsKey(userId, chatId), () async {
+      try {
+        final prefs =
+            _prefsOverride ?? _prefs ?? await SharedPreferences.getInstance();
+        _prefs ??= prefs;
+        await prefs.setString(
+          _prefsKey(userId, chatId),
+          jsonEncode(_toEnvelope(userId, chatId, snap)),
+        );
+      } catch (_) {}
+    });
   }
 
   static Map<String, dynamic> _toEnvelope(

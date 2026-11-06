@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart'
-    show kReleaseMode, kIsWeb, defaultTargetPlatform, TargetPlatform;
+    show kReleaseMode, kIsWeb, defaultTargetPlatform, TargetPlatform, visibleForTesting;
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -42,6 +42,8 @@ import 'src/core/sqlite_policy_grant_store.dart';
 import 'src/core/coordinated_refresh_client.dart';
 import 'src/core/refresh_security_fence.dart';
 import 'src/core/offline_startup_admission.dart';
+import 'src/core/local_snapshot_startup.dart';
+import 'src/core/auth_session.dart';
 import 'src/core/refresh_policy_grant_observer.dart';
 import 'src/core/settled_policy_transport.dart';
 import 'src/core/auth_transition_host.dart';
@@ -85,16 +87,77 @@ OfflineStartupAdmission? _policyQaAdmission;
 RefreshPolicyGrantObserver? _qaRefreshGrantObserver;
 RefreshAdmissionClient? _qaRefreshGate;
 HomeContentCoordinator? _qaHomeContent;
+LocalSnapshotStartup? _ordinarySnapshotStartup;
+VoidCallback? _ordinaryRejectHeldGate;
+http.Client? _debugOrdinaryHttp;
+String? _debugOrdinaryDatabasePath;
+sqlite.DatabaseFactory? _debugOrdinaryDatabaseFactory;
+void Function(sqlite.Database)? _debugChatDatabaseOpened;
+final _ordinaryStartupPending = ValueNotifier<bool>(false);
+final _ordinaryRouteRefresh = ValueNotifier<int>(0);
+bool _ordinaryCacheUnavailable = false;
+bool _ordinaryCleanColdStart = true;
+bool get _ordinaryOffline => !_ordinaryCacheUnavailable && !_sqlitePolicyQa && !kIsWeb &&
+    (defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS);
+@visibleForTesting
+bool get debugOrdinaryOfflineEnabled => _ordinaryOffline;
+
+void _watchOrdinaryScope(AuthSessionScope scope) {
+  var previous = scope.capture();
+  var hadSession = Supabase.instance.client.auth.currentSession != null;
+  scope.addListener(() {
+    final current = scope.capture();
+    final hasSession = Supabase.instance.client.auth.currentSession != null;
+    final signedOut = hadSession && !hasSession;
+    hadSession = hasSession;
+    if (signedOut) {
+      _ordinaryRejectHeldGate?.call();
+      scheduleMicrotask(() {
+        if (Supabase.instance.client.auth.currentSession == null) appRouter.go('/guest');
+      });
+    }
+    if (current == previous) return;
+    previous = current;
+    _ordinaryRouteRefresh.value++;
+  });
+}
+
+@visibleForTesting
+void debugConfigureOrdinaryOffline({
+  required AuthSessionScope scope,
+  required LocalSnapshotStartup startup,
+  required ProjectChatServerCache chatCache,
+}) {
+  assert(!kReleaseMode);
+  _policyQaScope = scope;
+  _watchOrdinaryScope(scope);
+  _ordinarySnapshotStartup = startup;
+  ProjectChatServerCache.qaInstance = chatCache;
+  _ordinaryStartupPending.value = scope.capture() != null;
+}
+
+@visibleForTesting
+Future<void> debugInitializeOrdinaryApp({required http.Client client,
+    required String databasePath, required sqlite.DatabaseFactory databaseFactory,
+    void Function(sqlite.Database)? onChatDatabaseOpened}) async {
+  assert(!kReleaseMode);
+  _debugOrdinaryHttp = client;
+  _debugOrdinaryDatabasePath = databasePath;
+  _debugOrdinaryDatabaseFactory = databaseFactory;
+  _debugChatDatabaseOpened = onChatDatabaseOpened;
+  await _initializeApp((_) {}, initializeTheme: false);
+}
 
 /// ===== GoRouter =====
 final GoRouter appRouter = GoRouter(
   navigatorKey: rootNavigatorKey,
   initialLocation: '/splash',
+  refreshListenable: _ordinaryRouteRefresh,
   observers: [routeObserver],
   redirect: (context, state) {
     final caps = SessionCapabilitiesHost.maybeRead(context);
-    if (_sqlitePolicyQa &&
-        _offlineUiQa &&
+    if (((_sqlitePolicyQa && _offlineUiQa) || _ordinaryOffline) &&
         caps?.mode == SessionCapabilityMode.cacheOnly) {
       return state.uri.path == '/home' || state.uri.path == '/splash'
           ? null
@@ -106,42 +169,103 @@ final GoRouter appRouter = GoRouter(
       hasSession: () => client.auth.currentSession != null,
       currentAccess: () =>
           context.mounted ? OfflinePolicyGrantHost.maybeRead(context) : null,
+      onAllowed: !_ordinaryOffline ? null : (owner) {
+        final caps = SessionCapabilitiesHost.maybeRead(context);
+        if (caps == null || caps.capture(SessionCapability.networkRead) != null) return;
+        final attempt = caps.beginAuthorization(owner);
+        if (attempt != null) caps.grant(SessionCapabilityMode.online, attempt);
+      },
     );
   },
   routes: [
     GoRoute(
       path: '/splash',
       builder: (context, state) {
-        final manualRetry = state.uri.queryParameters['retry'] == '1';
+        final manualRetry = state.uri.queryParameters['retry'] == '1' &&
+            !(_ordinaryOffline && state.uri.queryParameters['offline'] == '1' &&
+                _ordinarySnapshotStartup != null);
         final networkUnavailable = state.uri.queryParameters['offline'] == '1';
         final admission = _offlineUiQa ? _policyQaAdmission : null;
+        final localAdmission = _ordinaryOffline ? _ordinarySnapshotStartup : null;
         final caps = SessionCapabilitiesHost.maybeRead(context);
         return SplashScreen(
             key: ValueKey('$manualRetry:$networkUnavailable'),
             manualRetry: manualRetry,
             initialNetworkUnavailable: networkUnavailable,
-            qaAdmission: admission == null || caps == null
-                ? null
-                : () => admission.resolve(caps));
+            qaAdmission: caps == null ? null : admission != null
+                ? () => admission.resolve(caps)
+                : localAdmission == null ? null : () async {
+                    try {
+                      final result = await localAdmission.resolve(caps);
+                      if (result == OfflineStartupResult.denied ||
+                          result == OfflineStartupResult.passwordChangeRequired) {
+                        _ordinaryRejectHeldGate?.call();
+                      }
+                      return result;
+                    }
+                    finally { _ordinaryStartupPending.value = false; }
+                  });
       },
     ),
     GoRoute(
       path: '/login',
-      builder: (_, state) => AuthenticateScreen(
-        key: ValueKey(state.uri.queryParameters['mode']),
-        initialRegister: state.uri.queryParameters['mode'] == 'register',
-      ),
+      builder: (_, state) {
+        if (_ordinaryOffline) _ordinaryCleanColdStart = false;
+        return AuthenticateScreen(
+          key: ValueKey(state.uri.queryParameters['mode']),
+          initialRegister: state.uri.queryParameters['mode'] == 'register',
+        );
+      },
     ),
     GoRoute(
       path: '/guest',
-      builder: (_, __) =>
-          const NavigationScreen(key: ValueKey('guest-shell'), guest: true),
+      builder: (_, __) {
+        if (_ordinaryOffline) _ordinaryCleanColdStart = false;
+        return const NavigationScreen(key: ValueKey('guest-shell'), guest: true);
+      },
     ),
     GoRoute(
       path: '/home',
       builder: (context, __) {
         final caps = SessionCapabilitiesHost.maybeRead(context);
         final scope = AuthSessionScopeHost.maybeRead(context);
+        if (_ordinaryOffline && caps != null && scope != null) {
+          Widget cached(BuildContext context) {
+            try {
+              final reader = CachedHomeScheduleReader(
+                capabilities: caps,
+                home: HomeSnapshotCache(
+                    project: SupabaseConfig.url,
+                    authScope: scope,
+                    currentUserId: () => scope.capture()?.userId,
+                    sessionGeneration: () => scope.generation,
+                    sessionIdentity: scope.capture),
+                schedule: ScheduleMonthCache(scope, SupabaseConfig.url));
+            final chats = ProjectChatServerCache.qaInstance;
+              return NavigationScreen(
+                cachedReader: reader,
+                homeContent: _qaHomeContent,
+                homeContentCapabilities: caps,
+                cachedInfo: chats == null ? null : (_) => CachedTeamChatDirectory(
+                    store: chats, capabilities: caps, subjectsOnly: true),
+                cachedLearning: chats == null ? null : (_) => CachedTeamChatDirectory(
+                    store: chats, capabilities: caps, subjectsOnly: false),
+                cachedProfile: chats == null ? null : (_) => ProfileScreen(
+                    cachedReader: reader, cachedChats: chats, cachedCapabilities: caps));
+            } catch (_) {
+              return const Scaffold(body: Center(child: Text('Сохранённые данные недоступны.')));
+            }
+          }
+          return QaCapabilityView(capabilities: caps,
+              blockedBuilder: (_) => const Scaffold(body: Center(
+                  child: Text('Сохранённые данные недоступны.'))),
+              onlineBuilder: (_, barrier) {
+                _ordinaryCleanColdStart = false;
+                return PushSessionHost(barrier: barrier,
+                    child: NavigationScreen(onlineBarrier: barrier, homeContent: _qaHomeContent));
+              },
+              cachedBuilder: cached);
+        }
         if (_sqlitePolicyQa && _offlineUiQa) {
           if (caps == null || scope == null)
             return const Scaffold(
@@ -267,7 +391,7 @@ Future<void> main() async {
     stage('first-frame');
     unawaited(WidgetsBinding.instance.waitUntilFirstFrameRasterized.then((_) {
       stage('first-raster');
-      if (_sqlitePolicyQa ||
+      if (_sqlitePolicyQa || _ordinaryOffline ||
           Supabase.instance.client.auth.currentSession == null) return;
       unawaited(PushNotificationService.instance.bootstrapFirebase().then((_) {
         stage(PushNotificationService.instance.isFirebaseReady
@@ -284,7 +408,9 @@ Future<void> _initializeApp(
 }) async {
   SupabaseConfig.validate();
   final usePolicyQa = _sqlitePolicyQa && !kIsWeb;
-  final inner = usePolicyQa ? http.Client() : null;
+  final useOrdinaryOffline = _ordinaryOffline;
+  final inner = (usePolicyQa || useOrdinaryOffline)
+      ? (useOrdinaryOffline ? _debugOrdinaryHttp : null) ?? http.Client() : null;
   final refreshFence = RefreshSecurityFence();
   final gate = inner == null
       ? null
@@ -391,6 +517,161 @@ Future<void> _initializeApp(
           currentRefreshToken: () => client.auth.currentSession?.refreshToken,
           securityFence: refreshFence,
           monitor: monitor));
+    } else if (useOrdinaryOffline && gate != null && inner != null) {
+      final client = Supabase.instance.client;
+      final scope = AuthSessionScope(
+          currentSession: () => client.auth.currentSession,
+          authEvents: client.auth.onAuthStateChange);
+      await scope.ready;
+      _policyQaScope = scope;
+      _watchOrdinaryScope(scope);
+      final project = SupabaseConfig.url.replaceFirst(RegExp(r'/$'), '');
+      final issuer = '$project/auth/v1';
+      OfflineSessionBinding? binding() {
+        final session = client.auth.currentSession;
+        return session == null ? null : OfflineSessionBinding.fromSession(session, issuer);
+      }
+      sqlite.Database? chatDb;
+      try {
+        final directory = _debugOrdinaryDatabasePath ?? await sqlite.getDatabasesPath();
+        chatDb = await openProjectChatServerDatabase(
+            '$directory/offline_chat_ordinary_v1.db', factory: _debugOrdinaryDatabaseFactory);
+        _debugChatDatabaseOpened?.call(chatDb);
+        final contentDb = await openHomeContentSnapshotDatabase(
+            '$directory/offline_home_content_ordinary_v1.db', factory: _debugOrdinaryDatabaseFactory);
+        ProjectChatServerCache.qaInstance = ProjectChatServerCache(
+            db: chatDb, scope: scope, currentBinding: binding, project: project);
+        _qaHomeContent = HomeContentCoordinator(
+            store: HomeContentSnapshotStore(
+                db: contentDb, scope: scope, currentBinding: binding, project: project),
+            scope: scope, httpClient: inner);
+      } catch (error) {
+        // A damaged or full offline cache must not prevent ordinary online
+        // use. Preserve the database files and the SDK session for recovery.
+        try { if (chatDb != null) await closeProjectChatServerDatabase(chatDb); } catch (_) {}
+        ProjectChatServerCache.qaInstance = null;
+        _qaHomeContent = null;
+        _ordinarySnapshotStartup = null;
+        _ordinaryCacheUnavailable = true;
+        _ordinaryStartupPending.value = false;
+        gate.bind(inner);
+        gate.resume();
+        debugPrint('[offline] Cache unavailable: ${error.runtimeType}');
+      }
+      if (!_ordinaryCacheUnavailable) {
+      final transport = SettledPolicyTransport(inner);
+      var gateBound = false;
+      Timer? reconnectTimer;
+      var reconnectInFlight = false;
+      var enteringCache = false;
+      scope.addListener(() {
+        if (scope.capture() == null) {
+          reconnectTimer?.cancel();
+          reconnectTimer = null;
+        }
+      });
+      void openGate() {
+        if (!gateBound) {
+          gateBound = true;
+          gate.bind(inner);
+        }
+        gate.resume();
+      }
+      void rejectHeldGate() { gate.discardHeldRefreshes(); openGate(); }
+      _ordinaryRejectHeldGate = rejectHeldGate;
+      {
+        bool sameSession(OfflineSessionBinding expected) {
+          return isSameLocalSnapshotSession(scope, expected, client.auth.currentSession);
+        }
+        Future<bool> probeConnection() async {
+          final abort = Completer<void>();
+          final timer = Timer(const Duration(seconds: 2), () {
+            if (!abort.isCompleted) abort.complete();
+          });
+          try {
+            final request = http.AbortableRequest('GET', Uri.parse('$project/auth/v1/health'),
+                abortTrigger: abort.future)
+              ..followRedirects = false
+              ..headers['apikey'] = SupabaseConfig.anonKey;
+            final response = await inner.send(request).timeout(const Duration(seconds: 3));
+            await response.stream.drain<void>().timeout(const Duration(seconds: 3));
+            return response.statusCode == 200;
+          } catch (_) {
+            return false;
+          } finally {
+            timer.cancel();
+            if (!abort.isCompleted) abort.complete();
+          }
+        }
+        void watchForReconnect(OfflineSessionBinding expected) {
+          reconnectTimer?.cancel();
+          reconnectTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
+            if (!sameSession(expected)) {
+              timer.cancel();
+              return;
+            }
+            if (reconnectInFlight) return;
+            reconnectInFlight = true;
+            probeConnection().then((available) {
+              if (!timer.isActive || !available || enteringCache || !sameSession(expected)) return;
+              timer.cancel();
+              openGate();
+              appRouter.go('/splash');
+            }, onError: (Object _, StackTrace __) {}).whenComplete(() {
+              reconnectInFlight = false;
+            });
+          });
+        }
+        _ordinaryStartupPending.value = scope.capture() != null && binding() != null;
+        _ordinarySnapshotStartup = LocalSnapshotStartup(
+            scope: scope,
+            issuer: issuer,
+            restore: () {
+              if (client.auth.currentSession?.isExpired == true && !gateBound) {
+                final expected = binding();
+                unawaited(probeConnection().then((available) {
+                  if (expected != null && available && !enteringCache && sameSession(expected)) openGate();
+                }));
+              }
+              return AuthSession.restoreSessionStatus(client);
+            },
+            checkPolicy: () {
+              final owner = scope.capture();
+              final session = client.auth.currentSession;
+              if (owner == null || session == null || !scope.matchesSession(owner, session)) {
+                return Future.value(SettledPolicyStatus.indeterminate);
+              }
+              return transport.check(backend: Uri.parse(project), userId: owner.userId,
+                  accessToken: session.accessToken, publicKey: SupabaseConfig.anonKey,
+                  timeout: const Duration(seconds: 12));
+            },
+            onCacheOnly: () async {
+              enteringCache = true;
+              try {
+                if (!_ordinaryCleanColdStart) {
+                  throw StateError('Local-only mode requires a clean cold start');
+                }
+                await gate.suspendAndDrain();
+                final closed = await QaOnlineSideEffectCoordinator.instance
+                    .closeAndWait(timeout: const Duration(seconds: 10));
+                if (!closed) throw StateError('Online work did not drain');
+                final expected = binding();
+                if (expected == null || !sameSession(expected)) throw StateError('Session changed');
+                watchForReconnect(expected);
+              }
+              finally { enteringCache = false; }
+            },
+            onOnline: () async { reconnectTimer?.cancel(); openGate(); },
+            onLateDenial: (passwordChangeRequired) {
+              reconnectTimer?.cancel();
+              rejectHeldGate();
+              appRouter.go(passwordChangeRequired ? '/change-password' : '/login');
+            });
+      }
+      if (scope.capture() == null || binding() == null) {
+        openGate();
+      }
+      }
     }
   } catch (_) {
     gate?.block();
@@ -511,6 +792,15 @@ class _QaAwareSessionKeeper extends StatelessWidget {
   const _QaAwareSessionKeeper({required this.child});
   final Widget child;
   @override
-  Widget build(BuildContext context) =>
-      _sqlitePolicyQa && !kIsWeb ? child : SessionKeeper(child: child);
+  Widget build(BuildContext context) {
+    if (_sqlitePolicyQa && !kIsWeb) return child;
+    if (!_ordinaryOffline) return SessionKeeper(child: child);
+    final caps = SessionCapabilitiesHost.maybeOf(context);
+    return ValueListenableBuilder<bool>(
+      valueListenable: _ordinaryStartupPending,
+      builder: (context, pending, _) => pending ||
+          caps?.mode == SessionCapabilityMode.cacheOnly
+          ? child : SessionKeeper(child: child),
+    );
+  }
 }

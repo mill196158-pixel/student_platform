@@ -1,12 +1,14 @@
 import 'live_policy_grant_bridge.dart';
 import 'offline_policy_grant_host.dart';
 import 'transport_failure.dart';
+import 'auth_session_scope.dart';
 
 /// The saved grant is recorded here, but is not used to permit offline entry.
 Future<String?> guardedPolicyRedirect({
   required String path,
   required bool Function() hasSession,
   required OfflinePolicyGrantAccess? Function() currentAccess,
+  void Function(AuthOperationScope)? onAllowed,
 }) async {
   if (path == '/login' || path == '/splash' || path == '/guest') return null;
   if (!hasSession()) return '/login';
@@ -25,6 +27,10 @@ Future<String?> guardedPolicyRedirect({
     try {
       final decision = await pending;
       if (!current() || !access.bridge.isCurrentDecision(decision)) continue;
+      if (!decision.passwordChangeRequired) {
+        onAllowed?.call(owner);
+        if (!current() || !access.bridge.isCurrentDecision(decision)) continue;
+      }
       return decision.passwordChangeRequired ? '/change-password' : null;
     } on PolicyCheckStale {
       continue;
