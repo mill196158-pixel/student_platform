@@ -134,4 +134,34 @@ void main() {
     // Oldest should be gone after cap.
     expect(await disk.peek(key('news/0.png', '1')), isNull);
   });
+
+  test('oversized new image does not evict previously cached images', () async {
+    final prior = key('news/retained.png', '1');
+    final oversized = key('news/large.png', '1');
+    final original = Uint8List.fromList([4, 5, 6]);
+    final large = Uint8List.fromList(List<int>.filled(10 * 1024 + 1, 9));
+    await disk.put(prior, original);
+    await disk.put(oversized, large);
+
+    expect(await disk.peek(oversized), large);
+    final reopened = NewsImageDiskCache(
+      memory: NewsImageBytesCache(),
+      rootOverride: () => tempDir,
+      maxEntries: 3,
+      maxTotalBytes: 10 * 1024,
+    );
+    expect(await reopened.peek(prior), original);
+    expect(await reopened.peek(oversized), isNull);
+  });
+
+  test('invalidation removes memory-only oversized image', () async {
+    final oversized = key('news/large.png', '1');
+    await disk.put(
+      oversized,
+      Uint8List.fromList(List<int>.filled(10 * 1024 + 1, 9)),
+    );
+    expect(await disk.peek(oversized), isNotNull);
+    await disk.invalidatePath(oversized.path);
+    expect(await disk.peek(oversized), isNull);
+  });
 }

@@ -103,6 +103,11 @@ class NewsImageDiskCache {
     if (bytes.isEmpty) return;
     _memory.put(key, bytes);
     await ensureReady();
+    // A new image that cannot fit would otherwise evict every older entry
+    // before the LRU eventually evicts the image itself. Keep it in memory
+    // for this view without discarding the existing offline image cache.
+    // Existing keys retain their replacement semantics.
+    if (bytes.length > maxTotalBytes && !_index!.containsKey(key.id)) return;
     final fileName = '${_fileId(key.id)}.bin';
     try {
       final file = File('${_root!.path}/$fileName');
