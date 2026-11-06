@@ -47,6 +47,9 @@ async function run() {
 }
 run().catch(async () => { document.querySelector('#result').textContent='FAILED'; await fetch('/done'); });
 </script><img src="/hold"></body>'''
+if os.environ.get('PHOTO_QA_BUDGET') == '1':
+    html = html.replace(b'worker.postMessage(source.slice(0));',
+                        b"worker.postMessage({mode:'budget',bytes:source.slice(0)});")
 
 
 class Handler(BaseHTTPRequestHandler):

@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -101,11 +102,12 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       final pixels = image.Image(width: 20, height: 20);
       pixels.setPixelRgb(0, 0, 255, 0, 0);
-      final original = image.encodeJpg(pixels, quality: 100);
-      final smaller = image.encodeJpg(pixels, quality: 70);
+      final original = image.encodePng(pixels);
+      final smaller = File('test/fixtures/media/tiny.webp').readAsBytesSync();
       final store = LocalAdminImageStore();
       final picker = _FakePicker(PickedAdminImage(bytes: smaller, originalBytes: original,
-          fileName: 'photo.jpg', mimeType: 'image/jpeg'));
+          fileName: 'photo.webp', mimeType: 'image/webp',
+          originalFileName: 'photo.png', originalMimeType: 'image/png'));
       await tester.pumpWidget(MaterialApp(home: Scaffold(body: NewsEditorScreen(
         repository: LocalNewsRepository(seed: const [NewsItem(
           id: 'local-1', title: 'Без картинки', subtitle: 'Пока пусто',
@@ -124,6 +126,7 @@ void main() {
       await tester.tap(find.text(keepOriginal ? 'Оставить оригинал' : 'Использовать уменьшенное'));
       await tester.pumpAndSettle();
       expect(store.getBytes('local-image-1'), orderedEquals(keepOriginal ? original : smaller));
+      expect(store.mimeTypeOf('local-image-1'), keepOriginal ? 'image/png' : 'image/webp');
     });
   }
   test('new image preparation retains fallback and keeps MIME aligned', () async {

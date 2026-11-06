@@ -74,8 +74,10 @@ function jpegInfo(bytes) {
 
 self.onmessage = async (event) => {
   try {
-    if (!(event.data instanceof ArrayBuffer)) throw new Error('input');
-    const bytes = new Uint8Array(event.data);
+    const budget = event.data && event.data.mode === 'budget';
+    const input = budget ? event.data.bytes : event.data;
+    if (!(input instanceof ArrayBuffer)) throw new Error('input');
+    const bytes = new Uint8Array(input);
     const info = jpegInfo(bytes) || pngInfo(bytes);
     if (!info || !info.width || !info.height || info.width * info.height > 20000000 ||
         typeof createImageBitmap !== 'function' || typeof OffscreenCanvas !== 'function') {
@@ -90,11 +92,41 @@ self.onmessage = async (event) => {
       const width = Math.max(1, Math.round(image.width * scale));
       const height = Math.max(1, Math.round(image.height * scale));
       const canvas = new OffscreenCanvas(width, height);
-      const context = canvas.getContext('2d', { alpha: false });
+      const context = canvas.getContext('2d', { alpha: false, willReadFrequently: budget });
       if (!context) { self.postMessage(null); return; }
       context.drawImage(image, 0, 0, width, height);
-      const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.88 });
-      if (blob.type !== 'image/jpeg' || blob.size >= bytes.length) { self.postMessage(null); return; }
+      let blob;
+      if (!budget) {
+        // Preserve the established oversized-JPEG legacy path unchanged.
+        blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.88 });
+      } else {
+        const reference = context.getImageData(0, 0, width, height).data;
+        let best = null;
+        for (const quality of [0.88, 0.82, 0.75]) {
+          context.clearRect(0, 0, width, height);
+          context.drawImage(image, 0, 0, width, height);
+          const candidate = await canvas.convertToBlob({type:'image/jpeg', quality});
+          if (candidate.type !== 'image/jpeg' || candidate.size >= bytes.length || candidate.size > 5 * 1024 * 1024) continue;
+          const decoded = await createImageBitmap(candidate);
+          try {
+            if (decoded.width !== width || decoded.height !== height) continue;
+            context.clearRect(0, 0, width, height);
+            context.drawImage(decoded, 0, 0);
+            const pixels = context.getImageData(0, 0, width, height).data;
+            let difference = 0;
+            for (let i = 0; i < reference.length; i += 4) {
+              difference += Math.abs(reference[i]-pixels[i]) + Math.abs(reference[i+1]-pixels[i+1]) + Math.abs(reference[i+2]-pixels[i+2]);
+            }
+            if (difference / (width * height * 3) > 15) continue;
+            if (best === null || candidate.size < best.size) best = candidate;
+            if (best.size <= 512 * 1024) break;
+          } finally {
+            decoded.close();
+          }
+        }
+        blob = best;
+      }
+      if (!blob || blob.type !== 'image/jpeg' || blob.size >= bytes.length) { self.postMessage(null); return; }
       const output = await blob.arrayBuffer();
       self.postMessage(output, [output]);
     } finally {

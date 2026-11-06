@@ -49,10 +49,11 @@ void main() {
         addTearDown(() => tester.binding.setSurfaceSize(null));
         final pixels = image.Image(width: 20, height: 20);
         pixels.setPixelRgb(0, 0, 255, 0, 0);
-        final original = image.encodeJpg(pixels, quality: 100);
-        final smaller = image.encodeJpg(pixels, quality: 70);
+        final original = image.encodePng(pixels);
+        final smaller = File('test/fixtures/media/tiny.webp').readAsBytesSync();
         final picker = _Picker(PickedAdminImage(bytes: smaller, originalBytes: original,
-            fileName: 'photo.jpg', mimeType: 'image/jpeg'));
+            fileName: 'photo.webp', mimeType: 'image/webp',
+            originalFileName: 'photo.png', originalMimeType: 'image/png'));
         final store = _Store();
         await tester.pumpWidget(MaterialApp(home: Scaffold(body: home
             ? HomePromoEditorScreen(repository: LocalHomePromoRepository(), mediaStore: store, imagePicker: picker)
@@ -78,6 +79,7 @@ void main() {
         tester.widget<OutlinedButton>(save).onPressed!();
         await tester.pumpAndSettle();
         expect(store.data, orderedEquals(keepOriginal ? original : smaller));
+        expect(store.contentType, keepOriginal ? 'image/png' : 'image/webp');
       });
     }
   }

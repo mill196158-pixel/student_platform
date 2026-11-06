@@ -5,6 +5,8 @@ import 'package:image/image.dart' as image;
 import 'admin_photo_optimizer_stub.dart'
     if (dart.library.html) 'admin_photo_optimizer_web.dart'
     as legacy;
+import 'admin_alpha_optimizer_stub.dart'
+    if (dart.library.html) 'admin_alpha_optimizer_web.dart' as alpha;
 
 /// Optimise only simple static PNGs, preserving every decoded RGBA pixel.
 /// JPEG, WebP, animations, metadata and uncertain input remain untouched.
@@ -15,6 +17,16 @@ Future<Uint8List?> optimizeAdminPhoto(Uint8List original) =>
 /// This is lossy and does not guarantee preservation of QR codes or fine text.
 Future<Uint8List?> optimizeLargeJpegLegacy(Uint8List original) =>
     legacy.optimizeAdminPhoto(Uint8List.fromList(original));
+
+Future<Uint8List?> optimizeAdminJpegBudget(Uint8List original,
+    {Listenable? invalidation, bool Function()? isCurrent}) =>
+    legacy.optimizeAdminPhoto(Uint8List.fromList(original), targetBudget: true,
+        invalidation: invalidation, isCurrent: isCurrent);
+
+Future<Uint8List?> optimizeAdminAlpha(Uint8List original,
+    {Listenable? invalidation, bool Function()? isCurrent}) =>
+    alpha.optimizeAdminAlpha(Uint8List.fromList(original),
+        invalidation: invalidation, isCurrent: isCurrent);
 
 /// Conservative opt-in path for a photo: unknown metadata, unsupported colour
 /// formats, multiple scans and trailing data are never passed to the encoder.

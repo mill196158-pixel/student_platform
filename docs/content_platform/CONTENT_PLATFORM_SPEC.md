@@ -290,10 +290,16 @@ The accepted EXIF subset is limited to allowlisted standard image, Exif, GPS
 and interoperability tags with bounded value offsets and orientation 1;
 SubIFDs, maker notes and unknown tags fall back unchanged.
 Unsupported images fall back to original bytes or, above the upload limit, a
-clear error. QR/document protection depends on choosing original; the client
-does not prove that a chosen photo contains no QR or fine text. This local
-change is not deployed. WebP and unsupported data are not recompressed;
-native platforms without the JPEG worker retain the original.
+clear error. On Web, eligible still PNG/WebP may produce a reviewed WebP copy
+with alpha validated against the resized source. Metadata, animation, unusual
+formats and oversized inputs fall back. JPEG and these copies aim for 512 KiB,
+but keep a larger candidate if the configured colour-error limit rules out
+smaller candidates; the actual size and missed target are shown. Resizing can
+change transparent edges and text: alpha validation and the mean-colour metric
+do not prove QR or text readability. QR/document protection depends on choosing
+original; the client cannot prove that a photo contains no QR or fine text.
+This local change is not deployed; native platforms without the Web workers
+retain the original.
 
 CTA rules v1:
 

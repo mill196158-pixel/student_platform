@@ -55,6 +55,48 @@ Future<void> _run() async {
           listEquals(compressed.originalBytes, saved),
       'windowsTarget': defaultTargetPlatform == TargetPlatform.windows,
       'mime': compressed.mimeType});
+    stage = 'alpha';
+    for (final kind in ['png', 'webp']) {
+      final response = await html.HttpRequest.request('/synthetic-$kind', responseType: 'arraybuffer');
+      final input = Uint8List.view(response.response as ByteBuffer);
+      final before = Uint8List.fromList(input);
+      final picked = await LocalAdminImagePicker.prepareSelected(bytes: input,
+          fileName: 'alpha.$kind', mimeType: 'image/$kind', photoMode: true, automatic: true);
+      result['${kind}Before'] = input.length;
+      result['${kind}After'] = picked.bytes.length;
+      result['${kind}Mime'] = picked.mimeType;
+      result['${kind}Original'] = listEquals(picked.originalBytes, before) && listEquals(input, before);
+      result['${kind}OriginalMime'] = picked.originalMimeType;
+      await html.HttpRequest.request('/capture?name=$kind', method: 'POST', sendData: picked.bytes);
+    }
+    for (final kind in ['metadata', 'animated']) {
+      final response = await html.HttpRequest.request('/synthetic-$kind', responseType: 'arraybuffer');
+      final input = Uint8List.view(response.response as ByteBuffer);
+      try {
+        final picked = await LocalAdminImagePicker.prepareSelected(bytes: input,
+            fileName: kind == 'metadata' ? 'meta.png' : 'animation.webp',
+            mimeType: kind == 'metadata' ? 'image/png' : 'image/webp', photoMode: true, automatic: true);
+        result['${kind}Fallback'] = listEquals(input, picked.bytes) &&
+            (input.length <= 512 * 1024 || picked.optimizationMessage != null);
+      } on AdminImagePickException {
+        result['${kind}Fallback'] = input.length > LocalAdminImagePicker.maxBytes;
+      }
+    }
+    stage = 'cancel';
+    final alphaResponse = await html.HttpRequest.request('/synthetic-png', responseType: 'arraybuffer');
+    final alphaInput = Uint8List.view(alphaResponse.response as ByteBuffer);
+    var permitted = true;
+    final invalidation = ValueNotifier<int>(0);
+    final pending = optimizeAdminAlpha(alphaInput, invalidation: invalidation,
+        isCurrent: () => permitted);
+    Timer(const Duration(milliseconds: 1), () { permitted = false; invalidation.value++; });
+    result['cancelled'] = await pending == null;
+    invalidation.dispose();
+    stage = 'worker-lock';
+    final first = optimizeAdminAlpha(alphaInput);
+    final second = await optimizeAdminJpegBudget(source);
+    result['overlapBlocked'] = second == null;
+    result['workerRecovered'] = await first != null;
   } catch (error) {
     result['error'] = error.runtimeType.toString();
     result['stage'] = stage;

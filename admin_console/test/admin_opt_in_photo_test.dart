@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
@@ -37,6 +38,23 @@ void main() {
         photoMode: true, automatic: true);
     expect(tiny.bytes, orderedEquals(jpeg));
     expect(tiny.optimizationMessage, isNull);
+    final tinyPng = image.encodePng(image.Image(width: 20, height: 20));
+    final tinyWebp = base64Decode('UklGRjYAAABXRUJQVlA4ICoAAACQAQCdASoCAAIAAUAmJaACdLoAA5gA/uC5f/OJfyR+gXdn/3GtufrEAAA=');
+    for (final item in [(tinyPng, 'tiny.png', 'image/png'),
+                        (tinyWebp, 'tiny.webp', 'image/webp')]) {
+      final result = await LocalAdminImagePicker.prepareSelected(
+          bytes: item.$1, fileName: item.$2, mimeType: item.$3,
+          photoMode: true, automatic: true);
+      expect(result.bytes, orderedEquals(item.$1));
+    }
+    final frame = image.Image(width: 24, height: 24, numChannels: 4);
+    final animation = image.Image.from(frame)..addFrame(image.Image.from(frame));
+    final animatedPng = image.encodePng(animation);
+    final animatedResult = await LocalAdminImagePicker.prepareSelected(
+        bytes: animatedPng, fileName: 'animation.png', mimeType: 'image/png',
+        photoMode: true, automatic: true);
+    expect(animatedResult.bytes, orderedEquals(animatedPng));
+    expect(animatedResult.optimizationMessage, contains('Анимация'));
   });
   testWidgets('compressed photo, original and cancel are reviewable', (tester) async {
     PickedAdminImage? result;
@@ -114,6 +132,26 @@ void main() {
     expect(button.onPressed, isNull);
     await tester.tap(find.text('Отмена'));
     await tester.pumpAndSettle();
+  });
+
+  testWidgets('choosing original restores original PNG MIME and filename', (tester) async {
+    final png = image.encodePng(image.Image(width: 20, height: 20));
+    final jpeg = image.encodeJpg(image.Image(width: 20, height: 20));
+    PickedAdminImage? result;
+    final picked = PickedAdminImage(bytes: jpeg, fileName: 'image.webp', mimeType: 'image/webp',
+      originalBytes: png, originalFileName: 'image.png', originalMimeType: 'image/png');
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: Builder(
+      builder: (context) => TextButton(onPressed: () async {
+        result = await reviewAdminImage(context, picked, isCurrent: () => true);
+      }, child: const Text('Выбрать')),
+    ))));
+    await tester.tap(find.text('Выбрать'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Оставить оригинал'));
+    await tester.pumpAndSettle();
+    expect(result!.bytes, orderedEquals(png));
+    expect(result!.fileName, 'image.png');
+    expect(result!.mimeType, 'image/png');
   });
 
   test(

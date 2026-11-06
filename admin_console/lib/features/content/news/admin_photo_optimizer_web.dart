@@ -2,20 +2,33 @@
 import 'dart:async';
 import 'dart:html' as html;
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
+import 'admin_image_worker_lock.dart';
 
-bool _running = false;
-
-Future<Uint8List?> optimizeAdminPhoto(Uint8List original) async {
-  if (_running) return null;
-  _running = true;
+Future<Uint8List?> optimizeAdminPhoto(Uint8List original,
+    {bool targetBudget = false, Listenable? invalidation, bool Function()? isCurrent}) async {
+  if (!acquireAdminImageWorker()) return null;
   html.Worker? worker;
   StreamSubscription<html.MessageEvent>? messageSub;
   StreamSubscription<html.Event>? errorSub;
+  void Function()? removeListener;
   try {
     final base = Uri.tryParse(html.document.baseUri ?? '');
     if (base == null || base.origin != Uri.base.origin) return null;
     worker = html.Worker(base.resolve('admin_photo_optimizer_worker.js').toString());
     final result = Completer<Uint8List?>();
+    void check() {
+      var current = false;
+      try { current = isCurrent?.call() ?? true; } catch (_) {}
+      if (!current && !result.isCompleted) {
+        worker?.terminate();
+        result.complete(null);
+      }
+    }
+    invalidation?.addListener(check);
+    removeListener = () => invalidation?.removeListener(check);
+    check();
+    if (result.isCompleted) return null;
     messageSub = worker.onMessage.listen((event) {
       if (result.isCompleted) return;
       final data = event.data;
@@ -33,14 +46,16 @@ Future<Uint8List?> optimizeAdminPhoto(Uint8List original) async {
       if (!result.isCompleted) result.complete(null);
     });
     // Structured clone a copy; the original must remain available on failure.
-    worker.postMessage(Uint8List.fromList(original).buffer);
+    final copy = Uint8List.fromList(original).buffer;
+    worker.postMessage(targetBudget ? {'mode': 'budget', 'bytes': copy} : copy);
     return await result.future.timeout(const Duration(seconds: 10), onTimeout: () => null);
   } catch (_) {
     return null;
   } finally {
+    removeListener?.call();
     await messageSub?.cancel();
     await errorSub?.cancel();
     worker?.terminate();
-    _running = false;
+    releaseAdminImageWorker();
   }
 }

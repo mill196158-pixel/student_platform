@@ -15,11 +15,33 @@ Future<PickedAdminImage?> pickAdminImageForEditor(
   Stream<AuthState>? authEvents,
 }) async {
   if (!isCurrent()) return null;
-  final picked = picker is LocalAdminImagePicker
-      ? await LocalAdminImagePicker(
-          photoMode: true, automatic: true, isCurrent: isCurrent).pickImage()
-      : await picker.pickImage();
-  if (picked == null || !isCurrent() || !context.mounted) return null;
+  var revoked = false;
+  final changes = ValueNotifier<int>(0);
+  bool current() {
+    try { return !revoked && isCurrent(); } catch (_) { return false; }
+  }
+  void check() {
+    if (!current()) revoked = true;
+    changes.value++;
+  }
+  invalidation?.addListener(check);
+  final authSubscription = authEvents?.listen((event) {
+    if (event.event != AuthChangeEvent.initialSession) revoked = true;
+    check();
+  }, onError: (Object _, StackTrace __) { revoked = true; check(); });
+  PickedAdminImage? picked;
+  try {
+    picked = picker is LocalAdminImagePicker
+        ? await LocalAdminImagePicker(photoMode: true, automatic: true,
+            isCurrent: current, invalidation: changes).pickImage()
+        : await picker.pickImage();
+  } finally {
+    invalidation?.removeListener(check);
+    final cancelled = authSubscription?.cancel();
+    if (cancelled != null) unawaited(cancelled.catchError((Object _) {}));
+    changes.dispose();
+  }
+  if (picked == null || !current() || !context.mounted) return null;
   return reviewAdminImage(context, picked, isCurrent: isCurrent,
       invalidation: invalidation, authEvents: authEvents);
 }
@@ -76,10 +98,14 @@ Future<PickedAdminImage?> reviewAdminImage(
         active.value && current() ? SizedBox(
         width: 720,
         child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text('JPEG: ${(original.length / 1024).ceil()} → ${(picked.bytes.length / 1024).ceil()} КБ. '
-              'Качество и детализация снижены, EXIF и геоданные удалены. '
+          Text('${(picked.originalMimeType ?? picked.mimeType).split('/').last.toUpperCase()} → '
+              '${picked.mimeType.split('/').last.toUpperCase()}: '
+              '${(original.length / 1024).ceil()} → ${(picked.bytes.length / 1024).ceil()} КБ. '
+              'Размер изображения, качество и детализация могут быть снижены; метаданные, включая геоданные, не сохраняются. '
               'Проверьте мелкий текст и QR-коды; их читаемость не гарантируется. '
               'Увеличивайте изображение прокруткой или жестом.'),
+          if (picked.bytes.length > 512 * 1024)
+            const Text('Цель 512 КиБ не достигнута с заданным ограничением качества.'),
           if (!canUseOriginal)
             const Text('Оригинал больше 5 МБ и не может быть загружен. Для оригинала выберите файл меньшего размера.'),
           const SizedBox(height: 12),
@@ -118,7 +144,8 @@ Future<PickedAdminImage?> reviewAdminImage(
   }
   if (!canUseOriginal) return null;
   return PickedAdminImage(bytes: Uint8List.fromList(original),
-      fileName: picked.fileName, mimeType: picked.mimeType);
+      fileName: picked.originalFileName ?? picked.fileName,
+      mimeType: picked.originalMimeType ?? picked.mimeType);
 }
 
 class _Preview extends StatelessWidget {
