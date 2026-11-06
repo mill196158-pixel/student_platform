@@ -19,7 +19,11 @@ LocalAttach file(String localId, {String? id, bool uploaded = false}) =>
             ? LocalAttachUploadStatus.uploaded
             : LocalAttachUploadStatus.uploading);
 
-Message message(String id, {List<ChatFile>? files}) => Message(
+Message message(String id,
+        {List<ChatFile>? files,
+        MessageType type = MessageType.text,
+        String? fileId,
+        List<String> outboundFileIds = const []}) => Message(
     id: id,
     chatId: 'chat',
     authorId: 'a',
@@ -27,6 +31,9 @@ Message message(String id, {List<ChatFile>? files}) => Message(
     authorName: 'A',
     text: 'hello',
     at: DateTime.utc(2026),
+    type: type,
+    fileId: fileId,
+    outboundFileIds: outboundFileIds,
     attachments: files);
 ChatFile attachment(
         {String id = 'id', String url = 'https://example.test/file'}) =>
@@ -175,6 +182,27 @@ void main() {
           message('one', files: [attachment()])
         ]),
         hasLength(1));
+  });
+  test('file messages require all known attachments before selection', () {
+    for (final incomplete in [
+      message('one', type: MessageType.file),
+      message('one', fileId: 'missing'),
+      message('one', files: [attachment()], outboundFileIds: ['id', 'missing']),
+    ]) {
+      expect(completeForwardSelection(['one'], [incomplete]), isNull);
+    }
+    expect(
+        completeForwardSelection(['one'], [
+          message('one', type: MessageType.file, fileId: 'id',
+              outboundFileIds: ['id'], files: [attachment()])
+        ]),
+        hasLength(1));
+  });
+  test('selection snapshot rejects later changes to file references', () {
+    final initial = message('one');
+    final snapshot = ForwardSelectionSnapshot([initial]);
+    expect(snapshot.matches([message('one', fileId: 'missing')]), isFalse);
+    expect(snapshot.matches([message('one', type: MessageType.file)]), isFalse);
   });
   test('ID-only or mismatched handoff cannot become text-only forward', () {
     expect(forwardSourceReferencesComplete(payload([]), ['file-id']), isFalse);

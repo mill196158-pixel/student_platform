@@ -2874,6 +2874,14 @@ class _ChatTabState extends State<ChatTab> {
 
   Future<void> _startForwardSelection(List<Message> selected, {VoidCallback? onPrepared}) async {
     if (selected.isEmpty) return;
+    if (completeForwardSelection(
+            selected.map((message) => message.id).toList(), selected) ==
+        null) {
+      if (mounted) {
+        _showSnack('Часть сообщений или вложений ещё недоступна. Дождитесь загрузки и попробуйте снова.');
+      }
+      return;
+    }
     final outbox = ForwardOutbox.capture(context);
     if (outbox == null) return;
     final selectedSnapshot = ForwardSelectionSnapshot(selected);

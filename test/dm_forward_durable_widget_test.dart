@@ -386,6 +386,31 @@ void main() {
     expect(legacyStorage.values['forward_outbox_${uid}_legacy-target'], isNotNull);
     expect(source.sent, hasLength(3));
     await tester.pumpWidget(const SizedBox.shrink());
+    final incomplete = _Service('incomplete-source', [Message(
+      id: 'incomplete-message', chatId: 'incomplete-source', authorId: uid,
+      authorLogin: 'test', authorName: 'Автор', text: 'Неполное вложение',
+      at: DateTime.utc(2026), fileId: oldFileId,
+    )]);
+    var incompletePicks = 0;
+    await tester.pumpWidget(ForwardOutboxHost(source: scope, storage: _Storage(),
+      child: MaterialApp(home: UnifiedChatScreen(service: incomplete, title: 'Источник',
+        debugPickForwardTarget: (_, __) async { incompletePicks++; return null; }))));
+    for (var i = 0; i < 15; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    await tester.longPress(find.text('Неполное вложение'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('Выбрать').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Переслать').last);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.textContaining('вложений ещё недоступна'), findsOneWidget);
+    expect(incompletePicks, 0);
+    expect(incomplete.sent, isEmpty);
+    expect(find.text('Неполное вложение'), findsWidgets);
+    expect(find.text('Выбрано 1'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
     await tester.runAsync(() async {
       scope.dispose();
       await Supabase.instance.dispose();

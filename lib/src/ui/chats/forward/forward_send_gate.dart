@@ -96,7 +96,16 @@ List<Message>? completeForwardSelection(
         return null;
       }
     }
-    for (final attachment in message.attachments ?? const []) {
+    final attachments = message.attachments ?? const [];
+    final referencedIds = <String>{
+      if ((message.fileId ?? '').trim().isNotEmpty) message.fileId!.trim(),
+      for (final id in message.outboundFileIds)
+        if (id.trim().isNotEmpty) id.trim(),
+    };
+    final attachedIds = attachments.map((file) => file.id.trim()).toSet();
+    if ((message.type == MessageType.file && attachments.isEmpty) ||
+        !attachedIds.containsAll(referencedIds)) return null;
+    for (final attachment in attachments) {
       if (attachment.id.trim().isEmpty ||
           attachment.fileUrl.trim().isEmpty ||
           attachment.isDeleted) return null;
@@ -128,6 +137,9 @@ class ForwardSelectionSnapshot {
         message.authorAvatarUrl,
         message.at.toIso8601String(),
         message.text,
+        message.type.name,
+        message.fileId,
+        message.outboundFileIds,
         for (final file in message.attachments ?? const [])
           [
             file.id,

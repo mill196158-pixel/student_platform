@@ -407,6 +407,34 @@ void main() {
     expect(find.byTooltip('Отменить пересылку'), findsOneWidget);
     expect(sent, 1); // Only staging was checked; no legacy-mode send.
     await tester.pumpWidget(const SizedBox.shrink());
+    final incomplete = Message(
+      id: 'incomplete-message', chatId: chat, authorId: uid,
+      authorLogin: 'test', authorName: 'Автор', text: 'Неполное вложение',
+      at: DateTime.utc(2026), fileId: '33333333-3333-4333-8333-333333333333',
+    );
+    cubit.emit(TeamState(team: team, chat: [incomplete], chatHasSnapshot: true));
+    final picksBeforeIncomplete = picks, sendsBeforeIncomplete = sent;
+    await tester.pumpWidget(app(const ValueKey('incomplete')));
+    for (var i = 0; i < 15; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    await tester.longPress(find.text('Неполное вложение').first);
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('Выбрать').last);
+    await tester.pumpAndSettle();
+    for (final messenger in tester.stateList<ScaffoldMessengerState>(find.byType(ScaffoldMessenger))) {
+      messenger.clearSnackBars();
+      messenger.removeCurrentSnackBar();
+    }
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Переслать').last);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.textContaining('вложений ещё недоступна'), findsOneWidget);
+    expect(find.text('Выбрано 1'), findsOneWidget);
+    expect(picks, picksBeforeIncomplete);
+    expect(sent, sendsBeforeIncomplete);
+    await tester.pumpWidget(const SizedBox.shrink());
     await cubit.close();
     scope.dispose();
     await tester.runAsync(() async {
