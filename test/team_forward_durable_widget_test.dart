@@ -27,6 +27,9 @@ import 'package:student_platform/src/ui/learning/models/chat_file.dart';
 import 'package:student_platform/src/ui/learning/models/team.dart';
 import 'package:student_platform/src/ui/learning/state/team_cubit.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat_tab.dart';
+import 'package:student_platform/src/ui/learning/global_cache.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/composer.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/composer/chat_composer_bar.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class _Storage implements ForwardOutboxStorage {
@@ -48,9 +51,11 @@ class _Storage implements ForwardOutboxStorage {
 
 class _Repo implements LearningRepository {
   final sentTexts = <String>[];
+  Completer<String?>? pendingSave;
   @override
   Future<String?> saveChat(String teamId, List<Message> messages) async {
     sentTexts.addAll(messages.map((message) => message.text));
+    if (pendingSave != null) return pendingSave!.future;
     return 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
   }
   @override
@@ -81,6 +86,7 @@ void main() {
     late Directory dir;
     late Database db;
     var sent = 0;
+    Completer<void>? pauseFileSend;
     var copies = 0;
     List<dynamic>? sentFileIds;
     const uid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -97,6 +103,7 @@ void main() {
               sent++;
               sentFileIds = (jsonDecode(request.body)
                   as Map<String, dynamic>)['p_file_ids'] as List<dynamic>?;
+              if (pauseFileSend != null) await pauseFileSend!.future;
               return http.Response(
                   '"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"', 200,
                   request: request,
@@ -362,6 +369,95 @@ void main() {
     expect(repo.sentTexts, ['Обычный текст QA']);
     expect(storage.values[legacyKey], legacyRaw);
     expect(sent, 1);
+    // While the first message is in flight the user may start the next one.
+    // Its contents must survive both the RPC and the draft cleanup.
+    repo.pendingSave = Completer<String?>();
+    await tester.enterText(find.byType(TextField).last, 'Первое сообщение');
+    await tester.pump();
+    await tester.tap(find.byTooltip('Отправить'));
+    for (var i = 0; i < 20 && repo.sentTexts.length < 2; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(repo.sentTexts.last, 'Первое сообщение');
+    await tester.enterText(find.byType(TextField).last, 'Следующий черновик');
+    await tester.pump(const Duration(milliseconds: 400));
+    repo.pendingSave!.complete('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
+    repo.pendingSave = null;
+    for (var i = 0; i < 20; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(find.text('Следующий черновик'), findsOneWidget);
+    expect(GlobalCache().getDraft(team.id)?.$1, 'Следующий черновик');
+    repo.pendingSave = Completer<String?>();
+    await tester.enterText(find.byType(TextField).last, 'Сообщение без подтверждения');
+    await tester.pump();
+    await tester.tap(find.byTooltip('Отправить'));
+    for (var i = 0; i < 20 && repo.sentTexts.length < 3; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(repo.sentTexts.last, 'Сообщение без подтверждения');
+    repo.pendingSave!.complete(null);
+    repo.pendingSave = null;
+    for (var i = 0; i < 10; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(find.text('Сообщение без подтверждения'), findsWidgets);
+    expect(GlobalCache().getDraft(team.id)?.$1, 'Сообщение без подтверждения');
+    await tester.enterText(find.byType(TextField).last, '');
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump(const Duration(milliseconds: 400));
+    cubit.emit(TeamState(team: team, chat: [message], chatHasSnapshot: true));
+    await tester.pumpWidget(const SizedBox.shrink());
+    await GlobalCache().saveDraft(team.id, 'Файл', [{
+      'localId': 'sent-local', 'path': '/test/sent.pdf', 'name': 'sent.pdf',
+      'mimeType': 'application/pdf', 'size': 100, 'isImage': false,
+      'uploadedFileId': '44444444-4444-4444-8444-444444444444',
+    }]);
+    await tester.pumpWidget(app(const ValueKey('file-race')));
+    for (var i = 0; i < 15; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(find.text('sent.pdf'), findsWidgets);
+    pauseFileSend = Completer<void>();
+    for (final messenger in tester.stateList<ScaffoldMessengerState>(find.byType(ScaffoldMessenger))) {
+      messenger.clearSnackBars();
+      messenger.removeCurrentSnackBar();
+    }
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Отправить'));
+    for (var i = 0; i < 20 && sent < 2; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(sent, 2);
+    tester.widget<ChatComposerBar>(find.byType(ChatComposerBar)).onAddFile(AttachedFile(
+      localId: 'new-local', path: '/test/new.pdf', name: 'new.pdf',
+      isImage: false, size: 120));
+    await tester.pump();
+    await tester.longPress(find.text('Сообщение для пересылки').first);
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('Ответить').last);
+    await tester.pump();
+    expect(tester.widget<ChatComposerBar>(find.byType(ChatComposerBar)).replyTo?.id,
+        message.id);
+    pauseFileSend!.complete();
+    pauseFileSend = null;
+    for (var i = 0; i < 20; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(find.text('new.pdf'), findsWidgets);
+    expect(tester.widget<ChatComposerBar>(find.byType(ChatComposerBar)).replyTo?.id,
+        message.id);
+    expect(GlobalCache().getDraft(team.id)?.$2.map((f) => f['name']), contains('new.pdf'));
+    expect(GlobalCache().getDraft(team.id)?.$2.map((f) => f['name']), isNot(contains('sent.pdf')));
+    await tester.pumpWidget(const SizedBox.shrink());
+    await GlobalCache().clearDraft(team.id);
     await tester.pump(const Duration(seconds: 1));
     await tester.pump(const Duration(seconds: 1));
     await tester.pumpWidget(const SizedBox.shrink());
@@ -390,7 +486,7 @@ void main() {
     expect(picks, greaterThan(picksBeforeUnsupportedForward));
     expect(find.text('Выбрано 1'), findsOneWidget);
     expect(storage.values[legacyKey], legacyRaw);
-    expect(sent, 1);
+    expect(sent, 2);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpWidget(app(const ValueKey('legacy-mode'), durable: false));
     for (var i = 0; i < 15; i++) {
@@ -405,7 +501,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
     }
     expect(find.byTooltip('Отменить пересылку'), findsOneWidget);
-    expect(sent, 1); // Only staging was checked; no legacy-mode send.
+    expect(sent, 2); // Only staging was checked; no legacy-mode send.
     await tester.pumpWidget(const SizedBox.shrink());
     final incomplete = Message(
       id: 'incomplete-message', chatId: chat, authorId: uid,

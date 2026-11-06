@@ -1523,8 +1523,20 @@ class _ChatTabState extends State<ChatTab> {
         return;
       }
 
-      final text = _ctrl.text.trim();
+      final composerText = _ctrl.text;
+      final text = composerText.trim();
       if (text.isEmpty && _att.pending.isEmpty) return;
+
+      final teamId = context.read<TeamCubit>().state.team.id;
+      final owner = ChatFileAccess.userId;
+      final session = ChatFileAccess.currentSessionBinding;
+      final epoch = ChatFileAccess.generation;
+      bool sameSend() => mounted && owner != null && session != null &&
+          owner == ChatFileAccess.userId &&
+          session == ChatFileAccess.currentSessionBinding &&
+          epoch == ChatFileAccess.generation &&
+          context.read<TeamCubit>().state.team.id == teamId;
+      if (!sameSend()) return;
 
       // Принудительно сохраняем черновик перед отправкой
       _forceSaveDraft();
@@ -1534,24 +1546,33 @@ class _ChatTabState extends State<ChatTab> {
 
       // Если есть прикрепленные файлы, отправляем их вместе с текстом
       if (filesToSend.isNotEmpty) {
-        final ok = await _sendMessageWithFiles(text, replyId, filesToSend);
+        final ok = await _sendMessageWithFiles(text, replyId, filesToSend,
+            isCurrent: sameSend);
         if (!ok) return; // Ждём загрузку файлов, не чистим поля
       } else {
         // Только текст
-        await context.read<TeamCubit>().sendMessage(
+        final id = await context.read<TeamCubit>().sendMessage(
               'me',
               text,
               replyToId: replyId,
             );
+        if (id == null || id.isEmpty) return;
+      }
+      if (!sameSend()) return;
+      final cleanup = confirmedForwardCleanup(sentText: composerText,
+          currentText: _ctrl.text, sentReplyId: replyId,
+          currentReplyId: _replyTo?.id);
+      if (cleanup.clearText) _ctrl.clear();
+      if (cleanup.clearReply) _replyTo = null;
+
+      if (_ctrl.text.isEmpty && _att.pending.isEmpty) {
+        await _clearDraft();
+      } else {
+        _forceSaveDraft();
       }
 
-      _ctrl.clear();
-      _replyTo = null;
-
-      // Очищаем черновик после отправки
-      _clearDraft();
-
       // Скрываем клавиатуру после отправки
+      if (!mounted) return;
       FocusScope.of(context).unfocus();
       shouldJumpAfterSend = true;
     } on UnconfirmedMessageSend {
@@ -1571,18 +1592,18 @@ class _ChatTabState extends State<ChatTab> {
   }
 
   Future<bool> _sendMessageWithFiles(
-      String text, String? replyId, List<LocalAttach> filesToSend) async {
+      String text, String? replyId, List<LocalAttach> filesToSend,
+      {required bool Function() isCurrent}) async {
     try {
       // Дожидаемся загрузки файлов (uploadedFileId) максимум 8 секунд
-      final paths = filesToSend.map((f) => f.path).toList();
       const maxTries = 40; // 40 * 200мс = 8с
       var tries = 0;
       List<String> fileIds = [];
       while (tries < maxTries) {
         final ready = <String>[];
-        for (final p in paths) {
+        for (final original in filesToSend) {
           final f = _att.pending.firstWhere(
-            (x) => x.path == p,
+            (x) => x.localId == original.localId,
             orElse: () => LocalAttach(
                 path: '', name: '', mimeType: '', size: 0, isImage: false),
           );
@@ -1591,30 +1612,35 @@ class _ChatTabState extends State<ChatTab> {
             ready.add(f.uploadedFileId!);
           }
         }
-        if (ready.length == paths.length) {
+        if (ready.length == filesToSend.length) {
           fileIds = ready;
           break;
         }
         tries++;
         await Future.delayed(const Duration(milliseconds: 200));
+        if (!isCurrent()) return false;
       }
 
       if (fileIds.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('⏳ Файлы загружаются, подождите...')),
         );
         return false;
       }
 
       // Вызываем новую RPC для отправки сообщения с файлами
+      if (!isCurrent()) return false;
+      final sentIds = filesToSend.map((f) => f.localId).toSet();
+      final sentSnapshot = ForwardAttachmentSnapshot(
+          _att.pending.where((f) => sentIds.contains(f.localId)).toList());
       await _sendMessageWithFilesAndRefresh(
         context.read<TeamCubit>().state.team.id,
         text,
         fileIds,
       );
 
-      // Очищаем список прикрепленных файлов
-      _att.clear();
+      if (!isCurrent()) return false;
+      _att.forgetConfirmedSent(sentSnapshot.containsUnchanged);
 
       return true;
     } on UnconfirmedMessageSend {
@@ -1627,7 +1653,7 @@ class _ChatTabState extends State<ChatTab> {
       return false;
     } catch (e) {
       safeDebugLog('[ChatTab] sendMessageWithFiles failed: ${e.runtimeType}');
-      ScaffoldMessenger.of(context).showSnackBar(
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('❌ Ошибка отправки: $e'),
           backgroundColor: Colors.red,
