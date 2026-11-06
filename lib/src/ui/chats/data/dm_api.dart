@@ -76,6 +76,13 @@ class DmApi {
     DateTime? clearedAt,
   })? debugSyncPageLoader;
 
+  @visibleForTesting
+  static Future<ConfirmedDmPage> Function({
+    required String chatId,
+    required int limit,
+    DateTime? clearedAt,
+  })? debugConfirmedPageLoader;
+
   /// Test hook for an in-flight older-page fetch.
   static Future<({List<Message> messages, bool hasMore})> Function({
     required String chatId,
@@ -813,14 +820,25 @@ class DmApi {
           return ChatSyncResult.failure(StateError('Session changed'));
         }
         final projectCache = ProjectChatServerCache.qaInstance;
-        if (projectCache != null && debugSyncPageLoader == null) {
+        if (projectCache != null &&
+            (debugSyncPageLoader == null || debugConfirmedPageLoader != null)) {
+          final projectOwner = projectCache.scope.capture();
+          bool currentProjectOwner() => projectOwner != null &&
+              projectOwner.userId == owner &&
+              _isCurrentSession(owner, generation) &&
+              projectCache.scope.isCurrent(projectOwner);
           unawaited(() async {
             try {
-              final ticket = await projectCache.begin(chatId);
-              if (ticket == null) return;
-              final confirmed = await loadConfirmedMessagesPage(chatId,
-                  limit: limit, clearedAt: clearedAt);
-              if (!_isCurrentSession(owner, generation) ||
+              if (!currentProjectOwner()) return;
+              final ticket = await projectCache.begin(chatId,
+                  isCurrent: currentProjectOwner);
+              if (ticket == null || !currentProjectOwner()) return;
+              final confirmed = debugConfirmedPageLoader != null
+                  ? await debugConfirmedPageLoader!(
+                      chatId: chatId, limit: limit, clearedAt: clearedAt)
+                  : await loadConfirmedMessagesPage(chatId,
+                      limit: limit, clearedAt: clearedAt);
+              if (!currentProjectOwner() ||
                   confirmed.source != ConfirmedDmSource.serverRpc) return;
               final tombs = gate.pendingDeleteTombstones;
               final safe = confirmed.messages

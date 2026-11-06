@@ -1,5 +1,6 @@
 // FILE: lib/src/ui/chats/direct_chat_screen.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:student_platform/src/ui/chats/core/unified_chat_screen.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:student_platform/src/ui/learning/state/team_cubit.dart';
@@ -7,6 +8,7 @@ import 'package:student_platform/src/ui/chats/core/dm_chat_service.dart';
 import 'package:student_platform/src/ui/chats/core/chat_messages_load_state.dart';
 import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
+import 'package:student_platform/src/core/online_side_effect_barrier.dart';
 import 'package:student_platform/src/services/push/push_navigation.dart';
 import 'package:student_platform/src/ui/chats/dm_title.dart';
 import 'direct_chat_info_screen.dart';
@@ -20,6 +22,10 @@ class DirectChatScreen extends StatefulWidget {
     this.initialChatId,
     this.cachedStore,
     this.cachedCapabilities,
+    this.onlineBarrier,
+    this.sessionIsCurrent,
+    this.debugResolveProfile,
+    this.debugChatBuilder,
   });
 
   final String peerId;
@@ -28,6 +34,15 @@ class DirectChatScreen extends StatefulWidget {
   final String? initialChatId;
   final ProjectChatServerCache? cachedStore;
   final SessionCapabilities? cachedCapabilities;
+
+  /// Optional route boundary. Both fields must be supplied for guarded use.
+  final OnlineSideEffectBarrier? onlineBarrier;
+  final bool Function()? sessionIsCurrent;
+  @visibleForTesting
+  final Future<({String name, String? avatar})> Function(String)?
+      debugResolveProfile;
+  @visibleForTesting
+  final Widget Function(BuildContext, String)? debugChatBuilder;
 
   @override
   State<DirectChatScreen> createState() => _DirectChatScreenState();
@@ -89,8 +104,9 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
     if (oldWidget.peerId == widget.peerId &&
         oldWidget.initialChatId == widget.initialChatId &&
         identical(oldWidget.cachedStore, widget.cachedStore) &&
-        identical(oldWidget.cachedCapabilities, widget.cachedCapabilities))
-      return;
+        identical(oldWidget.cachedCapabilities, widget.cachedCapabilities) &&
+        identical(oldWidget.onlineBarrier, widget.onlineBarrier) &&
+        identical(oldWidget.sessionIsCurrent, widget.sessionIsCurrent)) return;
     _service?.dispose();
     _peerName = normalizeDmTitle(widget.peerName);
     _peerAvatarUrl = widget.peerAvatarUrl;
@@ -107,6 +123,8 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
   @override
   Widget build(BuildContext context) {
     final title = normalizeDmTitle(_peerName);
+    final debugBuilder = widget.debugChatBuilder;
+    if (kDebugMode && debugBuilder != null) return debugBuilder(context, title);
     final service = _service;
     if (service == null)
       return const Scaffold(
@@ -117,6 +135,8 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
       title: title,
       hideAvatars: true,
       peerAvatarUrl: _peerAvatarUrl,
+      onlineBarrier: widget.onlineBarrier,
+      sessionIsCurrent: widget.sessionIsCurrent,
       onOpenPeer: _wantsCached
           ? null
           : () {
@@ -140,9 +160,34 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
   Future<void> _loadPeerProfile() async {
     if (_wantsCached) return;
     final revision = _serviceRevision;
+    final peer = widget.peerId;
+    final barrier = widget.onlineBarrier;
+    final guard = widget.sessionIsCurrent;
+    bool current() {
+      try {
+        return mounted &&
+            !_wantsCached &&
+            revision == _serviceRevision &&
+            widget.peerId == peer &&
+            identical(widget.onlineBarrier, barrier) &&
+            identical(widget.sessionIsCurrent, guard) &&
+            (barrier == null
+                ? guard == null
+                : guard != null && barrier.isOpen && guard());
+      } catch (_) {
+        return false;
+      }
+    }
+
+    if (!current()) return;
     try {
-      final profile = await PushNavigation.resolvePeerProfile(widget.peerId);
-      if (!mounted || _wantsCached || revision != _serviceRevision) return;
+      Future<({String name, String? avatar})> fetch() =>
+          (kDebugMode ? widget.debugResolveProfile : null) != null
+              ? widget.debugResolveProfile!(peer)
+              : PushNavigation.resolvePeerProfile(peer);
+      final profile =
+          barrier == null ? await fetch() : await barrier.run(fetch);
+      if (profile == null || !current()) return;
       final fullName = isUnresolvedDmTitle(profile.name) ? '' : profile.name;
       final avatar = (profile.avatar ?? '').trim();
       if (fullName.isEmpty && avatar.isEmpty) return;

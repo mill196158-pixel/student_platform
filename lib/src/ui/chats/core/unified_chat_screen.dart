@@ -1,6 +1,7 @@
 import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_card_envelope.dart';
 import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:student_platform/src/services/chat_file_access.dart';
+import 'package:student_platform/src/core/online_side_effect_barrier.dart';
 import 'cached_chat_message_bubble.dart';
 // FILE: lib/src/ui/chats/core/unified_chat_screen.dart
 // ignore_for_file: unnecessary_import, unused_import, unused_field, unused_element, dead_null_aware_expression, invalid_null_aware_operator, deprecated_member_use
@@ -75,6 +76,8 @@ class UnifiedChatScreen extends StatefulWidget {
     this.debugPickForwardTarget,
     this.debugCopyForwardFile,
     this.debugAfterDurableCancel,
+    this.onlineBarrier,
+    this.sessionIsCurrent,
   });
 
   final IChatService service;
@@ -84,6 +87,9 @@ class UnifiedChatScreen extends StatefulWidget {
   // для ЛС
   final String? peerAvatarUrl;
   final VoidCallback? onOpenPeer;
+  /// Optional guard for automatic work started by a scoped push route.
+  final OnlineSideEffectBarrier? onlineBarrier;
+  final bool Function()? sessionIsCurrent;
   @visibleForTesting
   final Future<ForwardTarget?> Function(BuildContext, bool Function())? debugPickForwardTarget;
   @visibleForTesting
@@ -96,6 +102,31 @@ class UnifiedChatScreen extends StatefulWidget {
 }
 
 class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
+  bool get _autoWorkCurrent {
+    final barrier = widget.onlineBarrier, guard = widget.sessionIsCurrent;
+    if (barrier == null && guard == null) return true;
+    try { return mounted && barrier != null && guard != null && barrier.isOpen && guard(); }
+    catch (_) { return false; }
+  }
+
+  Future<void> _runAutoWork(Future<void> Function(bool Function()) operation) async {
+    final barrier = widget.onlineBarrier, guard = widget.sessionIsCurrent;
+    final service = widget.service;
+    if (barrier == null && guard == null) {
+      await operation(() => true);
+      return;
+    }
+    bool current() {
+      try {
+        return mounted && barrier != null && guard != null && barrier.isOpen &&
+            identical(widget.onlineBarrier, barrier) &&
+            identical(widget.sessionIsCurrent, guard) &&
+            identical(widget.service, service) && guard();
+      } catch (_) { return false; }
+    }
+    if (barrier == null || !current()) return;
+    await barrier.run(() async { if (current()) await operation(current); });
+  }
   static const bool enableTypingIndicator = false;
   // The host keeps the experimental mode disabled until both consumers and
   // migration are reviewed together.
@@ -364,7 +395,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     ActiveChatTracker.instance.leave(_currentChatIdDm);
     try {
       final list = widget.service.currentMessages;
-      if (list.isNotEmpty) _markReadSafely(list.last.id);
+      if (list.isNotEmpty && _autoWorkCurrent) _markReadSafely(list.last.id);
     } catch (_) {}
     _forceSaveDraftDm();
     _seenDebounce?.cancel();
@@ -622,8 +653,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   }
 
   Future<void> _prefetchOldFilesForDm() async {
-    try {
+    await _runAutoWork((current) async { try {
       final chatId = await widget.service.ensureChatId();
+      if (!current()) return;
       final rows = await Supabase.instance.client
           .from('messages')
           .select('id, file_id')
@@ -631,7 +663,10 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
           .eq('msg_type', 'file')
           .not('file_id', 'is', null);
 
+      if (!current()) return;
+
       for (final row in rows) {
+        if (!current()) return;
         final fileId = row['file_id'] as String;
         final cached = _globalCache.getFile(fileId);
         if (cached != null) continue;
@@ -643,12 +678,13 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
             .eq('is_deleted', false)
             .maybeSingle();
 
+        if (!current()) return;
         if (fileRow == null) continue;
         final chatFile = ChatFile.fromJson(fileRow);
         await _globalCache.cacheFile(fileId, chatFile);
-
+        if (!current()) return;
       }
-    } catch (_) {}
+    } catch (_) {} });
   }
 
   Future<void> _initEntryBoundary() async {
@@ -1334,8 +1370,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
   Future<void> _markReadSafely(String lastId) async {
     if (lastId.isEmpty || lastId.startsWith('local_')) return;
-    try {
+    await _runAutoWork((current) async { try {
       await widget.service.markRead(lastId);
+      if (!current()) return;
       _lastMarkedReadId = lastId;
       final chatId = _currentChatIdDm;
       if (chatId != null && chatId.isNotEmpty) {
@@ -1349,7 +1386,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       }
     } catch (e) {
       if (kDebugMode) debugPrint('[UnifiedChat] markRead error: $e');
-    }
+    } });
   }
 
   Future<void> _jumpToBottom() async {
