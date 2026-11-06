@@ -37,7 +37,13 @@ class OfflineStartupAdmission {
       this.backend,
       this.publicKey,
       this.onOnlineAdmitted,
-      this.policyTimeout = const Duration(seconds: 12)});
+      this.onInitialRefreshAdmitted,
+      bool initialRefreshJoined = false,
+      int? joinedStartRevision,
+      this.policyTimeout = const Duration(seconds: 12)})
+      : _initialRefreshJoined = initialRefreshJoined,
+        _joinedStartRevision = joinedStartRevision,
+        _initialGeneration = scope.generation;
   final SupabaseClient client;
   final AuthSessionScope scope;
   final SqlitePolicyGrantStore store;
@@ -52,15 +58,24 @@ class OfflineStartupAdmission {
   final Uri? backend;
   final String? publicKey;
   final Duration policyTimeout;
+  /// Internal QA continuation after joining an already-started SDK refresh.
+  final bool _initialRefreshJoined;
+  final int? _joinedStartRevision;
   final void Function(
           AuthOperationScope, OfflineSessionBinding, SessionCapabilities)?
       onOnlineAdmitted;
+  final void Function(AuthOperationScope, SessionCapabilities)?
+      onInitialRefreshAdmitted;
   bool _used = false;
+  final int _initialGeneration;
 
   Future<OfflineStartupResult> resolve(SessionCapabilities capabilities) async {
-    if (_used || !scope.isCurrent(owner))
-      return OfflineStartupResult.unavailable;
+    if (_used) return OfflineStartupResult.unavailable;
     _used = true;
+    if (gate.trackQaRefresh && gate.qaRefreshPending && !_initialRefreshJoined) {
+      return _joinInitialRefresh(capabilities);
+    }
+    if (!scope.isCurrent(owner)) return OfflineStartupResult.unavailable;
     OfflineAuthErrorReceipt.instance.activateStrict();
     final authSignalBefore = scope.authSignalRevision;
     Object? refreshError;
@@ -97,8 +112,54 @@ class OfflineStartupAdmission {
           authSignalBefore: authSignalBefore);
     } catch (_) {
       // Unknown storage/transport failure is never an offline permit.
-      capabilities.block();
+      _blockIfCurrent(capabilities);
+      return OfflineStartupResult.unavailable;
+    }
+  }
+
+  void _blockIfCurrent(SessionCapabilities caps) {
+    if (!scope.isCurrent(owner)) {
+      if (scope.logoutFenced) unawaited(gate.suspendAndDrain());
+      return;
+    }
+    caps.blockFenced();
+    // block() synchronously notifies listeners; a different owner may have
+    // taken over before it returns.
+    if (scope.isCurrent(owner) || scope.logoutFenced) {
       unawaited(gate.suspendAndDrain());
+    }
+  }
+
+  Future<OfflineStartupResult> _joinInitialRefresh(SessionCapabilities caps) async {
+    final generation = _initialGeneration;
+    final starts = gate.refreshStarts.value;
+    if (gate.qaRefreshAmbiguous || !fence.unchangedSince(fenceRevision) ||
+        scope.generation != generation) return OfflineStartupResult.unavailable;
+    try {
+      // The pinned SDK joins an in-flight refresh for the same refresh token.
+      // Timeout does not cancel SDK work: pending remains fail-closed.
+      await client.auth.refreshSession().timeout(policyTimeout);
+      await Future<void>.delayed(Duration.zero);
+      if (gate.qaRefreshAmbiguous || gate.refreshStarts.value != starts ||
+          !gate.qaRefreshPending || scope.generation != generation ||
+          !fence.unchangedSince(fenceRevision)) return OfflineStartupResult.unavailable;
+      final next = scope.capture();
+      final session = client.auth.currentSession;
+      if (next == null || session == null || !scope.matchesSession(next, session)) {
+        return OfflineStartupResult.unavailable;
+      }
+      final nextBinding = scope.bindingFor(next, binding.issuer);
+      if (nextBinding == null || nextBinding.issuer != binding.issuer ||
+          nextBinding.userId != binding.userId ||
+          nextBinding.sessionId != binding.sessionId) return OfflineStartupResult.unavailable;
+      return await OfflineStartupAdmission(client: client, scope: scope, store: store,
+          gate: gate, monitor: monitor, fence: fence, owner: next,
+          binding: nextBinding, prior: null, fenceRevision: fenceRevision,
+          policy: policy, backend: backend, publicKey: publicKey,
+          policyTimeout: policyTimeout, onOnlineAdmitted: onOnlineAdmitted,
+          onInitialRefreshAdmitted: onInitialRefreshAdmitted,
+          initialRefreshJoined: true, joinedStartRevision: starts).resolve(caps);
+    } catch (_) {
       return OfflineStartupResult.unavailable;
     }
   }
@@ -150,27 +211,59 @@ class OfflineStartupAdmission {
         }
         if (!scope.isCurrent(owner) || !fence.unchangedSince(fenceRevision))
           return OfflineStartupResult.unavailable;
+        if (_initialRefreshJoined &&
+            (gate.qaRefreshAmbiguous || !gate.qaRefreshPending ||
+             gate.refreshStarts.value != _joinedStartRevision)) {
+          return OfflineStartupResult.unavailable;
+        }
+        final capabilityRevision = caps.revision;
         final authorization = caps.beginAuthorization(owner);
         if (authorization == null ||
             !scope.isCurrent(owner) ||
-            !fence.unchangedSince(fenceRevision)) {
+            !fence.unchangedSince(fenceRevision) ||
+            caps.revision != capabilityRevision + 1 ||
+            caps.mode != SessionCapabilityMode.blocked) {
+          _blockIfCurrent(caps);
           return OfflineStartupResult.unavailable;
         }
         gate.resume();
         if (!caps.grant(SessionCapabilityMode.online, authorization)) {
-          unawaited(gate.suspendAndDrain());
+          _blockIfCurrent(caps);
           return OfflineStartupResult.unavailable;
         }
         // grant() notifies listeners synchronously; one may invalidate the
         // owner or capability during that notification.
         if (!scope.isCurrent(owner) ||
             !fence.unchangedSince(fenceRevision) ||
-            caps.mode != SessionCapabilityMode.online) {
-          caps.block();
-          unawaited(gate.suspendAndDrain());
+            caps.mode != SessionCapabilityMode.online ||
+            caps.revision != capabilityRevision + 2) {
+          _blockIfCurrent(caps);
           return OfflineStartupResult.unavailable;
         }
+        if (_initialRefreshJoined && !gate.confirmQaRefresh()) {
+          _blockIfCurrent(caps);
+          return OfflineStartupResult.unavailable;
+        }
+        final admittedRevision = caps.revision;
         onOnlineAdmitted?.call(owner, binding, caps);
+        bool stillAdmitted() => scope.isCurrent(owner) &&
+            fence.unchangedSince(fenceRevision) &&
+            caps.mode == SessionCapabilityMode.online &&
+            caps.revision == admittedRevision &&
+            (!_initialRefreshJoined || (!gate.qaRefreshPending &&
+                !gate.qaRefreshAmbiguous &&
+                gate.refreshStarts.value == _joinedStartRevision));
+        if (!stillAdmitted()) {
+          _blockIfCurrent(caps);
+          return OfflineStartupResult.unavailable;
+        }
+        if (_initialRefreshJoined) {
+          onInitialRefreshAdmitted?.call(owner, caps);
+          if (!stillAdmitted()) {
+            _blockIfCurrent(caps);
+            return OfflineStartupResult.unavailable;
+          }
+        }
         return OfflineStartupResult.online;
       case SettledPolicyStatus.passwordChangeRequired:
       case SettledPolicyStatus.denied:

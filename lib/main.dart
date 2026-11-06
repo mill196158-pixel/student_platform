@@ -379,6 +379,9 @@ Future<void> _initializeApp(
             policy: SettledPolicyTransport(inner),
             backend: Uri.parse(SupabaseConfig.url),
             publicKey: SupabaseConfig.anonKey,
+            onInitialRefreshAdmitted: _qaRotationNavigation
+                ? (owner, caps) => _qaRotationReceipt.record(owner, owner, caps)
+                : null,
             onOnlineAdmitted: (owner, binding, caps) =>
                 _qaRefreshGrantObserver?.arm(owner, binding, caps));
       }

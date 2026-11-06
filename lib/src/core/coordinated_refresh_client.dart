@@ -185,6 +185,7 @@ class RefreshAdmissionClient extends http.BaseClient {
   bool _qaRefreshPending = false;
   bool _qaRefreshAmbiguous = false;
   bool get qaRefreshPending => _qaRefreshPending || _qaRefreshAmbiguous;
+  bool get qaRefreshAmbiguous => _qaRefreshAmbiguous;
 
   /// Only a verified policy result can settle a single observed start.
   /// Overlapping or otherwise ambiguous starts remain closed for this process.

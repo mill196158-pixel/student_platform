@@ -21,6 +21,7 @@ class SessionCapabilities extends ChangeNotifier {
   AuthOperationScope? _owner;
   int _revision = 0;
   bool _disposed = false;
+  int _fencedBlocks = 0;
   CapabilityBlockReason? _lastBlockReason;
   int get revision => _revision;
   CapabilityBlockReason? get lastBlockReason => _lastBlockReason;
@@ -35,7 +36,7 @@ class SessionCapabilities extends ChangeNotifier {
   /// Begin before checking authorization. Starting a new attempt blocks old
   /// permits; a later block or attempt also invalidates this attempt.
   CapabilityAuthorizationAttempt? beginAuthorization(AuthOperationScope owner) {
-    if (_disposed || !_session.isCurrent(owner)) return null;
+    if (_disposed || _fencedBlocks != 0 || !_session.isCurrent(owner)) return null;
     _mode = SessionCapabilityMode.blocked;
     _lastBlockReason = CapabilityBlockReason.explicit;
     _owner = null;
@@ -63,6 +64,17 @@ class SessionCapabilities extends ChangeNotifier {
   }
 
   void block() => _block(CapabilityBlockReason.explicit);
+
+  /// Prevents synchronous listeners of this block from reauthorizing while
+  /// a failed admission is still unwinding. Ordinary later attempts work.
+  void blockFenced() {
+    _fencedBlocks++;
+    try {
+      block();
+    } finally {
+      _fencedBlocks--;
+    }
+  }
 
   void _block(CapabilityBlockReason reason) {
     if (_disposed) return;
