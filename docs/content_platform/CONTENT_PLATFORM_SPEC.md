@@ -301,6 +301,13 @@ original; the client cannot prove that a photo contains no QR or fine text.
 This local change is not deployed; native platforms without the Web workers
 retain the original.
 
+Local Home Promo icon follow-up: custom PNG/WebP icons up to 5 MiB now use
+the same guarded preparation before editor mutation. Lossy conversions offer
+an original-versus-optimized choice; valid animated images or optimization
+failures retain the original, while unsupported formats are rejected. This
+does not change existing published assets or grant upload permissions. The
+actual browser file-selection and production upload paths remain unverified.
+
 CTA rules v1:
 
 - internal route from fixed allowlist (e.g. `/diary`, `/info`, `/chat/...` patterns approved in migration); **or**
