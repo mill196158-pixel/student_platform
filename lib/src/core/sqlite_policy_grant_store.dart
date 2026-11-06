@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'auth_session_scope.dart';
 import 'offline_policy_grant.dart';
@@ -14,7 +15,7 @@ Future<Database> openPolicyGrantDatabase(String path,
       options: OpenDatabaseOptions(
         version: 1,
         onConfigure: (db) async {
-          await db.rawQuery('PRAGMA journal_mode=WAL');
+          validatePolicyWalMode(await db.rawQuery('PRAGMA journal_mode=WAL'));
           await db.execute('PRAGMA synchronous=FULL');
         },
         onCreate: (db, version) async {
@@ -36,7 +37,18 @@ Future<Database> openPolicyGrantDatabase(String path,
       ));
 }
 
+@visibleForTesting
+void validatePolicyWalMode(List<Map<String, Object?>> rows) {
+  if (rows.length != 1 ||
+      rows.single.length != 1 ||
+      rows.single.values.single is! String ||
+      (rows.single.values.single as String).toLowerCase() != 'wal') {
+    throw StateError('Policy database WAL unavailable');
+  }
+}
+
 Future<void> _validatePolicySchema(Database db) async {
+  validatePolicyWalMode(await db.rawQuery('PRAGMA journal_mode'));
   const expected = <String, List<(String, String, int, int)>>{
     'policy_owner': [
       ('issuer', 'TEXT', 1, 1),
@@ -209,7 +221,7 @@ class SqlitePolicyGrantStore {
               '(issuer,uid,epoch,live_seq,state,last_seen) VALUES (?,?,0,0,?,NULL)',
               [binding.issuer, binding.userId, 'revoked']);
           await txn.rawUpdate(
-              'UPDATE policy_owner SET live_seq=live_seq+1 WHERE issuer=? AND uid=?',
+              "UPDATE policy_owner SET live_seq=live_seq+1,state='revoked' WHERE issuer=? AND uid=?",
               [binding.issuer, binding.userId]);
           final rows = await txn.rawQuery(
               'SELECT epoch,live_seq FROM policy_owner WHERE issuer=? AND uid=?',
@@ -400,8 +412,7 @@ class SqlitePolicyGrantStore {
               rows.single['owner_epoch'] != owners.single['epoch'] ||
               rows.single['live_seq'] is! int ||
               (rows.single['live_seq'] as int) <= 0 ||
-              (rows.single['live_seq'] as int) >
-                  (owners.single['live_seq'] as int)) {
+              rows.single['live_seq'] != owners.single['live_seq']) {
             return const SqliteGrantReadResult(SqliteGrantReadStatus.blocked);
           }
           final grant = OfflinePolicyGrant.fromJson({
