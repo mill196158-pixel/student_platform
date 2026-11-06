@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:student_platform/src/ui/learning/data/learning_repository.dart';
+import 'package:student_platform/src/ui/chats/core/confirmed_chat_row.dart';
 import 'package:student_platform/src/ui/learning/models/team.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_card_envelope.dart';
@@ -13,13 +14,24 @@ import 'package:student_platform/src/ui/learning/models/assignment.dart';
 import 'package:student_platform/src/ui/learning/models/chat_file.dart'; // ДОБАВЛЕНО!
 import 'package:student_platform/src/utils/safe_debug_log.dart';
 
+enum TeamPageSource { serverRpc }
+
+class ConfirmedTeamChatPage {
+  const ConfirmedTeamChatPage(this.messages, this.hasMore, this.source);
+  final List<Message> messages;
+  final bool hasMore;
+  final TeamPageSource source;
+}
+
 class SupabaseLearningRepository implements LearningRepository {
-  SupabaseLearningRepository({this.useLegacyTeamCache = true});
+  SupabaseLearningRepository(
+      {this.useLegacyTeamCache = true, SupabaseClient? client})
+      : _sb = client ?? Supabase.instance.client;
 
   /// Opt out of ownerless team chat/assignment caches. Other repository
   /// methods retain their existing error handling.
   final bool useLegacyTeamCache;
-  final SupabaseClient _sb = Supabase.instance.client;
+  final SupabaseClient _sb;
 
   static const _kTeamsCache = 'learning_teams_cache';
   static const _kHiddenIds = 'learning_hidden_team_ids';
@@ -373,6 +385,50 @@ class SupabaseLearningRepository implements LearningRepository {
   bool _rowHasAttachments(Map<String, dynamic> data) {
     final raw = data['attachments'];
     return raw is List && raw.isNotEmpty;
+  }
+
+  /// Strict server-only page; errors never fall back to ownerless legacy data.
+  Future<ConfirmedTeamChatPage> loadConfirmedChatPage(String chatId) async {
+    if (chatId.isEmpty) throw ArgumentError('Chat id required');
+    final rows = await _sb.rpc('get_chat_messages_page', params: {
+      'p_chat_id': chatId,
+      'p_limit': 100,
+    });
+    if (rows is! List) throw const FormatException('Invalid chat page');
+    final messages = <Message>[];
+    var hasMore = false;
+    var sawMoreFlag = false;
+    final seen = <String>{};
+    for (final row in rows) {
+      if (row is! Map || row.keys.any((key) => key is! String)) {
+        throw const FormatException('Invalid chat row');
+      }
+      final map = Map<String, dynamic>.from(row);
+      validateConfirmedChatRow(map, chatId);
+      final id = map['id'];
+      final actualChat = map['chat_id'] ?? chatId;
+      final timestamp = map['at'] ?? map['created_at'];
+      final more = map['has_more'];
+      if (id is! String ||
+          id.isEmpty ||
+          !seen.add(id) ||
+          actualChat != chatId ||
+          DateTime.tryParse(timestamp?.toString() ?? '') == null ||
+          (more != null && more is! bool)) {
+        throw const FormatException('Invalid chat row');
+      }
+      if (more is bool) sawMoreFlag = true;
+      hasMore = hasMore || more == true;
+      messages.add(_mapMessageRow(map,
+          chatId: chatId, currentUserId: _sb.auth.currentUser?.id ?? ''));
+    }
+    if (!sawMoreFlag) hasMore = rows.length >= 100;
+    messages.sort((a, b) {
+      final byTime = a.at.compareTo(b.at);
+      return byTime == 0 ? a.id.compareTo(b.id) : byTime;
+    });
+    return ConfirmedTeamChatPage(
+        List.unmodifiable(messages), hasMore, TeamPageSource.serverRpc);
   }
 
   @override

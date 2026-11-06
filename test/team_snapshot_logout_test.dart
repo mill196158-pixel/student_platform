@@ -66,7 +66,7 @@ void main() {
           signedOut = true;
         },
         clearSession: () {});
-    expect(complete, isFalse);
+    expect(complete, LogoutCleanupResult.signedOutCleanupIncomplete);
     expect(signedOut, isTrue);
     expect(store.beginLoad(), isNull);
     storage.release!.complete();

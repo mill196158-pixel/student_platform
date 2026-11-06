@@ -110,7 +110,7 @@ void main() {
           signedOut = true;
         },
         clearSession: () {});
-    expect(complete, isFalse);
+    expect(complete, LogoutCleanupResult.signedOutCleanupIncomplete);
     expect(signedOut, isTrue);
   });
   test('hanging removal times out without blocking signout and continues later',
@@ -133,7 +133,7 @@ void main() {
           signedOut = true;
         },
         clearSession: () {});
-    expect(complete, isFalse);
+    expect(complete, LogoutCleanupResult.signedOutCleanupIncomplete);
     expect(signedOut, isTrue);
     gate.complete();
     await Future<void>.delayed(Duration.zero);

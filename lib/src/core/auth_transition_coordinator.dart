@@ -1,5 +1,56 @@
 import 'dart:async';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'auth_session_scope.dart';
+import 'offline_policy_grant.dart';
+
+/// Identity for logout only; this does not authorize any read or network use.
+class LogoutSessionIdentity {
+  LogoutSessionIdentity(Session session, this.issuer)
+      : _binding = OfflineSessionBinding.fromSession(session, issuer),
+        _exact = (session.user.id, session.accessToken, session.refreshToken);
+
+  final String issuer;
+  final OfflineSessionBinding? _binding;
+  final (String, String, String?) _exact;
+  bool get hasBoundSession => _binding != null;
+
+  bool matches(Session? session) {
+    if (session == null) return false;
+    final bound = _binding;
+    if (bound == null) {
+      return (session.user.id, session.accessToken, session.refreshToken) ==
+          _exact;
+    }
+    final current = OfflineSessionBinding.fromSession(session, issuer);
+    return current != null &&
+        current.issuer == bound.issuer &&
+        current.userId == bound.userId &&
+        current.sessionId == bound.sessionId;
+  }
+}
+
+/// Opaque, process-local permission to retry logout, never to read or send.
+class LogoutRetryOwner {
+  LogoutRetryOwner._(this._scope, this._identity, this._generation);
+
+  static LogoutRetryOwner? capture(AuthSessionScope scope,
+      LogoutSessionIdentity identity, Session? session) {
+    if (!scope.logoutFenced ||
+        !identity.hasBoundSession ||
+        !identity.matches(session)) return null;
+    return LogoutRetryOwner._(scope, identity, scope.generation);
+  }
+
+  final AuthSessionScope _scope;
+  final LogoutSessionIdentity _identity;
+  final int _generation;
+
+  bool matches(AuthSessionScope scope, Session? session) =>
+      identical(scope, _scope) &&
+      scope.logoutFenced &&
+      scope.generation == _generation &&
+      _identity.matches(session);
+}
 
 /// Opaque session identity, captured before the queued logout begins.
 class AuthTransitionOwner {

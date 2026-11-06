@@ -71,6 +71,7 @@ dev_dependencies:
   # Линтинг и метрики
   custom_lint: ^0.6.4
   dart_code_metrics_presets: ^2.15.0
+  sqflite_common_ffi: 2.3.6
 
 flutter:
   uses-material-design: true

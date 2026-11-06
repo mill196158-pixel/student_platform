@@ -194,13 +194,26 @@ void main() {
         currentUserId: () => source.capture()?.userId,
         sessionGeneration: () => source.generation,
         sessionIdentity: source.capture);
+    final projectCache = HomeSnapshotCache(
+        currentUserId: () => source.capture()?.userId,
+        sessionGeneration: () => source.generation,
+        sessionIdentity: source.capture,
+        project: 'https://example.invalid',
+        authScope: source);
+    final otherProjectCache = HomeSnapshotCache(
+        currentUserId: () => source.capture()?.userId,
+        sessionGeneration: () => source.generation,
+        sessionIdentity: source.capture,
+        project: 'https://another.invalid',
+        authScope: source);
     final schedules = _ScheduleQueue();
     final service = HomeDashboardService(
         client: client,
         scheduleRepository: schedules,
         learningRepository: _EmptyLearning(),
         sessionScope: source,
-        snapshotCache: cache);
+        snapshotCache: cache,
+        projectSnapshotCache: projectCache);
     final first = service.load();
     final oldExpected = expectLater(first, throwsA(isA<HomeLoadCancelled>()));
     while (schedules.requests.isEmpty) {
@@ -226,6 +239,11 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     final saved = await cache.read('a', HomeSnapshotSection.schedule);
     expect(saved!.items.single['id'], 'new');
+    final projectSaved =
+        await projectCache.read('a', HomeSnapshotSection.schedule);
+    expect(projectSaved!.items.single['id'], 'new');
+    expect(await otherProjectCache.read('a', HomeSnapshotSection.schedule),
+        isNull);
     service.dispose();
     source.dispose();
     await client.dispose();

@@ -78,6 +78,42 @@ void main() {
             now: now, policyTransportFailure: true),
         isFalse);
   });
+
+  test('local snapshots can outlive token only within a bounded owner grant',
+      () {
+    final binding = bind(claims())!;
+    final localGrant = OfflinePolicyGrant(
+        issuer: issuer,
+        userId: 'a',
+        sessionId: sid,
+        checkedAt: now,
+        validUntil: now.add(const Duration(days: 30)));
+    final later = now.add(const Duration(hours: 2));
+    expect(localGrant.matchesForLocalSnapshot(binding, now: later), isTrue);
+    expect(
+        localGrant.matchesForCachedRead(binding,
+            now: later, policyTransportFailure: true),
+        isFalse);
+    expect(
+        localGrant.matchesForLocalSnapshot(binding, now: localGrant.validUntil),
+        isFalse);
+    expect(OfflinePolicyGrant.fromJson(localGrant.toJson()), isNull);
+    expect(
+        OfflinePolicyGrant.fromJson(localGrant.toJson(),
+            maximumAge: OfflinePolicyGrant.maximumLocalSnapshotLifetime),
+        isNotNull);
+    final otherSession = claims()
+      ..['session_id'] = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    expect(localGrant.matchesForLocalSnapshot(bind(otherSession), now: later),
+        isFalse);
+    final afterToken = OfflinePolicyGrant(
+        issuer: issuer,
+        userId: 'a',
+        sessionId: sid,
+        checkedAt: now.add(const Duration(hours: 2)),
+        validUntil: now.add(const Duration(days: 1)));
+    expect(afterToken.matchesForLocalSnapshot(binding, now: later), isFalse);
+  });
   test('rejects missing, malformed or foreign JWT claims', () {
     for (final changed in [
       claims()..remove('exp'),

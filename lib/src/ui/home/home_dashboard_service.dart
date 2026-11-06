@@ -10,6 +10,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
+import 'package:student_platform/src/config/supabase_config.dart';
 import 'package:student_platform/src/ui/home/home_snapshot_cache.dart';
 import 'package:student_platform/src/ui/home/home_snapshot_codec.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/data/chat_group_actions_repository.dart';
@@ -31,6 +32,7 @@ class HomeDashboardService {
     http.Client? httpClient,
     AuthSessionScope? sessionScope,
     HomeSnapshotCache? snapshotCache,
+    HomeSnapshotCache? projectSnapshotCache,
   })  : _sb = client ?? Supabase.instance.client,
         _sessionScope = sessionScope,
         _snapshotCache = snapshotCache ??
@@ -40,6 +42,17 @@ class HomeDashboardService {
                     currentUserId: () => sessionScope.capture()?.userId,
                     sessionGeneration: () => sessionScope.generation,
                     sessionIdentity: sessionScope.capture,
+                  )),
+        _projectSnapshotCache = projectSnapshotCache ??
+            (sessionScope == null ||
+                    !const bool.fromEnvironment('SQLITE_POLICY_QA')
+                ? null
+                : HomeSnapshotCache(
+                    currentUserId: () => sessionScope.capture()?.userId,
+                    sessionGeneration: () => sessionScope.generation,
+                    sessionIdentity: sessionScope.capture,
+                    project: SupabaseConfig.url,
+                    authScope: sessionScope,
                   )),
         _scheduleRepository = scheduleRepository ?? ScheduleRepository(),
         _learningRepository =
@@ -64,6 +77,7 @@ class HomeDashboardService {
   final bool _ownsHttpClient;
   final AuthSessionScope? _sessionScope;
   final HomeSnapshotCache? _snapshotCache;
+  final HomeSnapshotCache? _projectSnapshotCache;
   bool _disposed = false;
   int _loadRevision = 0;
 
@@ -98,6 +112,26 @@ class HomeDashboardService {
     if (!current()) throw HomeLoadCancelled();
     final cache = _snapshotCache;
     final cacheScope = userId == null ? null : cache?.captureScope(userId);
+    final projectCache = _projectSnapshotCache;
+    final projectScope =
+        userId == null ? null : projectCache?.captureScope(userId);
+    void writeProjectSnapshot(
+        HomeSnapshotSection section, List<Map<String, dynamic>> items,
+        {String? date}) {
+      if (!current() ||
+          projectCache == null ||
+          projectScope == null ||
+          !projectCache.isCurrent(projectScope)) return;
+      unawaited(projectCache
+          .write(
+              scope: projectScope,
+              section: section,
+              items: items,
+              date: date,
+              savedAt: DateTime.now())
+          .catchError((Object _) => false));
+    }
+
     final scheduleDate = MskDate.today();
     final validPrevious =
         previous?.profile.id == userId && userId != null ? previous : null;
@@ -193,6 +227,7 @@ class HomeDashboardService {
         isCurrent: current,
         fallback: profile.id == userId ? profile : null,
         onFresh: (fresh) {
+          writeProjectSnapshot(HomeSnapshotSection.profile, [fresh]);
           if (cache != null &&
               cacheScope != null &&
               current() &&
@@ -222,6 +257,8 @@ class HomeDashboardService {
       assignmentsReady = true;
       updateAssignmentStatus();
       publish();
+      writeProjectSnapshot(HomeSnapshotSection.assignments,
+          value.take(4).map(HomeSnapshotCodec.assignmentToMap).toList());
       if (cache != null && cacheScope != null && cache.isCurrent(cacheScope)) {
         unawaited(cache
             .write(
@@ -250,6 +287,9 @@ class HomeDashboardService {
         scheduleFromCache = false;
         scheduleStatus = null;
         publish();
+        writeProjectSnapshot(HomeSnapshotSection.schedule,
+            value.map(HomeSnapshotCodec.lessonToMap).toList(),
+            date: MskDate.isoDate(scheduleDate));
         if (cache != null &&
             cacheScope != null &&
             cache.isCurrent(cacheScope)) {
@@ -396,6 +436,7 @@ class HomeDashboardService {
         }
       }
     }
+
     await Future.wait(List.generate(items.length.clamp(0, 4), (_) => worker()));
     return out;
   }

@@ -27,6 +27,8 @@ import 'package:student_platform/src/ui/chats/data/chat_summaries_cache.dart';
 import 'package:student_platform/src/ui/chats/data/chat_summary_card.dart';
 import 'package:student_platform/src/core/auth_session_scope_host.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
+import 'package:student_platform/src/core/session_capabilities.dart';
+import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
 import 'package:student_platform/src/ui/chats/core/chat_message_cache_store.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/widgets.dart'; // ChatMessageList
 import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_card_envelope.dart';
@@ -35,8 +37,15 @@ import 'package:student_platform/src/ui/learning/state/team_cubit.dart';
 import 'package:student_platform/src/utils/safe_debug_log.dart';
 
 class MyChatsScreen extends StatefulWidget {
-  const MyChatsScreen({super.key, this.pickMode = false, this.pickIsCurrent,
-      this.enableRealtime = true});
+  const MyChatsScreen(
+      {super.key,
+      this.pickMode = false,
+      this.pickIsCurrent,
+      this.enableRealtime = true,
+      this.cachedStore,
+      this.cachedCapabilities});
+  final ProjectChatServerCache? cachedStore;
+  final SessionCapabilities? cachedCapabilities;
   final bool pickMode;
   final bool Function()? pickIsCurrent;
   @visibleForTesting
@@ -48,6 +57,11 @@ class MyChatsScreen extends StatefulWidget {
 class _MyChatsScreenState extends State<MyChatsScreen>
     with WidgetsBindingObserver {
   bool _loading = true;
+  bool _cachedUnavailable = false;
+  bool _boundaryInvalidated = false;
+  bool _startedOnline = false;
+  bool get _cacheOnly =>
+      widget.cachedStore != null || widget.cachedCapabilities != null;
 
   List<_ChatSummary> _all = [];
   List<_ChatSummary> _visible = [];
@@ -101,6 +115,12 @@ class _MyChatsScreenState extends State<MyChatsScreen>
   @override
   void initState() {
     super.initState();
+    if (_cacheOnly) {
+      widget.cachedCapabilities?.addListener(_onCachedAccessChanged);
+      unawaited(_loadScopedSummaries());
+      return;
+    }
+    _startedOnline = true;
     ActiveChatTracker.instance.enterMessageList();
     WidgetsBinding.instance.addObserver(this);
     final raw = ChatSummariesCache.readSync(_currentUserId);
@@ -118,10 +138,39 @@ class _MyChatsScreenState extends State<MyChatsScreen>
   }
 
   @override
+  void didUpdateWidget(covariant MyChatsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (identical(oldWidget.cachedStore, widget.cachedStore) &&
+        identical(oldWidget.cachedCapabilities, widget.cachedCapabilities))
+      return;
+    // Session-mode transitions require a fresh route and a fresh permit.
+    _boundaryInvalidated = true;
+    _summaryRevision++;
+    _all = [];
+    _visible = [];
+    _hydrated = false;
+    _loading = false;
+    _cachedUnavailable = true;
+    oldWidget.cachedCapabilities?.removeListener(_onCachedAccessChanged);
+    _reloadDebounce?.cancel();
+    _channel?.unsubscribe();
+    _channel = null;
+    if (_startedOnline) {
+      ActiveChatTracker.instance.leaveMessageList();
+      WidgetsBinding.instance.removeObserver(this);
+      _startedOnline = false;
+    }
+  }
+
+  @override
   void dispose() {
     _summaryRevision++;
-    ActiveChatTracker.instance.leaveMessageList();
-    WidgetsBinding.instance.removeObserver(this);
+    if (_cacheOnly)
+      widget.cachedCapabilities?.removeListener(_onCachedAccessChanged);
+    if (_startedOnline) {
+      ActiveChatTracker.instance.leaveMessageList();
+      WidgetsBinding.instance.removeObserver(this);
+    }
     _reloadDebounce?.cancel();
     _reloadDebounce = null;
     _channel?.unsubscribe();
@@ -143,6 +192,8 @@ class _MyChatsScreenState extends State<MyChatsScreen>
   }
 
   Future<void> _load() async {
+    if (_boundaryInvalidated) return;
+    if (_cacheOnly) return _loadScopedSummaries();
     if (!_hydrated) {
       _safeSetState(() => _loading = true);
     }
@@ -160,7 +211,8 @@ class _MyChatsScreenState extends State<MyChatsScreen>
         _safeSetState(() => _loading = false);
         return;
       }
-      bool current() => mounted && revision == _summaryRevision && scope.isCurrent(owner);
+      bool current() =>
+          mounted && revision == _summaryRevision && scope.isCurrent(owner);
       final sb = Supabase.instance.client;
       final me = sb.auth.currentUser?.id;
       if (me == null || me.isEmpty) {
@@ -173,8 +225,13 @@ class _MyChatsScreenState extends State<MyChatsScreen>
         return;
       }
 
+      final projectCache = ProjectChatServerCache.qaInstance;
+      final ticket =
+          await projectCache?.begin(ProjectChatServerCache.summaryChatKey);
+      if (!current()) return;
       final res = await sb.rpc('get_my_chat_summaries');
       if (!current()) return;
+      _saveConfirmedSummaries(projectCache, ticket, res);
       final rows = (res as List? ?? const [])
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
@@ -263,16 +320,23 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     };
     bool current(SummaryActionCard card) {
       final item = byCard[card];
-      return mounted && revision == _summaryRevision && scope.isCurrent(owner) &&
-          item != null && _all.any((value) => identical(value, item)) &&
-          item.chatId == card.chatId && item.lastMessageId == card.messageId &&
+      return mounted &&
+          revision == _summaryRevision &&
+          scope.isCurrent(owner) &&
+          item != null &&
+          _all.any((value) => identical(value, item)) &&
+          item.chatId == card.chatId &&
+          item.lastMessageId == card.messageId &&
           identical(item.actionCard, card);
     }
 
     await verifySummaryActionCards(byCard.keys.toList(),
         isCurrent: current,
-        fetch: (card) => Supabase.instance.client.rpc('get_chat_action_cards_batch',
-            params: {'p_chat_id': card.chatId, 'p_items': [card.rpcItem]}),
+        fetch: (card) => Supabase.instance.client
+                .rpc('get_chat_action_cards_batch', params: {
+              'p_chat_id': card.chatId,
+              'p_items': [card.rpcItem]
+            }),
         onUnavailable: (card) {
           if (!current(card)) return;
           setState(() => byCard[card]!.verifiedPreview = 'Карточка недоступна');
@@ -586,6 +650,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
   }
 
   Future<void> _reloadSummariesFromRpc() async {
+    if (_boundaryInvalidated || _cacheOnly) return;
     if (_summariesInFlight) {
       _summariesQueued = true;
       return _summariesReloadCompleter?.future ?? Future<void>.value();
@@ -602,12 +667,18 @@ class _MyChatsScreenState extends State<MyChatsScreen>
         final owner = scope.capture();
         final revision = ++_summaryRevision;
         if (owner == null || !mounted) break;
-        bool current() => mounted && revision == _summaryRevision && scope.isCurrent(owner);
+        bool current() =>
+            mounted && revision == _summaryRevision && scope.isCurrent(owner);
         final sb = Supabase.instance.client;
         if (sb.auth.currentUser == null) break;
 
+        final projectCache = ProjectChatServerCache.qaInstance;
+        final ticket =
+            await projectCache?.begin(ProjectChatServerCache.summaryChatKey);
+        if (!current()) break;
         final res = await sb.rpc('get_my_chat_summaries');
         if (!current()) break;
+        _saveConfirmedSummaries(projectCache, ticket, res);
         final list = (res as List? ?? const [])
             .map((e) => _summaryFromRpcRow(Map<String, dynamic>.from(e as Map)))
             .where((c) => !c.isDm || (c.peerId?.isNotEmpty ?? false))
@@ -839,10 +910,14 @@ class _MyChatsScreenState extends State<MyChatsScreen>
 
   @override
   Widget build(BuildContext context) {
+    if (_boundaryInvalidated)
+      return const Scaffold(
+          body: Center(child: Text('Сохранённые чаты недоступны.')));
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    final searchFill = theme.colorScheme.surfaceContainerHighest.withValues(alpha: .55);
+    final searchFill =
+        theme.colorScheme.surfaceContainerHighest.withValues(alpha: .55);
     final dividerOpacity = isDark ? .24 : .35;
 
     return Scaffold(
@@ -850,36 +925,37 @@ class _MyChatsScreenState extends State<MyChatsScreen>
         centerTitle: true,
         title: const Text('Сообщения'),
         actions: [
-          PopupMenuButton<String>(
-            tooltip: 'Ещё',
-            padding: EdgeInsets.zero,
-            icon: const Icon(Icons.more_vert),
-            onSelected: (value) {
-              if (value == 'archive') {
-                unawaited(
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => BlocProvider.value(
-                        value: context.read<TeamCubit>(),
-                        child: const ArchiveScreen(),
+          if (!_cacheOnly)
+            PopupMenuButton<String>(
+              tooltip: 'Ещё',
+              padding: EdgeInsets.zero,
+              icon: const Icon(Icons.more_vert),
+              onSelected: (value) {
+                if (value == 'archive') {
+                  unawaited(
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => BlocProvider.value(
+                          value: context.read<TeamCubit>(),
+                          child: const ArchiveScreen(),
+                        ),
                       ),
                     ),
+                  );
+                }
+              },
+              itemBuilder: (ctx) => const [
+                PopupMenuItem<String>(
+                  value: 'archive',
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.archive_outlined),
+                    title: Text('Архив'),
+                    dense: true,
                   ),
-                );
-              }
-            },
-            itemBuilder: (ctx) => const [
-              PopupMenuItem<String>(
-                value: 'archive',
-                child: ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(Icons.archive_outlined),
-                  title: Text('Архив'),
-                  dense: true,
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
         ],
       ),
       body: Column(
@@ -920,7 +996,8 @@ class _MyChatsScreenState extends State<MyChatsScreen>
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(16),
-                    borderSide: BorderSide(color: theme.colorScheme.primary, width: 1.5),
+                    borderSide: BorderSide(
+                        color: theme.colorScheme.primary, width: 1.5),
                   ),
                 ),
               ),
@@ -931,142 +1008,167 @@ class _MyChatsScreenState extends State<MyChatsScreen>
           Expanded(
             child: (_loading && !_hydrated)
                 ? const _SkeletonList()
-                : RefreshIndicator(
-                    onRefresh: _load,
-                    child: ListView.separated(
-                      key: const PageStorageKey('chats_list'),
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      padding: EdgeInsets.only(
-                        left: 6,
-                        right: 6,
-                        top: 4,
-                        bottom: MediaQuery.of(context).padding.bottom + 12,
-                      ),
-                      itemCount: _visible.length,
-                      separatorBuilder: (ctx, i) =>
-                          _ThinDivider(opacity: dividerOpacity),
-                      itemBuilder: (ctx, i) {
-                        final c = _visible[i];
-                        return KeyedSubtree(
-                          key: ValueKey(c.chatId ?? c.title),
-                          child: _ChatRow(
-                            data: c,
-                            onTap: () async {
-                              debugPrint(
-                                  '[MyChatsScreen] onTap -> \'${c.title}\'');
-                              if (widget.pickMode) {
-                                try {
-                                  bool current() => mounted && (widget.pickIsCurrent?.call() ?? true);
-                                  if (!current()) return;
+                : _cacheOnly && _cachedUnavailable
+                    ? const Center(child: Text('Сохранённые чаты недоступны.'))
+                    : RefreshIndicator(
+                        onRefresh: _load,
+                        child: ListView.separated(
+                          key: const PageStorageKey('chats_list'),
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: EdgeInsets.only(
+                            left: 6,
+                            right: 6,
+                            top: 4,
+                            bottom: MediaQuery.of(context).padding.bottom + 12,
+                          ),
+                          itemCount: _visible.length,
+                          separatorBuilder: (ctx, i) =>
+                              _ThinDivider(opacity: dividerOpacity),
+                          itemBuilder: (ctx, i) {
+                            final c = _visible[i];
+                            return KeyedSubtree(
+                              key: ValueKey(c.chatId ?? c.title),
+                              child: _ChatRow(
+                                data: c,
+                                allowNetworkAvatar: !_cacheOnly,
+                                onTap: () async {
+                                  if (_cacheOnly) {
+                                    await _openCachedChat(c);
+                                    return;
+                                  }
+                                  debugPrint(
+                                      '[MyChatsScreen] onTap -> \'${c.title}\'');
+                                  if (widget.pickMode) {
+                                    try {
+                                      bool current() =>
+                                          mounted &&
+                                          (widget.pickIsCurrent?.call() ??
+                                              true);
+                                      if (!current()) return;
+                                      if (c.isDm &&
+                                          (c.peerId?.isNotEmpty ?? false)) {
+                                        final realId =
+                                            await resolveForwardTargetForSession(
+                                                current,
+                                                () => DmApi.getOrCreateChatId(
+                                                    peerId: c.peerId!));
+                                        if (realId == null || !current())
+                                          return;
+                                        // ignore: use_build_context_synchronously
+                                        Navigator.pop(
+                                            context,
+                                            ForwardTarget(
+                                              chatId: realId,
+                                              title: c.title,
+                                              mode: ChatMode.dm,
+                                              avatarUrl: c.avatarUrl,
+                                              open: (ctx) async {
+                                                await Navigator.of(ctx)
+                                                    .push(MaterialPageRoute(
+                                                  builder: (_) =>
+                                                      BlocProvider.value(
+                                                    value:
+                                                        ctx.read<TeamCubit>(),
+                                                    child: DirectChatScreen(
+                                                      peerId: c.peerId!,
+                                                      peerName: c.title,
+                                                      peerAvatarUrl:
+                                                          c.avatarUrl,
+                                                      initialChatId: realId,
+                                                    ),
+                                                  ),
+                                                ));
+                                              },
+                                            ));
+                                      } else {
+                                        String? chatId = c.chatId;
+                                        if (chatId == null || chatId.isEmpty) {
+                                          try {
+                                            final res =
+                                                await resolveForwardTargetForSession(
+                                                    current,
+                                                    () => Supabase
+                                                        .instance.client
+                                                        .from('chats')
+                                                        .select('id')
+                                                        .eq('team_id',
+                                                            c.team.id)
+                                                        .eq('type', 'team_main')
+                                                        .limit(1)
+                                                        .maybeSingle());
+                                            if (res != null) {
+                                              chatId =
+                                                  (res['id'] ?? '').toString();
+                                            }
+                                          } catch (_) {}
+                                        }
+                                        if (!current()) return;
+                                        // ignore: use_build_context_synchronously
+                                        Navigator.pop(
+                                            context,
+                                            ForwardTarget(
+                                              chatId: chatId ?? '',
+                                              title: c.title,
+                                              mode: ChatMode.team,
+                                              avatarUrl: c.avatarUrl,
+                                              open: (ctx) async {
+                                                await Navigator.of(ctx)
+                                                    .push(MaterialPageRoute(
+                                                  builder: (_) =>
+                                                      TeamDetailsScreen(
+                                                          team: c.team,
+                                                          initialTabIndex: 1),
+                                                ));
+                                              },
+                                            ));
+                                      }
+                                    } catch (_) {}
+                                    return;
+                                  }
                                   if (c.isDm &&
                                       (c.peerId?.isNotEmpty ?? false)) {
-                                    final realId =
-                                        await resolveForwardTargetForSession(current,
-                                          () => DmApi.getOrCreateChatId(peerId: c.peerId!));
-                                    if (realId == null || !current()) return;
-                                    // ignore: use_build_context_synchronously
-                                    Navigator.pop(
-                                        context,
-                                        ForwardTarget(
-                                          chatId: realId,
-                                          title: c.title,
-                                          mode: ChatMode.dm,
-                                          avatarUrl: c.avatarUrl,
-                                          open: (ctx) async {
-                                            await Navigator.of(ctx)
-                                                .push(MaterialPageRoute(
-                                              builder: (_) =>
-                                                  BlocProvider.value(
-                                                value: ctx.read<TeamCubit>(),
-                                                child: DirectChatScreen(
-                                                  peerId: c.peerId!,
-                                                  peerName: c.title,
-                                                  peerAvatarUrl: c.avatarUrl,
-                                                  initialChatId: realId,
-                                                ),
-                                              ),
-                                            ));
-                                          },
-                                        ));
-                                  } else {
-                                    String? chatId = c.chatId;
-                                    if (chatId == null || chatId.isEmpty) {
-                                      try {
-                                        final res = await resolveForwardTargetForSession(current, () => Supabase
-                                            .instance.client
-                                            .from('chats')
-                                            .select('id')
-                                            .eq('team_id', c.team.id)
-                                            .eq('type', 'team_main')
-                                            .limit(1)
-                                            .maybeSingle());
-                                        if (res != null) {
-                                          chatId = (res['id'] ?? '').toString();
-                                        }
-                                      } catch (_) {}
-                                    }
-                                    if (!current()) return;
-                                    // ignore: use_build_context_synchronously
-                                    Navigator.pop(
-                                        context,
-                                        ForwardTarget(
-                                          chatId: chatId ?? '',
-                                          title: c.title,
-                                          mode: ChatMode.team,
-                                          avatarUrl: c.avatarUrl,
-                                          open: (ctx) async {
-                                            await Navigator.of(ctx)
-                                                .push(MaterialPageRoute(
-                                              builder: (_) => TeamDetailsScreen(
-                                                  team: c.team,
-                                                  initialTabIndex: 1),
-                                            ));
-                                          },
-                                        ));
+                                    await Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) => BlocProvider.value(
+                                          value: context.read<TeamCubit>(),
+                                          child: DirectChatScreen(
+                                            peerId: c.peerId!,
+                                            peerName: c.title,
+                                            peerAvatarUrl: c.avatarUrl,
+                                            initialChatId: c.chatId,
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                    await _refreshAfterReturningFromChat();
+                                    return;
                                   }
-                                } catch (_) {}
-                                return;
-                              }
-                              if (c.isDm && (c.peerId?.isNotEmpty ?? false)) {
-                                await Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => BlocProvider.value(
-                                      value: context.read<TeamCubit>(),
-                                      child: DirectChatScreen(
-                                        peerId: c.peerId!,
-                                        peerName: c.title,
-                                        peerAvatarUrl: c.avatarUrl,
-                                        initialChatId: c.chatId,
+
+                                  await Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => TeamDetailsScreen(
+                                        team: c.team,
+                                        initialTabIndex: 1,
                                       ),
                                     ),
-                                  ),
-                                );
-                                await _refreshAfterReturningFromChat();
-                                return;
-                              }
-
-                              await Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => TeamDetailsScreen(
-                                    team: c.team,
-                                    initialTabIndex: 1,
-                                  ),
-                                ),
-                              );
-                              await _refreshAfterReturningFromChat();
-                            },
-                            onLongPressStart: (details) {
-                              safeDebugLog(
-                                  '[MyChatsScreen] onLongPress chat=${maskDebugId(c.chatId)}');
-                              HapticFeedback.mediumImpact();
-                              _showPeek(c,
-                                  pressPosition: details.globalPosition);
-                            },
-                          ),
-                        );
-                      },
-                    ),
-                  ),
+                                  );
+                                  await _refreshAfterReturningFromChat();
+                                },
+                                onLongPressStart: _cacheOnly
+                                    ? null
+                                    : (details) {
+                                        safeDebugLog(
+                                            '[MyChatsScreen] onLongPress chat=${maskDebugId(c.chatId)}');
+                                        HapticFeedback.mediumImpact();
+                                        _showPeek(c,
+                                            pressPosition:
+                                                details.globalPosition);
+                                      },
+                              ),
+                            );
+                          },
+                        ),
+                      ),
           ),
         ],
       ),
@@ -1257,6 +1359,163 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     return 'Сообщение';
   }
 
+  void _saveConfirmedSummaries(ProjectChatServerCache? cache,
+      ProjectChatPageTicket? ticket, Object? raw) {
+    if (cache == null || ticket == null || raw is! List) return;
+    try {
+      final rows = <Map<String, dynamic>>[];
+      for (final value in raw) {
+        if (value is! Map || value.keys.any((key) => key is! String)) return;
+        final row = Map<String, dynamic>.from(value);
+        if (row['chat_id'] is! String ||
+            (row['chat_id'] as String).isEmpty ||
+            row['chat_type'] is! String ||
+            row['unread_count'] is! int ||
+            row['is_pinned'] is! bool ||
+            row['is_muted'] is! bool) return;
+        final summary = _summaryFromRpcRow(row);
+        if (summary.isDm && (summary.peerId == null || summary.peerId!.isEmpty))
+          return;
+        final mapped = _summaryToMap(summary);
+        final kind = row['team_kind'];
+        if (!summary.isDm && (kind == 'subject' || kind == 'group_space')) {
+          (mapped['team'] as Map<String, dynamic>)['kind'] = kind;
+        }
+        rows.add(mapped);
+      }
+      unawaited(
+          cache.saveSummaries(ticket, rows).catchError((Object _) => false));
+    } catch (_) {/* Keep existing v2 on malformed server responses. */}
+  }
+
+  void _onCachedAccessChanged() {
+    if (!mounted ||
+        widget.cachedCapabilities?.mode == SessionCapabilityMode.cacheOnly)
+      return;
+    _summaryRevision++;
+    setState(() {
+      _all = [];
+      _visible = [];
+      _hydrated = false;
+      _loading = false;
+      _cachedUnavailable = true;
+    });
+  }
+
+  Future<void> _loadScopedSummaries() async {
+    final cache = widget.cachedStore, caps = widget.cachedCapabilities;
+    if (cache == null || caps == null) {
+      if (mounted)
+        setState(() {
+          _loading = false;
+          _cachedUnavailable = true;
+        });
+      return;
+    }
+    final permit = caps.capture(SessionCapability.cachedRead);
+    if (permit == null) {
+      if (mounted)
+        setState(() {
+          _loading = false;
+          _cachedUnavailable = true;
+        });
+      return;
+    }
+    List<Map<String, dynamic>>? rows;
+    try {
+      rows = await cache.readSummaries(caps);
+    } catch (_) {
+      rows = null;
+    }
+    if (!mounted ||
+        !_cacheOnly ||
+        !identical(widget.cachedStore, cache) ||
+        !identical(widget.cachedCapabilities, caps) ||
+        caps.mode != SessionCapabilityMode.cacheOnly ||
+        !caps.permits(permit, SessionCapability.cachedRead)) return;
+    if (rows == null) {
+      setState(() {
+        _all = [];
+        _visible = [];
+        _loading = false;
+        _hydrated = false;
+        _cachedUnavailable = true;
+      });
+      return;
+    }
+    try {
+      final list = rows.map(_summaryFromMap).toList()..sort(_compareChats);
+      setState(() {
+        _all = list;
+        _visible = List.of(list);
+        _loading = false;
+        _hydrated = true;
+        _cachedUnavailable = false;
+      });
+    } catch (_) {
+      setState(() {
+        _all = [];
+        _visible = [];
+        _loading = false;
+        _hydrated = false;
+        _cachedUnavailable = true;
+      });
+    }
+  }
+
+  Future<void> _openCachedChat(_ChatSummary c) async {
+    if (!mounted) return;
+    final cache = widget.cachedStore;
+    final caps = widget.cachedCapabilities;
+    final permit = caps?.capture(SessionCapability.cachedRead);
+    final chatId = c.chatId;
+    final peerId = c.peerId;
+    if (!_boundaryInvalidated &&
+        cache != null &&
+        caps != null &&
+        caps.mode == SessionCapabilityMode.cacheOnly &&
+        permit != null &&
+        caps.permits(permit, SessionCapability.cachedRead) &&
+        c.isDm &&
+        chatId != null &&
+        chatId.isNotEmpty &&
+        peerId != null &&
+        peerId.isNotEmpty) {
+      await Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => DirectChatScreen(
+          peerId: peerId,
+          peerName: c.title,
+          initialChatId: chatId,
+          cachedStore: cache,
+          cachedCapabilities: caps,
+        ),
+      ));
+      return;
+    }
+    if (!_boundaryInvalidated &&
+        cache != null &&
+        caps != null &&
+        caps.mode == SessionCapabilityMode.cacheOnly &&
+        permit != null &&
+        caps.permits(permit, SessionCapability.cachedRead) &&
+        !c.isDm &&
+        chatId != null &&
+        chatId.isNotEmpty &&
+        c.team.id.isNotEmpty) {
+      await Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => TeamDetailsScreen(
+            team: c.team,
+            initialTabIndex: 1,
+            cachedStore: cache,
+            cachedCapabilities: caps,
+            cachedChatId: chatId),
+      ));
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Сохранённый чат пока недоступен.')));
+  }
+
   Future<void> _hydrateFromCache() async {
     try {
       final s = await ChatSummariesCache.read(_currentUserId);
@@ -1330,6 +1589,9 @@ class _MyChatsScreenState extends State<MyChatsScreen>
       icon: (tm['icon'] ?? '') as String,
       teacher: (tm['teacher'] ?? '') as String,
       groupCode: (tm['groupCode'] ?? '') as String,
+      kind: tm['kind'] == 'group_space' || tm['kind'] == 'subject'
+          ? tm['kind'] as String
+          : 'unknown',
     );
     final isDm = (m['isDm'] ?? false) as bool;
     final titleRaw = (m['title'] ?? '') as String;
@@ -1355,6 +1617,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
 
   // ➜ NEW: обновить unread для одного чата по RPC и переложить в список + кэш
   Future<void> _refreshUnreadFor(String chatId) async {
+    if (_boundaryInvalidated || _cacheOnly) return;
     try {
       final res = await Supabase.instance.client
           .rpc('get_unread_in_chat', params: {'p_chat_id': chatId});
@@ -1423,11 +1686,13 @@ class _ChatSummary {
 
 class _ChatRow extends StatelessWidget {
   final _ChatSummary data;
+  final bool allowNetworkAvatar;
   final VoidCallback onTap;
   final GestureLongPressStartCallback? onLongPressStart;
 
   const _ChatRow({
     required this.data,
+    this.allowNetworkAvatar = true,
     required this.onTap,
     this.onLongPressStart,
   });
@@ -1462,9 +1727,8 @@ class _ChatRow extends StatelessWidget {
                 _BubbleAvatar(
                     label: data.title,
                     muted: data.muted,
-                    avatarUrl: data.avatarUrl),
+                    avatarUrl: allowNetworkAvatar ? data.avatarUrl : null),
                 const SizedBox(width: 12),
-
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1478,16 +1742,21 @@ class _ChatRow extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                               style: t.titleSmall?.copyWith(
                                 color: onSurface,
-                                fontWeight: unread ? FontWeight.w800 : FontWeight.w700,
+                                fontWeight:
+                                    unread ? FontWeight.w800 : FontWeight.w700,
                               ),
                             ),
                           ),
                           if (time.isNotEmpty) ...[
                             const SizedBox(width: 8),
-                            Text(time, style: t.labelSmall?.copyWith(
-                              color: unread && !muted ? accent : onSurfaceVar,
-                              fontWeight: unread && !muted ? FontWeight.w700 : FontWeight.w500,
-                            )),
+                            Text(time,
+                                style: t.labelSmall?.copyWith(
+                                  color:
+                                      unread && !muted ? accent : onSurfaceVar,
+                                  fontWeight: unread && !muted
+                                      ? FontWeight.w700
+                                      : FontWeight.w500,
+                                )),
                           ],
                         ],
                       ),
@@ -1511,8 +1780,12 @@ class _ChatRow extends StatelessWidget {
                                     ),
                                   ),
                                 if (author.isNotEmpty && preview.isNotEmpty)
-                                  Text(data.lastAuthor?.isNotEmpty == true ? ': ' : ' · ',
-                                      style: t.bodyMedium?.copyWith(color: onSurfaceVar)),
+                                  Text(
+                                      data.lastAuthor?.isNotEmpty == true
+                                          ? ': '
+                                          : ' · ',
+                                      style: t.bodyMedium
+                                          ?.copyWith(color: onSurfaceVar)),
                                 if (preview.isNotEmpty)
                                   Expanded(
                                     flex: 3,
@@ -1521,8 +1794,12 @@ class _ChatRow extends StatelessWidget {
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: t.bodyMedium?.copyWith(
-                                        color: unread && !muted ? onSurface : onSurfaceVar,
-                                        fontWeight: unread && !muted ? FontWeight.w600 : FontWeight.w400,
+                                        color: unread && !muted
+                                            ? onSurface
+                                            : onSurfaceVar,
+                                        fontWeight: unread && !muted
+                                            ? FontWeight.w600
+                                            : FontWeight.w400,
                                       ),
                                     ),
                                   ),
@@ -1534,7 +1811,8 @@ class _ChatRow extends StatelessWidget {
                             _UnreadBadge(count: data.unread, muted: data.muted),
                           ] else if (data.pinned) ...[
                             const SizedBox(width: 8),
-                            Icon(Icons.push_pin_outlined, size: 16, color: onSurfaceVar),
+                            Icon(Icons.push_pin_outlined,
+                                size: 16, color: onSurfaceVar),
                           ],
                         ],
                       ),

@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:student_platform/src/config/supabase_config.dart';
+import 'transport_failure_platform_stub.dart'
+    if (dart.library.io) 'transport_failure_platform_io.dart' as transport;
 
 enum SettledPolicyStatus {
   allowed,
@@ -61,6 +63,7 @@ class SettledPolicyTransport {
     });
     final abort = Completer<void>();
     var timeoutRequested = false;
+    var headersReceived = false;
     final timer = Timer(timeout, () {
       timeoutRequested = true;
       if (!abort.isCompleted) abort.complete();
@@ -72,6 +75,7 @@ class SettledPolicyTransport {
             ..headers['apikey'] = publicKey
             ..headers['Authorization'] = 'Bearer $accessToken';
       final streamed = await client.send(request);
+      headersReceived = true;
       // A denial remains authoritative even if the UI deadline has elapsed.
       if (streamed.statusCode == 401 || streamed.statusCode == 403) {
         try {
@@ -110,11 +114,15 @@ class SettledPolicyTransport {
           : SettledPolicyStatus.allowed;
     } on http.RequestAbortedException {
       return SettledPolicyStatus.indeterminate;
-    } on http.ClientException {
-      // The SDK/client may wrap unrelated or post-header errors; they do not
-      // establish that the authority was unreachable.
-      return SettledPolicyStatus.indeterminate;
-    } catch (_) {
+    } catch (error) {
+      // A settled socket failure before headers is the only outage proof.
+      // A deadline, post-header stream failure or wrapped client error remains
+      // ambiguous, and a denial status always wins above.
+      if (!timeoutRequested &&
+          !headersReceived &&
+          transport.isSocketFailure(error)) {
+        return SettledPolicyStatus.unavailable;
+      }
       return SettledPolicyStatus.indeterminate;
     } finally {
       timer.cancel();

@@ -13,6 +13,9 @@ import 'package:student_ui/student_ui.dart';
 import 'package:student_platform/src/core/auth_session.dart';
 import 'package:student_platform/src/services/auth_service.dart';
 import 'package:student_platform/src/ui/chats/my_chats_screen.dart';
+import 'package:student_platform/src/ui/home/cached_home_schedule_reader.dart';
+import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
+import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:student_platform/src/ui/friends/my_friends_screen.dart';
 import 'package:student_platform/src/ui/content/content_nav_executor.dart';
 import 'package:student_platform/src/ui/info/content_media_service.dart';
@@ -23,7 +26,15 @@ import 'package:student_platform/src/ui/profile/my_reviews_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final ValueListenable<bool>? activeListenable;
-  const ProfileScreen({super.key, this.activeListenable});
+  const ProfileScreen(
+      {super.key,
+      this.activeListenable,
+      this.cachedReader,
+      this.cachedChats,
+      this.cachedCapabilities});
+  final CachedHomeScheduleReader? cachedReader;
+  final ProjectChatServerCache? cachedChats;
+  final SessionCapabilities? cachedCapabilities;
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -34,6 +45,12 @@ class _ProfileScreenState extends State<ProfileScreen>
   // ----- state -----
   Map<String, dynamic>? _user;
   bool _loading = true;
+  bool _cachedUnavailable = false;
+  bool _boundaryInvalidated = false;
+  bool get _cacheOnly =>
+      widget.cachedReader != null ||
+      widget.cachedChats != null ||
+      widget.cachedCapabilities != null;
 
   // ----- deps -----
   final SupabaseClient _sb = Supabase.instance.client;
@@ -72,11 +89,17 @@ class _ProfileScreenState extends State<ProfileScreen>
   @override
   void initState() {
     super.initState();
+    if (_cacheOnly) {
+      widget.cachedReader?.accessChanges.addListener(_onCachedAccessChanged);
+      unawaited(_loadCachedProfile());
+      return;
+    }
     WidgetsBinding.instance.addObserver(this);
     // слушаем активность от родителя
     widget.activeListenable?.addListener(_onActiveChanged);
     // стартуем после первого кадра, чтобы исключить странности при построении
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _cacheOnly || _boundaryInvalidated) return;
       debugPrint('${_ts()} [Profile] initState -> postFrame boot()');
       _boot(); // без автозапуска таймера
       unawaited(_loadFeed());
@@ -84,6 +107,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   Future<void> _loadFeed() async {
+    if (_cacheOnly || _boundaryInvalidated) return;
     if (_feedLoadInFlight) return;
     final generation = ++_feedLoadGeneration;
     _feedLoadInFlight = true;
@@ -95,6 +119,9 @@ class _ProfileScreenState extends State<ProfileScreen>
         unawaited(_hydrateFeedMedia(cached));
       }
       try {
+        if (_cacheOnly ||
+            _boundaryInvalidated ||
+            generation != _feedLoadGeneration) return;
         final next = await _feedService.load();
         if (!mounted || generation != _feedLoadGeneration) return;
         setState(() => _feed = next);
@@ -184,6 +211,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   void _recordVisibleFeedImpression(ManagedProfileFeedCard card) {
+    if (_cacheOnly || _boundaryInvalidated || !mounted) return;
     if (!mounted ||
         !(widget.activeListenable?.value ?? true) ||
         ModalRoute.of(context)?.isCurrent == false) return;
@@ -194,9 +222,11 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   Future<void> _onManagedFeedTap(ManagedProfileFeedCard card) async {
+    if (_cacheOnly || _boundaryInvalidated || !mounted) return;
     if (!card.showDemoBadge && !card.id.startsWith('demo-')) {
       await _feedService.recordEvent(card.id, 'click');
     }
+    if (!mounted || _cacheOnly || _boundaryInvalidated) return;
     final payload = card.payload;
     final intent = ContentNavResolver.resolve(
       action: payload.action,
@@ -231,6 +261,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (_cacheOnly || _boundaryInvalidated) return;
     final route = ModalRoute.of(context);
     if (route is PageRoute) {
       routeObserver.subscribe(this, route);
@@ -239,6 +270,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   @override
   void dispose() {
+    widget.cachedReader?.accessChanges.removeListener(_onCachedAccessChanged);
     widget.activeListenable?.removeListener(_onActiveChanged);
     routeObserver.unsubscribe(this);
     WidgetsBinding.instance.removeObserver(this);
@@ -274,6 +306,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   // ===== lifecycle =====
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_cacheOnly || _boundaryInvalidated) return;
     if (state == AppLifecycleState.resumed) {
       final active = widget.activeListenable?.value ?? true;
       if (active) {
@@ -299,12 +332,15 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   // ===== boot =====
   Future<void> _boot() async {
+    if (_cacheOnly || _boundaryInvalidated) return;
     debugPrint('${_ts()} [Profile] boot start');
     // 1) локальный пользователь (для шапки/группы)
     await _loadLocal();
+    if (!mounted || _cacheOnly || _boundaryInvalidated) return;
     // 2) гарантируем валидную сессию
     if (mounted) setState(() => _loading = false);
     await _ensureSession();
+    if (!mounted || _cacheOnly || _boundaryInvalidated) return;
     // 3) первый тик — только если вкладка активна. Не блокируем профиль
     // подготовкой chat ids: unread_total считает серверный RPC.
     if (mounted && (widget.activeListenable?.value ?? true)) {
@@ -315,6 +351,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   // === явное управление из родителя ===
   void _onActiveChanged() {
+    if (_cacheOnly || _boundaryInvalidated) return;
     final active = widget.activeListenable?.value ?? true;
     if (active) {
       debugPrint('${_ts()} [Profile] active=true -> start polling');
@@ -362,6 +399,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   // ===== session keep-alive (без realtime) =====
   Future<void> _ensureSession() async {
+    if (_cacheOnly || _boundaryInvalidated || !mounted) return;
     try {
       await AuthSession.ensureFreshSession(_sb);
     } catch (e) {
@@ -371,6 +409,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   // ===== polling =====
   void _startPolling() {
+    if (_cacheOnly || _boundaryInvalidated || !mounted) return;
     if (_pollTimer != null) return; // уже запущен
     _pollTimer = Timer.periodic(_pollEvery, (_) {
       debugPrint('${_ts()} [Profile] tick');
@@ -385,6 +424,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   Future<void> _pollOnce() async {
+    if (_cacheOnly || _boundaryInvalidated || !mounted) return;
     final now = DateTime.now();
     final lastStartedAt = _lastPollStartedAt;
     if (lastStartedAt != null &&
@@ -415,7 +455,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       final fr = await friendsAndReqF;
       final ut = await unreadF;
 
-      if (!mounted) return;
+      if (!mounted || _cacheOnly || _boundaryInvalidated) return;
 
       final (fc, rc) = fr;
       final newFriends = fc ?? 0;
@@ -521,8 +561,10 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   // ===== ручной refresh =====
   Future<void> _refreshFromServer() async {
+    if (_cacheOnly || _boundaryInvalidated || !mounted) return;
     try {
       await _ensureSession();
+      if (!mounted || _cacheOnly || _boundaryInvalidated) return;
 
       final id = _uid ?? _user?['id'] as String?;
       if (id == null || id.isEmpty) return;
@@ -534,10 +576,12 @@ class _ProfileScreenState extends State<ProfileScreen>
           .eq('id', id)
           .maybeSingle();
 
+      if (!mounted || _cacheOnly || _boundaryInvalidated) return;
       if (fresh != null) {
         final mapFresh = Map<String, dynamic>.from(fresh as Map);
         _user = mapFresh;
         final prefs = await SharedPreferences.getInstance();
+        if (!mounted || _cacheOnly || _boundaryInvalidated) return;
         await prefs.setString('user', jsonEncode(mapFresh));
         setState(() {}); // обновим шапку
       }
@@ -561,9 +605,134 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
   }
 
+  @override
+  void didUpdateWidget(covariant ProfileScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (identical(oldWidget.cachedReader, widget.cachedReader) &&
+        identical(oldWidget.cachedChats, widget.cachedChats) &&
+        identical(oldWidget.cachedCapabilities, widget.cachedCapabilities))
+      return;
+    oldWidget.cachedReader?.accessChanges
+        .removeListener(_onCachedAccessChanged);
+    _boundaryInvalidated = true;
+    _feedLoadGeneration++;
+    _feedMediaGeneration++;
+    _stopPolling();
+    _user = null;
+    _loading = false;
+    _cachedUnavailable = true;
+  }
+
+  void _onCachedAccessChanged() {
+    if (!mounted || (widget.cachedReader?.canRead ?? false)) return;
+    setState(() {
+      _user = null;
+      _loading = false;
+      _cachedUnavailable = true;
+    });
+  }
+
+  Future<void> _loadCachedProfile() async {
+    final reader = widget.cachedReader;
+    if (reader == null ||
+        widget.cachedChats == null ||
+        widget.cachedCapabilities == null) {
+      if (mounted)
+        setState(() {
+          _loading = false;
+          _cachedUnavailable = true;
+        });
+      return;
+    }
+    try {
+      final dashboard = await reader.readDashboard();
+      if (!mounted ||
+          _boundaryInvalidated ||
+          !identical(reader, widget.cachedReader) ||
+          !reader.canRead) return;
+      final profile = dashboard.profile;
+      if (profile.id.isEmpty) {
+        setState(() {
+          _user = null;
+          _loading = false;
+          _cachedUnavailable = true;
+        });
+        return;
+      }
+      setState(() {
+        _user = {
+          'id': profile.id,
+          'name': profile.name,
+          'surname': profile.surname,
+          'group_name': profile.groupName,
+          'status': profile.status
+        };
+        _loading = false;
+        _cachedUnavailable = false;
+      });
+    } catch (_) {
+      if (mounted)
+        setState(() {
+          _user = null;
+          _loading = false;
+          _cachedUnavailable = true;
+        });
+    }
+  }
+
+  void _openCachedMessages() {
+    final cache = widget.cachedChats, caps = widget.cachedCapabilities;
+    if (!mounted ||
+        _boundaryInvalidated ||
+        cache == null ||
+        caps == null ||
+        !(widget.cachedReader?.canRead ?? false)) return;
+    Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) =>
+            MyChatsScreen(cachedStore: cache, cachedCapabilities: caps)));
+  }
+
+  Widget _buildCachedProfile(BuildContext context) {
+    if (_loading)
+      return const Scaffold(
+          body: Center(child: ProductLoadingIndicator.page()));
+    final canRead =
+        !_boundaryInvalidated && (widget.cachedReader?.canRead ?? false);
+    if (_cachedUnavailable || _user == null || !canRead) {
+      return Scaffold(
+          body: Center(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Text('Сохранённый профиль недоступен.'),
+        if (canRead &&
+            widget.cachedChats != null &&
+            widget.cachedCapabilities != null)
+          TextButton(
+              onPressed: _openCachedMessages, child: const Text('Сообщения')),
+      ])));
+    }
+    final u = _user!;
+    final name = [u['name'], u['surname']]
+        .whereType<String>()
+        .where((s) => s.isNotEmpty)
+        .join(' ');
+    return Scaffold(
+        body: StudentProfileScreenPreview(
+      displayName: name.isEmpty ? 'Студент' : name,
+      groupLabel: (u['group_name'] ?? '').toString(),
+      statusLabel: (u['status'] ?? '').toString(),
+      padding: EdgeInsets.fromLTRB(
+          16, MediaQuery.paddingOf(context).top + 16, 16, 24),
+      onMessagesTap:
+          widget.cachedChats == null || widget.cachedCapabilities == null
+              ? null
+              : _openCachedMessages,
+    ));
+  }
+
   // ===== UI =====
   @override
   Widget build(BuildContext context) {
+    if (_cacheOnly || _boundaryInvalidated) return _buildCachedProfile(context);
     // Жёсткая заслонка видимости: включаем/выключаем опрос в зависимости от видимости
     final nowVisible = _isActuallyVisible();
     if (nowVisible != _wasVisible) {
@@ -693,7 +862,6 @@ class _ProfileScreenState extends State<ProfileScreen>
       ),
     );
   }
-
 }
 
 // ===== banners =====

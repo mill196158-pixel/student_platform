@@ -8,7 +8,7 @@ const Color _kOngoingColor = Color(0xFF10B981);
 
 class LessonCard extends StatelessWidget {
   final Lesson lesson;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final LessonLiveStatus status;
   const LessonCard({
     super.key,
@@ -59,78 +59,81 @@ class LessonCard extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-            // Время
-            SizedBox(
-              width: 86,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(time,
-                      style: theme.textTheme.labelMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: theme.colorScheme.primary)),
-                  const SizedBox(height: 6),
-                  Text('${lesson.pairNum}-я пара',
-                      style: theme.textTheme.labelSmall
-                          ?.copyWith(color: Colors.black.withValues(alpha: 0.55))),
-                ],
-              ),
+                // Время
+                SizedBox(
+                  width: 86,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(time,
+                          style: theme.textTheme.labelMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: theme.colorScheme.primary)),
+                      const SizedBox(height: 6),
+                      Text('${lesson.pairNum}-я пара',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                              color: Colors.black.withValues(alpha: 0.55))),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // Контент
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                lesson.subject,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.black,
+                                    height: 1.08),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            if (label.isNotEmpty)
+                              _Badge(text: label, color: color),
+                          ]),
+                      const SizedBox(height: 6),
+                      if ((lesson.teacher ?? '').isNotEmpty)
+                        Row(children: [
+                          const Icon(Icons.person_outline, size: 16),
+                          const SizedBox(width: 6),
+                          Expanded(
+                              child: Text(
+                            lesson.teacher!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                                color: Colors.black.withValues(alpha: 0.70)),
+                          )),
+                        ]),
+                      if ((lesson.room ?? '').isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Row(children: [
+                          const Icon(Icons.location_on_outlined, size: 16),
+                          const SizedBox(width: 6),
+                          Expanded(
+                              child: Text(
+                            lesson.room!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                                color: Colors.black.withValues(alpha: 0.70)),
+                          )),
+                        ]),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 12),
-            // Контент
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Expanded(
-                      child: Text(
-                        lesson.subject,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w800,
-                            color: Colors.black,
-                            height: 1.08),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    if (label.isNotEmpty) _Badge(text: label, color: color),
-                  ]),
-                  const SizedBox(height: 6),
-                  if ((lesson.teacher ?? '').isNotEmpty)
-                    Row(children: [
-                      const Icon(Icons.person_outline, size: 16),
-                      const SizedBox(width: 6),
-                      Expanded(
-                          child: Text(
-                        lesson.teacher!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                            color: Colors.black.withValues(alpha: 0.70)),
-                      )),
-                    ]),
-                  if ((lesson.room ?? '').isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Row(children: [
-                      const Icon(Icons.location_on_outlined, size: 16),
-                      const SizedBox(width: 6),
-                      Expanded(
-                          child: Text(
-                        lesson.room!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                            color: Colors.black.withValues(alpha: 0.70)),
-                      )),
-                    ]),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
           ],
         ),
       ),

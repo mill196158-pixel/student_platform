@@ -89,6 +89,50 @@ void main() {
       checkedAt: now,
       validUntil: now.add(const Duration(minutes: 30)));
 
+  testWidgets('v1 migration preserves records but blocks unproven grant',
+      (tester) async {
+    final legacyPath = '${path}_legacy_v1';
+    if (await databaseExists(legacyPath)) {
+      throw StateError('QA database already exists');
+    }
+    var legacy = await databaseFactory.openDatabase(legacyPath,
+        options: OpenDatabaseOptions(version: 1, onCreate: (db, _) async {
+      await db.execute('CREATE TABLE policy_owner ('
+          'issuer TEXT NOT NULL, uid TEXT NOT NULL, epoch INTEGER NOT NULL CHECK(epoch>=0), '
+          'live_seq INTEGER NOT NULL CHECK(live_seq>=0), state TEXT NOT NULL CHECK(state IN (\'active\',\'revoked\')), last_seen TEXT, '
+          'PRIMARY KEY (issuer, uid))');
+      await db.execute('CREATE TABLE policy_grant ('
+          'issuer TEXT NOT NULL, uid TEXT NOT NULL, sid TEXT NOT NULL, '
+          'owner_epoch INTEGER NOT NULL CHECK(owner_epoch>=0), live_seq INTEGER NOT NULL CHECK(live_seq>0), '
+          'checked_at TEXT NOT NULL, valid_until TEXT NOT NULL, '
+          'PRIMARY KEY (issuer, uid, sid))');
+      await db.rawInsert('INSERT INTO policy_owner VALUES (?,?,?,?,?,?)', [
+        binding.issuer, binding.userId, 0, 1, 'active', now.toIso8601String()
+      ]);
+      await db.rawInsert('INSERT INTO policy_grant VALUES (?,?,?,?,?,?,?)', [
+        binding.issuer, binding.userId, binding.sessionId, 0, 1,
+        now.toIso8601String(), now.add(const Duration(minutes: 30)).toIso8601String()
+      ]);
+    }));
+    await legacy.close();
+    legacy = await openPolicyGrantDatabase(legacyPath);
+    final migrated = SqlitePolicyGrantStore(
+        scope: scope,
+        currentBinding: () => binding,
+        coordinator: SqlitePolicyGrantCoordinator(legacy),
+        clock: () => now);
+    expect((await legacy.rawQuery('SELECT * FROM policy_grant')).length, 1);
+    expect((await migrated.readCandidate(scope.capture()!, binding)).status,
+        SqliteGrantReadStatus.blocked);
+    final fresh = (await migrated.beginLiveCheck(scope.capture()!, binding))!;
+    expect(await migrated.saveAllowed(fresh, grant()), isTrue);
+    expect((await migrated.readCandidate(scope.capture()!, binding)).status,
+        SqliteGrantReadStatus.found);
+    migrated.dispose();
+    await legacy.close();
+    await deleteDatabase(legacyPath);
+  });
+
   testWidgets('real SQLite commit survives reopen and revoke survives reopen',
       (tester) async {
     expect((await store.readCandidate(scope.capture()!, binding)).status,
@@ -201,7 +245,7 @@ void main() {
     expect(await store.saveAllowed(fresh!, grant()), isTrue);
   });
 
-  testWidgets('old binding cannot extend a rotated token expiry',
+  testWidgets('old binding rejected; matching session retains local snapshot',
       (tester) async {
     final oldBinding = binding;
     final attempt = (await store.beginLiveCheck(scope.capture()!, binding))!;
@@ -218,7 +262,7 @@ void main() {
     expect((await store.readCandidate(scope.capture()!, oldBinding)).status,
         SqliteGrantReadStatus.blocked);
     expect((await store.readCandidate(scope.capture()!, binding)).status,
-        SqliteGrantReadStatus.blocked);
+        SqliteGrantReadStatus.found);
   });
 
   testWidgets('invalid counters cannot become an eligible candidate',
@@ -273,7 +317,7 @@ void main() {
       throw StateError('QA database already exists');
     var futureDb = await databaseFactory.openDatabase(futurePath,
         options: OpenDatabaseOptions(
-            version: 2,
+            version: 3,
             onCreate: (db, _) async {
               await db.execute('CREATE TABLE marker (value TEXT)');
               await db.rawInsert(
@@ -282,7 +326,7 @@ void main() {
     await futureDb.close();
     await expectLater(openPolicyGrantDatabase(futurePath), throwsA(anything));
     futureDb = await databaseFactory.openDatabase(futurePath,
-        options: OpenDatabaseOptions(version: 2));
+        options: OpenDatabaseOptions(version: 3));
     expect(
         (await futureDb.rawQuery('SELECT value FROM marker')).single['value'],
         'intact');

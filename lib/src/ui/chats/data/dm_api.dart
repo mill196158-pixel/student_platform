@@ -1,3 +1,5 @@
+import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
+import 'package:student_platform/src/ui/chats/core/confirmed_chat_row.dart';
 // FILE: lib/src/ui/chats/data/dm_api.dart
 import 'dart:async';
 import 'dart:math';
@@ -11,6 +13,15 @@ import 'package:student_platform/src/ui/chats/core/chat_message_memory_cache.dar
 import 'package:student_platform/src/ui/chats/core/chat_messages_load_state.dart';
 import 'package:student_platform/src/utils/safe_debug_log.dart';
 import 'chat_sync_realtime_gate.dart';
+
+enum ConfirmedDmSource { serverRpc }
+
+class ConfirmedDmPage {
+  const ConfirmedDmPage(this.messages, this.hasMore, this.source);
+  final List<Message> messages;
+  final bool hasMore;
+  final ConfirmedDmSource source;
+}
 
 class ChatSyncResult {
   const ChatSyncResult._({
@@ -246,6 +257,13 @@ class DmApi {
     _clearedAtByChat[chatId] = value;
   }
 
+  @visibleForTesting
+  static DateTime? debugCachedClearedAt(String chatId) =>
+      _clearedAtByChat[chatId];
+
+  @visibleForTesting
+  static Future<void> Function()? debugAfterSessionDetach;
+
   static ChatMessagesViewState viewStateFor(String chatId) {
     return _viewStates[chatId] ??
         ChatMessagesViewState(
@@ -361,6 +379,56 @@ class DmApi {
       }
       return result;
     }
+  }
+
+  /// Never falls back to tables or local cache; validates raw data before
+  /// constructing Message objects that otherwise normalize malformed fields.
+  static Future<ConfirmedDmPage> loadConfirmedMessagesPage(String chatId,
+      {required int limit, DateTime? clearedAt}) async {
+    final rows = await _sb.rpc('get_chat_messages_page', params: {
+      'p_chat_id': chatId,
+      'p_limit': limit.clamp(1, 100),
+    });
+    return parseConfirmedMessagesPage(rows, chatId,
+        limit: limit, clearedAt: clearedAt);
+  }
+
+  @visibleForTesting
+  static ConfirmedDmPage parseConfirmedMessagesPage(Object? rows, String chatId,
+      {required int limit, DateTime? clearedAt}) {
+    if (chatId.isEmpty || rows is! List)
+      throw const FormatException('Invalid chat page');
+    final seen = <String>{};
+    final messages = <Message>[];
+    var hasMore = false;
+    var sawMoreFlag = false;
+    for (final row in rows) {
+      if (row is! Map || row.keys.any((key) => key is! String))
+        throw const FormatException('Invalid chat row');
+      final data = Map<String, dynamic>.from(row);
+      validateConfirmedChatRow(data, chatId);
+      final id = data['id'],
+          actualChat = data['chat_id'],
+          date = data['at'] ?? data['created_at'],
+          more = data['has_more'];
+      if (id is! String ||
+          id.isEmpty ||
+          !seen.add(id) ||
+          actualChat != chatId ||
+          DateTime.tryParse(date?.toString() ?? '') == null ||
+          (more != null && more is! bool)) {
+        throw const FormatException('Invalid chat row');
+      }
+      if (more is bool) sawMoreFlag = true;
+      hasMore = hasMore || more == true;
+      final message = Message.fromJson(
+          {...data, 'content': data['text'], 'msg_type': data['type']});
+      if (clearedAt == null || message.at.isAfter(clearedAt))
+        messages.add(message);
+    }
+    if (!sawMoreFlag) hasMore = rows.length >= limit.clamp(1, 100);
+    return ConfirmedDmPage(
+        List.unmodifiable(messages), hasMore, ConfirmedDmSource.serverRpc);
   }
 
   /// Legacy table select used only when RPC is unavailable. Authors are left
@@ -744,6 +812,25 @@ class DmApi {
         if (!_isCurrentSession(owner, generation)) {
           return ChatSyncResult.failure(StateError('Session changed'));
         }
+        final projectCache = ProjectChatServerCache.qaInstance;
+        if (projectCache != null && debugSyncPageLoader == null) {
+          unawaited(() async {
+            try {
+              final ticket = await projectCache.begin(chatId);
+              if (ticket == null) return;
+              final confirmed = await loadConfirmedMessagesPage(chatId,
+                  limit: limit, clearedAt: clearedAt);
+              if (!_isCurrentSession(owner, generation) ||
+                  confirmed.source != ConfirmedDmSource.serverRpc) return;
+              final tombs = gate.pendingDeleteTombstones;
+              final safe = confirmed.messages
+                  .where((m) => !tombs.contains(m.id))
+                  .toList();
+              await projectCache.saveServerPage(ticket, safe,
+                  hasMore: confirmed.hasMore, clearedAt: clearedAt);
+            } catch (_) {/* Keep the last confirmed page on any failure. */}
+          }());
+        }
         final page = debugSyncPageLoader != null
             ? await debugSyncPageLoader!(
                 chatId: chatId,
@@ -913,8 +1000,18 @@ class DmApi {
     final owner = _currentSessionUserId;
     final generation = _sessionGeneration;
     final gate = _gateFor(chatId);
+    final projectCache = ProjectChatServerCache.qaInstance;
+    final projectOwner = projectCache?.scope.capture();
     return (id) async {
       if (id.isEmpty || !_isCurrentSession(owner, generation)) return;
+      if (projectCache != null &&
+          projectOwner != null &&
+          projectCache.scope.isCurrent(projectOwner)) {
+        try {
+          await projectCache.invalidate(chatId);
+        } catch (_) {}
+      }
+      if (!_isCurrentSession(owner, generation)) return;
       if (dedupe && !gate.isBusy) {
         final current = _streamMessages[chatId] ?? const <Message>[];
         if (current.any((message) => message.id == id)) return;
@@ -933,6 +1030,8 @@ class DmApi {
     final owner = _currentSessionUserId;
     final generation = _sessionGeneration;
     final gate = _gateFor(chatId);
+    final projectCache = ProjectChatServerCache.qaInstance;
+    final projectOwner = projectCache?.scope.capture();
     final insert = _boundRealtimeUpsert(chatId, dedupe: true);
     final update = _boundRealtimeUpsert(chatId, dedupe: false);
 
@@ -948,6 +1047,14 @@ class DmApi {
     Future<void> deleteOne(PostgresChangePayload payload) async {
       final id = idFromPayload(payload, old: true);
       if (id.isEmpty || !_isCurrentSession(owner, generation)) return;
+      if (projectCache != null &&
+          projectOwner != null &&
+          projectCache.scope.isCurrent(projectOwner)) {
+        try {
+          await projectCache.invalidate(chatId);
+        } catch (_) {}
+      }
+      if (!_isCurrentSession(owner, generation)) return;
       await gate.handleDelete(id);
     }
 
@@ -1003,27 +1110,14 @@ class DmApi {
   /// Stop realtime, clear in-memory streams/maps, clear clearedAt cache.
   static Future<void> clearSessionState() async {
     _sessionGeneration++;
-    for (final ch in _channels.values) {
-      try {
-        await ch.unsubscribe();
-      } catch (_) {}
-    }
+    // Detach the old generation synchronously. Awaiting unsubscribe before
+    // clearing the shared maps could otherwise erase a new session's entries.
+    final channels = _channels.values.toList();
+    final streams = _streamControllers.values.toList();
+    final views = _viewControllers.values.toList();
     _channels.clear();
-
-    for (final ctrl in _streamControllers.values) {
-      try {
-        await ctrl.close();
-      } catch (_) {}
-    }
     _streamControllers.clear();
-
-    for (final ctrl in _viewControllers.values) {
-      try {
-        await ctrl.close();
-      } catch (_) {}
-    }
     _viewControllers.clear();
-
     _streamMessages.clear();
     _viewStates.clear();
     _syncInFlight.clear();
@@ -1033,6 +1127,24 @@ class DmApi {
     debugSyncPageLoader = null;
     debugOlderPageLoader = null;
     debugLoadMessageById = null;
+
+    await debugAfterSessionDetach?.call();
+
+    for (final ch in channels) {
+      try {
+        await ch.unsubscribe();
+      } catch (_) {}
+    }
+    for (final ctrl in streams) {
+      try {
+        await ctrl.close();
+      } catch (_) {}
+    }
+    for (final ctrl in views) {
+      try {
+        await ctrl.close();
+      } catch (_) {}
+    }
   }
 
   // 4) Отправка текста + привязка файлов

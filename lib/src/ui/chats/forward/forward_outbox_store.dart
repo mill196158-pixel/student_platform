@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'package:crypto/crypto.dart';
 
 import '../../../core/auth_session_scope.dart';
 import '../core/forward_payload.dart';
@@ -25,9 +26,50 @@ enum ForwardAcknowledgeResult { removed, changed, missing }
 class ForwardOutboxCoordinator {
   ForwardOutboxCoordinator(this.storage);
   final ForwardOutboxStorage storage;
+  bool? _durableMode;
+  void bindMode(bool durableMode) {
+    if (_durableMode != null && _durableMode != durableMode) {
+      throw StateError('Forward mode cannot change during process lifetime');
+    }
+    _durableMode = durableMode;
+  }
+
   final _pending = <String, Future<void>>{};
   final _epochs = <String, int>{};
   final _quarantined = <String>{};
+  final _autoApprovals = <String, (AuthOperationScope, bool Function())>{};
+
+  void clearAutoApprovals() => _autoApprovals.clear();
+
+  String _approvalKey(
+          String backend, AuthOperationScope owner, String chat, String op) =>
+      jsonEncode([backend, owner.userId, chat, op]);
+
+  void recordAutoApproval(String backend, AuthOperationScope owner, String chat,
+      String op, bool Function() sourceCurrent) {
+    _autoApprovals[_approvalKey(backend, owner, chat, op)] =
+        (owner, sourceCurrent);
+    // An evicted proof only requires manual confirmation; it never drops the
+    // persisted forward. Avoid retaining abandoned source screens indefinitely.
+    while (_autoApprovals.length > 128) {
+      _autoApprovals.remove(_autoApprovals.keys.first);
+    }
+  }
+
+  bool Function()? consumeAutoApproval(
+      String backend, AuthOperationScope owner, String chat, String op) {
+    final proof = _autoApprovals.remove(_approvalKey(backend, owner, chat, op));
+    if (proof == null || proof.$1 != owner) return null;
+    bool current() {
+      try {
+        return proof.$2();
+      } catch (_) {
+        return false;
+      }
+    }
+
+    return current() ? current : null;
+  }
 
   Future<T> serial<T>(String key, Future<T> Function() work) {
     final result = Completer<T>();
@@ -54,6 +96,10 @@ class ForwardOutboxEntry {
   final List<String> files;
   final List<String> fileIds;
   final _ForwardReceipt _receipt;
+
+  /// Fingerprints the exact serialized legacy version, including its nonce.
+  String get migrationFingerprint =>
+      sha256.convert(utf8.encode(_receipt.raw)).toString();
 }
 
 class _ForwardReceipt {
@@ -189,6 +235,17 @@ class ForwardOutboxStore {
       } catch (_) {
         return null;
       }
+    });
+  }
+
+  /// An unreadable entry is still occupied and must never be overwritten.
+  Future<bool> hasAny(AuthOperationScope owner, String chatId) {
+    final key = _key(owner, chatId);
+    return coordinator.serial(key, () async {
+      _check(owner, key);
+      final raw = await _read(key);
+      _check(owner, key);
+      return raw != null;
     });
   }
 

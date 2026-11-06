@@ -213,7 +213,9 @@ void main() {
     storage.readEntered = null;
     storage.readRelease!.complete();
     await replacement;
-    expect(await take, isNull);
+    // The outer coordinator now serializes the complete take before the new
+    // writer, so the old value is delivered and the replacement remains.
+    expect((await take)?.text, 'old');
     expect((await captured.tryTakeForChat('chat'))?.text, 'new');
     await tester.pumpWidget(const SizedBox());
     scope.dispose();

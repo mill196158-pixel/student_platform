@@ -1,5 +1,6 @@
 // FILE: lib/src/ui/chats/core/dm_chat_service.dart
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
@@ -76,6 +77,8 @@ class DmChatService implements IChatService {
   DmChatService._cached(this.peerId, this._chatId, this._capabilities,
       this._cachedReadPermit, this._cacheReader) {
     _capabilities!.addListener(_onCapabilityChanged);
+    // A project-bound reader must never paint the legacy uid-only memory cache.
+    if (_cacheReader != null) return;
     try {
       final cached = ChatMessageCacheStore.peek(_chatId!,
           userId: _cachedReadPermit!.userId);
@@ -90,6 +93,11 @@ class DmChatService implements IChatService {
   }
 
   bool get _cacheOnly => _capabilities != null;
+  /// Read-only UI boundaries must observe this exact permit, not just the
+  /// current account or the fact that a cache exists.
+  bool get isCachedOnly => _cacheOnly;
+  bool get canReadCached => _cacheAllowed;
+  Listenable? get cachedAccessChanges => _capabilities;
   bool get _cacheAllowed =>
       _cacheOnly &&
       !_disposed &&

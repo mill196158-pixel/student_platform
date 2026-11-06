@@ -9,12 +9,16 @@ import 'dart:convert';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter/foundation.dart';
 import 'inflight_only.dart';
+import '../core/offline_auth_error_receipt.dart';
 
 /// Resolves only the application's private object namespace. Signed URLs are
 /// ephemeral and never become message metadata or persistent cache keys.
 class ChatFileAccess {
   static const storageHost = 'studentsplatform.storage.yandexcloud.net';
   static int generation = 0;
+  static bool _logoutFenced = false;
+  static bool _logoutFenceInProgress = false;
+  static Object? _logoutFenceOwner;
   static final _resolving = InflightOnly<
       (String, String, int, String, SupabaseClient, int), String>();
   static final _leaseClock = Stopwatch()..start();
@@ -25,6 +29,23 @@ class ChatFileAccess {
   static SupabaseClient? _observedClient;
   static StreamSubscription<AuthState>? _authSubscription;
   static (String?, String?)? _observedIdentity;
+  static bool _acceptedAuthReceipt = false;
+  static bool _receiptListenerAttached = false;
+
+  static void _fenceAuthError() {
+    _acceptedAuthReceipt = false;
+    _logoutFenced = true;
+    generation++;
+    _resolving.clear();
+    _leases.clear();
+    _revisions.clear();
+    _pendingTickets.clear();
+    accessChanges.value++;
+  }
+
+  static void _receiptChanged() {
+    if (_acceptedAuthReceipt) _fenceAuthError();
+  }
 
   static void _observeAuth(SupabaseClient client) {
     if (identical(_observedClient, client)) return;
@@ -36,8 +57,17 @@ class ChatFileAccess {
     _authSubscription = client.auth.onAuthStateChange.listen((event) {
       if (!identical(_observedClient, client)) return;
       final identity = (event.session?.user.id, _sessionId(event.session));
-      if (identity != _observedIdentity) {
+      final newSignIn = !_logoutFenceInProgress &&
+          _logoutFenced &&
+          event.event == AuthChangeEvent.signedIn &&
+          identity.$1 != null;
+      if (identity != _observedIdentity || newSignIn) {
         _observedIdentity = identity;
+        if (!_logoutFenceInProgress &&
+            event.event == AuthChangeEvent.signedIn &&
+            identity.$1 != null) {
+          _logoutFenced = false;
+        }
         generation++;
         _resolving.clear();
         _leases.clear();
@@ -46,6 +76,25 @@ class ChatFileAccess {
         _pendingTickets.clear();
         _unsupportedProtocol.clear();
         accessChanges.value++;
+      }
+    }, onError: (Object error, StackTrace stack) {
+      if (!identical(_observedClient, client)) return;
+      // The SDK wraps security and transport failures alike. A stream error
+      // alone cannot establish an offline permit, even if it is retryable.
+      // Preserve the original stream-listener semantics outside the explicit
+      // QA admission path: without an onError, Dart reports to this zone.
+      if (!OfflineAuthErrorReceipt.instance.strict) {
+        Zone.current.handleUncaughtError(error, stack);
+        return;
+      }
+      if (OfflineAuthErrorReceipt.instance.accepts(error)) {
+        if (!_receiptListenerAttached) {
+          OfflineAuthErrorReceipt.instance.addListener(_receiptChanged);
+          _receiptListenerAttached = true;
+        }
+        _acceptedAuthReceipt = true;
+      } else {
+        _fenceAuthError();
       }
     });
   }
@@ -65,7 +114,34 @@ class ChatFileAccess {
   static final ValueNotifier<int> accessChanges = ValueNotifier<int>(0);
   static bool isAccessRevoked(String url) {
     final uid = userId, key = keyFor(url);
-    return key != null && (uid == null || _noOffline.contains('$uid:$key'));
+    return key != null &&
+        (_logoutFenced || uid == null || _noOffline.contains('$uid:$key'));
+  }
+
+  /// Invalidates active and new private-file operations without deleting data.
+  /// The fence remains if durable logout cannot finish.
+  static Object fenceForLogout() {
+    // Bind the auth listener before the first await of the logout barrier.
+    currentSessionBinding;
+    _logoutFenced = true;
+    _logoutFenceInProgress = true;
+    final owner = Object();
+    _logoutFenceOwner = owner;
+    generation++;
+    _resolving.clear();
+    _leases.clear();
+    _revisions.clear();
+    _pendingTickets.clear();
+    accessChanges.value++;
+    return owner;
+  }
+
+  /// Called only after sign-out is confirmed and no old session remains.
+  static void completeLogoutFence(Object owner) {
+    if (identical(_logoutFenceOwner, owner) && userId == null) {
+      _logoutFenceInProgress = false;
+      _logoutFenceOwner = null;
+    }
   }
 
   /// The caller must capture both values when opening a viewer. A later logout
@@ -340,6 +416,9 @@ class ChatFileAccess {
   /// Simulates a new process without clearing persisted files or receipts.
   @visibleForTesting
   static void debugResetProcessMemory() {
+    _logoutFenced = false;
+    _logoutFenceInProgress = false;
+    _logoutFenceOwner = null;
     generation++;
     _resolving.clear();
     _leases.clear();
@@ -391,6 +470,58 @@ class ChatFileAccess {
     final digest =
         crypto.sha256.convert(utf8.encode('$uid:${keyFor(url) ?? url}'));
     return File('${root.path}/authorized_chat_files/$uid/$digest');
+  }
+
+  /// Reads an already authorized copy without initiating any network request.
+  /// [permit] must remain true for the entire read; callers must also hide
+  /// decoded content when that permit or the attachment access is revoked.
+  static Future<Uint8List?> readCachedOnly(String url,
+      {required bool Function() permit}) async {
+    final uid = userId;
+    final sid = currentSessionBinding;
+    final epoch = generation;
+    bool current() => uid != null && !_unsupportedProtocol.contains('$uid:${keyFor(url)}') &&
+        permit() && isViewerCurrent(url,
+        user: uid, epoch: epoch, sessionBinding: sid);
+    if (uid == null || sid == null || keyFor(url) == null || !current()) {
+      return null;
+    }
+    return _withOwnerFiles(uid, () async {
+      try {
+        if (!current()) return null;
+        final file = await _cachedFile(url, uid);
+        if (file == null || !current() || !await _hasReceipt(file, sid) || !current()) {
+          return null;
+        }
+        final bytes = await file.readAsBytes();
+        return current() && await _hasReceipt(file, sid) && current() ? bytes : null;
+      } on FileSystemException {
+        return null;
+      }
+    });
+  }
+
+  /// Returns only a previously granted cache path; never contacts the server.
+  /// The caller must recheck its access ticket immediately before handing the
+  /// path to an external viewer, which may retain the bytes after export.
+  static Future<String?> cachedPathForOpen(String url,
+      {required bool Function() permit}) async {
+    final uid = userId;
+    final sid = currentSessionBinding;
+    final epoch = generation;
+    bool current() => uid != null && !_unsupportedProtocol.contains('$uid:${keyFor(url)}') &&
+        permit() && isViewerCurrent(url, user: uid, epoch: epoch, sessionBinding: sid);
+    if (uid == null || sid == null || keyFor(url) == null || !current()) return null;
+    return _withOwnerFiles(uid, () async {
+      try {
+        if (!current()) return null;
+        final file = await _cachedFile(url, uid);
+        if (file == null || !current() || !await _hasReceipt(file, sid) || !current()) return null;
+        return file.path;
+      } on FileSystemException {
+        return null;
+      }
+    });
   }
 
   static Future<bool> _receiptAvailable(
@@ -532,7 +663,8 @@ class ChatFileAccess {
     try {
       final session = Supabase.instance.client.auth.currentSession;
       final key = keyFor(url);
-      return uid != null &&
+      return !_logoutFenced &&
+          uid != null &&
           uid.isNotEmpty &&
           key != null &&
           token != null &&
@@ -553,6 +685,9 @@ class ChatFileAccess {
   }
 
   static Future<void> authorize(String url) async {
+    if (keyFor(url) != null && _logoutFenced) {
+      throw StateError('Выход из аккаунта не завершён.');
+    }
     final uid = userId, epoch = generation;
     final token = _currentAccessToken();
     final key = keyFor(url);
@@ -592,6 +727,7 @@ class ChatFileAccess {
   static Future<String> resolve(String url) async {
     final key = keyFor(url);
     if (key == null) return url;
+    if (_logoutFenced) throw StateError('Выход из аккаунта не завершён.');
     final uid = userId, epoch = generation;
     if (uid == null) throw StateError('Войдите, чтобы открыть вложение.');
     final token = _currentAccessToken();
@@ -829,6 +965,9 @@ class ChatFileAccess {
   }
 
   static Future<Uint8List> readBytes(String url) async {
+    if (keyFor(url) != null && _logoutFenced) {
+      throw StateError('Выход из аккаунта не завершён.');
+    }
     final uid = userId, epoch = generation;
     final token = _currentAccessToken();
     final key = keyFor(url);

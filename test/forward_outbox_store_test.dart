@@ -50,6 +50,12 @@ class Storage implements ForwardOutboxStorage {
 }
 
 void main() {
+  test('coordinator rejects mixing legacy and durable modes in one process', () {
+    final coordinator = ForwardOutboxCoordinator(Storage());
+    coordinator.bindMode(false);
+    coordinator.bindMode(false);
+    expect(() => coordinator.bindMode(true), throwsStateError);
+  });
   late StreamController<AuthState> events;
   late Session session;
   late AuthSessionScope scope;

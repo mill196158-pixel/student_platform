@@ -13,8 +13,11 @@ class AuthSessionScope extends ChangeNotifier {
     // A retained session is an owner identity only, never authorization.
     _observed = _identity(_currentSession());
     _subscription =
-        authEvents.listen(_onEvent, onError: (Object _, StackTrace __) {
+        authEvents.listen(_onEvent, onError: (Object error, StackTrace __) {
+      _lastAuthError = error;
+      _authSignalRevision++;
       if (!_ready.isCompleted) _ready.complete();
+      if (!_disposed) notifyListeners();
     }, onDone: () {
       _closed = true;
       _generation++;
@@ -33,14 +36,23 @@ class AuthSessionScope extends ChangeNotifier {
   bool _logoutAcknowledged = false;
   bool _disposed = false;
   bool _closed = false;
+  Object? _lastAuthError;
+  int _authSignalRevision = 0;
+  Object? get lastAuthError => _lastAuthError;
+  int get authSignalRevision => _authSignalRevision;
 
   Future<void> get ready => _ready.future;
   int get generation => _generation;
 
+  /// Exposes no credentials or permission; used only to retry an interrupted
+  /// logout while all ordinary operation scopes remain unavailable.
+  bool get logoutFenced => !_disposed && !_closed && _invalidated;
+
   void _onEvent(AuthState event) {
     if (_disposed) return;
+    _lastAuthError = null;
+    _authSignalRevision++;
     final next = _identity(event.session);
-    final materialChanged = next != _observed;
     final changed = next?.$1 != _observed?.$1 ||
         event.event == AuthChangeEvent.signedIn ||
         event.event == AuthChangeEvent.signedOut ||
@@ -57,7 +69,7 @@ class AuthSessionScope extends ChangeNotifier {
       _logoutAcknowledged = false;
     }
     if (!_ready.isCompleted) _ready.complete();
-    if (changed || materialChanged) notifyListeners();
+    notifyListeners();
   }
 
   /// Call synchronously when explicit logout starts, before any awaits.
@@ -100,6 +112,7 @@ class AuthSessionScope extends ChangeNotifier {
     _disposed = true;
     _generation++;
     if (!_ready.isCompleted) _ready.complete();
+    notifyListeners();
     unawaited(_subscription.cancel());
     super.dispose();
   }

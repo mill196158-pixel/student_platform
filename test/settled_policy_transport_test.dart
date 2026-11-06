@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
 
@@ -74,6 +75,17 @@ void main() {
       expect(await check(client), test.$3);
       client.close();
     }
+  });
+
+  test('only settled socket failure before headers is unavailable', () async {
+    final offline =
+        _Client((_) async => throw const SocketException('offline'));
+    expect(await check(offline), SettledPolicyStatus.unavailable);
+    final broken = _Client((_) async => http.StreamedResponse(
+        Stream<List<int>>.error(const SocketException('body failed')), 200));
+    expect(await check(broken), SettledPolicyStatus.indeterminate);
+    offline.close();
+    broken.close();
   });
 
   test('unclassified client failure remains indeterminate', () async {

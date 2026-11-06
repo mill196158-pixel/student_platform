@@ -46,6 +46,10 @@ import 'chat/models/chat_card_envelope.dart';
 import '../../chats/core/forward_payload.dart';
 import '../../chats/data/blocks_api.dart';
 import '../../chats/forward/forward_outbox.dart';
+import '../../chats/forward/forward_outbox_host.dart';
+import '../../chats/forward/durable_forward_outbox.dart';
+import '../../chats/forward/confirm_ready_forward.dart';
+import '../../chats/forward/sent_forward_sentinel.dart';
 import '../../chats/forward/forward_send_gate.dart';
 import '../../chats/forward/forward_picker.dart';
 import '../../chats/forward/forward_pick_nav.dart';
@@ -94,7 +98,17 @@ class ChatTab extends StatefulWidget {
     this.onSelectingChanged,
     this.readOnly = false,
     this.highlightMessageId,
+    this.forwardTargetOverride,
+    this.copyForwardFileOverride,
+    this.debugAfterDurableCancel,
   });
+  @visibleForTesting
+  final Future<ForwardTarget?> Function()? forwardTargetOverride;
+  @visibleForTesting
+  final Future<ForwardFileRef> Function(ForwardFileRef source, String targetChat)?
+      copyForwardFileOverride;
+  @visibleForTesting
+  final Future<void> Function()? debugAfterDurableCancel;
   @override
   State<ChatTab> createState() => _ChatTabState();
 }
@@ -190,6 +204,9 @@ class _ChatTabState extends State<ChatTab> {
   int _forwardPreparationGeneration = 0;
   final List<String> _forwardSelectedIds = [];
   final List<String> _stagedForwardFileIds = [];
+  DurableForwardOutbox? _durableForwardStore;
+  DurableForwardReceipt? _durableForward;
+  String? _displayedForwardOperation;
   final Set<String> _requiredForwardFileIds = {};
   final _capsRepo = ChatComposerCapabilitiesRepository();
   ChatComposerCapabilities? _composerCaps;
@@ -1337,7 +1354,32 @@ class _ChatTabState extends State<ChatTab> {
           isCurrent: currentForward,
           send: (ids) async {
             sentAttachments = ForwardAttachmentSnapshot(_att.pending);
-            await _sendMessageWithFilesAndRefresh(teamId, forwardText, ids);
+            if (!ForwardOutboxHost.usesDurable(context)) {
+              await _sendMessageWithFilesAndRefresh(teamId, forwardText, ids);
+              return;
+            }
+            final durable = _durableForwardStore, receipt = _durableForward;
+            if (durable == null || receipt == null ||
+                receipt.state != DurableForwardState.ready ||
+                receipt.chat != _trackedChatId) throw const UnconfirmedMessageSend();
+            try {
+              final confirmed = await durable.sendOnce(receipt,
+                  text: forwardText, replyId: null, fileIds: ids,
+                  send: (snapshot) {
+                if (!currentForward() || snapshot.chat != _trackedChatId) {
+                  throw const SendScopeInvalidated();
+                }
+                return _repo.sendMessageWithFiles(teamId, snapshot.text, snapshot.fileIds);
+              });
+              if (!sameForwardOperation()) return;
+              _durableForward = confirmed;
+              try { await durable.acknowledgeSent(confirmed); } catch (_) {}
+              if (mounted && currentForward()) {
+                unawaited(context.read<TeamCubit>().refreshMessageById(confirmed.messageId!).catchError((_) {}));
+              }
+            } catch (_) {
+              throw const UnconfirmedMessageSend();
+            }
           },
         );
         if (!sent) {
@@ -1365,6 +1407,9 @@ class _ChatTabState extends State<ChatTab> {
       }
       // same-chat forward: как в ЛС — обычный ForwardPayload + encodeForText()
       if (_forwardPackageAttached && _stagedForward == null) {
+        if (ForwardOutboxHost.usesDurable(context)) {
+          throw const UnconfirmedMessageSend();
+        }
         final teamId = context.read<TeamCubit>().state.team.id;
         final requestedIds = List<String>.of(_forwardSelectedIds);
         final selected = completeForwardSelection(requestedIds, context.read<TeamCubit>().state.chat);
@@ -2010,18 +2055,7 @@ class _ChatTabState extends State<ChatTab> {
                       : 0,
                   forwardPreview: _forwardComposerPreview(),
                   onCancelForward: _forwardPackageAttached
-                      ? () {
-                          setState(() {
-                            _forwardPackageAttached = false;
-      _forwardPreparationGeneration++;
-      _preparingForward = false;
-      _forwardPreparationFailed = false;
-                            _stagedForward = null;
-                            _forwardSelectedIds.clear();
-                            _stagedForwardFileIds.clear();
-                            _att.pending.removeWhere((x) => x.path == '__FG__');
-                          });
-                        }
+                      ? () => unawaited(_cancelForwardByUser())
                       : null,
                   someoneTyping: _someoneTyping,
                   typingNames: _visibleTypingUsers,
@@ -2086,15 +2120,7 @@ class _ChatTabState extends State<ChatTab> {
                   },
                   onRemoveFile: (ui) {
                     if (ui.path == '__FG__') {
-                      setState(() {
-                        _forwardPackageAttached = false;
-      _forwardPreparationGeneration++;
-      _preparingForward = false;
-      _forwardPreparationFailed = false;
-                        _stagedForward = null;
-                        _forwardSelectedIds.clear();
-                        _att.pending.removeWhere((x) => x.path == '__FG__');
-                      });
+                      unawaited(_cancelForwardByUser());
                     } else {
                       final local = _att.pending
                           .firstWhere((f) => f.localId == ui.localId);
@@ -2380,9 +2406,181 @@ class _ChatTabState extends State<ChatTab> {
     unawaited(_loadComposerCapabilities());
   }
 
-  Future<void> _consumeForwardOutboxIfAny(String chatId, ForwardOutboxSession? outbox) async {
+  Future<void> _consumeForwardOutboxIfAny(String chatId, ForwardOutboxSession? outbox,
+      {String? expectedExistingDraft}) async {
     final uid=ChatFileAccess.userId, epoch=ChatFileAccess.generation;
     if (outbox == null || !outbox.isCurrent) return;
+    if (ForwardOutboxHost.usesDurable(context)) {
+      final team = context.read<TeamCubit>().state.team.id;
+      bool currentTarget() => mounted && outbox.isCurrent &&
+          uid != null && uid == ChatFileAccess.userId && epoch == ChatFileAccess.generation &&
+          _trackedChatId == chatId && context.read<TeamCubit>().state.team.id == team;
+      try {
+        final durable = await ForwardOutboxHost.durable(context);
+        if (!currentTarget()) return;
+        final terminalOperations = await outbox.terminalOperationsForChat(durable, chatId);
+        if (!currentTarget()) return;
+        _att.forgetConfirmedSent((file) => isTerminalForwardSentinel(file, terminalOperations));
+        var receipt = await outbox.claimDurableForChat(chatId, durable);
+        if (!currentTarget() || receipt == null) return;
+        _durableForwardStore = durable;
+        _durableForward = receipt;
+        if (receipt.state == DurableForwardState.sent) {
+          final displayed = _displayedForwardOperation;
+          final generation = _forwardPreparationGeneration;
+          final staged = _stagedForward, attached = _forwardPackageAttached;
+          final selected = List<String>.of(_forwardSelectedIds);
+          final stagedIds = List<String>.of(_stagedForwardFileIds);
+          final requiredIds = Set<String>.of(_requiredForwardFileIds);
+          await durable.acknowledgeSent(receipt);
+          if (!currentTarget() || !identical(_durableForward, receipt)) return;
+          final sentOperation = receipt.operation;
+          _att.forgetConfirmedSent((file) => isTerminalForwardSentinel(file, {sentOperation}));
+          _durableForward = null;
+          if (displayed == sentOperation && _displayedForwardOperation == displayed &&
+              _forwardPreparationGeneration == generation && identical(_stagedForward, staged) &&
+              _forwardPackageAttached == attached && listEquals(_forwardSelectedIds, selected) &&
+              listEquals(_stagedForwardFileIds, stagedIds) && setEquals(_requiredForwardFileIds, requiredIds)) {
+            setState(() {
+              _displayedForwardOperation = null;
+              _forwardPackageAttached = false;
+              _stagedForward = null;
+              _forwardSelectedIds.clear();
+              _stagedForwardFileIds.clear();
+              _requiredForwardFileIds.clear();
+            });
+          }
+          return;
+        }
+        if (receipt.state == DurableForwardState.sendingUnknown ||
+            receipt.state == DurableForwardState.preparingUnknown) {
+          final isSending = receipt.state == DurableForwardState.sendingUnknown;
+          final retry = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+            title: Text(isSending ? 'Отправка не подтверждена' : 'Подготовка прервана'),
+            content: Text(isSending
+                ? 'Проверьте чат. При повторной отправке сообщение может появиться дважды.'
+                : 'Вложения могли загрузиться не полностью. Можно подготовить их заново.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Проверить чат')),
+              TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Повторить')),
+            ],
+          ));
+          if (retry != true || !currentTarget()) return;
+          if (isSending) {
+            final originalGeneration = _forwardPreparationGeneration;
+            final originalStaged = _stagedForward;
+            final originalAttached = _forwardPackageAttached;
+            final originalSelected = List<String>.of(_forwardSelectedIds);
+            final originalStagedIds = List<String>.of(_stagedForwardFileIds);
+            final originalRequiredIds = Set<String>.of(_requiredForwardFileIds);
+            final confirmed = await durable.retryUnknownByUser(receipt, send: (snapshot) {
+              if (!currentTarget() || snapshot.chat != chatId) {
+                throw const SendScopeInvalidated();
+              }
+              return _repo.sendMessageWithFiles(team, snapshot.text, snapshot.fileIds);
+            });
+            if (!currentTarget() || !identical(_durableForward, receipt)) return;
+            _durableForward = confirmed;
+            try { await durable.acknowledgeSent(confirmed); } catch (_) {}
+            if (!currentTarget() || !identical(_durableForward, confirmed)) return;
+            _att.forgetConfirmedSent((file) => isTerminalForwardSentinel(file, {confirmed.operation}));
+            setState(() {
+              _durableForward = null;
+              if (_forwardPreparationGeneration == originalGeneration &&
+                  identical(_stagedForward, originalStaged) &&
+                  _forwardPackageAttached == originalAttached &&
+                  listEquals(_forwardSelectedIds, originalSelected) &&
+                  listEquals(_stagedForwardFileIds, originalStagedIds) &&
+                  setEquals(_requiredForwardFileIds, originalRequiredIds)) {
+                _forwardPackageAttached = false;
+                _stagedForward = null;
+                _forwardSelectedIds.clear();
+                _stagedForwardFileIds.clear();
+                _requiredForwardFileIds.clear();
+              }
+            });
+          } else {
+            await durable.retryPreparationByUser(receipt);
+            if (currentTarget()) await _consumeForwardOutboxIfAny(chatId, outbox);
+          }
+          return;
+        }
+        bool Function()? autoApproval;
+        if (receipt.state == DurableForwardState.reservedUnverified ||
+            receipt.state == DurableForwardState.queued) {
+          autoApproval = receipt.state == DurableForwardState.queued
+              ? outbox.consumeAutoApproval(durable, receipt) : null;
+          if (autoApproval == null) {
+            final preview = ForwardPayload.tryParse(receipt.source);
+            if (preview == null) throw const FormatException();
+            final approved = await confirmReadyForward(context, preview, actionLabel: 'Подготовить');
+            if (!approved || !currentTarget()) return;
+          }
+          if (receipt.state == DurableForwardState.reservedUnverified) {
+            receipt = await durable.confirmReservation(receipt);
+            if (!currentTarget()) return;
+            _durableForward = receipt;
+          }
+        }
+        bool composerEmpty() => (_ctrl.text.isEmpty ||
+            (expectedExistingDraft != null && _ctrl.text == expectedExistingDraft &&
+             expectedExistingDraft == (ForwardPayload.tryParse(receipt!.source)?.caption ?? ''))) && _replyTo == null &&
+            _att.pending.isEmpty && !_forwardPackageAttached && _stagedForward == null;
+        if (!composerEmpty()) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text(
+              'В чате есть черновик. Сохранённая пересылка будет доступна после его завершения.')));
+          return;
+        }
+        if (receipt.state == DurableForwardState.ready) {
+          final prepared = ForwardPayload.tryParse(receipt.prepared ?? '');
+          final ids = receipt.preparedIds;
+          if (prepared == null || ids == null) throw const FormatException();
+          final approved = await confirmReadyForward(context, prepared, actionLabel: 'Открыть');
+          if (!approved || !currentTarget() || !composerEmpty()) return;
+          if (!_att.pending.any((file) => file.path == '__FG__')) {
+            _att.pending.add(LocalAttach(localId: 'durable-forward:${receipt.operation}', path: '__FG__', name: 'forward.json',
+                mimeType: 'application/json', size: 0, isImage: false));
+          }
+          setState(() {
+            _displayedForwardOperation = receipt!.operation;
+            _stagedForward = prepared;
+            _forwardPackageAttached = true;
+            _stagedForwardFileIds..clear()..addAll(ids);
+            _requiredForwardFileIds..clear()..addAll(ids);
+            _ctrl.text = prepared.caption ?? '';
+          });
+          return;
+        }
+        final source = ForwardPayload.tryParse(receipt.source);
+        if (source == null) throw const FormatException();
+        final preparing = await durable.markPreparing(receipt);
+        if (!currentTarget() || !composerEmpty() || !(autoApproval?.call() ?? true)) return;
+        _durableForward = preparing;
+        await _stageForwardPayload(source, receipt.sourceUrls, chatId,
+            durableOperation: receipt.operation,
+            isTargetCurrent: () => currentTarget() && (autoApproval?.call() ?? true),
+            onPrepared: (prepared, ids, uploads) async {
+          if (!currentTarget()) throw StateError('Session changed');
+          final ready = await durable.markReady(preparing,
+              prepared: prepared.encodeForText(), preparedIds: ids,
+              uploadedIdsBySource: uploads);
+          if (!currentTarget() || !(autoApproval?.call() ?? true)) {
+            throw StateError('Forward source changed');
+          }
+          _durableForward = ready;
+          _displayedForwardOperation = ready.operation;
+          _stagedForwardFileIds..clear()..addAll(ids);
+          _requiredForwardFileIds..clear()..addAll(ids);
+        });
+      } on LegacyForwardProvenanceUnknown {
+        if (currentTarget()) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Сохранённая пересылка требует восстановления: её проект неизвестен.')));
+      } catch (_) {
+        if (currentTarget()) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Не удалось открыть сохранённую пересылку. Данные сохранены.')));
+      }
+      return;
+    }
     ForwardOutboxData? data;
     try {
       data = await outbox.tryTakeForChat(chatId);
@@ -2409,15 +2607,20 @@ class _ChatTabState extends State<ChatTab> {
   }
 
   Future<void> _stageForwardPayload(
-      ForwardPayload payload, List<String> fileUrls, String chatId) async {
+      ForwardPayload payload, List<String> fileUrls, String chatId,
+      {Future<void> Function(ForwardPayload, List<String>, Map<String, String>)? onPrepared,
+      bool Function()? isTargetCurrent, String? durableOperation}) async {
     final uid=ChatFileAccess.userId, epoch=ChatFileAccess.generation;
-    bool sameSession()=>uid!=null && uid==ChatFileAccess.userId && epoch==ChatFileAccess.generation;
+    bool sameSession()=>uid!=null && uid==ChatFileAccess.userId && epoch==ChatFileAccess.generation && (isTargetCurrent?.call() ?? true);
     if (!mounted || !sameSession()) return;
     _requiredForwardFileIds.clear();
-    final sameChat = payload.fromChatId == chatId;
+    // Durable forwards upload fresh copies even within the same chat; the
+    // server does not permit reattaching an existing message's file ID.
+    final sameChat = payload.fromChatId == chatId && onPrepared == null;
 
     if (!_att.pending.any((x) => x.path == '__FG__')) {
       _att.pending.add(LocalAttach(
+        localId: durableOperation == null ? null : 'durable-forward:$durableOperation',
         path: '__FG__',
         name: 'forward.json',
         mimeType: 'application/json',
@@ -2435,6 +2638,7 @@ class _ChatTabState extends State<ChatTab> {
     }
 
     if (sameChat) {
+      if (!mounted || !sameSession()) return;
       setState(() {
         _forwardPackageAttached = true;
         _stagedForward = payload;
@@ -2465,11 +2669,20 @@ class _ChatTabState extends State<ChatTab> {
       final urls = {...fileUrls.where((u)=>u.isNotEmpty), ...refs.keys};
       final copies = <String,ForwardFileRef>{};
       for (final url in urls) {
-        if(!sameSession()) return;
+        if (!mounted || !sameSession() || preparation != _forwardPreparationGeneration) return;
+        final copyOverride = widget.copyForwardFileOverride;
+        if (copyOverride != null) {
+          final source = refs[url];
+          if (source == null) throw StateError('Missing source file');
+          final copied = await copyOverride(source, chatId);
+          if (!mounted || !sameSession() || preparation != _forwardPreparationGeneration) return;
+          copies[url] = copied;
+          continue;
+        }
         final tmp = await _downloadToTemp(url);
         if (!mounted || !sameSession() || preparation != _forwardPreparationGeneration) { await ChatFileAccess.releaseForwardTemp(tmp.path); return; }
         final size=await tmp.length();
-        if(!sameSession()) { await ChatFileAccess.releaseForwardTemp(tmp.path); return; }
+        if (!mounted || !sameSession() || preparation != _forwardPreparationGeneration) { await ChatFileAccess.releaseForwardTemp(tmp.path); return; }
         final source = refs[url];
         final attach = LocalAttach(path:tmp.path,
           name:source?.name ?? tmp.path.split(RegExp(r'[\\/]')).last,
@@ -2481,6 +2694,7 @@ class _ChatTabState extends State<ChatTab> {
         final ready = _att.pending.where((f)=>f.localId==attach.localId).firstOrNull;
         if (ready?.uploadedFileId == null) throw StateError('Не удалось подготовить вложение.');
         final row = await Supabase.instance.client.from('chat_files').select().eq('id',ready!.uploadedFileId!).single();
+        if (!mounted || !sameSession() || preparation != _forwardPreparationGeneration) return;
         final copied = ChatFile.fromJson(row);
         copies[url] = ForwardFileRef(id:copied.id,url:copied.fileUrl,
             name:copied.fileName,type:copied.fileType,size:copied.fileSize);
@@ -2491,6 +2705,9 @@ class _ChatTabState extends State<ChatTab> {
           throw StateError('Не все вложения готовы к пересылке.');
         }
         final preparedPayload = payload.withCopiedFiles(copies);
+        await onPrepared?.call(preparedPayload, preparedIds.cast<String>(),
+            {for (final e in copies.entries) e.key: e.value.id!});
+        if (!mounted || !sameSession() || preparation != _forwardPreparationGeneration) return;
         setState(() {
           _requiredForwardFileIds
             ..clear()
@@ -2531,10 +2748,86 @@ class _ChatTabState extends State<ChatTab> {
 
   String? _forwardComposerPreview() => _stagedForward?.composerPreview();
 
+  Future<void> _cancelForwardByUser() async {
+    if (_isSending) return;
+    if (ForwardOutboxHost.usesDurable(context)) {
+      final durable = _durableForwardStore, receipt = _durableForward;
+      if (durable == null || receipt == null) return;
+      final chat = _trackedChatId, team = context.read<TeamCubit>().state.team.id;
+      final uid = ChatFileAccess.userId, epoch = ChatFileAccess.generation;
+      bool sameTarget() => mounted && uid != null && uid == ChatFileAccess.userId &&
+          epoch == ChatFileAccess.generation && _trackedChatId == chat &&
+          context.read<TeamCubit>().state.team.id == team;
+      bool current() => sameTarget() && identical(_durableForward, receipt);
+      if (!current()) return;
+      final staged = _stagedForward, attached = _forwardPackageAttached;
+      final selected = List<String>.of(_forwardSelectedIds);
+      final stagedIds = List<String>.of(_stagedForwardFileIds);
+      final requiredIds = Set<String>.of(_requiredForwardFileIds);
+      _forwardPreparationGeneration++;
+      final cancelGeneration = _forwardPreparationGeneration;
+      try {
+        await durable.cancelByUser(receipt);
+        await widget.debugAfterDurableCancel?.call();
+      } catch (_) {
+        if (current()) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Не удалось отменить пересылку. Данные сохранены.')));
+        return;
+      }
+      if (!sameTarget()) return;
+      if (identical(_durableForward, receipt)) _durableForward = null;
+      _att.forgetConfirmedSent((file) =>
+          isTerminalForwardSentinel(file, {receipt.operation}));
+      if (_displayedForwardOperation != receipt.operation ||
+          _forwardPreparationGeneration != cancelGeneration ||
+          !identical(_stagedForward, staged) || _forwardPackageAttached != attached ||
+          !listEquals(_forwardSelectedIds, selected) ||
+          !listEquals(_stagedForwardFileIds, stagedIds) ||
+          !setEquals(_requiredForwardFileIds, requiredIds)) return;
+      setState(() {
+        _displayedForwardOperation = null;
+        _forwardPackageAttached = false;
+        _forwardPreparationGeneration++;
+        _preparingForward = false;
+        _forwardPreparationFailed = false;
+        _stagedForward = null;
+        _forwardSelectedIds.clear();
+        _stagedForwardFileIds.clear();
+        _requiredForwardFileIds.clear();
+      });
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _forwardPackageAttached = false;
+      _forwardPreparationGeneration++;
+      _preparingForward = false;
+      _forwardPreparationFailed = false;
+      _stagedForward = null;
+      _forwardSelectedIds.clear();
+      _stagedForwardFileIds.clear();
+      _requiredForwardFileIds.clear();
+      _att.pending.removeWhere((file) => file.path == '__FG__');
+    });
+  }
+
   Future<void> _startForwardSelection(List<Message> selected, {VoidCallback? onPrepared}) async {
     if (selected.isEmpty) return;
     final outbox = ForwardOutbox.capture(context);
     if (outbox == null) return;
+    final selectedSnapshot = ForwardSelectionSnapshot(selected);
+    final selectionAtStart = Set<String>.of(_selectedMessageIds);
+    final teamId = context.read<TeamCubit>().state.team.id;
+    final sourceChat = _trackedChatId;
+    final initialCaption = _ctrl.text;
+    bool sourceCurrent() => mounted && outbox.isCurrent && sourceChat != null &&
+        _trackedChatId == sourceChat &&
+        context.read<TeamCubit>().state.team.id == teamId &&
+        selectedSnapshot.matches(context.read<TeamCubit>().state.chat);
+    void preserveNewSelection() {
+      if (sourceCurrent() && _selectedMessageIds.length == selectionAtStart.length &&
+          _selectedMessageIds.containsAll(selectionAtStart)) onPrepared?.call();
+    }
 
     final items = <ForwardItem>[];
     final fileUrls = <String>[];
@@ -2567,29 +2860,56 @@ class _ChatTabState extends State<ChatTab> {
       ));
     }
 
-    final teamId = context.read<TeamCubit>().state.team.id;
     final fromChatId = await _getChatIdForTeam(teamId);
-    final caption = _ctrl.text.trim().isEmpty ? null : _ctrl.text.trim();
+    if (!sourceCurrent() || fromChatId != sourceChat) return;
+    final caption = initialCaption.trim().isEmpty ? null : initialCaption.trim();
     final payload =
         ForwardPayload(fromChatId: fromChatId, caption: caption, items: items);
 
     final uniqueFileUrls = fileUrls.where((u) => u.isNotEmpty).toSet().toList();
     final uniqueFileIds = fileIds.where((id) => id.isNotEmpty).toSet().toList();
 
-    if (!outbox.isCurrent) return;
-    final target = await pickForwardTarget(context, isCurrent: () => outbox.isCurrent);
-    if (target == null || !outbox.isCurrent) return;
+    if (!sourceCurrent()) return;
+    final target = await (widget.forwardTargetOverride?.call() ??
+        pickForwardTarget(context, isCurrent: sourceCurrent));
+    if (target == null || !sourceCurrent()) return;
+
+    if (ForwardOutboxHost.usesDurable(context)) {
+      try {
+        final durable = await ForwardOutboxHost.durable(context);
+        if (!sourceCurrent()) return;
+        final saved = await completeForwardHandoff(
+          prepare: () => outbox.putDurableForChat(durable,
+              chatId: target.chatId, text: payload.encodeForText(),
+              isSourceCurrent: sourceCurrent,
+              fileUrls: uniqueFileUrls, fileIds: uniqueFileIds),
+          isCurrent: () => outbox.isCurrent, onPrepared: preserveNewSelection);
+        if (!saved || !sourceCurrent()) return;
+        if (target.chatId == fromChatId) {
+          await _consumeForwardOutboxIfAny(target.chatId, outbox,
+              expectedExistingDraft: initialCaption);
+        } else {
+          await target.open(context);
+        }
+      } catch (_) {
+        if (outbox.isCurrent) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Не удалось сохранить пересылку. Проверьте сохранённую пересылку и повторите.')));
+        }
+      }
+      return;
+    }
 
     if (target.chatId == fromChatId) {
       await completeForwardHandoff(
           prepare: () => _stageForwardPayload(payload, uniqueFileUrls, target.chatId),
-          isCurrent: () => outbox.isCurrent, onPrepared: onPrepared);
+          isCurrent: () => outbox.isCurrent, onPrepared: preserveNewSelection);
     } else {
       try {
         final ready = await completeForwardHandoff(
           prepare: () => outbox.putForChat(chatId: target.chatId, text: payload.encodeForText(),
             fileUrls: uniqueFileUrls, fileIds: uniqueFileIds),
-          isCurrent: () => outbox.isCurrent, onPrepared: onPrepared);
+          isCurrent: () => outbox.isCurrent, onPrepared: preserveNewSelection);
         if (!ready) return;
       } catch (_) {
         if (outbox.isCurrent) {
@@ -2598,7 +2918,7 @@ class _ChatTabState extends State<ChatTab> {
         }
         return;
       }
-      if (!outbox.isCurrent) return;
+      if (!sourceCurrent()) return;
       await target.open(context); // в целевом чате пакет вставится в композер
     }
   }

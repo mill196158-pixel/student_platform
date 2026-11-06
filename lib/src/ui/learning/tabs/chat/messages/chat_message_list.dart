@@ -171,6 +171,9 @@ class ChatMessageList extends StatelessWidget {
   final bool? canDeleteGroupAction;
   final bool? canEditOwnBeforeActivity;
 
+  /// Replaces all network-capable message/card widgets for a local snapshot.
+  final Widget Function(Message message)? localOnlyBubbleBuilder;
+
   const ChatMessageList({
     super.key,
     required this.messages,
@@ -214,6 +217,7 @@ class ChatMessageList extends StatelessWidget {
     this.canModerateCollection,
     this.canDeleteGroupAction,
     this.canEditOwnBeforeActivity,
+    this.localOnlyBubbleBuilder,
   });
 
   @override
@@ -260,7 +264,7 @@ class ChatMessageList extends StatelessWidget {
       messages: list,
       owner: currentUserId,
       builder: (context, visibility, reportVisibility) {
-        bool shown(Message m) => !_isActionCard(m) || _shouldCollapseBlockedMessage(m) ||
+        bool shown(Message m) => localOnlyBubbleBuilder != null || !_isActionCard(m) || _shouldCollapseBlockedMessage(m) ||
             visibility[_cardIdentity(m, currentUserId)] == true;
         final shownMessages = list.where(shown).toList(growable: false);
         final positions = <String, int>{
@@ -358,7 +362,7 @@ class ChatMessageList extends StatelessWidget {
               isFailed: m.isFailed,
             );
 
-            final bubble = buildBubble(
+            final bubble = localOnlyBubbleBuilder?.call(m) ?? buildBubble(
               m: m,
               // скрыть любые идентификаторы отправителей, если требуется (превью ЛС)
               showAvatar: shouldShowSender,
@@ -394,7 +398,7 @@ class ChatMessageList extends StatelessWidget {
               canEditOwnBeforeActivity: canEditOwnBeforeActivity,
             );
 
-            final previewBubble = buildBubble(
+            final previewBubble = localOnlyBubbleBuilder?.call(m) ?? buildBubble(
               m: m,
               showAvatar: shouldShowSender,
               reserveAvatarSpace:
@@ -478,6 +482,8 @@ class ChatMessageList extends StatelessWidget {
                           ? _BlockedAuthorMessagePlaceholder(
                               onShow: () => onRevealBlockedMessage?.call(m.id),
                             )
+                          : localOnlyBubbleBuilder != null
+                          ? bubbleWithKey
                           : SwipeToReply(
                               onReply: () => onReply(m),
                               child: SearchHighlight(

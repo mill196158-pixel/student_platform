@@ -1,3 +1,6 @@
+import 'package:student_platform/src/core/coordinated_refresh_client.dart';
+import 'package:student_platform/src/core/refresh_security_fence.dart';
+import 'package:student_platform/src/core/transport_failure.dart';
 import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
@@ -42,8 +45,10 @@ void main() {
       TimeoutException('offline'),
       AuthRetryableFetchException(statusCode: '503'),
     ]) {
-      expect(await AuthSession.restoreSessionStatus(client,
-          refresh: () async => throw error), SessionRestoreStatus.transportFailure);
+      expect(
+          await AuthSession.restoreSessionStatus(client,
+              refresh: () async => throw error),
+          SessionRestoreStatus.transportFailure);
     }
     for (final error in [
       const AuthApiException('invalid', statusCode: '400'),
@@ -51,8 +56,10 @@ void main() {
       const AuthApiException('denied', statusCode: '403'),
       StateError('invalid data'),
     ]) {
-      expect(await AuthSession.restoreSessionStatus(client,
-          refresh: () async => throw error), SessionRestoreStatus.rejected);
+      expect(
+          await AuthSession.restoreSessionStatus(client,
+              refresh: () async => throw error),
+          SessionRestoreStatus.rejected);
     }
   });
 
@@ -63,7 +70,8 @@ void main() {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     await client.auth.setInitialSession(jsonEncode(sessionFixture(now - 60)));
     final delayed = Completer<AuthResponse>();
-    final result = AuthSession.restoreSessionStatus(client, refresh: () => delayed.future);
+    final result =
+        AuthSession.restoreSessionStatus(client, refresh: () => delayed.future);
     final newer = sessionFixture(now + 3600);
     (newer['user'] as Map<String, dynamic>)['id'] = 'other-user';
     await client.auth.setInitialSession(jsonEncode(newer));
@@ -71,22 +79,27 @@ void main() {
     expect(await result, SessionRestoreStatus.stale);
   });
 
-  test('late rejection and success from old session cannot replace new account', () async {
+  test('late rejection and success from old session cannot replace new account',
+      () async {
     for (final success in [false, true]) {
       final client = SupabaseClient('https://example.com', 'test-public-key',
           authOptions: const AuthClientOptions(autoRefreshToken: false));
       final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
       await client.auth.setInitialSession(jsonEncode(sessionFixture(now - 60)));
       final delayed = Completer<AuthResponse>();
-      final pending = AuthSession.restoreSessionStatus(client, refresh: () => delayed.future);
+      final pending = AuthSession.restoreSessionStatus(client,
+          refresh: () => delayed.future);
       final newer = sessionFixture(now + 3600);
       (newer['user'] as Map<String, dynamic>)['id'] = 'other-user';
       await client.auth.setInitialSession(jsonEncode(newer));
       if (success) {
-        delayed.complete(AuthResponse(session: Session.fromJson(
-            jsonDecode(jsonEncode(sessionFixture(now + 3600))) as Map<String, dynamic>)));
+        delayed.complete(AuthResponse(
+            session: Session.fromJson(
+                jsonDecode(jsonEncode(sessionFixture(now + 3600)))
+                    as Map<String, dynamic>)));
       } else {
-        delayed.completeError(const AuthApiException('denied', statusCode: '401'));
+        delayed
+            .completeError(const AuthApiException('denied', statusCode: '401'));
       }
       expect(await pending, SessionRestoreStatus.stale);
       expect(client.auth.currentUser?.id, 'other-user');
@@ -94,7 +107,8 @@ void main() {
     }
   });
 
-  test('real SDK delayed refresh cannot redirect after a new sign-in', () async {
+  test('real SDK delayed refresh cannot redirect after a new sign-in',
+      () async {
     for (final status in [200, 401]) {
       final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
       final entered = Completer<void>();
@@ -114,15 +128,90 @@ void main() {
       await client.auth.setInitialSession(jsonEncode(sessionFixture(now - 60)));
       final pending = AuthSession.restoreSessionStatus(client);
       await entered.future;
-      await client.auth.signInWithPassword(email: 'test@example.com', password: 'test');
+      await client.auth
+          .signInWithPassword(email: 'test@example.com', password: 'test');
       oldResponse.complete(http.Response(
-          jsonEncode(status == 200 ? sessionFixture(now + 3600) : {'msg': 'denied'}),
-          status, headers: {'content-type': 'application/json'}));
+          jsonEncode(
+              status == 200 ? sessionFixture(now + 3600) : {'msg': 'denied'}),
+          status,
+          headers: {'content-type': 'application/json'}));
       expect(await pending, SessionRestoreStatus.stale);
       expect(client.auth.currentUser?.id, 'other-user');
       await client.dispose();
     }
   });
+  test('SDK masks fence error but its revision blocks offline admission',
+      () async {
+    expect(
+        isTemporaryTransportFailure(RefreshSecurityFenceException()), isFalse);
+    final fence = RefreshSecurityFence();
+    final gate = RefreshAdmissionClient(
+        MockClient((_) async => http.Response('', 200)),
+        backend: Uri.parse('https://example.invalid'),
+        securityFence: fence);
+    gate.block();
+    final client = SupabaseClient('https://example.invalid', 'test',
+        authOptions: const AuthClientOptions(autoRefreshToken: false),
+        httpClient: gate);
+    final subscription =
+        client.auth.onAuthStateChange.listen((_) {}, onError: (_) {});
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    await client.auth.setInitialSession(jsonEncode(sessionFixture(now - 60)));
+    final revision = fence.revision;
+    final status = await AuthSession.restoreSessionStatus(client);
+    expect(status, SessionRestoreStatus.transportFailure);
+    expect(fence.unchangedSince(revision), isFalse);
+    expect(client.auth.currentSession, isNotNull);
+    await subscription.cancel();
+    await client.dispose();
+  }, timeout: const Timeout(Duration(seconds: 50)));
+
+  test('real SDK confirmed 401 clears the expired session', () async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    var requests = 0;
+    final client = SupabaseClient('https://example.invalid', 'test',
+        authOptions: const AuthClientOptions(autoRefreshToken: false),
+        httpClient: MockClient((request) async {
+      requests++;
+      return http.Response(
+          jsonEncode(
+              {'msg': 'revoked', 'error_code': 'refresh_token_not_found'}),
+          401,
+          request: request,
+          headers: {'content-type': 'application/json'});
+    }));
+    final subscription =
+        client.auth.onAuthStateChange.listen((_) {}, onError: (_) {});
+    await client.auth.setInitialSession(jsonEncode(sessionFixture(now - 60)));
+    final status = await AuthSession.restoreSessionStatus(client);
+    expect(requests, greaterThan(0));
+    expect(status, SessionRestoreStatus.stale);
+    expect(client.auth.currentSession, isNull);
+    await subscription.cancel();
+    await client.dispose();
+  });
+
+  test('real SDK offline refresh preserves an expired saved session', () async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    var requests = 0;
+    final client = SupabaseClient('https://example.invalid', 'test',
+        authOptions: const AuthClientOptions(autoRefreshToken: false),
+        httpClient: MockClient((request) async {
+      requests++;
+      throw const SocketException('synthetic offline');
+    }));
+    final subscription =
+        client.auth.onAuthStateChange.listen((_) {}, onError: (_) {});
+    await client.auth.setInitialSession(jsonEncode(sessionFixture(now - 60)));
+    expect(client.auth.currentSession!.isExpired, isTrue);
+    final status = await AuthSession.restoreSessionStatus(client);
+    expect(requests, greaterThan(0));
+    expect(status, SessionRestoreStatus.transportFailure);
+    expect(client.auth.currentSession?.user.id, 'test-user');
+    expect(client.auth.currentSession!.isExpired, isTrue);
+    await subscription.cancel();
+    await client.dispose();
+  }, timeout: const Timeout(Duration(seconds: 50)));
   for (final scenario in ['valid', 'expired', 'rejected', 'missing']) {
     test('cold session restore: $scenario', () async {
       var requests = 0;

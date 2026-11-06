@@ -3,15 +3,18 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:student_platform/src/core/auth_session.dart';
+import 'package:student_platform/src/core/offline_startup_admission.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen(
       {super.key,
       this.restoreSession,
       this.restoreStatus,
+      this.qaAdmission,
       this.manualRetry = false});
   final Future<bool> Function()? restoreSession;
   final Future<SessionRestoreStatus> Function()? restoreStatus;
+  final Future<OfflineStartupResult> Function()? qaAdmission;
   final bool manualRetry;
 
   @override
@@ -33,6 +36,25 @@ class _SplashScreenState extends State<SplashScreen> {
 
   Future<void> _bootstrap() async {
     try {
+      if (widget.qaAdmission != null) {
+        final result = await widget.qaAdmission!();
+        if (!mounted) return;
+        switch (result) {
+          case OfflineStartupResult.online:
+          case OfflineStartupResult.cacheOnly:
+            context.go('/home');
+            return;
+          case OfflineStartupResult.passwordChangeRequired:
+            context.go('/change-password');
+            return;
+          case OfflineStartupResult.denied:
+            context.go('/guest');
+            return;
+          case OfflineStartupResult.unavailable:
+            setState(() => _needsRetry = true);
+            return;
+        }
+      }
       final SessionRestoreStatus status;
       if (widget.restoreStatus != null) {
         status = await widget.restoreStatus!();

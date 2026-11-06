@@ -1,4 +1,5 @@
 import 'chat_file_access.dart';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -6,7 +7,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:student_platform/src/core/session.dart';
 import 'package:student_platform/src/core/logout_cleanup.dart';
+import 'package:student_platform/src/core/logout_feedback.dart';
+import 'package:student_platform/src/navigation/root_nav.dart';
 import 'package:student_platform/src/core/auth_session_scope_host.dart';
+import 'package:student_platform/src/core/auth_transition_host.dart';
+import 'package:student_platform/src/core/auth_transition_coordinator.dart';
+import 'package:student_platform/src/core/session_capabilities_host.dart';
 import 'package:student_platform/src/core/offline_policy_grant_host.dart';
 import 'package:student_platform/src/core/offline_grant_logout.dart';
 import 'package:student_platform/src/config/supabase_config.dart';
@@ -30,117 +36,210 @@ import 'package:student_platform/src/ui/profile/student_review_service.dart';
 
 class AuthService {
   static final _sb = Supabase.instance.client;
+  static LogoutRetryOwner? _retryOwner;
+  static Future<void>? _signOutInFlight;
 
-  static Future<void> signOut(BuildContext context) async {
+  static Future<void> signOut(BuildContext context) {
+    final existing = _signOutInFlight;
+    if (existing != null) return existing;
+    final operation = _signOut(context);
+    _signOutInFlight = operation;
+    unawaited(operation.then<void>((_) {
+      if (identical(_signOutInFlight, operation)) _signOutInFlight = null;
+    }, onError: (Object _, StackTrace __) {
+      if (identical(_signOutInFlight, operation)) _signOutInFlight = null;
+    }));
+    return operation;
+  }
+
+  static Future<void> _signOut(BuildContext context) async {
     final scope = AuthSessionScopeHost.maybeRead(context);
-    final teamCleanup = beginTeamSnapshotLogout(
-      coordinator: TeamSnapshotHost.maybeRead(context),
-      project: SupabaseConfig.url,
-      userId: _sb.auth.currentUser?.id,
-    );
-    final revoke = beginOfflineGrantLogout(
-      access: OfflinePolicyGrantHost.maybeRead(context),
-      invalidate: () => scope?.invalidateForSignOut(),
-    );
-    // Start attachment fencing immediately; do not wait for unrelated logout
-    // cleanups while the old session can still be observed by a late download.
-    final attachmentCleanup = ChatFileAccess.clear().then<bool>(
-      (_) => true,
-      onError: (Object _, StackTrace __) => false,
-    );
-    ChatWarmCoordinator.instance.stop();
-    var cleanupComplete = false;
+    final transition = AuthTransitionHost.maybeRead(context);
+    final owner = scope == null ? null : AuthTransitionOwner.capture(scope);
+    final initialSession = _sb.auth.currentSession;
+    final retry = _retryOwner;
+    if (scope == null ||
+        transition == null ||
+        initialSession == null ||
+        (owner == null &&
+            (retry == null || !retry.matches(scope, initialSession)))) {
+      showLogoutFeedback(
+          rootScaffoldMessengerKey, LogoutCleanupResult.blockedBeforeSignOut);
+      return;
+    }
+    final originalIdentity = LogoutSessionIdentity(initialSession,
+        '${SupabaseConfig.url.replaceFirst(RegExp(r'/$'), '')}/auth/v1');
+    var expectedGeneration = scope.generation;
+    bool ownerIsCurrent() {
+      final session = _sb.auth.currentSession;
+      return originalIdentity.matches(session) &&
+          scope.generation == expectedGeneration;
+    }
+
+    final capabilities = SessionCapabilitiesHost.maybeRead(context);
+    final teamCoordinator = TeamSnapshotHost.maybeRead(context);
+    final oldUserId = _sb.auth.currentUser?.id;
+    final access = OfflinePolicyGrantHost.maybeRead(context);
+    final sqliteStore = access?.sqliteStore;
+    final sqliteBinding = sqliteStore == null ? null : access?.currentBinding();
+    Object? attachmentFence;
+    var result = LogoutCleanupResult.blockedBeforeSignOut;
     try {
-      cleanupComplete = await runLogoutCleanup(
-        cleanups: [
-          () async {
-            if (!await teamCleanup)
-              throw StateError('Team cache cleanup failed');
-          },
-          () async {
-            if (!await revoke) throw StateError('Local grant removal failed');
-          },
-          () async {
-            await PushNotificationService.instance.onLogout();
-          },
-          () async {
-            if (!await attachmentCleanup)
-              throw StateError('Attachment cleanup failed');
-            await DmApi.clearSessionState();
-          },
-          () async {
-            await TeamCubit.clearSessionCaches();
-          },
-          () async {
-            await ChatMessageCacheStore.clearOnLogout();
-          },
-          () async {
-            await PublishedNewsCache(
-              currentUserId: () => _sb.auth.currentUser?.id,
-            ).clearAll();
-          },
-          () async {
-            await ProfileFeedService(
-              currentUserId: () => _sb.auth.currentUser?.id,
-            ).clearAll();
-          },
-          () async {
-            await SubjectCardService(
-              currentUserId: () => _sb.auth.currentUser?.id,
-            ).clearAll();
-          },
-          () async {
-            await SubjectMediaService(
-              currentUserId: () => _sb.auth.currentUser?.id,
-            ).clearAll();
-          },
-          () async {
-            await ContentMediaService(
-              currentUserId: () => _sb.auth.currentUser?.id,
-            ).clearAll();
-          },
-          () async {
-            await ReferenceService(
-              currentUserId: () => _sb.auth.currentUser?.id,
-            ).clearAll();
-          },
-          () async {
-            await VacancyService(
-              currentUserId: () => _sb.auth.currentUser?.id,
-            ).clearAll();
-          },
-          () async {
-            await VacancyMediaService(
-              currentUserId: () => _sb.auth.currentUser?.id,
-            ).clearAll();
-          },
-          () async {
-            await StudentReviewService(
-              currentUserId: () => _sb.auth.currentUser?.id,
-            ).clearAll();
-          },
-          () async {
-            await NewsImageDiskCache().clear();
-          },
-          () async {
-            final prefs = await SharedPreferences.getInstance();
-            await prefs.remove('user');
-            await prefs.remove('loggedIn');
-          },
-        ],
-        signOut: () => _sb.auth.signOut(),
-        clearSession: AppSession.clear,
-      );
+      Future<void> action() async {
+        result = await runLogoutCleanup(
+          isOwnerCurrent: ownerIsCurrent,
+          mayClearSession: () => _sb.auth.currentSession == null,
+          memoryFence: () => runLogoutMemoryFences([
+            () => capabilities?.block(),
+            () {
+              expectedGeneration++;
+              scope.invalidateForSignOut();
+            },
+            () => attachmentFence = ChatFileAccess.fenceForLogout(),
+          ]),
+          durableRevoke: sqliteStore == null
+              ? null
+              : () async {
+                  if (sqliteBinding == null || !ownerIsCurrent()) return false;
+                  await sqliteStore.beginRevoke(sqliteBinding,
+                      stillCurrent: ownerIsCurrent);
+                  return ownerIsCurrent();
+                },
+          cleanups: [
+            () async {
+              Future<bool> safely(Future<bool> Function() start) async {
+                try {
+                  return await start();
+                } catch (_) {
+                  return false;
+                }
+              }
+
+              ChatWarmCoordinator.instance.stop();
+              final results = await Future.wait([
+                safely(() => beginOfflineGrantLogout(
+                      access: access,
+                      invalidate: () {},
+                    )),
+                safely(() => beginTeamSnapshotLogout(
+                      coordinator: teamCoordinator,
+                      project: SupabaseConfig.url,
+                      userId: oldUserId,
+                    )),
+                safely(() async {
+                  await ChatFileAccess.clear();
+                  return true;
+                }),
+              ]);
+              if (results.any((value) => !value)) {
+                throw StateError('Local cleanup incomplete');
+              }
+            },
+            () async {
+              await PushNotificationService.instance.onLogout();
+            },
+            () async {
+              await DmApi.clearSessionState();
+            },
+            () async {
+              await TeamCubit.clearSessionCaches();
+            },
+            () async {
+              await ChatMessageCacheStore.clearOnLogout();
+            },
+            () async {
+              await PublishedNewsCache(
+                currentUserId: () => _sb.auth.currentUser?.id,
+              ).clearAll();
+            },
+            () async {
+              await ProfileFeedService(
+                currentUserId: () => _sb.auth.currentUser?.id,
+              ).clearAll();
+            },
+            () async {
+              await SubjectCardService(
+                currentUserId: () => _sb.auth.currentUser?.id,
+              ).clearAll();
+            },
+            () async {
+              await SubjectMediaService(
+                currentUserId: () => _sb.auth.currentUser?.id,
+              ).clearAll();
+            },
+            () async {
+              await ContentMediaService(
+                currentUserId: () => _sb.auth.currentUser?.id,
+              ).clearAll();
+            },
+            () async {
+              await ReferenceService(
+                currentUserId: () => _sb.auth.currentUser?.id,
+              ).clearAll();
+            },
+            () async {
+              await VacancyService(
+                currentUserId: () => _sb.auth.currentUser?.id,
+              ).clearAll();
+            },
+            () async {
+              await VacancyMediaService(
+                currentUserId: () => _sb.auth.currentUser?.id,
+              ).clearAll();
+            },
+            () async {
+              await StudentReviewService(
+                currentUserId: () => _sb.auth.currentUser?.id,
+              ).clearAll();
+            },
+            () async {
+              await NewsImageDiskCache().clear();
+            },
+            () async {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.remove('user');
+              await prefs.remove('loggedIn');
+            },
+          ],
+          signOut: () => _sb.auth.signOut(),
+          clearSession: AppSession.clear,
+        );
+        // Complete A's attachment fence before releasing the serialized
+        // transition; otherwise a queued B sign-in can overtake finalization.
+        if ((result == LogoutCleanupResult.signedOut ||
+                result == LogoutCleanupResult.signedOutCleanupIncomplete ||
+                result == LogoutCleanupResult.signOutUnconfirmed) &&
+            _sb.auth.currentSession == null &&
+            attachmentFence != null) {
+          ChatFileAccess.completeLogoutFence(attachmentFence!);
+        }
+      }
+
+      final started = owner != null
+          ? await transition.logout(owner, action: action)
+          : await transition.run(() async {
+              if (retry == null ||
+                  !retry.matches(scope, _sb.auth.currentSession)) {
+                return false;
+              }
+              await action();
+              return true;
+            });
+      if (!started) result = LogoutCleanupResult.ownerChanged;
     } finally {
-      if (context.mounted && _sb.auth.currentSession == null) {
+      if (result == LogoutCleanupResult.blockedBeforeSignOut &&
+          ownerIsCurrent()) {
+        _retryOwner = LogoutRetryOwner.capture(
+            scope, originalIdentity, _sb.auth.currentSession);
+      } else {
+        _retryOwner = null;
+      }
+      if (result != LogoutCleanupResult.ownerChanged &&
+          context.mounted &&
+          _sb.auth.currentSession == null) {
         context.go('/guest');
       }
     }
-    if (!cleanupComplete && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text(
-            'Вы вышли из аккаунта, но часть локальных данных не удалось очистить.'),
-      ));
-    }
+    showLogoutFeedback(rootScaffoldMessengerKey, result);
   }
 }

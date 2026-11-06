@@ -4,6 +4,7 @@ import 'package:student_ui/student_ui.dart';
 
 // Импорты по текущей структуре
 import '../home/home_screen.dart';
+import '../home/cached_home_schedule_reader.dart';
 import '../info/info_screen.dart';
 import '../learning/learning_screen.dart';
 import '../schedule/schedule_screen.dart';
@@ -16,8 +17,21 @@ import 'visited_tab.dart';
 import '../guest/guest_workspace.dart';
 
 class NavigationScreen extends StatefulWidget {
-  const NavigationScreen({super.key, this.guest = false});
+  const NavigationScreen(
+      {super.key,
+      this.guest = false,
+      this.cachedReader,
+      this.cachedInfo,
+      this.cachedLearning,
+      this.cachedProfile});
   final bool guest;
+
+  /// Non-null only after a cache-only admission. Other tabs must supply their
+  /// own local-only implementation before they can be opened in this mode.
+  final CachedHomeScheduleReader? cachedReader;
+  final WidgetBuilder? cachedInfo;
+  final WidgetBuilder? cachedLearning;
+  final WidgetBuilder? cachedProfile;
 
   @override
   State<NavigationScreen> createState() => _NavigationScreenState();
@@ -29,24 +43,34 @@ class _NavigationScreenState extends State<NavigationScreen> {
   final ValueNotifier<bool> _profileActive = ValueNotifier<bool>(false);
   final ValueNotifier<bool> _homeActive = ValueNotifier<bool>(true);
 
-  late final List<Widget> _tabs = <Widget>[
-    _KeepAlive(
-        storageKey: 'tab_home',
-        child: HomeScreen(activeListenable: _homeActive)),
-    const _KeepAlive(storageKey: 'tab_info', child: InfoScreen()),
-    const _KeepAlive(storageKey: 'tab_learning', child: LearningScreen()),
-    const _KeepAlive(storageKey: 'tab_schedule', child: ScheduleScreen()),
-  ];
+  bool get _cacheOnly => widget.cachedReader != null;
+  bool _backgroundStarted = false;
+
+  void _syncBackground() {
+    final shouldRun = !widget.guest && !_cacheOnly;
+    if (shouldRun == _backgroundStarted) return;
+    _backgroundStarted = shouldRun;
+    if (shouldRun) {
+      ChatWarmCoordinator.instance.start();
+      PresenceService.instance.start();
+    } else {
+      PresenceService.instance.stop();
+      ChatWarmCoordinator.instance.stop();
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     _profileActive.value = _currentIndex == 4;
     // Quietly refresh chat list + top thread histories in the background.
-    if (!widget.guest) {
-      ChatWarmCoordinator.instance.start();
-      PresenceService.instance.start();
-    }
+    _syncBackground();
+  }
+
+  @override
+  void didUpdateWidget(covariant NavigationScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncBackground();
   }
 
   void _switchToTab(MainTab tab) {
@@ -60,6 +84,21 @@ class _NavigationScreenState extends State<NavigationScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final reader = widget.cachedReader;
+    if (reader != null && !widget.guest) {
+      return ListenableBuilder(
+        listenable: reader.accessChanges,
+        builder: (context, _) => reader.canRead
+            ? _buildWorkspace(context)
+            : const Scaffold(
+                body: Center(child: Text('Сохранённые данные недоступны.')),
+              ),
+      );
+    }
+    return _buildWorkspace(context);
+  }
+
+  Widget _buildWorkspace(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final overlay = ThemeService.overlayFor(darkMode: isDark);
     // Re-assert on every tab rebuild so a transparent AppBar (profile) cannot
@@ -76,24 +115,46 @@ class _NavigationScreenState extends State<NavigationScreen> {
           child: widget.guest
               ? GuestWorkspace(tab: _currentIndex)
               : PageStorage(
+                  key: ValueKey(_cacheOnly),
                   bucket: _bucket,
                   child: IndexedStack(
                     index: _currentIndex,
                     children: [
                       VisitedTab(
-                          active: _currentIndex == 0, builder: (_) => _tabs[0]),
+                          active: _currentIndex == 0,
+                          builder: (_) => _KeepAlive(
+                              storageKey: 'tab_home',
+                              child: HomeScreen(
+                                  activeListenable: _homeActive,
+                                  cachedReader: widget.cachedReader))),
                       VisitedTab(
-                          active: _currentIndex == 1, builder: (_) => _tabs[1]),
+                          active: _currentIndex == 1,
+                          builder: (context) => _KeepAlive(
+                              storageKey: 'tab_info',
+                              child: _cacheOnly
+                                  ? _cachedTab(context, widget.cachedInfo)
+                                  : const InfoScreen())),
                       VisitedTab(
-                          active: _currentIndex == 2, builder: (_) => _tabs[2]),
+                          active: _currentIndex == 2,
+                          builder: (context) => _KeepAlive(
+                              storageKey: 'tab_learning',
+                              child: _cacheOnly
+                                  ? _cachedTab(context, widget.cachedLearning)
+                                  : const LearningScreen())),
                       VisitedTab(
-                          active: _currentIndex == 3, builder: (_) => _tabs[3]),
+                          active: _currentIndex == 3,
+                          builder: (_) => _KeepAlive(
+                              storageKey: 'tab_schedule',
+                              child: ScheduleScreen(
+                                  cachedReader: widget.cachedReader,
+                                  subscribeRealtime: !_cacheOnly))),
                       VisitedTab(
                         active: _currentIndex == 4,
                         builder: (_) => _KeepAlive(
                           storageKey: 'tab_profile',
-                          child:
-                              ProfileScreen(activeListenable: _profileActive),
+                          child: _cacheOnly
+                              ? _cachedTab(context, widget.cachedProfile)
+                              : ProfileScreen(activeListenable: _profileActive),
                         ),
                       ),
                     ],
@@ -104,9 +165,15 @@ class _NavigationScreenState extends State<NavigationScreen> {
     );
   }
 
+  Widget _cachedTab(BuildContext context, WidgetBuilder? builder) =>
+      builder?.call(context) ??
+      const Center(
+        child: Text('Сохранённые данные этого раздела пока недоступны.'),
+      );
+
   @override
   void dispose() {
-    if (!widget.guest) {
+    if (_backgroundStarted) {
       PresenceService.instance.stop();
       ChatWarmCoordinator.instance.stop();
     }

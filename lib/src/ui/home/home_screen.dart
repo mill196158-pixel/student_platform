@@ -13,6 +13,7 @@ import 'package:student_platform/src/core/auth_session_scope_host.dart';
 import 'package:student_platform/src/services/push/in_app_notification_bus.dart';
 import 'package:student_platform/src/ui/content/content_nav_executor.dart';
 import 'package:student_platform/src/ui/home/home_dashboard_service.dart';
+import 'package:student_platform/src/ui/home/cached_home_schedule_reader.dart';
 import 'package:student_platform/src/ui/home/home_promo_service.dart';
 import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
 import 'package:student_platform/src/ui/info/content_media_service.dart';
@@ -29,11 +30,15 @@ class HomeScreen extends StatefulWidget {
       this.promoService,
       this.contentMedia,
       this.activeListenable,
-      this.notificationsApi});
+      this.notificationsApi,
+      this.cachedReader});
   final HomeDashboardService? dashboardService;
   final HomePromoService? promoService;
   final ContentMediaService? contentMedia;
   final AppNotificationsApi? notificationsApi;
+
+  /// Only passed after a separately verified cache-only admission.
+  final CachedHomeScheduleReader? cachedReader;
   final ValueListenable<bool>? activeListenable;
 
   @override
@@ -60,6 +65,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _loading = true;
   int _unreadNotificationCount = 0;
   int _promoLoadGeneration = 0;
+  int _modeRevision = 0;
   int _promoMediaGeneration = 0;
   final Set<String> _recordedImpressionIds = {};
   final Map<String, GlobalKey> _promoKeys = {};
@@ -77,7 +83,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     widget.activeListenable?.addListener(_queuePromoImpressions);
-    _inAppSub = InAppNotificationBus.instance.stream.listen(_onInAppEvent);
+    if (widget.cachedReader == null) {
+      _inAppSub = InAppNotificationBus.instance.stream.listen(_onInAppEvent);
+    }
   }
 
   @override
@@ -124,13 +132,37 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void didUpdateWidget(covariant HomeScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!_serviceInitialized ||
-        identical(oldWidget.dashboardService, widget.dashboardService)) return;
-    if (_ownsService) _service.dispose();
-    _ownsService = widget.dashboardService == null;
-    _service = widget.dashboardService ??
-        HomeDashboardService(sessionScope: _authScope);
+    final modeChanged = !identical(oldWidget.cachedReader, widget.cachedReader);
+    final serviceChanged =
+        !identical(oldWidget.dashboardService, widget.dashboardService);
+    if (!_serviceInitialized || (!modeChanged && !serviceChanged)) return;
+    if (modeChanged) {
+      _modeRevision++;
+      _hiddenDoneAssignmentIds.clear();
+      _markingDoneAssignmentIds.clear();
+      _inAppSub?.cancel();
+      _inAppSub = widget.cachedReader == null
+          ? InAppNotificationBus.instance.stream.listen(_onInAppEvent)
+          : null;
+      _promoMediaGeneration++;
+      _promo = const HomePromoLoadResult(intentionallyEmpty: true);
+      _unreadNotificationCount = 0;
+      _promoImageBytes.clear();
+      _promoIconBytes.clear();
+      _promoImageStates.clear();
+      _promoAssetIdentities.clear();
+      _promoKeys.clear();
+      _recordedImpressionIds.clear();
+    }
+    if (serviceChanged) {
+      if (_ownsService) _service.dispose();
+      _ownsService = widget.dashboardService == null;
+      _service = widget.dashboardService ??
+          HomeDashboardService(sessionScope: _authScope);
+    }
     _data = null;
+    _error = null;
+    _loading = true;
     _loadInFlight = null;
     _loadUserId = null;
     _loadAuthScope = null;
@@ -160,9 +192,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _refreshUnreadBadge() async {
+    final modeRevision = _modeRevision;
+    bool stillOnline() =>
+        mounted && widget.cachedReader == null && modeRevision == _modeRevision;
+    if (!stillOnline()) return;
+    if (widget.cachedReader != null) return;
     try {
       final count = await _notificationsApi.unreadCount();
-      if (!mounted) return;
+      if (!stillOnline()) return;
       setState(() => _unreadNotificationCount = count);
     } catch (_) {}
   }
@@ -203,6 +240,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _loadDashboard() async {
+    final reader = widget.cachedReader;
+    if (reader != null) {
+      try {
+        final snapshot = await reader.readDashboard();
+        if (!mounted || widget.cachedReader != reader) return;
+        setState(() {
+          _data = snapshot;
+          _loading = false;
+          _error = null;
+        });
+      } catch (error) {
+        if (!mounted || widget.cachedReader != reader) return;
+        setState(() {
+          _data = null;
+          _loading = false;
+          _error = error;
+        });
+      }
+      return;
+    }
     final firstContentClock = Stopwatch()..start();
     var reportedFirstContent = false;
     final userId = _service.currentUserId;
@@ -272,6 +329,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _refreshPromo(int generation) async {
     final userId = _service.currentUserId;
     await _paintCachedPromo(generation);
+    if (!mounted ||
+        widget.cachedReader != null ||
+        generation != _promoLoadGeneration ||
+        userId != _service.currentUserId) return;
     final promo = await _loadPromoSafe();
     if (!mounted ||
         generation != _promoLoadGeneration ||
@@ -409,6 +470,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     return Column(
       children: [
+        if (widget.cachedReader != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Text('Без сети · новости и объявления могут быть недоступны',
+                style: Theme.of(context).textTheme.bodySmall),
+          ),
         if (_error != null)
           TextButton(
               onPressed: _load,
@@ -423,22 +490,32 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               data: _toPresentationData(data),
               notificationCount: _unreadNotificationCount,
               onRefresh: _load,
-              onNotificationsTap: _openNotifications,
-              onNewsTap: (index) => _showNewsFeed(data.news, index),
+              onNotificationsTap:
+                  widget.cachedReader == null ? _openNotifications : null,
+              onNewsTap: widget.cachedReader == null
+                  ? (index) => _showNewsFeed(data.news, index)
+                  : null,
               onSummaryTap: () => MainTabScope.switchToTab(
                 context,
                 MainTab.schedule,
               ),
-              onGroupActionTap: _openGroupAction,
-              onAssignmentsOpen: () => context.push('/my-diary'),
-              onAssignmentTap: (item) {
-                final source = _findAssignment(item.id);
-                if (source != null) _showAssignmentDetails(source);
-              },
-              onAssignmentDoneTap: (item) {
-                final source = _findAssignment(item.id);
-                if (source != null) _markAssignmentDone(source);
-              },
+              onGroupActionTap:
+                  widget.cachedReader == null ? _openGroupAction : null,
+              onAssignmentsOpen: widget.cachedReader == null
+                  ? () => context.push('/my-diary')
+                  : null,
+              onAssignmentTap: widget.cachedReader != null
+                  ? null
+                  : (item) {
+                      final source = _findAssignment(item.id);
+                      if (source != null) _showAssignmentDetails(source);
+                    },
+              onAssignmentDoneTap: widget.cachedReader != null
+                  ? null
+                  : (item) {
+                      final source = _findAssignment(item.id);
+                      if (source != null) _markAssignmentDone(source);
+                    },
               homePromo: _promo.hidePromoStrip || _promo.cards.length != 1
                   ? null
                   : (_promo.isDemoFallback ? null : _promo.payload),
@@ -460,6 +537,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _openGroupAction(StudentHomeGroupAction action) {
+    if (widget.cachedReader != null) return;
     final source = _findGroupAction(action.id);
     if (source == null) return;
     openGroupActionDeeplink(
@@ -588,14 +666,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _openNotifications() async {
+    final modeRevision = _modeRevision;
+    bool stillOnline() =>
+        mounted && widget.cachedReader == null && modeRevision == _modeRevision;
+    if (!stillOnline()) return;
+    if (widget.cachedReader != null) return;
     await showNotificationCenterSheet(context);
-    if (!mounted) return;
+    if (!stillOnline()) return;
     final count = await _notificationsApi.unreadCount();
-    if (!mounted) return;
+    if (!stillOnline()) return;
     setState(() => _unreadNotificationCount = count);
   }
 
   Future<void> _markAssignmentDone(HomeAssignmentPreview item) async {
+    final modeRevision = _modeRevision;
+    bool stillOnline() =>
+        mounted && widget.cachedReader == null && modeRevision == _modeRevision;
+    if (!stillOnline()) return;
+    if (widget.cachedReader != null) return;
     final assignmentId = item.assignment.id;
     if (assignmentId.isEmpty ||
         _markingDoneAssignmentIds.contains(assignmentId) ||
@@ -604,7 +692,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
 
     final confirmed = await _confirmAssignmentDone(item);
-    if (confirmed != true || !mounted) return;
+    if (confirmed != true || !stillOnline()) return;
 
     setState(() {
       _hiddenDoneAssignmentIds.add(assignmentId);
@@ -616,10 +704,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         assignmentId: assignmentId,
         done: true,
       );
-      if (!mounted) return;
+      if (!stillOnline()) return;
       setState(() => _markingDoneAssignmentIds.remove(assignmentId));
       await _load();
-      if (!mounted) return;
+      if (!stillOnline()) return;
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
@@ -633,7 +721,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
         );
     } catch (_) {
-      if (!mounted) return;
+      if (!stillOnline()) return;
       setState(() {
         _hiddenDoneAssignmentIds.remove(assignmentId);
         _markingDoneAssignmentIds.remove(assignmentId);
@@ -650,6 +738,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _undoAssignmentDone(HomeAssignmentPreview item) async {
+    final modeRevision = _modeRevision;
+    bool stillOnline() =>
+        mounted && widget.cachedReader == null && modeRevision == _modeRevision;
+    if (!stillOnline()) return;
     final assignmentId = item.assignment.id;
     if (assignmentId.isEmpty) return;
 
@@ -664,7 +756,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         done: false,
       );
     } finally {
-      if (!mounted) return;
+      if (!stillOnline()) return;
       setState(() => _markingDoneAssignmentIds.remove(assignmentId));
       await _load();
     }
@@ -798,6 +890,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _showAssignmentDetails(HomeAssignmentPreview item) {
+    if (widget.cachedReader != null) return;
     final assignment = item.assignment;
     _showDetailsSheet(
       title: assignment.title,
@@ -980,6 +1073,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _maybeRecordPromoImpression(HomePromoLoadResult promo) {
+    if (widget.cachedReader != null) return;
     if (!mounted ||
         _data == null ||
         !(widget.activeListenable?.value ?? true) ||
@@ -1008,11 +1102,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _queuePromoImpressions() {
+    if (widget.cachedReader != null) return;
     if (!mounted || _impressionFramePending) return;
     _impressionFramePending = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _impressionFramePending = false;
-      if (mounted) _maybeRecordPromoImpression(_promo);
+      if (mounted && widget.cachedReader == null)
+        _maybeRecordPromoImpression(_promo);
     });
   }
 
@@ -1041,6 +1137,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     ManagedContentCard? card,
     HomePromoPayload? payload,
   }) async {
+    final modeRevision = _modeRevision;
+    bool stillOnline() =>
+        mounted && widget.cachedReader == null && modeRevision == _modeRevision;
+    if (!stillOnline()) return;
+    if (widget.cachedReader != null) return;
     final resolved = payload ?? card?.homePromo ?? _promo.payload;
     final managedId = card?.id;
     if (managedId != null && !_promo.isDemoFallback && !_promo.hidePromoStrip) {
@@ -1053,7 +1154,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ctaUrl: resolved.ctaUrl,
     );
     if (intent is ContentNavNone || intent is ContentNavDisabled) {
-      if (!mounted) return;
+      if (!stillOnline()) return;
       if (intent is ContentNavDisabled) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Действие недоступно')),
@@ -1063,18 +1164,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _showHelpDetails(resolved);
       return;
     }
-    if (!mounted) return;
+    if (!stillOnline()) return;
     await const ContentNavExecutor().execute(
       context,
       intent,
       onUnavailableMessage: (message) {
-        if (!mounted) return;
+        if (!stillOnline()) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(message)),
         );
       },
       onDisabled: () {
-        if (!mounted) return;
+        if (!stillOnline()) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Действие недоступно')),
         );
@@ -1083,6 +1184,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _onHomePromoDismiss(ManagedContentCard card) async {
+    final modeRevision = _modeRevision;
+    bool stillOnline() =>
+        mounted && widget.cachedReader == null && modeRevision == _modeRevision;
+    if (!stillOnline()) return;
+    if (widget.cachedReader != null) return;
     if (_promo.isDemoFallback) {
       setState(() {
         _promo = const HomePromoLoadResult(intentionallyEmpty: true);
@@ -1091,7 +1197,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
     try {
       await _promoService.dismiss(card.id);
-      if (!mounted) return;
+      if (!stillOnline()) return;
       // Optimistic: remove only the dismissed card; empty must not resurrect demo.
       final remaining =
           _promo.cards.where((c) => c.id != card.id).toList(growable: false);
@@ -1104,11 +1210,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             : HomePromoLoadResult(cards: remaining);
       });
       final refreshed = await _loadPromoSafe();
-      if (!mounted) return;
+      if (!stillOnline()) return;
       setState(() => _promo = refreshed);
       unawaited(_hydratePromoMedia(refreshed));
     } catch (error) {
-      if (!mounted) return;
+      if (!stillOnline()) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Не удалось скрыть карточку.')),
       );

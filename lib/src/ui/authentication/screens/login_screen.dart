@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:student_platform/src/config/auth_email_adapter.dart';
 import 'package:student_platform/src/core/password_policy.dart';
+import 'package:student_platform/src/core/auth_transition_host.dart';
 import 'change_password_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -37,56 +38,60 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       final authEmail = normalizeLoginToAuthEmail(login);
-      await _sb.auth.signInWithPassword(email: authEmail, password: pass);
+      final coordinator = AuthTransitionHost.maybeRead(context);
+      if (coordinator == null) throw StateError('Вход временно недоступен');
+      await coordinator.run(() async {
+        await _sb.auth.signInWithPassword(email: authEmail, password: pass);
 
-      // 2) Профиль. Сначала RPC (устойчиво к рассинхрону id/login),
-      //    если не вернул — прямой select по id.
-      Map<String, dynamic>? data;
+        // 2) Профиль. Сначала RPC (устойчиво к рассинхрону id/login),
+        //    если не вернул — прямой select по id.
+        Map<String, dynamic>? data;
 
-      try {
-        final rows = await _sb.rpc('get_my_profile') as List?;
-        if (rows != null && rows.isNotEmpty) {
-          data = Map<String, dynamic>.from(rows.first as Map);
+        try {
+          final rows = await _sb.rpc('get_my_profile') as List?;
+          if (rows != null && rows.isNotEmpty) {
+            data = Map<String, dynamic>.from(rows.first as Map);
+          }
+        } catch (_) {
+          // упадём в план Б ниже
         }
-      } catch (_) {
-        // упадём в план Б ниже
-      }
 
-      if (data == null) {
-        final uid = _sb.auth.currentUser?.id;
-        if (uid == null) throw 'Не удалось получить сессию';
-        final row = await _sb
-            .from('users')
-            .select(
-                'id, login, name, surname, university, group_name, avatar_url, status, role, must_change_password')
-            .eq('id', uid)
-            .maybeSingle();
+        if (data == null) {
+          final uid = _sb.auth.currentUser?.id;
+          if (uid == null) throw 'Не удалось получить сессию';
+          final row = await _sb
+              .from('users')
+              .select(
+                  'id, login, name, surname, university, group_name, avatar_url, status, role, must_change_password')
+              .eq('id', uid)
+              .maybeSingle();
 
-        if (row == null) throw 'Профиль не найден';
-        data = Map<String, dynamic>.from(row as Map);
-      }
+          if (row == null) throw 'Профиль не найден';
+          data = Map<String, dynamic>.from(row as Map);
+        }
 
-      data['must_change_password'] = await loadPasswordChangeRequired(_sb);
+        data['must_change_password'] = await loadPasswordChangeRequired(_sb);
 
-      // 3) Сохраняем локально и идём на /home
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('loggedIn', true);
-      await prefs.setString('user', jsonEncode(data));
+        // 3) Сохраняем локально и идём на /home
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('loggedIn', true);
+        await prefs.setString('user', jsonEncode(data));
 
-      if (!mounted) return;
-      final mustChangePassword = data['must_change_password'] == true;
-      if (mustChangePassword) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const ChangePasswordScreen()),
-        );
-        return;
-      }
+        if (!mounted) return;
+        final mustChangePassword = data['must_change_password'] == true;
+        if (mustChangePassword) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const ChangePasswordScreen()),
+          );
+          return;
+        }
 
-      try {
-        context.go('/home');
-      } catch (_) {
-        Navigator.of(context).pushReplacementNamed('/home');
-      }
+        try {
+          context.go('/home');
+        } catch (_) {
+          Navigator.of(context).pushReplacementNamed('/home');
+        }
+      });
     } on AuthException catch (e) {
       if (!mounted) return;
       final serverTimeout =
@@ -180,7 +185,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                         Text(
                                             'Твоя группа и учебные дела — здесь.',
                                             style: TextStyle(
-                                                color: theme.colorScheme.onSurfaceVariant)),
+                                                color: theme.colorScheme
+                                                    .onSurfaceVariant)),
                                         const SizedBox(height: 28),
                                       ],
                                       Padding(

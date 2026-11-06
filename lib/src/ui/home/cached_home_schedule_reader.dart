@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:student_platform/src/ui/home/home_snapshot_cache.dart';
 import 'package:student_platform/src/ui/home/home_snapshot_codec.dart';
@@ -30,6 +31,12 @@ class CachedHomeScheduleReader {
   final ScheduleMonthCache _schedule;
   final CapabilityPermit _permit;
 
+  /// Lets a visible cache-only shell remove its data when admission is revoked.
+  Listenable get accessChanges => _capabilities;
+  bool get canRead =>
+      _capabilities.mode == SessionCapabilityMode.cacheOnly &&
+      _capabilities.permits(_permit, SessionCapability.cachedRead);
+
   static CapabilityPermit _capture(SessionCapabilities capabilities) {
     final permit = capabilities.capture(SessionCapability.cachedRead);
     if (permit == null ||
@@ -40,8 +47,7 @@ class CachedHomeScheduleReader {
   }
 
   void _check() {
-    if (_capabilities.mode != SessionCapabilityMode.cacheOnly ||
-        !_capabilities.permits(_permit, SessionCapability.cachedRead)) {
+    if (!canRead) {
       throw const CachedHomeAccessDenied();
     }
   }

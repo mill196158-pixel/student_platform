@@ -3,6 +3,17 @@
 This is a working checklist, not a release approval. Preserve the original
 AVD backup, the original-project file backup, and the saved Git stash.
 
+## Experimental checkpoint
+
+The unfinished integrated candidate is retained for review, not release or
+installation. Offline admission/UI and Android durable forwarding require the
+explicit defines `SQLITE_POLICY_QA`, `OFFLINE_UI_QA`, and
+`FORWARD_DURABLE_ANDROID_QA`; all default to false. Some ordinary online paths
+also changed and have not received complete end-to-end review. Do not assume a
+normal build includes the requested offline behavior. Downgrading an app that
+has created durable queue entries requires a separately verified recovery plan;
+the old APK cannot see those entries. Existing user data must be preserved.
+
 ## Verified on the intermediate Android build
 
 - The original app package was reinstalled and the supplied test account signed

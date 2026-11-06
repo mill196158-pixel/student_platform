@@ -106,6 +106,7 @@ class SessionCapabilities extends ChangeNotifier {
     _revision++;
     _owner = null;
     _session.removeListener(_onSessionChanged);
+    notifyListeners();
     super.dispose();
   }
 }

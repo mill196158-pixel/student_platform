@@ -1,10 +1,12 @@
 import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_card_envelope.dart';
 import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:student_platform/src/services/chat_file_access.dart';
+import 'cached_chat_attachment.dart';
 // FILE: lib/src/ui/chats/core/unified_chat_screen.dart
 // ignore_for_file: unnecessary_import, unused_import, unused_field, unused_element, dead_null_aware_expression, invalid_null_aware_operator, deprecated_member_use
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
@@ -45,6 +47,11 @@ import '../forward/forward_pick_nav.dart';
 import 'forward_payload.dart';
 import '../forward/forward_outbox.dart';
 import '../forward/forward_send_gate.dart';
+import '../forward/durable_forward_outbox.dart';
+import '../forward/durable_forward_pending_notice.dart';
+import '../forward/confirm_ready_forward.dart';
+import '../forward/sent_forward_sentinel.dart';
+import '../forward/forward_outbox_host.dart';
 import '../data/dm_api.dart';
 import '../data/blocks_api.dart';
 import '../dm_title.dart';
@@ -64,6 +71,9 @@ class UnifiedChatScreen extends StatefulWidget {
     this.hideAvatars = false,
     this.peerAvatarUrl,
     this.onOpenPeer,
+    this.debugPickForwardTarget,
+    this.debugCopyForwardFile,
+    this.debugAfterDurableCancel,
   });
 
   final IChatService service;
@@ -73,6 +83,12 @@ class UnifiedChatScreen extends StatefulWidget {
   // для ЛС
   final String? peerAvatarUrl;
   final VoidCallback? onOpenPeer;
+  @visibleForTesting
+  final Future<ForwardTarget?> Function(BuildContext, bool Function())? debugPickForwardTarget;
+  @visibleForTesting
+  final Future<ForwardFileRef> Function(ForwardFileRef source, String chat)? debugCopyForwardFile;
+  @visibleForTesting
+  final Future<void> Function()? debugAfterDurableCancel;
 
   @override
   State<UnifiedChatScreen> createState() => _UnifiedChatScreenState();
@@ -80,6 +96,9 @@ class UnifiedChatScreen extends StatefulWidget {
 
 class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   static const bool enableTypingIndicator = false;
+  // The host keeps the experimental mode disabled until both consumers and
+  // migration are reviewed together.
+  bool get _durableForwards => ForwardOutboxHost.usesDurable(context);
 
   final _scroll = ScrollController();
   final _ctrl = TextEditingController();
@@ -90,8 +109,10 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   late final PinController _pinsCtl;
   late final ChatAttachmentsController _att;
   late final Stream<ChatMessagesViewState> _messagesStream;
+  late final IChatService _screenService;
+  late final bool _initialCachedOnly;
 
-  final FileService _fileService = FileService();
+  late final FileService _fileService = FileService();
   final GlobalCache _globalCache = GlobalCache();
 
   final Map<String, GlobalKey> _messageKeys = {};
@@ -146,6 +167,11 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   final List<String> _stagedForwardFileIds = [];
   final Set<String> _requiredForwardFileIds = {};
   ForwardPayload? _stagedForward;
+  DurableForwardOutbox? _durableOutbox;
+  DurableForwardReceipt? _durableReceipt;
+  bool _durableBlocked = true;
+  (String, int, String, String)? _legacyTextScope;
+  ForwardOutboxSession? _legacyTextOutbox;
 
   // Блокировка повторных отправок и индикатор фоновых загрузок
   bool _isSending = false;
@@ -169,17 +195,23 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   // якорь для «⋯»
   final GlobalKey _kebabKey = GlobalKey();
 
-  final _capsRepo = ChatComposerCapabilitiesRepository();
+  late final _capsRepo = ChatComposerCapabilitiesRepository();
   ChatComposerCapabilities? _composerCaps;
   bool _capsLoading = true;
 
   @override
   void initState() {
     super.initState();
+    _screenService = widget.service;
+    _initialCachedOnly = _screenService is DmChatService &&
+        _screenService.isCachedOnly;
     _messagesStream = widget.service.watchMessagesState();
     _chatScroll = ChatScrollController(_scroll, _messageKeys);
     _search = ChatSearchController();
     _pinsCtl = PinController();
+    // Do not initialize network, presence, draft, file or keyboard handlers
+    // for a local-only service. This path is an experimental QA boundary.
+    if (_initialCachedOnly) return;
     _att = ChatAttachmentsController(
         _fileService, _globalCache, Supabase.instance.client)
       ..addListener(() {
@@ -291,6 +323,13 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
   @override
   void dispose() {
+    if (_initialCachedOnly) {
+      _scroll.dispose();
+      _ctrl.dispose();
+      _composerFocus.dispose();
+      super.dispose();
+      return;
+    }
     ActiveChatTracker.instance.leave(_currentChatIdDm);
     try {
       final list = widget.service.currentMessages;
@@ -622,9 +661,163 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   }
 
   // ---------- Forward Outbox ----------
-  Future<void> _consumeForwardOutboxIfAny(String chatId, ForwardOutboxSession? outbox) async {
+  Future<void> _consumeForwardOutboxIfAny(String chatId, ForwardOutboxSession? outbox, {String? expectedExistingDraft}) async {
     final uid=ChatFileAccess.userId, epoch=ChatFileAccess.generation;
     if (outbox == null || !outbox.isCurrent) return;
+    if (_durableForwards) {
+      bool currentTarget() => mounted && outbox.isCurrent && uid != null &&
+          uid == ChatFileAccess.userId && epoch == ChatFileAccess.generation &&
+          _currentChatIdDm == chatId;
+      // Block sends until the durable slot has been inspected. Unknown results
+      // must never be re-sent automatically after a restart.
+      _durableBlocked = true;
+      _legacyTextScope = null;
+      _legacyTextOutbox = null;
+      try {
+        final durable = await ForwardOutboxHost.durable(context);
+        if (!currentTarget()) return;
+        final sentOperations = await outbox.terminalOperationsForChat(durable, chatId);
+        if (!currentTarget()) return;
+        if (_att.pending.any((file) => isTerminalForwardSentinel(file, sentOperations))) {
+          _att.forgetConfirmedSent((file) => isTerminalForwardSentinel(file, sentOperations));
+        }
+        var receipt = await outbox.claimDurableForChat(chatId, durable);
+        if (!currentTarget()) return;
+        if (receipt == null) { _durableBlocked = false; return; }
+        _durableOutbox = durable;
+        _durableReceipt = receipt;
+        if (receipt.state == DurableForwardState.sent) {
+          await durable.acknowledgeSent(receipt);
+          if (currentTarget() && identical(_durableReceipt, receipt)) {
+            _att.forgetConfirmedSent((file) => isTerminalForwardSentinel(file, {receipt!.operation}));
+            _durableReceipt = null;
+            _durableBlocked = false;
+          }
+          return;
+        }
+        if (receipt.state == DurableForwardState.sendingUnknown || receipt.state == DurableForwardState.preparingUnknown) {
+          final sending = receipt.state == DurableForwardState.sendingUnknown;
+          final action = await showDialog<String>(context: context, builder: (dialogContext) => AlertDialog(
+            title: Text(sending ? 'Отправка не подтверждена' : 'Подготовка прервана'),
+            content: Column(mainAxisSize: MainAxisSize.min, children: [
+              DurableForwardPendingNotice(upload: !sending),
+              const SizedBox(height: 12),
+              Text(sending ? 'Проверьте чат. При повторной отправке сообщение может появиться дважды.' : 'Ранее загруженные файлы могли остаться на сервере.'),
+            ]),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(dialogContext, 'check'), child: const Text('Проверить чат')),
+              TextButton(onPressed: () => Navigator.pop(dialogContext, 'cancel'), child: const Text('Удалить пересылку')),
+              if (!sending) TextButton(onPressed: () => Navigator.pop(dialogContext, 'retry'), child: const Text('Повторить')),
+            ],
+          ));
+          if (!currentTarget()) return;
+          if (action == 'cancel') {
+            final confirmed = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(
+              title: const Text('Удалить сохранённую пересылку?'),
+              content: Text(sending ? 'Сообщение уже могло быть отправлено. Запись о пересылке будет удалена с устройства.' : 'Загруженные ранее файлы могут остаться на сервере.'),
+              actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Назад')),
+                TextButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Удалить'))],
+            ));
+            if (confirmed != true || !currentTarget()) return;
+            if (!identical(_durableReceipt, receipt)) return;
+            final generation = _forwardPreparationGeneration;
+            final staged = _stagedForward, attached = _forwardPackageAttached;
+            final selected = List<String>.of(_forwardSelectedIds);
+            final stagedIds = List<String>.of(_stagedForwardFileIds);
+            final requiredIds = Set<String>.of(_requiredForwardFileIds);
+            await durable.cancelByUser(receipt);
+            await widget.debugAfterDurableCancel?.call();
+            if (!currentTarget()) return;
+            _att.forgetConfirmedSent((file) => isTerminalForwardSentinel(file, {receipt!.operation}));
+            if (identical(_durableReceipt, receipt)) {
+              _durableReceipt = null;
+              _durableBlocked = false;
+            }
+            if (_forwardPreparationGeneration == generation && identical(_stagedForward, staged) &&
+                _forwardPackageAttached == attached && listEquals(_forwardSelectedIds, selected) &&
+                listEquals(_stagedForwardFileIds, stagedIds) && setEquals(_requiredForwardFileIds, requiredIds)) {
+              setState(() {
+                _forwardPackageAttached = false;
+                _stagedForward = null;
+                _forwardSelectedIds.clear();
+                _stagedForwardFileIds.clear();
+                _requiredForwardFileIds.clear();
+              });
+            }
+          } else if (action == 'retry' && !sending) {
+            await durable.retryPreparationByUser(receipt);
+            if (currentTarget()) await _consumeForwardOutboxIfAny(chatId, outbox);
+          }
+          return;
+        }
+        bool composerAvailable() => (_ctrl.text.isEmpty ||
+            (expectedExistingDraft != null && _ctrl.text == expectedExistingDraft &&
+             expectedExistingDraft == (ForwardPayload.tryParse(receipt!.source)?.caption ?? ''))) &&
+            _att.pending.isEmpty && _replyTo == null && !_forwardPackageAttached;
+        if (!composerAvailable()) {
+          _showSnack('Сохранённая пересылка ожидает: сначала завершите текущий черновик.');
+          return;
+        }
+        bool Function()? sourceTicket;
+        if (receipt.state == DurableForwardState.reservedUnverified || receipt.state == DurableForwardState.queued) {
+          sourceTicket = receipt.state == DurableForwardState.queued
+              ? outbox.consumeAutoApproval(durable, receipt) : null;
+          if (sourceTicket == null) {
+            final source = ForwardPayload.tryParse(receipt.source);
+            if (source == null) throw const FormatException('Invalid forward');
+            final approved = await confirmReadyForward(context, source, actionLabel: 'Подготовить');
+            if (!approved || !currentTarget()) return;
+          }
+          if (receipt.state == DurableForwardState.reservedUnverified) {
+            receipt = await durable.confirmReservation(receipt);
+            if (!currentTarget()) return;
+            _durableReceipt = receipt;
+          }
+        }
+        if (receipt.state == DurableForwardState.ready) {
+          final payload = ForwardPayload.tryParse(receipt.prepared ?? '');
+          final preparedIds = receipt.preparedIds;
+          if (payload == null || preparedIds == null) throw const FormatException('Invalid forward');
+          final approved = await confirmReadyForward(context, payload);
+          if (!approved || !currentTarget() || !identical(_durableReceipt, receipt)) return;
+          if (!composerAvailable()) {
+            _showSnack('Черновик изменился. Сохранённая пересылка ожидает проверки.');
+            return;
+          }
+          if (!_att.pending.any((x) => x.path == '__FG__')) {
+            _att.pending.add(LocalAttach(localId: 'durable-forward:${receipt.operation}', path: '__FG__', name: 'forward.json', mimeType: 'application/x-forward-group', size: 0, isImage: false));
+          }
+          setState(() {
+            _stagedForward = payload;
+            _forwardPackageAttached = true;
+            _requiredForwardFileIds..clear()..addAll(preparedIds);
+            _stagedForwardFileIds..clear()..addAll(preparedIds);
+            _durableBlocked = false;
+          });
+          return;
+        }
+        final payload = ForwardPayload.tryParse(receipt.source);
+        if (payload == null) throw const FormatException('Invalid forward');
+        final preparing = await durable.markPreparing(receipt);
+        if (!currentTarget()) return;
+        _durableReceipt = preparing;
+        if ((sourceTicket != null && !sourceTicket()) || _currentChatIdDm != chatId || !composerAvailable()) {
+          _showSnack('Черновик изменился. Сохранённая пересылка ожидает проверки.');
+          return;
+        }
+        await _stageForwardPayload(payload, receipt.sourceUrls, receipt.sourceIds, chatId, durablePreparation: true, sourceTicket: sourceTicket);
+      } on LegacyForwardProvenanceUnknown {
+        final binding = ChatFileAccess.currentSessionBinding;
+        if (currentTarget() && binding != null) {
+          _legacyTextScope = (uid!, epoch, chatId, binding);
+          _legacyTextOutbox = outbox;
+          _showSnack('Старая пересылка сохранена. Её происхождение не подтверждено.');
+        }
+      } catch (_) {
+        if (currentTarget()) _showSnack('Пересылка сохранена, но пока недоступна.');
+      }
+      return;
+    }
     ForwardOutboxData? data;
     try {
       data = await outbox.tryTakeForChat(chatId);
@@ -641,19 +834,28 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   }
 
   Future<void> _stageForwardPayload(ForwardPayload payload,
-      List<String> fileUrls, List<String> fileIds, String chatId) async {
+      List<String> fileUrls, List<String> fileIds, String chatId, {bool durablePreparation = false, bool Function()? sourceTicket}) async {
     final uid=ChatFileAccess.userId, epoch=ChatFileAccess.generation;
-    bool sameSession()=>uid!=null && uid==ChatFileAccess.userId && epoch==ChatFileAccess.generation;
+    bool sameSession() {
+      try {
+        return uid!=null && uid==ChatFileAccess.userId && epoch==ChatFileAccess.generation &&
+            (!durablePreparation || _currentChatIdDm == chatId) && (sourceTicket?.call() ?? true);
+      } catch (_) { return false; }
+    }
     if (!mounted || !sameSession()) return;
     if (!forwardSourceReferencesComplete(payload, fileIds)) {
       throw const FormatException('Не все вложения готовы к пересылке.');
     }
     _requiredForwardFileIds.clear();
 
-    final sameChat = (payload.fromChatId == chatId);
+    // Existing file rows belong to the original message; even in this chat
+    // the send RPC only accepts newly uploaded, unattached rows.
+    final sameChat = !durablePreparation && payload.fromChatId == chatId;
 
     if (!_att.pending.any((x) => x.path == '__FG__')) {
       _att.pending.add(LocalAttach(
+        localId: durablePreparation && _durableReceipt != null
+            ? 'durable-forward:${_durableReceipt!.operation}' : null,
         path: '__FG__',
         name: 'forward.json',
         mimeType: 'application/x-forward-group',
@@ -697,11 +899,20 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       final urls = {...fileUrls.where((u)=>u.isNotEmpty), ...refs.keys};
       final copies = <String,ForwardFileRef>{};
       for (final url in urls) {
-        if(!sameSession()) return;
+        if (!mounted || !sameSession() || preparation != _forwardPreparationGeneration) return;
+        final copyOverride = widget.debugCopyForwardFile;
+        if (copyOverride != null) {
+          final source = refs[url];
+          if (source == null) throw StateError('Missing source file');
+          final copied = await copyOverride(source, chatId);
+          if (!mounted || !sameSession() || preparation != _forwardPreparationGeneration) return;
+          copies[url] = copied;
+          continue;
+        }
         final tmp = await _downloadToTemp(url);
         if (!mounted || !sameSession() || preparation != _forwardPreparationGeneration) { await ChatFileAccess.releaseForwardTemp(tmp.path); return; }
         final size=await tmp.length();
-        if(!sameSession()) { await ChatFileAccess.releaseForwardTemp(tmp.path); return; }
+        if (!mounted || !sameSession() || preparation != _forwardPreparationGeneration) { await ChatFileAccess.releaseForwardTemp(tmp.path); return; }
         final source = refs[url];
         final attach = LocalAttach(path:tmp.path,
           name:source?.name ?? tmp.path.split(RegExp(r'[\\/]')).last,
@@ -713,6 +924,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         final ready = _att.pending.where((f)=>f.localId==attach.localId).firstOrNull;
         if (ready?.uploadedFileId == null) throw StateError('Не удалось подготовить вложение.');
         final row = await Supabase.instance.client.from('chat_files').select().eq('id',ready!.uploadedFileId!).single();
+        if (!mounted || !sameSession() || preparation != _forwardPreparationGeneration) return;
         final copied = ChatFile.fromJson(row);
         copies[url] = ForwardFileRef(id:copied.id,url:copied.fileUrl,
             name:copied.fileName,type:copied.fileType,size:copied.fileSize);
@@ -723,8 +935,19 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
           throw StateError('Не все вложения готовы к пересылке.');
         }
         final preparedPayload = payload.withCopiedFiles(copies);
+        if (durablePreparation) {
+          final durable = _durableOutbox, receipt = _durableReceipt;
+          if (durable == null || receipt == null) throw StateError('Forward unavailable');
+          final confirmed = await durable.markReady(receipt, prepared: preparedPayload.encodeForText(), preparedIds: preparedIds.cast<String>(), uploadedIdsBySource: copies.map((key, value) => MapEntry(key, value.id!)));
+          if (!mounted || !sameSession() || preparation != _forwardPreparationGeneration) return;
+          _durableReceipt = confirmed;
+          _durableBlocked = false;
+        }
         setState(() {
           _requiredForwardFileIds
+            ..clear()
+            ..addAll(preparedIds.cast<String>());
+          _stagedForwardFileIds
             ..clear()
             ..addAll(preparedIds.cast<String>());
           _stagedForward = preparedPayload;
@@ -791,6 +1014,15 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     if (selected.isEmpty) return;
     final outbox = ForwardOutbox.capture(context);
     if (outbox == null) return;
+    final selectionSnapshot = ForwardSelectionSnapshot(selected);
+    final sourceChat = _currentChatIdDm;
+    final initialCaption = _ctrl.text;
+    bool selectionCurrent() => mounted && outbox.isCurrent && (!_isDm || _currentChatIdDm == sourceChat) && selectionSnapshot.matches(widget.service.currentMessages);
+    if (!selectionCurrent()) return;
+    final initialSelection = Set<String>.of(_selectedIds);
+    void preserveNewSelection() {
+      if (selectionCurrent() && _selectedIds.length == initialSelection.length && _selectedIds.containsAll(initialSelection)) onPrepared?.call();
+    }
 
     final items = <ForwardItem>[];
     final fileUrls = <String>[];
@@ -824,36 +1056,64 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     }
 
     final fromChatId = await widget.service.ensureChatId();
-    final caption = _ctrl.text.trim().isEmpty ? null : _ctrl.text.trim();
+    if (!selectionCurrent() || (_isDm && fromChatId != sourceChat)) return;
+    final caption = initialCaption.trim().isEmpty ? null : initialCaption.trim();
     final payload =
         ForwardPayload(fromChatId: fromChatId, caption: caption, items: items);
 
     final uniqueFileUrls = fileUrls.where((u) => u.isNotEmpty).toSet().toList();
     final uniqueFileIds = fileIds.where((id) => id.isNotEmpty).toSet().toList();
 
-    if (!outbox.isCurrent) return;
-    final target = await pickForwardTarget(context, isCurrent: () => outbox.isCurrent);
-    if (target == null || !outbox.isCurrent) return;
+    if (!selectionCurrent()) return;
+    final target = await (widget.debugPickForwardTarget?.call(context, () => outbox.isCurrent) ??
+        pickForwardTarget(context, isCurrent: () => outbox.isCurrent));
+    if (target == null || !selectionCurrent()) return;
 
     final targetChatId = await _resolveForwardTargetChatId(target);
-    if (!outbox.isCurrent) return;
+    if (!selectionCurrent()) return;
+    if (_durableForwards && targetChatId == fromChatId) {
+      try {
+        final durable = await ForwardOutboxHost.durable(context);
+        if (!selectionCurrent()) return;
+        final saved = await completeForwardHandoff(
+            prepare: () => outbox.putDurableForChat(durable, chatId: targetChatId,
+                text: payload.encodeForText(), fileUrls: uniqueFileUrls,
+                fileIds: uniqueFileIds, isSourceCurrent: selectionCurrent),
+            isCurrent: selectionCurrent, onPrepared: preserveNewSelection);
+        if (!saved || !selectionCurrent()) return;
+        await _consumeForwardOutboxIfAny(targetChatId, outbox, expectedExistingDraft: initialCaption);
+      } catch (_) {
+        if (mounted && outbox.isCurrent) _showSnack('Не удалось сохранить пересылку. Выбор сохранён.');
+      }
+      return;
+    }
     if (targetChatId == fromChatId) {
       // Всегда staged-чип, не вставляем сырой FG-текст
       await completeForwardHandoff(
           prepare: () => _stageForwardPayload(payload, uniqueFileUrls, uniqueFileIds, targetChatId),
-          isCurrent: () => outbox.isCurrent, onPrepared: onPrepared);
+          isCurrent: selectionCurrent, onPrepared: preserveNewSelection);
     } else {
       try {
         final ready = await completeForwardHandoff(
-          prepare: () => outbox.putForChat(chatId: targetChatId, text: payload.encodeForText(),
-            fileUrls: uniqueFileUrls, fileIds: uniqueFileIds),
-          isCurrent: () => outbox.isCurrent, onPrepared: onPrepared);
+          prepare: () async {
+            if (_durableForwards) {
+              final durable = await ForwardOutboxHost.durable(context);
+              if (!selectionCurrent()) throw StateError('Forward selection changed');
+              await outbox.putDurableForChat(durable, chatId: targetChatId,
+                  text: payload.encodeForText(), fileUrls: uniqueFileUrls, fileIds: uniqueFileIds,
+                  isSourceCurrent: selectionCurrent);
+            } else {
+              await outbox.putForChat(chatId: targetChatId, text: payload.encodeForText(),
+                  fileUrls: uniqueFileUrls, fileIds: uniqueFileIds);
+            }
+          },
+          isCurrent: selectionCurrent, onPrepared: preserveNewSelection);
         if (!ready) return;
       } catch (_) {
         if (outbox.isCurrent) _showSnack('Не удалось сохранить пересылку. Попробуйте ещё раз.');
         return;
       }
-      if (!outbox.isCurrent) return;
+      if (!selectionCurrent()) return;
       await target.open(context);
     }
   }
@@ -877,6 +1137,58 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   }
 
   String? _forwardComposerPreview() => _stagedForward?.composerPreview();
+
+  Future<void> _cancelDurableForward() async {
+    if (_isSending) return;
+    final durable = _durableOutbox, receipt = _durableReceipt;
+    if (durable == null || receipt == null) return;
+    final uid = ChatFileAccess.userId, epoch = ChatFileAccess.generation, chatId = _currentChatIdDm;
+    bool sameTarget() => mounted && uid != null && chatId != null &&
+        uid == ChatFileAccess.userId && epoch == ChatFileAccess.generation &&
+        _currentChatIdDm == chatId;
+    bool current() => sameTarget() && identical(receipt, _durableReceipt);
+    final confirmed = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(
+      title: const Text('Удалить сохранённую пересылку?'),
+      content: const Text('Загруженные файлы могут остаться на сервере.'),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Назад')),
+        TextButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Удалить'))],
+    ));
+    if (confirmed != true || !current()) return;
+    _forwardPreparationGeneration++;
+    final cancellationGeneration = _forwardPreparationGeneration;
+    final staged = _stagedForward;
+    final attached = _forwardPackageAttached;
+    final selected = List<String>.of(_forwardSelectedIds);
+    final stagedIds = List<String>.of(_stagedForwardFileIds);
+    final requiredIds = Set<String>.of(_requiredForwardFileIds);
+    _durableBlocked = true;
+    try {
+      await durable.cancelByUser(receipt);
+      await widget.debugAfterDurableCancel?.call();
+      if (!sameTarget()) return;
+      setState(() {
+        if (identical(receipt, _durableReceipt)) {
+          _durableReceipt = null;
+          _durableBlocked = false;
+        }
+        _att.pending.removeWhere((file) => isTerminalForwardSentinel(file, {receipt.operation}));
+        if (_forwardPreparationGeneration == cancellationGeneration &&
+            identical(_stagedForward, staged) && _forwardPackageAttached == attached &&
+            listEquals(_forwardSelectedIds, selected) && listEquals(_stagedForwardFileIds, stagedIds) &&
+            setEquals(_requiredForwardFileIds, requiredIds)) {
+          _forwardPackageAttached = false;
+          _preparingForward = false;
+          _forwardPreparationFailed = false;
+          _stagedForward = null;
+          _forwardSelectedIds.clear();
+          _stagedForwardFileIds.clear();
+          _requiredForwardFileIds.clear();
+        }
+      });
+    } catch (_) {
+      if (current()) _showSnack('Не удалось удалить пересылку. Данные сохранены.');
+    }
+  }
 
   Future<String> _resolveForwardTargetChatId(ForwardTarget target) async {
     final id = target.chatId.trim();
@@ -1216,8 +1528,40 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     }
     if (_isUploadingAttachments || _hasFailedAttachments || _isSending) return;
     if (!_canComposeDm) return;
+    final legacy = _legacyTextScope;
+    bool plainText(String value) {
+      if (value.contains('__FG__')) return false;
+      final trimmed = value.trimLeft();
+      if (!trimmed.startsWith('{')) return true;
+      try {
+        final decoded = jsonDecode(trimmed);
+        return decoded is! Map ||
+            (decoded['forward'] == null && decoded['from_chat_id'] == null);
+      } on FormatException {
+        return true;
+      }
+    }
+    final plainLegacyText = legacy != null && (_legacyTextOutbox?.isCurrent ?? false) &&
+        legacy.$1 == ChatFileAccess.userId && legacy.$2 == ChatFileAccess.generation &&
+        legacy.$3 == _currentChatIdDm && legacy.$4 == ChatFileAccess.currentSessionBinding &&
+        text.trim().isNotEmpty &&
+        plainText(text) && _stagedForward == null &&
+        !_forwardPackageAttached && _forwardSelectedIds.isEmpty &&
+        _att.pending.isEmpty && _replyTo == null;
+    if (_durableForwards && _durableBlocked && !plainLegacyText) {
+      final chat = _currentChatIdDm;
+      if (chat != null) {
+        await _consumeForwardOutboxIfAny(chat, ForwardOutbox.capture(context));
+      } else {
+        _showSnack('Состояние пересылки ещё не подтверждено.');
+      }
+      return;
+    }
 
     _isSending = true;
+    final sendChat = _currentChatIdDm;
+    final sendOwner = ChatFileAccess.userId;
+    final sendEpoch = ChatFileAccess.generation;
     setState(() {});
     try {
       _forceSaveDraftDm();
@@ -1285,8 +1629,30 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
           isCurrent: currentForward,
           send: (ids) async {
             sentAttachments = ForwardAttachmentSnapshot(_att.pending);
-            await widget.service.sendText(
-                forwardText, replyToId: replyId, fileIds: ids.isEmpty ? null : ids);
+            final durable = _durableOutbox, receipt = _durableReceipt;
+            if (_durableForwards) {
+              if (receipt == null || durable == null) throw StateError('Forward unavailable');
+              _durableBlocked = true;
+              final confirmed = await durable.sendOnce(receipt,
+                  text: forwardText, replyId: replyId, fileIds: ids,
+                  send: (snapshot) {
+                    if (!sameForwardOperation() || snapshot.chat != target) {
+                      throw StateError('Chat changed');
+                    }
+                    return widget.service.sendText(snapshot.text,
+                        replyToId: snapshot.replyId,
+                        fileIds: snapshot.fileIds.isEmpty ? null : snapshot.fileIds);
+                  });
+              if (!sameForwardOperation()) return;
+              _durableReceipt = confirmed;
+              await durable.acknowledgeSent(confirmed);
+              if (!sameForwardOperation() || !identical(_durableReceipt, confirmed)) return;
+              _durableReceipt = null;
+              _durableBlocked = false;
+            } else {
+              await widget.service.sendText(
+                  forwardText, replyToId: replyId, fileIds: ids.isEmpty ? null : ids);
+            }
           },
         );
         if (!sent) {
@@ -1459,6 +1825,13 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         await widget.service.sendText(trimmed, replyToId: replyId);
       }
     } catch (e) {
+      if (_durableForwards && _durableBlocked && !plainLegacyText) {
+        if (mounted && sendChat == _currentChatIdDm && sendOwner != null &&
+            sendOwner == ChatFileAccess.userId && sendEpoch == ChatFileAccess.generation) {
+          _showSnack('Отправка пересылки не подтверждена. Проверьте чат перед повтором.');
+        }
+        return;
+      }
       if (_isDm && BlocksApi.isDmBlockedError(e)) {
         await _applyDmBlockedFromServer();
         return;
@@ -1471,6 +1844,10 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   }
 
   Future<void> _retryFailedDm(Message message) async {
+    if (_durableForwards && _durableBlocked) {
+      _showSnack('Сначала проверьте состояние сохранённой пересылки.');
+      return;
+    }
     final svc = widget.service;
     if (svc is! DmChatService) return;
     try {
@@ -1492,12 +1869,18 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   Future<void> _handleForwardFlow() async {
     final outbox = ForwardOutbox.capture(context);
     if (outbox == null) return;
+    final originalText = _ctrl.text;
+    final originalSelection = Set<String>.of(_selectedIds);
+    final originalForwardGeneration = _forwardPreparationGeneration;
+    final originalForwardIds = List<String>.of(_forwardSelectedIds);
+    final originalStagedForward = _stagedForward;
     final list = widget.service.currentMessages;
-    final selected = list
-        .where((m) => _forwardSelectedIds.contains(m.id))
-        .toList()
-      ..sort((a, b) => a.at.compareTo(b.at));
-    if (selected.isEmpty) return;
+    final selected = completeForwardSelection(List.of(_forwardSelectedIds), list);
+    if (selected == null) return;
+    final selectionSnapshot = ForwardSelectionSnapshot(selected);
+    final sourceChat = _currentChatIdDm;
+    bool selectionCurrent() => mounted && outbox.isCurrent && (!_isDm || _currentChatIdDm == sourceChat) && selectionSnapshot.matches(widget.service.currentMessages);
+    if (!selectionCurrent()) return;
 
     final items = <ForwardItem>[];
     final fileUrls = <String>[];
@@ -1530,6 +1913,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       ));
     }
     final fromChatId = await widget.service.ensureChatId();
+    if (!selectionCurrent() || (_isDm && fromChatId != sourceChat)) return;
     final caption = _ctrl.text.trim().isEmpty ? null : _ctrl.text.trim();
     final payload =
         ForwardPayload(fromChatId: fromChatId, caption: caption, items: items);
@@ -1537,13 +1921,47 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     final uniqueFileUrls = fileUrls.where((u) => u.isNotEmpty).toSet().toList();
     final uniqueFileIds = fileIds.where((id) => id.isNotEmpty).toSet().toList();
 
-    if (!outbox.isCurrent) return;
-    final target = await pickForwardTarget(context, isCurrent: () => outbox.isCurrent);
-    if (target == null || !outbox.isCurrent) return;
+    if (!selectionCurrent()) return;
+    final target = await (widget.debugPickForwardTarget?.call(context, () => outbox.isCurrent) ??
+        pickForwardTarget(context, isCurrent: () => outbox.isCurrent));
+    if (target == null || !selectionCurrent()) return;
 
     final targetChatId = await _resolveForwardTargetChatId(target);
-    if (!outbox.isCurrent) return;
+    if (!selectionCurrent()) return;
     if (targetChatId == fromChatId) {
+      if (_durableForwards) {
+        final oldMarkers = _att.pending.where((file) => file.path == '__FG__').map((file) => file.localId).toSet();
+        bool originalComposer() => selectionCurrent() && _ctrl.text == originalText &&
+            originalText == (payload.caption ?? '') && _replyTo == null &&
+            _forwardPreparationGeneration == originalForwardGeneration && _forwardPackageAttached &&
+            listEquals(_forwardSelectedIds, originalForwardIds) && identical(_stagedForward, originalStagedForward) &&
+            _durableReceipt == null && _att.pending.length == oldMarkers.length &&
+            oldMarkers.isNotEmpty && _att.pending.every((file) => file.path == '__FG__' && oldMarkers.contains(file.localId));
+        if (!originalComposer()) {
+          _showSnack('Завершите текущий черновик перед пересылкой.');
+          return;
+        }
+        try {
+          final durable = await ForwardOutboxHost.durable(context);
+          if (!originalComposer()) return;
+          await outbox.putDurableForChat(durable, chatId: targetChatId,
+              text: payload.encodeForText(), fileUrls: uniqueFileUrls,
+              fileIds: uniqueFileIds, isSourceCurrent: originalComposer);
+          if (!originalComposer()) return;
+          setState(() {
+            _att.pending.removeWhere((file) => file.path == '__FG__' && oldMarkers.contains(file.localId));
+            _forwardPackageAttached = false;
+            _forwardPreparationGeneration++;
+            _forwardSelectedIds.clear();
+            _stagedForwardFileIds.clear();
+            _requiredForwardFileIds.clear();
+          });
+          await _consumeForwardOutboxIfAny(targetChatId, outbox, expectedExistingDraft: originalText);
+        } catch (_) {
+          if (mounted && outbox.isCurrent) _showSnack('Не удалось сохранить пересылку. Черновик сохранён.');
+        }
+        return;
+      }
       await _stageForwardPayload(
         payload,
         uniqueFileUrls,
@@ -1554,26 +1972,38 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     }
 
     try {
-      await outbox.putForChat(chatId: targetChatId, text: payload.encodeForText(),
-        fileUrls: uniqueFileUrls, fileIds: uniqueFileIds);
+      if (_durableForwards) {
+        final durable = await ForwardOutboxHost.durable(context);
+        if (!selectionCurrent()) throw StateError('Forward selection changed');
+        await outbox.putDurableForChat(durable, chatId: targetChatId,
+            text: payload.encodeForText(), fileUrls: uniqueFileUrls, fileIds: uniqueFileIds,
+            isSourceCurrent: selectionCurrent);
+      } else {
+        await outbox.putForChat(chatId: targetChatId, text: payload.encodeForText(),
+            fileUrls: uniqueFileUrls, fileIds: uniqueFileIds);
+      }
     } catch (_) {
       if (outbox.isCurrent) _showSnack('Не удалось сохранить пересылку. Попробуйте ещё раз.');
       return;
     }
-    if (!outbox.isCurrent) return;
+    if (!selectionCurrent() || (_isDm && _currentChatIdDm != fromChatId)) return;
 
     setState(() {
-      _forwardPackageAttached = false;
-      _forwardPreparationGeneration++;
-      _preparingForward = false;
-      _forwardPreparationFailed = false;
-      _stagedForward = null;
-      _forwardSelectedIds.clear();
-      _stagedForwardFileIds.clear();
+      if (_forwardPreparationGeneration == originalForwardGeneration) {
+        _forwardPackageAttached = false;
+        _forwardPreparationGeneration++;
+        _preparingForward = false;
+        _forwardPreparationFailed = false;
+        _stagedForward = null;
+        _forwardSelectedIds.clear();
+        _stagedForwardFileIds.clear();
+      }
       // Очищаем выбор после подготовки FG-пакета
-      _selecting = false;
-      _selectedIds.clear();
-      _ctrl.clear();
+      if (_selectedIds.length == originalSelection.length && _selectedIds.containsAll(originalSelection)) {
+        _selecting = false;
+        _selectedIds.clear();
+      }
+      if (_ctrl.text == originalText) _ctrl.clear();
     });
 
     await target.open(context);
@@ -1622,6 +2052,10 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   // ---------- UI ----------
   @override
   Widget build(BuildContext context) {
+    if (!identical(widget.service, _screenService)) {
+      return const Scaffold(body: Center(child: Text('Чат недоступен.')));
+    }
+    if (_initialCachedOnly) return _buildCachedDm(context);
     final titleText = widget.title == null || widget.title!.trim().isEmpty
         ? (widget.service.mode == ChatMode.dm ? kDmTitleFallback : 'Чат')
         : (widget.service.mode == ChatMode.dm
@@ -1967,6 +2401,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                                     : 0,
                                 forwardPreview: _forwardComposerPreview(),
                                 onCancelForward: () {
+                                  if (_durableForwards && _durableReceipt != null) { unawaited(_cancelDurableForward()); return; }
                                   setState(() {
                                     _forwardPackageAttached = false;
       _forwardPreparationGeneration++;
@@ -2013,6 +2448,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                                 },
                                 onRemoveFile: (ui) {
                                   if (ui.path == '__FG__') {
+                                    if (_durableForwards && _durableReceipt != null) { unawaited(_cancelDurableForward()); return; }
                                     setState(() {
                                       _forwardPackageAttached = false;
       _forwardPreparationGeneration++;
@@ -2106,6 +2542,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                                     : 0,
                                 forwardPreview: _forwardComposerPreview(),
                                 onCancelForward: () {
+                                  if (_durableForwards && _durableReceipt != null) { unawaited(_cancelDurableForward()); return; }
                                   setState(() {
                                     _forwardPackageAttached = false;
       _forwardPreparationGeneration++;
@@ -2149,6 +2586,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                                 },
                                 onRemoveFile: (ui) {
                                   if (ui.path == '__FG__') {
+                                    if (_durableForwards && _durableReceipt != null) { unawaited(_cancelDurableForward()); return; }
                                     setState(() {
                                       _forwardPackageAttached = false;
       _forwardPreparationGeneration++;
@@ -2259,6 +2697,79 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
           );
         },
       ),
+    );
+  }
+
+  /// QA-only safe fallback while existing bubble/media widgets do not yet
+  /// support a strictly local-only access path.
+  Widget _buildCachedDm(BuildContext context) {
+    final service = _screenService as DmChatService;
+    return ListenableBuilder(
+      listenable: service.cachedAccessChanges!,
+      builder: (context, _) {
+        if (!service.canReadCached) {
+          return const Scaffold(body: Center(child: Text('Сохранённый чат недоступен.')));
+        }
+        return Scaffold(
+          appBar: AppBar(title: Text(normalizeDmTitle(widget.title ?? ''))),
+          body: StreamBuilder<ChatMessagesViewState>(
+            stream: _messagesStream,
+            initialData: service.messagesViewState,
+            builder: (context, snapshot) {
+              if (!service.canReadCached) return const SizedBox.shrink();
+              final view = snapshot.data ?? service.messagesViewState;
+              if (!view.hasSnapshot) {
+                return Center(child: Text(view.showError
+                    ? 'Сохранённые сообщения недоступны.' : 'Открываем сохранённые сообщения…'));
+              }
+              if (view.messages.isEmpty) return const Center(child: Text('Сообщений пока нет'));
+              final colors = Theme.of(context).colorScheme;
+              return ChatMessageList(
+                messages: view.messages,
+                controller: _scroll,
+                messageKeys: _messageKeys,
+                search: _search,
+                currentUserId: service.currentUserId,
+                forceHideAvatars: true,
+                noAvatarSpacing: true,
+                hideAuthorLine: true,
+                isDirectChat: true,
+                showEntryNewBadge: false,
+                selectingMessages: false,
+                selectedMessageIds: const <String>{},
+                onToggleSelect: null,
+                onReply: (_) {},
+                onLongPress: (_, __, ___, ____, _____, ______) {},
+                onReplyTap: (_) {},
+                onReact: (_, __) {},
+                localOnlyBubbleBuilder: (message) {
+                  final own = message.authorId == service.currentUserId;
+                  return Align(
+                    alignment: own ? Alignment.centerRight : Alignment.centerLeft,
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      constraints: const BoxConstraints(maxWidth: 480),
+                      decoration: BoxDecoration(
+                        color: own ? colors.primaryContainer : colors.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (ChatCardPreview.forPreview(message).trim().isNotEmpty)
+                            Text(ChatCardPreview.forPreview(message).trim()),
+                          for (final attachment in message.attachments ?? const <ChatFile>[])
+                            CachedChatAttachment(file: attachment, service: service),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        );
+      },
     );
   }
 

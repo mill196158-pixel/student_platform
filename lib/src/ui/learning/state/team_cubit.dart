@@ -1,3 +1,4 @@
+import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
 // lib/src/ui/learning/state/team_cubit.dart
 import 'dart:async';
 import 'dart:convert';
@@ -113,10 +114,12 @@ class TeamCubit extends Cubit<TeamState> {
   static final Map<String, List<Message>> _messagesByTeamId = {};
   static final Map<String, List<Assignment>> _assignmentsByTeamId = {};
 
-  TeamCubit(Team team, {LearningRepository? repository, AuthSessionScope? authScope})
+  TeamCubit(Team team,
+      {LearningRepository? repository, AuthSessionScope? authScope})
       : repo = repository ?? SupabaseLearningRepository(),
         _authScope = authScope,
-        _cacheOwner = authScope == null ? null : TeamCacheOwner.bind(authScope, team.id),
+        _cacheOwner =
+            authScope == null ? null : TeamCacheOwner.bind(authScope, team.id),
         super(TeamState(
           team: team,
           chat: List<Message>.unmodifiable(
@@ -171,6 +174,7 @@ class TeamCubit extends Cubit<TeamState> {
     _myDisplayName = null;
     _myAvatarUrl = null;
   }
+
   String? _mainChatId;
 
   // realtime
@@ -203,7 +207,9 @@ class TeamCubit extends Cubit<TeamState> {
   Future<void> _restoreInitialAssignments() async {
     if (state.assignments.isNotEmpty) return;
     final persistedAssignments = await _loadPersistedAssignmentsSnapshot();
-    if (isClosed || state.assignments.isNotEmpty || persistedAssignments.isEmpty) return;
+    if (isClosed ||
+        state.assignments.isNotEmpty ||
+        persistedAssignments.isEmpty) return;
     _rememberAssignments(persistedAssignments);
     emit(state.copyWith(
       assignments: persistedAssignments,
@@ -258,9 +264,14 @@ class TeamCubit extends Cubit<TeamState> {
     final seed = scope != null && owner != null
         ? VerifiedEmptyTeamChats.instance.lookup(scope, owner)
         : null;
-    if (_verifiedEmptyChatId != null && seed == _verifiedEmptyChatId && state.chat.isEmpty) {
-      emit(state.copyWith(loading: false, chatHasSnapshot: true,
-          chatRefreshing: true, chatError: false));
+    if (_verifiedEmptyChatId != null &&
+        seed == _verifiedEmptyChatId &&
+        state.chat.isEmpty) {
+      emit(state.copyWith(
+          loading: false,
+          chatHasSnapshot: true,
+          chatRefreshing: true,
+          chatError: false));
       return;
     }
     emit(state.copyWith(
@@ -272,6 +283,22 @@ class TeamCubit extends Cubit<TeamState> {
   }
 
   Future<void> _loadChatInBackground(String? chatId) async {
+    final projectCache = ProjectChatServerCache.qaInstance;
+    if (projectCache != null &&
+        chatId != null &&
+        repo is SupabaseLearningRepository) {
+      unawaited(() async {
+        try {
+          final ticket = await projectCache.begin(chatId);
+          if (ticket == null) return;
+          final page = await (repo as SupabaseLearningRepository)
+              .loadConfirmedChatPage(chatId!);
+          if (isClosed || page.source != TeamPageSource.serverRpc) return;
+          await projectCache.saveServerPage(ticket, page.messages,
+              hasMore: page.hasMore);
+        } catch (_) {/* Never save a cache fallback as a server page. */}
+      }());
+    }
     try {
       final chat = await repo.loadChat(state.team.id);
       if (isClosed) return;
@@ -384,8 +411,11 @@ class TeamCubit extends Cubit<TeamState> {
   Future<String?> _resolveMainChatId() async {
     if (_mainChatId != null && _mainChatId!.isNotEmpty) return _mainChatId;
     final scope = _authScope, owner = _cacheOwner;
-    if (scope != null && owner != null && _verifiedEmptyChatId != null &&
-        VerifiedEmptyTeamChats.instance.lookup(scope, owner) == _verifiedEmptyChatId) {
+    if (scope != null &&
+        owner != null &&
+        _verifiedEmptyChatId != null &&
+        VerifiedEmptyTeamChats.instance.lookup(scope, owner) ==
+            _verifiedEmptyChatId) {
       _mainChatId = _verifiedEmptyChatId;
       return _mainChatId;
     }
@@ -418,13 +448,18 @@ class TeamCubit extends Cubit<TeamState> {
       owner: owner,
       isOpenAndEmpty: () => !isClosed && state.chat.isEmpty,
       fetchMapping: () async {
-        final rows = await sb.from('chats').select('id,team_id,type')
-            .eq('team_id', owner.teamId).eq('type', 'team_main').limit(2);
+        final rows = await sb
+            .from('chats')
+            .select('id,team_id,type')
+            .eq('team_id', owner.teamId)
+            .eq('type', 'team_main')
+            .limit(2);
         if (rows.length != 1 || rows.first['id'] != expectedChatId) return null;
         return rows;
       },
       fetchPage: (id) => sb.rpc('get_chat_messages_page', params: {
-        'p_chat_id': id, 'p_limit': 1,
+        'p_chat_id': id,
+        'p_limit': 1,
       }),
     );
   }
@@ -593,14 +628,18 @@ class TeamCubit extends Cubit<TeamState> {
     emit(state.copyWith(chat: _mergeCachedChat(updated)));
   }
 
-  Future<void> refreshMessageById(String messageId, {bool Function()? isCurrent}) async {
+  Future<void> refreshMessageById(String messageId,
+      {bool Function()? isCurrent}) async {
     if (messageId.isEmpty || (isCurrent != null && !isCurrent())) return;
     final teamId = state.team.id;
     final owner = _currentProfileOwner();
     if (owner == null) return;
     final message = await repo.loadMessageById(teamId, messageId);
-    if (message == null || isClosed || state.team.id != teamId ||
-        _currentProfileOwner() != owner || (isCurrent != null && !isCurrent())) return;
+    if (message == null ||
+        isClosed ||
+        state.team.id != teamId ||
+        _currentProfileOwner() != owner ||
+        (isCurrent != null && !isCurrent())) return;
 
     emit(state.copyWith(chat: _reconcileCachedMessage(message)));
     await _hydrateAssignmentIdsInChat();
@@ -1009,6 +1048,19 @@ class TeamCubit extends Cubit<TeamState> {
       );
 
       safeDebugLog('[TeamCubit] RT subscribe chat=${maskDebugId(chatId)}');
+      final projectCache = ProjectChatServerCache.qaInstance;
+      final cacheOwner = _cacheOwner;
+      final eventTicket = cacheOwner?.capture();
+      Future<void> invalidateSnapshot() async {
+        if (projectCache == null ||
+            cacheOwner == null ||
+            eventTicket == null ||
+            !cacheOwner.belongsTo(projectCache.scope) ||
+            !cacheOwner.isCurrent(eventTicket)) return;
+        try {
+          await projectCache.invalidate(chatId);
+        } catch (_) {}
+      }
 
       _rtChat!
           .onPostgresChanges(
@@ -1018,6 +1070,7 @@ class TeamCubit extends Cubit<TeamState> {
             filter: filter,
             callback: (payload) async {
               safeDebugLog('[TeamCubit] RT messages INSERT');
+              await invalidateSnapshot();
               await _onRealtimeMessageInsert(payload);
             },
           )
@@ -1028,6 +1081,7 @@ class TeamCubit extends Cubit<TeamState> {
             filter: filter,
             callback: (payload) async {
               safeDebugLog('[TeamCubit] RT messages UPDATE');
+              await invalidateSnapshot();
               await _onRealtimeMessageUpdate(payload);
             },
           )
@@ -1038,6 +1092,7 @@ class TeamCubit extends Cubit<TeamState> {
             filter: filter,
             callback: (payload) async {
               safeDebugLog('[TeamCubit] RT messages DELETE');
+              await invalidateSnapshot();
               await _onRealtimeMessageDelete(payload);
             },
           );
@@ -1067,6 +1122,7 @@ class TeamCubit extends Cubit<TeamState> {
                   final chat = [...state.chat];
                   final idx = chat.indexWhere((m) => m.id == mid);
                   if (idx != -1) {
+                    await invalidateSnapshot();
                     chat[idx] = chat[idx].copyWith(
                       reactions: counts,
                       userReactions: userReactions,
@@ -1095,6 +1151,7 @@ class TeamCubit extends Cubit<TeamState> {
                   final chat = [...state.chat];
                   final idx = chat.indexWhere((m) => m.id == mid);
                   if (idx != -1) {
+                    await invalidateSnapshot();
                     chat[idx] = chat[idx].copyWith(
                       reactions: counts,
                       userReactions: userReactions,
@@ -1173,11 +1230,13 @@ class TeamCubit extends Cubit<TeamState> {
   }
 
   // 👇 новая публичная прокладка
-  Future<void> voteFor(String assignmentId, {bool propagateError = false}) async {
+  Future<void> voteFor(String assignmentId,
+      {bool propagateError = false}) async {
     await _voteAssignment(assignmentId, propagateError: propagateError);
   }
 
-  Future<void> _voteAssignment(String assignmentId, {bool propagateError = false}) async {
+  Future<void> _voteAssignment(String assignmentId,
+      {bool propagateError = false}) async {
     final sb = Supabase.instance.client;
     final uid = sb.auth.currentUser?.id;
     if (uid == null || uid.isEmpty) return;

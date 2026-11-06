@@ -71,6 +71,10 @@ class OfflineSessionBinding {
 /// validate a server policy, or grant a capability.
 class OfflinePolicyGrant {
   static const maximumLifetime = Duration(hours: 24);
+
+  /// Local snapshot access is separate from server authorization. An offline
+  /// device cannot learn about revocations it has not received yet.
+  static const maximumLocalSnapshotLifetime = Duration(days: 30);
   const OfflinePolicyGrant(
       {required this.issuer,
       required this.userId,
@@ -92,7 +96,8 @@ class OfflinePolicyGrant {
         'valid_until': validUntil.toUtc().toIso8601String()
       };
 
-  static OfflinePolicyGrant? fromJson(Object? raw) {
+  static OfflinePolicyGrant? fromJson(Object? raw,
+      {Duration maximumAge = maximumLifetime}) {
     if (raw is! Map || raw['schema'] != 1) return null;
     final issuer = raw['issuer'], uid = raw['uid'], sid = raw['sid'];
     final checked = raw['checked_at'], until = raw['valid_until'];
@@ -111,7 +116,7 @@ class OfflinePolicyGrant {
         checkedAt.toIso8601String() != checked ||
         validUntil.toIso8601String() != until ||
         !validUntil.isAfter(checkedAt) ||
-        validUntil.difference(checkedAt) > maximumLifetime) return null;
+        validUntil.difference(checkedAt) > maximumAge) return null;
     return OfflinePolicyGrant(
         issuer: issuer,
         userId: uid,
@@ -136,5 +141,32 @@ class OfflinePolicyGrant {
         !time.isBefore(checkedAt) &&
         time.isBefore(validUntil) &&
         time.isBefore(binding.expiresAt);
+  }
+
+  /// Only for last-known local snapshots; never use as a server credential.
+  /// [checkedAt] must have been within the bound token's validity window.
+  bool matchesForLocalSnapshot(OfflineSessionBinding? binding,
+      {required DateTime now,
+      DateTime? verifiedNotBefore,
+      DateTime? verifiedExpiresAt}) {
+    final time = now.toUtc();
+    if ((verifiedNotBefore == null) != (verifiedExpiresAt == null)) {
+      return false;
+    }
+    final notBefore = verifiedNotBefore ?? binding?.notBefore;
+    final expiresAt = verifiedExpiresAt ?? binding?.expiresAt;
+    return binding != null &&
+        notBefore != null &&
+        expiresAt != null &&
+        expiresAt.isAfter(notBefore) &&
+        issuer == binding.issuer &&
+        userId == binding.userId &&
+        sessionId == binding.sessionId &&
+        validUntil.isAfter(checkedAt) &&
+        validUntil.difference(checkedAt) <= maximumLocalSnapshotLifetime &&
+        !checkedAt.isBefore(notBefore) &&
+        checkedAt.isBefore(expiresAt) &&
+        !time.isBefore(checkedAt) &&
+        time.isBefore(validUntil);
   }
 }

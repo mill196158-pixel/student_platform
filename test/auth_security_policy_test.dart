@@ -90,21 +90,20 @@ void main() {
         clearSession: () {
           events.add('clear');
         });
-    expect(complete, isFalse);
+    expect(complete, LogoutCleanupResult.signedOutCleanupIncomplete);
     expect(events, ['first', 'second', 'signOut', 'clear']);
   });
 
   test('session memory clears even when auth signout reports an error',
       () async {
     var cleared = false;
-    await expectLater(
-        runLogoutCleanup(
-            cleanups: [],
-            signOut: () async => throw StateError('network unavailable'),
-            clearSession: () {
-              cleared = true;
-            }),
-        throwsStateError);
+    final result = await runLogoutCleanup(
+        cleanups: [],
+        signOut: () async => throw StateError('network unavailable'),
+        clearSession: () {
+          cleared = true;
+        });
+    expect(result, LogoutCleanupResult.signOutUnconfirmed);
     expect(cleared, isTrue);
   });
 }

@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'auth_session_scope.dart';
 import 'offline_policy_grant.dart';
 import 'offline_policy_grant_store.dart';
+import 'sqlite_policy_grant_store.dart';
 
 class PolicyCheckStale implements Exception {
   const PolicyCheckStale();
@@ -23,13 +24,15 @@ class LivePolicyDecision {
 /// and bridge identity after awaiting a decision.
 class LivePolicyGrantBridge {
   LivePolicyGrantBridge(
-      {required this.scope,
+      {this.sqliteStore,
+      required this.scope,
       required this.store,
       required this.currentBinding,
       required this.readLivePolicy,
       DateTime Function()? clock})
       : _clock = clock ?? DateTime.now;
 
+  final SqlitePolicyGrantStore? sqliteStore;
   final AuthSessionScope scope;
   final OfflinePolicyGrantStore store;
   final OfflineSessionBinding? Function() currentBinding;
@@ -57,9 +60,30 @@ class LivePolicyGrantBridge {
       // Failure to prepare optional storage must not break online policy.
     }
     bool current() => revision == _revision && scope.isCurrent(owner);
+    SqliteLiveGrantAttempt? sqliteAttempt;
+    if (sqliteStore != null) {
+      if (binding == null) throw const PolicyCheckStale();
+      sqliteAttempt = await sqliteStore!.beginLiveCheck(owner, binding);
+      if (sqliteAttempt == null || !current()) throw const PolicyCheckStale();
+    }
     try {
       final required = await readLivePolicy();
       if (!current()) throw const PolicyCheckStale();
+      if (sqliteAttempt != null && binding != null) {
+        final checkedAt = _clock().toUtc();
+        final saved = required
+            ? await sqliteStore!.revokeAfterLiveCheck(sqliteAttempt)
+            : await sqliteStore!.saveAllowed(
+                sqliteAttempt,
+                OfflinePolicyGrant(
+                    issuer: binding.issuer,
+                    userId: binding.userId,
+                    sessionId: binding.sessionId,
+                    checkedAt: checkedAt,
+                    validUntil: checkedAt
+                        .add(OfflinePolicyGrant.maximumLocalSnapshotLifetime)));
+        if (!saved || !current()) throw const PolicyCheckStale();
+      }
       if (attempt != null && binding != null) {
         if (required) {
           _ignoreStorage(() => store.revokeAfterLiveCheck(attempt!));
@@ -77,6 +101,11 @@ class LivePolicyGrantBridge {
       return LivePolicyDecision._(required, revision, _issuer);
     } catch (error) {
       if (!current()) throw const PolicyCheckStale();
+      if (sqliteAttempt != null && _isConfirmedDenial(error)) {
+        if (!await sqliteStore!.revokeAfterLiveCheck(sqliteAttempt)) {
+          throw const PolicyCheckStale();
+        }
+      }
       if (attempt != null && _isConfirmedDenial(error)) {
         _ignoreStorage(() => store.revokeAfterLiveCheck(attempt!));
       }

@@ -6,6 +6,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:student_platform/src/core/auth_session_scope_host.dart';
+import 'package:student_platform/src/core/session_capabilities.dart';
+import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
+import 'package:student_platform/src/ui/chats/core/dm_chat_service.dart';
+import 'package:student_platform/src/ui/chats/core/cached_chat_attachment.dart';
+import 'package:student_platform/src/ui/learning/models/chat_file.dart';
+import 'package:student_platform/src/ui/learning/models/message.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/messages/chat_message_list.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/search/chat_search_controller.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_card_envelope.dart';
 
 import 'models/team.dart';
 import 'state/team_cubit.dart';
@@ -25,19 +34,43 @@ class TeamDetailsScreen extends StatelessWidget {
 
   /// Completed-semester academic chats: history/files readable, no composer.
   final bool readOnly;
+  final ProjectChatServerCache? cachedStore;
+  final SessionCapabilities? cachedCapabilities;
+  final String? cachedChatId;
   const TeamDetailsScreen({
     super.key,
     required this.team,
     this.initialTabIndex = 1,
     this.highlightMessageId,
     this.readOnly = false,
+    this.cachedStore,
+    this.cachedCapabilities,
+    this.cachedChatId,
   });
 
   @override
   Widget build(BuildContext context) {
+    if (cachedStore != null ||
+        cachedCapabilities != null ||
+        cachedChatId != null) {
+      final store = cachedStore,
+          caps = cachedCapabilities,
+          chatId = cachedChatId;
+      if (store == null || caps == null || chatId == null || chatId.isEmpty) {
+        return const Scaffold(
+            body: Center(child: Text('Сохранённый чат недоступен.')));
+      }
+      return _CachedTeamDetails(
+          team: team,
+          chatId: chatId,
+          store: store,
+          capabilities: caps,
+          initialTabIndex: initialTabIndex);
+    }
     return BlocProvider<TeamCubit>(
       create: (_) {
-        final c = TeamCubit(team, authScope: AuthSessionScopeHost.maybeRead(context));
+        final c =
+            TeamCubit(team, authScope: AuthSessionScopeHost.maybeRead(context));
         c.init();
         return c;
       },
@@ -48,6 +81,215 @@ class TeamDetailsScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Experimental cache-only route. It never constructs TeamCubit or its tabs,
+/// which start subscriptions and network requests during initialization.
+class _CachedTeamDetails extends StatefulWidget {
+  const _CachedTeamDetails(
+      {required this.team,
+      required this.chatId,
+      required this.store,
+      required this.capabilities,
+      required this.initialTabIndex});
+  final Team team;
+  final String chatId;
+  final ProjectChatServerCache store;
+  final SessionCapabilities capabilities;
+  final int initialTabIndex;
+
+  @override
+  State<_CachedTeamDetails> createState() => _CachedTeamDetailsState();
+}
+
+class _CachedTeamDetailsState extends State<_CachedTeamDetails>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabs;
+  final _scroll = ScrollController();
+  final _search = ChatSearchController();
+  final _keys = <String, GlobalKey>{};
+  DmChatService? _filePermit;
+  CapabilityPermit? _permit;
+  Future<List<Message>?>? _messages;
+  int _revision = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabs = TabController(
+        length: 3,
+        vsync: this,
+        initialIndex: widget.initialTabIndex.clamp(0, 2));
+    _bind();
+  }
+
+  void _bind() {
+    _revision++;
+    final caps = widget.capabilities;
+    final permit = caps.capture(SessionCapability.cachedRead);
+    if (caps.mode != SessionCapabilityMode.cacheOnly || permit == null) return;
+    try {
+      _filePermit = DmChatService.cachedOnly(
+          peerId: '',
+          initialChatId: widget.chatId,
+          capabilities: caps,
+          cacheReader: (_, __) async => throw const CachedChatUnavailable());
+      _permit = permit;
+      _messages = widget.store.read(widget.chatId, caps);
+    } catch (_) {
+      _filePermit = null;
+      _permit = null;
+    }
+  }
+
+  bool get _allowed =>
+      _permit != null &&
+      widget.capabilities.mode == SessionCapabilityMode.cacheOnly &&
+      widget.capabilities.permits(_permit!, SessionCapability.cachedRead) &&
+      (_filePermit?.canReadCached ?? false);
+
+  @override
+  void didUpdateWidget(covariant _CachedTeamDetails oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.chatId != widget.chatId ||
+        oldWidget.team.id != widget.team.id ||
+        !identical(oldWidget.store, widget.store) ||
+        !identical(oldWidget.capabilities, widget.capabilities)) {
+      _filePermit?.dispose();
+      _filePermit = null;
+      _permit = null;
+      _messages = null;
+      _bind();
+    }
+  }
+
+  @override
+  void dispose() {
+    _filePermit?.dispose();
+    _tabs.dispose();
+    _scroll.dispose();
+    _search.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+      listenable: widget.capabilities,
+      builder: (context, _) {
+        if (!_allowed)
+          return const Scaffold(
+              body: Center(child: Text('Сохранённый чат недоступен.')));
+        final colors = Theme.of(context).colorScheme;
+        return Scaffold(
+            body: Column(children: [
+          SizedBox(
+              height: MediaQuery.paddingOf(context).top + 64,
+              child: _TeamHeader(
+                  team: widget.team.copyWith(icon: ''),
+                  leading: const _RoundBackButton(),
+                  trailing: const SizedBox.shrink())),
+          Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+              child: TabBar(
+                  controller: _tabs,
+                  tabs: const [
+                    Tab(text: 'Задания'),
+                    Tab(text: 'Чат'),
+                    Tab(text: 'Файлы')
+                  ],
+                  indicator: BoxDecoration(
+                      color: colors.primary,
+                      borderRadius: BorderRadius.circular(6)),
+                  labelColor: colors.onPrimary,
+                  unselectedLabelColor: colors.onSurfaceVariant)),
+          Expanded(
+              child: TabBarView(controller: _tabs, children: [
+            const Center(child: Text('Сохранённые задания недоступны.')),
+            FutureBuilder<List<Message>?>(
+                key: ValueKey(_revision),
+                future: _messages,
+                builder: (context, snapshot) {
+                  if (!_allowed) return const SizedBox.shrink();
+                  if (snapshot.connectionState != ConnectionState.done) {
+                    return const Center(
+                        child: Text('Открываем сохранённые сообщения…'));
+                  }
+                  if (snapshot.hasError || snapshot.data == null) {
+                    return const Center(
+                        child: Text('Сохранённые сообщения недоступны.'));
+                  }
+                  final messages = snapshot.data!
+                      .where((m) =>
+                          m.cardKind == null &&
+                          m.type != MessageType.assignmentDraft &&
+                          m.type != MessageType.assignmentPublished)
+                      .toList();
+                  if (messages.isEmpty)
+                    return Center(
+                        child: Text(snapshot.data!.isEmpty
+                            ? 'Сообщений пока нет'
+                            : 'Сохранённые карточки недоступны.'));
+                  return ChatMessageList(
+                      messages: messages,
+                      controller: _scroll,
+                      messageKeys: _keys,
+                      search: _search,
+                      currentUserId: _filePermit!.currentUserId,
+                      forceHideAvatars: true,
+                      noAvatarSpacing: true,
+                      hideAuthorLine: true,
+                      isDirectChat: false,
+                      showEntryNewBadge: false,
+                      selectingMessages: false,
+                      selectedMessageIds: const <String>{},
+                      onToggleSelect: null,
+                      onReply: (_) {},
+                      onLongPress: (_, __, ___, ____, _____, ______) {},
+                      onReplyTap: (_) {},
+                      onReact: (_, __) {},
+                      localOnlyBubbleBuilder: (message) {
+                        final own =
+                            message.authorId == _filePermit!.currentUserId;
+                        final text = ChatCardPreview.forPreview(message).trim();
+                        return Align(
+                            alignment: own
+                                ? Alignment.centerRight
+                                : Alignment.centerLeft,
+                            child: Container(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 14, vertical: 10),
+                                constraints:
+                                    const BoxConstraints(maxWidth: 480),
+                                decoration: BoxDecoration(
+                                    color: own
+                                        ? colors.primaryContainer
+                                        : colors.surfaceContainerHighest,
+                                    borderRadius: BorderRadius.circular(18)),
+                                child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      if (!own &&
+                                          message.authorName.trim().isNotEmpty)
+                                        Text(message.authorName,
+                                            style: TextStyle(
+                                                color: colors.primary)),
+                                      if (text.isNotEmpty) Text(text),
+                                      for (final attachment
+                                          in message.attachments ??
+                                              const <ChatFile>[])
+                                        CachedChatAttachment(
+                                            file: attachment,
+                                            service: _filePermit!),
+                                    ])));
+                      });
+                }),
+            const Center(child: Text('Сохранённый список файлов недоступен.')),
+          ]))
+        ]));
+      });
 }
 
 class _Body extends StatefulWidget {

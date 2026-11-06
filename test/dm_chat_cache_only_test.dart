@@ -89,6 +89,51 @@ void main() {
     ChatMessageCacheStore.debugSetPrefs(null);
   });
 
+  test('project-bound reader never paints legacy same-uid cache', () async {
+    SharedPreferences.setMockInitialValues({});
+    ChatMessageCacheStore.debugSetPrefs(await SharedPreferences.getInstance());
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final session = fakeSession('same-user');
+    final scope = AuthSessionScope(
+        currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final caps = SessionCapabilities(scope);
+    caps.grant(SessionCapabilityMode.cacheOnly,
+        caps.beginAuthorization(scope.capture()!)!);
+    await ChatMessageCacheStore.replace(
+        userId: 'same-user',
+        chatId: 'shared',
+        messages: [
+          Message(
+              id: 'legacy',
+              chatId: 'shared',
+              authorId: 'same-user',
+              authorLogin: '',
+              authorName: '',
+              text: 'Данные другого проекта',
+              at: DateTime.utc(2026))
+        ]);
+    final pending = Completer<ChatCacheSnapshot>();
+    final service = DmChatService.cachedOnly(
+        peerId: 'p',
+        initialChatId: 'shared',
+        capabilities: caps,
+        cacheReader: (_, __) => pending.future);
+    expect(service.currentMessages, isEmpty);
+    expect(service.messagesViewState.hasSnapshot, isFalse);
+    final result = service
+        .watchMessagesState()
+        .firstWhere((s) => s.phase == ChatMessagesLoadPhase.error);
+    pending.complete(ChatCacheSnapshot.notFound);
+    expect((await result).error, isA<CachedChatUnavailable>());
+    expect(service.currentMessages, isEmpty);
+    await service.dispose();
+    caps.dispose();
+    scope.dispose();
+    await events.close();
+    ChatMessageCacheStore.debugSetPrefs(null);
+  });
+
   test('missing snapshot is an error and a blank id never creates a chat',
       () async {
     SharedPreferences.setMockInitialValues({});

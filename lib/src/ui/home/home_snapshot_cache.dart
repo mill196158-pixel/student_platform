@@ -30,6 +30,7 @@ class HomeSnapshotCache {
   static final Map<String, int> _writeVersions = <String, int>{};
   static final Map<String, Future<void>> _pendingWrites =
       <String, Future<void>>{};
+  static final Set<String> _quarantined = <String>{};
 
   String _key(String uid, HomeSnapshotSection section) => project == null
       ? 'home_snapshot_v1_${section.name}_$uid'
@@ -57,9 +58,17 @@ class HomeSnapshotCache {
     final generation = _sessionGeneration();
     final identity = _sessionIdentity();
     if (!_isCurrent(uid, generation, identity)) return null;
+    final key = _key(uid, section);
+    if (project != null) {
+      final pending = _pendingWrites[key];
+      if (pending != null) await pending;
+      if (!_isCurrent(uid, generation, identity) || _quarantined.contains(key))
+        return null;
+    }
     final prefs = await _preferences();
-    if (!_isCurrent(uid, generation, identity)) return null;
-    final raw = prefs.getString(_key(uid, section));
+    if (!_isCurrent(uid, generation, identity) ||
+        (project != null && _quarantined.contains(key))) return null;
+    final raw = prefs.getString(key);
     if (raw == null) return null;
     try {
       final value = jsonDecode(raw);
@@ -121,10 +130,35 @@ class HomeSnapshotCache {
           _writeVersions[key] != version) {
         return false;
       }
-      final saved = await prefs.setString(key, raw);
-      return saved &&
-          _isCurrent(uid, generation, identity) &&
-          _writeVersions[key] == version;
+      if (project == null) {
+        final saved = await prefs.setString(key, raw);
+        return saved &&
+            _isCurrent(uid, generation, identity) &&
+            _writeVersions[key] == version;
+      }
+      final previousValue = prefs.getString(key);
+      final previouslyQuarantined = _quarantined.contains(key);
+      _quarantined.add(key);
+      try {
+        final saved = await prefs.setString(key, raw);
+        if (saved &&
+            _isCurrent(uid, generation, identity) &&
+            _writeVersions[key] == version) {
+          _quarantined.remove(key);
+          return true;
+        }
+      } catch (_) {
+        // A failing store may still have committed: restore the prior value.
+      }
+      try {
+        final restored = previousValue == null
+            ? await prefs.remove(key)
+            : await prefs.setString(key, previousValue);
+        if (restored && !previouslyQuarantined) _quarantined.remove(key);
+      } catch (_) {
+        // Keep the key blocked if rollback could not be confirmed.
+      }
+      return false;
     } finally {
       finished.complete();
       if (identical(_pendingWrites[key], finished.future))

@@ -31,7 +31,8 @@ class AuthSession {
   }
 
   static Future<SessionRestoreStatus> restoreSessionStatus(
-      SupabaseClient client, {Future<AuthResponse> Function()? refresh}) async {
+      SupabaseClient client, {Future<AuthResponse> Function()? refresh,
+      void Function(Object error)? onRefreshError}) async {
     final initial = client.auth.currentSession;
     (String, String, String?)? identity(Session? session) => session == null
         ? null
@@ -54,6 +55,7 @@ class AuthSession {
           identity(refreshed) != current) return SessionRestoreStatus.stale;
       return SessionRestoreStatus.restored;
     } catch (error) {
+      onRefreshError?.call(error);
       if (identity(client.auth.currentSession) != captured) {
         return SessionRestoreStatus.stale;
       }

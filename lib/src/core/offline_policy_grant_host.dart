@@ -6,13 +6,16 @@ import 'auth_session_scope.dart';
 import 'auth_session_scope_host.dart';
 import 'offline_policy_grant.dart';
 import 'offline_policy_grant_store.dart';
+import 'sqlite_policy_grant_store.dart';
 import 'live_policy_grant_bridge.dart';
 import 'password_policy.dart';
 
 /// Passive storage owner. It neither checks policy nor grants offline access.
 class OfflinePolicyGrantAccess {
   const OfflinePolicyGrantAccess(
-      this.scope, this.store, this.bridge, this._currentSession, this._issuer);
+      this.scope, this.store, this.bridge, this._currentSession, this._issuer,
+      [this.sqliteStore]);
+  final SqlitePolicyGrantStore? sqliteStore;
   final AuthSessionScope scope;
   final OfflinePolicyGrantStore store;
   final LivePolicyGrantBridge bridge;
@@ -35,8 +38,10 @@ class OfflinePolicyGrantHost extends StatefulWidget {
       this.currentSession,
       this.storage,
       this.readLivePolicy,
-      this.issuer});
+      this.issuer,
+      this.sqliteStore});
   final Widget child;
+  final SqlitePolicyGrantStore? sqliteStore;
   @visibleForTesting
   final AuthSessionScope? source;
   @visibleForTesting
@@ -80,7 +85,8 @@ class _OfflinePolicyGrantHostState extends State<OfflinePolicyGrantHost> {
     if (!identical(oldWidget.source, widget.source) ||
         oldWidget.currentSession != widget.currentSession ||
         oldWidget.readLivePolicy != widget.readLivePolicy ||
-        oldWidget.issuer != widget.issuer) _bind(force: true);
+        oldWidget.issuer != widget.issuer ||
+        oldWidget.sqliteStore != widget.sqliteStore) _bind(force: true);
   }
 
   void _bind({bool force = false}) {
@@ -105,15 +111,20 @@ class _OfflinePolicyGrantHostState extends State<OfflinePolicyGrantHost> {
 
     final store = OfflinePolicyGrantStore(
         session: scope, currentBinding: binding, coordinator: _coordinator);
+    if (widget.sqliteStore != null &&
+        !identical(widget.sqliteStore!.scope, scope)) {
+      throw StateError('Policy store scope mismatch');
+    }
     final bridge = LivePolicyGrantBridge(
+      sqliteStore: widget.sqliteStore,
       scope: scope,
       store: store,
       currentBinding: binding,
       readLivePolicy: widget.readLivePolicy ??
           () => loadPasswordChangeRequired(Supabase.instance.client),
     );
-    _access =
-        OfflinePolicyGrantAccess(scope, store, bridge, readSession, issuer);
+    _access = OfflinePolicyGrantAccess(
+        scope, store, bridge, readSession, issuer, widget.sqliteStore);
   }
 
   @override
