@@ -69,19 +69,26 @@ class FileService {
     bool preserveOriginal = true,
     UploadProgressCallback? onProgress,
     CancelToken? cancelToken,
+    bool Function()? isCurrent,
   }) async {
     try {
       final fileName = _fileNameFromPath(customFileName ?? file.path);
       final contentType = _getContentType(fileName);
       final session = _supabase.auth.currentSession;
+      void checkCurrent() {
+        _checkUploadSession(session, cancelToken);
+        if (isCurrent != null && !isCurrent()) {
+          throw Exception('Вложение изменилось. Повторите загрузку.');
+        }
+      }
       final original = await _readUploadBytes(file);
-      _checkUploadSession(session, cancelToken);
+      checkCurrent();
       final bytes = !preserveOriginal && contentType == 'image/png'
           ? await optimizeNewChatPng(original, cancelToken: cancelToken)
           : !preserveOriginal && contentType == 'image/jpeg'
               ? await optimizeChatPhoto(original, cancelToken: cancelToken)
               : original;
-      _checkUploadSession(session, cancelToken);
+      checkCurrent();
 
       final upload = await _createPresignedUpload(
         chatId: chatId,
@@ -89,15 +96,15 @@ class FileService {
         contentType: contentType,
         fileSize: bytes.length,
       );
-      _checkUploadSession(session, cancelToken);
+      checkCurrent();
       await _putToPresignedUrl(
         upload,
         bytes,
         onProgress: onProgress,
         cancelToken: cancelToken,
-        checkCurrent: () => _checkUploadSession(session, cancelToken),
+        checkCurrent: checkCurrent,
       );
-      _checkUploadSession(session, cancelToken);
+      checkCurrent();
 
       return ChatFile(
         id: '', // Будет заполнено на сервере
