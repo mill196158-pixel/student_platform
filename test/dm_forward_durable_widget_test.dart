@@ -115,6 +115,14 @@ void main() {
           name: 'source.pdf', type: 'application/pdf', size: 100);
     }
     final storage = _Storage();
+    Future<void> tapSendWhenVisible() async {
+      final send = find.byTooltip('Отправить');
+      for (var i = 0; i < 80 && send.hitTestable().evaluate().isEmpty; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      expect(send.hitTestable(), findsOneWidget);
+      await tester.tap(send.hitTestable());
+    }
     await tester.pumpWidget(ForwardOutboxHost(source: scope, storage: storage, durableMode: true,
       openDatabaseOverride: () async => db, backendOverride: 'qa-backend',
       child: MaterialApp(navigatorKey: navigator, home: UnifiedChatScreen(service: source, title: 'Источник', debugCopyForwardFile: copyFile,
@@ -204,7 +212,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
     }
     expect(find.byTooltip('Отменить пересылку'), findsOneWidget);
-    await tester.tap(find.byTooltip('Отправить'));
+    await tapSendWhenVisible();
     for (var i = 0; i < 15; i++) {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
       await tester.pump(const Duration(milliseconds: 50));
@@ -222,7 +230,7 @@ void main() {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
       await tester.pump(const Duration(milliseconds: 50));
     }
-    await tester.tap(find.byTooltip('Отправить'));
+    await tapSendWhenVisible();
     for (var i = 0; i < 15; i++) {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
       await tester.pump(const Duration(milliseconds: 50));

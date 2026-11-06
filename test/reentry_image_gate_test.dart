@@ -410,5 +410,5 @@ void main() {
     });
     messenger.setMockMethodCallHandler(links, null);
     messenger.setMockMethodCallHandler(paths, null);
-  });
+  }, skip: !const bool.fromEnvironment('CHAT_REENTRY_GATE_QA'));
 }

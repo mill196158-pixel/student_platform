@@ -64,6 +64,8 @@ class _Notifications extends Notifications {
 
 class _Reader implements CachedHomeScheduleReader {
   @override
+  bool get canRead => true;
+  @override
   Future<HomeDashboardData> readDashboard({DateTime? date}) async =>
       HomeDashboardData(
           profile: const HomeUserProfile(id: 'fixture', name: 'Офлайн имя'),
