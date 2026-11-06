@@ -116,7 +116,7 @@ void main() {
     expect(find.text('local:https://example.test/chats/a'), findsOneWidget);
     await show(file.copyWith(fileUrl: 'https://example.test/chats/different'));
     expect(find.text('local:https://example.test/chats/a'), findsNothing);
-    expect(find.text('local:https://example.test/chats/different'), findsOneWidget);
+    expect(find.text('local:https://example.test/chats/different'), findsNothing);
     expect(find.textContaining('a.pdf'), findsWidgets);
     await show(file.copyWith(isDeleted: true));
     expect(find.textContaining('local:'), findsNothing);

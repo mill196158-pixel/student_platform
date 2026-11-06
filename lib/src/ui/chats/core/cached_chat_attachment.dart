@@ -11,9 +11,11 @@ import 'dm_chat_service.dart';
 /// A network-free attachment preview for the experimental cached-only chat.
 class CachedChatAttachment extends StatefulWidget {
   const CachedChatAttachment({super.key, required this.file, required this.service,
-    this.debugBeforeRead, this.debugOpen, this.debugRead});
+    this.sourceIsCurrent, this.sourceChanges, this.debugBeforeRead, this.debugOpen, this.debugRead});
   final ChatFile file;
   final DmChatService service;
+  final bool Function()? sourceIsCurrent;
+  final Listenable? sourceChanges;
   @visibleForTesting
   final Future<void> Function()? debugBeforeRead;
   @visibleForTesting
@@ -48,6 +50,8 @@ class _CachedChatAttachmentState extends State<CachedChatAttachment> {
     if (oldWidget.file.id != widget.file.id ||
         oldWidget.file.fileUrl != widget.file.fileUrl ||
         oldWidget.file.isDeleted != widget.file.isDeleted ||
+        !identical(oldWidget.sourceIsCurrent, widget.sourceIsCurrent) ||
+        !identical(oldWidget.sourceChanges, widget.sourceChanges) ||
         !identical(oldWidget.service, widget.service)) _bind();
   }
 
@@ -67,6 +71,7 @@ class _CachedChatAttachmentState extends State<CachedChatAttachment> {
     _generation = ChatFileAccess.generation;
     _changes = Listenable.merge([
       widget.service.cachedAccessChanges!, ChatFileAccess.accessChanges,
+      if (widget.sourceChanges != null) widget.sourceChanges!,
     ]);
     _changes!.addListener(_onAccessChanged);
     bool current() => mounted && revision == _revision &&
@@ -98,9 +103,14 @@ class _CachedChatAttachmentState extends State<CachedChatAttachment> {
     super.dispose();
   }
 
-  bool _allowed() => !widget.file.isDeleted && widget.service.canReadCached &&
-      ChatFileAccess.isViewerCurrent(widget.file.fileUrl, user: _owner,
-          epoch: _generation, sessionBinding: _session);
+  bool _allowed() {
+    try {
+      return (widget.sourceIsCurrent?.call() ?? true) &&
+          !widget.file.isDeleted && widget.service.canReadCached &&
+          ChatFileAccess.isViewerCurrent(widget.file.fileUrl, user: _owner,
+              epoch: _generation, sessionBinding: _session);
+    } catch (_) { return false; }
+  }
 
   void _onAccessChanged() {
     if (_allowed()) return;

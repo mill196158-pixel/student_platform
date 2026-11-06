@@ -6,6 +6,8 @@ import 'package:student_platform/src/ui/chats/core/cached_chat_attachment.dart';
 import 'package:student_platform/src/ui/chats/core/dm_chat_service.dart';
 import 'package:student_platform/src/ui/chats/core/forward_payload.dart';
 import 'package:student_platform/src/ui/chats/core/scoped_forward_author_resolver.dart';
+import 'package:student_platform/src/ui/chats/core/scoped_forward_file_resolver.dart';
+import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/learning/models/chat_file.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/message_bubble.dart';
@@ -19,24 +21,28 @@ class CachedChatMessageBubble extends StatelessWidget {
       required this.service,
       required this.showAuthor,
       this.authorResolver,
-      this.debugForwardAttachmentBuilder});
+      this.debugForwardAttachmentBuilder,
+      this.debugGuardedAttachmentBuilder});
   final Message message;
   final DmChatService service;
   final bool showAuthor;
   final ScopedForwardAuthorResolver? authorResolver;
   @visibleForTesting
   final Widget Function(ChatFile)? debugForwardAttachmentBuilder;
+  @visibleForTesting
+  final Widget Function(ChatFile, bool Function())? debugGuardedAttachmentBuilder;
 
   @override
   Widget build(BuildContext context) {
     final resolver = authorResolver;
-    if (resolver == null) return _buildBody(context, const {});
+    if (resolver == null) return _buildBody(context, const {}, const {});
     return _ScopedForwardNames(message: message, service: service, resolver: resolver,
-        builder: (context, names) => _buildBody(context, names));
+        builder: (context, names, files) => _buildBody(context, names, files));
   }
 
   Widget _buildBody(BuildContext context,
-      Map<(String, String, String), ScopedForwardAuthor> names) {
+      Map<(String, String, String), ScopedForwardAuthor> names,
+      Map<(String, String, String, String), ScopedForwardFile> files) {
     String shownAuthor((String, String, String) key, String saved) {
       final verified = names[key];
       if (verified?.isCurrent == true) return verified!.name.trim();
@@ -48,9 +54,10 @@ class CachedChatMessageBubble extends StatelessWidget {
     final canonical = message.attachments ?? const <ChatFile>[];
     final matched = <ChatFile>[];
     final matchedIds = <String>{};
+    final sourceReceipts = <String, ScopedForwardFile>{};
     var remainingItems = 30;
     var remainingFiles = 30;
-    bool addFile(String? id, String url, String name, List<String> lines) {
+    bool addFile(String chat, String messageId, String? id, String url, String name, List<String> lines) {
       final candidates = canonical.where((f) => id != null && id.isNotEmpty && f.id == id).toList();
       final urlMatches = canonical.where((f) => f.fileUrl == url).toList();
       if (candidates.length == 1 && urlMatches.length == 1 &&
@@ -61,6 +68,13 @@ class CachedChatMessageBubble extends StatelessWidget {
           if (matchedIds.add(file.id)) matched.add(file);
           return true;
         }
+      }
+      final source = candidates.isEmpty && urlMatches.isEmpty
+          ? files[(chat, messageId, id ?? '', url)] : null;
+      if (source != null && source.isCurrent) {
+        sourceReceipts[source.file.id] = source;
+        if (matchedIds.add(source.file.id)) matched.add(source.file);
+        return true;
       }
       lines.add('📎 ${name.trim().isEmpty ? 'Вложение' : name.trim()}');
       return false;
@@ -83,7 +97,7 @@ class CachedChatMessageBubble extends StatelessWidget {
         }
         for (final file in item.files.take(10)) {
           if (remainingFiles-- <= 0) break;
-          addFile(file.id, file.url, file.name, lines);
+          addFile(payload.fromChatId, item.messageId, file.id, file.url, file.name, lines);
         }
       }
     }
@@ -101,7 +115,7 @@ class CachedChatMessageBubble extends StatelessWidget {
           lines.add(author.isEmpty ? body : '$author: $body');
         else if (author.isNotEmpty) lines.add(author);
         for (final file in item.attachments.take(10)) {
-          addFile(file.id, file.url, file.name ?? '', lines);
+          addFile(message.forward!.fromChatId, item.id, file.id, file.url, file.name ?? '', lines);
         }
       }
       text = lines.join('\n');
@@ -125,9 +139,7 @@ class CachedChatMessageBubble extends StatelessWidget {
         attachments: canonical.where((f) {
           if (f.isDeleted || matchedIds.contains(f.id)) return false;
           if (embedded == null && message.type != MessageType.forward) return true;
-          return f.deletionVerified && f.id.isNotEmpty && f.fileUrl.isNotEmpty &&
-              canonical.where((x) => x.id == f.id).length == 1 &&
-              canonical.where((x) => x.fileUrl == f.fileUrl).length == 1;
+          return false;
         }).toList(),
         reactions: message.reactions,
         receiptTicks: 0);
@@ -136,9 +148,23 @@ class CachedChatMessageBubble extends StatelessWidget {
         children: [bubble, for (final file in matched)
           Padding(padding: const EdgeInsets.only(left: 40, top: 4),
             child: SizedBox(width: 280, child:
-              kDebugMode && debugForwardAttachmentBuilder != null
-                  ? debugForwardAttachmentBuilder!(file)
-                  : CachedChatAttachment(file: file, service: service))) ]);
+              sourceReceipts[file.id] != null
+                  ? _buildScopedAttachment(file, sourceReceipts[file.id]!)
+                  : kDebugMode && debugForwardAttachmentBuilder != null
+                      ? debugForwardAttachmentBuilder!(file)
+                      : CachedChatAttachment(file: file, service: service))) ]);
+  }
+
+  Widget _buildScopedAttachment(ChatFile file, ScopedForwardFile receipt) {
+    bool current() => receipt.isCurrent;
+    if (kDebugMode && debugGuardedAttachmentBuilder != null) {
+      return debugGuardedAttachmentBuilder!(file, current);
+    }
+    if (kDebugMode && debugForwardAttachmentBuilder != null) {
+      return debugForwardAttachmentBuilder!(file);
+    }
+    return CachedChatAttachment(file: file, service: service,
+      sourceIsCurrent: current, sourceChanges: ProjectChatServerCache.snapshotChanges);
   }
 }
 
@@ -148,14 +174,22 @@ class _ScopedForwardNames extends StatefulWidget {
   final Message message;
   final DmChatService service;
   final ScopedForwardAuthorResolver resolver;
-  final Widget Function(BuildContext, Map<(String, String, String), ScopedForwardAuthor>) builder;
+  final Widget Function(BuildContext, Map<(String, String, String), ScopedForwardAuthor>,
+      Map<(String, String, String, String), ScopedForwardFile>) builder;
   @override State<_ScopedForwardNames> createState() => _ScopedForwardNamesState();
 }
 
 class _ScopedForwardNamesState extends State<_ScopedForwardNames> {
   Map<(String, String, String), ScopedForwardAuthor> _names = {};
+  Map<(String, String, String, String), ScopedForwardFile> _files = {};
   int _revision = 0;
-  @override void initState() { super.initState(); _resolve(); }
+  @override void initState() { super.initState(); ProjectChatServerCache.snapshotChanges.addListener(_snapshotChanged); _resolve(); }
+  void _snapshotChanged() {
+    _revision++;
+    if (!mounted) return;
+    setState(() { _names = {}; _files = {}; });
+    _resolve();
+  }
   @override void didUpdateWidget(covariant _ScopedForwardNames oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.message, widget.message) ||
@@ -163,18 +197,25 @@ class _ScopedForwardNamesState extends State<_ScopedForwardNames> {
         !identical(oldWidget.resolver.store, widget.resolver.store) ||
         !identical(oldWidget.resolver.capabilities, widget.resolver.capabilities)) {
       _names = {};
+      _files = {};
       _resolve();
     }
   }
 
   void _resolve() {
     final revision = ++_revision;
+    if (ProjectChatServerCache.snapshotMutationInProgress) return;
     final targets = <(String, String, String)>{};
+    final fileTargets = <(String, String, String, String)>{};
     void gather(ForwardPayload payload, int depth) {
       if (depth > 3 || targets.length >= 30) return;
       for (final item in payload.items) {
         if (targets.length >= 30) break;
         targets.add((payload.fromChatId, item.messageId, item.authorId));
+        for (final file in item.files.take(10)) {
+          if (fileTargets.length >= 30) break;
+          if (file.id != null && file.id!.isNotEmpty) fileTargets.add((payload.fromChatId, item.messageId, file.id!, file.url));
+        }
         final nested = ForwardPayload.tryParse(item.text);
         if (nested != null) gather(nested, depth + 1);
       }
@@ -185,12 +226,17 @@ class _ScopedForwardNamesState extends State<_ScopedForwardNames> {
     if (structured != null) {
       for (final item in structured.items.take(30 - targets.length)) {
         targets.add((structured.fromChatId, item.id, item.authorId));
+        for (final file in item.attachments.take(10)) {
+          if (fileTargets.length >= 30) break;
+          if (file.id != null && file.id!.isNotEmpty) fileTargets.add((structured.fromChatId, item.id, file.id!, file.url));
+        }
       }
     }
     if (targets.isEmpty || !widget.service.canReadCached) return;
     unawaited(() async {
       try {
       final names = <(String, String, String), ScopedForwardAuthor>{};
+      final files = <(String, String, String, String), ScopedForwardFile>{};
       for (final target in targets) {
         if (!mounted || revision != _revision || !widget.service.canReadCached) return;
         final value = await widget.resolver.resolve(sourceChatId: target.$1,
@@ -198,8 +244,15 @@ class _ScopedForwardNamesState extends State<_ScopedForwardNames> {
         if (!mounted || revision != _revision || !widget.service.canReadCached) return;
         if (value != null && value.isCurrent) names[target] = value;
       }
+      final fileResolver = ScopedForwardFileResolver(store: widget.resolver.store, capabilities: widget.resolver.capabilities);
+      for (final target in fileTargets) {
+        if (!mounted || revision != _revision || !widget.service.canReadCached) return;
+        final value = await fileResolver.resolve(chatId: target.$1, messageId: target.$2, fileId: target.$3, url: target.$4);
+        if (!mounted || revision != _revision || !widget.service.canReadCached) return;
+        if (value != null && value.isCurrent) files[target] = value;
+      }
       if (mounted && revision == _revision && widget.service.canReadCached) {
-        setState(() => _names = names);
+        setState(() { _names = names; _files = files; });
       }
       } catch (_) {
         // A failed optional local lookup leaves the stored label unchanged.
@@ -207,10 +260,10 @@ class _ScopedForwardNamesState extends State<_ScopedForwardNames> {
     }());
   }
 
-  @override void dispose() { _revision++; super.dispose(); }
+  @override void dispose() { ProjectChatServerCache.snapshotChanges.removeListener(_snapshotChanged); _revision++; super.dispose(); }
   @override Widget build(BuildContext context) => ListenableBuilder(
     listenable: widget.resolver.capabilities,
     builder: (context, _) => widget.service.canReadCached
-        ? widget.builder(context, _names)
+        ? widget.builder(context, _names, _files)
         : const SizedBox.shrink());
 }

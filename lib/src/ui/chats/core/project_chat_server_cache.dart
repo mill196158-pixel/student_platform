@@ -120,7 +120,16 @@ class ProjectChatServerCache {
   static ProjectChatServerCache? qaInstance;
   @visibleForTesting
   Future<void> Function()? debugBeforeSummaryCommit;
+  @visibleForTesting
+  Future<void> Function()? debugBeforePageCommit;
   static final Map<String, int> _eventVersions = {};
+  /// Invalidates in-process consumers before a snapshot mutation can begin.
+  /// This does not provide cross-process invalidation.
+  static final ValueNotifier<int> snapshotChanges = ValueNotifier<int>(0);
+  static int _snapshotMutations = 0;
+  static bool get snapshotMutationInProgress => _snapshotMutations != 0;
+  static void _beginSnapshotMutation() { _snapshotMutations++; snapshotChanges.value++; }
+  static void _endSnapshotMutation() { _snapshotMutations--; snapshotChanges.value++; }
   static final Set<String> _eventQuarantine = {};
   static final Map<String, Future<void>> _eventQueues = {};
   String _eventKey(OfflineSessionBinding b, String chat) =>
@@ -146,6 +155,7 @@ class ProjectChatServerCache {
         owner.userId != binding.userId ||
         binding.issuer != '$project/auth/v1' ||
         _eventQuarantine.contains(_eventKey(binding, chat))) return null;
+    _beginSnapshotMutation();
     bool valid() {
       try {
         return scope.isCurrent(owner) &&
@@ -187,6 +197,8 @@ class ProjectChatServerCache {
       return ProjectChatPageTicket._(_issuer, owner, binding, chat, seq, isCurrent);
     } on _StalePage {
       return null;
+    } finally {
+      _endSnapshotMutation();
     }
   }
 
@@ -239,6 +251,7 @@ class ProjectChatServerCache {
       final c = a.at.compareTo(b.at);
       return c == 0 ? a.id.compareTo(b.id) : c;
     });
+    _beginSnapshotMutation();
     try {
       return await db.transaction((txn) async {
         if (!_current(t)) throw const _StalePage();
@@ -287,11 +300,14 @@ class ProjectChatServerCache {
               'payload': payload
             },
             conflictAlgorithm: ConflictAlgorithm.replace);
+        if (kDebugMode && debugBeforePageCommit != null) await debugBeforePageCommit!();
         if (!_current(t)) throw const _StalePage();
         return true;
       });
     } on _StalePage {
       return false;
+    } finally {
+      _endSnapshotMutation();
     }
   }
 
@@ -449,6 +465,7 @@ class ProjectChatServerCache {
         chat.isEmpty ||
         owner.userId != binding.userId ||
         binding.issuer != '$project/auth/v1') return false;
+    _beginSnapshotMutation();
     final key = _eventKey(binding, chat);
     final version = (_eventVersions[key] ?? 0) + 1;
     _eventVersions[key] = version;
@@ -468,6 +485,7 @@ class ProjectChatServerCache {
         _eventQuarantine.remove(key);
       done.complete();
       if (identical(_eventQueues[key], done.future)) _eventQueues.remove(key);
+      _endSnapshotMutation();
     }
   }
 
@@ -486,6 +504,7 @@ class ProjectChatServerCache {
         binding.issuer != '$project/auth/v1' ||
         (!allowEventQuarantine &&
             _eventQuarantine.contains(_eventKey(binding, chat)))) return null;
+    _beginSnapshotMutation();
     bool valid() =>
         scope.isCurrent(owner) &&
         _matches(currentBinding(), binding) &&
@@ -528,6 +547,8 @@ class ProjectChatServerCache {
           : null;
     } on _StalePage {
       return null;
+    } finally {
+      _endSnapshotMutation();
     }
   }
 
