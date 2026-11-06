@@ -7,27 +7,113 @@ import 'package:image/image.dart' as image;
 import 'package:student_platform_admin/features/content/news/admin_image_picker.dart';
 import 'package:student_platform_admin/features/content/news/admin_photo_optimizer.dart';
 import 'package:student_platform_admin/features/content/news/admin_photo_choice.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 void main() {
-  testWidgets('photo, original and cancel require an explicit decision', (tester) async {
-    bool? result;
+  test('automatic lossless PNG reports actual sizes; unsupported stays original', () async {
+    final input = image.Image(width: 600, height: 600, numChannels: 4);
+    for (var y = 0; y < input.height; y++) {
+      for (var x = 0; x < input.width; x++) {
+        final c = ((x ~/ 8 + y ~/ 8) % 2) * 255;
+        input.setPixelRgba(x, y, c, c, c, x < 50 ? 0 : 255);
+      }
+    }
+    final originalPng = image.encodePng(input, level: 0);
+    final optimized = await LocalAdminImagePicker.prepareSelected(
+        bytes: originalPng, fileName: 'qr.png', mimeType: 'image/png',
+        photoMode: true, automatic: true);
+    expect(optimized.bytes.length, lessThan(originalPng.length));
+    expect(optimized.optimizationMessage, contains('без потери'));
+    expect(await isLosslessAdminPhoto(originalPng, optimized.bytes), isTrue);
+    final jpeg = image.encodeJpg(image.Image(width: 30, height: 30));
+    final unsupported = Uint8List(600 * 1024)..setRange(0, jpeg.length, jpeg);
+    final unchanged = await LocalAdminImagePicker.prepareSelected(
+        bytes: unsupported, fileName: 'document.jpg', mimeType: 'image/jpeg',
+        photoMode: true, automatic: true);
+    expect(unchanged.bytes, orderedEquals(unsupported));
+    expect(unchanged.optimizationMessage, contains('Не удалось'));
+    final tiny = await LocalAdminImagePicker.prepareSelected(
+        bytes: jpeg, fileName: 'tiny.jpg', mimeType: 'image/jpeg',
+        photoMode: true, automatic: true);
+    expect(tiny.bytes, orderedEquals(jpeg));
+    expect(tiny.optimizationMessage, isNull);
+  });
+  testWidgets('compressed photo, original and cancel are reviewable', (tester) async {
+    PickedAdminImage? result;
     var completed = false;
+    var current = true;
+    final invalidation = ValueNotifier<int>(0);
+    final auth = StreamController<AuthState>.broadcast(sync: true);
+    addTearDown(invalidation.dispose);
+    addTearDown(auth.close);
+    final original = image.encodeJpg(image.Image(width: 24, height: 24), quality: 100);
+    final compressed = image.encodeJpg(image.Image(width: 24, height: 24), quality: 70);
+    final picked = PickedAdminImage(bytes: compressed, originalBytes: original,
+        fileName: 'photo.jpg', mimeType: 'image/jpeg');
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: Builder(
       builder: (context) => TextButton(onPressed: () async {
-        result = await showAdminPhotoMode(context);
+        result = await reviewAdminImage(context, picked, isCurrent: () => current,
+            invalidation: invalidation, authEvents: auth.stream);
         completed = true;
       }, child: const Text('Выбрать')),
     ))));
-    for (final choice in ['Сжать фото', 'Оригинал', 'Отмена']) {
+    for (final choice in ['Использовать уменьшенное', 'Оставить оригинал', 'Отмена']) {
       completed = false;
       await tester.tap(find.text('Выбрать'));
       await tester.pumpAndSettle();
       expect(find.textContaining('геоданные'), findsOneWidget);
+      expect(find.byType(InteractiveViewer), findsNWidgets(2));
       await tester.tap(find.text(choice));
       await tester.pumpAndSettle();
       expect(completed, isTrue);
-      expect(result, choice == 'Отмена' ? null : choice == 'Сжать фото');
+      if (choice == 'Отмена') {
+        expect(result, isNull);
+      } else {
+        expect(result!.bytes, orderedEquals(choice == 'Оставить оригинал' ? original : compressed));
+      }
     }
+    completed = false;
+    await tester.tap(find.text('Выбрать'));
+    await tester.pumpAndSettle();
+    current = false;
+    invalidation.value++;
+    await tester.pump();
+    expect(find.byType(Image), findsNothing);
+    await tester.pumpAndSettle();
+    expect(completed, isTrue);
+    expect(result, isNull);
+    expect(find.text('Изображение уменьшено'), findsNothing);
+    current = true;
+    completed = false;
+    await tester.tap(find.text('Выбрать'));
+    await tester.pumpAndSettle();
+    // SDK can deliver the auth event before its currentSession getter changes.
+    auth.add(AuthState(AuthChangeEvent.signedOut, null));
+    await tester.pump();
+    expect(find.byType(Image), findsNothing);
+    await tester.pumpAndSettle();
+    expect(result, isNull);
+    expect(completed, isTrue);
+  });
+
+  testWidgets('oversized original is clearly unavailable and cannot be chosen', (tester) async {
+    final jpeg = image.encodeJpg(image.Image(width: 24, height: 24));
+    final oversized = Uint8List(LocalAdminImagePicker.maxBytes + 1)
+      ..setRange(0, jpeg.length, jpeg);
+    final picked = PickedAdminImage(bytes: jpeg, originalBytes: oversized,
+        fileName: 'photo.jpg', mimeType: 'image/jpeg');
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: Builder(
+      builder: (context) => TextButton(onPressed: () {
+        reviewAdminImage(context, picked, isCurrent: () => true);
+      }, child: const Text('Выбрать')),
+    ))));
+    await tester.tap(find.text('Выбрать'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Оригинал больше 5 МБ'), findsOneWidget);
+    final button = tester.widget<TextButton>(find.widgetWithText(TextButton, 'Оставить оригинал'));
+    expect(button.onPressed, isNull);
+    await tester.tap(find.text('Отмена'));
+    await tester.pumpAndSettle();
   });
 
   test(
@@ -59,6 +145,7 @@ void main() {
         fileName: 'photo.jpeg',
         mimeType: 'image/jpeg',
         photoMode: true,
+        automatic: true,
         optimizer: (_) async {
           calls++;
           return encoded;
@@ -69,6 +156,7 @@ void main() {
       expect(result.mimeType, 'image/jpeg');
       expect(result.fileName, 'photo.jpg');
       expect(input, orderedEquals(before));
+      expect(result.originalBytes, orderedEquals(before));
     var current = true, staleCalls = 0;
     final stale = LocalAdminImagePicker.prepareSelected(
         bytes: input, fileName: 'photo.jpg', mimeType: 'image/jpeg',

@@ -30,7 +30,8 @@ Future<void> _run() async {
     stage = 'photo';
     clock.stop(); timer.cancel();
     final compressed = await LocalAdminImagePicker.prepareSelected(
-        bytes: source, fileName: 'synthetic.jpg', mimeType: 'image/jpeg', photoMode: true);
+        bytes: source, fileName: 'synthetic.jpg', mimeType: 'image/jpeg',
+        photoMode: true, automatic: true);
     stage = 'original';
     final original = await LocalAdminImagePicker.prepareSelected(
         bytes: source, fileName: 'synthetic.jpg', mimeType: 'image/jpeg', photoMode: false);
@@ -50,7 +51,8 @@ Future<void> _run() async {
     result.addAll({'before': source.length, 'after': compressed.bytes.length,
       'mean': error / samples, 'eligible': eligible, 'ticks': ticks,
       'validationMs': clock.elapsedMilliseconds,
-      'originalSame': listEquals(original.bytes, saved) && listEquals(source, saved),
+      'originalSame': listEquals(original.bytes, saved) && listEquals(source, saved) &&
+          listEquals(compressed.originalBytes, saved),
       'windowsTarget': defaultTargetPlatform == TargetPlatform.windows,
       'mime': compressed.mimeType});
   } catch (error) {

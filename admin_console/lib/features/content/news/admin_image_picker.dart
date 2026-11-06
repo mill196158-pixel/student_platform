@@ -10,11 +10,16 @@ class PickedAdminImage {
     required this.bytes,
     required this.fileName,
     required this.mimeType,
+    this.originalBytes,
+    this.optimizationMessage,
   });
 
   final Uint8List bytes;
   final String fileName;
   final String mimeType;
+  /// Retained only until the sender accepts or rejects a lossy conversion.
+  final Uint8List? originalBytes;
+  final String? optimizationMessage;
 }
 
 class AdminImagePickException implements Exception {
@@ -34,12 +39,13 @@ abstract class AdminImagePicker {
 }
 
 class LocalAdminImagePicker implements AdminImagePicker {
-  const LocalAdminImagePicker({this.photoMode, this.isCurrent});
+  const LocalAdminImagePicker({this.photoMode, this.isCurrent, this.automatic = false});
 
   /// Null retains legacy behavior. True is explicit photo compression; false
   /// preserves the original bytes, including QR codes and documents.
   final bool? photoMode;
   final bool Function()? isCurrent;
+  final bool automatic;
   static const allowedExtensions = ['jpg', 'jpeg', 'png', 'webp'];
   static const allowedMimeTypes = {'image/jpeg', 'image/png', 'image/webp'};
   static const maxBytes = 5 * 1024 * 1024;
@@ -70,6 +76,7 @@ class LocalAdminImagePicker implements AdminImagePicker {
       mimeType: _guessMimeType(file.name, file.extension),
       photoMode: photoMode,
       isCurrent: isCurrent,
+      automatic: automatic,
     );
     return (isCurrent?.call() ?? true) ? selected : null;
   }
@@ -83,6 +90,7 @@ class LocalAdminImagePicker implements AdminImagePicker {
     Future<Uint8List?> Function(Uint8List)? optimizer,
     bool? photoMode,
     bool Function()? isCurrent,
+    bool automatic = false,
   }) async {
     final original = _validateAndWrap(
       bytes: Uint8List.fromList(bytes),
@@ -122,7 +130,8 @@ class LocalAdminImagePicker implements AdminImagePicker {
     }
     Uint8List? optimized;
     try {
-      if (actualMime == 'image/png') {
+      if (actualMime == 'image/png' &&
+          (!automatic || original.bytes.length > 512 * 1024)) {
         final result = await (optimizer ?? optimizeAdminPhoto)(
           Uint8List.fromList(original.bytes),
         );
@@ -161,12 +170,26 @@ class LocalAdminImagePicker implements AdminImagePicker {
           'Не удалось уменьшить изображение до 5 МБ. Выберите другой файл.',
         );
       }
+      if (automatic && original.bytes.length > 512 * 1024) {
+        return PickedAdminImage(
+          bytes: safeOriginal.bytes,
+          fileName: safeOriginal.fileName,
+          mimeType: safeOriginal.mimeType,
+          optimizationMessage: 'Не удалось безопасно уменьшить изображение '
+              '(${(original.bytes.length / 1024).ceil()} КБ). Выбран оригинал.',
+        );
+      }
       return safeOriginal;
     }
     return PickedAdminImage(
       bytes: optimized!,
       fileName: '$stem.${actualMime == 'image/jpeg' ? 'jpg' : 'png'}',
       mimeType: actualMime,
+      originalBytes: automatic && actualMime == 'image/jpeg'
+          ? Uint8List.fromList(original.bytes) : null,
+      optimizationMessage: automatic && actualMime == 'image/png'
+          ? 'PNG без потери качества: ${(original.bytes.length / 1024).ceil()} → ${(optimized!.length / 1024).ceil()} КБ.'
+          : null,
     );
   }
 

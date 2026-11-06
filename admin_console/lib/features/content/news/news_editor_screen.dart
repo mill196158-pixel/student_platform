@@ -54,13 +54,17 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
   List<NewsItem> _items = [];
   String? _selectedIdValue;
   int _imagePickRevision = 0;
+  final _imagePickChanges = ValueNotifier<int>(0);
   String? get _selectedId => _selectedIdValue;
   set _selectedId(String? value) {
-    if (_selectedIdValue != value) _imagePickRevision++;
+    if (_selectedIdValue != value) _invalidateImagePick();
     _selectedIdValue = value;
   }
 
-  void _invalidateImagePick() => _imagePickRevision++;
+  void _invalidateImagePick() {
+    _imagePickRevision++;
+    _imagePickChanges.value = _imagePickRevision;
+  }
   _NewsListTab _listTab = _NewsListTab.published;
   final Map<String, Uint8List> _resolvedBytes = {};
 
@@ -159,6 +163,7 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
   void dispose() {
     widget.session?.removeListener(_invalidateImagePick);
     _invalidateImagePick();
+    _imagePickChanges.dispose();
     _titleController.dispose();
     _subtitleController.dispose();
     _bodyController.dispose();
@@ -874,7 +879,8 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
   Future<void> _pickImage() async {
     final selected = _selected;
     if (selected == null || !_canWrite) return;
-    final revision = ++_imagePickRevision;
+    _invalidateImagePick();
+    final revision = _imagePickRevision;
     final session = widget.session;
     final auth = _tryClient()?.auth.currentSession;
     bool current() {
@@ -890,7 +896,8 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
     }
 
     try {
-      final picked = await pickAdminImageForEditor(context, _imagePicker, isCurrent: current);
+      final picked = await pickAdminImageForEditor(context, _imagePicker, isCurrent: current,
+          invalidation: _imagePickChanges, authEvents: _tryClient()?.auth.onAuthStateChange);
       if (picked == null || !current()) return;
       final stored = await _imageStore.put(
         bytes: picked.bytes,

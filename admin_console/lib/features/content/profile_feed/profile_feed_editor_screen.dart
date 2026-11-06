@@ -80,12 +80,16 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
   List<ProfileFeedItem> _items = [];
   String? _selectedIdValue;
   int _imagePickRevision = 0;
+  final _imagePickChanges = ValueNotifier<int>(0);
   String? get _selectedId => _selectedIdValue;
   set _selectedId(String? value) {
-    if (_selectedIdValue != value) _imagePickRevision++;
+    if (_selectedIdValue != value) _invalidateImagePick();
     _selectedIdValue = value;
   }
-  void _invalidateImagePick() => _imagePickRevision++;
+  void _invalidateImagePick() {
+    _imagePickRevision++;
+    _imagePickChanges.value = _imagePickRevision;
+  }
   VisualEditorListTab _listTab = VisualEditorListTab.published;
   bool _showDemoOnly = false;
   bool _loading = true;
@@ -195,6 +199,7 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
   void dispose() {
     widget.session?.removeListener(_invalidateImagePick);
     _invalidateImagePick();
+    _imagePickChanges.dispose();
     _titleController.dispose();
     _subtitleController.dispose();
     _ctaLabelController.dispose();
@@ -973,7 +978,8 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
         !_canWrite) {
       return;
     }
-    final revision = ++_imagePickRevision;
+    _invalidateImagePick();
+    final revision = _imagePickRevision;
     final session = widget.session;
     final auth = _tryClient()?.auth.currentSession;
     bool current() {
@@ -988,7 +994,8 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
     PickedAdminImage? picked;
     try {
       picked = await pickAdminImageForEditor(context,
-          widget.imagePicker ?? const LocalAdminImagePicker(), isCurrent: current);
+          widget.imagePicker ?? const LocalAdminImagePicker(), isCurrent: current,
+          invalidation: _imagePickChanges, authEvents: _tryClient()?.auth.onAuthStateChange);
     } on AdminImagePickException catch (error) {
       if (current()) _showBanner(error.message);
       return;

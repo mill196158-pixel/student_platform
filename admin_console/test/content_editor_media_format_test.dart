@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as image;
 import 'package:student_platform_admin/core/auth/admin_backend_config.dart';
 import 'package:student_platform_admin/features/content/home_promo/home_promo_editor_screen.dart';
 import 'package:student_platform_admin/features/content/home_promo/home_promo_repository.dart';
@@ -39,6 +40,47 @@ class _Store extends ContentMediaStore {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  for (final home in [true, false]) {
+    for (final keepOriginal in [true, false]) {
+      testWidgets('${home ? 'home' : 'profile'} review chooses ${keepOriginal ? 'original' : 'compressed'}', (tester) async {
+        AdminBackendConfig.debugDemoModeOverride = true;
+        addTearDown(() => AdminBackendConfig.debugDemoModeOverride = null);
+        await tester.binding.setSurfaceSize(const Size(1400, 1600));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final pixels = image.Image(width: 20, height: 20);
+        pixels.setPixelRgb(0, 0, 255, 0, 0);
+        final original = image.encodeJpg(pixels, quality: 100);
+        final smaller = image.encodeJpg(pixels, quality: 70);
+        final picker = _Picker(PickedAdminImage(bytes: smaller, originalBytes: original,
+            fileName: 'photo.jpg', mimeType: 'image/jpeg'));
+        final store = _Store();
+        await tester.pumpWidget(MaterialApp(home: Scaffold(body: home
+            ? HomePromoEditorScreen(repository: LocalHomePromoRepository(), mediaStore: store, imagePicker: picker)
+            : ProfileFeedEditorScreen(repository: LocalProfileFeedRepository(), mediaStore: store, imagePicker: picker))));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Создать черновик'));
+        await tester.pumpAndSettle();
+        final properties = find.ancestor(of: find.byWidgetPredicate(
+            (w) => w is TextField && w.decoration?.labelText == 'Заголовок'),
+            matching: find.byType(Scrollable)).first;
+        final scrollable = tester.widget<Scrollable>(properties);
+        await tester.scrollUntilVisible(find.text(home ? 'Загрузить' : 'Иллюстрация'), 200,
+            scrollable: find.byWidget(scrollable));
+        final upload = find.ancestor(of: find.text(home ? 'Загрузить' : 'Иллюстрация'),
+            matching: find.byWidgetPredicate((w) => w is OutlinedButton));
+        tester.widget<OutlinedButton>(upload).onPressed!();
+        await tester.pumpAndSettle();
+        expect(store.data, isNull);
+        await tester.tap(find.text(keepOriginal ? 'Оставить оригинал' : 'Использовать уменьшенное'));
+        await tester.pumpAndSettle();
+        final save = find.ancestor(of: find.text('Сохранить черновик'),
+            matching: find.byWidgetPredicate((w) => w is OutlinedButton));
+        tester.widget<OutlinedButton>(save).onPressed!();
+        await tester.pumpAndSettle();
+        expect(store.data, orderedEquals(keepOriginal ? original : smaller));
+      });
+    }
+  }
   for (final entry in [
     ('tiny.jpg', 'image/jpeg'),
     ('tiny.webp', 'image/webp'),

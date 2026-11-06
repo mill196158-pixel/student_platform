@@ -87,12 +87,16 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
   List<StudentHomeNews> _previewNews = const [];
   String? _selectedIdValue;
   int _imagePickRevision = 0;
+  final _imagePickChanges = ValueNotifier<int>(0);
   String? get _selectedId => _selectedIdValue;
   set _selectedId(String? value) {
-    if (_selectedIdValue != value) _imagePickRevision++;
+    if (_selectedIdValue != value) _invalidateImagePick();
     _selectedIdValue = value;
   }
-  void _invalidateImagePick() => _imagePickRevision++;
+  void _invalidateImagePick() {
+    _imagePickRevision++;
+    _imagePickChanges.value = _imagePickRevision;
+  }
   VisualEditorListTab _listTab = VisualEditorListTab.published;
   bool _showDemoOnly = false;
 
@@ -236,6 +240,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
   void dispose() {
     widget.session?.removeListener(_invalidateImagePick);
     _invalidateImagePick();
+    _imagePickChanges.dispose();
     _titleController.dispose();
     _subtitleController.dispose();
     _ctaLabelController.dispose();
@@ -1251,7 +1256,8 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
   Future<void> _pickImage() async {
     final selected = _selected;
     if (selected == null || !_canWrite || selected.isArchived) return;
-    final revision = ++_imagePickRevision;
+    _invalidateImagePick();
+    final revision = _imagePickRevision;
     final session = widget.session;
     final auth = _tryClient()?.auth.currentSession;
     bool current() {
@@ -1262,7 +1268,8 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
           auth?.refreshToken == now?.refreshToken;
     }
     try {
-      final picked = await pickAdminImageForEditor(context, _imagePicker, isCurrent: current);
+      final picked = await pickAdminImageForEditor(context, _imagePicker, isCurrent: current,
+          invalidation: _imagePickChanges, authEvents: _tryClient()?.auth.onAuthStateChange);
       if (picked == null || !current()) return;
       setState(() {
         _imageIntent[selected.id] =

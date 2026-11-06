@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as image;
 import 'package:student_platform_admin/features/content/news/admin_image_picker.dart';
 import 'package:student_platform_admin/features/content/news/admin_image_store.dart';
 import 'package:student_platform_admin/features/content/news/news_editor_screen.dart';
@@ -92,6 +93,39 @@ class _FakePicker implements AdminImagePicker {
 }
 
 void main() {
+  for (final keepOriginal in [true, false]) {
+    testWidgets('news review chooses ${keepOriginal ? 'original' : 'compressed'}', (tester) async {
+      tester.view.physicalSize = const Size(1440, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final pixels = image.Image(width: 20, height: 20);
+      pixels.setPixelRgb(0, 0, 255, 0, 0);
+      final original = image.encodeJpg(pixels, quality: 100);
+      final smaller = image.encodeJpg(pixels, quality: 70);
+      final store = LocalAdminImageStore();
+      final picker = _FakePicker(PickedAdminImage(bytes: smaller, originalBytes: original,
+          fileName: 'photo.jpg', mimeType: 'image/jpeg'));
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: NewsEditorScreen(
+        repository: LocalNewsRepository(seed: const [NewsItem(
+          id: 'local-1', title: 'Без картинки', subtitle: 'Пока пусто',
+          variant: StudentHomeNewsVariant.imageWithText,
+          colors: [Color(0xFFF3A95F), Color(0xFFE66E75)], status: NewsStatus.draft,
+        )]), imageStore: store, imagePicker: picker,
+      ))));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Черновики'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Без картинки').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Выбрать изображение'));
+      await tester.pumpAndSettle();
+      expect(store.getBytes('local-image-1'), isNull);
+      await tester.tap(find.text(keepOriginal ? 'Оставить оригинал' : 'Использовать уменьшенное'));
+      await tester.pumpAndSettle();
+      expect(store.getBytes('local-image-1'), orderedEquals(keepOriginal ? original : smaller));
+    });
+  }
   test('new image preparation retains fallback and keeps MIME aligned', () async {
     final source = Uint8List.fromList(_pngBytes);
     final jpeg = Uint8List.fromList([255, 216, 255, 1]);
