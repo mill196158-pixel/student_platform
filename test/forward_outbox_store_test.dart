@@ -80,6 +80,115 @@ void main() {
     expect(await store.acknowledge(second), ForwardAcknowledgeResult.removed);
     expect(await store.acknowledge(second), ForwardAcknowledgeResult.changed);
   });
+  test('vacant reservation preserves previous and unreadable entries',
+      () async {
+    final owner = scope.capture()!;
+    await store.putIfVacant(owner, 'chat', text: 'first', files: ['f']);
+    final original = storage.values['forward_outbox_a_chat'];
+    await expectLater(store.putIfVacant(owner, 'chat', text: 'second'),
+        throwsA(isA<ForwardOutboxOccupied>()));
+    expect(storage.values['forward_outbox_a_chat'], original);
+    expect((await store.peek(owner, 'chat'))?.text, 'first');
+    storage.values['forward_outbox_a_chat'] = '{broken';
+    await expectLater(store.putIfVacant(owner, 'chat', text: 'second'),
+        throwsA(isA<ForwardOutboxOccupied>()));
+    expect(storage.values['forward_outbox_a_chat'], '{broken');
+  });
+
+  test('concurrent reservations cannot overwrite the winning entry', () async {
+    final owner = scope.capture()!;
+    final first = store.putIfVacant(owner, 'chat', text: 'first');
+    final second = store.putIfVacant(owner, 'chat', text: 'second');
+    final rejected = expectLater(second, throwsA(isA<ForwardOutboxOccupied>()));
+    await first;
+    await rejected;
+    expect((await store.peek(owner, 'chat'))?.text, 'first');
+  });
+
+  test('a new store sees and preserves an unfinished reservation', () async {
+    final owner = scope.capture()!;
+    await store.putIfVacant(owner, 'chat', text: 'pending', files: ['f']);
+    store.dispose();
+    store = ForwardOutboxStore(scope, ForwardOutboxCoordinator(storage));
+    final restored = await store.peek(owner, 'chat');
+    expect(restored?.text, 'pending');
+    expect(restored?.files, ['f']);
+    await expectLater(store.putIfVacant(owner, 'chat', text: 'replacement'),
+        throwsA(isA<ForwardOutboxOccupied>()));
+    expect((await store.peek(owner, 'chat'))?.text, 'pending');
+  });
+
+  test('vacant reservation copies input lists before delayed read', () async {
+    final owner = scope.capture()!;
+    storage.readEntered = Completer<void>();
+    storage.readRelease = Completer<void>();
+    final files = ['original-url'];
+    final ids = ['original-id'];
+    final put = store.putIfVacant(owner, 'chat',
+        text: 'pending', files: files, fileIds: ids);
+    await storage.readEntered!.future;
+    files[0] = 'changed-url';
+    ids[0] = 'changed-id';
+    storage.readRelease!.complete();
+    storage.readEntered = null;
+    storage.readRelease = null;
+    await put;
+    final restored = (await store.peek(owner, 'chat'))!;
+    expect(restored.files, ['original-url']);
+    expect(restored.fileIds, ['original-id']);
+  });
+
+  for (final failure in ['write-false', 'write-throw']) {
+    test('vacant $failure restores missing slot', () async {
+      final owner = scope.capture()!;
+      storage.failures.add(failure);
+      await expectLater(store.putIfVacant(owner, 'chat', text: 'pending'),
+          throwsA(isA<ForwardOutboxStorageFailure>()));
+      expect(storage.values.containsKey('forward_outbox_a_chat'), isFalse);
+      expect(await store.peek(owner, 'chat'), isNull);
+    });
+  }
+
+  for (final failure in ['remove-false', 'remove-throw']) {
+    test('vacant rollback $failure quarantines only the affected chat',
+        () async {
+      final owner = scope.capture()!;
+      storage.failures.addAll(['write-false', failure]);
+      await expectLater(store.putIfVacant(owner, 'chat', text: 'pending'),
+          throwsA(isA<ForwardOutboxStorageFailure>()));
+      await expectLater(store.peek(owner, 'chat'),
+          throwsA(isA<ForwardOutboxStorageFailure>()));
+      final replacement = ForwardOutboxStore(scope, store.coordinator);
+      await expectLater(replacement.peek(owner, 'chat'),
+          throwsA(isA<ForwardOutboxStorageFailure>()));
+      await replacement.putIfVacant(owner, 'other', text: 'safe');
+      expect((await replacement.peek(owner, 'other'))?.text, 'safe');
+      replacement.dispose();
+    });
+  }
+
+  for (final operation in ['session change', 'dispose']) {
+    test('vacant write rolls back on $operation', () async {
+      final owner = scope.capture()!;
+      storage.writeEntered = Completer<void>();
+      storage.writeRelease = Completer<void>();
+      final put = store.putIfVacant(owner, 'chat', text: 'pending');
+      final rejected = expectLater(put, throwsA(isA<StateError>()));
+      await storage.writeEntered!.future;
+      if (operation == 'dispose') {
+        store.dispose();
+      } else {
+        session = fakeSession('b');
+        events.add(AuthState(AuthChangeEvent.signedIn, session));
+      }
+      storage.writeRelease!.complete();
+      storage.writeEntered = null;
+      storage.writeRelease = null;
+      await rejected;
+      expect(storage.values.containsKey('forward_outbox_a_chat'), isFalse);
+      expect(storage.values.containsKey('forward_outbox_b_chat'), isFalse);
+    });
+  }
   test('legacy read is non-destructive and invalid data stays intact',
       () async {
     final owner = scope.capture()!;

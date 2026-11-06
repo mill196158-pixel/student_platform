@@ -16,6 +16,10 @@ class ForwardOutboxStorageFailure implements Exception {
   const ForwardOutboxStorageFailure();
 }
 
+class ForwardOutboxOccupied implements Exception {
+  const ForwardOutboxOccupied();
+}
+
 enum ForwardAcknowledgeResult { removed, changed, missing }
 
 class ForwardOutboxCoordinator {
@@ -90,6 +94,39 @@ class ForwardOutboxStore {
   String _newVersion() => List.generate(24, (_) => _random.nextInt(256))
       .map((v) => v.toRadixString(16).padLeft(2, '0'))
       .join();
+
+  /// Reserves an empty slot without replacing even an unreadable old entry.
+  /// This is an isolated preparation API; it does not start uploads or send.
+  Future<void> putIfVacant(AuthOperationScope owner, String chatId,
+      {required String text,
+      List<String> files = const [],
+      List<String> fileIds = const []}) {
+    if (chatId.trim().isEmpty) throw const FormatException('Missing chat');
+    if (ForwardPayload.isForwardText(text) &&
+        ForwardPayload.tryParse(text) == null) {
+      throw const FormatException('Invalid forward payload');
+    }
+    final capturedFiles = List<String>.of(files);
+    final capturedIds = List<String>.of(fileIds);
+    final key = _key(owner, chatId.trim());
+    return coordinator.serial(key, () async {
+      _check(owner, key);
+      final previous = await _read(key);
+      _check(owner, key);
+      if (previous != null) throw const ForwardOutboxOccupied();
+      final raw = jsonEncode({
+        'version': _newVersion(),
+        'text': text,
+        'files': capturedFiles,
+        'file_ids': capturedIds,
+      });
+      await _mutate(key, null, () => coordinator.storage.write(key, raw));
+      if (!_isCurrent(owner)) {
+        await _restore(key, null);
+        throw StateError('Session changed');
+      }
+    });
+  }
 
   Future<void> put(AuthOperationScope owner, String chatId,
       {required String text,
