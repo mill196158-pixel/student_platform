@@ -282,7 +282,8 @@ class SqlitePolicyGrantStore {
 
   /// The caller must separately verify that a live policy result allows access.
   Future<bool> saveAllowed(
-      SqliteLiveGrantAttempt attempt, OfflinePolicyGrant grant) {
+      SqliteLiveGrantAttempt attempt, OfflinePolicyGrant grant,
+      {bool Function()? stillCurrent}) {
     if (!identical(attempt._issuer, _issuer) || attempt._used)
       return Future.value(false);
     attempt._used = true;
@@ -292,7 +293,15 @@ class SqlitePolicyGrantStore {
             null ||
         !grant.matchesForLocalSnapshot(b, now: grant.checkedAt) ||
         grant.checkedAt.isAfter(_clock().toUtc())) return Future.value(false);
-    bool current() => _current(attempt._owner, b, attempt._memoryRevision);
+    bool current() {
+      try {
+        return _current(attempt._owner, b, attempt._memoryRevision) &&
+            (stillCurrent?.call() ?? true);
+      } catch (_) {
+        return false;
+      }
+    }
+
     return coordinator.serial(_key(b), () async {
       if (!current()) return false;
       try {

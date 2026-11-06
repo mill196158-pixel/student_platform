@@ -36,6 +36,7 @@ class OfflineStartupAdmission {
       this.policy,
       this.backend,
       this.publicKey,
+      this.onOnlineAdmitted,
       this.policyTimeout = const Duration(seconds: 12)});
   final SupabaseClient client;
   final AuthSessionScope scope;
@@ -51,6 +52,9 @@ class OfflineStartupAdmission {
   final Uri? backend;
   final String? publicKey;
   final Duration policyTimeout;
+  final void Function(
+          AuthOperationScope, OfflineSessionBinding, SessionCapabilities)?
+      onOnlineAdmitted;
   bool _used = false;
 
   Future<OfflineStartupResult> resolve(SessionCapabilities capabilities) async {
@@ -87,8 +91,10 @@ class OfflineStartupAdmission {
           !monitor.eligible) {
         return OfflineStartupResult.unavailable;
       }
-      return await _issueCachedRead(capabilities, requireRefreshFailures: true,
-          refreshError: refreshError, authSignalBefore: authSignalBefore);
+      return await _issueCachedRead(capabilities,
+          requireRefreshFailures: true,
+          refreshError: refreshError,
+          authSignalBefore: authSignalBefore);
     } catch (_) {
       // Unknown storage/transport failure is never an offline permit.
       capabilities.block();
@@ -145,7 +151,8 @@ class OfflineStartupAdmission {
         if (!scope.isCurrent(owner) || !fence.unchangedSince(fenceRevision))
           return OfflineStartupResult.unavailable;
         final authorization = caps.beginAuthorization(owner);
-        if (authorization == null || !scope.isCurrent(owner) ||
+        if (authorization == null ||
+            !scope.isCurrent(owner) ||
             !fence.unchangedSince(fenceRevision)) {
           return OfflineStartupResult.unavailable;
         }
@@ -156,12 +163,14 @@ class OfflineStartupAdmission {
         }
         // grant() notifies listeners synchronously; one may invalidate the
         // owner or capability during that notification.
-        if (!scope.isCurrent(owner) || !fence.unchangedSince(fenceRevision) ||
+        if (!scope.isCurrent(owner) ||
+            !fence.unchangedSince(fenceRevision) ||
             caps.mode != SessionCapabilityMode.online) {
           caps.block();
           unawaited(gate.suspendAndDrain());
           return OfflineStartupResult.unavailable;
         }
+        onOnlineAdmitted?.call(owner, binding, caps);
         return OfflineStartupResult.online;
       case SettledPolicyStatus.passwordChangeRequired:
       case SettledPolicyStatus.denied:
@@ -182,7 +191,8 @@ class OfflineStartupAdmission {
 
   Future<OfflineStartupResult> _issueCachedRead(
       SessionCapabilities capabilities,
-      {required bool requireRefreshFailures, Object? refreshError,
+      {required bool requireRefreshFailures,
+      Object? refreshError,
       int? authSignalBefore}) async {
     if (!scope.isCurrent(owner) ||
         !fence.unchangedSince(fenceRevision) ||
@@ -199,26 +209,32 @@ class OfflineStartupAdmission {
     if (attempt == null ||
         !capabilities.grant(SessionCapabilityMode.cacheOnly, attempt))
       return OfflineStartupResult.unavailable;
-    if (requireRefreshFailures && refreshError != null &&
+    if (requireRefreshFailures &&
+        refreshError != null &&
         authSignalBefore != null &&
         scope.authSignalRevision == authSignalBefore + 1 &&
         identical(scope.lastAuthError, refreshError) &&
-        gate.nonRefreshAuthRevision == 0 && gate.suppressedAuthRevision == 0 &&
+        gate.nonRefreshAuthRevision == 0 &&
+        gate.suppressedAuthRevision == 0 &&
         gate.activeAuthOperations == 0) {
       final permit = capabilities.capture(SessionCapability.cachedRead);
       final signal = scope.authSignalRevision;
       final gateSignal = gate.authSignals.value;
       if (permit != null) {
-        bool valid() => scope.isCurrent(owner) &&
+        bool valid() =>
+            scope.isCurrent(owner) &&
             scope.authSignalRevision == signal &&
             identical(scope.lastAuthError, refreshError) &&
             capabilities.mode == SessionCapabilityMode.cacheOnly &&
             capabilities.permits(permit, SessionCapability.cachedRead) &&
-            fence.unchangedSince(fenceRevision) && monitor.eligible &&
-            gate.nonRefreshAuthRevision == 0 && gate.suppressedAuthRevision == 0 &&
-            gate.activeAuthOperations == 0 && gate.authSignals.value == gateSignal;
-        OfflineAuthErrorReceipt.instance.install(refreshError, valid,
-            [scope, capabilities, gate.authSignals]);
+            fence.unchangedSince(fenceRevision) &&
+            monitor.eligible &&
+            gate.nonRefreshAuthRevision == 0 &&
+            gate.suppressedAuthRevision == 0 &&
+            gate.activeAuthOperations == 0 &&
+            gate.authSignals.value == gateSignal;
+        OfflineAuthErrorReceipt.instance.install(
+            refreshError, valid, [scope, capabilities, gate.authSignals]);
       }
     }
     return OfflineStartupResult.cacheOnly;

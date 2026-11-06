@@ -42,6 +42,7 @@ import 'src/core/sqlite_policy_grant_store.dart';
 import 'src/core/coordinated_refresh_client.dart';
 import 'src/core/refresh_security_fence.dart';
 import 'src/core/offline_startup_admission.dart';
+import 'src/core/refresh_policy_grant_observer.dart';
 import 'src/core/settled_policy_transport.dart';
 import 'src/core/auth_transition_host.dart';
 import 'src/core/serial_auth_local_storage.dart';
@@ -76,6 +77,7 @@ const _offlineUiQa = bool.fromEnvironment('OFFLINE_UI_QA');
 AuthSessionScope? _policyQaScope;
 SqlitePolicyGrantStore? _policyQaStore;
 OfflineStartupAdmission? _policyQaAdmission;
+RefreshPolicyGrantObserver? _qaRefreshGrantObserver;
 HomeContentCoordinator? _qaHomeContent;
 
 /// ===== GoRouter =====
@@ -344,6 +346,12 @@ Future<void> _initializeApp(
       final fenceRevision = refreshFence.revision;
       _policyQaScope = scope;
       _policyQaStore = store;
+      if (_offlineUiQa) {
+        _qaRefreshGrantObserver = RefreshPolicyGrantObserver(client: client,
+          scope: scope, store: store, gate: gate, fence: refreshFence,
+          policy: SettledPolicyTransport(inner), backend: Uri.parse(SupabaseConfig.url),
+          publicKey: SupabaseConfig.anonKey);
+      }
       if (owner != null && sessionBinding != null) {
         _policyQaAdmission = OfflineStartupAdmission(
             client: client,
@@ -358,7 +366,9 @@ Future<void> _initializeApp(
             fenceRevision: fenceRevision,
             policy: SettledPolicyTransport(inner),
             backend: Uri.parse(SupabaseConfig.url),
-            publicKey: SupabaseConfig.anonKey);
+            publicKey: SupabaseConfig.anonKey,
+            onOnlineAdmitted: (owner, binding, caps) =>
+                _qaRefreshGrantObserver?.arm(owner, binding, caps));
       }
       gate.bind(CoordinatedRefreshClient(inner, store,
           currentRefreshToken: () => client.auth.currentSession?.refreshToken,

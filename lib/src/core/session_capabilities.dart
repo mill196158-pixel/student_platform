@@ -6,6 +6,8 @@ enum SessionCapabilityMode { blocked, online, cacheOnly }
 
 enum SessionCapability { cachedRead, networkRead, mutation, background }
 
+enum CapabilityBlockReason { explicit, ownerChanged }
+
 /// Tracks what an already-authorized session may do. This class does not
 /// authenticate users or determine whether offline admission is allowed.
 class SessionCapabilities extends ChangeNotifier {
@@ -19,6 +21,9 @@ class SessionCapabilities extends ChangeNotifier {
   AuthOperationScope? _owner;
   int _revision = 0;
   bool _disposed = false;
+  CapabilityBlockReason? _lastBlockReason;
+  int get revision => _revision;
+  CapabilityBlockReason? get lastBlockReason => _lastBlockReason;
 
   SessionCapabilityMode get mode {
     final owner = _owner;
@@ -32,6 +37,7 @@ class SessionCapabilities extends ChangeNotifier {
   CapabilityAuthorizationAttempt? beginAuthorization(AuthOperationScope owner) {
     if (_disposed || !_session.isCurrent(owner)) return null;
     _mode = SessionCapabilityMode.blocked;
+    _lastBlockReason = CapabilityBlockReason.explicit;
     _owner = null;
     _revision++;
     final attempt = CapabilityAuthorizationAttempt._(_issuer, owner, _revision);
@@ -49,15 +55,19 @@ class SessionCapabilities extends ChangeNotifier {
         attempt._revision != _revision ||
         !_session.isCurrent(attempt._owner)) return false;
     _mode = mode;
+    _lastBlockReason = null;
     _owner = attempt._owner;
     _revision++;
     notifyListeners();
     return true;
   }
 
-  void block() {
+  void block() => _block(CapabilityBlockReason.explicit);
+
+  void _block(CapabilityBlockReason reason) {
     if (_disposed) return;
     _mode = SessionCapabilityMode.blocked;
+    _lastBlockReason = reason;
     _owner = null;
     _revision++;
     notifyListeners();
@@ -88,7 +98,8 @@ class SessionCapabilities extends ChangeNotifier {
 
   void _onSessionChanged() {
     final owner = _owner;
-    if (owner != null && !_session.isCurrent(owner)) block();
+    if (owner != null && !_session.isCurrent(owner))
+      _block(CapabilityBlockReason.ownerChanged);
   }
 
   static bool _allowed(

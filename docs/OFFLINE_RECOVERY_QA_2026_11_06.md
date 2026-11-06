@@ -114,6 +114,28 @@ chat list. Messages and the saved QR image were visible in all three checks
 `qa5-offline-list-subject.png`). A repeat entry produced a settled screenshot;
 frame-by-frame opening latency was not measured. The network was restored.
 
+In a separate live transition check, the subject chat was opened online
+(`qa5-live-subject-online.png`); after Wi-Fi and mobile data were turned off,
+the chat remained on screen (`qa5-live-subject-disconnected.png`). Returning
+and opening that same chat again offline showed messages and the QR image
+after five seconds (`qa5-live-subject-reopen-offline.png`). This does not
+establish frame-by-frame instant rendering. The network was restored.
+
+The earlier `qa5-live-online-before-drop` screenshot followed an incorrect
+sequence of taps and does not establish a reproducible token-refresh defect.
+
+A real online screen recording of reopening the chat
+(`qa5-online-chat-reopen-20261106.mp4`) shows `Загрузка…` in
+`qa5-reopen-frames/frame-02.png`, followed by the QR image in
+`qa5-reopen-frames/frame-03.png`. Instant image display has therefore not been
+achieved in this check.
+
+The experimental refresh-grant work is QA-only. Its synthetic SDK and SQLite
+suite reported 31/31 passing, including unchanged-then-rotated credentials.
+It does not restore the online UI capability after rotated credentials. The
+crash window between SQLite commit and stale cleanup remains unproven; these
+tests do not establish production readiness or Android device behavior.
+
 The assignment card was unavailable, and DOCX was represented only by text;
 opening the document was not verified. On QA5 the directory header overlapped
 the Android status bar. A SafeArea fix was made after that build, but its

@@ -177,11 +177,26 @@ class RefreshAdmissionClient extends http.BaseClient {
   int _nonRefreshAuthRevision = 0;
   int _suppressedAuthRevision = 0;
   final ValueNotifier<int> authSignals = ValueNotifier<int>(0);
+
   /// Changes on every non-refresh auth dispatch, even if it later fails.
   int get nonRefreshAuthRevision => _nonRefreshAuthRevision;
   int get suppressedAuthRevision => _suppressedAuthRevision;
   int get activeAuthOperations => _activeAuth;
   final List<Completer<void>> _drainers = [];
+
+  /// A policy check paired with auth refresh must settle before admission can
+  /// move to cache-only. Closing the gate prevents a new check from starting.
+  Future<T?> runTrackedPolicy<T>(Future<T> Function() work) async {
+    if (_closed || _suspended) return null;
+    _activeAuth++;
+    _nonRefreshAuthRevision++;
+    authSignals.value++;
+    try {
+      return await work();
+    } finally {
+      _authFinished();
+    }
+  }
 
   /// Blocks new auth sends synchronously, then waits for dispatched auth sends.
   /// This does not stop WebSockets or other HTTP clients.
@@ -224,9 +239,12 @@ class RefreshAdmissionClient extends http.BaseClient {
 
   bool _auth(http.BaseRequest request) {
     final uri = request.url;
-    return _backend.scheme == 'https' && _backend.userInfo.isEmpty &&
-        uri.scheme == 'https' && uri.userInfo.isEmpty &&
-        uri.host == _backend.host && uri.port == _backend.port &&
+    return _backend.scheme == 'https' &&
+        _backend.userInfo.isEmpty &&
+        uri.scheme == 'https' &&
+        uri.userInfo.isEmpty &&
+        uri.host == _backend.host &&
+        uri.port == _backend.port &&
         (uri.path == '/auth/v1' || uri.path.startsWith('/auth/v1/'));
   }
 
