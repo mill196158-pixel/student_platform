@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'package:flutter/services.dart';
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -5,13 +7,17 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_platform/src/services/chat_file_access.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'home_progressive_loading_test.dart' show signIn;
+import 'chat_file_durable_receipt_test.dart' show signInWithFileSession;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   test('recent cacheable grant avoids duplicate resolve; other files do not',
       () async {
     SharedPreferences.setMockInitialValues({});
+    final dir = await Directory.systemTemp.createTemp('chat-lease-');
+    const channel = MethodChannel('plugins.flutter.io/path_provider');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (_) async => dir.path);
     var calls = 0;
     final client = MockClient((request) async {
       calls++;
@@ -19,6 +25,7 @@ void main() {
       return http.Response(
           jsonEncode({
             'url': 'https://studentsplatform.storage.yandexcloud.net/$key',
+            'accessPolicyVersion': 1,
             'cacheable': !key.contains('sensitive'),
             'expiresIn': key.contains('invalid-ttl')
                 ? 0
@@ -35,8 +42,12 @@ void main() {
         authOptions: const FlutterAuthClientOptions(autoRefreshToken: false));
     addTearDown(() async {
       await Supabase.instance.dispose();
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+      if (await dir.exists()) await dir.delete(recursive: true);
     });
-    await signIn(Supabase.instance.client, 'test-user');
+    await signInWithFileSession(Supabase.instance.client, 'test-user',
+        'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
     const normal =
         'https://studentsplatform.storage.yandexcloud.net/chats/test/image.jpg';
     const special =
@@ -62,7 +73,8 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 1100));
     expect(await ChatFileAccess.resolve(shortTtl), shortTtl);
     expect(calls, 8);
-    await signIn(Supabase.instance.client, 'different-user');
+    await signInWithFileSession(Supabase.instance.client, 'different-user',
+        'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
     expect(await ChatFileAccess.resolve(normal), normal);
     expect(calls, 9);
   });

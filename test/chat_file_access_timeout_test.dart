@@ -11,11 +11,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_platform/src/services/chat_file_access.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'home_progressive_loading_test.dart' show signIn;
+import 'chat_file_durable_receipt_test.dart' show signInWithFileSession;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  test('timed out authorization uses an eligible local copy, denial purges it',
+  test('late denial revokes a warm grant without deleting the cached file',
       () async {
     SharedPreferences.setMockInitialValues({});
     final dir =
@@ -49,6 +49,7 @@ void main() {
               jsonEncode({
                 'url':
                     'https://studentsplatform.storage.yandexcloud.net/chats/test/photo.png',
+                'accessPolicyVersion': 1,
                 'cacheable': true,
                 'expiresIn': 60,
               }),
@@ -57,7 +58,8 @@ void main() {
               headers: {'content-type': 'application/json'});
         }
         if (denied) {
-          return http.Response('{"error":"denied"}', 403,
+          return http.Response(
+              '{"error":"file_unavailable","reason":"access_denied_v1"}', 403,
               request: request, headers: {'content-type': 'application/json'});
         }
         return pending.future;
@@ -77,7 +79,8 @@ void main() {
           .setMockMethodCallHandler(channel, null);
       if (await dir.exists()) await dir.delete(recursive: true);
     });
-    await signIn(Supabase.instance.client, 'test-user');
+    const sid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    await signInWithFileSession(Supabase.instance.client, 'test-user', sid);
     const url =
         'https://studentsplatform.storage.yandexcloud.net/chats/test/photo.png';
     final key = ChatFileAccess.keyFor(url)!;
@@ -85,22 +88,34 @@ void main() {
     final file = File('${dir.path}/authorized_chat_files/test-user/$digest');
     await file.parent.create(recursive: true);
     await file.writeAsBytes([1, 2, 3]);
+    await File('${file.path}.grant').writeAsString('chat-file-grant-v2:$sid');
 
     final copies = await Future.wait(
         List.generate(3, (_) => ChatFileAccess.readBytes(url)));
     expect(copies, everyElement([1, 2, 3]));
+    for (var i = 0; i < 100 && calls == 0; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
     expect(calls, 1);
+    // Local display is instant; wait for the independent server request to
+    // time out before starting a newer successful authorization.
+    await Future<void>.delayed(const Duration(milliseconds: 15100));
     secondSuccess = true;
     expect(await ChatFileAccess.resolve(url), url);
     expect(await ChatFileAccess.resolve(url), url);
     expect(calls, 2);
-    pending.complete(http.Response('{"error":"denied"}', 403,
+    // The old timed-out request still owns a durable pending fence even
+    // though a later request succeeded.
+    expect(await File('${file.path}.pending').exists(), isTrue);
+    pending.complete(http.Response(
+        '{"error":"file_unavailable","reason":"access_denied_v1"}', 403,
         headers: {'content-type': 'application/json'}));
-    for (var i = 0; i < 30 && await file.exists(); i++) {
+    final deniedMarker = File('${file.path}.denied');
+    for (var i = 0; i < 30 && !await deniedMarker.exists(); i++) {
       await Future<void>.delayed(const Duration(milliseconds: 10));
     }
-    expect(await file.exists(), isFalse);
-    await file.writeAsBytes([1, 2, 3]);
+    expect(await deniedMarker.exists(), isTrue);
+    expect(await file.exists(), isTrue);
     offline = true;
     await expectLater(
         ChatFileAccess.readBytes(url), throwsA(isA<SocketException>()));
@@ -109,7 +124,7 @@ void main() {
     denied = true;
     await expectLater(
         ChatFileAccess.readBytes(url), throwsA(isA<FunctionException>()));
-    expect(await file.exists(), isFalse);
+    expect(await file.exists(), isTrue);
 
     // A session switch while non-cacheable cleanup is waiting must not return
     // the old signed URL, including to a caller of resolve() directly.

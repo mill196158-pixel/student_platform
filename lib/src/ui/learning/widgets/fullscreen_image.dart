@@ -4,8 +4,8 @@ import 'package:student_platform/src/services/chat_file_access.dart';
 import 'package:flutter/material.dart';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:photo_view/photo_view.dart';
-import 'package:photo_view/photo_view_gallery.dart';
 import 'dart:convert';
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:pdfrx/pdfrx.dart';
@@ -16,30 +16,82 @@ import 'package:super_clipboard/super_clipboard.dart';
 import '../utils/chat_copied_file_cache.dart';
 import 'file_card.dart';
 
+int _viewerTempSequence = 0;
+final _viewerWriteVersions = <String, int>{};
+final _viewerPublishQueues = <String, Future<void>>{};
+@visibleForTesting
+int debugGalleryDrains = 0;
+
+@visibleForTesting
+Future<File> writeViewerFileAtomically(File destination, List<int> bytes,
+    {Future<void> Function()? beforePublish,
+    bool Function()? canPublish}) async {
+  final path = destination.absolute.path;
+  final version = _viewerTempSequence++;
+  _viewerWriteVersions[path] = version;
+  final temporary =
+      File('${destination.path}.tmp.$pid.${_viewerTempSequence++}');
+  try {
+    await temporary.writeAsBytes(bytes, flush: true);
+    if (beforePublish != null) await beforePublish();
+    final previous = _viewerPublishQueues[path];
+    final done = Completer<void>();
+    _viewerPublishQueues[path] = done.future;
+    try {
+      if (previous != null) await previous;
+      if (_viewerWriteVersions[path] != version ||
+          !(canPublish?.call() ?? true)) throw StateError('Запись устарела.');
+      return await temporary.rename(destination.path);
+    } finally {
+      done.complete();
+      if (identical(_viewerPublishQueues[path], done.future)) {
+        _viewerPublishQueues.remove(path);
+      }
+    }
+  } finally {
+    if (await temporary.exists()) await temporary.delete();
+    if (_viewerWriteVersions[path] == version)
+      _viewerWriteVersions.remove(path);
+  }
+}
+
 Future<File> _downloadRemoteFileToCache({
   required String url,
   required String fileName,
+  required _ViewerAccessTicket access,
 }) async {
+  void check() {
+    if (!access.isCurrent(url))
+      throw StateError('Доступ к вложению изменился.');
+  }
+
+  check();
   final cleanName = FileUiUtils.cleanFileName(fileName);
   await ChatFileAccess.authorize(url);
-  final digest = crypto.sha1
-      .convert(utf8.encode('${ChatFileAccess.userId}:$url'))
-      .toString();
+  check();
+  final digest =
+      crypto.sha1.convert(utf8.encode('${access.user}:$url')).toString();
   final dir = await getApplicationCacheDirectory();
+  check();
   final filesDir = Directory('${dir.path}${Platform.pathSeparator}chat_files');
   if (!await filesDir.exists()) {
     await filesDir.create(recursive: true);
   }
+  check();
 
   final path = '${filesDir.path}${Platform.pathSeparator}${digest}_$cleanName';
   final cached = File(path);
   if (await cached.exists() && await cached.length() > 0) {
+    check();
     return cached;
   }
 
   final bytes = await ChatFileAccess.readBytes(url);
-  await cached.writeAsBytes(bytes, flush: true);
-  return cached;
+  check();
+  final file = await writeViewerFileAtomically(cached, bytes,
+      canPublish: () => access.isCurrent(url));
+  check();
+  return file;
 }
 
 FileFormat _clipboardFormatForFile(String fileName, String? mimeType) {
@@ -124,6 +176,7 @@ Future<({String name, String mimeType, bool isImage})>
     _writeFileBytesToClipboard({
   required File file,
   required String fileName,
+  required bool Function() isCurrent,
   String? mimeType,
 }) async {
   final clipboard = SystemClipboard.instance;
@@ -131,7 +184,9 @@ Future<({String name, String mimeType, bool isImage})>
     throw UnsupportedError('Буфер обмена недоступен на этой платформе');
   }
 
+  if (!isCurrent()) throw StateError('Доступ к вложению изменился.');
   final bytes = await file.readAsBytes();
+  if (!isCurrent()) throw StateError('Доступ к вложению изменился.');
   final lowerMime = (mimeType ?? '').toLowerCase();
   final imageFormat = lowerMime == 'image/*' || lowerMime.startsWith('image/');
   final formatInfo = imageFormat ? _clipboardImageFormat(bytes) : null;
@@ -147,7 +202,9 @@ Future<({String name, String mimeType, bool isImage})>
 
   final item = DataWriterItem(suggestedName: effectiveName);
   item.add(format(Uint8List.fromList(bytes)));
+  if (!isCurrent()) throw StateError('Доступ к вложению изменился.');
   await clipboard.write([item]);
+  if (!isCurrent()) throw StateError('Доступ к вложению изменился.');
   return (
     name: effectiveName,
     mimeType: effectiveMimeType,
@@ -205,16 +262,44 @@ class FullscreenImageSurface extends StatelessWidget {
       );
 }
 
+class _ViewerAccessTicket {
+  _ViewerAccessTicket()
+      : session = ChatFileAccess.currentSessionBinding,
+        user = ChatFileAccess.userId,
+        epoch = ChatFileAccess.generation;
+  final String? session;
+  final String? user;
+  final int epoch;
+  bool isCurrent(String url) => ChatFileAccess.isViewerCurrent(url,
+      user: user, epoch: epoch, sessionBinding: session);
+}
+
+class _RevokedMedia extends StatelessWidget {
+  const _RevokedMedia();
+  @override
+  Widget build(BuildContext context) => const Center(
+      child:
+          Text('Вложение недоступно', style: TextStyle(color: Colors.white)));
+}
+
 class _FullscreenImageState extends State<FullscreenImage> {
   late final bool _isGallery;
   late final PageController _pageController;
+  late final List<AuthorizedFileImageProvider> _providers;
   late int _currentIndex;
   double _dragDy = 0;
+  late final _ViewerAccessTicket _access;
 
   @override
   void initState() {
     super.initState();
+    _access = _ViewerAccessTicket();
+    ChatFileAccess.accessChanges.addListener(_accessChanged);
     _isGallery = (widget.galleryUrls != null && widget.galleryUrls!.isNotEmpty);
+    _providers = [
+      for (final url in (_isGallery ? widget.galleryUrls! : [widget.imageUrl]))
+        AuthorizedFileImageProvider(url)
+    ];
     final maxIndex = _isGallery ? widget.galleryUrls!.length - 1 : 0;
     _currentIndex = widget.initialIndex.clamp(0, maxIndex).toInt();
     _pageController = PageController(initialPage: _currentIndex);
@@ -222,8 +307,13 @@ class _FullscreenImageState extends State<FullscreenImage> {
 
   @override
   void dispose() {
+    ChatFileAccess.accessChanges.removeListener(_accessChanged);
     _pageController.dispose();
     super.dispose();
+  }
+
+  void _accessChanged() {
+    if (mounted) setState(() {});
   }
 
   String get _currentUrl =>
@@ -264,11 +354,15 @@ class _FullscreenImageState extends State<FullscreenImage> {
   }
 
   Future<void> _openCurrentExternally() async {
+    final url = _currentUrl;
+    if (!_access.isCurrent(url)) return;
     try {
       final file = await _downloadRemoteFileToCache(
-        url: _currentUrl,
+        url: url,
         fileName: _currentName,
+        access: _access,
       );
+      if (!mounted || _currentUrl != url || !_access.isCurrent(url)) return;
       final res = await OpenFilex.open(file.path);
       if (res.type != ResultType.done && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -285,11 +379,15 @@ class _FullscreenImageState extends State<FullscreenImage> {
   }
 
   Future<void> _shareCurrent() async {
+    final url = _currentUrl;
+    if (!_access.isCurrent(url)) return;
     try {
       final file = await _downloadRemoteFileToCache(
-        url: _currentUrl,
+        url: url,
         fileName: _currentName,
+        access: _access,
       );
+      if (!mounted || _currentUrl != url || !_access.isCurrent(url)) return;
       await SharePlus.instance.share(
         ShareParams(files: [XFile(file.path, name: _currentName)]),
       );
@@ -302,22 +400,36 @@ class _FullscreenImageState extends State<FullscreenImage> {
   }
 
   Future<void> _copyCurrentFileToClipboard() async {
+    final url = _currentUrl;
+    final index = _currentIndex;
+    final name = _currentName;
+    final fileId = _currentFileId;
+    bool current() =>
+        mounted &&
+        _currentIndex == index &&
+        _currentUrl == url &&
+        _access.isCurrent(url);
+    if (!current()) return;
     try {
       final file = await _downloadRemoteFileToCache(
-        url: _currentUrl,
-        fileName: _currentName,
+        url: url,
+        fileName: name,
+        access: _access,
       );
+      if (!current()) return;
       final meta = await _writeFileBytesToClipboard(
         file: file,
-        fileName: _currentName,
+        fileName: name,
         mimeType: 'image/*',
+        isCurrent: current,
       );
+      if (!current()) return;
       ChatCopiedFileCache.remember(
         path: file.path,
         name: meta.name,
         mimeType: meta.mimeType,
         isImage: meta.isImage,
-        fileId: _currentFileId,
+        fileId: fileId,
       );
       if (mounted) _showShortCopiedSnack(context);
     } catch (e) {
@@ -330,6 +442,7 @@ class _FullscreenImageState extends State<FullscreenImage> {
 
   @override
   Widget build(BuildContext context) {
+    final allowed = _access.isCurrent(_currentUrl);
     return PopScope(
         canPop: true,
         child: Scaffold(
@@ -353,7 +466,7 @@ class _FullscreenImageState extends State<FullscreenImage> {
                 tooltip: 'Открыть',
                 icon:
                     const Icon(Icons.open_in_new_rounded, color: Colors.white),
-                onPressed: _openCurrentExternally,
+                onPressed: allowed ? _openCurrentExternally : null,
               ),
             ],
           ),
@@ -370,24 +483,29 @@ class _FullscreenImageState extends State<FullscreenImage> {
               }
               _dragDy = 0;
             },
-            child: _isGallery ? _buildGallery() : _buildSingle(),
+            child: _isGallery
+                ? _buildGallery()
+                : Stack(children: [
+                    Offstage(offstage: !allowed, child: _buildSingle()),
+                    if (!allowed) const _RevokedMedia()
+                  ]),
           ),
           bottomNavigationBar: _ViewerActionBar(
             actions: [
               _ViewerAction(
                 icon: Icons.open_in_new_rounded,
                 label: 'Открыть',
-                onTap: _openCurrentExternally,
+                onTap: allowed ? _openCurrentExternally : null,
               ),
               _ViewerAction(
                 icon: Icons.ios_share_rounded,
                 label: 'Поделиться',
-                onTap: _shareCurrent,
+                onTap: allowed ? _shareCurrent : null,
               ),
               _ViewerAction(
                 icon: Icons.copy_rounded,
                 label: 'Копировать',
-                onTap: _copyCurrentFileToClipboard,
+                onTap: allowed ? _copyCurrentFileToClipboard : null,
               ),
             ],
           ),
@@ -400,7 +518,7 @@ class _FullscreenImageState extends State<FullscreenImage> {
         minScale: 0.7,
         maxScale: 4,
         child: Image(
-          image: AuthorizedFileImageProvider(_currentUrl),
+          image: _providers.first,
           fit: BoxFit.contain,
           frameBuilder: (context, child, frame, synchronous) =>
               synchronous || frame != null
@@ -438,24 +556,146 @@ class _FullscreenImageState extends State<FullscreenImage> {
     final urls = widget.galleryUrls!;
     return PhotoViewGestureDetectorScope(
       axis: Axis.vertical,
-      child: PhotoViewGallery.builder(
-        pageController: _pageController,
-        backgroundDecoration: const BoxDecoration(color: Colors.black),
-        itemCount: urls.length,
-        onPageChanged: (i) => setState(() => _currentIndex = i),
-        builder: (context, index) {
-          final url = urls[index];
-          return PhotoViewGalleryPageOptions(
-            imageProvider: AuthorizedFileImageProvider(url),
-            minScale: PhotoViewComputedScale.contained,
-            maxScale: PhotoViewComputedScale.covered * 2,
-          );
-        },
-        loadingBuilder: (context, event) => const Center(
-          child: ProductLoadingIndicator.page(color: Colors.white),
+      child: PhotoViewGestureDetectorScope(
+        axis: Axis.horizontal,
+        child: PageView.builder(
+          controller: _pageController,
+          itemCount: urls.length,
+          onPageChanged: (i) => setState(() => _currentIndex = i),
+          itemBuilder: (context, index) {
+            final permitted = _access.isCurrent(urls[index]);
+            return Stack(children: [
+              Offstage(
+                  offstage: !permitted,
+                  child: GalleryImageSurface(provider: _providers[index])),
+              if (!permitted) const _RevokedMedia(),
+            ]);
+          },
         ),
       ),
     );
+  }
+}
+
+/// Resolves the image size so the white backing follows the zoomed image.
+class GalleryImageSurface extends StatefulWidget {
+  const GalleryImageSurface({super.key, required this.provider});
+  final ImageProvider provider;
+
+  @override
+  State<GalleryImageSurface> createState() => _GalleryImageSurfaceState();
+}
+
+class _GalleryImageSurfaceState extends State<GalleryImageSurface> {
+  ImageStream? _stream;
+  ImageStreamListener? _listener;
+  ImageInfo? _imageInfo;
+  bool _error = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _subscribe();
+  }
+
+  @override
+  void didUpdateWidget(covariant GalleryImageSurface oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.provider != widget.provider) {
+      _unsubscribe();
+      _error = false;
+      _subscribe();
+    }
+  }
+
+  void _subscribe() {
+    final stream =
+        widget.provider.resolve(createLocalImageConfiguration(context));
+    if (_stream?.key == stream.key) return;
+    _unsubscribe();
+    _stream = stream;
+    late final ImageStreamListener listener;
+    listener = ImageStreamListener((info, synchronous) {
+      if (!mounted || !identical(_listener, listener)) {
+        info.dispose();
+        return;
+      }
+      final previous = _imageInfo;
+      if (synchronous) {
+        _imageInfo = info;
+        _error = false;
+      } else {
+        setState(() {
+          _imageInfo = info;
+          _error = false;
+        });
+      }
+      previous?.dispose();
+    }, onError: (Object _, StackTrace? __) {
+      if (!mounted || !identical(_listener, listener)) return;
+      if (_imageInfo == null) setState(() => _error = true);
+    });
+    _listener = listener;
+    stream.addListener(listener);
+  }
+
+  void _unsubscribe() {
+    final listener = _listener;
+    final stream = _stream;
+    if (listener != null && stream != null && _imageInfo == null) {
+      // A revoked viewer can detach while its image future is still failing.
+      // The provider API has no cancellation. Keep an independent listener
+      // until the request settles, without retaining the disposed widget.
+      late final ImageStreamListener drain;
+      var finished = false;
+      void finish() {
+        if (finished) return;
+        finished = true;
+        debugGalleryDrains--;
+        stream.removeListener(drain);
+      }
+
+      drain = ImageStreamListener((info, _) {
+        info.dispose();
+        finish();
+      }, onError: (Object _, StackTrace? __) => finish());
+      debugGalleryDrains++;
+      stream.addListener(drain);
+    }
+    if (listener != null) stream?.removeListener(listener);
+    _stream = null;
+    _listener = null;
+    _imageInfo?.dispose();
+    _imageInfo = null;
+  }
+
+  @override
+  void dispose() {
+    _unsubscribe();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_error)
+      return const Center(
+          child: Icon(Icons.broken_image_outlined, color: Colors.white));
+    final info = _imageInfo;
+    if (info == null)
+      return const Center(
+          child: ProductLoadingIndicator.page(color: Colors.white));
+    final size =
+        Size(info.image.width / info.scale, info.image.height / info.scale);
+    return ClipRect(
+        child: PhotoView.customChild(
+      childSize: size,
+      backgroundDecoration: const BoxDecoration(color: Colors.black),
+      minScale: PhotoViewComputedScale.contained,
+      maxScale: PhotoViewComputedScale.covered * 2,
+      child: FullscreenImageSurface(
+          child:
+              RawImage(image: info.image, scale: info.scale, fit: BoxFit.fill)),
+    ));
   }
 }
 
@@ -482,11 +722,26 @@ class FullscreenFileViewer extends StatefulWidget {
 class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
   bool _opening = false;
   late final Future<File> _cachedFileFuture;
+  late final _ViewerAccessTicket _access;
 
   @override
   void initState() {
     super.initState();
+    _access = _ViewerAccessTicket();
+    ChatFileAccess.accessChanges.addListener(_accessChanged);
     _cachedFileFuture = _ensureCachedFile();
+    unawaited(_cachedFileFuture.then<void>((_) {},
+        onError: (Object _, StackTrace __) {}));
+  }
+
+  void _accessChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    ChatFileAccess.accessChanges.removeListener(_accessChanged);
+    super.dispose();
   }
 
   String get _fileName => FileUiUtils.cleanFileName(widget.fileName);
@@ -497,10 +752,11 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
   }
 
   Future<void> _downloadAndOpen() async {
-    if (_opening) return;
+    if (_opening || !_access.isCurrent(widget.fileUrl)) return;
     setState(() => _opening = true);
     try {
       final file = await _cachedFileFuture;
+      if (!mounted || !_access.isCurrent(widget.fileUrl)) return;
       final res = await OpenFilex.open(file.path);
       if (res.type != ResultType.done && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -522,12 +778,15 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
     return _downloadRemoteFileToCache(
       url: widget.fileUrl,
       fileName: _fileName,
+      access: _access,
     );
   }
 
   Future<void> _shareCachedFile() async {
+    if (!_access.isCurrent(widget.fileUrl)) return;
     try {
       final file = await _cachedFileFuture;
+      if (!mounted || !_access.isCurrent(widget.fileUrl)) return;
       await SharePlus.instance.share(
         ShareParams(files: [XFile(file.path, name: _fileName)]),
       );
@@ -540,13 +799,20 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
   }
 
   Future<void> _copyCachedFileToClipboard() async {
+    final url = widget.fileUrl;
+    bool current() =>
+        mounted && widget.fileUrl == url && _access.isCurrent(url);
+    if (!current()) return;
     try {
       final file = await _cachedFileFuture;
+      if (!current()) return;
       final meta = await _writeFileBytesToClipboard(
         file: file,
         fileName: _fileName,
         mimeType: widget.mimeType,
+        isCurrent: current,
       );
+      if (!current()) return;
       ChatCopiedFileCache.remember(
         path: file.path,
         name: meta.name,
@@ -567,6 +833,7 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final allowed = _access.isCurrent(widget.fileUrl);
 
     return Scaffold(
       backgroundColor: const Color(0xFF0D0D0F),
@@ -588,27 +855,29 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
           IconButton(
             tooltip: 'Открыть файл',
             icon: const Icon(Icons.open_in_new_rounded, color: Colors.white),
-            onPressed: _opening ? null : _downloadAndOpen,
+            onPressed: _opening || !allowed ? null : _downloadAndOpen,
           ),
         ],
       ),
-      body: _isPdf ? _buildPdfPreview() : _buildFileActionCard(theme, scheme),
+      body: !allowed
+          ? const _RevokedMedia()
+          : (_isPdf ? _buildPdfPreview() : _buildFileActionCard(theme, scheme)),
       bottomNavigationBar: _ViewerActionBar(
         actions: [
           _ViewerAction(
             icon: Icons.open_in_new_rounded,
             label: _opening ? 'Открываем' : 'Открыть',
-            onTap: _opening ? null : _downloadAndOpen,
+            onTap: _opening || !allowed ? null : _downloadAndOpen,
           ),
           _ViewerAction(
             icon: Icons.ios_share_rounded,
             label: 'Поделиться',
-            onTap: _shareCachedFile,
+            onTap: allowed ? _shareCachedFile : null,
           ),
           _ViewerAction(
             icon: Icons.copy_rounded,
             label: 'Копировать',
-            onTap: _copyCachedFileToClipboard,
+            onTap: allowed ? _copyCachedFileToClipboard : null,
           ),
         ],
       ),

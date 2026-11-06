@@ -42,13 +42,20 @@ class AuthService {
       access: OfflinePolicyGrantHost.maybeRead(context),
       invalidate: () => scope?.invalidateForSignOut(),
     );
+    // Start attachment fencing immediately; do not wait for unrelated logout
+    // cleanups while the old session can still be observed by a late download.
+    final attachmentCleanup = ChatFileAccess.clear().then<bool>(
+      (_) => true,
+      onError: (Object _, StackTrace __) => false,
+    );
     ChatWarmCoordinator.instance.stop();
     var cleanupComplete = false;
     try {
       cleanupComplete = await runLogoutCleanup(
         cleanups: [
           () async {
-            if (!await teamCleanup) throw StateError('Team cache cleanup failed');
+            if (!await teamCleanup)
+              throw StateError('Team cache cleanup failed');
           },
           () async {
             if (!await revoke) throw StateError('Local grant removal failed');
@@ -57,7 +64,8 @@ class AuthService {
             await PushNotificationService.instance.onLogout();
           },
           () async {
-            await ChatFileAccess.clear();
+            if (!await attachmentCleanup)
+              throw StateError('Attachment cleanup failed');
             await DmApi.clearSessionState();
           },
           () async {

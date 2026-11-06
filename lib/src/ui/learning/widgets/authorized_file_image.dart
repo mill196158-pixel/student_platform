@@ -1,22 +1,26 @@
 import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'dart:async';
 import '../../../services/chat_file_access.dart';
 
 class AuthorizedFileImageProvider
     extends ImageProvider<AuthorizedFileImageProvider> {
   AuthorizedFileImageProvider(this.url)
       : user = ChatFileAccess.userId,
-        epoch = ChatFileAccess.generation;
+        epoch = ChatFileAccess.generation,
+        sessionBinding = ChatFileAccess.currentSessionBinding;
   final String url;
   final String? user;
   final int epoch;
+  final String? sessionBinding;
   @override
   Future<AuthorizedFileImageProvider> obtainKey(
       ImageConfiguration configuration) async {
     // Check permission even when decoded pixels already exist in ImageCache.
     await ChatFileAccess.authorize(url);
-    if (ChatFileAccess.userId != user || ChatFileAccess.generation != epoch) {
+    if (!ChatFileAccess.isViewerCurrent(url,
+        user: user, epoch: epoch, sessionBinding: sessionBinding)) {
       throw StateError('Сессия изменилась.');
     }
     return this;
@@ -33,7 +37,10 @@ class AuthorizedFileImageProvider
     } catch (_) {
       try {
         await ChatFileAccess.discardUnreadableImage(url,
-            user: user, epoch: epoch);
+            user: user,
+            epoch: epoch,
+            sessionBinding: sessionBinding,
+            expectedBytes: bytes);
       } on Exception catch (error) {
         debugPrint('[chat-image] Cache cleanup failed: ${error.runtimeType}');
       }
@@ -46,9 +53,10 @@ class AuthorizedFileImageProvider
       other is AuthorizedFileImageProvider &&
       other.url == url &&
       other.user == user &&
-      other.epoch == epoch;
+      other.epoch == epoch &&
+      other.sessionBinding == sessionBinding;
   @override
-  int get hashCode => Object.hash(url, user, epoch);
+  int get hashCode => Object.hash(url, user, epoch, sessionBinding);
   @override
   String toString() => 'AuthorizedFileImageProvider';
 }
@@ -74,10 +82,72 @@ class AuthorizedFileImage extends StatefulWidget {
 
 class _AuthorizedFileImageState extends State<AuthorizedFileImage> {
   int _attempt = 0;
+  bool _revoked = false;
+  String? _user;
+  int _generation = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _revoked = ChatFileAccess.isAccessRevoked(widget.imageUrl);
+    _user = ChatFileAccess.userId;
+    _generation = ChatFileAccess.generation;
+    ChatFileAccess.accessChanges.addListener(_accessChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant AuthorizedFileImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.imageUrl != widget.imageUrl) {
+      _revoked = ChatFileAccess.isAccessRevoked(widget.imageUrl);
+    }
+  }
+
+  void _accessChanged() {
+    final revoked = ChatFileAccess.isAccessRevoked(widget.imageUrl);
+    final user = ChatFileAccess.userId;
+    final generation = ChatFileAccess.generation;
+    if (mounted &&
+        (revoked != _revoked || user != _user || generation != _generation)) {
+      setState(() {
+        _revoked = revoked;
+        _user = user;
+        _generation = generation;
+        _attempt++;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    ChatFileAccess.accessChanges.removeListener(_accessChanged);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final provider = AuthorizedFileImageProvider(widget.imageUrl);
+    Widget error(Object error) => Semantics(
+          button: true,
+          label: 'Повторить загрузку изображения',
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              PaintingBinding.instance.imageCache.evict(provider);
+              if (_revoked) {
+                unawaited(
+                    ChatFileAccess.resolve(widget.imageUrl).then<void>((_) {
+                  if (mounted) setState(() => _attempt++);
+                }, onError: (Object _, StackTrace __) {}));
+              } else {
+                setState(() => _attempt++);
+              }
+            },
+            child: widget.errorWidget?.call(context, widget.imageUrl, error) ??
+                const Icon(Icons.refresh_rounded),
+          ),
+        );
+    if (_revoked) return error(StateError('Файл недоступен'));
     return Image(
       key: ValueKey(_attempt),
       image: provider,
@@ -88,19 +158,7 @@ class _AuthorizedFileImageState extends State<AuthorizedFileImage> {
           ? child
           : widget.placeholder?.call(context, widget.imageUrl) ??
               const Center(child: ProductLoadingIndicator(size: 72)),
-      errorBuilder: (context, error, stack) => Semantics(
-        button: true,
-        label: 'Повторить загрузку изображения',
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () {
-            PaintingBinding.instance.imageCache.evict(provider);
-            setState(() => _attempt++);
-          },
-          child: widget.errorWidget?.call(context, widget.imageUrl, error) ??
-              const Icon(Icons.refresh_rounded),
-        ),
-      ),
+      errorBuilder: (context, problem, stack) => error(problem),
     );
   }
 }
