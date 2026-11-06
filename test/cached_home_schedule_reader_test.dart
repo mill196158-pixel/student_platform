@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
@@ -7,6 +8,7 @@ import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:student_platform/src/ui/home/cached_home_schedule_reader.dart';
 import 'package:student_platform/src/ui/home/home_snapshot_cache.dart';
 import 'package:student_platform/src/ui/schedule/schedule_month_cache.dart';
+import 'package:student_platform/src/ui/schedule/models/lesson.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'auth_session_scope_test.dart' show fakeSession;
@@ -220,6 +222,148 @@ void main() {
     expect(await readerA.readMonth(month), isEmpty);
     expect(await readerB.readHome(HomeSnapshotSection.schedule), isNull);
     expect(await readerB.readMonth(month), isNull);
+    capabilities.dispose();
+    scope.dispose();
+    await events.close();
+  });
+
+  test('dashboard uses only stored sections and distinguishes unknown data',
+      () async {
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final session = fakeSession('a');
+    final scope = AuthSessionScope(
+        currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final capabilities = SessionCapabilities(scope);
+    final home = HomeSnapshotCache(
+        project: 'backend',
+        authScope: scope,
+        currentUserId: () => session.user.id,
+        sessionGeneration: () => scope.generation,
+        sessionIdentity: () => session.accessToken);
+    final schedule = ScheduleMonthCache(scope, 'backend');
+    final day = DateTime(2026, 11, 6);
+    expect(
+        await home.write(
+            scope: home.captureScope('a')!,
+            section: HomeSnapshotSection.profile,
+            items: [
+              {'id': 'a', 'name': 'Минь'}
+            ],
+            savedAt: DateTime.utc(2026)),
+        isTrue);
+    expect(await schedule.write(schedule.begin(day)!, []), isTrue);
+    expect(
+        capabilities.grant(SessionCapabilityMode.cacheOnly,
+            capabilities.beginAuthorization(scope.capture()!)!),
+        isTrue);
+    final reader = CachedHomeScheduleReader(
+        capabilities: capabilities, home: home, schedule: schedule);
+    final result = await reader.readDashboard(date: day);
+    expect(result.profile.name, 'Минь');
+    expect(result.scheduleStatus, 'Сохранённое расписание');
+    expect(result.todayLessons, isEmpty);
+    expect(result.assignmentsStatus, 'Задания ещё не сохранены');
+    expect(capabilities.capture(SessionCapability.networkRead), isNull);
+    expect(capabilities.capture(SessionCapability.mutation), isNull);
+    capabilities.dispose();
+    scope.dispose();
+    await events.close();
+  });
+
+  test('incorrect lesson date rejects day snapshot and uses valid month',
+      () async {
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final session = fakeSession('a');
+    final scope = AuthSessionScope(
+        currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final capabilities = SessionCapabilities(scope);
+    final home = HomeSnapshotCache(
+        project: 'backend',
+        authScope: scope,
+        currentUserId: () => session.user.id,
+        sessionGeneration: () => scope.generation,
+        sessionIdentity: () => session.accessToken);
+    final schedule = ScheduleMonthCache(scope, 'backend');
+    final day = DateTime(2026, 11, 6);
+    expect(
+        await home.write(
+            scope: home.captureScope('a')!,
+            section: HomeSnapshotSection.schedule,
+            date: '2026-11-06',
+            items: [
+              {
+                'id': 'wrong-day',
+                'date': '2026-11-07',
+                'week': 1,
+                'day': 'СБ',
+                'pair_num': 1,
+                'time_start': '09:00',
+                'time_end': '10:30',
+                'subject': 'Не сегодняшнее занятие',
+              }
+            ],
+            savedAt: DateTime.utc(2026)),
+        isTrue);
+    expect(
+        capabilities.grant(SessionCapabilityMode.cacheOnly,
+            capabilities.beginAuthorization(scope.capture()!)!),
+        isTrue);
+    final reader = CachedHomeScheduleReader(
+        capabilities: capabilities, home: home, schedule: schedule);
+    final unavailable = await reader.readDashboard(date: day);
+    expect(unavailable.scheduleStatus, 'Расписание ещё не сохранено');
+    expect(unavailable.todayLessons, isEmpty);
+    expect(await schedule.write(schedule.begin(day)!, []), isTrue);
+    final fallback = await reader.readDashboard(date: day);
+    expect(fallback.scheduleStatus, 'Сохранённое расписание');
+    expect(fallback.todayLessons, isEmpty);
+    capabilities.dispose();
+    scope.dispose();
+    await events.close();
+  });
+
+  test('UTC month boundary reads Moscow month and filters other days',
+      () async {
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final session = fakeSession('a');
+    final scope = AuthSessionScope(
+        currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final capabilities = SessionCapabilities(scope);
+    final home = HomeSnapshotCache(
+        project: 'backend',
+        authScope: scope,
+        currentUserId: () => session.user.id,
+        sessionGeneration: () => scope.generation,
+        sessionIdentity: () => session.accessToken);
+    final schedule = ScheduleMonthCache(scope, 'backend');
+    Lesson lesson(String id, int day) => Lesson(
+        id: id,
+        date: DateTime(2026, 11, day),
+        week: 1,
+        day: 'ПН',
+        pairNum: 1,
+        start: const TimeOfDay(hour: 9, minute: 0),
+        end: const TimeOfDay(hour: 10, minute: 30),
+        subjectRaw: id);
+    expect(
+        await schedule.write(schedule.begin(DateTime(2026, 11))!,
+            [lesson('today', 1), lesson('other-day', 2)]),
+        isTrue);
+    expect(
+        capabilities.grant(SessionCapabilityMode.cacheOnly,
+            capabilities.beginAuthorization(scope.capture()!)!),
+        isTrue);
+    final reader = CachedHomeScheduleReader(
+        capabilities: capabilities, home: home, schedule: schedule);
+    final result =
+        await reader.readDashboard(date: DateTime.utc(2026, 10, 31, 22));
+    expect(result.scheduleStatus, 'Сохранённое расписание');
+    expect(result.scheduleDate, DateTime(2026, 11, 1));
+    expect(result.todayLessons.map((item) => item.id).toList(), ['today']);
+    expect((await reader.readMonth(DateTime.utc(2026, 10, 31, 22)))!.length, 2);
     capabilities.dispose();
     scope.dispose();
     await events.close();
