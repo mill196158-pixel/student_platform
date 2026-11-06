@@ -5,6 +5,59 @@ import 'package:student_platform/src/services/push/push_payload.dart';
 import 'package:student_platform/src/ui/notifications/in_app_toast_host.dart';
 
 void main() {
+  testWidgets('non-chat notifications appear on a nested screen and dismiss',
+      (tester) async {
+    final bus = InAppNotificationBus.instance;
+    bus.resetSession();
+    await tester.pumpWidget(MaterialApp(
+      builder: (_, child) => InAppToastHost(child: child!),
+      home: Builder(
+          builder: (context) => Scaffold(
+                body: TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                          builder: (_) =>
+                              const Scaffold(body: Text('Nested screen')))),
+                  child: const Text('Open screen'),
+                ),
+              )),
+    ));
+    await tester.tap(find.text('Open screen'));
+    await tester.pumpAndSettle();
+    bus.emit(const InAppNotificationEvent(
+      type: 'schedule_change',
+      title: 'Schedule updated',
+      body: 'New time',
+      payload: PushPayload(
+          version: 1, type: 'schedule_change', notificationId: 'schedule-1'),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(find.text('Nested screen'), findsOneWidget);
+    expect(find.text('Schedule updated'), findsOneWidget);
+    bus.dismissNotifications({'schedule-1'});
+    await tester.pump();
+    expect(find.text('Schedule updated'), findsNothing);
+    bus.emit(const InAppNotificationEvent(
+      type: 'schedule_change',
+      title: 'Late duplicate',
+      body: '',
+      payload: PushPayload(
+          version: 1, type: 'schedule_change', notificationId: 'schedule-1'),
+    ));
+    bus.emit(const InAppNotificationEvent(
+      type: 'unknown_type',
+      title: 'Unsupported payload',
+      body: '',
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(find.text('Late duplicate'), findsNothing);
+    expect(find.text('Unsupported payload'), findsNothing);
+    bus.resetSession();
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets(
       'global banner survives route change but clears on read and logout',
       (t) async {
@@ -43,9 +96,12 @@ void main() {
     await t.pumpAndSettle();
     expect(find.text('Synthetic sender'), findsNothing,
         reason: 'late duplicate after read must remain dismissed');
-    bus.emit(const InAppNotificationEvent(type: 'friend_accepted',
-        title: 'Friend accepted fixture', body: 'Accepted',
-        payload: PushPayload(version: 1, type: 'friend_accepted', notificationId: 'friend')));
+    bus.emit(const InAppNotificationEvent(
+        type: 'friend_accepted',
+        title: 'Friend accepted fixture',
+        body: 'Accepted',
+        payload: PushPayload(
+            version: 1, type: 'friend_accepted', notificationId: 'friend')));
     await t.pumpAndSettle();
     expect(find.text('Friend accepted fixture'), findsOneWidget);
     bus.dismissNotifications({'friend'});

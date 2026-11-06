@@ -12,6 +12,7 @@ import '../../models/message.dart';
 import '../../widgets/fullscreen_image.dart';
 
 import 'profile_avatar.dart';
+import 'forward_author_label.dart';
 import 'package:student_platform/src/ui/friends/friend_profile_screen.dart';
 
 const _forwardGroupMark = '__FG__:';
@@ -157,6 +158,7 @@ class ForwardGroupBubble extends StatelessWidget {
               // Элементы пересылки
               ...items.map((m) => _ForwardItem(
                     map: m,
+                    originalChatId: (fg['from'] ?? '').toString(),
                     idToFile: idToFile,
                     onOpenOriginal: onOpenOriginal,
                     depth: 0,
@@ -244,12 +246,14 @@ class ForwardGroupBubble extends StatelessWidget {
 
 class _ForwardItem extends StatelessWidget {
   final Map<String, dynamic> map;
+  final String originalChatId;
   final Map<String, ChatFile> idToFile;
   final void Function(String srcMessageId)? onOpenOriginal;
   final int depth;
 
   const _ForwardItem({
     required this.map,
+    required this.originalChatId,
     required this.idToFile,
     this.onOpenOriginal,
     this.depth = 0,
@@ -285,43 +289,53 @@ class _ForwardItem extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              InkWell(
-                onTap: authorId.isNotEmpty
-                    ? () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                              builder: (_) =>
-                                  FriendProfileScreen(userId: authorId)),
-                        )
-                    : null,
-                child: ProfileAvatar(name: author, imageUrl: ava),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  pretty.isEmpty ? author : '$author • $pretty',
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      color: textColor),
-                ),
-              ),
-              if (srcId.isNotEmpty && onOpenOriginal != null)
-                IconButton(
-                  padding: EdgeInsets.zero,
-                  constraints:
-                      const BoxConstraints(minWidth: 48, minHeight: 48),
-                  icon: Icon(Icons.open_in_new,
-                      size: 16,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  tooltip: 'Перейти к исходному',
-                  onPressed: () => onOpenOriginal!(srcId),
-                ),
-            ],
-          ),
+          ForwardAuthorLabel(
+              originalChatId: originalChatId,
+              messageId: srcId,
+              authorId: authorId,
+              storedName: author,
+              builder: (context, resolvedAuthor) => Row(
+                    children: [
+                      InkWell(
+                        onTap: authorId.isNotEmpty
+                            ? () => Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                      builder: (_) => FriendProfileScreen(
+                                          userId: authorId)),
+                                )
+                            : null,
+                        child:
+                            ProfileAvatar(name: resolvedAuthor, imageUrl: ava),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          pretty.isEmpty
+                              ? resolvedAuthor
+                              : '$resolvedAuthor • $pretty',
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              color: textColor),
+                        ),
+                      ),
+                      if (srcId.isNotEmpty && onOpenOriginal != null)
+                        IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints:
+                              const BoxConstraints(minWidth: 48, minHeight: 48),
+                          icon: Icon(Icons.open_in_new,
+                              size: 16,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant),
+                          tooltip: 'Перейти к исходному',
+                          onPressed: () => onOpenOriginal!(srcId),
+                        ),
+                    ],
+                  )),
           if (nestedForward != null) ...[
             const SizedBox(height: 6),
             _NestedForwardPreview(
@@ -403,6 +417,7 @@ class _NestedForwardPreview extends StatelessWidget {
           ...items.map(
             (m) => _ForwardItem(
               map: m,
+              originalChatId: (payload['from'] ?? '').toString(),
               idToFile: idToFile,
               onOpenOriginal: null,
               depth: depth,

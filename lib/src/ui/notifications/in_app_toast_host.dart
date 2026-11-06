@@ -61,10 +61,9 @@ class _InAppToastHostState extends State<InAppToastHost>
       }
       return;
     }
-    final show = event.isChatMessage ||
-        event.type == 'friend_request' ||
-        event.type == 'friend_accepted';
-    if (!show) return;
+    // Only events understood by the client can be routed from the banner.
+    // Internal bus events and unknown payloads must never become visible.
+    if (!PushPayload.knownTypes.contains(event.type)) return;
 
     final now = DateTime.now();
     final notificationId = event.payload?.notificationId;

@@ -295,14 +295,9 @@ class PushNotificationService {
       ChatWarmCoordinator.instance.prioritizeChat(chatId);
     }
 
-    // Foreground chat/friend events use the floating in-app toast.
-    // Skip a second OS banner so the tab bar isn't covered by a SnackBar-like strip.
-    final useInAppToast = eventType == 'dm_message' ||
-        eventType == 'team_message' ||
-        eventType == 'team_reply' ||
-        eventType == 'friend_request' ||
-        eventType == 'friend_accepted';
-    if (useInAppToast) return;
+    // Known foreground events use the global in-app banner. Do not also
+    // display a system notification for the same event.
+    if (PushPayload.knownTypes.contains(eventType)) return;
 
     await _showLocalNotification(
       title: title.toString(),
