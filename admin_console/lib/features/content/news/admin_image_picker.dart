@@ -34,6 +34,12 @@ abstract class AdminImagePicker {
 }
 
 class LocalAdminImagePicker implements AdminImagePicker {
+  const LocalAdminImagePicker({this.photoMode, this.isCurrent});
+
+  /// Null retains legacy behavior. True is explicit photo compression; false
+  /// preserves the original bytes, including QR codes and documents.
+  final bool? photoMode;
+  final bool Function()? isCurrent;
   static const allowedExtensions = ['jpg', 'jpeg', 'png', 'webp'];
   static const allowedMimeTypes = {'image/jpeg', 'image/png', 'image/webp'};
   static const maxBytes = 5 * 1024 * 1024;
@@ -41,13 +47,14 @@ class LocalAdminImagePicker implements AdminImagePicker {
 
   @override
   Future<PickedAdminImage?> pickImage() async {
+    if (!(isCurrent?.call() ?? true)) return null;
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: allowedExtensions,
       withData: true,
       allowMultiple: false,
     );
-    if (result == null || result.files.isEmpty) return null;
+    if (!(isCurrent?.call() ?? true) || result == null || result.files.isEmpty) return null;
 
     final file = result.files.single;
     final bytes = file.bytes;
@@ -57,11 +64,14 @@ class LocalAdminImagePicker implements AdminImagePicker {
       );
     }
 
-    return prepareSelected(
+    final selected = await prepareSelected(
       bytes: bytes,
       fileName: file.name,
       mimeType: _guessMimeType(file.name, file.extension),
+      photoMode: photoMode,
+      isCurrent: isCurrent,
     );
+    return (isCurrent?.call() ?? true) ? selected : null;
   }
 
   /// Processes an already selected file. Injectable optimizer supports
@@ -71,6 +81,8 @@ class LocalAdminImagePicker implements AdminImagePicker {
     required String fileName,
     required String mimeType,
     Future<Uint8List?> Function(Uint8List)? optimizer,
+    bool? photoMode,
+    bool Function()? isCurrent,
   }) async {
     final original = _validateAndWrap(
       bytes: Uint8List.fromList(bytes),
@@ -100,6 +112,14 @@ class LocalAdminImagePicker implements AdminImagePicker {
       fileName: '$stem.$ext',
       mimeType: actualMime,
     );
+    if (photoMode == false) {
+      if (original.bytes.length > maxBytes) {
+        throw const AdminImagePickException(
+          'Оригинал больше 5 МБ. Выберите файл меньшего размера.',
+        );
+      }
+      return safeOriginal;
+    }
     Uint8List? optimized;
     try {
       if (actualMime == 'image/png') {
@@ -108,13 +128,16 @@ class LocalAdminImagePicker implements AdminImagePicker {
         );
         optimized = result == null ? null : Uint8List.fromList(result);
       } else if (actualMime == 'image/jpeg' &&
-          original.bytes.length > maxBytes) {
-        // Preserve the existing Admin Web capability for oversized JPEGs.
-        // The legacy encoder is lossy; source files are never modified.
-        final result = await (optimizer ?? optimizeLargeJpegLegacy)(
-          Uint8List.fromList(original.bytes),
-        );
-        optimized = result == null ? null : Uint8List.fromList(result);
+          original.bytes.length > (photoMode == true ? 512 * 1024 : maxBytes)) {
+        final eligible = photoMode != true || await isEligibleAdminPhotoJpeg(
+            original.bytes, isCurrent: isCurrent);
+        if (eligible && (isCurrent?.call() ?? true)) {
+          // The encoder is lossy; source files are never modified.
+          final result = await (optimizer ?? optimizeLargeJpegLegacy)(
+            Uint8List.fromList(original.bytes),
+          );
+          optimized = result == null ? null : Uint8List.fromList(result);
+        }
       }
     } catch (_) {
       optimized = null;

@@ -11,6 +11,7 @@ import '../../../core/auth/admin_backend_config.dart';
 import '../../../core/auth/admin_session_controller.dart';
 import '../../academic/students/students_repository.dart';
 import '../news/admin_image_picker.dart';
+import '../news/admin_photo_choice.dart';
 import '../news/news_preview.dart';
 import '../news/news_repository.dart';
 import '../news/supabase_news_repository.dart';
@@ -1261,7 +1262,7 @@ class _HomePromoEditorScreenState extends State<HomePromoEditorScreen> {
           auth?.refreshToken == now?.refreshToken;
     }
     try {
-      final picked = await _imagePicker.pickImage();
+      final picked = await pickAdminImageForEditor(context, _imagePicker, isCurrent: current);
       if (picked == null || !current()) return;
       setState(() {
         _imageIntent[selected.id] =

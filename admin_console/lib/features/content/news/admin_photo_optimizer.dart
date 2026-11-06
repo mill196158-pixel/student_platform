@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as image;
@@ -14,6 +15,135 @@ Future<Uint8List?> optimizeAdminPhoto(Uint8List original) =>
 /// This is lossy and does not guarantee preservation of QR codes or fine text.
 Future<Uint8List?> optimizeLargeJpegLegacy(Uint8List original) =>
     legacy.optimizeAdminPhoto(Uint8List.fromList(original));
+
+/// Conservative opt-in path for a photo: unknown metadata, unsupported colour
+/// formats, multiple scans and trailing data are never passed to the encoder.
+Future<bool> isEligibleAdminPhotoJpeg(Uint8List bytes,
+    {bool Function()? isCurrent}) async {
+  if (bytes.length < 64 || bytes.length > 20 * 1024 * 1024 ||
+      bytes[0] != 0xff || bytes[1] != 0xd8) return false;
+  var p = 2, width = 0, height = 0, scans = 0;
+  var sawJfif = false, sawExif = false;
+  while (p + 2 <= bytes.length) {
+    if (bytes[p++] != 0xff) return false;
+    while (p < bytes.length && bytes[p] == 0xff) { p++; }
+    if (p >= bytes.length) return false;
+    final marker = bytes[p++];
+    if (marker == 0xd9) return p == bytes.length && scans == 1 && sawJfif;
+    if (p + 2 > bytes.length) return false;
+    final length = (bytes[p] << 8) | bytes[p + 1];
+    if (length < 2 || p + length > bytes.length) return false;
+    if (marker == 0xe0) {
+      if (sawJfif || length != 16 || bytes[p + 14] != 0 || bytes[p + 15] != 0 ||
+          String.fromCharCodes(bytes.sublist(p + 2, p + 7)) != 'JFIF\x00') return false;
+      sawJfif = true;
+    } else if (marker == 0xe1) {
+      if (sawExif || !_jpegExifUpright(bytes, p + 2, length - 2) ||
+          !_photoExifSafe(bytes, p + 2, length - 2)) return false;
+      sawExif = true;
+    } else if (!const {0xc0, 0xc4, 0xdb, 0xdd, 0xda}.contains(marker)) {
+      return false;
+    }
+    if (marker == 0xc0) {
+      if (width != 0 || length != 17 || bytes[p + 2] != 8 || bytes[p + 7] != 3) return false;
+      height = (bytes[p + 3] << 8) | bytes[p + 4];
+      width = (bytes[p + 5] << 8) | bytes[p + 6];
+      if (width == 0 || height == 0 || width * height > 20000000) return false;
+    }
+    p += length;
+    if (marker == 0xda) {
+      if (++scans != 1 || width == 0) return false;
+      var nextYield = p + 65536;
+      while (p + 1 < bytes.length) {
+        if (p >= nextYield) {
+          await Future<void>.delayed(Duration.zero);
+          if (!(isCurrent?.call() ?? true)) return false;
+          nextYield = p + 65536;
+        }
+        if (bytes[p++] != 0xff) continue;
+        final next = bytes[p];
+        if (next == 0 || (next >= 0xd0 && next <= 0xd7)) { p++; continue; }
+        p--;
+        break;
+      }
+    }
+  }
+  return false;
+}
+
+bool _photoExifSafe(Uint8List bytes, int start, int length) {
+  try {
+    final tiff = start + 6, end = start + length;
+    final view = ByteData.sublistView(bytes);
+    final order = String.fromCharCodes(bytes.sublist(tiff, tiff + 2));
+    if (order != 'II' && order != 'MM') return false;
+    final endian = order == 'II' ? Endian.little : Endian.big;
+    // Only standard EXIF IFDs and known tags are allowed. Unknown tags can
+    // represent private offsets or embedded containers, so they fail closed.
+    const imageTags = <int>{
+      0x0100,0x0101,0x0102,0x0103,0x0106,0x010e,0x010f,0x0110,
+      0x0111,0x0112,0x0115,0x0116,0x0117,0x011a,0x011b,0x011c,
+      0x0128,0x012d,0x0131,0x0132,0x013b,0x013c,0x013e,0x013f,
+      0x0140,0x0156,0x0201,0x0202,0x0211,0x0212,0x0213,0x0214,
+      0x8298,0x8769,0x8825,
+    };
+    const exifTags = <int>{
+      0x829a,0x829d,0x8822,0x8824,0x8827,0x8830,0x8831,0x8832,0x8833,
+      0x9000,0x9003,0x9004,0x9010,0x9011,0x9012,0x9101,0x9102,
+      0x9201,0x9202,0x9203,0x9204,0x9205,0x9206,0x9207,0x9208,0x9209,0x920a,
+      0x9214,0x9286,0x9290,0x9291,0x9292,0xa000,0xa001,0xa002,0xa003,0xa004,
+      0xa005,0xa20b,0xa20c,0xa20e,0xa20f,0xa210,0xa214,0xa215,0xa217,
+      0xa300,0xa301,0xa302,0xa401,0xa402,0xa403,0xa404,0xa405,0xa406,
+      0xa407,0xa408,0xa409,0xa40a,0xa40b,0xa40c,0xa420,0xa430,0xa431,
+      0xa432,0xa433,0xa434,0xa435,
+    };
+    const interopTags = <int>{0x0001,0x0002,0x1000,0x1001,0x1002};
+    final queue = <(int, String)>[(view.getUint32(tiff + 4, endian), 'image')];
+    final seen = <int>{};
+    const sizes = <int, int>{1:1, 2:1, 3:2, 4:4, 5:8, 6:1, 7:1, 8:2, 9:4, 10:8, 11:4, 12:8};
+    var total = 0;
+    var sawOrientation = false;
+    while (queue.isNotEmpty) {
+      final (offset, kind) = queue.removeLast();
+      final ifd = tiff + offset;
+      if (offset < 8 || ifd + 2 > end || !seen.add(offset) || seen.length > 16) return false;
+      final count = view.getUint16(ifd, endian);
+      total += count;
+      final last = ifd + 2 + count * 12;
+      if (total > 512 || last + 4 > end) return false;
+      for (var i = 0; i < count; i++) {
+        final entry = ifd + 2 + i * 12;
+        final tag = view.getUint16(entry, endian), type = view.getUint16(entry + 2, endian);
+        final number = view.getUint32(entry + 4, endian), size = sizes[type];
+        if (!(kind == 'image' ? imageTags.contains(tag)
+            : kind == 'exif' ? exifTags.contains(tag)
+            : kind == 'gps' ? tag <= 0x001f
+            : interopTags.contains(tag))) return false;
+        if (size == null || tag == 0x927c || number > length || number * size > length) return false;
+        if (tag == 0x0112) {
+          if (sawOrientation || type != 3 || number != 1 ||
+              view.getUint16(entry + 8, endian) != 1) return false;
+          sawOrientation = true;
+        }
+        if (number * size > 4) {
+          final dataOffset = view.getUint32(entry + 8, endian);
+          if (dataOffset > end - tiff - number * size) return false;
+        }
+        if (tag == 0x8769 || tag == 0x8825 || tag == 0xa005) {
+          if (type != 4 || number != 1) return false;
+          final next = view.getUint32(entry + 8, endian);
+          if (next == 0) return false;
+          queue.add((next, tag == 0x8769 ? 'exif' : tag == 0x8825 ? 'gps' : 'interop'));
+        }
+      }
+      final next = view.getUint32(last, endian);
+      if (next != 0) queue.add((next, kind));
+    }
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
 
 Future<bool> isValidLegacyJpeg(Uint8List original, Uint8List encoded) =>
     compute(_validLegacyJpeg, [

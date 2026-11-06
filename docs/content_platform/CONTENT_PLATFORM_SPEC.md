@@ -264,7 +264,7 @@ bounded lossless recompression only for simple static 8-bit PNG images without
 metadata, up to 4 megapixels (1 megapixel and 2 MiB input on Web to bound
 main-isolate work). Input and output must decode to the same size
 and every RGBA pixel must match; the result must also be smaller. JPEG up to
-5 MiB, WebP, animated images, images with metadata and uncertain inputs remain
+5 MiB (apart from the Windows Web opt-in below), WebP, animated images, images with metadata and uncertain inputs remain
 unchanged. To preserve existing Admin Web behaviour, an oversized JPEG may
 still use the legacy lossy worker, subject to its EXIF/color checks. That
 worker cannot guarantee QR or fine-text preservation and its Web runtime has
@@ -279,6 +279,20 @@ retain their existing upload, versioning and access-control contracts. Custom
 icons are excluded. Existing published assets require a separately reviewed
 retention and conditional-swap process; local conversion alone is not a
 production migration or proof that originals can be restored from Storage.
+
+Windows Web local QA change: News, Home Promo and Profile Feed offer an
+explicit choice between a compressed photo and original bytes before the file
+dialog. Only the photo choice can use the existing lossy JPEG worker for files
+above 512 KiB, after conservative format checks; the original choice preserves
+bytes and rejects files above 5 MiB. The dialog warns that compression removes
+EXIF (including location) and detail, and does not modify the local source.
+The accepted EXIF subset is limited to allowlisted standard image, Exif, GPS
+and interoperability tags with bounded value offsets and orientation 1;
+SubIFDs, maker notes and unknown tags fall back unchanged.
+Unsupported images fall back to original bytes or, above the upload limit, a
+clear error. QR/document protection depends on choosing original; the client
+does not prove that a chosen photo contains no QR or fine text. This local
+change is not deployed, and other platforms retain their previous behavior.
 
 CTA rules v1:
 

@@ -10,6 +10,7 @@ import '../../../core/auth/admin_session_controller.dart';
 import '../../academic/students/students_repository.dart';
 import '../reference/content_media_store.dart';
 import '../news/admin_image_picker.dart';
+import '../news/admin_photo_choice.dart';
 import '../shared/admin_content_backend.dart';
 import '../shared/content_action_model.dart';
 import '../shared/content_action_picker.dart';
@@ -986,8 +987,8 @@ class _ProfileFeedEditorScreenState extends State<ProfileFeedEditorScreen> {
     }
     PickedAdminImage? picked;
     try {
-      picked = await (widget.imagePicker ?? LocalAdminImagePicker())
-          .pickImage();
+      picked = await pickAdminImageForEditor(context,
+          widget.imagePicker ?? const LocalAdminImagePicker(), isCurrent: current);
     } on AdminImagePickException catch (error) {
       if (current()) _showBanner(error.message);
       return;

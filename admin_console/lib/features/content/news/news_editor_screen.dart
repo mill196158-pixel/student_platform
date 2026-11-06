@@ -11,6 +11,7 @@ import '../../../core/auth/admin_session_controller.dart';
 import '../../../shared/widgets/publication_status_badge.dart';
 import '../shared/admin_content_backend.dart';
 import 'admin_image_picker.dart';
+import 'admin_photo_choice.dart';
 import 'admin_image_store.dart';
 import 'news_item.dart';
 import 'news_preview.dart';
@@ -889,7 +890,7 @@ class _NewsEditorScreenState extends State<NewsEditorScreen> {
     }
 
     try {
-      final picked = await _imagePicker.pickImage();
+      final picked = await pickAdminImageForEditor(context, _imagePicker, isCurrent: current);
       if (picked == null || !current()) return;
       final stored = await _imageStore.put(
         bytes: picked.bytes,
