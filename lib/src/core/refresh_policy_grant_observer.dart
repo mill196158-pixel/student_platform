@@ -12,8 +12,8 @@ import 'session_capabilities.dart';
 import 'settled_policy_transport.dart';
 import 'sqlite_policy_grant_store.dart';
 
-/// QA-only process-lifetime observer. It never grants UI access: it only
-/// refreshes a durable offline grant after an independently verified policy.
+/// QA-only process-lifetime observer. After policy verification and draining
+/// tracked old-session work, it can re-admit the refreshed online session.
 class RefreshPolicyGrantObserver {
   RefreshPolicyGrantObserver(
       {required this.client,
