@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
@@ -167,7 +166,7 @@ void main() {
         expect(identical(decodeKey, provider), isTrue, reason: 'valid receipt must obtain its own key');
         final decoded = Completer<void>(), finishDecode = Completer<void>();
         AuthorizedFileImageProvider.debugQaAfterDecode = () async { decoded.complete(); await finishDecode.future; };
-        final realCodec = (await tester.runAsync(() => ui.instantiateImageCodec(oldBytes!)))!;
+        final realCodec = (await tester.runAsync(() => ui.instantiateImageCodec(oldBytes)))!;
         AuthorizedFileImageProvider.debugQaCodec = () async => realCodec;
         late ImageStreamCompleter delayedStream;
         final delayedFrame = Completer<ImageInfo>();

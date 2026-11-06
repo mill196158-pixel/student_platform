@@ -67,7 +67,7 @@ class AuthorizedFileImageProvider
        ChatFileAccess.qaAccessEpoch(url, user) == accessEpoch);
   _QaOwnerStatus get _qaOwnerStatus {
     if (user == null || sessionBinding == null || clientIdentity == null ||
-        _qaCredential == null || _qaCredential!.isEmpty) return _QaOwnerStatus.unknown;
+        _qaCredential == null || _qaCredential.isEmpty) return _QaOwnerStatus.unknown;
     try {
       final client = Supabase.instance.client;
       final session = client.auth.currentSession;
@@ -87,7 +87,7 @@ class AuthorizedFileImageProvider
   bool _qaExpectedDenial(Object error) {
     if (!const bool.fromEnvironment('QA_LOCAL_IMAGE_PREWARM') ||
         user == null || sessionBinding == null || clientIdentity == null ||
-        _qaCredential == null || _qaCredential!.isEmpty || error is! FunctionException ||
+        _qaCredential == null || _qaCredential.isEmpty || error is! FunctionException ||
         !(error.status == 401 || (error.status == 403 && error.details is Map &&
           (error.details as Map)['error'] == 'file_unavailable' &&
           (error.details as Map)['reason'] == 'access_denied_v1'))) return false;
