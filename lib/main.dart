@@ -831,9 +831,10 @@ class _QaAwareSessionKeeper extends StatelessWidget {
     final caps = SessionCapabilitiesHost.maybeOf(context);
     return ValueListenableBuilder<bool>(
       valueListenable: _ordinaryStartupPending,
-      builder: (context, pending, _) => pending ||
-          caps?.mode == SessionCapabilityMode.cacheOnly
-          ? child : SessionKeeper(child: child),
+      builder: (context, pending, _) => SessionKeeper(
+        enabled: !pending && caps?.mode != SessionCapabilityMode.cacheOnly,
+        child: child,
+      ),
     );
   }
 }

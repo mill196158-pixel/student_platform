@@ -11,10 +11,11 @@ import 'online_side_effect_barrier.dart';
 class SessionKeeper extends StatefulWidget {
   final Widget child;
   final OnlineSideEffectBarrier? barrier;
+  final bool enabled;
   @visibleForTesting
   final Future<void> Function()? refreshOverride;
 
-  const SessionKeeper({super.key, required this.child, this.barrier, this.refreshOverride});
+  const SessionKeeper({super.key, required this.child, this.barrier, this.enabled = true, this.refreshOverride});
 
   @override
   State<SessionKeeper> createState() => _SessionKeeperState();
@@ -31,7 +32,11 @@ class _SessionKeeperState extends State<SessionKeeper>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _timer = Timer.periodic(_refreshInterval, (_) => _refreshSilently());
+    if (widget.enabled) _start();
+  }
+
+  void _start() {
+    _timer ??= Timer.periodic(_refreshInterval, (_) => _refreshSilently());
     _refreshSilently();
   }
 
@@ -49,16 +54,25 @@ class _SessionKeeperState extends State<SessionKeeper>
     if (!identical(oldWidget.barrier, widget.barrier)) {
       oldWidget.barrier?.close();
     }
+    if (oldWidget.enabled != widget.enabled) {
+      if (widget.enabled) {
+        _start();
+      } else {
+        _timer?.cancel();
+        _timer = null;
+      }
+    }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
+    if (widget.enabled && state == AppLifecycleState.resumed) {
       _refreshSilently();
     }
   }
 
   Future<void> _refreshSilently() async {
+    if (!widget.enabled) return;
     try {
       Future<void> refresh() => widget.refreshOverride?.call() ??
           AuthSession.ensureFreshSession(_client);
