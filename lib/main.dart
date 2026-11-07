@@ -553,7 +553,7 @@ Future<void> _initializeApp(
         final session = client.auth.currentSession;
         return session == null ? null : OfflineSessionBinding.fromSession(session, issuer);
       }
-      if (pinnedMediaRuntimeEnabled()) {
+      if (pinnedMediaRuntimeEnabled() || sourceDocumentFenceEnabled()) {
         _pinnedMediaHost = PinnedMediaHost(scope: scope, project: project,
             currentSession: () => client.auth.currentSession, currentBinding: binding,
             supportDirectory: getApplicationSupportDirectory,

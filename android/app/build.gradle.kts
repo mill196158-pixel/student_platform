@@ -6,6 +6,8 @@ plugins {
 }
 
 val offlineFixture = System.getenv("STUDENT_OFFLINE_FIXTURE") == "1"
+val attachFixture = System.getenv("STUDENT_ATTACH_FIXTURE") == "1"
+require(!(offlineFixture && attachFixture)) { "Select only one isolated fixture" }
 
 if (offlineFixture) {
     listOf(project, rootProject.project(":integration_test")).forEach { target ->
@@ -37,7 +39,11 @@ android {
     }
 
     defaultConfig {
-        applicationId = if (offlineFixture) "com.mill453020.studentplatform.offlinefixture" else "com.mill453020.studentplatform"
+        applicationId = when {
+            offlineFixture -> "com.mill453020.studentplatform.offlinefixture"
+            attachFixture -> "com.mill453020.studentplatform.attachfixture"
+            else -> "com.mill453020.studentplatform"
+        }
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -66,6 +72,6 @@ dependencies {
 // Apply Google Services only when a real google-services.json is present.
 // Do not commit a fake config file.
 val googleServicesFile = file("google-services.json")
-if (googleServicesFile.exists() && !offlineFixture) {
+if (googleServicesFile.exists() && !offlineFixture && !attachFixture) {
     apply(plugin = "com.google.gms.google-services")
 }

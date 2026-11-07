@@ -32,6 +32,7 @@ class ChatFileAccess {
   // enabled build. An engine that has not installed its durable guard must
   // not send access checks that could later revoke an archived object.
   static bool get _pinnedRuntime => pinnedMediaRuntimeEnabled();
+  static bool get _accessFenceRequired => _pinnedRuntime || sourceDocumentFenceEnabled();
   /// Optional until the protected media protocol is initialized. Eviction
   /// must never be enabled while any reader can operate without this store.
   static MediaCacheProtection? _mediaProtection;
@@ -1149,7 +1150,7 @@ class ChatFileAccess {
   static Future<String> resolve(String url) async {
     final key = keyFor(url);
     if (key == null) return url;
-    if (_pinnedRuntime && (mediaProtection == null || !_mediaOwnerCurrent(mediaProtection!))) {
+    if (_accessFenceRequired && (mediaProtection == null || !_mediaOwnerCurrent(mediaProtection!))) {
       throw const MediaProtectionUnavailable();
     }
     if (_logoutFenced) throw StateError('Выход из аккаунта не завершён.');
@@ -1210,10 +1211,10 @@ class ChatFileAccess {
               token == _currentAccessToken() &&
               (_revisions[id] ?? 0) == revision);
       final protection = mediaProtection;
-      if (_pinnedRuntime && (protection == null || !_mediaOwnerCurrent(protection))) {
+      if (_accessFenceRequired && (protection == null || !_mediaOwnerCurrent(protection))) {
         throw const MediaProtectionUnavailable();
       }
-      if (_pinnedRuntime) {
+      if (_accessFenceRequired) {
         final recovery = protection!.accessRecovery;
         if (recovery == null || !await recovery.timeout(const Duration(seconds: 2), onTimeout: () => false) ||
             !identical(mediaProtection, protection) || !_mediaOwnerCurrent(protection)) {
