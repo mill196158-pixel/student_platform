@@ -104,7 +104,12 @@ void main() {
     repo.calls.first.completeError(StateError('offline'));
     await tester.pump();
     await tester.pump();
-    expect(find.text('Не удалось загрузить расписание. Подключитесь к сети и повторите.'), findsOneWidget);
+    final error = find.text('Не удалось загрузить расписание. Подключитесь к сети и повторите.');
+    expect(error, findsOneWidget);
+    expect(tester.widget<Text>(error).textAlign, TextAlign.center);
+    final rect = tester.getRect(error);
+    expect(rect.left, greaterThanOrEqualTo(24));
+    expect(rect.right, lessThanOrEqualTo(tester.view.physicalSize.width / tester.view.devicePixelRatio - 24));
     prefs.release.complete();
     expect(await writing, isFalse);
     await tester.pumpWidget(const SizedBox.shrink());

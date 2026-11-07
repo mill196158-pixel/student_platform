@@ -1100,9 +1100,21 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         _all.isEmpty &&
         _assignments.isEmpty &&
         _groupActions.isEmpty) {
-      return Center(child: Text(_cacheTemporarilyUnavailable
-          ? 'Сохранённое расписание временно недоступно.'
-          : 'Не удалось загрузить расписание. Подключитесь к сети и повторите.'));
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Text(
+              _cacheTemporarilyUnavailable
+                  ? 'Сохранённое расписание временно недоступно.'
+                  : 'Не удалось загрузить расписание. Подключитесь к сети и повторите.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ),
+        ),
+      );
     }
     final body = _weekMode ? _buildWeekBody(context) : _buildDayBody(context);
     if (!_showingCachedSchedule && !_lessonsUnavailable) return body;
