@@ -7,6 +7,7 @@ import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/learning/team_details_screen.dart';
+import 'package:student_platform/src/ui/learning/widgets/team_avatar.dart';
 import 'package:student_platform/src/ui/navigation/cached_team_chat_directory.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'auth_session_scope_test.dart' show fakeSession;
@@ -47,7 +48,11 @@ class _Store implements ProjectChatServerCache {
 }
 
 class _SummaryStore implements ProjectChatServerCache {
-  _SummaryStore(this.rows, this.histories);
+  _SummaryStore(this.rows, this.histories, this.scope);
+  @override
+  final AuthSessionScope scope;
+  @override
+  OfflineSessionBinding? Function() get currentBinding => () => null;
   final List<Map<String, dynamic>> rows;
   final Map<String, List<Message>?> histories;
   @override
@@ -163,24 +168,40 @@ void main() {
       'isDm': false, 'chatId': 'chat-$id', 'team': {'id': id, 'name': name,
       'teacher': 'Преподаватель', 'groupCode': 'Группа', 'icon': '', 'kind': kind}};
     final store = _SummaryStore([row('s1', 'Первый предмет', 'subject'),
-      row('g', 'Групповой чат', 'group_space'), row('s2', 'Второй предмет', 'subject')],
-      {'chat-s1': <Message>[], 'chat-g': <Message>[], 'chat-s2': null});
+      row('g', 'Пространство группы', 'group_space'), row('s2', 'Второй предмет', 'subject')],
+      {'chat-s1': <Message>[], 'chat-g': <Message>[], 'chat-s2': null}, scope);
+    (store.rows[1]['team'] as Map)['groupCode'] = '1-См(ВВ)-2';
+    (store.rows[1]['team'] as Map)['icon'] = 'https://example.invalid/avatar.png';
     await tester.pumpWidget(MaterialApp(home: CachedTeamChatDirectory(
       store: store, capabilities: caps, subjectsOnly: false)));
     await tester.pumpAndSettle();
     expect(find.text('Команды'), findsOneWidget);
     expect(find.text('Первый предмет'), findsOneWidget);
     expect(find.text('Второй предмет'), findsOneWidget);
-    expect(tester.getTopLeft(find.text('Групповой чат')).dy,
+    expect(tester.getTopLeft(find.text('Чат группы')).dy,
       lessThan(tester.getTopLeft(find.text('Первый предмет')).dy));
     expect(tester.getTopLeft(find.text('Первый предмет')).dy,
       lessThan(tester.getTopLeft(find.text('Второй предмет')).dy));
     expect(find.text('История не сохранена на устройстве'), findsOneWidget);
+    expect(find.text('1-См(ВВ)-2 · общий чат'), findsOneWidget);
+    final avatar = tester.widget<TeamAvatar>(find.descendant(
+      of: find.byKey(const ValueKey('open-learning-group-chat')),
+      matching: find.byType(TeamAvatar)));
+    expect(avatar.name, 'Чат группы');
+    expect(avatar.icon, 'groups', reason: 'offline tile does not load the saved remote avatar');
     await tester.tap(find.text('Второй предмет'));
     await tester.pump();
     expect(find.text('История этого чата не сохранена на устройстве.'), findsOneWidget);
     expect(find.text('Второй предмет'), findsOneWidget);
     expect(find.byType(TeamDetailsScreen), findsNothing);
+    await tester.tap(find.text('Чат группы'));
+    await tester.pumpAndSettle();
+    final details = tester.widget<TeamDetailsScreen>(find.byType(TeamDetailsScreen));
+    expect(details.team.id, 'g');
+    expect(details.team.name, 'Пространство группы');
+    expect(details.team.icon, 'https://example.invalid/avatar.png');
+    expect(details.cachedChatId, 'chat-g');
+    expect(identical(details.cachedCapabilities, caps), isTrue);
     session = fakeSession('b');
     events.add(AuthState(AuthChangeEvent.signedIn, session));
     await tester.pump();

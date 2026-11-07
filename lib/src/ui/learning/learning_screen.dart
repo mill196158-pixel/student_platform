@@ -217,7 +217,7 @@ class _BodyState extends State<_Body> {
                       separatorBuilder: (_, __) => const SizedBox(height: 12),
                       itemBuilder: (_, i) {
                         if (groupChat != null && i == 0) {
-                          return _GroupChatCard(
+                          return StudentGroupChatTile(
                             key: const ValueKey('learning-group-chat-card'),
                             team: groupChat,
                             groupName: groupName,
@@ -239,15 +239,17 @@ class _BodyState extends State<_Body> {
 }
 
 /// Permanent academic group chat — list mode (Stage 13.9/13.10).
-class _GroupChatCard extends StatelessWidget {
-  const _GroupChatCard({
+class StudentGroupChatTile extends StatelessWidget {
+  const StudentGroupChatTile({
     super.key,
     required this.team,
     required this.groupName,
+    this.onTap,
   });
 
   final Team team;
   final String groupName;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -255,7 +257,7 @@ class _GroupChatCard extends StatelessWidget {
     final onSurface = theme.colorScheme.onSurface;
     return InkWell(
       key: const ValueKey('open-learning-group-chat'),
-      onTap: () => Navigator.of(context).push(
+      onTap: onTap ?? () => Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => TeamDetailsScreen(
             team: team.copyWith(

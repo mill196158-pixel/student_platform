@@ -39,7 +39,9 @@ class _Cache implements ProjectChatServerCache {
             'icon': '',
             'kind': 'subject'
           }
-        }
+        },
+        {'isDm': false, 'chatId': 'chat-g', 'team': {'id': 'g', 'name': 'Пространство группы',
+          'teacher': '', 'groupCode': '1-См(ВВ)-2', 'icon': '', 'kind': 'group_space'}}
       ];
   @override
   Future<List<Message>?> read(String chat, SessionCapabilities caps) async =>
@@ -123,9 +125,9 @@ void main() {
                   id: 'g',
                   name: 'Group',
                   teacher: '',
-                  groupCode: 'G',
+                  groupCode: '',
                   icon: '',
-                  kind: 'group_space'),
+                  kind: 'unknown'),
             ],
             DateTime.utc(2026, 1, 2))),
         isTrue);
@@ -143,12 +145,17 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Subject'), findsOneWidget);
     expect(find.text('Unknown'), findsOneWidget);
-    expect(find.text('Group'), findsOneWidget);
+    expect(find.text('Чат группы'), findsOneWidget);
     expect(find.text('Тип команды не подтверждён'), findsOneWidget);
     expect(find.text('История не сохранена на устройстве'), findsNWidgets(3));
     expect(find.textContaining('Данные могут устареть'), findsOneWidget);
-    expect(tester.getTopLeft(find.text('Group')).dy,
+    expect(tester.getTopLeft(find.text('Чат группы')).dy,
         lessThan(tester.getTopLeft(find.text('Subject')).dy));
+    expect(find.text('1-См(ВВ)-2 · общий чат'), findsOneWidget);
+    await tester.tap(find.text('Чат группы'));
+    await tester.pump();
+    expect(find.text('История этого чата не сохранена на устройстве.'), findsOneWidget);
+    expect(find.text('Чат группы'), findsOneWidget);
     expect(await tester.runAsync(() => catalog.deny(ticket)), isTrue);
     await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 200)));

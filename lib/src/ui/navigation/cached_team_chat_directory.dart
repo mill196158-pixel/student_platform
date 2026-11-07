@@ -5,7 +5,7 @@ import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dar
 import 'package:student_platform/src/ui/learning/models/team.dart';
 import 'package:student_platform/src/ui/learning/state/scoped_team_catalog.dart';
 import 'package:student_platform/src/ui/learning/learning_screen.dart'
-    show StudentTeamTile;
+    show StudentTeamTile, StudentGroupChatTile;
 import 'package:student_platform/src/ui/shared/student_section_headers.dart'
     show StudentLearningHeader;
 import 'package:student_platform/src/ui/learning/team_details_screen.dart';
@@ -27,10 +27,15 @@ class CachedTeamChatDirectory extends StatefulWidget {
 }
 
 class _Entry {
-  const _Entry(this.team, this.chatId, this.historyAvailable);
+  const _Entry(this.team, this.chatId, this.historyAvailable,
+      {this.displayGroupName, this.confirmedSummaryKind});
   final Team team;
   final String? chatId;
   final bool historyAvailable;
+  final String? displayGroupName;
+  final String? confirmedSummaryKind;
+  String get displayKind => team.kind == 'unknown'
+      ? (confirmedSummaryKind ?? 'unknown') : team.kind;
 }
 
 class _CachedTeamChatDirectoryState extends State<CachedTeamChatDirectory> {
@@ -185,15 +190,19 @@ class _CachedTeamChatDirectoryState extends State<CachedTeamChatDirectory> {
         final chatId = summaries[team.id]?.$1;
         final saved = chatId == null ? null : await store.read(chatId, caps);
         if (!current()) return;
-        result.add(_Entry(team, chatId, saved != null));
+        final ownGroup = team.groupCode.trim();
+        final summaryGroup = summaries[team.id]?.$2.groupCode.trim() ?? '';
+        result.add(_Entry(team, chatId, saved != null,
+            displayGroupName: ownGroup.isNotEmpty ? ownGroup : summaryGroup,
+            confirmedSummaryKind: summaries[team.id]?.$2.kind));
       }
       if (!widget.subjectsOnly) {
         // Match the online screen: the group chat precedes subject teams,
         // while preserving the saved relative order within each type.
         final groups =
-            result.where((entry) => entry.team.kind == 'group_space').toList();
+            result.where((entry) => entry.displayKind == 'group_space').toList();
         final subjects =
-            result.where((entry) => entry.team.kind != 'group_space').toList();
+            result.where((entry) => entry.displayKind != 'group_space').toList();
         result
           ..clear()
           ..addAll(groups)
@@ -232,7 +241,8 @@ class _CachedTeamChatDirectoryState extends State<CachedTeamChatDirectory> {
     if (saved == null) {
       setState(() => _entries = _entries
           ?.map((item) => identical(item, entry)
-              ? _Entry(item.team, item.chatId, false)
+              ? _Entry(item.team, item.chatId, false, displayGroupName: item.displayGroupName,
+                  confirmedSummaryKind: item.confirmedSummaryKind)
               : item)
           .toList());
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
@@ -322,9 +332,18 @@ class _CachedTeamChatDirectoryState extends State<CachedTeamChatDirectory> {
                   'Нет сохранённых данных. Подключитесь к сети, чтобы обновить список.')
             else
               for (final entry in entries) ...[
-                StudentTeamTile(entry.team,
-                    onTap: () => unawaited(_open(entry))),
-                if (entry.team.kind == 'unknown')
+                if (entry.displayKind == 'group_space')
+                  StudentGroupChatTile(
+                    team: (entry.team.icon.startsWith('http://') || entry.team.icon.startsWith('https://'))
+                        ? entry.team.copyWith(icon: '') : entry.team,
+                    groupName: entry.displayGroupName?.isNotEmpty == true
+                        ? entry.displayGroupName! : 'Группа',
+                    onTap: () => unawaited(_open(entry)),
+                  )
+                else
+                  StudentTeamTile(entry.team,
+                      onTap: () => unawaited(_open(entry))),
+                if (entry.displayKind == 'unknown')
                   Padding(
                       padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
                       child: Text('Тип команды не подтверждён',
