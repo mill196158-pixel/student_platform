@@ -9,6 +9,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart' as sqlite;
 import 'package:student_ui/student_ui.dart';
 
+import '../../core/optional_image_cache_budget.dart';
+
 /// Persistent news image bytes for Mobile, keyed by path + version.
 ///
 /// - Does not store signed URLs.
@@ -24,11 +26,14 @@ class NewsImageDiskCache {
     this.maxTotalBytes = 48 * 1024 * 1024,
     this.immutableQaDatabase,
     this.legacyQaRootOverride,
+    this.debugOptionalBudget,
   })  : _memory = memory ?? NewsImageBytesCache.instance,
         _rootOverride = rootOverride;
 
   final NewsImageBytesCache _memory;
   final Directory? Function()? _rootOverride;
+  @visibleForTesting
+  final OptionalImageCacheBudget? debugOptionalBudget;
   final int maxEntries;
   final int maxTotalBytes;
 
@@ -400,6 +405,10 @@ class NewsImageDiskCache {
     }
     // Do not evict existing entries for a new image that cannot fit.
     if (bytes.length > maxTotalBytes && !_index!.containsKey(key.id)) return;
+    final budget = debugOptionalBudget ??
+        (_rootOverride == null ? OptionalImageCacheBudget.instance : null);
+    final release = budget?.reserve(bytes.length);
+    if (budget != null && release == null) return;
     final fileName = '${_fileId(key.id)}.bin';
     try {
       final file = File('${_root!.path}/$fileName');
@@ -416,6 +425,8 @@ class NewsImageDiskCache {
       await _persistIndex();
     } catch (e) {
       debugPrint('[news-img] disk put failed type=${e.runtimeType}');
+    } finally {
+      release?.call();
     }
   }
 
