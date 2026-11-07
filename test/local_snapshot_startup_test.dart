@@ -127,6 +127,47 @@ void main() {
     gate.close(); caps.dispose(); scope.dispose(); await events.close();
   });
 
+  test('late denial navigates even when auth gate cannot reopen', () async {
+    final session = _session('a');
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final caps = SessionCapabilities(scope);
+    final inner = _HungAuthClient();
+    final gate = RefreshAdmissionClient(inner, backend: Uri.parse('https://example.invalid'));
+    final inflight = gate.send(http.Request('GET', Uri.parse('https://example.invalid/auth/v1/user')));
+    final held = gate.send(http.Request('POST', Uri.parse('https://example.invalid/auth/v1/token?grant_type=refresh_token')));
+    final heldRejected = expectLater(held, throwsA(isA<RefreshTransportSuppressed>()));
+    final pendingPolicy = Completer<SettledPolicyStatus>();
+    var navigated = false;
+    var reopened = true;
+    var bound = false;
+    void openGate() {
+      if (!bound) { bound = true; gate.bind(inner); }
+      gate.resume();
+    }
+    final startup = LocalSnapshotStartup(scope: scope,
+      issuer: 'https://example.invalid/auth/v1',
+      restore: () async => SessionRestoreStatus.restored,
+      checkPolicy: () => pendingPolicy.future,
+      wait: const Duration(milliseconds: 10),
+      onCacheOnly: () => gate.suspendAndDrain(timeout: const Duration(milliseconds: 10)),
+      onLateDenial: (_) { reopened = rejectHeldRefreshesSafely(gate, openGate); navigated = true; });
+    expect(await startup.resolve(caps), OfflineStartupResult.unavailable);
+    expect(caps.capture(SessionCapability.cachedRead), isNull);
+    pendingPolicy.complete(SettledPolicyStatus.denied);
+    await heldRejected;
+    await Future<void>.delayed(Duration.zero);
+    expect(navigated, isTrue);
+    expect(reopened, isFalse);
+    expect(gate.isSuspended, isTrue);
+    expect(caps.capture(SessionCapability.networkRead), isNull);
+    inner.response.complete(http.StreamedResponse(Stream<List<int>>.empty(), 200));
+    await inflight;
+    expect(gate.isSuspended, isTrue);
+    gate.close(); caps.dispose(); scope.dispose(); await events.close();
+  });
+
   test('online is enabled only after live policy allows', () async {
     final session = _session('a');
     final events = StreamController<AuthState>.broadcast(sync: true);

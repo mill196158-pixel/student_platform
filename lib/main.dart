@@ -605,7 +605,7 @@ Future<void> _initializeApp(
         }
         gate.resume();
       }
-      void rejectHeldGate() { gate.discardHeldRefreshes(); openGate(); }
+      void rejectHeldGate() { rejectHeldRefreshesSafely(gate, openGate); }
       _ordinaryRejectHeldGate = rejectHeldGate;
       {
         bool sameSession(OfflineSessionBinding expected) {

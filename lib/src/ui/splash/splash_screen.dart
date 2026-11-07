@@ -52,8 +52,11 @@ class _SplashScreenState extends State<SplashScreen> {
 
   Future<void> _bootstrapOnce() async {
     try {
+      debugPrint('[startup-route] bootstrap started');
       if (widget.qaAdmission != null) {
+        debugPrint('[startup-route] local admission started');
         final result = await widget.qaAdmission!();
+        debugPrint('[startup-route] local admission result: ${result.name}');
         if (!mounted) return;
         switch (result) {
           case OfflineStartupResult.online:
@@ -82,6 +85,7 @@ class _SplashScreenState extends State<SplashScreen> {
         status =
             await AuthSession.restoreSessionStatus(Supabase.instance.client);
       }
+      debugPrint('[startup-route] session restore result: ${status.name}');
       // GoRouter awaits the live password policy before building /home.
       // Do not repeat that network request or populate unused legacy state here.
       if (!mounted) return;
@@ -108,7 +112,8 @@ class _SplashScreenState extends State<SplashScreen> {
       }
 
       if (mounted) context.go('/guest');
-    } catch (_) {
+    } catch (error) {
+      debugPrint('[startup-route] bootstrap error: ${error.runtimeType}');
       if (!mounted) return;
       context.go('/login');
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(

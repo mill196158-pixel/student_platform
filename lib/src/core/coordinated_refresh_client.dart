@@ -162,6 +162,19 @@ class CoordinatedRefreshClient extends http.BaseClient {
 /// Instantiated before Supabase.initialize: SDK recovery may start before that
 /// future returns. Refresh requests wait for exactly one configured coordinator.
 /// Non-refresh traffic does not wait; this object never logs request bodies.
+/// Denial must still reach the login route when previously dispatched auth
+/// has not drained. In that case the gate remains closed until a safe retry.
+bool rejectHeldRefreshesSafely(
+    RefreshAdmissionClient gate, void Function() openGate) {
+  gate.discardHeldRefreshes();
+  try {
+    openGate();
+    return true;
+  } on StateError {
+    return false;
+  }
+}
+
 class RefreshAdmissionClient extends http.BaseClient {
   RefreshAdmissionClient(this._inner,
       {Uri? backend, RefreshSecurityFence? securityFence,
