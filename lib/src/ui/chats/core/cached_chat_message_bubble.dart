@@ -11,6 +11,8 @@ import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dar
 import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/learning/models/chat_file.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/message_bubble.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/file_message_bubble.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/reaction_overlay_scope.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_card_envelope.dart';
 
 /// Existing message presentation with no online avatar, actions or file fetch.
@@ -125,6 +127,25 @@ class CachedChatMessageBubble extends StatelessWidget {
     // guessing from the literal name; retain all message and forwarded text.
     final displayAuthor = showAuthor &&
         (message.type != MessageType.forward || message.authorNameVerified == true);
+    final ordinaryFiles = canonical.where((file) => !file.isDeleted).toList();
+    if (embedded == null && message.type != MessageType.forward && ordinaryFiles.length == 1) {
+      final file = ordinaryFiles.single;
+      final isMine = message.isMine(service.currentUserId);
+      return FileMessageBubble(
+        file: file, isMe: isMine,
+        time: DateFormat('HH:mm').format(message.at.toLocal()),
+        authorName: message.authorName, authorId: message.authorId,
+        showAvatar: displayAuthor, reserveAvatarSpace: displayAuthor,
+        showAuthorLine: displayAuthor, caption: message.text, receiptTicks: 0,
+        reactions: LocalReactionOverlayScope.active(context) ? null : message.reactions,
+        localPreviewBuilder: (_, width, time, hasCaption) =>
+          kDebugMode && debugForwardAttachmentBuilder != null
+            ? debugForwardAttachmentBuilder!(file)
+            : CachedChatAttachment(file: file, service: service,
+                inlineMaxWidth: width, inlineTime: time,
+                inlineIsMine: isMine, inlineHasCaption: hasCaption),
+      );
+    }
     final bubble = MessageBubble(
         message: message.copyWith(text: text),
         time: DateFormat('HH:mm').format(message.at.toLocal()),
@@ -141,7 +162,9 @@ class CachedChatMessageBubble extends StatelessWidget {
           if (embedded == null && message.type != MessageType.forward) return true;
           return false;
         }).toList(),
-        reactions: message.reactions,
+        // Reactions are painted by the same read-only overlay used by the
+        // surrounding message list; avoid a second inline copy.
+        reactions: LocalReactionOverlayScope.active(context) ? null : message.reactions,
         receiptTicks: 0);
     if (matched.isEmpty) return bubble;
     return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,

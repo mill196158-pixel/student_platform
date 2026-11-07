@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:open_filex/open_filex.dart';
@@ -11,11 +12,16 @@ import 'dm_chat_service.dart';
 /// A network-free attachment preview for the experimental cached-only chat.
 class CachedChatAttachment extends StatefulWidget {
   const CachedChatAttachment({super.key, required this.file, required this.service,
-    this.sourceIsCurrent, this.sourceChanges, this.debugBeforeRead, this.debugOpen, this.debugRead});
+    this.sourceIsCurrent, this.sourceChanges, this.debugBeforeRead, this.debugOpen, this.debugRead,
+    this.inlineMaxWidth, this.inlineTime, this.inlineIsMine = false, this.inlineHasCaption = false});
   final ChatFile file;
   final DmChatService service;
   final bool Function()? sourceIsCurrent;
   final Listenable? sourceChanges;
+  final double? inlineMaxWidth;
+  final String? inlineTime;
+  final bool inlineIsMine;
+  final bool inlineHasCaption;
   @visibleForTesting
   final Future<void> Function()? debugBeforeRead;
   @visibleForTesting
@@ -174,11 +180,19 @@ class _CachedChatAttachmentState extends State<CachedChatAttachment> {
         final bytes = snapshot.data;
         final revision = _revision;
         if (!widget.file.isImage) {
+          final colors = Theme.of(context).colorScheme;
           return AppFileCard(
             fileName: widget.file.fileName,
             fileSize: widget.file.fileSize,
             mimeType: widget.file.fileType,
             compact: true,
+            maxNameLines: widget.inlineMaxWidth == null ? 2 : 1,
+            statusLabel: widget.inlineTime,
+            statusColor: widget.inlineIsMine ? colors.onPrimaryContainer : colors.onSurface,
+            backgroundColor: widget.inlineMaxWidth == null ? null : widget.inlineHasCaption
+                ? Colors.transparent : widget.inlineIsMine ? colors.primaryContainer : colors.surface,
+            borderColor: widget.inlineMaxWidth == null ? null : widget.inlineHasCaption
+                ? Colors.transparent : colors.outlineVariant.withValues(alpha: .18),
             onTap: () {
               if (revision != _revision || !_allowed()) return;
               if (snapshot.connectionState != ConnectionState.done) {
@@ -240,9 +254,20 @@ class _CachedChatAttachmentState extends State<CachedChatAttachment> {
               }
               _viewer.show();
             },
-            child: ClipRRect(borderRadius: BorderRadius.circular(12),
-              child: Image.memory(bytes, width: 220, fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) => Text('Вложение: ${widget.file.fileName}'))),
+            child: ClipRRect(borderRadius: BorderRadius.circular(widget.inlineMaxWidth == null ? 12 : 18),
+              child: Stack(alignment: Alignment.bottomRight, children: [
+                ConstrainedBox(constraints: const BoxConstraints(maxHeight: 270),
+                  child: Image.memory(bytes,
+                    width: widget.inlineMaxWidth == null ? 220 : math.min(widget.inlineMaxWidth!, 245),
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => Text('Вложение: ${widget.file.fileName}'))),
+                if (widget.inlineTime != null && !widget.inlineHasCaption)
+                  Positioned(bottom: 8, right: 8, child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(color: Colors.black.withValues(alpha: .58),
+                      borderRadius: BorderRadius.circular(10)),
+                    child: Text(widget.inlineTime!, style: const TextStyle(color: Colors.white, fontSize: 10)))),
+              ])),
           ),
         );
       });

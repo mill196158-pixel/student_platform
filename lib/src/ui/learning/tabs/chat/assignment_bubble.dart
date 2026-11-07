@@ -27,6 +27,9 @@ class AssignmentBubble extends StatelessWidget {
   final Map<String, int>? reactions;
   final VoidCallback? onReact;
   final Key? boundaryKey;
+  /// A verified local snapshot. In this mode the bubble does not construct a
+  /// team controller or offer network-backed mutation and preview actions.
+  final Assignment? localAssignment;
 
   const AssignmentBubble({
     super.key,
@@ -43,11 +46,13 @@ class AssignmentBubble extends StatelessWidget {
     this.reactions,
     this.onReact,
     this.boundaryKey,
+    this.localAssignment,
   });
 
   @override
   Widget build(BuildContext context) {
-    final st = context.watch<TeamCubit>().state;
+    final localOnly = localAssignment != null;
+    final st = localOnly ? null : context.watch<TeamCubit>().state;
 
     // Рендерим карточку ТОЛЬКО если есть валидный assignmentId и нашли задание.
     final String? aid =
@@ -55,7 +60,8 @@ class AssignmentBubble extends StatelessWidget {
     if (aid == null) return const UnavailableChatCard();
 
     Assignment? a;
-    final byId = st.assignments.where((x) => x.id == aid);
+    final byId = (localOnly ? <Assignment>[localAssignment!] : st!.assignments)
+        .where((x) => x.id == aid);
     if (byId.isNotEmpty) a = byId.first;
     if (a == null) {
       return _MissingAssignmentBubble(
@@ -94,8 +100,8 @@ class AssignmentBubble extends StatelessWidget {
     final whoDidText =
         isDraft ? 'предложил: $authorDisplay' : 'опубликовал: $authorDisplay';
 
-    final canManageDraft = isDraft && st.isStarosta;
-    final canVoteDraft = isDraft && !st.isStarosta;
+    final canManageDraft = !localOnly && isDraft && st!.isStarosta;
+    final canVoteDraft = !localOnly && isDraft && !st!.isStarosta;
 
     // ДЕФОЛТНЫЕ действия, если снаружи не передали колбэки
     void _defaultOpen() {
@@ -266,7 +272,7 @@ class AssignmentBubble extends StatelessWidget {
                                 color: textColor.withValues(alpha: .9)),
                           ),
                         ],
-                        if (assignment.attachments.isNotEmpty) ...[
+                        if (!localOnly && assignment.attachments.isNotEmpty) ...[
                           const SizedBox(height: 7),
                           _AssignmentAttachmentsPreview(
                               attachments: assignment.attachments),
@@ -339,7 +345,7 @@ class AssignmentBubble extends StatelessWidget {
                                 ),
                               ),
                               TextButton.icon(
-                                onPressed: onOpen ?? _defaultOpen,
+                                onPressed: onOpen ?? (localOnly ? null : _defaultOpen),
                                 icon: const Icon(Icons.open_in_new, size: 18),
                                 label: const Text('Открыть'),
                                 style: TextButton.styleFrom(
@@ -350,7 +356,7 @@ class AssignmentBubble extends StatelessWidget {
                               ),
                             ] else ...[
                               TextButton.icon(
-                                onPressed: onOpen ?? _defaultOpen,
+                                onPressed: onOpen ?? (localOnly ? null : _defaultOpen),
                                 icon: const Icon(Icons.open_in_new, size: 18),
                                 label: const Text('Открыть'),
                                 style: TextButton.styleFrom(

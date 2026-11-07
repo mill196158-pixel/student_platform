@@ -13,6 +13,7 @@ import '../search/chat_search_controller.dart';
 import '../search/search_highlight.dart';
 import '../message_builder.dart';
 import '../message_receipt.dart';
+import '../reaction_overlay_scope.dart';
 import '../models/chat_card_envelope.dart';
 import '../card_visibility_scope.dart';
 import '../../../../../core/auth_session_scope.dart';
@@ -483,7 +484,13 @@ class ChatMessageList extends StatelessWidget {
                               onShow: () => onRevealBlockedMessage?.call(m.id),
                             )
                           : localOnlyBubbleBuilder != null
-                          ? bubbleWithKey
+                          ? _ReadOnlyReactionOverlay(
+                              message: m,
+                              isMine: isMine,
+                              left: hideSenderIdentity || noAvatarSpacing ||
+                                      !reserveAvatarSpaceForChip ? 12 : 52,
+                              child: LocalReactionOverlayScope(child: bubbleWithKey),
+                            )
                           : SwipeToReply(
                               onReply: () => onReply(m),
                               child: SearchHighlight(
@@ -1161,6 +1168,33 @@ class _ChatMessageInteractionWrapper extends StatelessWidget {
     ]);
 
     return items;
+  }
+}
+
+/// Reuse the online reaction appearance without installing mutation handlers.
+class _ReadOnlyReactionOverlay extends StatelessWidget {
+  const _ReadOnlyReactionOverlay({required this.message, required this.isMine,
+    required this.left, required this.child});
+  final Message message;
+  final bool isMine;
+  final double left;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final reactions = (message.reactions ?? const <String, int>{}).entries
+        .where((entry) => entry.value > 0).take(4).toList();
+    if (reactions.isEmpty) return child;
+    final mine = message.userReactions?.toSet() ?? const <String>{};
+    return Stack(clipBehavior: Clip.none, children: [
+      child,
+      Positioned(left: isMine ? null : left, right: isMine ? 12 : null,
+        bottom: -10, child: IgnorePointer(child: Row(mainAxisSize: MainAxisSize.min,
+          textDirection: isMine ? TextDirection.rtl : TextDirection.ltr,
+          children: [for (final reaction in reactions)
+            _MessageReactionBubble(emoji: reaction.key, count: reaction.value,
+              selected: mine.contains(reaction.key), isMine: isMine)]))),
+    ]);
   }
 }
 

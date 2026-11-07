@@ -26,6 +26,8 @@ class FileMessageBubble extends StatelessWidget {
 
   /// DM receipts: null = legacy single ✓; 0/1/2 = none/delivered/read.
   final int? receiptTicks;
+  /// Uses a previously authorised local-only preview instead of network media.
+  final Widget Function(BuildContext, double, String, bool)? localPreviewBuilder;
 
   const FileMessageBubble({
     super.key,
@@ -45,6 +47,7 @@ class FileMessageBubble extends StatelessWidget {
     this.selected = false,
     this.boundaryKey,
     this.receiptTicks,
+    this.localPreviewBuilder,
   });
 
   @override
@@ -87,7 +90,7 @@ class FileMessageBubble extends StatelessWidget {
 
         return GestureDetector(
           onLongPress: onLongPress,
-          onTap: () => _handleFileTap(context),
+          onTap: localPreviewBuilder == null ? () => _handleFileTap(context) : null,
           child: Container(
             margin: const EdgeInsets.symmetric(vertical: 2),
             child: Row(
@@ -103,7 +106,7 @@ class FileMessageBubble extends StatelessWidget {
                             children: [
                               InkWell(
                                 onTap: (authorId != null &&
-                                        authorId!.isNotEmpty)
+                                        authorId!.isNotEmpty && localPreviewBuilder == null)
                                     ? () => Navigator.of(context).push(
                                           MaterialPageRoute(
                                             builder: (_) => FriendProfileScreen(
@@ -113,7 +116,7 @@ class FileMessageBubble extends StatelessWidget {
                                     : null,
                                 child: ProfileAvatar(
                                   name: authorName,
-                                  imageUrl: authorAvatarUrl,
+                                  imageUrl: localPreviewBuilder == null ? authorAvatarUrl : '',
                                 ),
                               ),
                               const SizedBox(width: 8),
@@ -150,7 +153,30 @@ class FileMessageBubble extends StatelessWidget {
                             ),
                           ),
 
-                        if (file.isImage && !hasCaption) ...[
+                        if (localPreviewBuilder != null) ...[
+                          if (hasCaption)
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: bg,
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(color: colors.outlineVariant.withValues(alpha: .16), width: .6),
+                              ),
+                              child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min, children: [
+                                localPreviewBuilder!(context, mediaInnerWidth - 16, displayTime, true),
+                                const SizedBox(height: 6),
+                                Text(captionText, maxLines: 3, overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(color: textColor, height: 1.24)),
+                                if (file.isImage) ...[
+                                  const SizedBox(height: 3),
+                                  Text(displayTime, style: TextStyle(color: textColor, fontSize: 11, height: 1)),
+                                ],
+                              ]),
+                            )
+                          else
+                            localPreviewBuilder!(context, mediaInnerWidth, displayTime, false),
+                        ] else if (file.isImage && !hasCaption) ...[
                           AppNetworkImagePreview(
                             imageUrl: file.fileUrl,
                             fileName: file.fileName,

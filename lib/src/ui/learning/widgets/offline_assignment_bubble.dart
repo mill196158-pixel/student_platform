@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/assignment_bubble.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:student_platform/src/ui/learning/models/assignment.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
@@ -25,37 +27,17 @@ class OfflineAssignmentBubble extends StatelessWidget {
           child: Text('Задание ещё не сохранено на устройстве',
               style: TextStyle(color: colors.onSurfaceVariant)));
     }
-    return Align(alignment: Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 18),
-        padding: const EdgeInsets.all(14),
-        constraints: const BoxConstraints(maxWidth: 320),
-        decoration: BoxDecoration(color: colors.primary.withValues(alpha: .08),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: colors.primary.withValues(alpha: .35))),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min, children: [
-          if (message.authorName.trim().isNotEmpty)
-            Text('опубликовал: ${message.authorName}',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(color: colors.onSurfaceVariant)),
-          Text(a.title, style: Theme.of(context).textTheme.titleSmall),
-          if ((a.due ?? '').trim().isNotEmpty)
-            Text('до ${a.due}', style: Theme.of(context).textTheme.labelSmall),
-          if (a.description.trim().isNotEmpty) ...[
-            const SizedBox(height: 6), Text(a.description, maxLines: 3, overflow: TextOverflow.ellipsis),
-          ],
-          const SizedBox(height: 6),
-          Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 8, children: [
-            Text(a.published ? 'Опубликовано' : 'Черновик',
-                style: TextStyle(color: colors.primary)),
-            TextButton.icon(onPressed: () {
-              if (!_current) return;
-              Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) =>
-                _OfflineAssignmentDetails(assignment: a, capabilities: capabilities, permit: permit)));
-            }, icon: const Icon(Icons.open_in_new, size: 17), label: const Text('Открыть')),
-          ]),
-        ]),
-      ));
+    return AssignmentBubble(
+      message: message,
+      isDraft: message.type == MessageType.assignmentDraft,
+      time: DateFormat('HH:mm').format(message.at.toLocal()),
+      localAssignment: a,
+      onOpen: () {
+        if (!_current) return;
+        Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) =>
+          _OfflineAssignmentDetails(assignment: a, capabilities: capabilities, permit: permit)));
+      },
+    );
   }
 }
 
