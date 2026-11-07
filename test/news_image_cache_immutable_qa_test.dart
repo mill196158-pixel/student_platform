@@ -353,4 +353,58 @@ void main() {
     expect(await cache.collectQaOrphans(allOperationsParticipate: true), 0);
     expect(await sentinel.readAsBytes(), [8]);
   }, skip: !const bool.fromEnvironment('NEWS_CACHE_IMMUTABLE_QA'));
+  test(
+      'corrupt index never gets replaced by clear invalidate prune replay or put',
+      () async {
+    final root = await Directory.systemTemp.createTemp('news-corrupt-index-');
+    final db = await databaseFactoryFfi.openDatabase('${root.path}/locks.db');
+    final folder = Directory('${root.path}/images');
+    await folder.create(recursive: true);
+    final index = File('${folder.path}/index.json');
+    final content = Uint8List.fromList([0x7b, 0x22, 0x78]);
+    await index.writeAsBytes(content, flush: true);
+    final blob = File('${folder.path}/protected.bin');
+    await blob.writeAsBytes([4, 5, 6]);
+    addTearDown(() async {
+      await db.close();
+      await root.delete(recursive: true);
+    });
+    final cache = NewsImageDiskCache(
+        rootOverride: () => folder,
+        memory: NewsImageBytesCache(),
+        immutableQaDatabase: db);
+    await expectLater(cache.clear(), throwsStateError);
+    await expectLater(cache.invalidatePath('path'), throwsStateError);
+    await expectLater(cache.pruneOtherVersions('path', '2'), throwsStateError);
+    await cache.put(
+        NewsImageCacheKey(path: 'path', version: '2'), Uint8List.fromList([9]));
+    expect(await index.readAsBytes(), content);
+    expect(await blob.readAsBytes(), [4, 5, 6]);
+    expect(await db.query('news_cache_qa_clear_intents'), isEmpty);
+    await db.insert('news_cache_qa_clear_intents',
+        {'directory': folder.absolute.path, 'snapshot': '{}'});
+    await expectLater(cache.clear(), throwsStateError);
+    expect(await index.readAsBytes(), content);
+    expect(await blob.readAsBytes(), [4, 5, 6]);
+    expect(await db.query('news_cache_qa_clear_intents'), hasLength(1));
+  }, skip: !const bool.fromEnvironment('NEWS_CACHE_IMMUTABLE_QA'));
+
+  test('new empty namespace permits first clear and first publication',
+      () async {
+    final root = await Directory.systemTemp.createTemp('news-empty-index-');
+    final db = await databaseFactoryFfi.openDatabase('${root.path}/locks.db');
+    final folder = Directory('${root.path}/images');
+    addTearDown(() async {
+      await db.close();
+      await root.delete(recursive: true);
+    });
+    final cache = NewsImageDiskCache(
+        rootOverride: () => folder,
+        memory: NewsImageBytesCache(),
+        immutableQaDatabase: db);
+    await cache.clear();
+    final key = NewsImageCacheKey(path: 'a', version: '1');
+    await cache.put(key, Uint8List.fromList([1]));
+    expect(await cache.peek(key), [1]);
+  }, skip: !const bool.fromEnvironment('NEWS_CACHE_IMMUTABLE_QA'));
 }

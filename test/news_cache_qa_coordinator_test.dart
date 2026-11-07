@@ -36,7 +36,13 @@ void main() {
           immutableQaDatabase: db);
       await cache.put(key, Uint8List.fromList(List.filled(i + 1, 1)));
       await cache.put(key, Uint8List.fromList([2, i]));
+      if (i == 0) {
+        cache.debugAfterCollectorRename =
+            () async => throw StateError('synthetic interruption');
+        expect(await cache.collectQaOrphans(allOperationsParticipate: true), 0);
+      }
     }
+    expect(await db.query('news_cache_qa_evictions'), hasLength(1));
     final blocked = await runQaNewsCacheMaintenance(
         limitBytes: 0, temporaryRoot: root, database: db);
     expect(blocked, isNotNull);
@@ -50,6 +56,7 @@ void main() {
     expect(cleaned, isNotNull);
     expect(cleaned!.confirmedFreedBytes, 6);
     expect(cleaned.beforeBytes - cleaned.afterBytes, 6);
+    expect(await db.query('news_cache_qa_evictions'), isEmpty);
     expect(await sentinel.readAsBytes(), [9, 9]);
   }, skip: !const bool.fromEnvironment('NEWS_CACHE_IMMUTABLE_QA'));
 }

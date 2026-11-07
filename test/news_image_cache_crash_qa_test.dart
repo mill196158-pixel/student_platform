@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:student_platform/src/ui/home/news_image_disk_cache.dart';
@@ -13,7 +15,9 @@ void main() {
       'after',
       'clear',
       'collect-intent',
-      'collect-staged'
+      'collect-uncommitted',
+      'collect-staged',
+      'collect-unlink'
     ]) {
       final root = await Directory.systemTemp.createTemp('news-publish-crash-');
       try {
@@ -48,14 +52,82 @@ void main() {
         if (phase.startsWith('collect')) {
           final journal = await db.query('news_cache_qa_evictions');
           expect(journal, hasLength(1));
-          expect(journal.single['state'],
-              phase == 'collect-intent' ? 'intent' : 'staged');
+          expect(
+              journal.single['state'],
+              phase == 'collect-staged' || phase == 'collect-unlink'
+                  ? 'staged'
+                  : 'intent');
           final files = await Directory('${root.path}/images')
               .list()
               .where((item) => item is File)
               .toList();
           expect(files.any((item) => item.path.contains('.news-evict-')),
-              phase == 'collect-staged');
+              phase != 'collect-intent' && phase != 'collect-unlink');
+          final key = NewsImageCacheKey(path: 'synthetic', version: '1');
+          await cache.put(key, Uint8List.fromList([1]));
+          expect(await cache.peek(key), [2],
+              reason: 'journal blocks a racing writer');
+          final indexFile = File('${root.path}/images/index.json');
+          final originalIndex = await indexFile.readAsString();
+          if (phase == 'collect-unlink') {
+            expect(await cache.recoverQaOrphans(allOperationsParticipate: true),
+                0);
+            expect(await db.query('news_cache_qa_evictions'), isEmpty);
+            await cache.put(key, Uint8List.fromList([1]));
+            expect(await cache.peek(key), [1]);
+          } else if (phase != 'collect-intent') {
+            final duplicateName = '${'a' * 40}.${'b' * 64}.bin';
+            await db.insert('news_cache_qa_blobs', {
+              'directory': journal.single['directory'],
+              'file': duplicateName
+            });
+            await db.insert('news_cache_qa_evictions', {
+              'directory': journal.single['directory'],
+              'file': duplicateName,
+              'token': journal.single['token'],
+              'state': 'staged'
+            });
+            expect(await cache.recoverQaOrphans(allOperationsParticipate: true),
+                0);
+            expect(await db.query('news_cache_qa_evictions'), hasLength(2));
+            await db.delete('news_cache_qa_evictions',
+                where: 'file=?', whereArgs: [duplicateName]);
+            await db.delete('news_cache_qa_blobs',
+                where: 'file=?', whereArgs: [duplicateName]);
+            final stagedFile = File(
+                '${root.path}/images/.news-evict-${journal.single['token']}');
+            final unexpectedOriginal =
+                File('${root.path}/images/${journal.single['file']}');
+            await unexpectedOriginal
+                .writeAsBytes(await stagedFile.readAsBytes());
+            expect(await cache.recoverQaOrphans(allOperationsParticipate: true),
+                0);
+            expect(await unexpectedOriginal.exists(), isTrue);
+            expect(await stagedFile.exists(), isTrue);
+            await unexpectedOriginal.delete();
+            final decoded = jsonDecode(originalIndex) as Map<String, dynamic>;
+            (decoded[key.id] as Map<String, dynamic>)['file'] =
+                journal.single['file'];
+            await indexFile.writeAsString(jsonEncode(decoded), flush: true);
+            expect(await cache.recoverQaOrphans(allOperationsParticipate: true),
+                0);
+            expect(await db.query('news_cache_qa_evictions'), hasLength(1));
+            await indexFile.writeAsString('{broken', flush: true);
+            expect(await cache.recoverQaOrphans(allOperationsParticipate: true),
+                0);
+            expect(await db.query('news_cache_qa_evictions'), hasLength(1));
+            await indexFile.writeAsString(originalIndex, flush: true);
+            expect(await cache.recoverQaOrphans(allOperationsParticipate: true),
+                1);
+            expect(await cache.recoverQaOrphans(allOperationsParticipate: true),
+                0);
+          } else {
+            expect(await cache.recoverQaOrphans(allOperationsParticipate: true),
+                0);
+            expect(await db.query('news_cache_qa_evictions'), isEmpty);
+            await cache.put(key, Uint8List.fromList([1]));
+            expect(await cache.peek(key), [1]);
+          }
         }
         await db.close();
       } finally {

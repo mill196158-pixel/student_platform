@@ -47,6 +47,10 @@ class NewsImageDiskCache {
   Future<void> Function()? debugAfterCollectorIntent;
   @visibleForTesting
   Future<void> Function()? debugAfterCollectorRename;
+  @visibleForTesting
+  Future<void> Function()? debugAfterCollectorRenameBeforeCommit;
+  @visibleForTesting
+  Future<void> Function()? debugAfterCollectorUnlinkBeforeCommit;
 
   final String directoryName;
   static const _indexName = 'index.json';
@@ -54,6 +58,8 @@ class NewsImageDiskCache {
   Directory? _root;
   Directory? _legacyQaRoot;
   Map<String, _IndexEntry>? _index;
+  bool _qaIndexVerified = false;
+  bool _qaIndexMissing = false;
   bool _ready = false;
   int _clearEpoch = 0;
   final Map<String, int> _pathEpoch = {};
@@ -162,6 +168,8 @@ class NewsImageDiskCache {
   }
 
   Future<void> _publishQaIndex() async {
+    if (!_qaIndexVerified && !_qaIndexMissing)
+      throw StateError('Unverified index');
     final encoded = <String, dynamic>{
       for (final e in _index!.entries) e.key: e.value.toJson()
     };
@@ -170,6 +178,8 @@ class NewsImageDiskCache {
     final next = File('${_root!.path}/.index.$suffix.tmp');
     await next.writeAsString(jsonEncode(encoded), flush: true);
     await next.rename('${_root!.path}/$_indexName');
+    _qaIndexMissing = false;
+    _qaIndexVerified = true;
   }
 
   Future<void> _replayQaClear(sqlite.Transaction txn) async {
@@ -178,6 +188,8 @@ class NewsImageDiskCache {
     if (rows.isEmpty) return;
     final decoded = jsonDecode(rows.single['snapshot'] as String);
     if (decoded is! Map) throw StateError('Invalid clear intent');
+    if (!_qaIndexVerified && (!_qaIndexMissing || decoded.isNotEmpty))
+      throw StateError('Unverified index');
     for (final entry in decoded.entries) {
       final current = _index![entry.key];
       if (current != null && current.revision == entry.value)
@@ -412,6 +424,8 @@ class NewsImageDiskCache {
   /// test-only and is not yet connected to the application's three caches.
   Future<bool> _writeImmutableQa(NewsImageCacheKey key, Uint8List bytes) async {
     try {
+      if (!_qaIndexVerified && !_qaIndexMissing)
+        throw StateError('Unverified index');
       if (bytes.length > maxTotalBytes && !_index!.containsKey(key.id))
         return false;
       final name = '${_fileId(key.id)}.${sha256.convert(bytes)}.bin';
@@ -459,10 +473,12 @@ class NewsImageDiskCache {
     if (!_immutableQa || !allOperationsParticipate) return 0;
     var freed = 0;
     try {
+      freed += await recoverQaOrphans(allOperationsParticipate: true);
       for (;;) {
         final candidate = await _qaGuard<(String, String)?>(() async {
-          if (await FileSystemEntity.type(_root!.path, followLinks: false) !=
-              FileSystemEntityType.directory) return null;
+          if (!_qaIndexVerified ||
+              await FileSystemEntity.type(_root!.path, followLinks: false) !=
+                  FileSystemEntityType.directory) return null;
           final rows = await _qaTransaction.query('news_cache_qa_blobs',
               where: 'directory=?', whereArgs: [_qaDirectory]);
           for (final row in rows) {
@@ -511,6 +527,7 @@ class NewsImageDiskCache {
                   await _root!.resolveSymbolicLinks()) return null;
           final size = await original.length();
           await original.rename(staged.path);
+          await debugAfterCollectorRenameBeforeCommit?.call();
           await _qaTransaction.update(
               'news_cache_qa_evictions', {'state': 'staged'},
               where: 'directory=? AND file=? AND token=?',
@@ -519,24 +536,117 @@ class NewsImageDiskCache {
         });
         if (size == null) break;
         await debugAfterCollectorRename?.call();
-        if (await FileSystemEntity.type(staged.path, followLinks: false) !=
-            FileSystemEntityType.file) break;
-        await staged.delete();
-        if (await FileSystemEntity.type(staged.path, followLinks: false) !=
-            FileSystemEntityType.notFound) break;
-        freed += size;
-        await _qaGuard(() async {
+        final deleted = await _qaGuard<bool>(() async {
+          if (!_qaIndexVerified ||
+              _index!.values.any((entry) => entry.file == name)) return false;
+          final journal = await _qaTransaction.query('news_cache_qa_evictions',
+              where: 'directory=? AND file=? AND token=? AND state=?',
+              whereArgs: [_qaDirectory, name, token, 'staged']);
+          if (journal.length != 1 ||
+              await FileSystemEntity.type(staged.path, followLinks: false) !=
+                  FileSystemEntityType.file ||
+              File(await staged.resolveSymbolicLinks()).parent.path !=
+                  await _root!.resolveSymbolicLinks()) return false;
+          await staged.delete();
+          if (await FileSystemEntity.type(staged.path, followLinks: false) !=
+              FileSystemEntityType.notFound) return false;
+          await debugAfterCollectorUnlinkBeforeCommit?.call();
           await _qaTransaction.delete('news_cache_qa_evictions',
               where: 'directory=? AND file=? AND token=? AND state=?',
               whereArgs: [_qaDirectory, name, token, 'staged']);
           await _qaTransaction.delete('news_cache_qa_blobs',
               where: 'directory=? AND file=?', whereArgs: [_qaDirectory, name]);
+          return true;
         });
+        if (!deleted) break;
+        freed += size;
       }
     } catch (_) {
       // Unknown or interrupted entries remain protected by their intent.
     }
     return freed;
+  }
+
+  /// Resume only journalled v2 orphans. An interrupted intent may be
+  /// cancelled while its original still exists; ambiguous states stay pinned.
+  /// Counts only an unlink completed in this call after transaction commit.
+  @visibleForTesting
+  Future<int> recoverQaOrphans({required bool allOperationsParticipate}) async {
+    if (!_immutableQa || !allOperationsParticipate) return 0;
+    try {
+      return await _qaGuard<int>(() async {
+        if (!_qaIndexVerified ||
+            await FileSystemEntity.type(_root!.path, followLinks: false) !=
+                FileSystemEntityType.directory) return 0;
+        final rows = await _qaTransaction.query('news_cache_qa_evictions',
+            where: 'directory=?', whereArgs: [_qaDirectory]);
+        var freed = 0;
+        for (final row in rows) {
+          final name = row['file'], token = row['token'], state = row['state'];
+          if (name is! String ||
+              token is! String ||
+              !RegExp(r'^[a-f0-9]{40}\.[a-f0-9]{64}\.bin$').hasMatch(name) ||
+              !RegExp(r'^[A-Za-z0-9_-]{24}$').hasMatch(token) ||
+              (state != 'intent' && state != 'staged')) continue;
+          final sameToken = await _qaTransaction.query(
+              'news_cache_qa_evictions',
+              columns: ['file'],
+              where: 'directory=? AND token=?',
+              whereArgs: [_qaDirectory, token]);
+          if (sameToken.length != 1) continue;
+          final registrations = await _qaTransaction.query(
+              'news_cache_qa_blobs',
+              where: 'directory=? AND file=?',
+              whereArgs: [_qaDirectory, name]);
+          if (registrations.length != 1) continue;
+          final original = File('${_root!.path}/$name');
+          final staged = File('${_root!.path}/.news-evict-$token');
+          final originalType =
+              await FileSystemEntity.type(original.path, followLinks: false);
+          final stagedType =
+              await FileSystemEntity.type(staged.path, followLinks: false);
+          if (state == 'intent' &&
+              originalType == FileSystemEntityType.file &&
+              stagedType == FileSystemEntityType.notFound) {
+            await _qaTransaction.delete('news_cache_qa_evictions',
+                where: 'directory=? AND file=? AND token=? AND state=?',
+                whereArgs: [_qaDirectory, name, token, state]);
+            continue;
+          }
+          if (!_index!.values.any((entry) => entry.file == name) &&
+              originalType == FileSystemEntityType.notFound &&
+              stagedType == FileSystemEntityType.notFound) {
+            // The OS or an interrupted unlink removed both paths. Retire only
+            // metadata; there is no proof of bytes freed in this invocation.
+            await _qaTransaction.delete('news_cache_qa_evictions',
+                where: 'directory=? AND file=? AND token=? AND state=?',
+                whereArgs: [_qaDirectory, name, token, state]);
+            await _qaTransaction.delete('news_cache_qa_blobs',
+                where: 'directory=? AND file=?',
+                whereArgs: [_qaDirectory, name]);
+            continue;
+          }
+          if (_index!.values.any((entry) => entry.file == name) ||
+              originalType != FileSystemEntityType.notFound ||
+              stagedType != FileSystemEntityType.file ||
+              File(await staged.resolveSymbolicLinks()).parent.path !=
+                  await _root!.resolveSymbolicLinks()) continue;
+          final size = await staged.length();
+          await staged.delete();
+          if (await FileSystemEntity.type(staged.path, followLinks: false) !=
+              FileSystemEntityType.notFound) continue;
+          await _qaTransaction.delete('news_cache_qa_evictions',
+              where: 'directory=? AND file=? AND token=? AND state=?',
+              whereArgs: [_qaDirectory, name, token, state]);
+          await _qaTransaction.delete('news_cache_qa_blobs',
+              where: 'directory=? AND file=?', whereArgs: [_qaDirectory, name]);
+          freed += size;
+        }
+        return freed;
+      });
+    } catch (_) {
+      return 0;
+    }
   }
 
   Future<void> invalidatePath(String path) {
@@ -598,6 +708,8 @@ class NewsImageDiskCache {
   Future<void> _removeQaTwoPhase({String? path, String? keepVersion}) async {
     await _mutations;
     await _qaGuard(() async {
+      if (!_qaIndexVerified && !_qaIndexMissing)
+        throw StateError('Unverified index');
       await _qaBump(path ?? '');
       await _qaTransaction.insert('news_cache_qa_legacy_suppression',
           {'directory': _qaDirectory, 'path': path ?? ''},
@@ -640,24 +752,66 @@ class NewsImageDiskCache {
   }
 
   Future<void> _loadIndex() async {
+    _qaIndexVerified = false;
+    _qaIndexMissing = false;
     final file = File('${_root!.path}/$_indexName');
-    if (!await file.exists()) {
+    if (!_immutableQa) {
+      if (!await file.exists()) {
+        _index = {};
+        return;
+      }
+      try {
+        final decoded = jsonDecode(await file.readAsString());
+        final map = <String, _IndexEntry>{};
+        if (decoded is Map) {
+          for (final entry in decoded.entries) {
+            final value = entry.value;
+            if (value is! Map) continue;
+            map[entry.key.toString()] =
+                _IndexEntry.fromJson(Map<String, dynamic>.from(value));
+          }
+        }
+        _index = map;
+      } catch (_) {
+        _index = {};
+      }
+      return;
+    }
+    final indexType =
+        await FileSystemEntity.type(file.path, followLinks: false);
+    if (indexType == FileSystemEntityType.notFound) {
+      _qaIndexMissing = true;
+      _index = {};
+      return;
+    }
+    if (indexType != FileSystemEntityType.file) {
       _index = {};
       return;
     }
     try {
       final decoded = jsonDecode(await file.readAsString());
       final map = <String, _IndexEntry>{};
+      var valid = decoded is Map &&
+          await FileSystemEntity.type(file.path, followLinks: false) ==
+              FileSystemEntityType.file;
       if (decoded is Map) {
         for (final entry in decoded.entries) {
           final value = entry.value;
-          if (value is! Map) continue;
-          map[entry.key.toString()] = _IndexEntry.fromJson(
-            Map<String, dynamic>.from(value),
-          );
+          if (entry.key is! String ||
+              value is! Map ||
+              value['file'] is! String ||
+              (value['file'] as String).isEmpty ||
+              value['path'] is! String ||
+              value['version'] is! String) {
+            valid = false;
+            continue;
+          }
+          map[entry.key as String] =
+              _IndexEntry.fromJson(Map<String, dynamic>.from(value));
         }
       }
       _index = map;
+      _qaIndexVerified = valid;
     } catch (_) {
       _index = {};
     }

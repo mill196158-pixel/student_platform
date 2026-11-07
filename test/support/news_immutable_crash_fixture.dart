@@ -28,6 +28,10 @@ void main() {
       await cache.put(key, Uint8List.fromList([2]));
       if (phase == 'collect-intent') {
         cache.debugAfterCollectorIntent = crash;
+      } else if (phase == 'collect-uncommitted') {
+        cache.debugAfterCollectorRenameBeforeCommit = crash;
+      } else if (phase == 'collect-unlink') {
+        cache.debugAfterCollectorUnlinkBeforeCommit = crash;
       } else {
         cache.debugAfterCollectorRename = crash;
       }
