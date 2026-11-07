@@ -42,6 +42,7 @@ class _Service implements IChatService {
   final String id;
   final List<Message> messages;
   final sent = <String>[];
+  Completer<String>? ensureGate;
   bool failSend = false;
   final sentFileIds = <List<String>>[];
   @override ChatMode get mode => ChatMode.dm;
@@ -49,7 +50,7 @@ class _Service implements IChatService {
   @override bool get supportsNotes => false;
   @override String get currentUserId => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   @override String? get chatId => id;
-  @override Future<String> ensureChatId() async => id;
+  @override Future<String> ensureChatId() async => ensureGate?.future ?? id;
   @override List<Message> get currentMessages => messages;
   @override ChatMessagesViewState get messagesViewState => ChatMessagesViewState(
       phase: ChatMessagesLoadPhase.ready, messages: messages, hasSnapshot: true);
@@ -71,6 +72,7 @@ void main() {
   sqfliteFfiInit();
 
   testWidgets('DM forward, cancel, unknown recovery and same-chat text forward', (tester) async {
+    expect(ForwardOutboxHost.mobileProductionModeFor(web: false, platform: TargetPlatform.android), isTrue);
     SharedPreferences.setMockInitialValues({});
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
         const MethodChannel('com.llfbandit.app_links/events'), (call) async => null);
@@ -128,7 +130,7 @@ void main() {
       await tester.tap(send.hitTestable());
     }
     Future<Database> openSourceDatabase() async => db;
-    Widget sourceScreen(Key key) => AuthSessionScopeHost(child: ForwardOutboxHost(source: scope, storage: storage, durableMode: true,
+    Widget sourceScreen(Key key) => AuthSessionScopeHost(child: ForwardOutboxHost(source: scope, storage: storage, durableMode: ForwardOutboxHost.mobileProductionModeFor(web: false, platform: TargetPlatform.android),
       openDatabaseOverride: openSourceDatabase, backendOverride: 'qa-backend',
       child: MaterialApp(navigatorKey: navigator, home: UnifiedChatScreen(key: key, service: source, title: 'Источник', debugCopyForwardFile: copyFile,
         debugAfterDurableCancel: () async { unknownCancelled.complete(); await releaseUnknown.future; },
@@ -139,6 +141,9 @@ void main() {
             debugPickForwardTarget: (_, __) async => ForwardTarget(chatId: 'target', title: 'Этот чат', mode: ChatMode.dm, open: (_) async {}),
             debugAfterDurableCancel: () async { if (!cancelCommitted.isCompleted) cancelCommitted.complete(); await cancelRelease.future; },
           ))); })))));
+    final legacyPrefs = await SharedPreferences.getInstance();
+    await legacyPrefs.setString(AccountDraftStore.legacyOwnerMarkerKey,
+        jsonEncode({'project': SupabaseConfig.url, 'owner': uid, 'conversation': 'source'}));
     await GlobalCache().saveDraft('source', 'Прежний личный черновик', []);
     await tester.pumpWidget(sourceScreen(const ValueKey('first')));
     for (var i = 0; i < 15; i++) {
@@ -357,7 +362,7 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     scopeSession = old;
     var unsupportedCalls = 0, picks = 0;
-    await tester.pumpWidget(AuthSessionScopeHost(child: ForwardOutboxHost(source: scope, storage: storage, durableMode: true,
+    await tester.pumpWidget(AuthSessionScopeHost(child: ForwardOutboxHost(source: scope, storage: storage, durableMode: ForwardOutboxHost.mobileProductionModeFor(web: false, platform: TargetPlatform.android),
       openDatabaseOverride: () async { unsupportedCalls++; throw UnsupportedError('QA unsupported'); },
       backendOverride: 'qa-backend', child: MaterialApp(home: UnifiedChatScreen(
         service: source, title: 'Источник', debugPickForwardTarget: (_, __) async {
@@ -446,6 +451,35 @@ void main() {
     expect(find.text('Неполное вложение'), findsWidgets);
     expect(find.text('Выбрано 1'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
+    final delayed = _Service('delayed-source', [])..ensureGate = Completer<String>();
+    await tester.pumpWidget(AuthSessionScopeHost(child: MaterialApp(
+        home: UnifiedChatScreen(service: delayed, title: 'Ожидание'))));
+    await tester.pump(const Duration(milliseconds: 100));
+    final currentClient = Supabase.instance.client;
+    final savedSession = currentClient.auth.currentSession!.toJson();
+    final nowForB = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    String partB(Object value) => base64Url.encode(utf8.encode(jsonEncode(value))).replaceAll('=', '');
+    const uidB = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    final tokenB = '${partB({'alg': 'none'})}.${partB({
+      'iss': '${SupabaseConfig.url}/auth/v1', 'sub': uidB,
+      'session_id': 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+      'aud': 'authenticated', 'role': 'authenticated', 'iat': nowForB, 'exp': nowForB + 3600,
+    })}.sig';
+    await tester.runAsync(() => currentClient.auth.setInitialSession(jsonEncode({
+      'access_token': tokenB, 'refresh_token': 'other', 'token_type': 'bearer',
+      'expires_at': nowForB + 3600, 'user': {'id': uidB, 'aud': 'authenticated',
+        'app_metadata': {}, 'user_metadata': {}, 'created_at': '2026-01-01T00:00:00Z'},
+    })));
+    await tester.pump(const Duration(milliseconds: 100));
+    delayed.ensureGate!.complete('delayed-source');
+    for (var i = 0; i < 12; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 40));
+    }
+    expect(find.text('Не удалось открыть чат. Повторить'), findsOneWidget);
+    expect(await AccountDraftStore().read(SupabaseConfig.url, uidB, 'delayed-source', () => true), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.runAsync(() => currentClient.auth.setInitialSession(jsonEncode(savedSession)));
     await tester.runAsync(() async {
       scope.dispose();
       await Supabase.instance.dispose();

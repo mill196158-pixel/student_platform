@@ -43,6 +43,7 @@ import 'src/core/coordinated_refresh_client.dart';
 import 'src/core/refresh_security_fence.dart';
 import 'src/core/offline_startup_admission.dart';
 import 'src/core/local_snapshot_startup.dart';
+import 'src/ui/learning/tabs/chat/data/chat_group_actions_repository.dart';
 import 'src/core/auth_session.dart';
 import 'src/core/refresh_policy_grant_observer.dart';
 import 'src/core/settled_policy_transport.dart';
@@ -240,7 +241,9 @@ final GoRouter appRouter = GoRouter(
                     currentUserId: () => scope.capture()?.userId,
                     sessionGeneration: () => scope.generation,
                     sessionIdentity: scope.capture),
-                schedule: ScheduleMonthCache(scope, SupabaseConfig.url));
+                schedule: ScheduleMonthCache(scope, SupabaseConfig.url),
+                groupDeadlines: (from, to) => ChatGroupActionsRepository()
+                    .peekCachedDeadlines(from: from, to: to));
             final chats = ProjectChatServerCache.qaInstance;
               return NavigationScreen(
                 cachedReader: reader,
@@ -739,7 +742,7 @@ class StudentPlatformApp extends StatelessWidget {
           child: AuthTransitionHost(
               child: TeamSnapshotHost(
                   child: ForwardOutboxHost(
-                      durableMode: ForwardOutboxHost.androidQaMode,
+                      durableMode: ForwardOutboxHost.mobileProductionMode,
                       child: OfflinePolicyGrantHost(
                           sqliteStore: _policyQaStore,
                           child: SessionCapabilitiesHost(

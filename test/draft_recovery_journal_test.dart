@@ -35,7 +35,7 @@ void main() {
     final rows = await restarted.pending(project: 'p', owner: 'a', conversation: 'chat',
         permitted: () => allowedA);
     expect(rows, hasLength(DraftRecoveryJournal.maxOwnerEntries));
-    expect(rows.first['draft'], containsPair('text', 'edit 15'));
+    expect(rows.first['draft'], containsPair('text', 'edit ${DraftRecoveryJournal.maxOwnerEntries - 1}'));
     final operation = rows.first['operation_id'] as String;
     expect(await restarted.markResolved(project: 'p', owner: 'b', conversation: 'chat',
         operationId: operation, permitted: () => true), isFalse);
@@ -62,5 +62,29 @@ void main() {
     expect(await pending, isFalse);
     expect(await journal.pending(project: 'p', owner: 'a', conversation: 'chat',
         permitted: () => true), isEmpty);
+  });
+
+  test('supersession is atomic and isolated to one writer stream', () async {
+    final db = await databaseFactoryFfi.openDatabase(inMemoryDatabasePath);
+    addTearDown(db.close);
+    final journal = DraftRecoveryJournal(open: () async => db);
+    Future<bool> append(String stream, String text) => journal.append(
+        project: 'p', owner: 'a', sessionId: 's', conversation: 'chat',
+        streamId: stream, draft: {'text': text}, permitted: () => true);
+    expect(await append('writer-1', 'old'), isTrue);
+    expect(await append('writer-2', 'other window'), isTrue);
+    await db.execute("CREATE TRIGGER reject_new BEFORE INSERT ON draft_recovery "
+        "WHEN NEW.payload LIKE '%reject-me%' BEGIN SELECT RAISE(ABORT, 'synthetic'); END");
+    await expectLater(append('writer-1', 'reject-me'), throwsA(isA<DatabaseException>()));
+    var entries = await journal.pending(project: 'p', owner: 'a', conversation: 'chat', permitted: () => true);
+    expect(entries.map((row) => (row['draft'] as Map)['text']), containsAll(['old', 'other window']));
+    await db.execute('DROP TRIGGER reject_new');
+    final writes = await Future.wait(List.generate(30, (i) => append('writer-1', 'edit $i')));
+    expect(writes.every((value) => value), isTrue);
+    entries = await journal.pending(project: 'p', owner: 'a', conversation: 'chat', permitted: () => true);
+    expect(entries, hasLength(2));
+    expect(entries.map((row) => (row['draft'] as Map)['text']), contains('other window'));
+    expect(entries.where((row) => (row['draft'] as Map)['text'] != 'other window').single['draft'],
+        containsPair('text', 'edit 29'));
   });
 }

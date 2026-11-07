@@ -26,11 +26,35 @@ class _FailOnceStore extends InMemorySharedPreferencesStore {
   }
 }
 
+class _SlowJournal extends DraftRecoveryJournal {
+  _SlowJournal(Future<Database> Function() open) : super(open: open);
+  final committed = Completer<void>();
+  final release = Completer<void>();
+  @override
+  Future<String?> appendOperation({required String project, required String owner,
+      required String sessionId, required String conversation,
+      required Map<String, dynamic> draft, required bool Function() permitted,
+      String? streamId}) async {
+    final result = await super.appendOperation(project: project, owner: owner,
+        sessionId: sessionId, conversation: conversation, draft: draft,
+        permitted: permitted, streamId: streamId);
+    if (result != null) {
+      committed.complete();
+      await release.future;
+    }
+    return result;
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   if (Platform.isWindows) open.overrideFor(
       OperatingSystem.windows, () => DynamicLibrary.open('winsqlite3.dll'));
   sqfliteFfiInit();
+  test('project issuer is identical with and without a trailing slash', () {
+    expect(normalizeDraftProject('https://example.test/'), 'https://example.test');
+    expect(normalizeDraftProject('https://example.test'), 'https://example.test');
+  });
   test('lease accepts same-SID refresh, refuses logout and later sign-in', () async {
     final previousStore = SharedPreferencesStorePlatform.instance;
     final platform = _FailOnceStore();
@@ -77,6 +101,21 @@ void main() {
     expect(platform.attempts, 2);
     expect(errors, 0);
     expect((await store.read(SupabaseConfig.url, uid, 'conversation', () => true))?['text'], 'saved');
+    final slowJournal = _SlowJournal(() async => db);
+    final slowWriter = AccountDraftWriter(store, lease, 'slow-conversation', journal: slowJournal);
+    await client.auth.signOut(scope: SignOutScope.local);
+    slowWriter.save({'text': 'slow receipt', 'files': [], 'reply': null});
+    await slowJournal.committed.future;
+    await client.auth.setInitialSession(session('one-refresh'));
+    events.add(AuthState(AuthChangeEvent.tokenRefreshed, client.auth.currentSession));
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect((await store.read(SupabaseConfig.url, uid, 'slow-conversation', () => true))?['text'], 'slow receipt');
+    slowJournal.release.complete();
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(await journal.pending(project: SupabaseConfig.url, owner: uid,
+        conversation: 'slow-conversation', permitted: () => true), isEmpty,
+        reason: 'late journal receipt resolves only after identical canonical save');
+    slowWriter.close();
     await client.auth.setInitialSession(session('two'));
     events.add(AuthState(AuthChangeEvent.tokenRefreshed, client.auth.currentSession));
     expect(lease.canSave, isTrue);
@@ -87,6 +126,24 @@ void main() {
     final gapRows = await journal.pending(project: SupabaseConfig.url, owner: uid,
         conversation: 'conversation', permitted: () => true);
     expect(gapRows.single['draft'], containsPair('text', 'saved during gap'));
+    await client.auth.setInitialSession(session('three'));
+    events.add(AuthState(AuthChangeEvent.tokenRefreshed, client.auth.currentSession));
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    expect((await store.read(SupabaseConfig.url, uid, 'conversation', () => true))?['text'],
+        'saved during gap');
+    expect(await journal.pending(project: SupabaseConfig.url, owner: uid,
+        conversation: 'conversation', permitted: () => true), isEmpty,
+        reason: 'a matching confirmed canonical snapshot resolves its journal entry');
+    await client.auth.signOut(scope: SignOutScope.local);
+    for (var i = 0; i < 30; i++) {
+      writer.save({'text': 'gap edit $i', 'files': [], 'reply': null});
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    final latestStream = await journal.pending(project: SupabaseConfig.url, owner: uid,
+        conversation: 'conversation', permitted: () => true);
+    expect(latestStream, hasLength(1));
+    expect(latestStream.single['draft'], containsPair('text', 'gap edit 29'));
     for (var i = 1; i < DraftRecoveryJournal.maxOwnerEntries; i++) {
       expect(await journal.append(project: SupabaseConfig.url, owner: uid,
           sessionId: sid, conversation: 'conversation', draft: {'text': 'entry $i'},
@@ -94,11 +151,12 @@ void main() {
     }
     writer.save({'text': 'still held in memory', 'files': [], 'reply': null});
     await Future<void>.delayed(const Duration(milliseconds: 300));
-    expect(journalErrors, 1, reason: 'full recovery storage must be surfaced');
-    expect(await journal.pending(project: SupabaseConfig.url, owner: uid,
-        conversation: 'conversation', permitted: () => true),
-        hasLength(DraftRecoveryJournal.maxOwnerEntries));
-    await client.auth.setInitialSession(session('three'));
+    expect(journalErrors, 0, reason: 'a newer complete snapshot replaces only the same writer stream');
+    final fullRows = await journal.pending(project: SupabaseConfig.url, owner: uid,
+        conversation: 'conversation', permitted: () => true);
+    expect(fullRows, hasLength(DraftRecoveryJournal.maxOwnerEntries));
+    expect(fullRows.any((row) => (row['draft'] as Map)['text'] == 'still held in memory'), isTrue);
+    await client.auth.setInitialSession(session('four'));
     events.add(AuthState(AuthChangeEvent.tokenRefreshed, client.auth.currentSession));
     await Future<void>.delayed(const Duration(milliseconds: 100));
     expect((await store.read(SupabaseConfig.url, uid, 'conversation', () => true))?['text'],

@@ -9,6 +9,12 @@ import 'auth_session_scope_test.dart' show fakeSession;
 import 'forward_outbox_store_test.dart' show Storage;
 
 void main() {
+  test('mobile production mode selects supported native platforms only', () {
+    expect(ForwardOutboxHost.mobileProductionModeFor(web: false, platform: TargetPlatform.android), isTrue);
+    expect(ForwardOutboxHost.mobileProductionModeFor(web: false, platform: TargetPlatform.iOS), isTrue);
+    expect(ForwardOutboxHost.mobileProductionModeFor(web: true, platform: TargetPlatform.android), isFalse);
+    expect(ForwardOutboxHost.mobileProductionModeFor(web: false, platform: TargetPlatform.windows), isFalse);
+  });
   testWidgets('host is passive and fences old work across source rebind',
       (tester) async {
     final events = StreamController<AuthState>.broadcast(sync: true);

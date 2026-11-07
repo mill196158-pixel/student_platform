@@ -24,6 +24,7 @@ import 'package:student_platform/src/ui/schedule/utils/msk_date.dart';
 import 'package:student_platform/src/ui/schedule/schedule_month_cache.dart';
 import 'package:student_platform/src/ui/schedule/schedule_prewarm.dart';
 import 'package:student_platform/src/core/online_side_effect_barrier.dart';
+import 'package:student_platform/src/core/transport_failure.dart';
 
 class HomeDashboardService {
   HomeDashboardService({
@@ -96,10 +97,7 @@ class HomeDashboardService {
 
   Future<void> prewarmSchedule(OnlineSideEffectBarrier barrier) async {
     final scope = _sessionScope;
-    if (_disposed ||
-        scope == null ||
-        !barrier.isOpen ||
-        !const bool.fromEnvironment('SQLITE_POLICY_QA')) return;
+    if (_disposed || scope == null || !barrier.isOpen) return;
     await scope.ready;
     if (_disposed || !barrier.isOpen) return;
     final cache = ScheduleMonthCache(scope, SupabaseConfig.url);
@@ -373,6 +371,7 @@ class HomeDashboardService {
         updateAssignmentStatus();
         publish();
       }, onError: (Object error) {
+        if (!isTemporaryTransportFailure(error)) actions = [];
         assignmentsStatus = assignmentsFromCache
             ? 'Сохранённые задания'
             : 'Не удалось обновить ближайшие дела';
@@ -619,7 +618,7 @@ class HomeDashboardService {
   Future<List<HomeGroupActionPreview>> _loadGroupActionDeadlines() async {
     try {
       final repo = ChatGroupActionsRepository(client: _sb);
-      final items = await repo.listMyGroupActionDeadlines();
+      final items = await repo.listMyGroupActionDeadlinesCached(strict: true);
       return items
           .map(
             (GroupActionDeadline e) => HomeGroupActionPreview(

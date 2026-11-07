@@ -9,6 +9,7 @@ import 'package:student_platform/src/core/auth_session_scope.dart';
 import 'package:student_platform/src/core/offline_policy_grant.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:student_platform/src/core/guarded_database.dart';
+import 'package:student_platform/src/core/media_cache_protection.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
 
 /// A separate local DB. Transactions ensure incomplete writes do not become
@@ -16,10 +17,13 @@ import 'package:student_platform/src/ui/learning/models/message.dart';
 class _DatabaseAppGuard {
   _DatabaseAppGuard(this.token, this.file);
   final String token;
-  final RandomAccessFile file;
+  final RandomAccessFile? file;
 }
 
 final Map<Database, _DatabaseAppGuard> _databaseAppGuards = {};
+
+@visibleForTesting
+Future<void> Function()? debugBeforeDatabaseGuard;
 
 @visibleForTesting
 String? debugProjectChatDatabaseGuard(Database db) => _databaseAppGuards[db]?.token;
@@ -29,8 +33,8 @@ Future<void> debugAbandonProjectChatDatabase(Database db) async {
   final guard = _databaseAppGuards.remove(db);
   if (guard == null) return;
   if (db is GuardedDatabase) await db.inner.close();
-  await guard.file.unlock();
-  await guard.file.close();
+  await guard.file?.unlock();
+  await guard.file?.close();
 }
 
 String _newGuardToken() {
@@ -46,7 +50,7 @@ Future<Database> openProjectChatServerDatabase(String path,
           version: 3,
           singleInstance: false,
           onConfigure: (db) async {
-            await db.execute('PRAGMA busy_timeout=3000');
+            await db.rawQuery('PRAGMA busy_timeout=3000');
             // Existing databases are never rewritten or reconfigured here.
             final tables = await db.rawQuery(
                 "SELECT name FROM sqlite_master WHERE type='table' LIMIT 1");
@@ -85,6 +89,7 @@ Future<Database> openProjectChatServerDatabase(String path,
   final token = _newGuardToken();
   RandomAccessFile? guardFile;
   try {
+    await debugBeforeDatabaseGuard?.call();
     final directory = Directory('${db.path}.guards');
     if (!await directory.exists()) await directory.create(recursive: true);
     if (await FileSystemEntity.type(directory.path, followLinks: false) != FileSystemEntityType.directory) {
@@ -107,8 +112,19 @@ Future<Database> openProjectChatServerDatabase(String path,
       try { await guardFile.unlock(); } catch (_) {}
       try { await guardFile.close(); } catch (_) {}
     }
-    await db.close();
-    rethrow;
+    // Preserve reads using a durable, deliberately unverifiable guard. It
+    // cannot be recovered automatically and forbids eviction on all handles.
+    try {
+      await db.insert('chat_app_guards', {'token': token, 'project': '*',
+        'uid': 'unverifiable', 'sid': '', 'database_token': token});
+      late GuardedDatabase wrapped;
+      wrapped = GuardedDatabase(db, () => _closeProjectChatServerDatabase(wrapped, db, opener));
+      _databaseAppGuards[wrapped] = _DatabaseAppGuard(token, null);
+      return wrapped;
+    } catch (_) {
+      await db.close();
+      rethrow;
+    }
   }
 }
 
@@ -131,14 +147,18 @@ Future<void> _closeProjectChatServerDatabase(Database wrapped, Database db,
     try {
       await maintenance.transaction((txn) async {
         await txn.delete('chat_route_leases', where: 'database_token=?', whereArgs: [guard.token]);
+        final media = await txn.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name='media_cache_read_leases'");
+        if (media.isNotEmpty) {
+          await txn.delete('media_cache_read_leases', where: 'database_token=?', whereArgs: [guard.token]);
+        }
         await txn.delete('chat_app_guards', where: 'database_token=?', whereArgs: [guard.token]);
       });
     } finally {
       await maintenance.close();
     }
     _databaseAppGuards.remove(wrapped);
-    await guard.file.unlock();
-    await guard.file.close();
+    await guard.file?.unlock();
+    await guard.file?.close();
   }
 }
 
@@ -233,6 +253,65 @@ class ChatHistoryRouteLease {
   final String token, project, uid, sid, chat;
 }
 
+/// Created synchronously before a route's first build. Until its durable
+/// wildcard lease settles, this isolate refuses history eviction. Other
+/// engines are fenced by their database-handle guards.
+class ChatHistoryRouteHold {
+  ChatHistoryRouteHold(ProjectChatServerCache? cache) : _cache = cache {
+    _pendingRouteHolds++;
+    unawaited(_start());
+  }
+  final ProjectChatServerCache? _cache;
+  final Completer<void> _ready = Completer<void>();
+  ChatHistoryRouteLease? _lease;
+  bool _closed = false, _failed = false;
+
+  Future<void> get ready => _ready.future;
+  bool get isReady => _ready.isCompleted;
+
+  Future<void> _start() async {
+    try {
+      final cache = _cache;
+      final lease = cache == null ? null : await cache.acquireHistoryRouteLease('*');
+      if (_closed) {
+        if (lease != null && cache != null) await cache.releaseHistoryRouteLease(lease);
+      } else if (lease == null) {
+        _failed = true;
+        _failedRouteHolds++;
+      } else {
+        _lease = lease;
+      }
+    } catch (_) {
+      if (!_closed) { _failed = true; _failedRouteHolds++; }
+    } finally {
+      // A failed acquisition cannot show cached UI while a previously started
+      // native commit is still settling. New evictions see the failed hold.
+      if (_failed) await Future.wait(List<Future<void>>.of(_historyEvictionBarriers));
+      _pendingRouteHolds--;
+      if (!_ready.isCompleted) _ready.complete();
+    }
+  }
+
+  Future<void> close() async {
+    if (_closed) return;
+    _closed = true;
+    if (_failed) { _failed = false; _failedRouteHolds--; }
+    await ready;
+    final lease = _lease;
+    _lease = null;
+    if (lease != null && _cache != null) {
+      await _cache.releaseHistoryRouteLease(lease);
+    }
+  }
+}
+
+int _pendingRouteHolds = 0;
+int _failedRouteHolds = 0;
+final Set<Future<void>> _historyEvictionBarriers = {};
+
+/// Synchronous guard for capturing an already-loaded snapshot before eviction.
+bool get historyEvictionInProgress => _historyEvictionBarriers.isNotEmpty;
+
 class ChatHistoryAppGuard {
   ChatHistoryAppGuard._(this.issuer, this.token, this.project, this.uid, this.sid,
       this.logicalBytesEvicted);
@@ -240,6 +319,17 @@ class ChatHistoryAppGuard {
   final String token, project, uid, sid;
   /// Logical payload reduction only; physical DB and WAL may remain unchanged.
   final int logicalBytesEvicted;
+}
+
+class ProjectMediaProtectionSession {
+  ProjectMediaProtectionSession._(this.store, this.userId, this._current);
+  final MediaCacheProtection store;
+  final String userId;
+  final bool Function() _current;
+  bool get isCurrent {
+    try { return _current(); } catch (_) { return false; }
+  }
+  Future<void> close() => store.endOwnerReadWindow(userId);
 }
 
 class ChatHistoryCompaction {
@@ -264,6 +354,8 @@ class ProjectChatServerCache {
   Future<void> Function()? debugBeforeSummaryCommit;
   @visibleForTesting
   Future<void> Function()? debugBeforePageCommit;
+  @visibleForTesting
+  Future<void> Function()? debugBeforeHistoryEvictCommit;
   static final Map<String, int> _eventVersions = {};
   /// Invalidates in-process consumers before a snapshot mutation can begin.
   /// This does not provide cross-process invalidation.
@@ -274,6 +366,24 @@ class ProjectChatServerCache {
   static void _endSnapshotMutation() { _snapshotMutations--; snapshotChanges.value++; }
   static final Set<String> _eventQuarantine = {};
   static final Map<String, Future<void>> _eventQueues = {};
+
+  /// Opens a prewarmed owner-wide file lease bound to the exact auth scope.
+  /// No media eviction is enabled by this method.
+  Future<ProjectMediaProtectionSession?> openMediaProtection(Directory root) async {
+    final owner = scope.capture(), binding = currentBinding(), guard = _databaseAppGuards[db];
+    final issuerBase = project.replaceFirst(RegExp(r'/+$'), '');
+    if (owner == null || binding == null || guard?.file == null ||
+        owner.userId != binding.userId || binding.issuer != '$issuerBase/auth/v1') return null;
+    bool current() => scope.isCurrent(owner) && _matches(currentBinding(), binding);
+    try {
+      final store = MediaCacheProtection(db: db, root: root, project: project,
+        databaseToken: guard!.token, currentOwner: () => current() ? owner.userId : null);
+      await store.initialize();
+      if (!current() || !await store.beginOwnerReadWindow(owner.userId, current)) return null;
+      if (!current()) { await store.endOwnerReadWindow(owner.userId); return null; }
+      return ProjectMediaProtectionSession._(store, owner.userId, current);
+    } catch (_) { return null; }
+  }
 
   Future<void> _touchHistory(Transaction txn, OfflineSessionBinding binding,
       String chat) => txn.insert('chat_snapshot_access', {
@@ -342,6 +452,10 @@ class ProjectChatServerCache {
         held.add(file);
         file = null;
         await txn.delete('chat_route_leases', where: 'database_token=?', whereArgs: [token]);
+        final media = await txn.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name='media_cache_read_leases'");
+        if (media.isNotEmpty) {
+          await txn.delete('media_cache_read_leases', where: 'database_token=?', whereArgs: [token]);
+        }
         await txn.delete('chat_app_guards', where: 'database_token=?', whereArgs: [token]);
       } catch (_) {
         if (file != null) {
@@ -362,9 +476,12 @@ class ProjectChatServerCache {
         owner.userId != binding.userId || binding.issuer != '$project/auth/v1') return null;
     bool current() => scope.isCurrent(owner) && _matches(currentBinding(), binding);
     final databaseGuard = _databaseAppGuards[db];
-    if (databaseGuard == null) return null;
+    if (databaseGuard == null || databaseGuard.file == null) return null;
     final token = _newGuardToken();
     final recoveredLocks = <RandomAccessFile>[];
+    final mayEvict = targetLogicalBytes > 0 && _pendingRouteHolds == 0 && _failedRouteHolds == 0;
+    final settled = Completer<void>();
+    if (mayEvict) _historyEvictionBarriers.add(settled.future);
     try {
       return await db.transaction((txn) async {
         if (!current()) throw const _StalePage();
@@ -372,8 +489,10 @@ class ProjectChatServerCache {
         if (!current()) throw const _StalePage();
         final guards = await txn.query('chat_app_guards', columns: ['token'],
             where: 'token<>?', whereArgs: [databaseGuard.token], limit: 1);
-        final removed = guards.isEmpty && targetLogicalBytes > 0
-            ? await _evictServerHistory(txn, binding, current, targetLogicalBytes)
+        final removed = guards.isEmpty && mayEvict &&
+                _pendingRouteHolds == 0 && _failedRouteHolds == 0
+            ? await _evictServerHistory(txn, binding, () => current() &&
+                _pendingRouteHolds == 0 && _failedRouteHolds == 0, targetLogicalBytes)
             : 0;
         await txn.insert('chat_app_guards', {'token': token, 'project': project,
           'uid': binding.userId, 'sid': binding.sessionId, 'database_token': databaseGuard.token});
@@ -387,6 +506,10 @@ class ProjectChatServerCache {
         try { await file.unlock(); } catch (_) {}
         try { await file.close(); } catch (_) {}
       }
+      if (mayEvict) {
+        _historyEvictionBarriers.remove(settled.future);
+        settled.complete();
+      }
     }
   }
 
@@ -396,7 +519,7 @@ class ProjectChatServerCache {
         whereArgs: [guard.token, guard.project, guard.uid, guard.sid]);
   }
 
-  /// Optional maintenance for newly created incremental-vacuum databases.
+  /// Optional maintenance for incremental or FULL auto-vacuum databases.
   /// Existing databases never undergo a full VACUUM or schema rewrite.
   Future<ChatHistoryCompaction?> compactHistory(ChatHistoryAppGuard guard) async {
     if (!identical(guard.issuer, _issuer) || guard.project != project) return null;
@@ -420,15 +543,18 @@ class ProjectChatServerCache {
       if (!current() || databaseGuard == null || guards.length != 2 ||
           !guardTokens.contains(databaseGuard.token) || !guardTokens.contains(guard.token)) return null;
       final mode = await db.rawQuery('PRAGMA auto_vacuum');
-      if (mode.length != 1 || mode.single.values.single != 2) return null;
+      if (mode.length != 1 || (mode.single.values.single != 1 && mode.single.values.single != 2)) return null;
       final before = await physicalBytes();
-      await db.execute('PRAGMA incremental_vacuum');
+      if (mode.single.values.single == 2) {
+        await db.rawQuery('PRAGMA incremental_vacuum');
+      }
       if (!current()) return null;
       await db.rawQuery('PRAGMA wal_checkpoint(TRUNCATE)');
       if (!current()) return null;
       final after = await physicalBytes();
       return ChatHistoryCompaction(before, after);
-    } catch (_) {
+    } catch (error) {
+      if (kDebugMode) debugPrint('[history-compaction] failed: ${error.runtimeType} $error');
       return null;
     }
   }
@@ -438,7 +564,7 @@ class ProjectChatServerCache {
         final rows = await txn.rawQuery('SELECT s.chat, s.payload FROM chat_server_snapshot s '
             'JOIN chat_snapshot_access a ON s.project=a.project AND s.uid=a.uid AND s.sid=a.sid AND s.chat=a.chat '
             'WHERE s.project=? AND s.uid=? AND s.sid=? AND s.chat<>? '
-            'AND NOT EXISTS (SELECT 1 FROM chat_route_leases l WHERE l.project=s.project AND l.uid=s.uid AND l.sid=s.sid AND l.chat=s.chat) '
+            'AND NOT EXISTS (SELECT 1 FROM chat_route_leases l WHERE l.project=s.project AND l.uid=s.uid AND l.sid=s.sid AND (l.chat=s.chat OR l.chat=\'*\')) '
             'ORDER BY a.access_ms ASC, s.chat ASC', [project, binding.userId, binding.sessionId, summaryChatKey]);
         var removed = 0;
         for (final row in rows) {
@@ -451,6 +577,7 @@ class ProjectChatServerCache {
           await txn.delete('chat_snapshot_access', where: 'project=? AND uid=? AND sid=? AND chat=?', whereArgs: args);
           removed += utf8.encode(payload).length;
         }
+        await debugBeforeHistoryEvictCommit?.call();
         if (!current()) throw const _StalePage();
         return removed;
   }

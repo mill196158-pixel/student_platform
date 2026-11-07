@@ -13,6 +13,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:flutter/foundation.dart';
 import 'inflight_only.dart';
 import '../core/offline_auth_error_receipt.dart';
+import '../core/media_cache_protection.dart';
+import '../core/pinned_media_store.dart';
+import '../core/support_storage_space.dart';
 
 /// A captured private-file operation no longer belongs to the current session.
 class ChatFileSessionChanged extends StateError {
@@ -22,6 +25,122 @@ class ChatFileSessionChanged extends StateError {
 /// Resolves only the application's private object namespace. Signed URLs are
 /// ephemeral and never become message metadata or persistent cache keys.
 class ChatFileAccess {
+  /// Optional until the protected media protocol is initialized. Eviction
+  /// must never be enabled while any reader can operate without this store.
+  static MediaCacheProtection? mediaProtection;
+  static final Map<(String, String, String, int, String), Future<void>> _pinning = {};
+
+  static Future<Uint8List?> _readPinnedCopy(String url, String uid, String sid,
+      String key, bool Function() current, {int? maxBytes, bool checkMarkers = true}) async {
+    final protection = mediaProtection;
+    if (protection == null || !current()) return null;
+    bool allowed() => identical(mediaProtection, protection) && current() &&
+        !isAccessRevoked(url) && !_unsupportedProtocol.contains('$uid:$key');
+    try {
+      final legacy = await _cachedFile(url, uid);
+      if (legacy == null || !allowed() || (checkMarkers && (await _hasDenyMarker(legacy) ||
+          await FileSystemEntity.type(_pendingFile(legacy).path, followLinks: false) != FileSystemEntityType.notFound)) || !allowed()) return null;
+      final support = await getApplicationSupportDirectory();
+      if (!allowed()) return null;
+      final archive = PinnedMediaStore(db: protection.db, supportRoot: support,
+        legacy: protection, project: protection.project, uid: uid, sessionId: sid,
+        permit: allowed, freeBytes: SupportStorageSpace.availableBytes,
+        verifyLegacyProvenance: (_, __, ___, ____, _____) async => false);
+      final bytes = await archive.readPinned(key);
+      if (!allowed() || bytes == null || (maxBytes != null && bytes.length > maxBytes) ||
+          (checkMarkers && (await _hasDenyMarker(legacy) ||
+          await FileSystemEntity.type(_pendingFile(legacy).path, followLinks: false) != FileSystemEntityType.notFound)) || !allowed()) return null;
+      return bytes;
+    } catch (_) { return null; }
+  }
+
+  // Runs after returning the cached bytes. A server response for this exact
+  // object must match the cached bytes before the private durable copy is made.
+  static void _pinCachedInBackground(String url, String uid, String sid,
+      String key, int epoch, bool Function() current, Uint8List localBytes) {
+    final protection = mediaProtection;
+    if (protection == null || !current() || localBytes.isEmpty ||
+        localBytes.length > 8 * 1024 * 1024) return;
+    final id = (protection.project, uid, sid, epoch, key);
+    if (_pinning.containsKey(id) || _pinning.length >= 2) return;
+    late final Future<void> job;
+    job = () async {
+      bool allowed() => identical(mediaProtection, protection) && current() &&
+          _sessionId(Supabase.instance.client.auth.currentSession) == sid &&
+          !isAccessRevoked(url) && !_unsupportedProtocol.contains('$uid:$key');
+      http.Client? client;
+      try {
+        if (!allowed()) return;
+        // Only compare bytes here; unlike a viewer, this does not expose the
+        // copy while an access revalidation marker is pending.
+        final pinned = await _readPinnedCopy(url, uid, sid, key, allowed, checkMarkers: false);
+        if (!allowed()) return;
+        if (pinned != null && crypto.sha256.convert(pinned) == crypto.sha256.convert(localBytes)) return;
+        final resolved = await resolve(url);
+        if (!allowed()) return;
+        client = debugHttpClientFactory?.call() ?? http.Client();
+        final response = await client.send(http.Request('GET', Uri.parse(resolved)))
+            .timeout(const Duration(seconds: 30));
+        if (!allowed() || response.statusCode != 200) return;
+        final fresh = BytesBuilder(copy: false);
+        await for (final chunk in response.stream.timeout(const Duration(seconds: 30))) {
+          if (!allowed() || fresh.length + chunk.length > 8 * 1024 * 1024) return;
+          fresh.add(chunk);
+        }
+        if (!allowed() || fresh.length == 0) return;
+        final digest = crypto.sha256.convert(fresh.takeBytes()).toString();
+        final support = await getApplicationSupportDirectory();
+        if (!allowed()) return;
+        final archive = PinnedMediaStore(db: protection.db, supportRoot: support,
+          legacy: protection, project: protection.project, uid: uid,
+          sessionId: sid, permit: allowed, freeBytes: SupportStorageSpace.availableBytes,
+          verifyLegacyProvenance: (source, project, owner, session, object) async {
+            if (!allowed() || owner != uid || session != sid || object != key) return false;
+            final actual = await crypto.sha256.bind(source.openRead()).first;
+            return allowed() && actual.toString() == digest;
+          });
+        await archive.pinFromLegacy(key);
+      } catch (_) {
+        // Offline reads never wait for, or depend on, background migration.
+      } finally {
+        client?.close();
+        if (identical(_pinning[id], job)) _pinning.remove(id);
+      }
+    }();
+    _pinning[id] = job;
+  }
+
+
+  static Future<T> _withMediaRead<T>(String uid, String key,
+      bool Function() current, Future<T> Function() read) async {
+    final protection = mediaProtection;
+    if (protection == null) return read();
+    if (protection.hasOwnerReadWindow(uid, current)) {
+      return protection.readInOwnerWindow(uid, current, read);
+    }
+    String? lease;
+    try {
+      if (await protection.registerPinned(uid, key, current)) {
+        lease = await protection.acquireRead(uid, key, current);
+      }
+    } catch (_) {
+      // Auto-eviction remains disabled until failed registrations can be
+      // fenced across every engine. Existing offline reads must still work.
+    }
+    try {
+      return await read();
+    } finally {
+      if (lease != null) {
+        try { await protection.releaseRead(uid, key, lease); } catch (_) {}
+      }
+    }
+  }
+
+  static Future<Uint8List> _readFileWithMediaLease(File file, String? uid,
+      String? key, bool Function() current) {
+    if (uid == null || key == null) return file.readAsBytes();
+    return _withMediaRead(uid, key, current, file.readAsBytes);
+  }
   static const storageHost = 'studentsplatform.storage.yandexcloud.net';
   static int generation = 0;
   static bool _logoutFenced = false;
@@ -586,30 +705,34 @@ class ChatFileAccess {
         (maxBytes != null && maxBytes <= 0)) {
       return null;
     }
-    return _withOwnerFiles(uid, () async {
+    final local = await _withOwnerFiles(uid, () async {
       try {
         if (!current()) return null;
         final file = await _cachedFile(url, uid);
         if (file == null || !current() || !await _hasReceipt(file, sid) || !current()) {
           return null;
         }
-        Uint8List bytes;
-        if (maxBytes == null) {
-          bytes = await file.readAsBytes();
-        } else {
-          if (await file.length() > maxBytes || !current()) return null;
-          final buffer = BytesBuilder(copy: false);
-          await for (final chunk in file.openRead()) {
-            if (!current() || buffer.length + chunk.length > maxBytes) return null;
-            buffer.add(chunk);
+        return await _withMediaRead<Uint8List?>(uid, keyFor(url)!, current, () async {
+          Uint8List bytes;
+          if (maxBytes == null) {
+            bytes = await file.readAsBytes();
+          } else {
+            if (await file.length() > maxBytes || !current()) return null;
+            final buffer = BytesBuilder(copy: false);
+            await for (final chunk in file.openRead()) {
+              if (!current() || buffer.length + chunk.length > maxBytes) return null;
+              buffer.add(chunk);
+            }
+            bytes = buffer.takeBytes();
           }
-          bytes = buffer.takeBytes();
-        }
-        return current() && await _hasReceipt(file, sid) && current() ? bytes : null;
+          return current() && await _hasReceipt(file, sid) && current() ? bytes : null;
+        });
       } on FileSystemException {
         return null;
       }
     });
+    if (local != null || !current()) return local;
+    return _readPinnedCopy(url, uid, sid, keyFor(url)!, current, maxBytes: maxBytes);
   }
 
   /// Returns only a previously granted cache path; never contacts the server.
@@ -628,6 +751,15 @@ class ChatFileAccess {
         if (!current()) return null;
         final file = await _cachedFile(url, uid);
         if (file == null || !current() || !await _hasReceipt(file, sid) || !current()) return null;
+        final protection = mediaProtection;
+        if (protection != null) {
+          try {
+            if (!await protection.registerPinned(uid, keyFor(url)!, current)) return null;
+          } catch (_) {
+            return null;
+          }
+        }
+        if (!current()) return null;
         return file.path;
       } on FileSystemException {
         return null;
@@ -1140,7 +1272,7 @@ class ChatFileAccess {
               _unsupportedProtocol.contains('$uid:$key') ||
               !await _hasReceipt(cached, sid)) return null;
           try {
-            final bytes = await cached.readAsBytes();
+            final bytes = await _readFileWithMediaLease(cached, uid, key, current);
             return current() &&
                     !isAccessRevoked(url) &&
                     !_unsupportedProtocol.contains('$uid:$key') &&
@@ -1156,6 +1288,7 @@ class ChatFileAccess {
             !isAccessRevoked(url) &&
             !_unsupportedProtocol.contains('$uid:$key')) {
           qaReentryTiming('read_receipt_disk', debugTrace);
+          if (key != null) _pinCachedInBackground(url, uid, sid, key, epoch, current, local);
           _revalidateInBackground(url);
           return local;
         }
@@ -1165,7 +1298,7 @@ class ChatFileAccess {
       if (cached != null &&
           !_unsupportedProtocol.contains('$uid:$key') &&
           await cached.exists()) {
-        final bytes = await cached.readAsBytes();
+        final bytes = await _readFileWithMediaLease(cached, uid, key, current);
         qaReentryTiming('read_authorized_disk', debugTrace);
         if (!current()) throw ChatFileSessionChanged();
         return bytes;
@@ -1233,7 +1366,7 @@ class ChatFileAccess {
       if (!current() ||
           !await _offlineCopy(error, url, cached, uid, epoch) ||
           !current()) rethrow;
-      final bytes = await cached!.readAsBytes();
+      final bytes = await _readFileWithMediaLease(cached!, uid, key, current);
       if (!current() ||
           !await _offlineCopy(error, url, cached, uid, epoch) ||
           !current() ||

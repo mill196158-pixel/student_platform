@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
@@ -22,6 +23,25 @@ class _DelayedStore extends InMemorySharedPreferencesStore {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('legacy marker permits only selected conversations and owner', () async {
+    SharedPreferences.setMockInitialValues({
+      AccountDraftStore.legacyOwnerMarkerKey: jsonEncode({
+        'project': 'project', 'owner': 'a', 'conversations': ['selected'],
+      }),
+    });
+    final store = AccountDraftStore();
+    expect(await store.mayOfferLegacy('project', 'a', 'selected', () => true), isTrue);
+    expect(await store.mayOfferLegacy('project', 'b', 'selected', () => true), isFalse);
+    expect(await store.mayOfferLegacy('project', 'a', 'other', () => true), isFalse);
+    expect(await store.mayOfferLegacy('project', 'a', 'selected', () => false), isFalse);
+  });
+  test('corrupt existing snapshot is not mistaken for an empty draft', () async {
+    final key = 'account_draft_v1_${base64Url.encode(utf8.encode(jsonEncode(['project', 'a', 'chat'])))}';
+    SharedPreferences.setMockInitialValues({key: '{bad'});
+    final store = AccountDraftStore();
+    await expectLater(store.read('project', 'a', 'chat', () => true), throwsFormatException);
+    expect((await SharedPreferences.getInstance()).getString(key), '{bad');
+  });
   test('delayed write cannot replace newer text, reply and files', () async {
     final original = SharedPreferencesStorePlatform.instance;
     final storage = _DelayedStore();

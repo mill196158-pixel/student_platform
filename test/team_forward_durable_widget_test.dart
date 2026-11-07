@@ -94,6 +94,7 @@ void main() {
 
   testWidgets('team forward copies an attachment into the durable composer',
       (tester) async {
+    expect(ForwardOutboxHost.mobileProductionModeFor(web: false, platform: TargetPlatform.android), isTrue);
     final originalPreferences = SharedPreferencesStorePlatform.instance;
     final delayedPreferences = _DelayedDraftPreferences();
     SharedPreferences.resetStatic();
@@ -230,7 +231,7 @@ void main() {
     Widget app(Key key, {bool unsupported = false, bool durable = true}) => ForwardOutboxHost(
         source: scope,
         storage: durable ? storage : legacyModeStorage,
-        durableMode: durable,
+        durableMode: durable && ForwardOutboxHost.mobileProductionModeFor(web: false, platform: TargetPlatform.android),
         openDatabaseOverride: unsupported ? unsupportedDb : openDb,
         backendOverride: 'qa-backend',
         child: AuthSessionScopeHost(child: MaterialApp(
@@ -265,6 +266,9 @@ void main() {
                             mode: ChatMode.team,
                             open: (_) async {});
                         }))))));
+    final legacyPrefs = await SharedPreferences.getInstance();
+    await legacyPrefs.setString(AccountDraftStore.legacyOwnerMarkerKey,
+        jsonEncode({'project': SupabaseConfig.url, 'owner': uid, 'conversation': team.id}));
     await GlobalCache().saveDraft(team.id, 'Прежний черновик', []);
     await tester.pumpWidget(app(const ValueKey('initial')));
     for (var i = 0; i < 20; i++) {
@@ -365,6 +369,56 @@ void main() {
     await tester.tap(find.text('Восстановить сохранённый черновик'));
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('Старый до ошибки'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).last, '');
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.enterText(find.byType(TextField).last, 'Сохранён до чтения');
+    await tester.pump(const Duration(milliseconds: 400));
+    final delayedReadEntered = Completer<void>();
+    final delayedReadRelease = Completer<void>();
+    addTearDown(() {
+      AccountDraftStore.debugBeforeRead = null;
+      if (!delayedReadRelease.isCompleted) delayedReadRelease.complete();
+    });
+    AccountDraftStore.debugBeforeRead = () async {
+      if (!delayedReadEntered.isCompleted) delayedReadEntered.complete();
+      await delayedReadRelease.future;
+    };
+    await tester.pumpWidget(app(const ValueKey('close-before-hydration')));
+    for (var i = 0; i < 20 && !delayedReadEntered.isCompleted; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 30));
+    }
+    expect(delayedReadEntered.isCompleted, isTrue);
+    for (var edit = 0; edit < 30; edit++) {
+      await tester.enterText(find.byType(TextField).last, 'Ввод перед закрытием $edit');
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    for (var i = 0; i < 15; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 30));
+    }
+    final earlyRows = await tester.runAsync(() => DraftRecoveryJournal().pending(
+        project: SupabaseConfig.url, owner: uid, conversation: team.id, permitted: () => true));
+    expect(earlyRows!.any((row) => (row['draft'] as Map)['text'] == 'Ввод перед закрытием 29'), isTrue);
+    await tester.pumpWidget(app(const ValueKey('after-close-before-hydration')));
+    delayedReadRelease.complete();
+    AccountDraftStore.debugBeforeRead = null;
+    for (var i = 0; i < 20; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 40));
+    }
+    expect(find.text('Сохранён до чтения'), findsOneWidget);
+    expect(find.text('Восстановить несохранённый черновик'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).last, '');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('Восстановить несохранённый черновик'));
+    for (var i = 0; i < 10; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 30));
+    }
+    expect(find.text('Ввод перед закрытием 29'), findsOneWidget);
     await tester.enterText(find.byType(TextField).last, '');
     FocusManager.instance.primaryFocus?.unfocus();
     await tester.pump(const Duration(milliseconds: 400));
@@ -697,6 +751,13 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('Первый A'), findsNothing);
     expect(await accountDraft.read(SupabaseConfig.url, otherUid, team.id, () => true), isNull);
+    await tester.pumpWidget(app(const ValueKey('account-race-b')));
+    for (var i = 0; i < 10; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 30));
+    }
+    expect(find.text('Восстановить прежний черновик'), findsNothing,
+        reason: 'ownerless legacy marker belongs only to A');
     await tester.runAsync(() => client.auth.setInitialSession(jsonEncode(oldSessionJson)));
     await tester.pumpWidget(app(const ValueKey('account-race-a2')));
     for (var i = 0; i < 15; i++) {
@@ -714,6 +775,50 @@ void main() {
     expect(afterSwitch?['text'], 'Новый A');
     expect((afterSwitch?['previous'] as Map)['text'], 'Первый A');
     await tester.pumpWidget(const SizedBox.shrink());
+    final seedEvents = StreamController<AuthState>.broadcast(sync: true);
+    final delayedScope = AuthSessionScope(currentSession: () => client.auth.currentSession,
+        authEvents: seedEvents.stream);
+    const seedTeam = Team(id: 'seed-team', name: 'Seed', teacher: '', groupCode: '', icon: 'S');
+    final seedCubit = TeamCubit(seedTeam, repository: _Repo());
+    seedCubit.emit(const TeamState(team: seedTeam, chatHasSnapshot: true));
+    await tester.pumpWidget(AuthSessionScopeHost(createScope: () => delayedScope,
+        child: MaterialApp(home: BlocProvider.value(value: seedCubit,
+          child: const Scaffold(body: ChatTab())))));
+    await tester.runAsync(() => client.auth.setInitialSession(jsonEncode({
+      'access_token': otherToken, 'refresh_token': 'other', 'token_type': 'bearer',
+      'expires_at': now + 3600, 'user': {'id': otherUid, 'aud': 'authenticated',
+        'app_metadata': {}, 'user_metadata': {}, 'created_at': '2026-01-01T00:00:00Z'},
+    })));
+    seedEvents.add(AuthState(AuthChangeEvent.initialSession, client.auth.currentSession));
+    for (var i = 0; i < 12; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 40));
+    }
+    expect(find.byType(TextField), findsNothing,
+        reason: 'a route opened under A must not accept unsavable input under B');
+    expect(await accountDraft.read(SupabaseConfig.url, otherUid, seedTeam.id, () => true), isNull);
+    expect(find.text('Сессия изменилась. Закройте и откройте чат снова.'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(AuthSessionScopeHost(child: MaterialApp(
+        home: BlocProvider.value(value: seedCubit, child: const Scaffold(body: ChatTab())))));
+    for (var i = 0; i < 15 && find.byType(TextField).evaluate().isEmpty; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 40));
+    }
+    expect(find.byType(TextField), findsWidgets,
+        reason: 'a newly opened route may bind to the new account');
+    expect(find.text('Восстановить прежний черновик'), findsNothing);
+    await tester.runAsync(() => client.auth.signOut(scope: SignOutScope.local));
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(AuthSessionScopeHost(child: MaterialApp(
+        home: BlocProvider.value(value: seedCubit, child: const Scaffold(body: ChatTab())))));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.byType(TextField), findsNothing,
+        reason: 'a route opened without an owner must not accept unsavable input');
+    expect(find.text('Сессия изменилась. Закройте и откройте чат снова.'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await seedCubit.close();
+    await seedEvents.close();
     await cubit.close();
     scope.dispose();
     DraftRecoveryJournal.debugOpen = null;

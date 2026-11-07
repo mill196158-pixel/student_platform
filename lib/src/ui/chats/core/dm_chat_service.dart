@@ -34,6 +34,7 @@ class DmChatService implements IChatService {
   bool _disposed = false;
   bool _watchStarted = false;
   final SessionCapabilities? _capabilities;
+  SessionCapabilities? get cachedCapabilities => _capabilities;
   final CapabilityPermit? _cachedReadPermit;
   final Future<ChatCacheSnapshot> Function(String, String)? _cacheReader;
   int _watchRevision = 0;

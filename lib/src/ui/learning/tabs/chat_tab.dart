@@ -414,14 +414,19 @@ class _ChatTabState extends State<ChatTab> {
   final GlobalCache _globalCache = GlobalCache();
   final _accountDraftStore = AccountDraftStore();
   DraftSessionOwner? _draftOwner;
+  DraftSessionSeed? _draftSeed;
   AccountDraftWriter? _draftWriter;
   int _draftRevision = 0;
   bool _draftHydrating = false;
+  bool _disposingDraft = false;
   bool _draftReady = false;
   bool _draftPreparing = false;
   bool _draftError = false;
+  bool _commitHydratedPending = false;
   bool _legacyDraftAvailable = false;
   Map<String, dynamic>? _recoveredScopedDraft;
+  bool get _draftCanEdit =>
+      (_draftOwner?.canRead ?? _draftSeed?.confirm()?.canRead ?? false);
   final _recoveryJournal = DraftRecoveryJournal();
   List<Map<String, dynamic>> _recoveryDrafts = const [];
   String? _lastAutoScrollTarget;
@@ -562,6 +567,9 @@ class _ChatTabState extends State<ChatTab> {
   @override
   void initState() {
     super.initState();
+    _draftSeed = DraftSessionSeed.capture(AuthSessionScopeHost.maybeRead(context));
+    _currentChatId = context.read<TeamCubit>().state.team.id;
+    DraftRecoveryJournal.changes.addListener(_onDraftJournalChanged);
     _scroll = ScrollController();
     _scroll.addListener(_onScroll);
     _ctrl.addListener(_onMyTyping);
@@ -580,7 +588,8 @@ class _ChatTabState extends State<ChatTab> {
           setState(() {});
           if (!_draftHydrating) {
             _draftRevision++;
-            _saveDraftDebounced();
+            if (_draftReady) _saveDraftDebounced();
+            else unawaited(_saveDraft());
           }
         }
       });
@@ -681,6 +690,8 @@ class _ChatTabState extends State<ChatTab> {
 
   @override
   void dispose() {
+    _disposingDraft = true;
+    DraftRecoveryJournal.changes.removeListener(_onDraftJournalChanged);
     final boundCardsChat = _boundActionCardsChatId;
     if (boundCardsChat != null && boundCardsChat.isNotEmpty) {
       unawaited(ChatActionCardsCache.instance.unbindRealtime(boundCardsChat));
@@ -1149,7 +1160,8 @@ class _ChatTabState extends State<ChatTab> {
     });
 
     // Сохраняем черновик при изменении текста (с задержкой для избежания частых сохранений)
-    _saveDraftDebounced();
+    if (_draftReady) _saveDraftDebounced();
+    else unawaited(_saveDraft());
   }
 
   Timer? _draftSaveTimer;
@@ -1247,7 +1259,13 @@ class _ChatTabState extends State<ChatTab> {
 
   // Сохраняем черновик в глобальный кэш
   Future<void> _saveDraft() async {
-    if (_currentChatId != null && _draftReady) {
+    if (_currentChatId != null) {
+      final owner = _draftOwner ?? _draftSeed?.confirm();
+      if (owner == null) {
+        if (mounted && !_disposingDraft) setState(() => _draftError = true);
+        return;
+      }
+      _bindDraftOwner(owner);
       final filesData = _att.pending
           .map((f) => {
                 'localId': f.localId,
@@ -1263,12 +1281,20 @@ class _ChatTabState extends State<ChatTab> {
               })
           .toList();
 
-      _draftWriter?.save({
+      final snapshot = <String, dynamic>{
         'text': _ctrl.text,
         'files': filesData,
         'reply': _replyTo?.toJson(),
         if (_recoveredScopedDraft != null) 'previous': _recoveredScopedDraft,
-      });
+      };
+      if (!_draftReady) {
+        _draftWriter?.stageBeforeHydration(snapshot);
+      } else if (_commitHydratedPending) {
+        _commitHydratedPending = false;
+        _draftWriter?.saveAfterHydration(snapshot);
+      } else {
+        _draftWriter?.save(snapshot);
+      }
       safeDebugLog(
           '[ChatTab] draft saved chat=${maskDebugId(_currentChatId)} files=${filesData.length} hasText=${_ctrl.text.trim().isNotEmpty}');
     }
@@ -1277,10 +1303,34 @@ class _ChatTabState extends State<ChatTab> {
   // Восстанавливаем черновик из глобального кэша
   void _onDraftOwnerChanged() {
     final owner = _draftOwner, chat = _currentChatId;
-    if (mounted && owner != null && chat != null && owner.canRead) {
+    if (mounted && !_disposingDraft && owner != null && chat != null && owner.canRead) {
       unawaited(_loadRecoveryDrafts(owner, chat));
     }
-    if (mounted) setState(() {});
+    if (mounted && !_disposingDraft) setState(() {});
+  }
+
+  void _onDraftJournalChanged() {
+    final owner = _draftOwner, chat = _currentChatId;
+    if (mounted && !_disposingDraft && owner != null && chat != null && owner.canRead) {
+      unawaited(_loadRecoveryDrafts(owner, chat));
+    }
+  }
+
+  void _bindDraftOwner(DraftSessionOwner owner) {
+    if (_draftOwner == null) owner.changes.addListener(_onDraftOwnerChanged);
+    _draftOwner ??= owner;
+    _draftWriter ??= AccountDraftWriter(_accountDraftStore, owner, _currentChatId!,
+        onFailure: () {
+          if (mounted) ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+            const SnackBar(content: Text('Не удалось сохранить черновик. Попробуйте ещё раз.')));
+        }, onJournalFailure: () {
+          if (mounted) ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+            const SnackBar(content: Text('Не удалось сохранить резервный черновик: хранилище заполнено или недоступно.')));
+        }, onRecoveryChange: () {
+          if (mounted && owner.canRead && _currentChatId != null) {
+            unawaited(_loadRecoveryDrafts(owner, _currentChatId!));
+          }
+        });
   }
 
   Future<void> _initDraftAndForward() async {
@@ -1308,25 +1358,16 @@ class _ChatTabState extends State<ChatTab> {
     try {
     if (_currentChatId != null) {
       final revision = _draftRevision;
-      final scope = AuthSessionScopeHost.maybeRead(context);
-      if (scope == null) return _draftUnavailable();
+      final seed = _draftSeed;
+      if (seed == null) return _draftUnavailable();
       try {
-        await scope.ready.timeout(const Duration(seconds: 3));
+        await seed.ready.timeout(const Duration(seconds: 3));
       } catch (_) { return _draftUnavailable(); }
       if (!mounted) return false;
       if (_draftOwner != null && !_draftOwner!.canRead) return _draftUnavailable();
-      final owner = _draftOwner ?? DraftSessionOwner.capture(scope);
+      final owner = _draftOwner ?? seed.confirm();
       if (owner == null || !owner.canRead) return _draftUnavailable();
-      if (_draftOwner == null) owner.changes.addListener(_onDraftOwnerChanged);
-      _draftOwner = owner;
-      _draftWriter ??= AccountDraftWriter(_accountDraftStore, owner, _currentChatId!,
-          onFailure: () {
-            if (mounted) ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-              const SnackBar(content: Text('Не удалось сохранить черновик. Попробуйте ещё раз.')));
-          }, onJournalFailure: () {
-            if (mounted) ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-              const SnackBar(content: Text('Не удалось сохранить резервный черновик: хранилище заполнено или недоступно.')));
-          });
+      _bindDraftOwner(owner);
       unawaited(_loadRecoveryDrafts(owner, _currentChatId!));
       final Map<String, dynamic>? draft;
       try {
@@ -1339,6 +1380,7 @@ class _ChatTabState extends State<ChatTab> {
         // The user started typing before I/O completed. Keep their new input
         // and retain the earlier snapshot for explicit recovery.
         _recoveredScopedDraft = draft;
+        _commitHydratedPending = true;
         if (mounted) setState(() { _draftReady = true; _draftError = false; });
         await _saveDraft();
         return true;
@@ -1348,7 +1390,17 @@ class _ChatTabState extends State<ChatTab> {
         final previous = draft['previous'];
         if (previous is Map) _recoveredScopedDraft = Map<String, dynamic>.from(previous);
       } else {
-        _legacyDraftAvailable = _globalCache.getDraft(_currentChatId!) != null;
+        final hasLegacy = _globalCache.getDraft(_currentChatId!) != null;
+        _legacyDraftAvailable = hasLegacy && await _accountDraftStore.mayOfferLegacy(
+            owner.project, owner.userId, _currentChatId!, () => owner.canRead);
+        if (!mounted || !owner.canRead) return false;
+        if (_draftRevision != revision) {
+          _legacyDraftAvailable = false;
+          _commitHydratedPending = true;
+          setState(() { _draftReady = true; _draftError = false; });
+          await _saveDraft();
+          return true;
+        }
       }
       if (mounted) setState(() { _draftReady = true; _draftError = false; });
       return true;
@@ -1388,6 +1440,10 @@ class _ChatTabState extends State<ChatTab> {
   Future<void> _importLegacyDraft() async {
     final owner = _draftOwner, conversation = _currentChatId;
     if (owner == null || conversation == null || !owner.canRead) return;
+    final initialRevision = _draftRevision;
+    if (!await _accountDraftStore.mayOfferLegacy(owner.project, owner.userId, conversation,
+        () => owner.canRead) || !mounted || !owner.canRead ||
+        initialRevision != _draftRevision) return;
     if (_ctrl.text.isNotEmpty || _att.pending.isNotEmpty || _replyTo != null) {
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
           content: Text('Сначала сохраните или очистите текущий черновик.')));
@@ -2052,7 +2108,8 @@ class _ChatTabState extends State<ChatTab> {
                   (_draftOwner?.canRead ?? false) && _recoveryDrafts.isNotEmpty)
                 TextButton(onPressed: () => unawaited(_restoreRecoveryDraft()),
                     child: const Text('Восстановить несохранённый черновик')),
-              if (!readOnly && !_selectingMessages && _draftError)
+              if (!readOnly && !_selectingMessages && _draftError &&
+                  (_draftSeed?.sameEpoch ?? false))
                 TextButton(onPressed: () => unawaited(_initDraftAndForward()),
                     child: const Text('Черновик пока не сохраняется. Повторить')),
               if (_selectingMessages)
@@ -2163,7 +2220,7 @@ class _ChatTabState extends State<ChatTab> {
                           onRevealBlockedMessage: (id) {
                             setState(() => _revealedBlockedMessageIds.add(id));
                           },
-                          onReply: readOnly || !_draftReady || !(_draftOwner?.canRead ?? false)
+                          onReply: readOnly || !_draftCanEdit
                               ? (_) {}
                               : (m) {
                                   setState(() => _replyTo = m);
@@ -2288,11 +2345,12 @@ class _ChatTabState extends State<ChatTab> {
                     );
                   },
                 )
-              else if (!readOnly && _draftOwner != null && !(_draftOwner?.canRead ?? false))
-                TextButton(
-                  onPressed: () => unawaited(_initDraftAndForward()),
-                  child: const Text('Подготовить черновик'),
-                )
+              else if (!readOnly && !_draftCanEdit)
+                (_draftSeed?.sameEpoch ?? false)
+                    ? TextButton(onPressed: () => unawaited(_initDraftAndForward()),
+                        child: const Text('Черновик недоступен. Повторить'))
+                    : const Padding(padding: EdgeInsets.all(12),
+                        child: Text('Сессия изменилась. Закройте и откройте чат снова.'))
               else if (!readOnly)
                 ChatComposerBar(
                   controller: _ctrl,

@@ -6,6 +6,7 @@ import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
 import 'package:student_platform/src/ui/schedule/models/lesson.dart';
 import 'package:student_platform/src/ui/schedule/schedule_month_cache.dart';
 import 'package:student_platform/src/ui/schedule/utils/msk_date.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_group_actions.dart';
 
 /// A local-only adapter. Construct only after an independent admission check;
 /// it cannot authenticate an account or issue network requests.
@@ -14,9 +15,11 @@ class CachedHomeScheduleReader {
     required SessionCapabilities capabilities,
     required HomeSnapshotCache home,
     required ScheduleMonthCache schedule,
+    Future<List<GroupActionDeadline>> Function(DateTime? from, DateTime? to)? groupDeadlines,
   })  : _capabilities = capabilities,
         _home = home,
         _schedule = schedule,
+        _groupDeadlines = groupDeadlines,
         _permit = _capture(capabilities) {
     if (home.project == null ||
         home.project!.trim().isEmpty ||
@@ -29,6 +32,7 @@ class CachedHomeScheduleReader {
   final SessionCapabilities _capabilities;
   final HomeSnapshotCache _home;
   final ScheduleMonthCache _schedule;
+  final Future<List<GroupActionDeadline>> Function(DateTime? from, DateTime? to)? _groupDeadlines;
   final CapabilityPermit _permit;
 
   /// Lets a visible cache-only shell remove its data when admission is revoked.
@@ -74,6 +78,16 @@ class CachedHomeScheduleReader {
     final value = await _schedule.read(attempt);
     _check();
     return value == null ? null : List<Lesson>.unmodifiable(value);
+  }
+
+  Future<List<GroupActionDeadline>> readGroupDeadlines({DateTime? from, DateTime? to}) async {
+    _check();
+    final owner = _home.authScope!.capture();
+    if (owner == null || !_capabilities.owns(_permit, owner)) throw const CachedHomeAccessDenied();
+    final value = await (_groupDeadlines?.call(from, to) ?? Future.value(const <GroupActionDeadline>[]));
+    _check();
+    if (!_capabilities.owns(_permit, owner)) throw const CachedHomeAccessDenied();
+    return List.unmodifiable(value);
   }
 
   /// Builds the existing dashboard model without constructing network APIs.
@@ -127,6 +141,8 @@ class CachedHomeScheduleReader {
       }
     }
     _check();
+    final groupActions = await readGroupDeadlines();
+    _check();
     return HomeDashboardData(
       profile: profile,
       scheduleDate: day,
@@ -134,6 +150,11 @@ class CachedHomeScheduleReader {
       assignments:
           List<HomeAssignmentPreview>.unmodifiable(assignments ?? const []),
       news: const [],
+      groupActions: groupActions.map((e) => HomeGroupActionPreview(eventType: e.eventType,
+          entityId: e.entityId, title: e.title, occursAt: e.occursAt,
+          chatId: e.chatId, cardMessageId: e.cardMessageId, teamId: e.teamId,
+          teamName: e.teamName, status: e.status, myPickText: e.myPickText,
+          canDelete: false)).toList(),
       scheduleStatus: lessons == null
           ? 'Расписание ещё не сохранено'
           : 'Сохранённое расписание',

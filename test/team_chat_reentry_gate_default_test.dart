@@ -11,6 +11,9 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_platform/src/services/chat_file_access.dart';
+import 'package:student_platform/src/core/auth_session_scope_host.dart';
+import 'package:student_platform/src/config/supabase_config.dart';
+import 'support/scoped_draft_test_session.dart';
 import 'package:student_platform/src/ui/learning/data/learning_repository.dart';
 import 'package:student_platform/src/ui/learning/models/chat_file.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
@@ -20,7 +23,6 @@ import 'package:student_platform/src/ui/learning/tabs/chat_tab.dart';
 import 'package:student_platform/src/ui/learning/widgets/reentry_image_gate.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'chat_file_durable_receipt_test.dart' show signInWithFileSession;
 
 class _Repo implements LearningRepository {
   @override
@@ -49,13 +51,12 @@ void main() {
       return pathRelease.future;
     });
     await tester.runAsync(() => Supabase.initialize(
-      url: 'https://example.test', publishableKey: 'test',
+      url: SupabaseConfig.url, publishableKey: 'test',
       authOptions: const FlutterAuthClientOptions(autoRefreshToken: false),
       httpClient: MockClient((request) async => http.Response('[]', 200,
         request: request, headers: {'content-type': 'application/json'})),
     ));
-    await tester.runAsync(() => signInWithFileSession(Supabase.instance.client,
-      'gate-owner', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'));
+    await tester.runAsync(() => signInForScopedDraft(Supabase.instance.client));
     addTearDown(() async {
       if (!pathRelease.isCompleted) pathRelease.complete(root.path);
       await Supabase.instance.dispose();
@@ -80,8 +81,8 @@ void main() {
     final message = Message(id: 'm', chatId: 'chat', authorId: 'owner',
       authorLogin: '', authorName: 'Owner', text: 'photo', at: DateTime.utc(2026),
       attachments: [attachment]);
-    Widget app(TeamCubit cubit) => MaterialApp(home: BlocProvider.value(
-      value: cubit, child: const Scaffold(body: ChatTab())));
+    Widget app(TeamCubit cubit) => AuthSessionScopeHost(child: MaterialApp(home: BlocProvider.value(
+      value: cubit, child: const Scaffold(body: ChatTab()))));
     Finder listOpacity() => find.descendant(of: find.byType(ReentryImageGate),
       matching: find.byType(Opacity)).first;
 
@@ -100,6 +101,9 @@ void main() {
     readyCubit.emit(TeamState(team: team, chatHasSnapshot: true, chat: [message]));
     await tester.pumpWidget(app(readyCubit));
     expect(tester.widget<Opacity>(listOpacity()).opacity, 0);
+    for (var i = 0; i < 20 && find.byType(TextField).evaluate().isEmpty; i++) {
+      await tester.pump(const Duration(milliseconds: 20));
+    }
     expect(find.byType(TextField), findsWidgets,
       reason: 'the composer is outside the covered list');
     await tester.enterText(find.byType(TextField).last, 'черновик');

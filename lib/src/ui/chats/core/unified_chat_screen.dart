@@ -7,6 +7,8 @@ import 'package:student_platform/src/core/session_capabilities_host.dart';
 import 'package:student_platform/src/core/qa_rotation_navigation_guard.dart';
 import 'cached_chat_message_bubble.dart';
 import 'cached_chat_composer.dart';
+import 'immutable_message_snapshot.dart';
+import 'project_chat_server_cache.dart' show historyEvictionInProgress;
 import 'scoped_forward_author_resolver.dart';
 // FILE: lib/src/ui/chats/core/unified_chat_screen.dart
 // ignore_for_file: unnecessary_import, unused_import, unused_field, unused_element, dead_null_aware_expression, invalid_null_aware_operator, deprecated_member_use
@@ -157,6 +159,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   late final Stream<ChatMessagesViewState> _messagesStream;
   late final IChatService _screenService;
   late final bool _initialCachedOnly;
+  ScopedImmutableMessageSnapshot? _cachedHistoryFallback;
 
   late final FileService _fileService = FileService();
   final GlobalCache _globalCache = GlobalCache();
@@ -188,6 +191,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   String? _currentChatIdDm;
   final _accountDraftStore = AccountDraftStore();
   DraftSessionOwner? _draftOwnerDm;
+  DraftSessionSeed? _draftSeedDm;
   AccountDraftWriter? _draftWriterDm;
   int _draftRevisionDm = 0;
   bool _draftHydratingDm = false;
@@ -305,6 +309,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   @override
   void initState() {
     super.initState();
+    _draftSeedDm = DraftSessionSeed.capture(AuthSessionScopeHost.maybeRead(context));
+    DraftRecoveryJournal.changes.addListener(_onDraftJournalChangedDm);
     _screenService = widget.service;
     _initialCachedOnly = _screenService is DmChatService &&
         _screenService.isCachedOnly;
@@ -433,6 +439,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
   @override
   void dispose() {
+    DraftRecoveryJournal.changes.removeListener(_onDraftJournalChangedDm);
     if (_initialCachedOnly) {
       _scroll.dispose();
       _ctrl.dispose();
@@ -684,11 +691,11 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
   Future<void> _restoreDraftDm() async {
     if (_currentChatIdDm == null) return;
-    final scope = AuthSessionScopeHost.maybeRead(context);
-    if (scope == null) throw StateError('Draft owner unavailable');
-    await scope.ready.timeout(const Duration(seconds: 3));
+    final seed = _draftSeedDm;
+    if (seed == null) throw StateError('Draft owner unavailable');
+    await seed.ready.timeout(const Duration(seconds: 3));
     if (!mounted) return;
-    final owner = _draftOwnerDm ?? DraftSessionOwner.capture(scope);
+    final owner = _draftOwnerDm ?? seed.confirm();
     if (owner == null || !owner.canRead) throw StateError('Draft owner unavailable');
     if (!_draftRestored && _draftRevisionDm != 0) {
       throw StateError('Composer changed before draft hydration');
@@ -700,6 +707,10 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
           if (mounted) _showSnack('Не удалось сохранить черновик. Попробуйте ещё раз.');
         }, onJournalFailure: () {
           if (mounted) _showSnack('Не удалось сохранить резервный черновик: хранилище заполнено или недоступно.');
+        }, onRecoveryChange: () {
+          if (mounted && owner.canRead && _currentChatIdDm != null) {
+            unawaited(_loadRecoveryDraftsDm(owner, _currentChatIdDm!));
+          }
         });
     unawaited(_loadRecoveryDraftsDm(owner, _currentChatIdDm!));
     final beforeRevision = _draftRevisionDm;
@@ -713,7 +724,11 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     if (_ctrl.text != beforeText || _replyTo?.id != beforeReply ||
         !listEquals(_att.pending.map((f) => f.localId).toList(), beforeFiles)) return;
     if (draft == null) {
-      _legacyDraftAvailableDm = _globalCache.getDraft(_currentChatIdDm!) != null;
+      final hasLegacy = _globalCache.getDraft(_currentChatIdDm!) != null;
+      _legacyDraftAvailableDm = hasLegacy && await _accountDraftStore.mayOfferLegacy(
+          owner.project, owner.userId, _currentChatIdDm!, () => owner.canRead);
+      if (!mounted || !owner.canRead) return;
+      if (_draftRevisionDm != beforeRevision) throw StateError('Composer changed during draft hydration');
       return;
     }
     _applyAccountDraftDm(draft);
@@ -759,6 +774,10 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   Future<void> _importLegacyDraftDm() async {
     final owner = _draftOwnerDm, conversation = _currentChatIdDm;
     if (owner == null || conversation == null || !owner.canRead) return;
+    final initialRevision = _draftRevisionDm;
+    if (!await _accountDraftStore.mayOfferLegacy(owner.project, owner.userId, conversation,
+        () => owner.canRead) || !mounted || !owner.canRead ||
+        initialRevision != _draftRevisionDm) return;
     if (_ctrl.text.isNotEmpty || _att.pending.isNotEmpty || _replyTo != null) {
       _showSnack('Сначала сохраните или очистите текущий черновик.');
       return;
@@ -791,6 +810,13 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       unawaited(_loadRecoveryDraftsDm(owner, chat));
     }
     if (mounted) setState(() {});
+  }
+
+  void _onDraftJournalChangedDm() {
+    final owner = _draftOwnerDm, chat = _currentChatIdDm;
+    if (mounted && owner != null && chat != null && owner.canRead) {
+      unawaited(_loadRecoveryDraftsDm(owner, chat));
+    }
   }
 
   Future<void> _restoreRecoveryDraftDm() async {
@@ -2947,6 +2973,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       listenable: service.cachedAccessChanges!,
       builder: (context, _) {
         if (!service.canReadCached) {
+          _cachedHistoryFallback = null;
           return const Scaffold(body: Center(child: Text('Сохранённый чат недоступен.')));
         }
         return Scaffold(
@@ -2957,16 +2984,46 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
             builder: (context, snapshot) {
               if (!service.canReadCached) return const SizedBox.shrink();
               final view = snapshot.data ?? service.messagesViewState;
+              if (const bool.fromEnvironment('CHAT_HISTORY_SNAPSHOT_FALLBACK_QA')) {
+                final capabilities = service.cachedCapabilities;
+                if (!historyEvictionInProgress && view.hasSnapshot && capabilities != null) {
+                  final capturedChat = service.chatId;
+                  final capturedOwner = service.currentUserId;
+                  _cachedHistoryFallback = ScopedImmutableMessageSnapshot.capture(
+                      capabilities: capabilities,
+                      sourceCurrent: () => mounted && identical(widget.service, service) &&
+                          service.canReadCached && service.chatId == capturedChat &&
+                          service.currentUserId == capturedOwner &&
+                          (widget.sessionIsCurrent?.call() ?? true),
+                      alreadyLoaded: view.messages);
+                }
+                if (historyEvictionInProgress) {
+                  final cached = _cachedHistoryFallback?.readable;
+                  if (cached == null) {
+                    return const Center(child: Text('Сохранённые сообщения временно недоступны.'));
+                  }
+                  return _buildCachedDmMessages(service, cached);
+                }
+              }
               if (!view.hasSnapshot) {
                 return Center(child: Text(view.showError
                     ? 'Сохранённые сообщения недоступны.' : 'Открываем сохранённые сообщения…'));
               }
-              final messages = view.messages.where((m) =>
+              return _buildCachedDmMessages(service, view.messages);
+            },
+          )), const CachedChatComposer()]),
+        );
+      },
+    );
+  }
+
+  Widget _buildCachedDmMessages(DmChatService service, List<Message> source) {
+              final messages = source.where((m) =>
                   (m.cardKind?.trim().isEmpty ?? true) &&
                   !ChatCardPreview.looksLikeCardJson(m.text) &&
                   m.type != MessageType.assignmentDraft &&
                   m.type != MessageType.assignmentPublished).toList();
-              if (messages.isEmpty) return Center(child: Text(view.messages.isEmpty
+              if (messages.isEmpty) return Center(child: Text(source.isEmpty
                   ? 'Сообщений пока нет' : 'Часть сообщений пока недоступна офлайн.'));
               return ChatMessageList(
                 messages: messages,
@@ -2990,11 +3047,6 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                     message: message, service: service, showAuthor: false,
                     authorResolver: widget.cachedAuthorResolver),
               );
-            },
-          )), const CachedChatComposer()]),
-        );
-      },
-    );
   }
 
   bool _canManageAssignments(BuildContext context) {

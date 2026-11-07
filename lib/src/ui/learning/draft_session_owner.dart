@@ -4,6 +4,9 @@ import 'package:student_platform/src/core/offline_policy_grant.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
 
+@visibleForTesting
+String normalizeDraftProject(String value) => value.replaceFirst(RegExp(r'/+$'), '');
+
 /// A screen captures this once; it cannot follow a different signed-in user.
 class DraftSessionOwner {
   DraftSessionOwner._(this._scope, this._generation, this._client,
@@ -25,7 +28,7 @@ class DraftSessionOwner {
       final client = Supabase.instance.client;
       final owner = scope.capture();
       if (owner == null || !scope.matchesSession(owner, client.auth.currentSession)) return null;
-      final project = SupabaseConfig.url;
+      final project = normalizeDraftProject(SupabaseConfig.url);
       final binding = scope.bindingFor(owner, '$project/auth/v1');
       if (binding == null) return null;
       return DraftSessionOwner._(scope, scope.generation, client, project,
@@ -66,5 +69,44 @@ class DraftSessionOwner {
     } catch (_) {
       return false;
     }
+  }
+}
+
+/// Captures the route's owner synchronously, before an asynchronous startup or
+/// first-frame callback can accidentally observe another signed-in account.
+class DraftSessionSeed {
+  DraftSessionSeed._(this._scope, this._generation, this._client,
+      this._project, this._userId, this._sessionId);
+  final AuthSessionScope _scope;
+  final int _generation;
+  final SupabaseClient _client;
+  final String _project, _userId, _sessionId;
+
+  static DraftSessionSeed? capture(AuthSessionScope? scope) {
+    if (scope == null || scope.logoutFenced) return null;
+    try {
+      final client = Supabase.instance.client;
+      final session = client.auth.currentSession;
+      if (session == null) return null;
+      final project = normalizeDraftProject(SupabaseConfig.url);
+      final binding = OfflineSessionBinding.fromSession(session, '$project/auth/v1');
+      if (binding == null) return null;
+      return DraftSessionSeed._(scope, scope.generation, client, project,
+          binding.userId, binding.sessionId);
+    } catch (_) { return null; }
+  }
+
+  Future<void> get ready => _scope.ready;
+  bool get sameEpoch => _scope.generation == _generation && !_scope.logoutFenced;
+
+  DraftSessionOwner? confirm() {
+    try {
+      if (_scope.generation != _generation || _scope.logoutFenced ||
+          !identical(_client, Supabase.instance.client)) return null;
+      final owner = DraftSessionOwner.capture(_scope);
+      if (owner == null || owner.project != _project || owner.userId != _userId ||
+          owner.sessionId != _sessionId || !owner.canRead) return null;
+      return owner;
+    } catch (_) { return null; }
   }
 }

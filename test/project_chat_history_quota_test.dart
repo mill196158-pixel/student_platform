@@ -9,6 +9,8 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
 import 'package:student_platform/src/core/offline_policy_grant.dart';
 import 'package:student_platform/src/core/startup_cache_budget.dart';
+import 'package:student_platform/src/core/session_capabilities.dart';
+import 'package:student_platform/src/ui/chats/core/immutable_message_snapshot.dart';
 import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -83,6 +85,18 @@ void main() {
     await db.rawUpdate("UPDATE chat_snapshot_access SET access_ms=1 WHERE chat='older'");
     await db.rawUpdate("UPDATE chat_snapshot_access SET access_ms=2 WHERE chat='active'");
     await db.rawUpdate("UPDATE chat_snapshot_access SET access_ms=3 WHERE chat='newer'");
+    final wildcard = ChatHistoryRouteHold(cache);
+    await wildcard.ready;
+    final whileVisible = (await cache.beginHistoryAppGuard(1000000, allEnginesGuarded: true))!;
+    expect(whileVisible.logicalBytesEvicted, 0);
+    await cache.releaseHistoryAppGuard(whileVisible);
+    await wildcard.close();
+    final failedHold = ChatHistoryRouteHold(null);
+    await failedHold.ready;
+    final afterFailure = (await cache.beginHistoryAppGuard(1000000, allEnginesGuarded: true))!;
+    expect(afterFailure.logicalBytesEvicted, 0);
+    await cache.releaseHistoryAppGuard(afterFailure);
+    await failedHold.close();
     final lease = (await cache.acquireHistoryRouteLease('active'))!;
     final receive = ReceivePort();
     final entered = Completer<void>(), committed = Completer<void>(), completed = Completer<void>();
@@ -260,6 +274,27 @@ void main() {
     final lease = (await cache.acquireHistoryRouteLease('visible'))!;
     expect(await runStartupCacheBudget(cache, allEnginesGuarded: false,
       root: temp, prefs: prefs, limitBytes: 1), isNull);
+    final evictEntered = Completer<void>(), finishEvict = Completer<void>();
+    cache.debugBeforeHistoryEvictCommit = () async { evictEntered.complete(); await finishEvict.future; };
+    final racingEviction = cache.beginHistoryAppGuard(1, allEnginesGuarded: true);
+    await evictEntered.future;
+    final capabilities = SessionCapabilities(scope);
+    expect(capabilities.grant(SessionCapabilityMode.cacheOnly,
+        capabilities.beginAuthorization(scope.capture()!)!), isTrue);
+    expect(ScopedImmutableMessageSnapshot.capture(capabilities: capabilities,
+      sourceCurrent: () => true, alreadyLoaded: []), isNull);
+    final failedRoute = ChatHistoryRouteHold(null);
+    var routeReady = false;
+    unawaited(failedRoute.ready.then((_) => routeReady = true));
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    expect(routeReady, isFalse);
+    finishEvict.complete();
+    expect(await racingEviction, isNull);
+    await failedRoute.ready;
+    await failedRoute.close();
+    capabilities.dispose();
+    cache.debugBeforeHistoryEvictCommit = null;
+    expect(await db.query('chat_server_snapshot', where: 'chat=?', whereArgs: ['old']), hasLength(1));
     final slowInventory = Completer<int?>();
     final timedOut = await runStartupCacheBudget(cache, allEnginesGuarded: true,
       root: temp, prefs: prefs, limitBytes: 1,
@@ -276,5 +311,46 @@ void main() {
     expect(await db.query('chat_server_snapshot', where: 'chat=?', whereArgs: ['old']), isEmpty);
     expect(prefs.getString('global_draft_texts'), 'protected');
     await cache.releaseHistoryRouteLease(lease);
+  });
+
+  test('lock refusal preserves cached reads and forbids eviction on every handle', () async {
+    final dir = await Directory.systemTemp.createTemp('history-lock-failure-');
+    final path = '${dir.path}/history.db';
+    debugBeforeDatabaseGuard = () async => throw FileSystemException('lock refused');
+    final db = await openProjectChatServerDatabase(path, factory: databaseFactoryFfi);
+    debugBeforeDatabaseGuard = null;
+    final other = await openProjectChatServerDatabase(path, factory: databaseFactoryFfi);
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final session = fakeSession('owner');
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final now = DateTime.now().toUtc();
+    final binding = OfflineSessionBinding(issuer: 'https://a.invalid/auth/v1',
+      userId: 'owner', sessionId: 'sid', notBefore: now.subtract(const Duration(hours: 1)),
+      expiresAt: now.add(const Duration(hours: 1)));
+    final cache = ProjectChatServerCache(db: db, scope: scope,
+      currentBinding: () => binding, project: 'https://a.invalid');
+    final otherCache = ProjectChatServerCache(db: other, scope: scope,
+      currentBinding: () => binding, project: 'https://a.invalid');
+    addTearDown(() async {
+      debugBeforeDatabaseGuard = null;
+      await db.close(); await other.close();
+      scope.dispose(); await events.close();
+      if (dir.parent.absolute.path == Directory.systemTemp.absolute.path) await dir.delete(recursive: true);
+    });
+    final ticket = (await cache.begin('chat'))!;
+    final message = Message.fromJson({'id': 'server', 'chat_id': 'chat', 'author_id': 'owner',
+      'content': 'available', 'created_at': now.toIso8601String()});
+    expect(await cache.saveServerPage(ticket, [message], hasMore: false), isTrue);
+    final capabilities = SessionCapabilities(scope);
+    expect(capabilities.grant(SessionCapabilityMode.cacheOnly,
+        capabilities.beginAuthorization(scope.capture()!)!), isTrue);
+    expect((await cache.read('chat', capabilities))!.single.text, 'available');
+    expect(await cache.beginHistoryAppGuard(1, allEnginesGuarded: true), isNull);
+    final blocked = (await otherCache.beginHistoryAppGuard(1, allEnginesGuarded: true))!;
+    expect(blocked.logicalBytesEvicted, 0);
+    await otherCache.releaseHistoryAppGuard(blocked);
+    expect((await cache.read('chat', capabilities))!.single.text, 'available');
+    capabilities.dispose();
   });
 }

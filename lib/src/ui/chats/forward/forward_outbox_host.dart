@@ -63,6 +63,15 @@ class ForwardOutboxHost extends StatefulWidget {
     return provider.openDurable();
   }
 
+  /// The persistent forward pipeline is supported on the mobile clients.
+  /// Other platforms retain their existing mode until their storage is tested.
+  static bool get mobileProductionMode => mobileProductionModeFor(
+      web: kIsWeb, platform: defaultTargetPlatform);
+
+  @visibleForTesting
+  static bool mobileProductionModeFor({required bool web, required TargetPlatform platform}) =>
+      !web && (platform == TargetPlatform.android || platform == TargetPlatform.iOS);
+
   @override
   State<ForwardOutboxHost> createState() => _ForwardOutboxHostState();
 }

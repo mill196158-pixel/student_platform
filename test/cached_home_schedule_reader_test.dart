@@ -9,6 +9,7 @@ import 'package:student_platform/src/ui/home/cached_home_schedule_reader.dart';
 import 'package:student_platform/src/ui/home/home_snapshot_cache.dart';
 import 'package:student_platform/src/ui/schedule/schedule_month_cache.dart';
 import 'package:student_platform/src/ui/schedule/models/lesson.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_group_actions.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'auth_session_scope_test.dart' show fakeSession;
@@ -16,6 +17,28 @@ import 'auth_session_scope_test.dart' show fakeSession;
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  test('cached group deadlines respect permit revocation after delayed disk read', () async {
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final session = fakeSession('group-owner');
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final caps = SessionCapabilities(scope);
+    final home = HomeSnapshotCache(project: 'test-project', authScope: scope,
+        currentUserId: () => session.user.id, sessionGeneration: () => scope.generation,
+        sessionIdentity: () => session.accessToken);
+    expect(caps.grant(SessionCapabilityMode.cacheOnly, caps.beginAuthorization(scope.capture()!)!), isTrue);
+    final gate = Completer<List<GroupActionDeadline>>();
+    final reader = CachedHomeScheduleReader(capabilities: caps, home: home,
+        schedule: ScheduleMonthCache(scope, 'test-project'), groupDeadlines: (_, __) => gate.future);
+    final pending = reader.readGroupDeadlines();
+    final rejected = expectLater(pending, throwsA(isA<CachedHomeAccessDenied>()));
+    caps.block();
+    gate.complete([GroupActionDeadline(eventType: 'collection_deadline', entityId: 'x',
+        title: 'Saved', occursAt: DateTime(2026, 11, 5))]);
+    await rejected;
+    caps.dispose(); scope.dispose(); await events.close();
+  });
 
   test('reads only owner snapshots and keeps empty distinct from missing',
       () async {

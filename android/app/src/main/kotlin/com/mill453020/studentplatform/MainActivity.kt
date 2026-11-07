@@ -55,6 +55,15 @@ class MainActivity : FlutterActivity() {
         startupTrace("plugins-start")
         super.configureFlutterEngine(flutterEngine)
         startupTrace("plugins-end")
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger,
+            "student_platform/storage_space").setMethodCallHandler { call, result ->
+            if (call.method == "availableSupportBytes") {
+                try {
+                    val bytes = filesDir.usableSpace
+                    result.success(if (bytes > 0) bytes else null)
+                } catch (_: Exception) { result.success(null) }
+            } else result.notImplemented()
+        }
         channel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "keyboard_image_channel"
