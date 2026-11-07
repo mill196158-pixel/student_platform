@@ -16,6 +16,9 @@ import 'package:student_platform/src/ui/chats/core/cached_chat_message_bubble.da
 import 'package:student_platform/src/ui/chats/core/cached_chat_composer.dart';
 import 'package:student_platform/src/ui/chats/core/scoped_forward_author_resolver.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
+import 'package:student_platform/src/ui/learning/models/assignment.dart';
+import 'package:student_platform/src/ui/learning/state/offline_assignment_store.dart';
+import 'package:student_platform/src/ui/learning/widgets/offline_assignment_bubble.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/messages/chat_message_list.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/search/chat_search_controller.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_card_envelope.dart';
@@ -141,6 +144,7 @@ class _CachedTeamDetailsState extends State<_CachedTeamDetails>
   DmChatService? _filePermit;
   CapabilityPermit? _permit;
   Future<List<Message>?>? _messages;
+  Future<List<Assignment>?>? _assignments;
   int _revision = 0;
 
   @override
@@ -166,6 +170,7 @@ class _CachedTeamDetailsState extends State<_CachedTeamDetails>
           cacheReader: (_, __) async => throw const CachedChatUnavailable());
       _permit = permit;
       _messages = widget.store.read(widget.chatId, caps);
+      _assignments = OfflineAssignmentStore(widget.store).read(widget.team.id, caps);
     } catch (_) {
       _filePermit = null;
       _permit = null;
@@ -189,6 +194,7 @@ class _CachedTeamDetailsState extends State<_CachedTeamDetails>
       _filePermit = null;
       _permit = null;
       _messages = null;
+      _assignments = null;
       _bind();
     }
   }
@@ -261,16 +267,23 @@ class _CachedTeamDetailsState extends State<_CachedTeamDetails>
                   }
                   final messages = snapshot.data!
                       .where((m) =>
-                          (m.cardKind?.trim().isEmpty ?? true) &&
-                          !ChatCardPreview.looksLikeCardJson(m.text) &&
-                          m.type != MessageType.assignmentDraft &&
-                          m.type != MessageType.assignmentPublished)
+                          m.type == MessageType.assignmentDraft ||
+                          m.type == MessageType.assignmentPublished ||
+                          ((m.cardKind?.trim().isEmpty ?? true) &&
+                          !ChatCardPreview.looksLikeCardJson(m.text)))
                       .toList();
                   if (messages.isEmpty)
                     return Center(
                         child: Text(snapshot.data!.isEmpty
                             ? 'Сообщений пока нет'
                             : 'Часть сообщений пока недоступна офлайн.'));
+                  return FutureBuilder<List<Assignment>?>(
+                      future: _assignments,
+                      builder: (context, assignmentSnapshot) {
+                  if (assignmentSnapshot.connectionState != ConnectionState.done) {
+                    return const SizedBox.shrink();
+                  }
+                  final assignments = {for (final a in assignmentSnapshot.data ?? <Assignment>[]) a.id: a};
                   return ChatMessageList(
                       messages: messages,
                       controller: _scroll,
@@ -289,10 +302,21 @@ class _CachedTeamDetailsState extends State<_CachedTeamDetails>
                       onLongPress: (_, __, ___, ____, _____, ______) {},
                       onReplyTap: (_) {},
                       onReact: (_, __) {},
-                      localOnlyBubbleBuilder: (message) => CachedChatMessageBubble(
+                      localOnlyBubbleBuilder: (message) {
+                        if (message.type == MessageType.assignmentDraft ||
+                            message.type == MessageType.assignmentPublished) {
+                          final assignment = assignments[message.assignmentId];
+                          final expectedPublished = message.type == MessageType.assignmentPublished;
+                          return OfflineAssignmentBubble(message: message,
+                              assignment: assignment?.published == expectedPublished ? assignment : null,
+                              capabilities: widget.capabilities, permit: _permit!);
+                        }
+                        return CachedChatMessageBubble(
                           message: message, service: _filePermit!, showAuthor: true,
                           authorResolver: ScopedForwardAuthorResolver(
-                              store: widget.store, capabilities: widget.capabilities)));
+                              store: widget.store, capabilities: widget.capabilities));
+                      });
+                  });
                 })), const CachedChatComposer()]),
             const Center(child: Text('Сохранённый список файлов недоступен.')),
           ]))

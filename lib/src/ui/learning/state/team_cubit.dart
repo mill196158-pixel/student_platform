@@ -21,6 +21,7 @@ import 'package:student_platform/src/utils/safe_debug_log.dart';
 import 'package:student_platform/src/core/legacy_user_cache.dart';
 import 'team_initial_load.dart';
 import 'team_cache_owner.dart';
+import 'offline_assignment_store.dart';
 import 'verified_empty_team_chat.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
 
@@ -343,7 +344,7 @@ class TeamCubit extends Cubit<TeamState> {
   Future<void> _loadAssignmentsInBackground() async {
     emit(state.copyWith(assignmentsLoading: true));
     try {
-      final ass = await repo.loadAssignments(state.team.id);
+      final ass = await _loadAssignmentsWithOfflineSnapshot();
       if (isClosed) return;
       _rememberAssignments(ass);
       unawaited(_persistAssignmentsSnapshot(ass));
@@ -355,6 +356,38 @@ class TeamCubit extends Cubit<TeamState> {
       ));
     } catch (_) {
       if (!isClosed) emit(state.copyWith(assignmentsLoading: false));
+    }
+  }
+
+  /// Only a successful live RPC may populate the session-bound offline copy.
+  /// Keep the repository's existing fallback for the ordinary online UI.
+  Future<List<Assignment>> _loadAssignmentsWithOfflineSnapshot() async {
+    final repository = repo, cache = ProjectChatServerCache.qaInstance;
+    final owner = _cacheOwner, ticket = owner?.capture();
+    if (repository is! SupabaseLearningRepository || cache == null ||
+        owner == null || ticket == null || _authScope == null ||
+        !identical(cache.scope, _authScope)) {
+      return repo.loadAssignments(state.team.id);
+    }
+    bool current() => !isClosed && owner.isCurrent(ticket);
+    final store = OfflineAssignmentStore(cache);
+    final attempt = await store.begin(state.team.id, isCurrent: current);
+    try {
+      final assignments = await repository.loadAssignments(state.team.id, strict: true);
+      if (!current()) throw StateError('Assignment session changed');
+      if (attempt != null && current()) {
+        await store.commit(attempt, assignments);
+      }
+      return assignments;
+    } catch (error) {
+      final confirmedDenial = error is AuthException &&
+              (error.statusCode == '401' || error.statusCode == '403') ||
+          error is PostgrestException &&
+              const {'401', '403', '42501', 'PGRST301', 'PGRST302', 'PGRST303'}
+                  .contains(error.code);
+      if (confirmedDenial && attempt != null) await store.deny(attempt);
+      if (!current() || confirmedDenial) rethrow;
+      return repository.loadAssignments(state.team.id);
     }
   }
 
@@ -1318,7 +1351,7 @@ class TeamCubit extends Cubit<TeamState> {
   // ---------------------- ВНУТРЕННЕЕ ----------------------
   Future<void> _reloadAssignments() async {
     if (isClosed) return;
-    final ass = await repo.loadAssignments(state.team.id);
+    final ass = await _loadAssignmentsWithOfflineSnapshot();
     if (isClosed) return;
     _rememberAssignments(ass);
     unawaited(_persistAssignmentsSnapshot(ass));
