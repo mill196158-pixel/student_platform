@@ -25,6 +25,10 @@ final Map<Database, _DatabaseAppGuard> _databaseAppGuards = {};
 
 @visibleForTesting
 Future<void> Function()? debugBeforeDatabaseGuard;
+@visibleForTesting
+Future<void> Function()? debugBeforePinnedRecovery;
+@visibleForTesting
+Future<void> Function()? debugAfterCloseAdmission;
 
 @visibleForTesting
 String? debugProjectChatDatabaseGuard(Database db) => _databaseAppGuards[db]?.token;
@@ -150,10 +154,16 @@ Future<void> _closeProjectChatServerDatabase(Database wrapped, Database db,
             where: 'database_token=?', whereArgs: [guard.token], limit: 1);
         if (pending.isNotEmpty) throw StateError('Media access checks are still running');
       }
+      final media = await txn.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name='media_cache_read_leases'");
+      if (media.isNotEmpty && (await txn.query('media_cache_read_leases', columns: ['token'],
+          where: 'database_token=?', whereArgs: [guard.token], limit: 1)).isNotEmpty) {
+        throw StateError('Media readers are still active');
+      }
       final updated = await txn.update('chat_app_guards', {'sid': 'closing'},
           where: 'token=? AND project=? AND sid=?', whereArgs: [guard.token, '*', '']);
       if (updated != 1) throw StateError('Database guard cannot close safely');
     });
+    await debugAfterCloseAdmission?.call();
   }
   // Keep the guard and FD if close fails: other engines must not evict.
   await db.close();
@@ -494,6 +504,7 @@ class ProjectChatServerCache {
   Future<void> recoverDeadAccessGuards() async {
     final held = <RandomAccessFile>[];
     try {
+      await debugBeforePinnedRecovery?.call();
       await db.transaction((txn) => _recoverDeadHandles(txn, held));
     } finally {
       for (final file in held) {

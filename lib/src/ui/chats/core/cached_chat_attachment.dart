@@ -139,17 +139,20 @@ class _CachedChatAttachmentState extends State<CachedChatAttachment> {
     }
     try {
       if (!current()) return;
-      final path = await ChatFileAccess.cachedPathForOpen(widget.file.fileUrl, permit: current);
+      final result = await ChatFileAccess.dispatchCachedPath<Object>(widget.file.fileUrl,
+          permit: current, dispatch: (path) {
+        final debugOpen = widget.debugOpen;
+        if (debugOpen != null) return debugOpen(path);
+        return OpenFilex.open(path, type: widget.file.fileType);
+      });
       if (!current()) return;
-      if (path == null) {
+      if (result == null) {
         notify('Локальная копия недоступна.');
         return;
       }
-      final debugOpen = widget.debugOpen;
-      if (debugOpen != null) {
-        if (!await debugOpen(path)) notify('Не удалось открыть сохранённый файл.');
-      } else {
-        final result = await OpenFilex.open(path, type: widget.file.fileType);
+      if (result is bool) {
+        if (!result) notify('Не удалось открыть сохранённый файл.');
+      } else if (result is OpenResult) {
         if (result.type == ResultType.noAppToOpen) {
           notify('Нет приложения для открытия файла.');
         } else if (result.type != ResultType.done) {

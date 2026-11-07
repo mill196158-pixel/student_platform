@@ -189,4 +189,14 @@ class PinnedMediaStore {
           ? bytes : null;
     } on FileSystemException { return null; } on FormatException { return null; }
   }
+
+  /// The returned versioned file is immutable and currently never evicted.
+  /// Callers must also recheck their durable access fence before using it.
+  Future<String?> verifiedPathForBytes(String key, Uint8List expected) async {
+    final actual = await readPinned(key);
+    if (actual == null || !_current() || sha256.convert(actual) != sha256.convert(expected)) return null;
+    final file = _data(key, sha256.convert(actual).toString());
+    if (await FileSystemEntity.type(file.path, followLinks: false) != FileSystemEntityType.file || !_current()) return null;
+    return file.path;
+  }
 }

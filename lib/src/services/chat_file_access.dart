@@ -17,6 +17,8 @@ import '../core/media_cache_protection.dart';
 import '../core/pinned_media_store.dart';
 import '../core/support_storage_space.dart';
 import '../core/pinned_access_fence.dart';
+import '../core/pinned_media_availability.dart';
+import '../core/pinned_media_switch.dart';
 
 /// A captured private-file operation no longer belongs to the current session.
 class ChatFileSessionChanged extends StateError {
@@ -29,7 +31,7 @@ class ChatFileAccess {
   // This compile-time gate applies independently to every Dart engine in an
   // enabled build. An engine that has not installed its durable guard must
   // not send access checks that could later revoke an archived object.
-  static const bool _pinnedRuntime = bool.fromEnvironment('PINNED_MEDIA_RUNTIME');
+  static bool get _pinnedRuntime => pinnedMediaRuntimeEnabled();
   /// Optional until the protected media protocol is initialized. Eviction
   /// must never be enabled while any reader can operate without this store.
   static MediaCacheProtection? _mediaProtection;
@@ -41,6 +43,7 @@ class ChatFileAccess {
     }
     if (identical(_mediaProtection, value)) return;
     _mediaProtection = value;
+    if (value != null) PinnedMediaAvailability.ready();
     mediaProtectionEpoch++;
     accessChanges.value++;
   }
@@ -51,7 +54,7 @@ class ChatFileAccess {
     if (!_pinnedRuntime) return action();
     final protection = mediaProtection;
     if (protection == null || !_mediaProjectCurrent(protection)) {
-      throw StateError('Media protection is not initialized');
+      throw const MediaProtectionUnavailable();
     }
     final fence = PinnedAccessFence(protection.db, databaseToken: protection.databaseToken);
     final pending = uid != null && key != null ? await fence.begin(protection.project, uid, key) : null;
@@ -130,7 +133,8 @@ class ChatFileAccess {
   // Runs after returning the cached bytes. A server response for this exact
   // object must match the cached bytes before the private durable copy is made.
   static void _pinCachedInBackground(String url, String uid, String sid,
-      String key, int epoch, bool Function() current, Uint8List localBytes) {
+      String key, int epoch, bool Function() current, Uint8List localBytes,
+      {bool freshlyDownloaded = false}) {
     final protection = mediaProtection;
     if (!_pinnedRuntime || protection == null || !current() || localBytes.isEmpty ||
         localBytes.length > 8 * 1024 * 1024) return;
@@ -152,21 +156,24 @@ class ChatFileAccess {
         if (!allowed()) return;
         if (pinned != null && crypto.sha256.convert(pinned) == crypto.sha256.convert(localBytes) &&
             await fence.isContentClean(protection.project, uid, key) && allowed()) return;
-        final resolved = await resolve(url);
+        final resolved = freshlyDownloaded ? null : await resolve(url);
         if (!allowed()) return;
         fenceToken = await fence.begin(protection.project, uid, key);
         if (!allowed()) return;
-        client = debugHttpClientFactory?.call() ?? http.Client();
-        final response = await client.send(http.Request('GET', Uri.parse(resolved)))
-            .timeout(const Duration(seconds: 30));
-        if (!allowed() || response.statusCode != 200) return;
-        final fresh = BytesBuilder(copy: false);
-        await for (final chunk in response.stream.timeout(const Duration(seconds: 30))) {
-          if (!allowed() || fresh.length + chunk.length > 8 * 1024 * 1024) return;
-          fresh.add(chunk);
+        var digest = crypto.sha256.convert(localBytes).toString();
+        if (!freshlyDownloaded) {
+          client = debugHttpClientFactory?.call() ?? http.Client();
+          final response = await client.send(http.Request('GET', Uri.parse(resolved!)))
+              .timeout(const Duration(seconds: 30));
+          if (!allowed() || response.statusCode != 200) return;
+          final fresh = BytesBuilder(copy: false);
+          await for (final chunk in response.stream.timeout(const Duration(seconds: 30))) {
+            if (!allowed() || fresh.length + chunk.length > 8 * 1024 * 1024) return;
+            fresh.add(chunk);
+          }
+          if (!allowed() || fresh.length == 0) return;
+          digest = crypto.sha256.convert(fresh.takeBytes()).toString();
         }
-        if (!allowed() || fresh.length == 0) return;
-        final digest = crypto.sha256.convert(fresh.takeBytes()).toString();
         final support = await getApplicationSupportDirectory();
         if (!allowed()) return;
         final archive = PinnedMediaStore(db: protection.db, supportRoot: support,
@@ -838,7 +845,7 @@ class ChatFileAccess {
     bool current() => uid != null && !_unsupportedProtocol.contains('$uid:${keyFor(url)}') &&
         permit() && isViewerCurrent(url, user: uid, epoch: epoch, sessionBinding: sid);
     if (uid == null || sid == null || keyFor(url) == null || !current()) return null;
-    return _withOwnerFiles(uid, () async {
+    final local = await _withOwnerFiles(uid, () async {
       try {
         if (!current()) return null;
         final file = await _cachedFile(url, uid);
@@ -857,6 +864,70 @@ class ChatFileAccess {
         return null;
       }
     });
+    if (local != null || !current()) return local;
+    final key = keyFor(url)!;
+    final protection = mediaProtection;
+    if (!_pinnedRuntime || protection == null || !_mediaOwnerCurrent(protection)) return null;
+    final bytes = await _readPinnedCopy(url, uid, sid, key, current);
+    if (bytes == null || !current() || !identical(mediaProtection, protection)) return null;
+    try {
+      final support = await getApplicationSupportDirectory();
+      if (!current() || !identical(mediaProtection, protection)) return null;
+      final archive = PinnedMediaStore(db: protection.db, supportRoot: support,
+          legacy: protection, project: protection.project, uid: uid, sessionId: sid,
+          permit: current, freeBytes: SupportStorageSpace.availableBytes,
+          verifyLegacyProvenance: (_, __, ___, ____, _____) async => false);
+      final path = await archive.verifiedPathForBytes(key, bytes);
+      if (path == null || !current() || !identical(mediaProtection, protection) ||
+          !await PinnedAccessFence(protection.db).canRead(protection.project, uid, key,
+              checksum: crypto.sha256.convert(bytes).toString()) || !current()) return null;
+      final legacy = await _cachedFile(url, uid);
+      if (legacy == null || isAccessRevoked(url) || !_mediaOwnerCurrent(protection) || await _hasDenyMarker(legacy) ||
+          await FileSystemEntity.type(_pendingFile(legacy).path, followLinks: false) != FileSystemEntityType.notFound || !current()) return null;
+      return path;
+    } catch (_) { return null; }
+  }
+
+  @visibleForTesting
+  static Future<void> Function()? debugBeforeViewerAdmission;
+
+  /// [dispatch] must start handing the path to the platform synchronously,
+  /// before its first await. The platform may retain it after this returns.
+  static Future<T?> dispatchCachedPath<T>(String url, {required bool Function() permit,
+      required Future<T> Function(String path) dispatch}) async {
+    final uid = userId, sid = currentSessionBinding, epoch = generation;
+    bool current() => uid != null && sid != null && permit() &&
+        isViewerCurrent(url, user: uid, epoch: epoch, sessionBinding: sid);
+    if (!current()) return null;
+    final path = await cachedPathForOpen(url, permit: current);
+    if (path == null || !current()) return null;
+    await debugBeforeViewerAdmission?.call();
+    if (!current()) return null;
+    final legacy = await _cachedFile(url, uid);
+    final isLegacy = legacy != null && legacy.path == path;
+    if (!_pinnedRuntime) return current() ? dispatch(path) : null;
+    final protection = mediaProtection, key = keyFor(url);
+    if (!_pinnedRuntime || protection == null || uid == null || key == null ||
+        !_mediaOwnerCurrent(protection) || !current()) return null;
+    try {
+      final bytes = isLegacy ? null : await File(path).readAsBytes();
+      if (!current() || !identical(mediaProtection, protection)) return null;
+      Future<T>? dispatched;
+      final admitted = await protection.db.transaction((txn) async {
+        if (!current() || !identical(mediaProtection, protection) || !_mediaOwnerCurrent(protection) ||
+            isAccessRevoked(url) || legacy == null || await _hasDenyMarker(legacy) ||
+            await FileSystemEntity.type(_pendingFile(legacy).path, followLinks: false) != FileSystemEntityType.notFound ||
+            !(isLegacy
+                ? await _hasReceipt(legacy, sid!) && await PinnedAccessFence(protection.db)
+                    .canReadLegacyInTransaction(txn, protection.project, uid, key)
+                : await PinnedAccessFence(protection.db).canReadInTransaction(txn, protection.project, uid, key,
+                    checksum: crypto.sha256.convert(bytes!).toString())) || !current()) return false;
+        dispatched = dispatch(path);
+        return true;
+      });
+      if (!admitted || dispatched == null) return null;
+      return await dispatched;
+    } catch (_) { return null; }
   }
 
   static Future<bool> _receiptAvailable(
@@ -1079,7 +1150,7 @@ class ChatFileAccess {
     final key = keyFor(url);
     if (key == null) return url;
     if (_pinnedRuntime && (mediaProtection == null || !_mediaOwnerCurrent(mediaProtection!))) {
-      throw StateError('Media protection is not initialized');
+      throw const MediaProtectionUnavailable();
     }
     if (_logoutFenced) throw StateError('Выход из аккаунта не завершён.');
     final uid = userId, epoch = generation;
@@ -1140,13 +1211,13 @@ class ChatFileAccess {
               (_revisions[id] ?? 0) == revision);
       final protection = mediaProtection;
       if (_pinnedRuntime && (protection == null || !_mediaOwnerCurrent(protection))) {
-        throw StateError('Media protection is not initialized');
+        throw const MediaProtectionUnavailable();
       }
       if (_pinnedRuntime) {
         final recovery = protection!.accessRecovery;
         if (recovery == null || !await recovery.timeout(const Duration(seconds: 2), onTimeout: () => false) ||
             !identical(mediaProtection, protection) || !_mediaOwnerCurrent(protection)) {
-          throw StateError('Media access recovery is unavailable');
+          throw const MediaProtectionUnavailable();
         }
       }
       PinnedAccessFence? archiveFence;
@@ -1378,7 +1449,7 @@ class ChatFileAccess {
     return result;
   }
 
-  static Future<Uint8List> readBytes(String url, {int? debugTrace}) async {
+  static Future<Uint8List> readBytes(String url, {int? debugTrace, int? maxDownloadBytes}) async {
     if (keyFor(url) != null && _logoutFenced) {
       throw StateError('Выход из аккаунта не завершён.');
     }
@@ -1464,13 +1535,14 @@ class ChatFileAccess {
       final bytes = BytesBuilder(copy: false);
       await for (final chunk
           in response.stream.timeout(const Duration(seconds: 30))) {
-        if (bytes.length + chunk.length > 100 * 1024 * 1024)
+        if (bytes.length + chunk.length > (maxDownloadBytes ?? 100 * 1024 * 1024))
           throw StateError('Файл слишком большой.');
         bytes.add(chunk);
       }
       if (!current()) throw ChatFileSessionChanged();
       final result = bytes.takeBytes();
       qaReentryTiming('read_http_done', debugTrace);
+      var stored = false;
       if (cached != null &&
           uid != null &&
           !_unsupportedProtocol.contains('$uid:$key') &&
@@ -1490,6 +1562,7 @@ class ChatFileAccess {
               await _withLegacyMutation(() async {
                 if (!current() || isAccessRevoked(url)) throw ChatFileSessionChanged();
                 await tmp.rename(cached.path);
+                stored = true;
               }, uid: uid, key: key);
             } finally {
               _qaEndContentMutation(url, uid);
@@ -1519,6 +1592,9 @@ class ChatFileAccess {
         }
       }
       if (!current()) throw ChatFileSessionChanged();
+      if (stored && uid != null && sid != null && key != null && result.length <= 8 * 1024 * 1024) {
+        _pinCachedInBackground(url, uid, sid, key, epoch, current, result, freshlyDownloaded: true);
+      }
       return result;
     } catch (error) {
       if (!current() ||
@@ -1534,5 +1610,12 @@ class ChatFileAccess {
     } finally {
       client.close();
     }
+  }
+
+  /// User-initiated document open: bounded background download, never blocks
+  /// launching the online viewer and never preloads other chat attachments.
+  static Future<void> prepareDocumentForOffline(String url) async {
+    if (!_pinnedRuntime) return;
+    try { await readBytes(url, maxDownloadBytes: 8 * 1024 * 1024); } catch (_) {}
   }
 }

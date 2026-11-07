@@ -1,4 +1,5 @@
 import 'package:flutter/widgets.dart';
+import 'package:flutter/scheduler.dart';
 import 'online_side_effect_barrier.dart';
 import 'qa_online_side_effect_coordinator.dart';
 import 'session_capabilities.dart';
@@ -29,6 +30,7 @@ class QaCapabilityView extends StatefulWidget {
 class _QaCapabilityViewState extends State<QaCapabilityView> {
   late QaOnlineSideEffectCoordinator _coordinator;
   Widget? _retainedOnline;
+  bool _refreshScheduled = false;
 
   Widget _retained({required bool showOnline, required Widget fallback}) =>
       Stack(fit: StackFit.expand, children: [
@@ -46,7 +48,18 @@ class _QaCapabilityViewState extends State<QaCapabilityView> {
   }
 
   void _coordinatorChanged() {
-    if (mounted) setState(() {});
+    if (!mounted || _refreshScheduled) return;
+    final phase = SchedulerBinding.instance.schedulerPhase;
+    if (phase == SchedulerPhase.idle || phase == SchedulerPhase.postFrameCallbacks) {
+      setState(() {});
+      return;
+    }
+    _refreshScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _refreshScheduled = false;
+      if (mounted) setState(() {});
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   void _changed() {
@@ -54,7 +67,7 @@ class _QaCapabilityViewState extends State<QaCapabilityView> {
     if (old != null && !old.isOpen) {
       _coordinator.close(timeout: widget.drainTimeout);
     }
-    if (mounted) setState(() {});
+    _coordinatorChanged();
   }
 
   @override

@@ -34,7 +34,7 @@ class _LocalReader extends ChangeNotifier implements CachedHomeScheduleReader {
       );
 
   @override
-  Future<List<Lesson>?> readMonth(DateTime month) async => null;
+  Future<List<Lesson>?> readMonth(DateTime month, {bool forDashboard = false}) async => null;
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

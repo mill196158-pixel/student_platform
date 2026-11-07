@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:student_platform/src/core/pinned_access_fence.dart';
+import 'package:student_platform/src/core/media_cache_protection.dart';
 import 'dart:isolate';
 import 'dart:convert';
 
@@ -20,6 +21,7 @@ import 'auth_session_scope_test.dart' show fakeSession;
 
 Future<void> leaseWorker((String, SendPort) args) async {
   sqfliteFfiInit();
+
   final db = await openProjectChatServerDatabase(args.$1, factory: databaseFactoryFfi);
   final port = ReceivePort();
   args.$2.send(port.sendPort);
@@ -42,6 +44,30 @@ Future<void> leaseWorker((String, SendPort) args) async {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
+
+  test('close refuses active batch and closing guard rejects another handle', () async {
+    final root = await Directory.systemTemp.createTemp('media-close-batch-');
+    final path = '${root.path}/db';
+    final db = await openProjectChatServerDatabase(path, factory: databaseFactoryFfi);
+    final otherDb = await databaseFactoryFfi.openDatabase(path, options: OpenDatabaseOptions(singleInstance: false));
+    final token = debugProjectChatDatabaseGuard(db)!;
+    final first = MediaCacheProtection(db: db, root: root, project: 'project', databaseToken: token, currentOwner: () => 'a');
+    final other = MediaCacheProtection(db: otherDb, root: root, project: 'project', databaseToken: token, currentOwner: () => 'a');
+    await first.initialize();
+    final dir = Directory('${root.path}/authorized_chat_files/a'); await dir.create(recursive: true);
+    final file = File('${dir.path}/${first.digest('a', 'key')}'); await file.writeAsBytes([1]);
+    expect(await first.registerPinned('a', 'key', () => true), isTrue);
+    final batch = (await first.acquireReadBatch('a', ['key'], () => true))!;
+    await expectLater(db.close(), throwsStateError);
+    await first.releaseReadBatch(batch);
+    final entered = Completer<void>(), resume = Completer<void>();
+    debugAfterCloseAdmission = () async { entered.complete(); await resume.future; };
+    final closing = db.close(); await entered.future;
+    expect(await other.acquireReadBatch('a', ['key'], () => true), isNull);
+    resume.complete(); await closing;
+    debugAfterCloseAdmission = null;
+    await otherDb.close(); await root.delete(recursive: true);
+  });
 
   test('handle cannot close around a late denial or admit new checks after close', () async {
     final dir = await Directory.systemTemp.createTemp('fence-close-test-');

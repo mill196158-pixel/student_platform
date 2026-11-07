@@ -147,6 +147,137 @@ void main() {
     capabilities.dispose(); scope.dispose(); await events.close();
   });
 
+  test('late local read is consumed once instead of causing a retry loop', () async {
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final session = fakeSession('slow-once');
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final capabilities = SessionCapabilities(scope);
+    final prefs = await SharedPreferences.getInstance();
+    var reads = 0;
+    Future<SharedPreferences> slow() async {
+      reads++;
+      await Future<void>.delayed(const Duration(milliseconds: 1200));
+      return prefs;
+    }
+    final home = HomeSnapshotCache(project: 'test-project', authScope: scope,
+        currentUserId: () => session.user.id, sessionGeneration: () => scope.generation,
+        sessionIdentity: () => session.accessToken, preferences: slow);
+    expect(capabilities.grant(SessionCapabilityMode.cacheOnly,
+        capabilities.beginAuthorization(scope.capture()!)!), isTrue);
+    final reader = CachedHomeScheduleReader(capabilities: capabilities, home: home,
+        schedule: ScheduleMonthCache(scope, 'test-project'));
+    var refreshes = 0;
+    reader.refreshChanges.addListener(() => refreshes++);
+    await expectLater(reader.readHome(HomeSnapshotSection.profile),
+        throwsA(isA<CachedHomeTemporarilyUnavailable>()));
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    expect(refreshes, 1);
+    expect(await reader.readHome(HomeSnapshotSection.profile), isNull);
+    expect(reads, 1, reason: 'late null is consumed without another slow read');
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(refreshes, 1);
+    capabilities.dispose(); scope.dispose(); await events.close();
+  });
+
+  test('staggered late sections never repeatedly reload each other', () async {
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final session = fakeSession('staggered');
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final caps = SessionCapabilities(scope);
+    expect(caps.grant(SessionCapabilityMode.cacheOnly, caps.beginAuthorization(scope.capture()!)!), isTrue);
+    final prefs = await SharedPreferences.getInstance();
+    final gates = List.generate(3, (_) => Completer<SharedPreferences>());
+    var reads = 0;
+    final home = HomeSnapshotCache(project: 'test-project', authScope: scope,
+        currentUserId: () => session.user.id, sessionGeneration: () => scope.generation,
+        sessionIdentity: () => session.accessToken,
+        preferences: () { final index = reads++; return gates[index].future; });
+    final reader = CachedHomeScheduleReader(capabilities: caps, home: home,
+        schedule: ScheduleMonthCache(scope, 'test-project'));
+    await reader.readDashboard();
+    expect(reads, 3);
+    gates[0].complete(prefs); await Future<void>.delayed(Duration.zero);
+    await reader.readDashboard();
+    expect(reads, 3);
+    gates[1].complete(prefs); await Future<void>.delayed(Duration.zero);
+    await reader.readDashboard();
+    expect(reads, 3);
+    gates[2].complete(prefs); await Future<void>.delayed(Duration.zero);
+    final finalData = await reader.readDashboard();
+    expect(finalData.assignmentsStatus, 'Задания ещё не сохранены');
+    expect(reads, 3);
+    caps.dispose(); scope.dispose(); await events.close();
+  });
+
+  test('late month data is retried without rereading storage', () async {
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final session = fakeSession('slow-month');
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final prefs = await SharedPreferences.getInstance();
+    final month = DateTime(2026, 11);
+    final writer = ScheduleMonthCache(scope, 'test-project', preferences: () async => prefs);
+    final writeAttempt = writer.begin(month)!;
+    expect(await writer.write(writeAttempt, []), isTrue);
+    writer.finishForeground(writeAttempt);
+    final gate = Completer<SharedPreferences>();
+    var reads = 0;
+    final schedule = ScheduleMonthCache(scope, 'test-project', preferences: () { reads++; return gate.future; });
+    final home = HomeSnapshotCache(project: 'test-project', authScope: scope,
+        currentUserId: () => session.user.id, sessionGeneration: () => scope.generation,
+        sessionIdentity: () => session.accessToken);
+    final capabilities = SessionCapabilities(scope);
+    expect(capabilities.grant(SessionCapabilityMode.cacheOnly,
+        capabilities.beginAuthorization(scope.capture()!)!), isTrue);
+    final reader = CachedHomeScheduleReader(capabilities: capabilities, home: home, schedule: schedule);
+    var refreshes = 0;
+    CachedHomeScheduleReader.scheduleRefreshFor(reader)!.addListener(() => refreshes++);
+    await expectLater(reader.readMonth(month), throwsA(isA<CachedHomeTemporarilyUnavailable>()));
+    gate.complete(prefs);
+    await Future<void>.delayed(Duration.zero);
+    expect(refreshes, 1);
+    expect(await reader.readMonth(month), isEmpty);
+    expect(reads, 1);
+    capabilities.dispose(); scope.dispose(); await events.close();
+  });
+
+  test('home and schedule consume delayed month independently', () async {
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final session = fakeSession('split-month');
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final caps = SessionCapabilities(scope);
+    expect(caps.grant(SessionCapabilityMode.cacheOnly, caps.beginAuthorization(scope.capture()!)!), isTrue);
+    final prefs = await SharedPreferences.getInstance();
+    final gate = Completer<SharedPreferences>();
+    var reads = 0;
+    final schedule = ScheduleMonthCache(scope, 'test-project', preferences: () { reads++; return gate.future; });
+    final home = HomeSnapshotCache(project: 'test-project', authScope: scope,
+        currentUserId: () => session.user.id, sessionGeneration: () => scope.generation,
+        sessionIdentity: () => session.accessToken);
+    final reader = CachedHomeScheduleReader(capabilities: caps, home: home, schedule: schedule);
+    var homeNotifications = 0, scheduleNotifications = 0;
+    CachedHomeScheduleReader.homeRefreshFor(reader)!.addListener(() => homeNotifications++);
+    CachedHomeScheduleReader.scheduleRefreshFor(reader)!.addListener(() => scheduleNotifications++);
+    final month = DateTime(2026, 11);
+    final first = reader.readMonth(month, forDashboard: true);
+    final second = reader.readMonth(month);
+    await Future.wait([
+      expectLater(first, throwsA(isA<CachedHomeTemporarilyUnavailable>())),
+      expectLater(second, throwsA(isA<CachedHomeTemporarilyUnavailable>())),
+    ]);
+    gate.complete(prefs); await Future<void>.delayed(Duration.zero);
+    expect(homeNotifications, 1); expect(scheduleNotifications, 1);
+    expect(await reader.readMonth(month, forDashboard: true), isNull);
+    expect(await reader.readMonth(month), isNull);
+    expect(reads, 2);
+    await Future<void>.delayed(Duration.zero);
+    expect(homeNotifications, 1); expect(scheduleNotifications, 1);
+    caps.dispose(); scope.dispose(); await events.close();
+  });
+
   test('account ABA and mode changes invalidate the original reader', () async {
     final events = StreamController<AuthState>.broadcast(sync: true);
     var session = fakeSession('a');

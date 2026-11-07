@@ -23,6 +23,10 @@ class MediaCacheProtection {
   final Map<String, int> _windowEpochs = {};
   @visibleForTesting
   Future<void> Function()? debugAfterWindowInsert;
+  @visibleForTesting
+  Future<void> Function()? debugAfterBatchInsert;
+  @visibleForTesting
+  Future<void> Function()? debugAfterEvictionRename;
 
   Future<void> initialize() async {
     await db.execute('CREATE TABLE IF NOT EXISTS media_cache_objects ('
@@ -32,6 +36,10 @@ class MediaCacheProtection {
     await db.execute('CREATE TABLE IF NOT EXISTS media_cache_read_leases ('
       'token TEXT NOT NULL PRIMARY KEY, project TEXT NOT NULL, uid TEXT NOT NULL, '
       'digest TEXT NOT NULL, database_token TEXT NOT NULL)');
+    await db.execute('CREATE TABLE IF NOT EXISTS media_cache_eviction_journal ('
+      'token TEXT PRIMARY KEY, project TEXT NOT NULL, uid TEXT NOT NULL, digest TEXT NOT NULL, '
+      'database_token TEXT NOT NULL, state TEXT NOT NULL, size INTEGER NOT NULL, '
+      'UNIQUE(project,uid,digest))');
   }
 
   String digest(String uid, String key) => sha256.convert(utf8.encode('$uid:$key')).toString();
@@ -73,7 +81,7 @@ class MediaCacheProtection {
   Future<bool> _guardPresent(Transaction txn) async {
     try {
       final rows = await txn.query('chat_app_guards', columns: ['token'],
-          where: 'token=? AND project=?', whereArgs: [databaseToken, '*']);
+          where: 'token=? AND project=? AND sid=?', whereArgs: [databaseToken, '*', '']);
       return rows.length == 1;
     } catch (_) { return false; }
   }
@@ -88,6 +96,8 @@ class MediaCacheProtection {
     final token = base64UrlEncode(List<int>.generate(32, (_) => random.nextInt(256)));
     final acquired = await db.transaction((txn) async {
       if (!_current(uid, permit) || !await _guardPresent(txn)) return false;
+      if ((await txn.query('media_cache_eviction_journal', columns: ['token'],
+          where: 'project=? AND uid=?', whereArgs: [project, uid], limit: 1)).isNotEmpty) return false;
       await txn.insert('media_cache_read_leases', {'token': token, 'project': project,
         'uid': uid, 'digest': '*', 'database_token': databaseToken});
       await debugAfterWindowInsert?.call();
@@ -151,6 +161,8 @@ class MediaCacheProtection {
     if (!_current(uid, permit) || await _checkedFile(uid, key) == null) return false;
     return db.transaction((txn) async {
       if (!_current(uid, permit) || await _checkedFile(uid, key) == null) return false;
+      if ((await txn.query('media_cache_eviction_journal', columns: ['token'],
+          where: 'project=? AND uid=? AND digest=?', whereArgs: [project, uid, digest(uid, key)], limit: 1)).isNotEmpty) return false;
       await txn.insert('media_cache_objects', {'project': project, 'uid': uid,
         'digest': digest(uid, key), 'pinned': 1, 'touched': DateTime.now().millisecondsSinceEpoch},
         conflictAlgorithm: ConflictAlgorithm.ignore);
@@ -166,6 +178,8 @@ class MediaCacheProtection {
     final token = base64UrlEncode(List<int>.generate(32, (_) => random.nextInt(256)));
     return db.transaction((txn) async {
       if (!_current(uid, permit) || await _checkedFile(uid, key) == null) return null;
+      if ((await txn.query('media_cache_eviction_journal', columns: ['token'],
+          where: 'project=? AND uid=? AND digest=?', whereArgs: [project, uid, digest(uid, key)], limit: 1)).isNotEmpty) return null;
       final matches = await txn.query('media_cache_objects', columns: ['pinned'],
         where: 'project=? AND uid=? AND digest=?', whereArgs: [project, uid, digest(uid, key)]);
       if (matches.length != 1 || !_current(uid, permit)) return null;
@@ -173,6 +187,59 @@ class MediaCacheProtection {
         'uid': uid, 'digest': digest(uid, key), 'database_token': databaseToken});
       if (!_current(uid, permit)) throw StateError('Session changed during media lease');
       return token;
+    });
+  }
+
+  /// Acquires one bounded, atomic group of specific file leases. Unlike an
+  /// owner-wide window, unrelated files can remain candidates for cleanup.
+  /// Unknown, missing or unregistered files fail the whole group closed.
+  Future<MediaReadBatch?> acquireReadBatch(String uid, Iterable<String> keys,
+      bool Function() permit) async {
+    final unique = keys.toSet();
+    if (unique.isEmpty || unique.length > 64 || !_current(uid, permit)) return null;
+    for (final key in unique) {
+      if (await _checkedFile(uid, key) == null || !_current(uid, permit)) return null;
+    }
+    final random = Random.secure();
+    final prefix = base64UrlEncode(List<int>.generate(32, (_) => random.nextInt(256)));
+    try {
+      return await db.transaction((txn) async {
+        if (!_current(uid, permit) || !await _guardPresent(txn)) return null;
+        final entries = <(String, String)>[];
+        var index = 0;
+        for (final key in unique) {
+          if (!_current(uid, permit) || await _checkedFile(uid, key) == null) {
+            throw StateError('Media batch changed during admission');
+          }
+          final hash = digest(uid, key);
+          if ((await txn.query('media_cache_eviction_journal', columns: ['token'],
+              where: 'project=? AND uid=? AND digest=?', whereArgs: [project, uid, hash], limit: 1)).isNotEmpty) {
+            throw StateError('Media eviction in progress');
+          }
+          final rows = await txn.query('media_cache_objects', columns: ['digest'],
+              where: 'project=? AND uid=? AND digest=?', whereArgs: [project, uid, hash]);
+          if (rows.length != 1) throw StateError('Unknown media object');
+          final token = '$prefix:${index++}';
+          await txn.insert('media_cache_read_leases', {'token': token, 'project': project,
+            'uid': uid, 'digest': hash, 'database_token': databaseToken});
+          await debugAfterBatchInsert?.call();
+          await txn.update('media_cache_objects', {'touched': DateTime.now().millisecondsSinceEpoch},
+            where: 'project=? AND uid=? AND digest=?', whereArgs: [project, uid, hash]);
+          entries.add((hash, token));
+        }
+        if (!_current(uid, permit)) throw StateError('Session changed during media batch');
+        return MediaReadBatch._(project, uid, databaseToken, entries);
+      });
+    } catch (_) { return null; }
+  }
+
+  Future<void> releaseReadBatch(MediaReadBatch batch) async {
+    if (batch.project != project || batch.databaseToken != databaseToken) return;
+    await db.transaction((txn) async {
+      for (final entry in batch._entries) {
+        await txn.delete('media_cache_read_leases', where: 'token=? AND project=? AND uid=? AND digest=? AND database_token=?',
+          whereArgs: [entry.$2, batch.project, batch.uid, entry.$1, databaseToken]);
+      }
     });
   }
 
@@ -230,6 +297,13 @@ class MediaCacheProtection {
       return removed;
     });
   }
+}
+
+class MediaReadBatch {
+  MediaReadBatch._(this.project, this.uid, this.databaseToken, List<(String, String)> entries)
+      : _entries = List.unmodifiable(entries);
+  final String project, uid, databaseToken;
+  final List<(String, String)> _entries;
 }
 
 class _OwnerReadWindow {

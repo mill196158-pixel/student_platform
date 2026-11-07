@@ -120,16 +120,31 @@ class PinnedAccessFence {
 
   Future<bool> canRead(String project, String uid, String key, {String? checksum}) async {
     try {
-      return await db.transaction((txn) async {
-        await _tables(txn);
-        final id = _id(project, uid, key);
-        final rows = await txn.query('pinned_fence_state', where: 'id=?', whereArgs: [id]);
-        if (rows.length != 1 || rows.single['denied'] != 0 || rows.single['dirty'] != 0 ||
-            (checksum != null && rows.single['content_hash'] != checksum)) return false;
-        return (await txn.query('pinned_fence_pending', columns: ['token'],
-            where: 'id=?', whereArgs: [id], limit: 1)).isEmpty;
-      });
+      return await db.transaction((txn) => canReadInTransaction(txn, project, uid, key, checksum: checksum));
     } catch (_) { return false; }
+  }
+
+  Future<bool> canReadInTransaction(Transaction txn, String project, String uid,
+      String key, {String? checksum}) async {
+    await _tables(txn);
+    final id = _id(project, uid, key);
+    final rows = await txn.query('pinned_fence_state', where: 'id=?', whereArgs: [id]);
+    if (rows.length != 1 || rows.single['denied'] != 0 || rows.single['dirty'] != 0 ||
+        (checksum != null && rows.single['content_hash'] != checksum)) return false;
+    return (await txn.query('pinned_fence_pending', columns: ['token'],
+        where: 'id=?', whereArgs: [id], limit: 1)).isEmpty;
+  }
+
+  /// A legacy copy can predate this DB. Its own session receipt is checked by
+  /// the caller in this same transaction; any recorded denial or pending
+  /// access check still blocks dispatch.
+  Future<bool> canReadLegacyInTransaction(Transaction txn, String project, String uid, String key) async {
+    await _tables(txn);
+    final id = _id(project, uid, key);
+    final rows = await txn.query('pinned_fence_state', where: 'id=?', whereArgs: [id]);
+    if (rows.length > 1 || (rows.isNotEmpty && rows.single['denied'] != 0)) return false;
+    return (await txn.query('pinned_fence_pending', columns: ['token'],
+        where: 'id=?', whereArgs: [id], limit: 1)).isEmpty;
   }
 
   /// Internal comparison only; never authorizes display or suppresses deny.

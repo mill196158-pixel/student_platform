@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'dart:ffi';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
@@ -13,7 +14,30 @@ import 'package:sqlite3/open.dart';
 import 'package:student_platform/main.dart' as app;
 import 'package:student_platform/src/config/supabase_config.dart';
 import 'package:student_platform/src/ui/navigation/navigation_screen.dart';
+import 'package:student_platform/src/services/chat_file_access.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
+
+class _Sink implements WebSocketSink {
+  _Sink(this.controller); final StreamController<dynamic> controller;
+  @override void add(dynamic data) {}
+  @override void addError(Object error, [StackTrace? stackTrace]) {}
+  @override Future<void> addStream(Stream<dynamic> stream) async { await stream.drain<void>(); }
+  @override Future<void> close([int? closeCode, String? closeReason]) => controller.close();
+  @override Future<void> get done => controller.done;
+  @override dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+class _Socket implements WebSocketChannel {
+  final StreamController<dynamic> controller = StreamController<dynamic>.broadcast();
+  late final _Sink output = _Sink(controller);
+  @override Stream<dynamic> get stream => controller.stream;
+  @override WebSocketSink get sink => output;
+  @override Future<void> get ready async {}
+  @override String? get protocol => null;
+  @override int? get closeCode => null;
+  @override String? get closeReason => null;
+  @override dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -31,6 +55,7 @@ void main() {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final project = SupabaseConfig.url.replaceFirst(RegExp(r'/$'), '');
     const uid = 'fallback-owner';
+    const imageUrl = 'https://studentsplatform.storage.yandexcloud.net/chats/test/fallback.png';
     String part(Object value) => base64Url.encode(utf8.encode(jsonEncode(value))).replaceAll('=', '');
     final token = '${part({'alg': 'HS256'})}.${part({
       'iss': '$project/auth/v1', 'sub': uid,
@@ -45,24 +70,38 @@ void main() {
     SharedPreferences.setMockInitialValues({key: raw});
     final transport = MockClient((request) async {
       Object body = [];
+      if (request.url.path.endsWith('/functions/v1/chat-file-access')) {
+        body = {'url': imageUrl, 'accessPolicyVersion': 1, 'cacheable': false, 'expiresIn': 60};
+      }
       if (request.url.path.endsWith('/users')) body = [{'must_change_password': false}];
       if (request.url.path.endsWith('/rpc/get_my_profile')) body = [{'id': uid, 'name': 'Fallback'}];
       return http.Response(jsonEncode(body), 200, request: request,
           headers: {'content-type': 'application/json'});
     });
     await tester.runAsync(() => app.debugInitializeOrdinaryApp(client: transport,
-      databasePath: notDirectory.path, databaseFactory: databaseFactoryFfi));
+      databasePath: notDirectory.path, databaseFactory: databaseFactoryFfi,
+      realtimeOptions: RealtimeClientOptions(transport: (_, __) => _Socket())));
     expect(app.debugOrdinaryOfflineEnabled, isFalse);
     expect(Supabase.instance.client.auth.currentUser?.id, uid);
     final persisted = jsonDecode((await SharedPreferences.getInstance()).getString(key)!) as Map;
     expect((persisted['user'] as Map)['id'], uid);
     expect(persisted['refresh_token'], 'synthetic');
     expect(await tester.runAsync(() => notDirectory.readAsString()), 'preserve');
+    if (const bool.fromEnvironment('PINNED_MEDIA_RUNTIME')) {
+      await tester.runAsync(() async {
+        for (var i = 0; i < 200 && ChatFileAccess.mediaProtection == null; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+        expect(ChatFileAccess.mediaProtection, isNotNull);
+        expect(await ChatFileAccess.resolve(imageUrl), imageUrl,
+            reason: 'independent guard permits online images despite corrupt chat DB');
+      });
+    }
     await tester.pumpWidget(const app.StudentPlatformApp());
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
     expect(find.byType(NavigationScreen), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
-    await tester.runAsync(() => Supabase.instance.dispose());
+    await tester.runAsync(() async { await app.debugDisposePinnedMediaHost(); await Supabase.instance.dispose(); });
     debugDefaultTargetPlatformOverride = null;
   });
 }

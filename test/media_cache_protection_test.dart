@@ -62,8 +62,8 @@ void main() {
       if (root.parent.absolute.path == Directory.systemTemp.absolute.path) await root.delete(recursive: true);
     });
     await registry.initialize();
-    await db.execute('CREATE TABLE chat_app_guards (token TEXT NOT NULL, project TEXT NOT NULL)');
-    await db.insert('chat_app_guards', {'token': 'guard', 'project': '*'});
+    await db.execute('CREATE TABLE chat_app_guards (token TEXT NOT NULL, project TEXT NOT NULL, sid TEXT NOT NULL)');
+    await db.insert('chat_app_guards', {'token': 'guard', 'project': '*', 'sid': ''});
     final dir = Directory('${root.path}/authorized_chat_files/a');
     await dir.create(recursive: true);
     final file = File('${dir.path}/${registry.digest('a', 'chats/file')}');

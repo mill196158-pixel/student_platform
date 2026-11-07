@@ -8,6 +8,7 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:student_platform/src/core/media_cache_protection.dart';
+import 'package:student_platform/src/core/pinned_media_availability.dart';
 import 'package:student_platform/src/services/chat_file_access.dart';
 import 'package:student_platform/src/ui/learning/widgets/authorized_file_image.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -41,11 +42,17 @@ void main() {
     });
     await tester.pumpWidget(MaterialApp(home: AuthorizedFileImage(imageUrl: url,
       errorWidget: (_, __, ___) => const Text('NOT_READY'))));
-    for (var i = 0; i < 100 && find.text('NOT_READY').evaluate().isEmpty; i++) {
+    for (var i = 0; i < 100 && find.text('Не удалось открыть вложение').evaluate().isEmpty; i++) {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
       await tester.pump(const Duration(milliseconds: 20));
     }
-    expect(find.text('NOT_READY'), findsOneWidget);
+    expect(find.text('Не удалось открыть вложение'), findsOneWidget);
+    final owner = Object(); var retries = 0;
+    PinnedMediaAvailability.attach(owner, () => retries++);
+    PinnedMediaAvailability.unavailable(owner);
+    await tester.pump();
+    await tester.tap(find.text('Повторить')); await tester.pump();
+    expect(retries, 1);
     final protection = MediaCacheProtection(db: db, root: root, project: 'https://example.test',
         databaseToken: 'guard', currentOwner: () => ChatFileAccess.userId);
     await tester.runAsync(() => protection.initialize()); protection.accessRecovery = Future.value(true);
@@ -55,8 +62,9 @@ void main() {
       await tester.pump(const Duration(milliseconds: 20));
     }
     expect(find.byType(RawImage), findsOneWidget);
-    expect(find.text('NOT_READY'), findsNothing);
+    expect(find.text('Не удалось открыть вложение'), findsNothing);
     await tester.pumpWidget(const SizedBox());
+    PinnedMediaAvailability.detach(owner);
     ChatFileAccess.mediaProtection = null; ChatFileAccess.debugHttpClientFactory = null;
     await tester.runAsync(() async { await Supabase.instance.dispose(); await db.close();
       messenger.setMockMethodCallHandler(paths, null); messenger.setMockMethodCallHandler(links, null);

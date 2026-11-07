@@ -4,6 +4,7 @@ import 'package:student_platform/src/core/qa_no_automatic_writes.dart';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/foundation.dart' show kReleaseMode, ValueListenable;
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -90,6 +91,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final Map<String, Uint8List> _promoImageBytes = {};
   final Map<String, Uint8List> _promoIconBytes = {};
   final Map<String, ContentImageRenderState> _promoImageStates = {};
+  final Map<String, HomeContentSnapshot> _lateOptionalContent = {};
+  int _contentRevision = 0;
+  SessionCapabilities? _observedContentCaps;
+  CapabilityPermit? _contentPermit;
+  bool _contentRebuildScheduled = false;
+  CachedHomeScheduleReader? _queuedCachedReload;
+  bool _cachedRefreshScheduled = false;
   final Set<String> _hiddenDoneAssignmentIds = {};
   final Set<String> _markingDoneAssignmentIds = {};
   StreamSubscription<InAppNotificationEvent>? _inAppSub;
@@ -100,24 +108,87 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     widget.activeListenable?.addListener(_queuePromoImpressions);
     widget.homeContent?.addListener(_onContentAccessChanged);
-    CachedHomeScheduleReader.refreshListenableFor(widget.cachedReader)?.addListener(_onCachedReadReady);
+    _bindContentCapabilities();
+    CachedHomeScheduleReader.homeRefreshFor(widget.cachedReader)?.addListener(_onCachedReadReady);
     if (widget.cachedReader == null) {
       _inAppSub = InAppNotificationBus.instance.stream.listen(_onInAppEvent);
     }
   }
 
   void _onContentAccessChanged() {
+    _contentRevision++;
+    _lateOptionalContent.clear();
+    if (widget.cachedReader != null) _onCachedReadReady();
     if (mounted) setState(() {});
   }
 
+  void _bindContentCapabilities() {
+    final next = widget.homeContentCapabilities;
+    if (!identical(next, _observedContentCaps)) {
+      _observedContentCaps?.removeListener(_onContentCapabilityChanged);
+      _observedContentCaps = next;
+      next?.addListener(_onContentCapabilityChanged);
+    }
+    _contentPermit = next?.capture(SessionCapability.cachedRead);
+  }
+
+  bool get _cachedContentAllowed {
+    final reader = widget.cachedReader;
+    if (reader == null) return true;
+    final caps = _observedContentCaps, permit = _contentPermit;
+    return caps != null && permit != null && reader.permitsContent(caps, permit);
+  }
+
+  void _onContentCapabilityChanged() {
+    if (widget.cachedReader == null) {
+      _contentPermit = _observedContentCaps?.capture(SessionCapability.cachedRead);
+      return;
+    }
+    _contentRevision++;
+    _lateOptionalContent.clear();
+    _contentPermit = _observedContentCaps?.capture(SessionCapability.cachedRead);
+    final data = _data;
+    if (data != null) {
+      _data = HomeDashboardData(profile: data.profile, scheduleDate: data.scheduleDate,
+          todayLessons: data.todayLessons, assignments: data.assignments, news: const [],
+          scheduleStatus: data.scheduleStatus, assignmentsStatus: data.assignmentsStatus,
+          readNotificationIds: data.readNotificationIds, unreadMessagesCount: data.unreadMessagesCount,
+          warning: data.warning, groupActions: data.groupActions);
+    }
+    _promo = const HomePromoLoadResult(intentionallyEmpty: true);
+    _promoImageBytes.clear(); _promoIconBytes.clear(); _promoImageStates.clear();
+    if (!mounted) return;
+    final phase = SchedulerBinding.instance.schedulerPhase;
+    if (phase == SchedulerPhase.idle || phase == SchedulerPhase.postFrameCallbacks) {
+      setState(() {});
+    } else if (!_contentRebuildScheduled) {
+      _contentRebuildScheduled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _contentRebuildScheduled = false;
+        if (mounted) setState(() {});
+      });
+      WidgetsBinding.instance.ensureVisualUpdate();
+    }
+    _onCachedReadReady();
+  }
+
   void _onCachedReadReady() {
+    if (_cachedRefreshScheduled) return;
+    _cachedRefreshScheduled = true;
     final reader = widget.cachedReader;
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _cachedRefreshScheduled = false;
       if (mounted && reader != null && identical(widget.cachedReader, reader) && reader.canRead) {
-        unawaited(_load());
+        if (_loadInFlight != null) {
+          _queuedCachedReload = reader;
+        } else {
+          unawaited(_load());
+        }
       }
     });
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
+
 
   @override
   void didChangeDependencies() {
@@ -151,6 +222,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _onAuthScopeChanged() {
     if (!mounted) return;
+    _contentRevision++;
+    _queuedCachedReload = null;
+    _lateOptionalContent.clear();
+    _bindContentCapabilities();
     _badgeRevision++;
     final scope = _authScope;
     final owner = scope?.capture();
@@ -178,14 +253,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void didUpdateWidget(covariant HomeScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final contentChanged = !identical(oldWidget.homeContent, widget.homeContent) ||
+        !identical(oldWidget.homeContentCapabilities, widget.homeContentCapabilities);
+    if (contentChanged) {
+      _contentRevision++;
+      _lateOptionalContent.clear();
+      _bindContentCapabilities();
+      if (widget.cachedReader != null) _onCachedReadReady();
+    }
     if (!identical(oldWidget.homeContent, widget.homeContent)) {
       oldWidget.homeContent?.removeListener(_onContentAccessChanged);
       widget.homeContent?.addListener(_onContentAccessChanged);
     }
     final modeChanged = !identical(oldWidget.cachedReader, widget.cachedReader);
     if (modeChanged) {
-      CachedHomeScheduleReader.refreshListenableFor(oldWidget.cachedReader)?.removeListener(_onCachedReadReady);
-      CachedHomeScheduleReader.refreshListenableFor(widget.cachedReader)?.addListener(_onCachedReadReady);
+      _contentRevision++;
+      _bindContentCapabilities();
+      _queuedCachedReload = null;
+      _lateOptionalContent.clear();
+      CachedHomeScheduleReader.homeRefreshFor(oldWidget.cachedReader)?.removeListener(_onCachedReadReady);
+      CachedHomeScheduleReader.homeRefreshFor(widget.cachedReader)?.addListener(_onCachedReadReady);
     }
     final serviceChanged =
         !identical(oldWidget.dashboardService, widget.dashboardService);
@@ -237,7 +324,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     widget.activeListenable?.removeListener(_queuePromoImpressions);
     widget.homeContent?.removeListener(_onContentAccessChanged);
-    CachedHomeScheduleReader.refreshListenableFor(widget.cachedReader)?.removeListener(_onCachedReadReady);
+    _observedContentCaps?.removeListener(_onContentCapabilityChanged);
+    CachedHomeScheduleReader.homeRefreshFor(widget.cachedReader)?.removeListener(_onCachedReadReady);
     _authScope?.removeListener(_onAuthScopeChanged);
     if (_serviceInitialized && _ownsService) _service.dispose();
     _inAppSub?.cancel();
@@ -310,7 +398,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final work = _loadDashboard();
     _loadInFlight = work;
     void release() {
-      if (identical(_loadInFlight, work)) _loadInFlight = null;
+      if (!identical(_loadInFlight, work)) return;
+      _loadInFlight = null;
+      final queued = _queuedCachedReload;
+      _queuedCachedReload = null;
+      if (queued != null) scheduleMicrotask(() {
+        if (mounted && identical(widget.cachedReader, queued) && queued.canRead) unawaited(_load());
+      });
     }
 
     unawaited(work.then<void>((_) => release(),
@@ -325,14 +419,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final snapshot = await reader.readDashboard();
         final content = widget.homeContent;
         final caps = widget.homeContentCapabilities;
+        final permit = _contentPermit;
+        final contentRevision = _contentRevision;
+        bool currentContext() => mounted && identical(widget.cachedReader, reader) &&
+            identical(widget.homeContent, content) && identical(widget.homeContentCapabilities, caps) &&
+            contentRevision == _contentRevision && reader.canRead;
+        bool currentContent() => currentContext() && content != null && caps != null && permit != null &&
+            identical(permit, _contentPermit) && reader.permitsContent(caps, permit);
         Future<HomeContentSnapshot?> readOptional(String section) async {
-          if (content == null || caps == null) return null;
+          if (content == null || caps == null || !currentContent()) return null;
           try {
+            if (content.isDenied(section)) return null;
+            final late = _lateOptionalContent[section];
+            if (late != null) return late;
             var timedOut = false;
             final pending = content.read(section, caps);
             pending.then((value) {
-              if (timedOut && value != null && mounted &&
-                  identical(widget.cachedReader, reader) && reader.canRead) {
+              if (timedOut && value != null && currentContent()) {
+                if (content.isDenied(section)) return;
+                _lateOptionalContent[section] = value;
                 _onCachedReadReady();
               }
             }, onError: (Object _, StackTrace __) {});
@@ -350,7 +455,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final optional = await Future.wait([readOptional('news'), readOptional('promo')]);
         final savedNews = optional[0];
         final savedPromo = optional[1];
-        if (!mounted || widget.cachedReader != reader || !reader.canRead)
+        if (!currentContext())
           return;
         final news = <HomeNewsItem>[];
         for (final row in savedNews?.rows ?? <Map<String, dynamic>>[]) {
@@ -676,7 +781,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       final source = _findAssignment(item.id);
                       if (source != null) _markAssignmentDone(source);
                     },
-              homePromo: _promo.hidePromoStrip || _promo.cards.length != 1
+              homePromo: !_cachedContentAllowed || _promo.hidePromoStrip || _promo.cards.length != 1
                   ? null
                   : (_promo.isDemoFallback ? null : _promo.payload),
               homePromoIsDemo: _promo.showDemoBadge && _promo.cards.length <= 1,
@@ -753,7 +858,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
       ],
       news: _presentationNews(
-          widget.homeContent?.isDenied('news') == true ? const [] : data.news),
+          !_cachedContentAllowed || widget.homeContent?.isDenied('news') == true ? const [] : data.news),
       groupActions: [
         for (final action in data.groupActions)
           StudentHomeGroupAction(
@@ -1022,6 +1127,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _showNewsFeed(List<HomeNewsItem> news, int initialIndex) {
+    if (!_cachedContentAllowed) return;
     if (news.isEmpty) return;
     final byId = {for (final item in news) item.id: item};
     final presentation = _presentationNews(news);
@@ -1029,6 +1135,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final reader = widget.cachedReader;
     final barrier = widget.onlineBarrier;
     final content = widget.homeContent;
+    final contentCaps = widget.homeContentCapabilities;
+    final contentPermit = _contentPermit;
     final scope = _authScope;
     final owner = scope?.capture();
     final active = ValueNotifier<bool>(true);
@@ -1039,6 +1147,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         identical(widget.cachedReader, reader) &&
         identical(widget.onlineBarrier, barrier) &&
         identical(widget.homeContent, content) &&
+        identical(widget.homeContentCapabilities, contentCaps) &&
+        (reader == null || (identical(_contentPermit, contentPermit) && _cachedContentAllowed)) &&
         (reader == null || reader.canRead) &&
         (barrier == null || barrier.isOpen) &&
         (scope == null || (owner != null && scope.isCurrent(owner))) &&
@@ -1068,6 +1178,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     scope?.addListener(check);
     reader?.accessChanges.addListener(check);
     content?.addListener(check);
+    contentCaps?.addListener(check);
     if (reader == null) mark(presentation[safeIndex].id);
     sheetRoute = ModalBottomSheetRoute<void>(
       isScrollControlled: true,
@@ -1098,6 +1209,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           active,
           if (reader != null) reader.accessChanges,
           if (widget.homeContent != null) widget.homeContent!,
+          if (contentCaps != null) contentCaps,
         ];
         if (changes.isEmpty) return sheet();
         return ListenableBuilder(
@@ -1117,6 +1229,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       scope?.removeListener(check);
       reader?.accessChanges.removeListener(check);
       content?.removeListener(check);
+      contentCaps?.removeListener(check);
       active.dispose();
     }));
   }
@@ -1271,6 +1384,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   List<StudentHomePromoPlacement> _promoPlacements() {
+    if (!_cachedContentAllowed) return const [];
     if (widget.homeContent?.isDenied('promo') == true) return const [];
     if (_promo.hidePromoStrip) return const [];
     if (_promo.isDemoFallback) {

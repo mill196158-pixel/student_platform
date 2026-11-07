@@ -38,7 +38,9 @@ import 'src/config/supabase_config.dart';
 import 'src/core/session_keeper.dart';
 import 'src/core/auth_session_scope_host.dart';
 import 'src/core/auth_session_scope.dart';
-import 'src/core/pinned_media_runtime.dart';
+import 'src/core/pinned_media_host.dart';
+import 'src/core/pinned_media_switch.dart';
+import 'src/core/pinned_media_status_host.dart';
 import 'src/core/offline_policy_grant.dart';
 import 'src/core/sqlite_policy_grant_store.dart';
 import 'src/core/coordinated_refresh_client.dart';
@@ -84,7 +86,13 @@ const _offlineUiQa = bool.fromEnvironment('OFFLINE_UI_QA');
 const _qaRotationNavigation = bool.fromEnvironment('QA_ROTATION_NAVIGATION_EXPERIMENT');
 final _qaRotationReceipt = QaRotationReceipt();
 AuthSessionScope? _policyQaScope;
-PinnedMediaRuntime? _pinnedMediaRuntime;
+PinnedMediaHost? _pinnedMediaHost;
+@visibleForTesting
+Future<void> debugDisposePinnedMediaHost() async {
+  final host = _pinnedMediaHost;
+  _pinnedMediaHost = null;
+  await host?.dispose();
+}
 SqlitePolicyGrantStore? _policyQaStore;
 OfflineStartupAdmission? _policyQaAdmission;
 RefreshPolicyGrantObserver? _qaRefreshGrantObserver;
@@ -93,6 +101,7 @@ HomeContentCoordinator? _qaHomeContent;
 LocalSnapshotStartup? _ordinarySnapshotStartup;
 VoidCallback? _ordinaryRejectHeldGate;
 http.Client? _debugOrdinaryHttp;
+RealtimeClientOptions? _debugOrdinaryRealtime;
 String? _debugOrdinaryDatabasePath;
 sqlite.DatabaseFactory? _debugOrdinaryDatabaseFactory;
 void Function(sqlite.Database)? _debugChatDatabaseOpened;
@@ -143,9 +152,11 @@ void debugConfigureOrdinaryOffline({
 @visibleForTesting
 Future<void> debugInitializeOrdinaryApp({required http.Client client,
     required String databasePath, required sqlite.DatabaseFactory databaseFactory,
+    RealtimeClientOptions? realtimeOptions,
     void Function(sqlite.Database)? onChatDatabaseOpened}) async {
   assert(!kReleaseMode);
   _debugOrdinaryHttp = client;
+  _debugOrdinaryRealtime = realtimeOptions;
   _debugOrdinaryDatabasePath = databasePath;
   _debugOrdinaryDatabaseFactory = databaseFactory;
   _debugChatDatabaseOpened = onChatDatabaseOpened;
@@ -431,6 +442,7 @@ Future<void> _initializeApp(
       url: SupabaseConfig.url,
       anonKey: SupabaseConfig.anonKey,
       httpClient: gate,
+      realtimeClientOptions: _debugOrdinaryRealtime ?? const RealtimeClientOptions(),
       authOptions: FlutterAuthClientOptions(
         // Disabling auto refresh causes the SDK's recoverSession to sign out
         // an expired saved session. The admission gate holds transport instead.
@@ -534,6 +546,13 @@ Future<void> _initializeApp(
         final session = client.auth.currentSession;
         return session == null ? null : OfflineSessionBinding.fromSession(session, issuer);
       }
+      if (pinnedMediaRuntimeEnabled()) {
+        _pinnedMediaHost = PinnedMediaHost(scope: scope, project: project,
+            currentSession: () => client.auth.currentSession, currentBinding: binding,
+            supportDirectory: getApplicationSupportDirectory,
+            cacheDirectory: getApplicationCacheDirectory,
+            databaseFactory: _debugOrdinaryDatabaseFactory)..start();
+      }
       sqlite.Database? chatDb;
       try {
         final directory = _debugOrdinaryDatabasePath ?? await sqlite.getDatabasesPath();
@@ -548,17 +567,9 @@ Future<void> _initializeApp(
             store: HomeContentSnapshotStore(
                 db: contentDb, scope: scope, currentBinding: binding, project: project),
             scope: scope, httpClient: inner);
-        if (const bool.fromEnvironment('PINNED_MEDIA_RUNTIME')) {
-          _pinnedMediaRuntime = PinnedMediaRuntime(scope: scope,
-              cache: ProjectChatServerCache.qaInstance!,
-              currentSession: () => client.auth.currentSession,
-              cacheDirectory: getApplicationCacheDirectory)..start();
-        }
       } catch (error) {
         // A damaged or full offline cache must not prevent ordinary online
         // use. Preserve the database files and the SDK session for recovery.
-        try { await _pinnedMediaRuntime?.dispose(); } catch (_) {}
-        _pinnedMediaRuntime = null;
         try { if (chatDb != null) await closeProjectChatServerDatabase(chatDb); } catch (_) {}
         ProjectChatServerCache.qaInstance = null;
         _qaHomeContent = null;
@@ -777,7 +788,8 @@ class StudentPlatformApp extends StatelessWidget {
                                         hasPendingRefresh: () => _qaRefreshGate?.qaRefreshPending ?? true,
                                         child: routes);
                                   }
-                                  return _sqlitePolicyQa ? routes : InAppToastHost(child: routes);
+                                  final shell = _sqlitePolicyQa ? routes : InAppToastHost(child: routes);
+                                  return pinnedMediaRuntimeEnabled() ? PinnedMediaStatusHost(child: shell) : shell;
                                 },
 
                                 // Локализация

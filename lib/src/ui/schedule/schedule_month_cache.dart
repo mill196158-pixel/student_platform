@@ -73,20 +73,27 @@ class ScheduleMonthCache {
       scope.isCurrent(attempt.owner) &&
       (_versions[attempt.key] ?? 0) == attempt.version;
 
-  Future<List<Lesson>?> read(ScheduleMonthAttempt attempt) async {
+  Future<List<Lesson>?> read(ScheduleMonthAttempt attempt, {bool bounded = true}) async {
     if (!_current(attempt)) return null;
     try {
       final pending = _pending[attempt.key];
       if (pending != null) {
         try {
-          await pending.timeout(const Duration(seconds: 1));
+          if (bounded) {
+            await pending.timeout(const Duration(seconds: 1));
+          } else {
+            await pending;
+          }
         } on TimeoutException {
           return null;
         }
       }
       if (!_current(attempt) || _quarantined.contains(attempt.key) ||
           _pending.containsKey(attempt.key)) return null;
-      final prefs = await _preferences().timeout(const Duration(seconds: 1));
+      final preferences = _preferences();
+      final prefs = bounded
+          ? await preferences.timeout(const Duration(seconds: 1))
+          : await preferences;
       if (!_current(attempt) || _quarantined.contains(attempt.key) ||
           _pending.containsKey(attempt.key)) return null;
       final raw = prefs.getString(attempt.key);

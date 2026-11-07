@@ -1,4 +1,5 @@
 import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
+import 'dart:async';
 import 'package:student_platform/src/services/chat_file_access.dart';
 import 'package:flutter/material.dart';
 import 'package:student_platform/src/ui/learning/widgets/authorized_file_image.dart';
@@ -135,7 +136,8 @@ class AttachmentWidget extends StatelessWidget {
     try {
       final url = Uri.parse(await ChatFileAccess.resolve(file.fileUrl));
       if (await canLaunchUrl(url)) {
-        await launchUrl(url, mode: LaunchMode.externalApplication);
+        final opened = await launchUrl(url, mode: LaunchMode.externalApplication);
+        if (opened) unawaited(ChatFileAccess.prepareDocumentForOffline(file.fileUrl));
       }
     } catch (e) {
       safeDebugLog('[AttachmentWidget] open file failed: ${e.runtimeType}');

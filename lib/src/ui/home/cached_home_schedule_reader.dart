@@ -25,24 +25,36 @@ class CachedHomeScheduleReader {
         home.authScope == null) {
       throw const CachedHomeAccessDenied();
     }
-    _refreshRegistry[this] = _refresh;
+    _refreshRegistry[this] = (_homeRefresh, _scheduleRefresh);
   }
 
   final SessionCapabilities _capabilities;
   final HomeSnapshotCache _home;
   final ScheduleMonthCache _schedule;
   final CapabilityPermit _permit;
-  final ValueNotifier<int> _refresh = ValueNotifier<int>(0);
-  static final Expando<ValueNotifier<int>> _refreshRegistry = Expando();
-  static Listenable? refreshListenableFor(CachedHomeScheduleReader? reader) =>
-      reader == null ? null : _refreshRegistry[reader];
+  final ValueNotifier<int> _homeRefresh = ValueNotifier<int>(0);
+  final ValueNotifier<int> _scheduleRefresh = ValueNotifier<int>(0);
+  final Map<Object, Future<Object?>> _pending = {};
+  final Set<Object> _timedOut = {};
+  final Map<Object, Object?> _late = {};
+  static final Expando<(ValueNotifier<int>, ValueNotifier<int>)> _refreshRegistry = Expando();
+  static Listenable? homeRefreshFor(CachedHomeScheduleReader? reader) =>
+      reader == null ? null : _refreshRegistry[reader]?.$1;
+  static Listenable? scheduleRefreshFor(CachedHomeScheduleReader? reader) =>
+      reader == null ? null : _refreshRegistry[reader]?.$2;
 
   /// Lets a visible cache-only shell remove its data when admission is revoked.
   Listenable get accessChanges => _capabilities;
-  Listenable get refreshChanges => _refresh;
+  Listenable get refreshChanges => _homeRefresh;
   bool get canRead =>
       _capabilities.mode == SessionCapabilityMode.cacheOnly &&
       _capabilities.permits(_permit, SessionCapability.cachedRead);
+
+  bool permitsContent(SessionCapabilities contentCapabilities, CapabilityPermit permit) {
+    final owner = _home.authScope!.capture();
+    return canRead && owner != null && _capabilities.owns(_permit, owner) &&
+        contentCapabilities.owns(permit, owner);
+  }
 
   static CapabilityPermit _capture(SessionCapabilities capabilities) {
     final permit = capabilities.capture(SessionCapability.cachedRead);
@@ -59,15 +71,31 @@ class CachedHomeScheduleReader {
     }
   }
 
-  Future<T?> _bounded<T>(Future<T?> work, AuthOperationScope owner) async {
-    var timedOut = false;
-    work.then((_) {
-      if (timedOut && canRead && _capabilities.owns(_permit, owner)) _refresh.value++;
-    }, onError: (Object _, StackTrace __) {});
-    return work.timeout(const Duration(seconds: 1), onTimeout: () {
-      timedOut = true;
+  Future<T?> _bounded<T>(Object key, Future<T?> Function() load,
+      AuthOperationScope owner, ValueNotifier<int> notifier) async {
+    // Keep a completed late result for this cache-only reader. Re-consuming
+    // it avoids staggered slow sections repeatedly waking each other up.
+    if (_late.containsKey(key)) return _late[key] as T?;
+    var work = _pending[key];
+    if (work == null) {
+      work = load();
+      _pending[key] = work;
+      final captured = work;
+      work.then((value) {
+        if (identical(_pending[key], captured)) _pending.remove(key);
+        if (_timedOut.remove(key) && canRead && _capabilities.owns(_permit, owner)) {
+          _late[key] = value;
+          notifier.value++;
+        }
+      }, onError: (Object _, StackTrace __) {
+        if (identical(_pending[key], captured)) _pending.remove(key);
+        _timedOut.remove(key);
+      });
+    }
+    return (await work.timeout(const Duration(seconds: 1), onTimeout: () {
+      _timedOut.add(key);
       throw const CachedHomeTemporarilyUnavailable();
-    });
+    })) as T?;
   }
 
   /// Null means no valid snapshot, while an empty items list is saved data.
@@ -77,19 +105,22 @@ class CachedHomeScheduleReader {
     if (owner == null || !_capabilities.owns(_permit, owner)) {
       throw const CachedHomeAccessDenied();
     }
-    final value = await _bounded(_home.read(_permit.userId, section), owner);
+    final value = await _bounded<HomeSectionSnapshot>('home:${section.name}',
+        () => _home.read(_permit.userId, section), owner, _homeRefresh);
     _check();
     return value;
   }
 
   /// Null means this month has not been saved; an empty list is a saved month.
-  Future<List<Lesson>?> readMonth(DateTime month) async {
+  Future<List<Lesson>?> readMonth(DateTime month, {bool forDashboard = false}) async {
     _check();
     final attempt = _schedule.beginRead(MskDate.calendarDate(month));
     if (attempt == null || !_capabilities.owns(_permit, attempt.owner)) {
       throw const CachedHomeAccessDenied();
     }
-    final value = await _bounded(_schedule.read(attempt), attempt.owner);
+    final day = MskDate.calendarDate(month);
+    final value = await _bounded<List<Lesson>>('${forDashboard ? 'dashboardMonth' : 'month'}:${day.year}-${day.month}',
+        () => _schedule.read(attempt, bounded: false), attempt.owner, forDashboard ? _homeRefresh : _scheduleRefresh);
     _check();
     return value == null ? null : List<Lesson>.unmodifiable(value);
   }
@@ -132,7 +163,7 @@ class CachedHomeScheduleReader {
     }
     if (lessons == null) {
       List<Lesson>? month;
-      try { month = await readMonth(day); }
+      try { month = await readMonth(day, forDashboard: true); }
       on CachedHomeTemporarilyUnavailable { scheduleTemporarilyUnavailable = true; }
       _check();
       if (month != null) {

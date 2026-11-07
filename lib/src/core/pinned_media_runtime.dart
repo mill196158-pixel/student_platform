@@ -9,15 +9,17 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 /// Initialization is asynchronous: legacy local images never wait for it.
 class PinnedMediaRuntime {
   PinnedMediaRuntime({required this.scope, required this.cache,
-    required this.currentSession, required this.cacheDirectory});
+    required this.currentSession, required this.cacheDirectory, this.onUnavailable});
   final AuthSessionScope scope;
   final ProjectChatServerCache cache;
   final Session? Function() currentSession;
   final Future<Directory> Function() cacheDirectory;
+  final void Function()? onUnavailable;
   ProjectMediaProtectionSession? _active;
   Future<void>? _refresh;
   Timer? _retry;
   bool _stopped = false, _again = false;
+  int _failures = 0;
 
   void start() {
     scope.addListener(_changed);
@@ -52,16 +54,33 @@ class PinnedMediaRuntime {
     if (_stopped || owner == null || !scope.isCurrent(owner)) return;
     ProjectMediaProtectionSession? next;
     try {
-      final root = await cacheDirectory();
+      final root = await cacheDirectory().timeout(const Duration(seconds: 3));
       if (_stopped || !scope.isCurrent(owner)) return;
-      next = await cache.openMediaProtection(root);
+      var abandoned = false;
+      final opening = cache.openMediaProtection(root);
+      unawaited(opening.then<void>((lateSession) async {
+        if (abandoned && lateSession != null) {
+          try { await lateSession.close(); } catch (_) {}
+        }
+      }, onError: (Object _, StackTrace __) {}));
+      next = await opening.timeout(const Duration(seconds: 3), onTimeout: () {
+        abandoned = true; throw TimeoutException('Media protection opening timed out');
+      });
       if (next == null || _stopped || !scope.isCurrent(owner) || !next.isCurrent) {
         if (next != null) unawaited(next.close().catchError((Object _) {}));
         if (next == null && !_stopped && scope.isCurrent(owner)) _scheduleRetry();
         return;
       }
+      final recovery = next.store.accessRecovery;
+      if (recovery == null || !await recovery.timeout(const Duration(seconds: 2), onTimeout: () => false) ||
+          _stopped || !scope.isCurrent(owner) || !next.isCurrent) {
+        unawaited(next.close().catchError((Object _) {}));
+        if (!_stopped && scope.isCurrent(owner)) _scheduleRetry();
+        return;
+      }
       ChatFileAccess.mediaProtection = next.store;
       _active = next;
+      _failures = 0;
       _retry?.cancel(); _retry = null;
     } catch (_) {
       if (next != null) unawaited(next.close().catchError((Object _) {}));
@@ -73,9 +92,13 @@ class PinnedMediaRuntime {
   }
 
   void _scheduleRetry() {
+    onUnavailable?.call();
+    _failures++;
     _retry?.cancel();
-    _retry = Timer(const Duration(milliseconds: 500), _changed);
+    if (_failures <= 3) _retry = Timer(Duration(seconds: 1 << (_failures - 1)), _changed);
   }
+
+  void retry() { _retry?.cancel(); _retry = null; _failures = 0; _changed(); }
 
   Future<void> dispose() async {
     _stopped = true; _retry?.cancel(); scope.removeListener(_changed);

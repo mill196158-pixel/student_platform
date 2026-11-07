@@ -30,6 +30,9 @@ class _Reader implements CachedHomeScheduleReader {
   @override
   bool get canRead => caps.capture(SessionCapability.cachedRead) != null;
   @override
+  bool permitsContent(SessionCapabilities other, CapabilityPermit permit) =>
+      canRead && other.permits(permit, SessionCapability.cachedRead);
+  @override
   Future<HomeDashboardData> readDashboard({DateTime? date}) async =>
       HomeDashboardData(
           profile: const HomeUserProfile(name: 'QA'),
@@ -109,6 +112,7 @@ class _Content extends ChangeNotifier implements HomeContentCoordinator {
   final HomeContentSnapshot news, promo;
   bool failNews = false;
   bool stall = false;
+  int reads = 0;
   final stalled = Completer<void>();
   final Set<String> denied = {};
   void deny(String section) {
@@ -126,6 +130,7 @@ class _Content extends ChangeNotifier implements HomeContentCoordinator {
   @override
   Future<HomeContentSnapshot?> read(
       String section, SessionCapabilities caps) async {
+    reads++;
     if (stall) await stalled.future;
     if (section == 'news' && failNews) throw StateError('synthetic failure');
     return caps.capture(SessionCapability.cachedRead) == null
@@ -137,7 +142,135 @@ class _Content extends ChangeNotifier implements HomeContentCoordinator {
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
 
+class _DisposeAction extends StatefulWidget {
+  const _DisposeAction(this.action);
+  final VoidCallback action;
+  @override
+  State<_DisposeAction> createState() => _DisposeActionState();
+}
+class _DisposeActionState extends State<_DisposeAction> {
+  @override
+  void dispose() { widget.action(); super.dispose(); }
+  @override
+  Widget build(BuildContext context) => const SizedBox();
+}
+
 void main() {
+  testWidgets('content revoke during sibling disposal leaves home usable', (tester) async {
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final session = fakeSession('dispose-content');
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final readerCaps = SessionCapabilities(scope), contentCaps = SessionCapabilities(scope);
+    for (final caps in [readerCaps, contentCaps]) {
+      expect(caps.grant(SessionCapabilityMode.cacheOnly,
+          caps.beginAuthorization(scope.capture()!)!), isTrue);
+    }
+    final reader = _Reader(readerCaps), dashboard = _Dashboard();
+    final content = _Content(const HomeContentSnapshot([], {}), const HomeContentSnapshot([], {}));
+    Widget app(bool sibling) => MaterialApp(home: Stack(children: [
+      HomeScreen(key: const ValueKey('home'), dashboardService: dashboard,
+          cachedReader: reader, homeContent: content, homeContentCapabilities: contentCaps),
+      if (sibling) _DisposeAction(contentCaps.block),
+    ]));
+    await tester.pumpWidget(app(true));
+    for (var i = 0; i < 8; i++) await tester.pump(const Duration(milliseconds: 30));
+    await tester.pumpWidget(app(false));
+    for (var i = 0; i < 8; i++) await tester.pump(const Duration(milliseconds: 30));
+    expect(tester.takeException(), isNull);
+    expect(reader.canRead, isTrue);
+    expect(find.byType(HomeScreen), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    readerCaps.dispose(); contentCaps.dispose(); scope.dispose(); await events.close();
+  });
+  testWidgets('independent content revoke hides news and rejects stale reads', (tester) async {
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final session = fakeSession('independent-content');
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final readerCaps = SessionCapabilities(scope), contentCaps = SessionCapabilities(scope);
+    void grant(SessionCapabilities c) => expect(c.grant(SessionCapabilityMode.cacheOnly,
+        c.beginAuthorization(scope.capture()!)!), isTrue);
+    grant(readerCaps); grant(contentCaps);
+    HomeContentSnapshot news(String title) => HomeContentSnapshot([
+      {'id': title, 'title': title, 'body': 'text', 'created_at': '2026-11-06T00:00:00Z'}
+    ], const {});
+    final first = _Content(news('Первая новость'), const HomeContentSnapshot([], {}));
+    final late = _Content(news('Устаревшая новость'), const HomeContentSnapshot([], {}))..stall = true;
+    final fresh = _Content(news('Свежая новость'), const HomeContentSnapshot([], {}));
+    final reader = _Reader(readerCaps), dashboard = _Dashboard();
+    Widget app(_Content c) => MaterialApp(home: HomeScreen(dashboardService: dashboard,
+        cachedReader: reader, homeContent: c, homeContentCapabilities: contentCaps));
+    await tester.pumpWidget(app(first));
+    for (var i = 0; i < 10; i++) await tester.pump(const Duration(milliseconds: 30));
+    expect(find.text('Первая новость'), findsWidgets);
+    await tester.tap(find.text('Первая новость').first);
+    await tester.pumpAndSettle();
+    expect(find.text('text'), findsWidgets);
+    contentCaps.block();
+    for (var i = 0; i < 10; i++) await tester.pump(const Duration(milliseconds: 30));
+    expect(reader.canRead, isTrue);
+    expect(find.text('Первая новость'), findsNothing);
+    expect(find.text('text'), findsNothing);
+    await tester.pumpWidget(app(late));
+    grant(contentCaps);
+    await tester.pump();
+    contentCaps.block();
+    await tester.pumpWidget(app(fresh));
+    grant(contentCaps);
+    for (var i = 0; i < 10; i++) await tester.pump(const Duration(milliseconds: 30));
+    late.stalled.complete();
+    for (var i = 0; i < 15; i++) await tester.pump(const Duration(milliseconds: 30));
+    expect(find.text('Устаревшая новость'), findsNothing);
+    expect(find.text('Свежая новость'), findsWidgets);
+    await tester.pumpWidget(const SizedBox());
+    readerCaps.dispose(); contentCaps.dispose(); scope.dispose(); await events.close();
+  });
+  testWidgets('replacing content coordinator fences its delayed old result', (tester) async {
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final session = fakeSession('content-swap');
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final caps = SessionCapabilities(scope);
+    expect(caps.grant(SessionCapabilityMode.cacheOnly, caps.beginAuthorization(scope.capture()!)!), isTrue);
+    HomeContentSnapshot news(String title) => HomeContentSnapshot([
+      {'id': title, 'title': title, 'body': 'text', 'created_at': '2026-11-06T00:00:00Z'}
+    ], const {});
+    final oldContent = _Content(news('Старая новость'), const HomeContentSnapshot([], {}))..stall = true;
+    final newContent = _Content(news('Новая новость'), const HomeContentSnapshot([], {}));
+    final reader = _Reader(caps), dashboard = _Dashboard();
+    Widget app(_Content content) => MaterialApp(home: HomeScreen(dashboardService: dashboard,
+        cachedReader: reader, homeContent: content, homeContentCapabilities: caps));
+    await tester.pumpWidget(app(oldContent)); await tester.pump();
+    await tester.pumpWidget(app(newContent)); await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1100));
+    for (var i = 0; i < 8; i++) await tester.pump(const Duration(milliseconds: 30));
+    expect(find.text('Новая новость'), findsWidgets);
+    oldContent.stalled.complete();
+    for (var i = 0; i < 8; i++) await tester.pump(const Duration(milliseconds: 30));
+    expect(find.text('Старая новость'), findsNothing);
+    expect(find.text('Новая новость'), findsWidgets);
+    await tester.pumpWidget(const SizedBox());
+    caps.dispose(); scope.dispose(); await events.close();
+  });
+  testWidgets('late optional sections are consumed once without reload loop', (tester) async {
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final session = fakeSession('late-content');
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final caps = SessionCapabilities(scope);
+    expect(caps.grant(SessionCapabilityMode.cacheOnly, caps.beginAuthorization(scope.capture()!)!), isTrue);
+    final content = _Content(const HomeContentSnapshot([], {}), const HomeContentSnapshot([], {}))..stall = true;
+    await tester.pumpWidget(MaterialApp(home: HomeScreen(dashboardService: _Dashboard(),
+        cachedReader: _Reader(caps), homeContent: content, homeContentCapabilities: caps)));
+    await tester.pump(); await tester.pump(const Duration(milliseconds: 1100)); await tester.pump();
+    expect(content.reads, 2);
+    content.stalled.complete();
+    for (var i = 0; i < 12; i++) await tester.pump(const Duration(milliseconds: 30));
+    expect(content.reads, 2);
+    await tester.pumpWidget(const SizedBox());
+    caps.dispose(); scope.dispose(); await events.close();
+  });
   testWidgets('late local profile read refreshes offline home without network', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final events = StreamController<AuthState>.broadcast(sync: true);
@@ -155,14 +288,21 @@ void main() {
         items: [{'id': 'late-home', 'name': 'Восстановленный профиль'}], savedAt: DateTime.now()), isTrue);
     expect(caps.grant(SessionCapabilityMode.cacheOnly, caps.beginAuthorization(scope.capture()!)!), isTrue);
     final gate = Completer<SharedPreferences>();
+    final monthGate = Completer<SharedPreferences>();
     final reader = CachedHomeScheduleReader(capabilities: caps, home: cache(() => gate.future),
-        schedule: ScheduleMonthCache(scope, 'test-project'));
+        schedule: ScheduleMonthCache(scope, 'test-project', preferences: () => monthGate.future));
     await tester.pumpWidget(MaterialApp(home: HomeScreen(dashboardService: _Dashboard(), cachedReader: reader)));
     await tester.pump(); await tester.pump(const Duration(milliseconds: 1100)); await tester.pump();
     expect(find.textContaining('Восстановленный профиль'), findsNothing);
     gate.complete(prefs);
+    await tester.pump();
+    // Profile returns after its deadline while the first dashboard load is
+    // still waiting for the month. The retry must be queued, not dropped.
+    await tester.pump(const Duration(milliseconds: 1100));
+    await tester.pump(const Duration(milliseconds: 1100));
     for (var i = 0; i < 8; i++) await tester.pump(const Duration(milliseconds: 30));
     expect(find.textContaining('Восстановленный профиль'), findsWidgets);
+    monthGate.complete(prefs);
     await tester.pumpWidget(const SizedBox());
     caps.dispose(); scope.dispose(); await events.close();
   });

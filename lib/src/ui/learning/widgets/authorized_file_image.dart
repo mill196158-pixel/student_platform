@@ -8,6 +8,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:supabase_flutter/supabase_flutter.dart' show FunctionException, Supabase;
 import '../../../services/chat_file_access.dart';
+import '../../../core/pinned_media_availability.dart';
 import 'reentry_image_gate.dart';
 import 'qa_reentry_timing.dart';
 
@@ -322,6 +323,7 @@ class _AuthorizedFileImageState extends State<AuthorizedFileImage> {
     _accessEpoch = ChatFileAccess.qaAccessEpoch(widget.imageUrl, _user);
     _provider = AuthorizedFileImageProvider(widget.imageUrl);
     ChatFileAccess.accessChanges.addListener(_accessChanged);
+    PinnedMediaAvailability.state.addListener(_availabilityChanged);
   }
 
   @override
@@ -380,10 +382,21 @@ class _AuthorizedFileImageState extends State<AuthorizedFileImage> {
     }
   }
 
+  void _availabilityChanged() {
+    if (!mounted) return;
+    if (PinnedMediaAvailability.state.value == PinnedMediaAvailabilityState.ready) {
+      PaintingBinding.instance.imageCache.evict(_provider);
+      setState(() => _attempt++);
+    } else {
+      setState(() {});
+    }
+  }
+
   @override
   void dispose() {
     _finishReentry();
     ChatFileAccess.accessChanges.removeListener(_accessChanged);
+    PinnedMediaAvailability.state.removeListener(_availabilityChanged);
     super.dispose();
   }
 
@@ -392,7 +405,31 @@ class _AuthorizedFileImageState extends State<AuthorizedFileImage> {
     final provider = ChatFileAccess.decodedImageExperimentEnabled
         ? _provider
         : AuthorizedFileImageProvider(widget.imageUrl);
-    Widget error(Object error) => Semantics(
+    Widget error(Object error) {
+      if (error is MediaProtectionUnavailable) {
+        final preparing = PinnedMediaAvailability.state.value == PinnedMediaAvailabilityState.preparing;
+        return LayoutBuilder(builder: (context, constraints) {
+        if (constraints.maxHeight < 88 || constraints.maxWidth < 130) {
+          return Center(child: IconButton(
+            onPressed: () { PinnedMediaAvailability.retry(); PaintingBinding.instance.imageCache.evict(provider); setState(() => _attempt++); },
+            icon: const Icon(Icons.refresh_rounded),
+          ));
+        }
+        return Center(child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(preparing ? 'Подготавливаем вложения' : 'Не удалось открыть вложение',
+                textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall),
+            if (!preparing) TextButton(onPressed: () {
+              PinnedMediaAvailability.retry();
+              PaintingBinding.instance.imageCache.evict(provider);
+              setState(() => _attempt++);
+            }, child: const Text('Повторить')),
+          ]),
+        ));
+        });
+      }
+      return Semantics(
           button: true,
           label: 'Повторить загрузку изображения',
           child: GestureDetector(
@@ -412,6 +449,7 @@ class _AuthorizedFileImageState extends State<AuthorizedFileImage> {
                 const Icon(Icons.refresh_rounded),
           ),
         );
+    }
     if (_revoked) {
       _finishReentry();
       return error(StateError('Файл недоступен'));

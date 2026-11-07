@@ -12,7 +12,7 @@ class _Reader implements CachedHomeScheduleReader {
   @override Listenable get refreshChanges => _refresh;
   @override bool get canRead => true;
   @override
-  Future<List<Lesson>?> readMonth(DateTime month) async {
+  Future<List<Lesson>?> readMonth(DateTime month, {bool forDashboard = false}) async {
     calls++;
     if (month.month != 11 || month.year != 2026) return null;
     return [

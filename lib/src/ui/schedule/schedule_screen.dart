@@ -475,7 +475,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   @override
   void initState() {
     super.initState();
-    CachedHomeScheduleReader.refreshListenableFor(widget.cachedReader)?.addListener(_onCachedReadReady);
+    CachedHomeScheduleReader.scheduleRefreshFor(widget.cachedReader)?.addListener(_onCachedReadReady);
     final now = _nowMsk();
     _selectedDay = now;
     _selectedWeekStart = _mondayOf(now);
@@ -495,6 +495,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         unawaited(_reload());
       }
     });
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   void _startRealtimeIfOnline() {
@@ -532,8 +533,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   void didUpdateWidget(covariant ScheduleScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.cachedReader, widget.cachedReader)) {
-      CachedHomeScheduleReader.refreshListenableFor(oldWidget.cachedReader)?.removeListener(_onCachedReadReady);
-      CachedHomeScheduleReader.refreshListenableFor(widget.cachedReader)?.addListener(_onCachedReadReady);
+      CachedHomeScheduleReader.scheduleRefreshFor(oldWidget.cachedReader)?.removeListener(_onCachedReadReady);
+      CachedHomeScheduleReader.scheduleRefreshFor(widget.cachedReader)?.addListener(_onCachedReadReady);
     }
     final changed = !identical(oldWidget.cachedReader, widget.cachedReader) ||
         oldWidget.subscribeRealtime != widget.subscribeRealtime;
@@ -582,7 +583,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
   @override
   void dispose() {
-    CachedHomeScheduleReader.refreshListenableFor(widget.cachedReader)?.removeListener(_onCachedReadReady);
+    CachedHomeScheduleReader.scheduleRefreshFor(widget.cachedReader)?.removeListener(_onCachedReadReady);
     _loadRevision++;
     _releaseForeground();
     _sessionScope?.removeListener(_sessionChanged);
