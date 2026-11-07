@@ -879,7 +879,7 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
       final permit = caps?.capture(SessionCapability.cachedRead);
       if (caps == null || permit == null || caps.mode != SessionCapabilityMode.cacheOnly) return;
       await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) =>
-        _SavedSubjectDetails(subject: item, capabilities: caps, permit: permit)));
+        SavedSubjectInfoScreen(subject: item, capabilities: caps, permit: permit)));
       return;
     }
     await Navigator.of(context).push(
@@ -1532,41 +1532,6 @@ class InfoPlanState {
       ..sort();
     return values;
   }
-}
-
-/// View only the fields actually saved with the subject list. Materials and
-/// actions that require a server are explicitly not represented as empty.
-class _SavedSubjectDetails extends StatelessWidget {
-  const _SavedSubjectDetails({required this.subject, required this.capabilities, required this.permit});
-  final UsefulSubject subject;
-  final SessionCapabilities capabilities;
-  final CapabilityPermit permit;
-
-  @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: capabilities,
-    builder: (context, _) {
-      final allowed = capabilities.mode == SessionCapabilityMode.cacheOnly &&
-          capabilities.permits(permit, SessionCapability.cachedRead);
-      if (!allowed) return const Scaffold(body: Center(child: Text('Сохранённый предмет недоступен.')));
-      return Scaffold(appBar: AppBar(title: const Text('Предмет')),
-        body: ListView(padding: const EdgeInsets.all(20), children: [
-          Text(subject.title, style: Theme.of(context).textTheme.headlineSmall),
-          const SizedBox(height: 8),
-          const Text('Сохранённая информация · без сети'),
-          if (subject.controlForm.trim().isNotEmpty) ...[
-            const SizedBox(height: 16), Text(subject.controlForm),
-          ],
-          if (subject.teacherName.trim().isNotEmpty) ...[
-            const SizedBox(height: 16), Text('Преподаватель: ${subject.teacherName}'),
-          ],
-          if (subject.description.trim().isNotEmpty) ...[
-            const SizedBox(height: 20), Text(subject.description),
-          ],
-          const SizedBox(height: 20),
-          const Text('Материалы и другие сведения могут быть недоступны без сети.'),
-        ]));
-    });
 }
 
 String _sectionSubtitle(_UsefulSection section) {

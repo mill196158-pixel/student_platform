@@ -215,7 +215,11 @@ void main() {
     expect(networkCalls, 0);
     await tester.tap(find.text('Тестовый экзамен'));
     await tester.pumpAndSettle();
+    expect(find.text('Информация о предмете'), findsOneWidget);
+    expect(find.text('Краткая информация'), findsOneWidget);
+    expect(find.text('Как сдаётся'), findsOneWidget);
     expect(find.text('Описание предмета'), findsOneWidget);
+    expect(find.text('Материалы пока не загружены'), findsNothing);
     caps.block(); await tester.pump();
     expect(find.text('Описание предмета'), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());

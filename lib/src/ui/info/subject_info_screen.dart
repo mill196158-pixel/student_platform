@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../learning/models/team.dart';
@@ -19,6 +20,72 @@ import 'subject_hero_load.dart';
 import 'subject_media_service.dart';
 import 'entity_review_screen.dart';
 import 'teacher_profile_screen.dart';
+import 'useful_subject.dart';
+
+/// Local-only view of the fields actually saved with the subject catalogue.
+/// The online screen's visual building blocks are reused without constructing
+/// its repositories, download services or interactive mutations.
+class SavedSubjectInfoScreen extends StatelessWidget {
+  const SavedSubjectInfoScreen({super.key, required this.subject,
+      required this.capabilities, required this.permit});
+  final UsefulSubject subject;
+  final SessionCapabilities capabilities;
+  final CapabilityPermit permit;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: capabilities,
+        builder: (context, _) {
+          final allowed = capabilities.mode == SessionCapabilityMode.cacheOnly &&
+              capabilities.permits(permit, SessionCapability.cachedRead);
+          if (!allowed) {
+            return const Scaffold(body: Center(child: Text('Сохранённый предмет недоступен.')));
+          }
+          final data = _SubjectInfoData(
+            title: subject.title, subjectOfferingId: subject.id,
+            subjectId: subject.subjectId, groupId: subject.groupId,
+            semesterNumber: subject.semesterNumber,
+            description: subject.description, controlForm: subject.controlForm,
+            teacherName: subject.teacherName, department: '', credits: '', hoursTotal: '',
+            teamName: subject.teamName, teamIcon: subject.teamIcon,
+            teamGroupName: subject.teamGroupName,
+          );
+          final theme = Theme.of(context);
+          return Scaffold(
+            backgroundColor: theme.colorScheme.surfaceContainerLow,
+            appBar: AppBar(title: const Text('Информация о предмете')),
+            body: ListView(padding: const EdgeInsets.fromLTRB(16, 10, 16, 24), children: [
+              _HeroCard(data: data),
+              Padding(padding: const EdgeInsets.fromLTRB(2, 10, 2, 10),
+                child: Row(children: [
+                  Icon(Icons.offline_bolt_outlined, size: 16, color: theme.colorScheme.onSurfaceVariant),
+                  const SizedBox(width: 6),
+                  Expanded(child: Text('Сохранённая информация · без сети',
+                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant))),
+                ])),
+              _ContentCard(icon: Icons.info_outline_rounded, title: 'Краткая информация',
+                child: Column(children: [
+                  if (subject.description.trim().isNotEmpty)
+                    _InfoTile(title: 'Описание', value: subject.description.trim(), icon: Icons.notes_rounded),
+                  if (subject.controlForm.trim().isNotEmpty)
+                    _InfoTile(title: 'Как сдаётся', value: subject.controlForm.trim(), icon: Icons.task_alt_rounded),
+                  if (subject.teacherName.trim().isNotEmpty)
+                    _InfoTile(title: 'Преподаватель', value: subject.teacherName.trim(), icon: Icons.person_outline_rounded),
+                  if (subject.description.trim().isEmpty && subject.controlForm.trim().isEmpty && subject.teacherName.trim().isEmpty)
+                    const _EmptyContentCallout(icon: Icons.cloud_off_outlined,
+                      title: 'Сохранено только основное',
+                      subtitle: 'Дополнительные сведения доступны при подключении к сети.'),
+                ])),
+              const SizedBox(height: 10),
+              const _ContentCard(icon: Icons.folder_outlined, title: 'Полезные файлы',
+                child: _EmptyContentCallout(icon: Icons.cloud_off_outlined,
+                  title: 'Без сети нельзя проверить материалы',
+                  subtitle: 'Подключитесь к интернету, чтобы открыть список файлов предмета.')),
+            ]),
+          );
+        },
+      );
+}
 
 class SubjectInfoScreen extends StatefulWidget {
   final String title;
