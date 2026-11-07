@@ -56,11 +56,12 @@ class _SplashScreenState extends State<SplashScreen> {
       if (widget.qaAdmission != null) {
         debugPrint('[startup-route] local admission started');
         final result = await widget.qaAdmission!();
-        debugPrint('[startup-route] local admission result: ${result.name}');
+        debugPrint('[startup-route] local admission result: ${result.name}; mounted: $mounted');
         if (!mounted) return;
         switch (result) {
           case OfflineStartupResult.online:
           case OfflineStartupResult.cacheOnly:
+            debugPrint('[startup-route] go home');
             context.go('/home');
             return;
           case OfflineStartupResult.passwordChangeRequired:
