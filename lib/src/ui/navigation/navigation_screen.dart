@@ -159,7 +159,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
                               storageKey: 'tab_learning',
                               child: _cacheOnly
                                   ? _cachedTab(context, widget.cachedLearning)
-                                  : const LearningScreen())),
+                                  : LearningScreen(onlineBarrier: widget.onlineBarrier))),
                       VisitedTab(
                           active: _currentIndex == 3,
                           builder: (_) => _KeepAlive(

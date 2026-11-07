@@ -108,6 +108,10 @@ class SessionCapabilities extends ChangeNotifier {
   bool owns(CapabilityPermit permit, AuthOperationScope owner) =>
       permits(permit, SessionCapability.cachedRead) && permit._owner == owner;
 
+  bool ownsFor(CapabilityPermit permit, AuthOperationScope owner,
+      SessionCapability capability) =>
+      permits(permit, capability) && permit._owner == owner;
+
   void _onSessionChanged() {
     final owner = _owner;
     if (owner != null && !_session.isCurrent(owner))

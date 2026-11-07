@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:student_platform/src/ui/learning/data/learning_repository.dart';
+import 'package:student_platform/src/ui/learning/data/confirmed_team_catalog.dart';
 import 'package:student_platform/src/ui/chats/core/confirmed_chat_row.dart';
 import 'package:student_platform/src/ui/learning/models/team.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
@@ -67,6 +68,35 @@ class SupabaseLearningRepository implements LearningRepository {
           .map((e) => Team.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList();
     }
+  }
+
+  /// A separate complete server read for the account-scoped offline snapshot.
+  /// Never reads or promotes the historical ownerless preferences fallback.
+  Future<List<Team>> loadConfirmedOfflineCatalog({required bool Function() current}) async {
+    if (!current()) throw StateError('Catalog scope is no longer current');
+    final response = await _sb.rpc('get_my_teams');
+    if (!current()) throw StateError('Catalog scope is no longer current');
+    if (response is! List || response.length > 500) throw const FormatException('Invalid team catalog');
+    final ids = <String>[];
+    for (final row in response) {
+      if (row is! Map || row['id'] is! String || (row['id'] as String).isEmpty) {
+        throw const FormatException('Invalid team id');
+      }
+      ids.add(row['id'] as String);
+    }
+    List<dynamic>? hydrated;
+    if (ids.isNotEmpty) {
+      if (!current()) throw StateError('Catalog scope is no longer current');
+      try {
+        final rows = await _sb.from('teams').select('id,kind').inFilter('id', ids);
+        hydrated = rows as List;
+      } catch (error) {
+        if (isConfirmedCatalogDenial(error)) rethrow;
+        // Unknown types remain unknown; the RPC result remains usable.
+      }
+    }
+    if (!current()) throw StateError('Catalog scope is no longer current');
+    return confirmedTeamCatalogFromRows(response, hydrated: hydrated);
   }
 
   Team _mapRowToTeam(Map<String, dynamic> m) {

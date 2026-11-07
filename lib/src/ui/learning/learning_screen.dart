@@ -10,6 +10,11 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:student_platform/src/data/academic_context_service.dart';
+import 'package:student_platform/src/core/auth_session_scope_host.dart';
+import 'package:student_platform/src/core/online_side_effect_barrier.dart';
+import 'package:student_platform/src/core/session_capabilities_host.dart';
+import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
+import 'package:student_platform/src/ui/learning/state/scoped_team_catalog.dart';
 import 'state/learning_cubit.dart';
 import 'state/learning_state.dart';
 import 'team_details_screen.dart';
@@ -22,12 +27,21 @@ const double _kHeaderSpacing = 12.0;
 const EdgeInsets _kContentPadding = EdgeInsets.fromLTRB(16, 0, 16, 16);
 
 class LearningScreen extends StatelessWidget {
-  const LearningScreen({super.key});
+  const LearningScreen({super.key, this.onlineBarrier});
+  final OnlineSideEffectBarrier? onlineBarrier;
 
   @override
   Widget build(BuildContext context) {
+    final cache = ProjectChatServerCache.qaInstance;
+    final scope = AuthSessionScopeHost.maybeRead(context);
+    final caps = SessionCapabilitiesHost.maybeRead(context);
+    final catalog = cache != null && identical(cache.scope, scope) && caps != null
+        ? ScopedTeamCatalogStore(db: cache.db, scope: cache.scope,
+            currentBinding: cache.currentBinding, project: cache.project)
+        : null;
     return BlocProvider<LearningCubit>(
-      create: (_) => LearningCubit(),
+      create: (_) => LearningCubit(catalogStore: catalog, catalogCapabilities: caps,
+          catalogBarrier: onlineBarrier),
       child: const _Body(),
     );
   }
