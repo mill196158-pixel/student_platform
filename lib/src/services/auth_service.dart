@@ -82,6 +82,11 @@ class AuthService {
     final access = OfflinePolicyGrantHost.maybeRead(context);
     final sqliteStore = access?.sqliteStore;
     final sqliteBinding = sqliteStore == null ? null : access?.currentBinding();
+    // Captured before the memory fence invalidates the active scope. This
+    // experimental barrier is never enabled in an ordinary build.
+    const qaEviction = bool.fromEnvironment('MEDIA_CACHE_EVICTION_QA');
+    final mediaStore = qaEviction ? ChatFileAccess.mediaProtection : null;
+    final mediaSid = qaEviction ? ChatFileAccess.currentSessionBinding : null;
     Object? attachmentFence;
     PushLogoutReservation? pushReservation;
     var result = LogoutCleanupResult.blockedBeforeSignOut;
@@ -100,12 +105,26 @@ class AuthService {
             },
             () => attachmentFence = ChatFileAccess.fenceForLogout(),
           ]),
-          durableRevoke: sqliteStore == null
+          durableRevoke: sqliteStore == null && !qaEviction
               ? null
               : () async {
-                  if (sqliteBinding == null || !ownerIsCurrent()) return false;
-                  await sqliteStore.beginRevoke(sqliteBinding,
-                      stillCurrent: ownerIsCurrent);
+                  if (qaEviction) {
+                    if (mediaStore == null || mediaSid == null || oldUserId == null ||
+                        mediaStore.project.replaceFirst(RegExp(r'/+$'), '') !=
+                            SupabaseConfig.url.replaceFirst(RegExp(r'/+$'), '') ||
+                        !ownerIsCurrent()) return false;
+                    // A timeout is not cancellation: a late completion can only
+                    // write the old SID tombstone, never delete files.
+                    final fenced = await mediaStore.markSessionLoggedOut(
+                      oldUserId, mediaSid, stillCurrent: ownerIsCurrent,
+                    ).timeout(const Duration(seconds: 5), onTimeout: () => false);
+                    if (!fenced || !ownerIsCurrent()) return false;
+                  }
+                  if (sqliteStore != null) {
+                    if (sqliteBinding == null || !ownerIsCurrent()) return false;
+                    await sqliteStore.beginRevoke(sqliteBinding,
+                        stillCurrent: ownerIsCurrent);
+                  }
                   return ownerIsCurrent();
                 },
           cleanups: [

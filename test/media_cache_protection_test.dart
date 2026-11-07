@@ -16,7 +16,7 @@ void main() {
         options: OpenDatabaseOptions(singleInstance: false));
     var owner = 'a';
     final registry = MediaCacheProtection(db: db, root: root, project: 'project',
-        databaseToken: 'guard', currentOwner: () => owner);
+        databaseToken: 'guard', currentOwner: () => owner, currentSessionId: () => 'sid');
     addTearDown(() async {
       await db.close();
       if (root.parent.absolute.path == Directory.systemTemp.absolute.path) await root.delete(recursive: true);
@@ -56,7 +56,7 @@ void main() {
         options: OpenDatabaseOptions(singleInstance: false));
     var owner = 'a';
     final registry = MediaCacheProtection(db: db, root: root, project: 'project',
-        databaseToken: 'guard', currentOwner: () => owner);
+        databaseToken: 'guard', currentOwner: () => owner, currentSessionId: () => 'sid');
     addTearDown(() async {
       await db.close();
       if (root.parent.absolute.path == Directory.systemTemp.absolute.path) await root.delete(recursive: true);
@@ -74,7 +74,7 @@ void main() {
     final otherDb = await databaseFactoryFfi.openDatabase(databasePath,
         options: OpenDatabaseOptions(singleInstance: false));
     final other = MediaCacheProtection(db: otherDb, root: root, project: 'project',
-        databaseToken: 'other-guard', currentOwner: () => owner);
+        databaseToken: 'other-guard', currentOwner: () => owner, currentSessionId: () => 'sid');
     expect(await other.evict('a', 1, allOperationsParticipate: true, permit: () => true), 0);
     await otherDb.close();
     final started = Completer<void>(), finish = Completer<void>();

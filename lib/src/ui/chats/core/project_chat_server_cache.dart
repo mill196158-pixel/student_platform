@@ -406,7 +406,8 @@ class ProjectChatServerCache {
     bool current() => scope.isCurrent(owner) && _matches(currentBinding(), binding);
     try {
       final store = MediaCacheProtection(db: db, root: root, project: project,
-        databaseToken: guard!.token, currentOwner: () => current() ? owner.userId : null);
+        databaseToken: guard!.token, currentOwner: () => current() ? owner.userId : null,
+        currentSessionId: () => current() ? binding.sessionId : null);
       await store.initialize();
       if (!current() || !await store.beginOwnerReadWindow(owner.userId, current)) return null;
       if (!current()) { await store.endOwnerReadWindow(owner.userId); return null; }

@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:sqflite/sqflite.dart' as sqlite;
 import 'package:student_ui/student_ui.dart';
 
 /// Persistent news image bytes for Mobile, keyed by path + version.
@@ -19,6 +22,8 @@ class NewsImageDiskCache {
     this.directoryName = 'news_images_v1',
     this.maxEntries = 80,
     this.maxTotalBytes = 48 * 1024 * 1024,
+    this.immutableQaDatabase,
+    this.legacyQaRootOverride,
   })  : _memory = memory ?? NewsImageBytesCache.instance,
         _rootOverride = rootOverride;
 
@@ -27,10 +32,27 @@ class NewsImageDiskCache {
   final int maxEntries;
   final int maxTotalBytes;
 
+  /// Synthetic QA only. Never enables eviction or changes ordinary builds.
+  @visibleForTesting
+  final sqlite.Database? immutableQaDatabase;
+  @visibleForTesting
+  final Directory? Function()? legacyQaRootOverride;
+  @visibleForTesting
+  Future<void> Function()? debugBeforeImmutablePublish;
+  @visibleForTesting
+  Future<void> Function()? debugAfterImmutablePublish;
+  @visibleForTesting
+  Future<void> Function()? debugAfterClearIntent;
+  @visibleForTesting
+  Future<void> Function()? debugAfterCollectorIntent;
+  @visibleForTesting
+  Future<void> Function()? debugAfterCollectorRename;
+
   final String directoryName;
   static const _indexName = 'index.json';
 
   Directory? _root;
+  Directory? _legacyQaRoot;
   Map<String, _IndexEntry>? _index;
   bool _ready = false;
   int _clearEpoch = 0;
@@ -39,8 +61,138 @@ class NewsImageDiskCache {
   @visibleForTesting
   Future<void> Function()? debugAfterFileWrite;
 
+  bool get _immutableQa =>
+      const bool.fromEnvironment('NEWS_CACHE_IMMUTABLE_QA');
+  Future<sqlite.Database>? _qaDatabaseFuture;
+  Future<sqlite.Database> _openQaDatabase() {
+    final supplied = immutableQaDatabase;
+    if (supplied != null) return Future.value(supplied);
+    return _qaDatabaseFuture ??= () async {
+      final path =
+          '${await sqlite.getDatabasesPath()}/news_cache_coordination_qa_v1.db';
+      return sqlite.openDatabase(path);
+    }();
+  }
+
+  static final Object _qaTxnKey = Object();
+  sqlite.Transaction get _qaTransaction =>
+      Zone.current[_qaTxnKey] as sqlite.Transaction;
+  String get _qaDirectory => _root!.absolute.path;
+
+  Future<(int, int)> _qaGeneration(String path) async {
+    final rows = await _qaTransaction.query('news_cache_qa_epochs',
+        where: 'directory=? AND path IN (?, ?)',
+        whereArgs: [_qaDirectory, '', path]);
+    var directory = 0, item = 0;
+    for (final row in rows) {
+      if (row['path'] == '') directory = row['generation'] as int;
+      if (row['path'] == path) item = row['generation'] as int;
+    }
+    return (directory, item);
+  }
+
+  Future<void> _qaBump(String path) async {
+    await _qaTransaction.rawInsert(
+        'INSERT INTO news_cache_qa_epochs(directory,path,generation) VALUES(?,?,1) '
+        'ON CONFLICT(directory,path) DO UPDATE SET generation=generation+1',
+        [_qaDirectory, path]);
+  }
+
+  Future<T> _qaGuard<T>(Future<T> Function() action) async {
+    await ensureReady();
+    final database = await _openQaDatabase();
+    // SQLite may encounter a lock at COMMIT after filesystem publication.
+    // Let SQLite wait there; never replay the filesystem callback on failure.
+    await database.execute('PRAGMA busy_timeout=3000');
+    for (var attempt = 0;; attempt++) {
+      var transactionStarted = false;
+      try {
+        return await database.transaction((txn) async {
+          transactionStarted = true;
+          await txn.execute(
+              'CREATE TABLE IF NOT EXISTS news_cache_qa_lock (id INTEGER PRIMARY KEY)');
+          await txn.insert('news_cache_qa_lock', {'id': 1},
+              conflictAlgorithm: sqlite.ConflictAlgorithm.ignore);
+          await txn.update('news_cache_qa_lock', {'id': 1}, where: 'id=1');
+          await txn.execute('CREATE TABLE IF NOT EXISTS news_cache_qa_epochs ('
+              'directory TEXT NOT NULL, path TEXT NOT NULL, generation INTEGER NOT NULL, '
+              'PRIMARY KEY(directory,path))');
+          await txn.execute(
+              'CREATE TABLE IF NOT EXISTS news_cache_qa_clear_intents ('
+              'directory TEXT PRIMARY KEY, snapshot TEXT NOT NULL)');
+          await txn.execute(
+              'CREATE TABLE IF NOT EXISTS news_cache_qa_legacy_suppression ('
+              'directory TEXT NOT NULL, path TEXT NOT NULL, PRIMARY KEY(directory,path))');
+          await txn.execute(
+              'CREATE TABLE IF NOT EXISTS news_cache_qa_legacy_keep ('
+              'directory TEXT NOT NULL, path TEXT NOT NULL, version TEXT NOT NULL, PRIMARY KEY(directory,path))');
+          await txn
+              .execute('CREATE TABLE IF NOT EXISTS news_cache_qa_protocols ('
+                  'directory TEXT PRIMARY KEY, version INTEGER NOT NULL)');
+          await txn.insert('news_cache_qa_protocols',
+              {'directory': _qaDirectory, 'version': 2},
+              conflictAlgorithm: sqlite.ConflictAlgorithm.ignore);
+          final protocols = await txn.query('news_cache_qa_protocols',
+              columns: ['version'],
+              where: 'directory=?',
+              whereArgs: [_qaDirectory]);
+          if (protocols.length != 1 || protocols.single['version'] != 2) {
+            throw StateError('Unsupported news cache protocol');
+          }
+          await txn.execute('CREATE TABLE IF NOT EXISTS news_cache_qa_blobs ('
+              'directory TEXT NOT NULL, file TEXT NOT NULL, PRIMARY KEY(directory,file))');
+          await txn.execute(
+              'CREATE TABLE IF NOT EXISTS news_cache_qa_evictions ('
+              'directory TEXT NOT NULL, file TEXT NOT NULL, token TEXT NOT NULL, '
+              'state TEXT NOT NULL, PRIMARY KEY(directory,file))');
+          await _loadIndex();
+          await _replayQaClear(txn);
+          return runZoned(action, zoneValues: {_qaTxnKey: txn});
+        });
+      } catch (error) {
+        // Retry only BEGIN failure. Once the callback starts it may have
+        // changed files and must never be repeated automatically.
+        if (transactionStarted ||
+            attempt >= 39 ||
+            !error.toString().toLowerCase().contains('database is locked'))
+          rethrow;
+        await Future<void>.delayed(const Duration(milliseconds: 25));
+      }
+    }
+  }
+
+  Future<void> _publishQaIndex() async {
+    final encoded = <String, dynamic>{
+      for (final e in _index!.entries) e.key: e.value.toJson()
+    };
+    final suffix = base64UrlEncode(
+        List<int>.generate(18, (_) => Random.secure().nextInt(256)));
+    final next = File('${_root!.path}/.index.$suffix.tmp');
+    await next.writeAsString(jsonEncode(encoded), flush: true);
+    await next.rename('${_root!.path}/$_indexName');
+  }
+
+  Future<void> _replayQaClear(sqlite.Transaction txn) async {
+    final rows = await txn.query('news_cache_qa_clear_intents',
+        where: 'directory=?', whereArgs: [_qaDirectory]);
+    if (rows.isEmpty) return;
+    final decoded = jsonDecode(rows.single['snapshot'] as String);
+    if (decoded is! Map) throw StateError('Invalid clear intent');
+    for (final entry in decoded.entries) {
+      final current = _index![entry.key];
+      if (current != null && current.revision == entry.value)
+        _index!.remove(entry.key);
+    }
+    // Only the index is changed. Orphaned blobs stay until a separately
+    // guarded collector can prove no active reader or newer publication.
+    await _publishQaIndex();
+    await txn.delete('news_cache_qa_clear_intents',
+        where: 'directory=?', whereArgs: [_qaDirectory]);
+  }
+
   Future<T> _mutate<T>(Future<T> Function() action) {
-    final operation = _mutations.then((_) => action());
+    final operation =
+        _mutations.then((_) => _immutableQa ? _qaGuard(action) : action());
     _mutations =
         operation.then<void>((_) {}, onError: (Object _, StackTrace __) {});
     return operation;
@@ -58,9 +210,16 @@ class NewsImageDiskCache {
 
   Future<void> _initialize() async {
     final override = _rootOverride?.call();
+    if (_immutableQa) {
+      _legacyQaRoot = legacyQaRootOverride?.call() ??
+          (override == null
+              ? Directory(
+                  '${(await getTemporaryDirectory()).path}/$directoryName')
+              : null);
+    }
     _root = override ??
         Directory(
-          '${(await getTemporaryDirectory()).path}/$directoryName',
+          '${(await getTemporaryDirectory()).path}/${_immutableQa ? '${directoryName}_immutable_qa_v2' : directoryName}',
         );
     if (!await _root!.exists()) {
       await _root!.create(recursive: true);
@@ -73,12 +232,43 @@ class NewsImageDiskCache {
   Future<Uint8List?> peek(NewsImageCacheKey key) async {
     final clearEpoch = _clearEpoch;
     final pathEpoch = _pathEpoch[key.path] ?? 0;
-    final mem = _memory.peek(key);
+    final mem = _immutableQa ? null : _memory.peek(key);
     if (mem != null) return mem;
     await _mutations;
     if (!_current(key.path, clearEpoch, pathEpoch)) return null;
     await ensureReady();
     if (!_current(key.path, clearEpoch, pathEpoch)) return null;
+    if (_immutableQa) {
+      try {
+        return await _qaGuard(() async {
+          final current = await _peekDisk(key, clearEpoch, pathEpoch);
+          if (current != null || !_current(key.path, clearEpoch, pathEpoch))
+            return current;
+          final suppressed = await _qaTransaction.query(
+              'news_cache_qa_legacy_suppression',
+              columns: ['path'],
+              where: 'directory=? AND path IN (?, ?)',
+              whereArgs: [_qaDirectory, '', key.path]);
+          if (suppressed.any((row) => row['path'] == '')) return null;
+          if (suppressed.isNotEmpty) {
+            final kept = await _qaTransaction.query('news_cache_qa_legacy_keep',
+                where: 'directory=? AND path=? AND version=?',
+                whereArgs: [_qaDirectory, key.path, key.version],
+                limit: 1);
+            if (kept.isEmpty) return null;
+          }
+          return _peekLegacyQa(key);
+        });
+      } catch (_) {
+        // An unverified in-memory copy may have been cleared by another engine.
+        return null;
+      }
+    }
+    return _peekDisk(key, clearEpoch, pathEpoch);
+  }
+
+  Future<Uint8List?> _peekDisk(
+      NewsImageCacheKey key, int clearEpoch, int pathEpoch) async {
     final entry = _index?[key.id];
     if (entry == null) return null;
     try {
@@ -105,6 +295,36 @@ class NewsImageDiskCache {
   }
 
   /// Memory → disk → [fetch], with single-flight via [NewsImageBytesCache].
+  /// Read only: no copying, publication or deletion. Legacy writers do not
+  /// participate in this lock, so these bytes are not an integrity snapshot.
+  Future<Uint8List?> _peekLegacyQa(NewsImageCacheKey key) async {
+    final root = _legacyQaRoot;
+    if (root == null) return null;
+    try {
+      if (await FileSystemEntity.type(root.path, followLinks: false) !=
+          FileSystemEntityType.directory) return null;
+      final index = File('${root.path}/$_indexName');
+      if (await FileSystemEntity.type(index.path, followLinks: false) !=
+          FileSystemEntityType.file) return null;
+      final decoded = jsonDecode(await index.readAsString());
+      if (decoded is! Map || decoded[key.id] is! Map) return null;
+      final data = decoded[key.id] as Map;
+      final name = '${_fileId(key.id)}.bin';
+      if (data['file'] != name ||
+          data['path'] != key.path ||
+          data['version'] != key.version) return null;
+      final file = File('${root.path}/$name');
+      if (await FileSystemEntity.type(file.path, followLinks: false) !=
+              FileSystemEntityType.file ||
+          File(await file.resolveSymbolicLinks()).parent.path !=
+              await root.resolveSymbolicLinks()) return null;
+      final bytes = await file.readAsBytes();
+      return bytes.isEmpty ? null : bytes;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<Uint8List?> getOrFetch(
     NewsImageCacheKey key,
     Future<Uint8List?> Function() fetch,
@@ -116,6 +336,23 @@ class NewsImageDiskCache {
     if (!current()) return null;
     if (peeked != null) return peeked;
 
+    if (_immutableQa) {
+      // Epoch capture and the eventual publish are both protected by the
+      // same shared database lock, even though the fetch itself is not.
+      final generation = await _qaGuard(() => _qaGeneration(key.path));
+      if (!current()) return null;
+      final bytes = await fetch();
+      if (!current() || bytes == null || bytes.isEmpty) return null;
+      var accepted = false;
+      await _mutate(() async {
+        if (!current() || await _qaGeneration(key.path) != generation) return;
+        // Publication failure does not make fetched bytes unusable for this
+        // display; no API here promises that disk persistence succeeded.
+        await _writeImmutableQa(key, bytes);
+        accepted = current() && await _qaGeneration(key.path) == generation;
+      });
+      return accepted ? bytes : null;
+    }
     return _memory.getOrFetch(key, () async {
       if (!current()) return null;
       final bytes = await fetch();
@@ -145,6 +382,10 @@ class NewsImageDiskCache {
 
   Future<void> _write(NewsImageCacheKey key, Uint8List bytes) async {
     await ensureReady();
+    if (_immutableQa) {
+      await _writeImmutableQa(key, bytes);
+      return;
+    }
     // Do not evict existing entries for a new image that cannot fit.
     if (bytes.length > maxTotalBytes && !_index!.containsKey(key.id)) return;
     final fileName = '${_fileId(key.id)}.bin';
@@ -166,14 +407,148 @@ class NewsImageDiskCache {
     }
   }
 
+  /// A copy-on-write experiment: old blobs remain untouched, including after
+  /// a crash. All writers must share [immutableQaDatabase]; therefore this is
+  /// test-only and is not yet connected to the application's three caches.
+  Future<bool> _writeImmutableQa(NewsImageCacheKey key, Uint8List bytes) async {
+    try {
+      if (bytes.length > maxTotalBytes && !_index!.containsKey(key.id))
+        return false;
+      final name = '${_fileId(key.id)}.${sha256.convert(bytes)}.bin';
+      final pending = await _qaTransaction.query('news_cache_qa_evictions',
+          where: 'directory=? AND file=?',
+          whereArgs: [_qaDirectory, name],
+          limit: 1);
+      if (pending.isNotEmpty) return false;
+      final blob = File('${_root!.path}/$name');
+      if (await FileSystemEntity.type(blob.path, followLinks: false) ==
+          FileSystemEntityType.link) return false;
+      if (!await blob.exists()) {
+        final temp = File(
+            '${_root!.path}/.$name.${DateTime.now().microsecondsSinceEpoch}.tmp');
+        await temp.writeAsBytes(bytes, flush: true);
+        await temp.rename(blob.path);
+      }
+      await _qaTransaction.insert(
+          'news_cache_qa_blobs', {'directory': _qaDirectory, 'file': name},
+          conflictAlgorithm: sqlite.ConflictAlgorithm.ignore);
+      _index![key.id] = _IndexEntry(
+          file: name,
+          bytes: bytes.length,
+          path: key.path,
+          version: key.version,
+          lastAccess: DateTime.now().toUtc(),
+          revision: base64UrlEncode(
+              List<int>.generate(18, (_) => Random.secure().nextInt(256))));
+      await debugBeforeImmutablePublish?.call();
+      await _publishQaIndex();
+      await debugAfterImmutablePublish?.call();
+      return true;
+    } catch (e) {
+      // A later read must use the actually published index, not an aborted one.
+      await _loadIndex();
+      debugPrint('[news-img] immutable QA write failed type=${e.runtimeType}');
+      return false;
+    }
+  }
+
+  /// Test-only collector. A durable intent blocks publication of the same
+  /// immutable blob before it is staged. Untracked, legacy and referenced
+  /// files are never candidates. This is not a global quota implementation.
+  Future<int> collectQaOrphans({required bool allOperationsParticipate}) async {
+    if (!_immutableQa || !allOperationsParticipate) return 0;
+    var freed = 0;
+    try {
+      for (;;) {
+        final candidate = await _qaGuard<(String, String)?>(() async {
+          if (await FileSystemEntity.type(_root!.path, followLinks: false) !=
+              FileSystemEntityType.directory) return null;
+          final rows = await _qaTransaction.query('news_cache_qa_blobs',
+              where: 'directory=?', whereArgs: [_qaDirectory]);
+          for (final row in rows) {
+            final name = row['file'];
+            if (name is! String ||
+                !RegExp(r'^[a-f0-9]{40}\.[a-f0-9]{64}\.bin$').hasMatch(name) ||
+                _index!.values.any((entry) => entry.file == name)) continue;
+            final previous = await _qaTransaction.query(
+                'news_cache_qa_evictions',
+                where: 'directory=? AND file=?',
+                whereArgs: [_qaDirectory, name]);
+            if (previous.isNotEmpty) continue;
+            final file = File('${_root!.path}/$name');
+            if (await FileSystemEntity.type(file.path, followLinks: false) !=
+                    FileSystemEntityType.file ||
+                File(await file.resolveSymbolicLinks()).parent.path !=
+                    await _root!.resolveSymbolicLinks()) continue;
+            final token = base64UrlEncode(
+                List<int>.generate(18, (_) => Random.secure().nextInt(256)));
+            await _qaTransaction.insert('news_cache_qa_evictions', {
+              'directory': _qaDirectory,
+              'file': name,
+              'token': token,
+              'state': 'intent'
+            });
+            return (name, token);
+          }
+          return null;
+        });
+        if (candidate == null) break;
+        await debugAfterCollectorIntent?.call();
+        final (name, token) = candidate;
+        final staged = File('${_root!.path}/.news-evict-$token');
+        final size = await _qaGuard<int?>(() async {
+          if (_index!.values.any((entry) => entry.file == name)) return null;
+          final journal = await _qaTransaction.query('news_cache_qa_evictions',
+              where: 'directory=? AND file=? AND token=? AND state=?',
+              whereArgs: [_qaDirectory, name, token, 'intent']);
+          final original = File('${_root!.path}/$name');
+          if (journal.length != 1 ||
+              await FileSystemEntity.type(original.path, followLinks: false) !=
+                  FileSystemEntityType.file ||
+              await FileSystemEntity.type(staged.path, followLinks: false) !=
+                  FileSystemEntityType.notFound ||
+              File(await original.resolveSymbolicLinks()).parent.path !=
+                  await _root!.resolveSymbolicLinks()) return null;
+          final size = await original.length();
+          await original.rename(staged.path);
+          await _qaTransaction.update(
+              'news_cache_qa_evictions', {'state': 'staged'},
+              where: 'directory=? AND file=? AND token=?',
+              whereArgs: [_qaDirectory, name, token]);
+          return size;
+        });
+        if (size == null) break;
+        await debugAfterCollectorRename?.call();
+        if (await FileSystemEntity.type(staged.path, followLinks: false) !=
+            FileSystemEntityType.file) break;
+        await staged.delete();
+        if (await FileSystemEntity.type(staged.path, followLinks: false) !=
+            FileSystemEntityType.notFound) break;
+        freed += size;
+        await _qaGuard(() async {
+          await _qaTransaction.delete('news_cache_qa_evictions',
+              where: 'directory=? AND file=? AND token=? AND state=?',
+              whereArgs: [_qaDirectory, name, token, 'staged']);
+          await _qaTransaction.delete('news_cache_qa_blobs',
+              where: 'directory=? AND file=?', whereArgs: [_qaDirectory, name]);
+        });
+      }
+    } catch (_) {
+      // Unknown or interrupted entries remain protected by their intent.
+    }
+    return freed;
+  }
+
   Future<void> invalidatePath(String path) {
     _pathEpoch[path] = (_pathEpoch[path] ?? 0) + 1;
     _memory.invalidatePath(path);
+    if (_immutableQa) return _removeQaTwoPhase(path: path);
     return _mutate(() => _invalidatePath(path));
   }
 
   Future<void> _invalidatePath(String path) async {
     await ensureReady();
+    if (_immutableQa) await _qaBump(path);
     final toRemove = _index!.entries
         .where((e) => e.value.path == path)
         .map((e) => e.key)
@@ -187,11 +562,14 @@ class NewsImageDiskCache {
   /// Drops older versions for [path], keeping [keepVersion] if present.
   Future<void> pruneOtherVersions(String path, String keepVersion) {
     _pathEpoch[path] = (_pathEpoch[path] ?? 0) + 1;
+    if (_immutableQa)
+      return _removeQaTwoPhase(path: path, keepVersion: keepVersion);
     return _mutate(() => _pruneOtherVersions(path, keepVersion));
   }
 
   Future<void> _pruneOtherVersions(String path, String keepVersion) async {
     await ensureReady();
+    if (_immutableQa) await _qaBump(path);
     final toRemove = _index!.entries
         .where(
           (e) => e.value.path == path && e.value.version != keepVersion,
@@ -213,11 +591,44 @@ class NewsImageDiskCache {
   Future<void> clear() {
     _clearEpoch++;
     _memory.clear();
+    if (_immutableQa) return _removeQaTwoPhase();
     return _mutate(_clear);
+  }
+
+  Future<void> _removeQaTwoPhase({String? path, String? keepVersion}) async {
+    await _mutations;
+    await _qaGuard(() async {
+      await _qaBump(path ?? '');
+      await _qaTransaction.insert('news_cache_qa_legacy_suppression',
+          {'directory': _qaDirectory, 'path': path ?? ''},
+          conflictAlgorithm: sqlite.ConflictAlgorithm.ignore);
+      if (path != null && keepVersion != null) {
+        await _qaTransaction.insert('news_cache_qa_legacy_keep',
+            {'directory': _qaDirectory, 'path': path, 'version': keepVersion},
+            conflictAlgorithm: sqlite.ConflictAlgorithm.replace);
+      } else if (path != null) {
+        await _qaTransaction.delete('news_cache_qa_legacy_keep',
+            where: 'directory=? AND path=?', whereArgs: [_qaDirectory, path]);
+      }
+      final snapshot = {
+        for (final e in _index!.entries)
+          if (path == null ||
+              (e.value.path == path &&
+                  (keepVersion == null || e.value.version != keepVersion)))
+            e.key: e.value.revision
+      };
+      await _qaTransaction.insert('news_cache_qa_clear_intents',
+          {'directory': _qaDirectory, 'snapshot': jsonEncode(snapshot)},
+          conflictAlgorithm: sqlite.ConflictAlgorithm.replace);
+    });
+    await debugAfterClearIntent?.call();
+    // Every guarded operation replays an existing intent before acting.
+    await _qaGuard(() async {});
   }
 
   Future<void> _clear() async {
     await ensureReady();
+    if (_immutableQa) await _qaBump('');
     try {
       if (await _root!.exists()) {
         await _root!.delete(recursive: true);
@@ -297,6 +708,7 @@ class _IndexEntry {
     required this.path,
     required this.version,
     required this.lastAccess,
+    this.revision = '',
   });
 
   final String file;
@@ -304,6 +716,7 @@ class _IndexEntry {
   final String path;
   final String version;
   DateTime lastAccess;
+  final String revision;
 
   Map<String, dynamic> toJson() => {
         'file': file,
@@ -311,6 +724,7 @@ class _IndexEntry {
         'path': path,
         'version': version,
         'lastAccess': lastAccess.toIso8601String(),
+        if (revision.isNotEmpty) 'revision': revision,
       };
 
   factory _IndexEntry.fromJson(Map<String, dynamic> json) {
@@ -319,6 +733,7 @@ class _IndexEntry {
       bytes: (json['bytes'] as num?)?.toInt() ?? 0,
       path: (json['path'] ?? '').toString(),
       version: (json['version'] ?? '0').toString(),
+      revision: (json['revision'] ?? '').toString(),
       lastAccess:
           DateTime.tryParse((json['lastAccess'] ?? '').toString())?.toUtc() ??
               DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),

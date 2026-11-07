@@ -11,8 +11,8 @@ void main() {
     final db = await databaseFactoryFfi.openDatabase(path, options: OpenDatabaseOptions(singleInstance: false));
     final otherDb = await databaseFactoryFfi.openDatabase(path, options: OpenDatabaseOptions(singleInstance: false));
     var owner = 'a';
-    final first = MediaCacheProtection(db: db, root: root, project: 'project', databaseToken: 'guard', currentOwner: () => owner);
-    final other = MediaCacheProtection(db: otherDb, root: root, project: 'project', databaseToken: 'other', currentOwner: () => owner);
+    final first = MediaCacheProtection(db: db, root: root, project: 'project', databaseToken: 'guard', currentOwner: () => owner, currentSessionId: () => 'sid');
+    final other = MediaCacheProtection(db: otherDb, root: root, project: 'project', databaseToken: 'other', currentOwner: () => owner, currentSessionId: () => 'sid');
     await first.initialize();
     await db.execute('CREATE TABLE chat_app_guards (token TEXT NOT NULL, project TEXT NOT NULL, sid TEXT NOT NULL)');
     await db.insert('chat_app_guards', {'token': 'guard', 'project': '*', 'sid': ''});
