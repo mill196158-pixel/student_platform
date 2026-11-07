@@ -5,6 +5,20 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val offlineFixture = System.getenv("STUDENT_OFFLINE_FIXTURE") == "1"
+
+if (offlineFixture) {
+    listOf(project, rootProject.project(":integration_test")).forEach { target ->
+        target.configurations.configureEach {
+            resolutionStrategy.eachDependency {
+                if (requested.group == "androidx.test" && requested.name == "runner") {
+                    useVersion("1.3.0")
+                }
+            }
+        }
+    }
+}
+
 android {
     namespace = "com.mill453020.studentplatform"
     compileSdk = flutter.compileSdkVersion
@@ -23,7 +37,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.mill453020.studentplatform"
+        applicationId = if (offlineFixture) "com.mill453020.studentplatform.offlinefixture" else "com.mill453020.studentplatform"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -43,6 +57,7 @@ flutter {
 }
 
 dependencies {
+    if (offlineFixture) add("releaseImplementation", project(":integration_test"))
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
     // On-device Cyrillic OCR fallback for topic lists (Stage 13.9).
     implementation("cz.adaptech.tesseract4android:tesseract4android:4.9.0")
@@ -51,6 +66,6 @@ dependencies {
 // Apply Google Services only when a real google-services.json is present.
 // Do not commit a fake config file.
 val googleServicesFile = file("google-services.json")
-if (googleServicesFile.exists()) {
+if (googleServicesFile.exists() && !offlineFixture) {
     apply(plugin = "com.google.gms.google-services")
 }
