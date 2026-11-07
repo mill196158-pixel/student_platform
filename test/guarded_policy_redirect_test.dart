@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:student_platform/src/core/coordinated_refresh_client.dart';
 import 'package:go_router/go_router.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
 import 'package:student_platform/src/core/guarded_policy_redirect.dart';
@@ -14,6 +16,12 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'auth_session_scope_test.dart' show fakeSession;
 import 'offline_policy_grant_store_test.dart' show MemoryStorage;
+
+class _HungRedirectAuthClient extends http.BaseClient {
+  final response = Completer<http.StreamedResponse>();
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) => response.future;
+}
 
 void main() {
   late StreamController<AuthState> events;
@@ -101,6 +109,53 @@ void main() {
   test('online failure cannot grant access', () async {
     access = makeAccess(() async => throw TimeoutException('offline'));
     expect(await redirect('/home'), '/splash?retry=1&offline=1');
+  });
+
+  test('hung policy reaches manual retry and late results never grant access', () async {
+    for (final deny in [false, true]) {
+      final pending = Completer<bool>();
+      access = makeAccess(() => pending.future);
+      var granted = 0;
+      final decision = await guardedPolicyRedirect(path: '/home', hasSession: () => true,
+        currentAccess: () => access, policyTimeout: const Duration(milliseconds: 10),
+        onAllowed: (_) => granted++);
+      expect(decision, '/splash?retry=1');
+      expect(granted, 0);
+      if (deny) {
+        pending.completeError(const AuthApiException('denied', statusCode: '401'));
+      } else {
+        pending.complete(false);
+      }
+      await Future<void>.delayed(Duration.zero);
+      expect(granted, 0);
+    }
+  });
+
+  test('policy allow cannot bypass an in-flight or suspended auth gate', () async {
+    access = makeAccess(() async => false);
+    final inner = _HungRedirectAuthClient();
+    final gate = RefreshAdmissionClient(inner, backend: Uri.parse('https://example.invalid'));
+    final inflight = gate.send(http.Request('GET', Uri.parse('https://example.invalid/auth/v1/user')));
+    var grants = 0;
+    Future<String?> attempt() => guardedPolicyRedirect(path: '/home', hasSession: () => true,
+      currentAccess: () => access, mayAllow: () => !gate.timedOutDrainBlocksAdmission,
+      onAllowed: (_) => grants++);
+    // Ordinary in-flight auth by itself must not change existing navigation.
+    expect(await attempt(), isNull);
+    expect(grants, 1);
+    grants = 0;
+    await expectLater(gate.suspendAndDrain(timeout: const Duration(milliseconds: 10)),
+        throwsA(isA<TimeoutException>()));
+    expect(await attempt(), '/splash?retry=1');
+    expect(grants, 0);
+    inner.response.complete(http.StreamedResponse(Stream<List<int>>.empty(), 200));
+    await inflight;
+    expect(await attempt(), '/splash?retry=1');
+    expect(grants, 0);
+    gate.requireAuthDrained(); gate.resume();
+    expect(await attempt(), isNull);
+    expect(grants, 1);
+    gate.close();
   });
 
   test('confirmed policy rejection still routes to login', () async {

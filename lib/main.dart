@@ -97,6 +97,7 @@ SqlitePolicyGrantStore? _policyQaStore;
 OfflineStartupAdmission? _policyQaAdmission;
 RefreshPolicyGrantObserver? _qaRefreshGrantObserver;
 RefreshAdmissionClient? _qaRefreshGate;
+RefreshAdmissionClient? _ordinaryRefreshGate;
 HomeContentCoordinator? _qaHomeContent;
 LocalSnapshotStartup? _ordinarySnapshotStartup;
 VoidCallback? _ordinaryRejectHeldGate;
@@ -183,6 +184,10 @@ final GoRouter appRouter = GoRouter(
       hasSession: () => client.auth.currentSession != null,
       currentAccess: () =>
           context.mounted ? OfflinePolicyGrantHost.maybeRead(context) : null,
+      mayAllow: !_ordinaryOffline ? null : () {
+        final gate = _ordinaryRefreshGate;
+        return gate != null && !gate.timedOutDrainBlocksAdmission;
+      },
       onAllowed: !_ordinaryOffline ? null : (owner) {
         final caps = SessionCapabilitiesHost.maybeRead(context);
         if (caps == null || caps.capture(SessionCapability.networkRead) != null) return;
@@ -431,6 +436,7 @@ Future<void> _initializeApp(
       : RefreshAdmissionClient(inner, securityFence: refreshFence,
           trackQaRefresh: _qaRotationNavigation);
   if (_qaRotationNavigation) _qaRefreshGate = gate;
+  if (useOrdinaryOffline) _ordinaryRefreshGate = gate;
   sqlite.Database? policyDb;
   try {
     if (usePolicyQa) {
@@ -673,7 +679,7 @@ Future<void> _initializeApp(
                 if (!_ordinaryCleanColdStart) {
                   throw StateError('Local-only mode requires a clean cold start');
                 }
-                await gate.suspendAndDrain();
+                await gate.suspendAndDrain(timeout: const Duration(seconds: 8));
                 final closed = await QaOnlineSideEffectCoordinator.instance
                     .closeAndWait(timeout: const Duration(seconds: 10));
                 if (!closed) throw StateError('Online work did not drain');
@@ -683,7 +689,11 @@ Future<void> _initializeApp(
               }
               finally { enteringCache = false; }
             },
-            onOnline: () async { reconnectTimer?.cancel(); openGate(); },
+            onOnline: () async {
+              gate.requireAuthDrained();
+              reconnectTimer?.cancel();
+              openGate();
+            },
             onLateDenial: (passwordChangeRequired) {
               reconnectTimer?.cancel();
               rejectHeldGate();

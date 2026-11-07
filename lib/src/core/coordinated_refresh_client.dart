@@ -174,6 +174,7 @@ class RefreshAdmissionClient extends http.BaseClient {
   final Completer<http.Client?> _admission = Completer<http.Client?>();
   bool _closed = false;
   bool _suspended = false;
+  bool _drainTimedOut = false;
   int _activeAuth = 0;
   int _nonRefreshAuthRevision = 0;
   int _suppressedAuthRevision = 0;
@@ -200,6 +201,9 @@ class RefreshAdmissionClient extends http.BaseClient {
   int get nonRefreshAuthRevision => _nonRefreshAuthRevision;
   int get suppressedAuthRevision => _suppressedAuthRevision;
   int get activeAuthOperations => _activeAuth;
+  bool get isSuspended => _suspended;
+  bool get timedOutDrainBlocksAdmission =>
+      _drainTimedOut && (_activeAuth != 0 || _suspended);
   final List<Completer<void>> _drainers = [];
 
   /// A policy check paired with auth refresh must settle before admission can
@@ -218,17 +222,33 @@ class RefreshAdmissionClient extends http.BaseClient {
 
   /// Blocks new auth sends synchronously, then waits for dispatched auth sends.
   /// This does not stop WebSockets or other HTTP clients.
-  Future<void> suspendAndDrain() {
+  Future<void> suspendAndDrain({Duration? timeout}) {
     _suspended = true;
     if (_activeAuth == 0) return Future.value();
     final done = Completer<void>();
     _drainers.add(done);
-    return done.future;
+    // A timeout does not cancel dispatched I/O. The gate stays suspended;
+    // callers must not treat a timed-out drain as permission to proceed.
+    return timeout == null ? done.future : done.future.timeout(timeout, onTimeout: () {
+      _drainTimedOut = true;
+      throw TimeoutException('Authentication drain did not finish', timeout);
+    });
+  }
+
+  /// An earlier timed-out drain can still have auth work in flight. A retry
+  /// must not reopen the gate until those operations have actually settled.
+  void requireAuthDrained() {
+    if (_drainTimedOut && _activeAuth != 0) {
+      throw StateError('Timed-out authentication work is still in flight');
+    }
   }
 
   /// Called only after the same owner receives a verified online policy result.
   void resume() {
-    if (!_closed) _suspended = false;
+    if (_closed) return;
+    requireAuthDrained();
+    _suspended = false;
+    _drainTimedOut = false;
   }
 
   void bind(http.Client guardedClient) {

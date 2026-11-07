@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:student_platform/src/core/coordinated_refresh_client.dart';
 import 'package:student_platform/src/core/auth_session.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
 import 'package:student_platform/src/core/local_snapshot_startup.dart';
@@ -21,6 +23,12 @@ Session _session(String uid) {
   return Session(accessToken: token, refreshToken: 'local', tokenType: 'bearer',
       user: User(id: uid, appMetadata: const {}, userMetadata: null,
           aud: 'authenticated', createdAt: ''));
+}
+
+class _HungAuthClient extends http.BaseClient {
+  final response = Completer<http.StreamedResponse>();
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) => response.future;
 }
 
 void main() {
@@ -77,6 +85,46 @@ void main() {
     expect(caps.capture(SessionCapability.cachedRead), isNotNull);
     expect(caps.capture(SessionCapability.mutation), isNull);
     caps.dispose(); scope.dispose(); await events.close();
+  });
+
+  test('hung real auth drain fails closed and never resumes late callback', () async {
+    final session = _session('a');
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final caps = SessionCapabilities(scope);
+    final inner = _HungAuthClient();
+    final gate = RefreshAdmissionClient(inner, backend: Uri.parse('https://example.invalid'));
+    final inflight = gate.send(http.Request('GET', Uri.parse('https://example.invalid/auth/v1/user')));
+    var afterDrain = false;
+    final startup = LocalSnapshotStartup(scope: scope,
+      issuer: 'https://example.invalid/auth/v1',
+      restore: () async => SessionRestoreStatus.transportFailure,
+      checkPolicy: () async => throw StateError('must not call policy'),
+      onCacheOnly: () async {
+        await gate.suspendAndDrain(timeout: const Duration(milliseconds: 10));
+        afterDrain = true;
+      });
+    expect(await startup.resolve(caps), OfflineStartupResult.unavailable);
+    expect(caps.capture(SessionCapability.cachedRead), isNull);
+    expect(caps.capture(SessionCapability.mutation), isNull);
+    final retry = LocalSnapshotStartup(scope: scope,
+      issuer: 'https://example.invalid/auth/v1',
+      restore: () async => SessionRestoreStatus.restored,
+      checkPolicy: () async => SettledPolicyStatus.allowed,
+      onOnline: () async { gate.requireAuthDrained(); gate.resume(); });
+    expect(await retry.resolve(caps), OfflineStartupResult.unavailable);
+    expect(caps.capture(SessionCapability.networkRead), isNull);
+    inner.response.complete(http.StreamedResponse(Stream<List<int>>.empty(), 200));
+    await inflight;
+    await Future<void>.delayed(Duration.zero);
+    expect(afterDrain, isFalse);
+    expect(caps.capture(SessionCapability.cachedRead), isNull);
+    await expectLater(gate.send(http.Request('GET', Uri.parse('https://example.invalid/auth/v1/user'))),
+        throwsA(isA<RefreshTransportSuppressed>()));
+    expect(await retry.resolve(caps), OfflineStartupResult.online);
+    expect(caps.capture(SessionCapability.networkRead), isNotNull);
+    gate.close(); caps.dispose(); scope.dispose(); await events.close();
   });
 
   test('online is enabled only after live policy allows', () async {
