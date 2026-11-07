@@ -9,7 +9,16 @@ class GuardedDatabase implements Database {
   Future<void>? _closing;
 
   @override
-  Future<void> close() => _closing ??= onClose();
+  Future<void> close() {
+    if (_closing != null) return _closing!;
+    late final Future<void> operation;
+    operation = onClose().catchError((Object error, StackTrace stack) {
+      if (inner.isOpen && identical(_closing, operation)) _closing = null;
+      Error.throwWithStackTrace(error, stack);
+    });
+    _closing = operation;
+    return operation;
+  }
   @override
   String get path => inner.path;
   @override

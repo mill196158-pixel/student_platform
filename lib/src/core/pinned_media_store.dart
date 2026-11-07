@@ -7,6 +7,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:sqflite/sqflite.dart';
 import 'package:student_platform/src/core/media_cache_protection.dart';
+import 'package:student_platform/src/core/pinned_access_fence.dart';
 
 /// Explicitly pinned copies live outside the OS-purgeable cache directory.
 /// Callers must supply an exact session/receipt check and a trustworthy free
@@ -29,6 +30,10 @@ class PinnedMediaStore {
       String sessionId, String key) verifyLegacyProvenance;
   @visibleForTesting
   Future<void> Function()? debugAfterCopy;
+  @visibleForTesting
+  Future<void> Function()? debugBeforePublish;
+  @visibleForTesting
+  Future<void> Function()? debugDuringPublish;
 
   static String _normalize(String value) {
     final uri = Uri.tryParse(value.trim());
@@ -46,7 +51,7 @@ class PinnedMediaStore {
     'session': _sessionDigest, 'sha256': checksum,
   });
   Directory get _folder => Directory('${supportRoot.path}/pinned_media_v1/${_hash(project)}/${_hash(uid)}');
-  File _data(String key) => File('${_folder.path}/${_objectId(key)}.bin');
+  File _data(String key, String checksum) => File('${_folder.path}/${_objectId(key)}.$checksum.bin');
   File _receipt(String key) => File('${_folder.path}/${_objectId(key)}.$_sessionDigest.proof');
   bool _current() {
     try { return identical(db, legacy.db) && project.isNotEmpty && project == _normalize(legacy.project) &&
@@ -100,10 +105,14 @@ class PinnedMediaStore {
         final before = await _checksum(source);
         if (!_current()) return false;
         if (!await _ensureSafeFolder() || !_current()) return false;
-        final destination = _data(key), receipt = _receipt(key);
+        final receipt = _receipt(key);
+        final initialType = await FileSystemEntity.type(receipt.path, followLinks: false);
+        if (!_current() || (initialType != FileSystemEntityType.notFound && initialType != FileSystemEntityType.file)) return false;
+        final initialProof = initialType == FileSystemEntityType.file ? await receipt.readAsString() : null;
+        if (!_current()) return false;
         final random = Random.secure();
         final nonce = base64UrlEncode(List<int>.generate(18, (_) => random.nextInt(256)));
-        final temp = File('${destination.path}.$nonce.tmp');
+        final temp = File('${_folder.path}/${_objectId(key)}.$nonce.tmp');
         final proofTemp = File('${receipt.path}.$nonce.tmp');
         try {
           await temp.create(exclusive: true);
@@ -116,7 +125,18 @@ class PinnedMediaStore {
           final after = await _checksum(source);
           if (!_current() || before != copied || before != after) return false;
           if (!await verifyLegacyProvenance(source, project, uid, sessionId, key) || !_current()) return false;
-          return await db.transaction((_) async {
+          await debugBeforePublish?.call();
+          return await db.transaction((txn) async {
+          // Another engine can have published a newer version while this
+          // job was copying. Recheck before changing the durable pointer.
+          if (!_current() || await _checksum(source) != copied || !_current()) return false;
+          await debugDuringPublish?.call();
+          if (!_current()) return false;
+          final latestType = await FileSystemEntity.type(receipt.path, followLinks: false);
+          if (latestType != FileSystemEntityType.notFound && latestType != FileSystemEntityType.file) return false;
+          final latestProof = latestType == FileSystemEntityType.file ? await receipt.readAsString() : null;
+          if (!_current() || latestProof != initialProof) return false;
+          final destination = _data(key, copied);
           final type = await FileSystemEntity.type(destination.path, followLinks: false);
           if (!_current() || (type != FileSystemEntityType.notFound && type != FileSystemEntityType.file)) return false;
           if (type == FileSystemEntityType.file) {
@@ -128,14 +148,19 @@ class PinnedMediaStore {
           if (!_current()) return false;
           final receiptType = await FileSystemEntity.type(receipt.path, followLinks: false);
           if (!_current() || (receiptType != FileSystemEntityType.notFound && receiptType != FileSystemEntityType.file)) return false;
-          if (receiptType == FileSystemEntityType.file) {
-            return await receipt.readAsString() == _proof(key, copied) && _current();
+          if (receiptType == FileSystemEntityType.file &&
+              await receipt.readAsString() == _proof(key, copied)) {
+            if (!_current()) return false;
+            await PinnedAccessFence(db).markPinned(txn, project, uid, key, copied);
+            return _current();
           }
           await proofTemp.create(exclusive: true);
           if (!_current()) return false;
           await proofTemp.writeAsString(_proof(key, copied), flush: true);
           if (!_current()) return false;
           await proofTemp.rename(receipt.path);
+          if (!_current()) return false;
+          await PinnedAccessFence(db).markPinned(txn, project, uid, key, copied);
           return _current();
           });
         } finally {
@@ -148,16 +173,20 @@ class PinnedMediaStore {
   Future<Uint8List?> readPinned(String key) async {
     if (key.isEmpty || !_current()) return null;
     try {
-      final receipt = _receipt(key), data = _data(key);
+      final receipt = _receipt(key);
       if (!await _safeFolder() || !_current()) return null;
-      if (await FileSystemEntity.type(receipt.path, followLinks: false) != FileSystemEntityType.file ||
-          await FileSystemEntity.type(data.path, followLinks: false) != FileSystemEntityType.file || !_current()) return null;
+      if (await FileSystemEntity.type(receipt.path, followLinks: false) != FileSystemEntityType.file || !_current()) return null;
       final proofText = await receipt.readAsString();
       if (!_current()) return null;
+      final decoded = jsonDecode(proofText);
+      if (decoded is! Map || decoded['sha256'] is! String ||
+          !RegExp(r'^[a-f0-9]{64}$').hasMatch(decoded['sha256'] as String)) return null;
+      final data = _data(key, decoded['sha256'] as String);
+      if (await FileSystemEntity.type(data.path, followLinks: false) != FileSystemEntityType.file || !_current()) return null;
       final bytes = await data.readAsBytes();
       final checksum = sha256.convert(bytes).toString();
       return _current() && bytes.isNotEmpty && proofText == _proof(key, checksum)
           ? bytes : null;
-    } on FileSystemException { return null; }
+    } on FileSystemException { return null; } on FormatException { return null; }
   }
 }

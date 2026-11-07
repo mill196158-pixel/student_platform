@@ -31,6 +31,7 @@ class _CachedChatAttachmentState extends State<CachedChatAttachment> {
   String? _owner;
   String? _session;
   int _generation = 0;
+  int _mediaEpoch = 0;
   int _revision = 0;
   bool _expanded = false;
   final OverlayPortalController _viewer = OverlayPortalController();
@@ -69,6 +70,7 @@ class _CachedChatAttachmentState extends State<CachedChatAttachment> {
     _owner = ChatFileAccess.userId;
     _session = ChatFileAccess.currentSessionBinding;
     _generation = ChatFileAccess.generation;
+    _mediaEpoch = ChatFileAccess.mediaProtectionEpoch;
     _changes = Listenable.merge([
       widget.service.cachedAccessChanges!, ChatFileAccess.accessChanges,
       if (widget.sourceChanges != null) widget.sourceChanges!,
@@ -113,6 +115,10 @@ class _CachedChatAttachmentState extends State<CachedChatAttachment> {
   }
 
   void _onAccessChanged() {
+    if (mounted && _allowed() && _mediaEpoch != ChatFileAccess.mediaProtectionEpoch) {
+      setState(_bind);
+      return;
+    }
     if (_allowed()) return;
     _expanded = false;
     final history = _history;

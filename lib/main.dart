@@ -8,6 +8,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 // import 'package:get_storage/get_storage.dart'; // Временно отключено
 import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart' as sqlite;
 import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -37,13 +38,13 @@ import 'src/config/supabase_config.dart';
 import 'src/core/session_keeper.dart';
 import 'src/core/auth_session_scope_host.dart';
 import 'src/core/auth_session_scope.dart';
+import 'src/core/pinned_media_runtime.dart';
 import 'src/core/offline_policy_grant.dart';
 import 'src/core/sqlite_policy_grant_store.dart';
 import 'src/core/coordinated_refresh_client.dart';
 import 'src/core/refresh_security_fence.dart';
 import 'src/core/offline_startup_admission.dart';
 import 'src/core/local_snapshot_startup.dart';
-import 'src/ui/learning/tabs/chat/data/chat_group_actions_repository.dart';
 import 'src/core/auth_session.dart';
 import 'src/core/refresh_policy_grant_observer.dart';
 import 'src/core/settled_policy_transport.dart';
@@ -83,6 +84,7 @@ const _offlineUiQa = bool.fromEnvironment('OFFLINE_UI_QA');
 const _qaRotationNavigation = bool.fromEnvironment('QA_ROTATION_NAVIGATION_EXPERIMENT');
 final _qaRotationReceipt = QaRotationReceipt();
 AuthSessionScope? _policyQaScope;
+PinnedMediaRuntime? _pinnedMediaRuntime;
 SqlitePolicyGrantStore? _policyQaStore;
 OfflineStartupAdmission? _policyQaAdmission;
 RefreshPolicyGrantObserver? _qaRefreshGrantObserver;
@@ -241,9 +243,7 @@ final GoRouter appRouter = GoRouter(
                     currentUserId: () => scope.capture()?.userId,
                     sessionGeneration: () => scope.generation,
                     sessionIdentity: scope.capture),
-                schedule: ScheduleMonthCache(scope, SupabaseConfig.url),
-                groupDeadlines: (from, to) => ChatGroupActionsRepository()
-                    .peekCachedDeadlines(from: from, to: to));
+                schedule: ScheduleMonthCache(scope, SupabaseConfig.url));
             final chats = ProjectChatServerCache.qaInstance;
               return NavigationScreen(
                 cachedReader: reader,
@@ -548,9 +548,17 @@ Future<void> _initializeApp(
             store: HomeContentSnapshotStore(
                 db: contentDb, scope: scope, currentBinding: binding, project: project),
             scope: scope, httpClient: inner);
+        if (const bool.fromEnvironment('PINNED_MEDIA_RUNTIME')) {
+          _pinnedMediaRuntime = PinnedMediaRuntime(scope: scope,
+              cache: ProjectChatServerCache.qaInstance!,
+              currentSession: () => client.auth.currentSession,
+              cacheDirectory: getApplicationCacheDirectory)..start();
+        }
       } catch (error) {
         // A damaged or full offline cache must not prevent ordinary online
         // use. Preserve the database files and the SDK session for recovery.
+        try { await _pinnedMediaRuntime?.dispose(); } catch (_) {}
+        _pinnedMediaRuntime = null;
         try { if (chatDb != null) await closeProjectChatServerDatabase(chatDb); } catch (_) {}
         ProjectChatServerCache.qaInstance = null;
         _qaHomeContent = null;

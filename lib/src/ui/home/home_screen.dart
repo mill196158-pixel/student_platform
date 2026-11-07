@@ -100,6 +100,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     widget.activeListenable?.addListener(_queuePromoImpressions);
     widget.homeContent?.addListener(_onContentAccessChanged);
+    CachedHomeScheduleReader.refreshListenableFor(widget.cachedReader)?.addListener(_onCachedReadReady);
     if (widget.cachedReader == null) {
       _inAppSub = InAppNotificationBus.instance.stream.listen(_onInAppEvent);
     }
@@ -107,6 +108,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _onContentAccessChanged() {
     if (mounted) setState(() {});
+  }
+
+  void _onCachedReadReady() {
+    final reader = widget.cachedReader;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && reader != null && identical(widget.cachedReader, reader) && reader.canRead) {
+        unawaited(_load());
+      }
+    });
   }
 
   @override
@@ -173,6 +183,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       widget.homeContent?.addListener(_onContentAccessChanged);
     }
     final modeChanged = !identical(oldWidget.cachedReader, widget.cachedReader);
+    if (modeChanged) {
+      CachedHomeScheduleReader.refreshListenableFor(oldWidget.cachedReader)?.removeListener(_onCachedReadReady);
+      CachedHomeScheduleReader.refreshListenableFor(widget.cachedReader)?.addListener(_onCachedReadReady);
+    }
     final serviceChanged =
         !identical(oldWidget.dashboardService, widget.dashboardService);
     if (_serviceInitialized &&
@@ -223,6 +237,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     widget.activeListenable?.removeListener(_queuePromoImpressions);
     widget.homeContent?.removeListener(_onContentAccessChanged);
+    CachedHomeScheduleReader.refreshListenableFor(widget.cachedReader)?.removeListener(_onCachedReadReady);
     _authScope?.removeListener(_onAuthScopeChanged);
     if (_serviceInitialized && _ownsService) _service.dispose();
     _inAppSub?.cancel();
@@ -313,7 +328,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         Future<HomeContentSnapshot?> readOptional(String section) async {
           if (content == null || caps == null) return null;
           try {
-            return await content.read(section, caps);
+            var timedOut = false;
+            final pending = content.read(section, caps);
+            pending.then((value) {
+              if (timedOut && value != null && mounted &&
+                  identical(widget.cachedReader, reader) && reader.canRead) {
+                _onCachedReadReady();
+              }
+            }, onError: (Object _, StackTrace __) {});
+            return await pending.timeout(const Duration(seconds: 1), onTimeout: () {
+              timedOut = true;
+              return null;
+            });
           } catch (error) {
             debugPrint(
                 '[home-cache] $section unavailable: ${error.runtimeType}');
@@ -321,8 +347,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           }
         }
 
-        final savedNews = await readOptional('news');
-        final savedPromo = await readOptional('promo');
+        final optional = await Future.wait([readOptional('news'), readOptional('promo')]);
+        final savedNews = optional[0];
+        final savedPromo = optional[1];
         if (!mounted || widget.cachedReader != reader || !reader.canRead)
           return;
         final news = <HomeNewsItem>[];

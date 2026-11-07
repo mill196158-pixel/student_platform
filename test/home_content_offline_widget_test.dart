@@ -3,11 +3,14 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_platform/src/core/online_side_effect_barrier.dart';
 import 'package:student_platform/src/services/push/app_notifications_api.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:student_platform/src/ui/home/cached_home_schedule_reader.dart';
+import 'package:student_platform/src/ui/home/home_snapshot_cache.dart';
+import 'package:student_platform/src/ui/schedule/schedule_month_cache.dart';
 import 'package:student_platform/src/ui/home/home_content_coordinator.dart';
 import 'package:student_platform/src/ui/home/home_dashboard_service.dart';
 import 'package:student_platform/src/ui/home/home_screen.dart';
@@ -22,6 +25,8 @@ class _Reader implements CachedHomeScheduleReader {
   final SessionCapabilities caps;
   @override
   Listenable get accessChanges => caps;
+  @override
+  Listenable get refreshChanges => caps;
   @override
   bool get canRead => caps.capture(SessionCapability.cachedRead) != null;
   @override
@@ -103,6 +108,8 @@ class _Content extends ChangeNotifier implements HomeContentCoordinator {
   _Content(this.news, this.promo);
   final HomeContentSnapshot news, promo;
   bool failNews = false;
+  bool stall = false;
+  final stalled = Completer<void>();
   final Set<String> denied = {};
   void deny(String section) {
     denied.add(section);
@@ -119,6 +126,7 @@ class _Content extends ChangeNotifier implements HomeContentCoordinator {
   @override
   Future<HomeContentSnapshot?> read(
       String section, SessionCapabilities caps) async {
+    if (stall) await stalled.future;
     if (section == 'news' && failNews) throw StateError('synthetic failure');
     return caps.capture(SessionCapability.cachedRead) == null
         ? null
@@ -130,6 +138,55 @@ class _Content extends ChangeNotifier implements HomeContentCoordinator {
 }
 
 void main() {
+  testWidgets('late local profile read refreshes offline home without network', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final session = fakeSession('late-home');
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final caps = SessionCapabilities(scope);
+    final prefs = await SharedPreferences.getInstance();
+    HomeSnapshotCache cache(Future<SharedPreferences> Function() preferences) => HomeSnapshotCache(
+      project: 'test-project', authScope: scope, currentUserId: () => session.user.id,
+      sessionGeneration: () => scope.generation, sessionIdentity: () => session.accessToken,
+      preferences: preferences);
+    final writer = cache(() async => prefs);
+    expect(await writer.write(scope: writer.captureScope('late-home')!, section: HomeSnapshotSection.profile,
+        items: [{'id': 'late-home', 'name': 'Восстановленный профиль'}], savedAt: DateTime.now()), isTrue);
+    expect(caps.grant(SessionCapabilityMode.cacheOnly, caps.beginAuthorization(scope.capture()!)!), isTrue);
+    final gate = Completer<SharedPreferences>();
+    final reader = CachedHomeScheduleReader(capabilities: caps, home: cache(() => gate.future),
+        schedule: ScheduleMonthCache(scope, 'test-project'));
+    await tester.pumpWidget(MaterialApp(home: HomeScreen(dashboardService: _Dashboard(), cachedReader: reader)));
+    await tester.pump(); await tester.pump(const Duration(milliseconds: 1100)); await tester.pump();
+    expect(find.textContaining('Восстановленный профиль'), findsNothing);
+    gate.complete(prefs);
+    for (var i = 0; i < 8; i++) await tester.pump(const Duration(milliseconds: 30));
+    expect(find.textContaining('Восстановленный профиль'), findsWidgets);
+    await tester.pumpWidget(const SizedBox());
+    caps.dispose(); scope.dispose(); await events.close();
+  });
+  testWidgets('stalled optional content does not block offline home', (tester) async {
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final session = fakeSession('qa-stalled');
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final caps = SessionCapabilities(scope);
+    expect(caps.grant(SessionCapabilityMode.cacheOnly, caps.beginAuthorization(scope.capture()!)!), isTrue);
+    final content = _Content(const HomeContentSnapshot([], {}), const HomeContentSnapshot([], {}))..stall = true;
+    await tester.pumpWidget(MaterialApp(home: HomeScreen(dashboardService: _Dashboard(),
+        cachedReader: _Reader(caps), homeContent: content, homeContentCapabilities: caps)));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1100));
+    await tester.pump();
+    expect(find.textContaining('QA'), findsWidgets);
+    expect(find.text('Не удалось загрузить главную'), findsNothing);
+    caps.block();
+    content.stalled.complete();
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox());
+    caps.dispose(); scope.dispose(); await events.close();
+  });
   testWidgets('optional content failure leaves the cached dashboard usable',
       (tester) async {
     final events = StreamController<AuthState>.broadcast(sync: true);

@@ -1,12 +1,12 @@
 import 'package:flutter/foundation.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
+import 'package:student_platform/src/core/auth_session_scope.dart';
 import 'package:student_platform/src/ui/home/home_snapshot_cache.dart';
 import 'package:student_platform/src/ui/home/home_snapshot_codec.dart';
 import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
 import 'package:student_platform/src/ui/schedule/models/lesson.dart';
 import 'package:student_platform/src/ui/schedule/schedule_month_cache.dart';
 import 'package:student_platform/src/ui/schedule/utils/msk_date.dart';
-import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_group_actions.dart';
 
 /// A local-only adapter. Construct only after an independent admission check;
 /// it cannot authenticate an account or issue network requests.
@@ -15,11 +15,9 @@ class CachedHomeScheduleReader {
     required SessionCapabilities capabilities,
     required HomeSnapshotCache home,
     required ScheduleMonthCache schedule,
-    Future<List<GroupActionDeadline>> Function(DateTime? from, DateTime? to)? groupDeadlines,
   })  : _capabilities = capabilities,
         _home = home,
         _schedule = schedule,
-        _groupDeadlines = groupDeadlines,
         _permit = _capture(capabilities) {
     if (home.project == null ||
         home.project!.trim().isEmpty ||
@@ -27,16 +25,21 @@ class CachedHomeScheduleReader {
         home.authScope == null) {
       throw const CachedHomeAccessDenied();
     }
+    _refreshRegistry[this] = _refresh;
   }
 
   final SessionCapabilities _capabilities;
   final HomeSnapshotCache _home;
   final ScheduleMonthCache _schedule;
-  final Future<List<GroupActionDeadline>> Function(DateTime? from, DateTime? to)? _groupDeadlines;
   final CapabilityPermit _permit;
+  final ValueNotifier<int> _refresh = ValueNotifier<int>(0);
+  static final Expando<ValueNotifier<int>> _refreshRegistry = Expando();
+  static Listenable? refreshListenableFor(CachedHomeScheduleReader? reader) =>
+      reader == null ? null : _refreshRegistry[reader];
 
   /// Lets a visible cache-only shell remove its data when admission is revoked.
   Listenable get accessChanges => _capabilities;
+  Listenable get refreshChanges => _refresh;
   bool get canRead =>
       _capabilities.mode == SessionCapabilityMode.cacheOnly &&
       _capabilities.permits(_permit, SessionCapability.cachedRead);
@@ -56,6 +59,17 @@ class CachedHomeScheduleReader {
     }
   }
 
+  Future<T?> _bounded<T>(Future<T?> work, AuthOperationScope owner) async {
+    var timedOut = false;
+    work.then((_) {
+      if (timedOut && canRead && _capabilities.owns(_permit, owner)) _refresh.value++;
+    }, onError: (Object _, StackTrace __) {});
+    return work.timeout(const Duration(seconds: 1), onTimeout: () {
+      timedOut = true;
+      throw const CachedHomeTemporarilyUnavailable();
+    });
+  }
+
   /// Null means no valid snapshot, while an empty items list is saved data.
   Future<HomeSectionSnapshot?> readHome(HomeSnapshotSection section) async {
     _check();
@@ -63,7 +77,7 @@ class CachedHomeScheduleReader {
     if (owner == null || !_capabilities.owns(_permit, owner)) {
       throw const CachedHomeAccessDenied();
     }
-    final value = await _home.read(_permit.userId, section);
+    final value = await _bounded(_home.read(_permit.userId, section), owner);
     _check();
     return value;
   }
@@ -75,19 +89,9 @@ class CachedHomeScheduleReader {
     if (attempt == null || !_capabilities.owns(_permit, attempt.owner)) {
       throw const CachedHomeAccessDenied();
     }
-    final value = await _schedule.read(attempt);
+    final value = await _bounded(_schedule.read(attempt), attempt.owner);
     _check();
     return value == null ? null : List<Lesson>.unmodifiable(value);
-  }
-
-  Future<List<GroupActionDeadline>> readGroupDeadlines({DateTime? from, DateTime? to}) async {
-    _check();
-    final owner = _home.authScope!.capture();
-    if (owner == null || !_capabilities.owns(_permit, owner)) throw const CachedHomeAccessDenied();
-    final value = await (_groupDeadlines?.call(from, to) ?? Future.value(const <GroupActionDeadline>[]));
-    _check();
-    if (!_capabilities.owns(_permit, owner)) throw const CachedHomeAccessDenied();
-    return List.unmodifiable(value);
   }
 
   /// Builds the existing dashboard model without constructing network APIs.
@@ -95,13 +99,17 @@ class CachedHomeScheduleReader {
   Future<HomeDashboardData> readDashboard({DateTime? date}) async {
     _check();
     final day = MskDate.calendarDate(date ?? MskDate.today());
+    Future<(HomeSectionSnapshot?, bool)> readSection(HomeSnapshotSection section) async {
+      try { return (await readHome(section), false); }
+      on CachedHomeTemporarilyUnavailable { return (null, true); }
+    }
     final snapshots = await Future.wait([
-      readHome(HomeSnapshotSection.profile),
-      readHome(HomeSnapshotSection.schedule),
-      readHome(HomeSnapshotSection.assignments),
+      readSection(HomeSnapshotSection.profile),
+      readSection(HomeSnapshotSection.schedule),
+      readSection(HomeSnapshotSection.assignments),
     ]);
     _check();
-    final profileSnapshot = snapshots[0];
+    final profileSnapshot = snapshots[0].$1;
     final profileItems = profileSnapshot?.items;
     final validProfile = profileItems != null &&
         profileItems.length == 1 &&
@@ -110,7 +118,8 @@ class CachedHomeScheduleReader {
         ? HomeUserProfile.fromMap(profileItems.first)
         : const HomeUserProfile();
 
-    final scheduleSnapshot = snapshots[1];
+    final scheduleSnapshot = snapshots[1].$1;
+    var scheduleTemporarilyUnavailable = snapshots[1].$2;
     List<Lesson>? lessons;
     if (scheduleSnapshot != null &&
         scheduleSnapshot.date == MskDate.isoDate(day)) {
@@ -122,7 +131,9 @@ class CachedHomeScheduleReader {
       }
     }
     if (lessons == null) {
-      final month = await readMonth(day);
+      List<Lesson>? month;
+      try { month = await readMonth(day); }
+      on CachedHomeTemporarilyUnavailable { scheduleTemporarilyUnavailable = true; }
       _check();
       if (month != null) {
         lessons = month
@@ -131,7 +142,7 @@ class CachedHomeScheduleReader {
       }
     }
     List<HomeAssignmentPreview>? assignments;
-    final savedAssignments = snapshots[2];
+    final savedAssignments = snapshots[2].$1;
     if (savedAssignments != null) {
       final decoded = savedAssignments.items
           .map(HomeSnapshotCodec.assignmentFromMap)
@@ -141,8 +152,6 @@ class CachedHomeScheduleReader {
       }
     }
     _check();
-    final groupActions = await readGroupDeadlines();
-    _check();
     return HomeDashboardData(
       profile: profile,
       scheduleDate: day,
@@ -150,16 +159,15 @@ class CachedHomeScheduleReader {
       assignments:
           List<HomeAssignmentPreview>.unmodifiable(assignments ?? const []),
       news: const [],
-      groupActions: groupActions.map((e) => HomeGroupActionPreview(eventType: e.eventType,
-          entityId: e.entityId, title: e.title, occursAt: e.occursAt,
-          chatId: e.chatId, cardMessageId: e.cardMessageId, teamId: e.teamId,
-          teamName: e.teamName, status: e.status, myPickText: e.myPickText,
-          canDelete: false)).toList(),
       scheduleStatus: lessons == null
-          ? 'Расписание ещё не сохранено'
+          ? (scheduleTemporarilyUnavailable
+              ? 'Сохранённое расписание временно недоступно'
+              : 'Расписание ещё не сохранено')
           : 'Сохранённое расписание',
       assignmentsStatus: assignments == null
-          ? 'Задания ещё не сохранены'
+          ? (snapshots[2].$2
+              ? 'Сохранённые задания временно недоступны'
+              : 'Задания ещё не сохранены')
           : 'Сохранённые задания',
     );
   }
@@ -167,4 +175,8 @@ class CachedHomeScheduleReader {
 
 class CachedHomeAccessDenied implements Exception {
   const CachedHomeAccessDenied();
+}
+
+class CachedHomeTemporarilyUnavailable implements Exception {
+  const CachedHomeTemporarilyUnavailable();
 }

@@ -290,6 +290,7 @@ class _AuthorizedFileImageState extends State<AuthorizedFileImage> {
   String? _user;
   int _generation = 0;
   int _contentEpoch = 0, _accessEpoch = 0;
+  int _mediaEpoch = 0;
   late AuthorizedFileImageProvider _provider;
   ReentryImageObserver? _reentryObserver;
   Object? _reentryTicket;
@@ -316,6 +317,7 @@ class _AuthorizedFileImageState extends State<AuthorizedFileImage> {
     _revoked = ChatFileAccess.isAccessRevoked(widget.imageUrl);
     _user = ChatFileAccess.userId;
     _generation = ChatFileAccess.generation;
+    _mediaEpoch = ChatFileAccess.mediaProtectionEpoch;
     _contentEpoch = ChatFileAccess.qaContentEpoch(widget.imageUrl, _user);
     _accessEpoch = ChatFileAccess.qaAccessEpoch(widget.imageUrl, _user);
     _provider = AuthorizedFileImageProvider(widget.imageUrl);
@@ -339,18 +341,23 @@ class _AuthorizedFileImageState extends State<AuthorizedFileImage> {
     final revoked = ChatFileAccess.isAccessRevoked(widget.imageUrl);
     final user = ChatFileAccess.userId;
     final generation = ChatFileAccess.generation;
+    final mediaEpoch = ChatFileAccess.mediaProtectionEpoch;
+    if (mediaEpoch != _mediaEpoch) {
+      PaintingBinding.instance.imageCache.evict(_provider);
+    }
     final contentEpoch = ChatFileAccess.qaContentEpoch(widget.imageUrl, user);
     final accessEpoch = ChatFileAccess.qaAccessEpoch(widget.imageUrl, user);
     if (!ChatFileAccess.decodedImageExperimentEnabled) {
       if (mounted &&
           (revoked != _revoked || user != _user || generation != _generation ||
-           contentEpoch != _contentEpoch || accessEpoch != _accessEpoch)) {
+           contentEpoch != _contentEpoch || accessEpoch != _accessEpoch || mediaEpoch != _mediaEpoch)) {
         setState(() {
           _revoked = revoked;
           _user = user;
           _generation = generation;
           _contentEpoch = contentEpoch;
           _accessEpoch = accessEpoch;
+          _mediaEpoch = mediaEpoch;
           _attempt++;
         });
       }
@@ -366,6 +373,7 @@ class _AuthorizedFileImageState extends State<AuthorizedFileImage> {
         _generation = generation;
         _contentEpoch = contentEpoch;
         _accessEpoch = accessEpoch;
+        _mediaEpoch = mediaEpoch;
         _provider = AuthorizedFileImageProvider(widget.imageUrl);
         _attempt++;
       });

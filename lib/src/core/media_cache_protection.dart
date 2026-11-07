@@ -17,6 +17,8 @@ class MediaCacheProtection {
   final Directory root;
   final String project, databaseToken;
   final String? Function() currentOwner;
+  /// Set by the managed database bootstrap before this store is published.
+  Future<bool>? accessRecovery;
   final Map<String, _OwnerReadWindow> _readWindows = {};
   final Map<String, int> _windowEpochs = {};
   @visibleForTesting

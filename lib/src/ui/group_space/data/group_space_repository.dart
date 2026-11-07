@@ -6,22 +6,17 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../services/file_service.dart';
 import '../models/group_space.dart';
-import '../../learning/tabs/chat/data/chat_group_actions_repository.dart';
 
 /// Cache-first access to the permanent academic group space.
 class GroupSpaceRepository {
   GroupSpaceRepository({
     SupabaseClient? client,
     FileService? fileService,
-    ChatGroupActionsRepository? deadlineRepository,
   })  : _client = client ?? Supabase.instance.client,
-        _fileService = fileService ?? FileService(),
-        _deadlineOverride = deadlineRepository;
+        _fileService = fileService ?? FileService();
 
   final SupabaseClient _client;
   final FileService _fileService;
-  final ChatGroupActionsRepository? _deadlineOverride;
-  ChatGroupActionsRepository get _deadlines => _deadlineOverride ?? ChatGroupActionsRepository(client: _client);
 
   static const _cachePrefix = 'group_space_v1_';
 
@@ -90,7 +85,7 @@ class GroupSpaceRepository {
     DateTime? deadlineAt,
     double? amountOptional,
   }) async {
-    final id = await _deadlines.withDeadlineMutation(() => _client.rpc(
+    final id = await _client.rpc(
       'create_group_collection',
       params: {
         'p_title': title,
@@ -99,7 +94,7 @@ class GroupSpaceRepository {
         'p_deadline_at': deadlineAt?.toIso8601String(),
         'p_amount_optional': amountOptional,
       },
-    ));
+    );
     return id.toString();
   }
 
@@ -107,13 +102,13 @@ class GroupSpaceRepository {
     required String collectionId,
     required String status,
   }) {
-    return _deadlines.withDeadlineMutation(() => _client.rpc(
+    return _client.rpc(
       'update_group_collection_status',
       params: {
         'p_collection_id': collectionId,
         'p_status': status,
       },
-    ), kind: 'collection', entityId: collectionId);
+    );
   }
 
   Future<void> upsertMyContribution({
@@ -124,7 +119,7 @@ class GroupSpaceRepository {
     String comment = '',
     String? proofFileId,
   }) {
-    return _deadlines.withDeadlineMutation(() => _client.rpc(
+    return _client.rpc(
       'upsert_my_collection_contribution',
       params: {
         'p_collection_id': collectionId,
@@ -134,7 +129,7 @@ class GroupSpaceRepository {
         'p_comment': comment,
         'p_proof_file_id': proofFileId,
       },
-    ), kind: 'collection', entityId: collectionId);
+    );
   }
 
   Future<void> confirmContribution({
@@ -142,14 +137,14 @@ class GroupSpaceRepository {
     required String userId,
     required String paymentStatus,
   }) {
-    return _deadlines.withDeadlineMutation(() => _client.rpc(
+    return _client.rpc(
       'confirm_collection_contribution',
       params: {
         'p_collection_id': collectionId,
         'p_user_id': userId,
         'p_payment_status': paymentStatus,
       },
-    ), kind: 'collection', entityId: collectionId);
+    );
   }
 
   Future<List<Map<String, dynamic>>> listCollectionContributions(
@@ -261,7 +256,7 @@ class GroupSpaceRepository {
     DateTime? deadlineAt,
     bool allowChange = true,
   }) async {
-    final id = await _deadlines.withDeadlineMutation(() => _client.rpc(
+    final id = await _client.rpc(
       'create_topic_selection',
       params: {
         'p_title': title,
@@ -269,7 +264,7 @@ class GroupSpaceRepository {
         'p_deadline_at': deadlineAt?.toIso8601String(),
         'p_allow_change': allowChange,
       },
-    ));
+    );
     return id.toString();
   }
 
@@ -279,7 +274,7 @@ class GroupSpaceRepository {
     required int capacity,
     int sortOrder = 0,
   }) async {
-    final id = await _deadlines.withDeadlineMutation(() => _client.rpc(
+    final id = await _client.rpc(
       'add_topic_option',
       params: {
         'p_selection_id': selectionId,
@@ -287,7 +282,7 @@ class GroupSpaceRepository {
         'p_capacity': capacity,
         'p_sort_order': sortOrder,
       },
-    ), kind: 'topic_selection', entityId: selectionId);
+    );
     return id.toString();
   }
 
@@ -295,33 +290,33 @@ class GroupSpaceRepository {
     required String selectionId,
     required String optionId,
   }) {
-    return _deadlines.withDeadlineMutation(() => _client.rpc(
+    return _client.rpc(
       'pick_topic',
       params: {
         'p_selection_id': selectionId,
         'p_option_id': optionId,
       },
-    ), kind: 'topic_selection', entityId: selectionId);
+    );
   }
 
   Future<void> cancelTopicPick(String selectionId) {
-    return _deadlines.withDeadlineMutation(() => _client.rpc(
+    return _client.rpc(
       'cancel_topic_pick',
       params: {'p_selection_id': selectionId},
-    ), kind: 'topic_selection', entityId: selectionId);
+    );
   }
 
   Future<void> closeTopicSelection({
     required String selectionId,
     String status = 'closed',
   }) {
-    return _deadlines.withDeadlineMutation(() => _client.rpc(
+    return _client.rpc(
       'close_topic_selection',
       params: {
         'p_selection_id': selectionId,
         'p_status': status,
       },
-    ), kind: 'topic_selection', entityId: selectionId);
+    );
   }
 
   Map<String, dynamic>? _asMap(dynamic raw) {

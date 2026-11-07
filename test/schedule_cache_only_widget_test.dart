@@ -1,16 +1,16 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:student_platform/src/ui/home/cached_home_schedule_reader.dart';
 import 'package:student_platform/src/ui/schedule/models/lesson.dart';
 import 'package:student_platform/src/ui/schedule/models/schedule_group_action_event.dart';
 import 'package:student_platform/src/ui/schedule/schedule_screen.dart';
-import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_group_actions.dart';
 
 class _Reader implements CachedHomeScheduleReader {
-  @override Future<List<GroupActionDeadline>> readGroupDeadlines({DateTime? from, DateTime? to}) async => [];
   int calls = 0;
+  final _refresh = ValueNotifier<int>(0);
+  @override Listenable get refreshChanges => _refresh;
+  @override bool get canRead => true;
   @override
   Future<List<Lesson>?> readMonth(DateTime month) async {
     calls++;
@@ -33,8 +33,6 @@ class _Reader implements CachedHomeScheduleReader {
 }
 
 class _Repo implements ScheduleRepository {
-  @override
-  ValueListenable<(int, String?, String?)>? get groupActionsInvalidations => null;
   int calls = 0;
   @override
   Future<List<Lesson>> loadMonth(DateTime anchor, {bool strict = false}) async {
@@ -50,8 +48,6 @@ class _Repo implements ScheduleRepository {
 }
 
 class _DeferredRepo implements ScheduleRepository {
-  @override
-  ValueListenable<(int, String?, String?)>? get groupActionsInvalidations => null;
   final requests = <Completer<List<Lesson>>>[];
   @override
   Future<List<Lesson>> loadMonth(DateTime anchor, {bool strict = false}) {
@@ -62,11 +58,11 @@ class _DeferredRepo implements ScheduleRepository {
 
   @override
   Future<List<ScheduleAssignment>> loadMonthAssignments(
-          DateTime anchor, {bool strict = false}) async =>
+          DateTime anchor) async =>
       [];
   @override
   Future<List<ScheduleGroupActionEvent>> loadMonthGroupActions(
-          DateTime anchor, {bool strict = false}) async =>
+          DateTime anchor) async =>
       [];
   @override
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);

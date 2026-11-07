@@ -10,6 +10,7 @@ import 'package:student_platform/src/core/offline_policy_grant.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:student_platform/src/core/guarded_database.dart';
 import 'package:student_platform/src/core/media_cache_protection.dart';
+import 'package:student_platform/src/core/pinned_access_fence.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
 
 /// A separate local DB. Transactions ensure incomplete writes do not become
@@ -137,6 +138,23 @@ Future<void> closeProjectChatServerDatabase(Database db) async {
 Future<void> _closeProjectChatServerDatabase(Database wrapped, Database db,
     DatabaseFactory factory) async {
   final guard = _databaseAppGuards[wrapped];
+  if (guard != null) {
+    await db.transaction((txn) async {
+      final tables = await txn.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name='pinned_fence_pending'");
+      if (tables.isNotEmpty) {
+        final columns = await txn.rawQuery('PRAGMA table_info(pinned_fence_pending)');
+        if (!columns.any((row) => row['name'] == 'database_token')) {
+          throw StateError('Cannot close while pinned fence ownership is unknown');
+        }
+        final pending = await txn.query('pinned_fence_pending', columns: ['token'],
+            where: 'database_token=?', whereArgs: [guard.token], limit: 1);
+        if (pending.isNotEmpty) throw StateError('Media access checks are still running');
+      }
+      final updated = await txn.update('chat_app_guards', {'sid': 'closing'},
+          where: 'token=? AND project=? AND sid=?', whereArgs: [guard.token, '*', '']);
+      if (updated != 1) throw StateError('Database guard cannot close safely');
+    });
+  }
   // Keep the guard and FD if close fails: other engines must not evict.
   await db.close();
   if (guard != null) {
@@ -146,6 +164,7 @@ Future<void> _closeProjectChatServerDatabase(Database wrapped, Database db,
         options: OpenDatabaseOptions(singleInstance: false));
     try {
       await maintenance.transaction((txn) async {
+        await PinnedAccessFence.recoverHandle(txn, guard.token);
         await txn.delete('chat_route_leases', where: 'database_token=?', whereArgs: [guard.token]);
         final media = await txn.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name='media_cache_read_leases'");
         if (media.isNotEmpty) {
@@ -381,6 +400,8 @@ class ProjectChatServerCache {
       await store.initialize();
       if (!current() || !await store.beginOwnerReadWindow(owner.userId, current)) return null;
       if (!current()) { await store.endOwnerReadWindow(owner.userId); return null; }
+      store.accessRecovery = recoverDeadAccessGuards().then<bool>((_) => true,
+          onError: (Object _, StackTrace __) => false);
       return ProjectMediaProtectionSession._(store, owner.userId, current);
     } catch (_) { return null; }
   }
@@ -451,6 +472,7 @@ class ProjectChatServerCache {
         }
         held.add(file);
         file = null;
+        await PinnedAccessFence.recoverHandle(txn, token);
         await txn.delete('chat_route_leases', where: 'database_token=?', whereArgs: [token]);
         final media = await txn.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name='media_cache_read_leases'");
         if (media.isNotEmpty) {
@@ -463,6 +485,20 @@ class ProjectChatServerCache {
           try { await file.close(); } catch (_) {}
         }
         // A live process or an unverifiable guard is always retained.
+      }
+    }
+  }
+
+  /// Recovery never authorizes a pinned file; it marks unknown requests
+  /// denied until a subsequent successful live check for that object.
+  Future<void> recoverDeadAccessGuards() async {
+    final held = <RandomAccessFile>[];
+    try {
+      await db.transaction((txn) => _recoverDeadHandles(txn, held));
+    } finally {
+      for (final file in held) {
+        try { await file.unlock(); } catch (_) {}
+        try { await file.close(); } catch (_) {}
       }
     }
   }

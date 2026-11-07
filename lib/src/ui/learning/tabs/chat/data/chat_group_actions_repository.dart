@@ -4,61 +4,20 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:crypto/crypto.dart';
-import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../../../../core/transport_failure.dart';
-import '../../../../../config/supabase_config.dart';
 
 import '../models/chat_group_actions.dart';
-import 'deadline_projection_store.dart';
 
 /// Cache-first chat-scoped topic/collection actions (Stage 13.9).
 class ChatGroupActionsRepository {
-  ChatGroupActionsRepository({SupabaseClient? client, String? project,
-      Future<DeadlineProjectionStore> Function()? openDeadlineStore})
-      : _client = client ?? Supabase.instance.client,
-        _project = _resolveProject(client, project),
-        _openDeadlineStore = openDeadlineStore ?? _defaultDeadlineStore;
-
-  static Future<DeadlineProjectionStore>? _sharedDeadlineStore;
-  static Future<DeadlineProjectionStore> _defaultDeadlineStore() =>
-      _sharedDeadlineStore ??= DeadlineProjectionStore.open().catchError((Object error) {
-        _sharedDeadlineStore = null;
-        throw error;
-      });
-
-  static String? _resolveProject(SupabaseClient? client, String? project) {
-    if (project != null && project.trim().isNotEmpty) {
-      return project.trim().replaceFirst(RegExp(r'/+$'), '');
-    }
-    try {
-      if (client == null || identical(client, Supabase.instance.client)) {
-        return SupabaseConfig.url.replaceFirst(RegExp(r'/+$'), '');
-      }
-    } catch (_) {}
-    // A custom client has no public endpoint getter. Do not guess its project.
-    return null;
-  }
+  ChatGroupActionsRepository({SupabaseClient? client})
+      : _client = client ?? Supabase.instance.client;
 
   final SupabaseClient _client;
-  final String? _project;
-  final Future<DeadlineProjectionStore> Function() _openDeadlineStore;
 
   static const _cachePrefix = 'chat_group_actions_v1_';
   static const _pendingPicksKey = 'chat_group_actions_pending_picks_v1';
-  static const _deadlinesCachePrefix = 'chat_group_actions_deadlines_v2_';
-  static final _deadlineRevisions = <String, int>{};
-  static final _deadlineMutations = <String, int>{};
-  static final _deadlineNotifiers = <String, ValueNotifier<(int, String?, String?)>>{};
-
-  ValueListenable<(int, String?, String?)>? get deadlineInvalidations {
-    final owner = _userId;
-    if (_project == null || owner == null) return null;
-    final prefix = _deadlinesOwnerPrefix(owner);
-    return _deadlineNotifiers.putIfAbsent(prefix,
-        () => ValueNotifier((_deadlineRevisions[prefix] ?? 0, null, null)));
-  }
+  static const _deadlinesCachePrefix = 'chat_group_actions_deadlines_v1_';
 
   String? get _userId => _client.auth.currentUser?.id;
 
@@ -154,7 +113,7 @@ class ChatGroupActionsRepository {
     String? sourceFileId,
     required List<TopicOptionDraft> options,
   }) async {
-    final res = await _withDeadlineMutation(() => _client.rpc(
+    final res = await _client.rpc(
       'publish_topic_selection_for_chat',
       params: {
         'p_chat_id': chatId,
@@ -167,7 +126,7 @@ class ChatGroupActionsRepository {
         'p_source_file_id': sourceFileId,
         'p_options': options.map((e) => e.toJson()).toList(),
       },
-    ));
+    );
     await _refreshSelections(chatId);
     return _asMap(res) ?? const {};
   }
@@ -178,13 +137,13 @@ class ChatGroupActionsRepository {
   }) async {
     await _enqueuePendingPick(selectionId, optionId);
     try {
-      await _withDeadlineMutation(() => _client.rpc(
+      await _client.rpc(
         'pick_topic',
         params: {
           'p_selection_id': selectionId,
           'p_option_id': optionId,
         },
-      ), kind: 'topic_selection', entityId: selectionId);
+      );
       await _removePendingPick(selectionId, optionId);
     } catch (e) {
       rethrow;
@@ -196,14 +155,14 @@ class ChatGroupActionsRepository {
     required String userId,
     required String optionId,
   }) {
-    return _withDeadlineMutation(() => _client.rpc(
+    return _client.rpc(
       'reassign_topic_pick',
       params: {
         'p_selection_id': selectionId,
         'p_user_id': userId,
         'p_option_id': optionId,
       },
-    ), kind: 'topic_selection', entityId: selectionId);
+    );
   }
 
   /// Organizer releases another member's topic pick.
@@ -211,13 +170,13 @@ class ChatGroupActionsRepository {
     required String selectionId,
     required String userId,
   }) {
-    return _withDeadlineMutation(() => _client.rpc(
+    return _client.rpc(
       'release_topic_pick',
       params: {
         'p_selection_id': selectionId,
         'p_user_id': userId,
       },
-    ), kind: 'topic_selection', entityId: selectionId);
+    );
   }
 
   /// Best-effort display names for collection/topic participant rows.
@@ -253,10 +212,10 @@ class ChatGroupActionsRepository {
   }
 
   Future<void> cancelTopicPick(String selectionId) async {
-    await _withDeadlineMutation(() => _client.rpc(
+    await _client.rpc(
       'cancel_topic_pick',
       params: {'p_selection_id': selectionId},
-    ), kind: 'topic_selection', entityId: selectionId);
+    );
     final pending = await peekPendingPicks();
     final next =
         pending.where((e) => e['selection_id'] != selectionId).toList();
@@ -297,7 +256,7 @@ class ChatGroupActionsRepository {
     List<String> fileIds = const [],
   }) async {
     final mode = amountMode.trim().toLowerCase();
-    final id = await _withDeadlineMutation(() => _client.rpc(
+    final id = await _client.rpc(
       clientKey == null ? 'create_group_collection' : 'create_group_collection_with_files',
       params: {
         if (clientKey != null) 'p_client_key':clientKey,
@@ -312,7 +271,7 @@ class ChatGroupActionsRepository {
         'p_instructions': instructions,
         'p_payment_details': paymentDetails,
       },
-    ));
+    );
     return id.toString();
   }
 
@@ -327,7 +286,7 @@ class ChatGroupActionsRepository {
     String? proofFileId,
     String comment = 'Я перевёл',
   }) {
-    return _withDeadlineMutation(() => _client.rpc(
+    return _client.rpc(
       'upsert_my_collection_contribution',
       params: {
         'p_collection_id': collectionId,
@@ -337,7 +296,7 @@ class ChatGroupActionsRepository {
         if (proofFileId != null && proofFileId.isNotEmpty)
           'p_proof_file_id': proofFileId,
       },
-    ), kind: 'collection', entityId: collectionId);
+    );
   }
 
   Future<List<Map<String, dynamic>>> listCollectionContributionProgress(
@@ -379,7 +338,7 @@ class ChatGroupActionsRepository {
     required String paymentStatus,
     String? organizerComment,
   }) {
-    return _withDeadlineMutation(() => _client.rpc(
+    return _client.rpc(
       'confirm_collection_contribution',
       params: {
         'p_collection_id': collectionId,
@@ -387,7 +346,7 @@ class ChatGroupActionsRepository {
         'p_payment_status': paymentStatus,
         if (organizerComment != null) 'p_organizer_comment': organizerComment,
       },
-    ), kind: 'collection', entityId: collectionId);
+    );
   }
 
   /// Reschedule collection deadline (organizer or author). Requires
@@ -397,76 +356,42 @@ class ChatGroupActionsRepository {
     required DateTime deadlineAt,
     int? expectedVersion,
   }) {
-    return _withDeadlineMutation(() => _client.rpc(
+    return _client.rpc(
       'update_group_collection_deadline',
       params: {
         'p_collection_id': collectionId,
         'p_deadline_at': deadlineAt.toUtc().toIso8601String(),
         if (expectedVersion != null) 'p_expected_version': expectedVersion,
       },
-    ), kind: 'collection', entityId: collectionId);
+    );
   }
 
   Future<void> deleteGroupAction({
     required String kind,
     required String entityId,
-  }) => _withDeadlineMutation(() => _client.rpc('delete_group_action', params: {
-    'p_kind': kind, 'p_entity_id': entityId,
-  }), kind: kind, entityId: entityId);
-
-  Future<T> _withDeadlineMutation<T>(Future<T> Function() dispatch,
-      {String? kind, String? entityId}) async {
-    final owner = _userId;
-    final session = _client.auth.currentSession;
-    if (owner == null || _project == null || session == null) {
-      throw StateError('Deadline session unavailable');
-    }
-    final mutationPrefix = _deadlinesOwnerPrefix(owner);
-    _deadlineMutations[mutationPrefix] = (_deadlineMutations[mutationPrefix] ?? 0) + 1;
-    var transitioned = false;
-    final subscription = _client.auth.onAuthStateChange.listen((state) {
-      if (!identical(state.session, session)) transitioned = true;
-    });
-    try {
-    final store = await _openDeadlineStore();
-    if (transitioned || _userId != owner || !identical(_client.auth.currentSession, session)) {
-      throw StateError('Deadline session changed');
-    }
-    await store.markDirty(_project, owner);
-    if (transitioned || _userId != owner || !identical(_client.auth.currentSession, session)) {
-      throw StateError('Deadline session changed');
-    }
-    final result = await dispatch();
-    if (entityId != null) _notifyDeadlineInvalidation(owner, kind: kind, entityId: entityId);
-    return result;
-    } finally {
-      final remaining = (_deadlineMutations[mutationPrefix] ?? 1) - 1;
-      if (remaining == 0) { _deadlineMutations.remove(mutationPrefix); }
-      else { _deadlineMutations[mutationPrefix] = remaining; }
-      await subscription.cancel();
-    }
+  }) async {
+    await _client.rpc(
+      'delete_group_action',
+      params: {
+        'p_kind': kind,
+        'p_entity_id': entityId,
+      },
+    );
+    // Drop stale Home/Diary/Schedule deadline projections immediately.
+    await invalidateDeadlinesCache();
   }
-
-  /// Other product surfaces must use the same durable invalidation protocol.
-  Future<T> withDeadlineMutation<T>(Future<T> Function() dispatch,
-      {String? kind, String? entityId}) =>
-      _withDeadlineMutation(dispatch, kind: kind, entityId: entityId);
 
   /// Clears all cached deadline projections so deleted collections/topics
   /// cannot linger on Home / Diary / Schedule after a successful cancel.
-  Future<void> invalidateDeadlinesCache({String? kind, String? entityId}) async {
-    final owner = _userId;
-    if (owner == null || _project == null) throw StateError('Deadline session unavailable');
-    final store = await _openDeadlineStore();
-    await store.markDirty(_project, owner);
-    _notifyDeadlineInvalidation(owner, kind: kind, entityId: entityId);
-  }
-
-  void _notifyDeadlineInvalidation(String owner, {String? kind, String? entityId}) {
-    if (_project == null) return;
-    final prefix = _deadlinesOwnerPrefix(owner);
-    _deadlineRevisions[prefix] = (_deadlineRevisions[prefix] ?? 0) + 1;
-    _deadlineNotifiers[prefix]?.value = (_deadlineRevisions[prefix]!, kind, entityId);
+  Future<void> invalidateDeadlinesCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final prefix = '$_deadlinesCachePrefix${_userId ?? 'anon'}';
+      final keys = prefs.getKeys().where((k) => k.startsWith(prefix)).toList();
+      for (final key in keys) {
+        await prefs.remove(key);
+      }
+    } catch (_) {}
   }
 
   /// Server SoT for whether the current user may cancel this entity.
@@ -491,7 +416,7 @@ class ChatGroupActionsRepository {
     DateTime? deadlineAt,
     bool? allowChange,
   }) {
-    return _withDeadlineMutation(() => _client.rpc(
+    return _client.rpc(
       'update_topic_selection_before_activity',
       params: {
         'p_selection_id': selectionId,
@@ -500,20 +425,20 @@ class ChatGroupActionsRepository {
         'p_deadline_at': deadlineAt?.toIso8601String(),
         'p_allow_change': allowChange,
       },
-    ), kind: 'topic_selection', entityId: selectionId);
+    );
   }
 
   Future<void> closeTopicSelection({
     required String selectionId,
     String status = 'closed',
   }) {
-    return _withDeadlineMutation(() => _client.rpc(
+    return _client.rpc(
       'close_topic_selection',
       params: {
         'p_selection_id': selectionId,
         'p_status': status,
       },
-    ), kind: 'topic_selection', entityId: selectionId);
+    );
   }
 
   /// Stage 13.12 continuation — thin pointer + options for the unified
@@ -547,14 +472,14 @@ class ChatGroupActionsRepository {
     DateTime? deadlineAt,
     bool? allowChange,
   }) async {
-    final res = await _withDeadlineMutation(() => _client.rpc('update_topic_selection', params: {
+    final res = await _client.rpc('update_topic_selection', params: {
       'p_selection_id': selectionId,
       'p_expected_version': expectedVersion,
       'p_title': title,
       'p_description': description,
       'p_deadline_at': deadlineAt?.toIso8601String(),
       'p_allow_change': allowChange,
-    }), kind: 'topic_selection', entityId: selectionId);
+    });
     return _asMap(res) ?? const {};
   }
 
@@ -569,12 +494,12 @@ class ChatGroupActionsRepository {
     String? title,
     int? capacity,
   }) async {
-    final res = await _withDeadlineMutation(() => _client.rpc('update_topic_option', params: {
+    final res = await _client.rpc('update_topic_option', params: {
       'p_option_id': optionId,
       'p_expected_version': expectedVersion,
       'p_title': title,
       'p_capacity': capacity,
-    }));
+    });
     return _asMap(res) ?? const {};
   }
 
@@ -585,11 +510,11 @@ class ChatGroupActionsRepository {
     required int expectedVersion,
     required List<String> optionIds,
   }) async {
-    final res = await _withDeadlineMutation(() => _client.rpc('reorder_topic_options', params: {
+    final res = await _client.rpc('reorder_topic_options', params: {
       'p_selection_id': selectionId,
       'p_expected_version': expectedVersion,
       'p_option_ids': optionIds,
-    }), kind: 'topic_selection', entityId: selectionId);
+    });
     return _asMap(res) ?? const {};
   }
 
@@ -599,10 +524,10 @@ class ChatGroupActionsRepository {
     required String optionId,
     required int expectedVersion,
   }) async {
-    final res = await _withDeadlineMutation(() => _client.rpc('remove_topic_option', params: {
+    final res = await _client.rpc('remove_topic_option', params: {
       'p_option_id': optionId,
       'p_expected_version': expectedVersion,
-    }));
+    });
     return _asMap(res) ?? const {};
   }
 
@@ -616,7 +541,6 @@ class ChatGroupActionsRepository {
     int capacity = 1,
     int? expectedVersion,
   }) async {
-    return _withDeadlineMutation(() async {
     try {
       final res = await _client.rpc('add_topic_option_with_version', params: {
         'p_selection_id': selectionId,
@@ -635,7 +559,6 @@ class ChatGroupActionsRepository {
       });
       return {'ok': true, 'option_id': id?.toString()};
     }
-    }, kind: 'topic_selection', entityId: selectionId);
   }
 
   bool _isMissingRpc(Object e) {
@@ -667,63 +590,23 @@ class ChatGroupActionsRepository {
     return status.isEmpty || status == 'open';
   }
 
-  String _deadlinesOwnerPrefix(String owner) =>
-      '$_deadlinesCachePrefix${sha256.convert(utf8.encode(jsonEncode([_project, owner])))}_';
-
-  String _deadlinesCacheKey(DateTime? from, DateTime? to, {String? owner}) {
-    final user = owner ?? _userId ?? 'anon';
+  String _deadlinesCacheKey(DateTime? from, DateTime? to) {
+    final user = _userId ?? 'anon';
     final fromKey = from?.toUtc().millisecondsSinceEpoch ?? 'null';
     final toKey = to?.toUtc().millisecondsSinceEpoch ?? 'null';
-    final range = sha256.convert(utf8.encode(jsonEncode([fromKey, toKey])));
-    return '${_deadlinesOwnerPrefix(user)}$range';
+    return '$_deadlinesCachePrefix${user}_${fromKey}_$toKey';
   }
 
   Future<List<GroupActionDeadline>> listMyGroupActionDeadlinesCached({
     DateTime? from,
     DateTime? to,
-    bool strict = false,
   }) async {
-    final owner = _userId;
-    final session = _client.auth.currentSession;
-    final prefix = owner == null || _project == null ? null : _deadlinesOwnerPrefix(owner);
-    final revision = prefix == null ? 0 : (_deadlineRevisions[prefix] ?? 0);
-    var transitioned = false;
-    final subscription = _client.auth.onAuthStateChange.listen((state) {
-      if (!identical(state.session, session)) transitioned = true;
-    });
-    bool current() => !transitioned && _userId == owner &&
-        identical(_client.auth.currentSession, session) &&
-        (prefix == null || ((_deadlineRevisions[prefix] ?? 0) == revision &&
-            !_deadlineMutations.containsKey(prefix)));
     try {
-      DeadlineProjectionStore? store;
-      int? durableRevision;
-      if (owner != null && _project != null) {
-        try {
-          store = await _openDeadlineStore();
-          durableRevision = await store.revision(_project, owner);
-        } catch (_) {
-          // Online requests remain available when local storage is unavailable.
-          store = null;
-        }
-      }
-      if (!current()) throw StateError('Deadline session changed');
       final items = await listMyGroupActionDeadlines(from: from, to: to);
-      if (!current()) throw StateError('Deadline session changed');
-      if (owner != null && _project != null && store != null && durableRevision != null) {
-        await store.saveConfirmed(_project, owner, _deadlinesCacheKey(from, to, owner: owner),
-            durableRevision, _encodeDeadlines(items), current);
-      }
-      if (!current()) throw StateError('Deadline session changed');
+      await _storeCachedDeadlines(from, to, items);
       return items;
-    } catch (error) {
-      if (!current()) rethrow;
-      if (strict || !isTemporaryTransportFailure(error)) rethrow;
-      final cached = await peekCachedDeadlines(from: from, to: to);
-      if (!current()) throw StateError('Deadline session changed');
-      return cached;
-    } finally {
-      await subscription.cancel();
+    } catch (_) {
+      return peekCachedDeadlines(from: from, to: to);
     }
   }
 
@@ -731,17 +614,10 @@ class ChatGroupActionsRepository {
     DateTime? from,
     DateTime? to,
   }) async {
-    if (_project == null || _userId == null) return const [];
-    final owner = _userId;
-    final session = _client.auth.currentSession;
-    if (owner != null && _deadlineMutations.containsKey(_deadlinesOwnerPrefix(owner))) return const [];
-    final key = _deadlinesCacheKey(from, to, owner: owner);
-    try {
-    final store = await _openDeadlineStore();
-    if (_userId != owner || !identical(_client.auth.currentSession, session)) return const [];
-    final raw = await store.read(_project, owner, key);
-    if (_userId != owner || !identical(_client.auth.currentSession, session)) return const [];
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_deadlinesCacheKey(from, to));
     if (raw == null || raw.isEmpty) return const [];
+    try {
       final decoded = jsonDecode(raw);
       if (decoded is! List) return const [];
       return decoded
@@ -755,7 +631,15 @@ class ChatGroupActionsRepository {
     }
   }
 
-  String _encodeDeadlines(List<GroupActionDeadline> items) => jsonEncode(items
+  Future<void> _storeCachedDeadlines(
+    DateTime? from,
+    DateTime? to,
+    List<GroupActionDeadline> items,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _deadlinesCacheKey(from, to),
+      jsonEncode(items
           .map((e) => {
                 'event_type': e.eventType,
                 'entity_id': e.entityId,
@@ -772,7 +656,9 @@ class ChatGroupActionsRepository {
                     'card_message_id': e.cardMessageId,
                 },
               })
-          .toList());
+          .toList()),
+    );
+  }
 
   Future<List<Map<String, String>>> peekPendingPicks() async {
     final prefs = await SharedPreferences.getInstance();
@@ -799,13 +685,13 @@ class ChatGroupActionsRepository {
     final pending = await peekPendingPicks();
     for (final item in pending) {
       try {
-        await _withDeadlineMutation(() => _client.rpc(
+        await _client.rpc(
           'pick_topic',
           params: {
             'p_selection_id': item['selection_id'],
             'p_option_id': item['option_id'],
           },
-        ), kind: 'topic_selection', entityId: item['selection_id']);
+        );
         await _removePendingPick(
           item['selection_id']!,
           item['option_id']!,

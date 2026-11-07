@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:student_platform/src/core/pinned_access_fence.dart';
 import 'dart:isolate';
 import 'dart:convert';
 
@@ -41,6 +42,29 @@ Future<void> leaseWorker((String, SendPort) args) async {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
+
+  test('handle cannot close around a late denial or admit new checks after close', () async {
+    final dir = await Directory.systemTemp.createTemp('fence-close-test-');
+    final path = '${dir.path}/history.db';
+    final oldDb = await openProjectChatServerDatabase(path, factory: databaseFactoryFfi);
+    final newDb = await openProjectChatServerDatabase(path, factory: databaseFactoryFfi);
+    final old = PinnedAccessFence(oldDb, databaseToken: debugProjectChatDatabaseGuard(oldDb));
+    final fresh = PinnedAccessFence(newDb, databaseToken: debugProjectChatDatabaseGuard(newDb));
+    const p = 'https://a.invalid', u = 'owner', k = 'file';
+    final pending = await old.begin(p, u, k);
+    await expectLater(oldDb.close(), throwsStateError);
+    final newAllow = await fresh.begin(p, u, k);
+    await fresh.finish(newAllow, allowed: true);
+    expect(await fresh.canRead(p, u, k), isFalse);
+    await old.finish(pending, allowed: false);
+    await oldDb.close();
+    expect(await fresh.canRead(p, u, k), isFalse);
+    final retry = await fresh.begin(p, u, k);
+    await fresh.finish(retry, allowed: true);
+    expect(await fresh.canRead(p, u, k), isTrue);
+    await newDb.close();
+    await dir.delete(recursive: true);
+  });
 
   test('LRU protects active and crash-stale leases and leaves unsent/attempts intact', () async {
     final dir = await Directory.systemTemp.createTemp('history-quota-');
@@ -214,6 +238,14 @@ void main() {
         .timeout(const Duration(seconds: 8)), 'ready');
     await db.insert('chat_app_guards', {'token': token, 'project': '*',
       'uid': child.pid.toString(), 'sid': '', 'database_token': token});
+    final childFence = PinnedAccessFence(db, databaseToken: token);
+    final ownFence = PinnedAccessFence(db, databaseToken: debugProjectChatDatabaseGuard(db));
+    final initialFence = await childFence.begin('https://a.invalid', 'owner', 'file');
+    await childFence.finish(initialFence, allowed: true);
+    await childFence.begin('https://a.invalid', 'owner', 'file');
+    final liveFence = await ownFence.begin('https://a.invalid', 'owner', 'file');
+    await cache.recoverDeadAccessGuards();
+    expect(await db.query('pinned_fence_pending'), hasLength(2));
     await db.insert('chat_route_leases', {'token': 'child-route',
       'project': 'https://a.invalid', 'uid': 'owner', 'sid': 'sid',
       'chat': 'cached', 'database_token': token});
@@ -226,6 +258,17 @@ void main() {
     await cache.releaseHistoryAppGuard(live);
     child.kill();
     await child.exitCode;
+    final mediaSession = (await cache.openMediaProtection(dir))!;
+    expect(await mediaSession.store.accessRecovery, isTrue);
+    expect(await db.query('pinned_fence_pending'), hasLength(1));
+    await ownFence.finish(liveFence, allowed: true);
+    expect(await ownFence.canRead('https://a.invalid', 'owner', 'file'), isFalse);
+    final freshFence = await ownFence.begin('https://a.invalid', 'owner', 'file');
+    await ownFence.finish(freshFence, allowed: true);
+    expect(await ownFence.canRead('https://a.invalid', 'owner', 'file'), isFalse);
+    await db.transaction((txn) => ownFence.markPinned(txn, 'https://a.invalid', 'owner', 'file', 'synthetic-checksum'));
+    expect(await ownFence.canRead('https://a.invalid', 'owner', 'file'), isTrue);
+    await mediaSession.close();
     final recovered = (await cache.beginHistoryAppGuard(1, allEnginesGuarded: true))!;
     expect(recovered.logicalBytesEvicted, greaterThan(0));
     expect(await db.query('chat_route_leases'), isEmpty);

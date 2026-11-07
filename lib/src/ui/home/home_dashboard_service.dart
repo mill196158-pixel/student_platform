@@ -618,7 +618,7 @@ class HomeDashboardService {
   Future<List<HomeGroupActionPreview>> _loadGroupActionDeadlines() async {
     try {
       final repo = ChatGroupActionsRepository(client: _sb);
-      final items = await repo.listMyGroupActionDeadlinesCached(strict: true);
+      final items = await repo.listMyGroupActionDeadlines();
       return items
           .map(
             (GroupActionDeadline e) => HomeGroupActionPreview(

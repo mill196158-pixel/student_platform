@@ -5,7 +5,6 @@ import '../shared/student_section_headers.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -28,7 +27,6 @@ import 'utils/msk_date.dart';
 import '../../config/supabase_config.dart';
 import '../../core/auth_session_scope.dart';
 import '../../core/auth_session_scope_host.dart';
-import '../../core/transport_failure.dart';
 import 'schedule_month_cache.dart';
 import '../home/home_snapshot_codec.dart';
 
@@ -36,9 +34,6 @@ class ScheduleRepository {
   ScheduleRepository({SupabaseClient? client})
       : _sb = client ?? Supabase.instance.client;
   final SupabaseClient _sb;
-
-  ValueListenable<(int, String?, String?)>? get groupActionsInvalidations =>
-      ChatGroupActionsRepository(client: _sb).deadlineInvalidations;
 
   /// Грузим все занятия за календарный месяц [anchor] (1-е число → последнее).
   Future<List<Lesson>> loadMonth(DateTime anchor, {bool strict = false}) async {
@@ -152,8 +147,7 @@ class ScheduleRepository {
     }
   }
 
-  Future<List<ScheduleAssignment>> loadMonthAssignments(DateTime anchor,
-      {bool strict = false}) async {
+  Future<List<ScheduleAssignment>> loadMonthAssignments(DateTime anchor) async {
     try {
       final first = DateTime(anchor.year, anchor.month, 1);
       final nextMonth = DateTime(anchor.year, anchor.month + 1, 1);
@@ -268,13 +262,12 @@ class ScheduleRepository {
     } catch (e, st) {
       // ignore: avoid_print
       print('Schedule assignments load error: $e\n$st');
-      if (strict) rethrow;
       return const [];
     }
   }
 
   Future<List<ScheduleGroupActionEvent>> loadMonthGroupActions(
-    DateTime anchor, {bool strict = false}
+    DateTime anchor,
   ) async {
     try {
       final first = DateTime(anchor.year, anchor.month, 1);
@@ -283,7 +276,6 @@ class ScheduleRepository {
       final raw = await repo.listMyGroupActionDeadlinesCached(
         from: first,
         to: last,
-        strict: strict,
       );
       return mapScheduleGroupActionEvents(raw);
     } catch (e, st) {
@@ -292,14 +284,9 @@ class ScheduleRepository {
       final repo = ChatGroupActionsRepository(client: _sb);
       final first = DateTime(anchor.year, anchor.month, 1);
       final last = DateTime(anchor.year, anchor.month + 1, 0, 23, 59, 59);
-      if (strict && !isTemporaryTransportFailure(e)) rethrow;
-      final cached = mapScheduleGroupActionEvents(
-          await repo.peekCachedDeadlines(from: first, to: last));
-      // The legacy reader cannot distinguish a missing snapshot from a
-      // successfully saved empty list. Let the caller retain its in-memory
-      // month rather than treating an unknown result as a successful empty one.
-      if (strict && cached.isEmpty) rethrow;
-      return cached;
+      return mapScheduleGroupActionEvents(
+        await repo.peekCachedDeadlines(from: first, to: last),
+      );
     }
   }
 }
@@ -450,6 +437,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   bool _loading = true;
   bool _weekMode = false; // режим «День»/«Неделя»
   bool _lessonsUnavailable = false;
+  bool _cacheTemporarilyUnavailable = false;
   bool _showingCachedSchedule = false;
   int _loadRevision = 0;
   AuthSessionScope? _sessionScope;
@@ -462,31 +450,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     _foregroundAttempts.clear();
   }
   List<Lesson> _all = [];
-  final Map<(int, int), List<ScheduleAssignment>> _assignmentMonths = {};
-  final Map<(int, int), List<ScheduleGroupActionEvent>> _groupActionMonths = {};
-  ValueListenable<(int, String?, String?)>? _groupActionsInvalidation;
-  int _groupActionsRevision = 0;
-
-  void _bindGroupActionsInvalidation() {
-    final next = _repo.groupActionsInvalidations;
-    if (identical(next, _groupActionsInvalidation)) return;
-    _groupActionsInvalidation?.removeListener(_invalidateGroupActions);
-    _groupActionsInvalidation = next;
-    next?.addListener(_invalidateGroupActions);
-  }
-
-  void _invalidateGroupActions() {
-    _groupActionsRevision++;
-    final (_, kind, entity) = _groupActionsInvalidation?.value ?? (0, null, null);
-    bool removed(ScheduleGroupActionEvent action) => entity == null ||
-        (action.entityId == entity && (kind == null ||
-          (kind == 'collection' && action.isCollection) ||
-          (kind == 'topic_selection' && action.isTopic)));
-    for (final entry in _groupActionMonths.entries.toList()) {
-      _groupActionMonths[entry.key] = entry.value.where((a) => !removed(a)).toList();
-    }
-    if (mounted) setState(() => _groupActions = _groupActions.where((a) => !removed(a)).toList());
-  }
   List<ScheduleAssignment> _assignments = [];
   List<ScheduleGroupActionEvent> _groupActions = [];
   RealtimeChannel? _channel;
@@ -512,6 +475,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   @override
   void initState() {
     super.initState();
+    CachedHomeScheduleReader.refreshListenableFor(widget.cachedReader)?.addListener(_onCachedReadReady);
     final now = _nowMsk();
     _selectedDay = now;
     _selectedWeekStart = _mondayOf(now);
@@ -522,6 +486,15 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     });
 
     _startRealtimeIfOnline();
+  }
+
+  void _onCachedReadReady() {
+    final reader = widget.cachedReader;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && reader != null && identical(widget.cachedReader, reader) && reader.canRead) {
+        unawaited(_reload());
+      }
+    });
   }
 
   void _startRealtimeIfOnline() {
@@ -558,6 +531,10 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   @override
   void didUpdateWidget(covariant ScheduleScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.cachedReader, widget.cachedReader)) {
+      CachedHomeScheduleReader.refreshListenableFor(oldWidget.cachedReader)?.removeListener(_onCachedReadReady);
+      CachedHomeScheduleReader.refreshListenableFor(widget.cachedReader)?.addListener(_onCachedReadReady);
+    }
     final changed = !identical(oldWidget.cachedReader, widget.cachedReader) ||
         oldWidget.subscribeRealtime != widget.subscribeRealtime;
     if (!changed) return;
@@ -568,6 +545,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     _groupActions = [];
     _loading = true;
     _lessonsUnavailable = false;
+    _cacheTemporarilyUnavailable = false;
     _showingCachedSchedule = false;
     _stopRealtime();
     _startRealtimeIfOnline();
@@ -579,13 +557,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     super.didChangeDependencies();
     final scope = AuthSessionScopeHost.maybeOf(context);
     if (identical(scope, _sessionScope) && _monthCache != null) return;
-    if (!identical(scope, _sessionScope)) {
-      _assignmentMonths.clear();
-      _groupActionMonths.clear();
-    }
     _sessionScope?.removeListener(_sessionChanged);
     _sessionScope = scope;
-    _bindGroupActionsInvalidation();
     _monthCache = scope == null ? null :
         (widget.cacheFactory?.call(scope) ?? ScheduleMonthCache(scope, SupabaseConfig.url));
     scope?.addListener(_sessionChanged);
@@ -596,22 +569,20 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     if (!mounted) return;
     _loadRevision++;
     _releaseForeground();
-    _assignmentMonths.clear();
-    _groupActionMonths.clear();
-    _bindGroupActionsInvalidation();
     setState(() {
       _all = [];
       _assignments = [];
       _groupActions = [];
       _loading = true;
       _showingCachedSchedule = false;
+      _cacheTemporarilyUnavailable = false;
     });
     unawaited(_reload());
   }
 
   @override
   void dispose() {
-    _groupActionsInvalidation?.removeListener(_invalidateGroupActions);
+    CachedHomeScheduleReader.refreshListenableFor(widget.cachedReader)?.removeListener(_onCachedReadReady);
     _loadRevision++;
     _releaseForeground();
     _sessionScope?.removeListener(_sessionChanged);
@@ -640,7 +611,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   Future<void> _loadMonth({required DateTime anchor}) async {
     if (widget.cachedReader != null) return _loadCachedMonths([anchor]);
     final revision = ++_loadRevision;
-    final groupRevision = _groupActionsRevision;
     _releaseForeground();
     setState(() => _loading = true);
     final scope = _sessionScope;
@@ -659,8 +629,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     if (cached != null) {
       setState(() {
         _all = cached;
-        _assignments = _assignmentMonths[(anchor.year, anchor.month)] ?? [];
-        _groupActions = _groupActionMonths[(anchor.year, anchor.month)] ?? [];
+        _assignments = [];
+        _groupActions = [];
         _lessonsUnavailable = false;
         _showingCachedSchedule = true;
         _loading = false;
@@ -670,26 +640,17 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       _repo.loadMonth(anchor, strict: true).then<List<Lesson>?>(
           (value) => value,
           onError: (Object _, StackTrace __) => null),
-      _repo.loadMonthAssignments(anchor, strict: true).then<List<ScheduleAssignment>?>(
-          (value) => value, onError: (Object error, StackTrace __) =>
-              isTemporaryTransportFailure(error) ? null : <ScheduleAssignment>[]),
-      _repo.loadMonthGroupActions(anchor, strict: true).then<List<ScheduleGroupActionEvent>?>(
-          (value) => value, onError: (Object error, StackTrace __) =>
-              isTemporaryTransportFailure(error) ? null : <ScheduleGroupActionEvent>[]),
+      _repo.loadMonthAssignments(anchor),
+      _repo.loadMonthGroupActions(anchor),
     ]);
     if (!current()) return;
     final lessons = data[0] as List<Lesson>?;
-    final assignments = data[1] as List<ScheduleAssignment>?;
-    final groupActions = groupRevision == _groupActionsRevision
-        ? data[2] as List<ScheduleGroupActionEvent>? : null;
-    if (assignments != null) _assignmentMonths[(anchor.year, anchor.month)] = assignments;
-    if (groupActions != null) _groupActionMonths[(anchor.year, anchor.month)] = groupActions;
     setState(() {
       _all = lessons ?? cached ?? [];
       _lessonsUnavailable = lessons == null && cached == null;
       _showingCachedSchedule = lessons == null && cached != null;
-      _assignments = assignments ?? _assignmentMonths[(anchor.year, anchor.month)] ?? [];
-      _groupActions = groupActions ?? _groupActionMonths[(anchor.year, anchor.month)] ?? [];
+      _assignments = data[1] as List<ScheduleAssignment>;
+      _groupActions = data[2] as List<ScheduleGroupActionEvent>;
       _loading = false;
     });
     if (lessons != null && attempt != null) await cache!.write(attempt, lessons, isCurrent: current);
@@ -714,7 +675,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       return _loadCachedMonths(months.toList());
     }
     final revision = ++_loadRevision;
-    final groupRevision = _groupActionsRevision;
     _releaseForeground();
     setState(() => _loading = true);
     final weekStart = _selectedWeekStart;
@@ -751,10 +711,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     if (cached.length == anchors.length) {
       setState(() {
         _all = cached.values.expand((value) => value).toList();
-        _assignments = anchors.expand((anchor) =>
-            _assignmentMonths[(anchor.year, anchor.month)] ?? <ScheduleAssignment>[]).toList();
-        _groupActions = anchors.expand((anchor) =>
-            _groupActionMonths[(anchor.year, anchor.month)] ?? <ScheduleGroupActionEvent>[]).toList();
+        _assignments = [];
+        _groupActions = [];
         _lessonsUnavailable = false;
         _showingCachedSchedule = true;
         _loading = false;
@@ -771,12 +729,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         _repo.loadMonth(anchor, strict: true).then<List<Lesson>?>(
             (value) => value,
             onError: (Object _, StackTrace __) => null),
-        _repo.loadMonthAssignments(anchor, strict: true).then<List<ScheduleAssignment>?>(
-            (value) => value, onError: (Object error, StackTrace __) =>
-                isTemporaryTransportFailure(error) ? null : <ScheduleAssignment>[]),
-        _repo.loadMonthGroupActions(anchor, strict: true).then<List<ScheduleGroupActionEvent>?>(
-            (value) => value, onError: (Object error, StackTrace __) =>
-                isTemporaryTransportFailure(error) ? null : <ScheduleGroupActionEvent>[]),
+        _repo.loadMonthAssignments(anchor),
+        _repo.loadMonthGroupActions(anchor),
       ]);
       if (!current()) return;
       final networkLessons = data[0] as List<Lesson>?;
@@ -790,28 +744,15 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         lessonsUnavailable = true;
       if (networkLessons == null && cached.containsKey(anchor))
         showingCachedSchedule = true;
-      final assignments = data[1] as List<ScheduleAssignment>?;
-      if (assignments != null) _assignmentMonths[(anchor.year, anchor.month)] = assignments;
-      for (final a in assignments ?? _assignmentMonths[(anchor.year, anchor.month)] ?? <ScheduleAssignment>[]) {
+      for (final a in data[1] as List<ScheduleAssignment>) {
         assignmentsById[a.id] = a;
       }
-      final groupActions = groupRevision == _groupActionsRevision
-          ? data[2] as List<ScheduleGroupActionEvent>? : null;
-      if (groupActions != null) _groupActionMonths[(anchor.year, anchor.month)] = groupActions;
-      for (final action in groupActions ?? _groupActionMonths[(anchor.year, anchor.month)] ?? <ScheduleGroupActionEvent>[]) {
+      for (final action in data[2] as List<ScheduleGroupActionEvent>) {
         groupActionsByKey[action.dedupeKey] = action;
       }
     }
 
     if (!current()) return;
-    if (groupRevision != _groupActionsRevision) {
-      groupActionsByKey.clear();
-      for (final anchor in anchors) {
-        for (final action in _groupActionMonths[(anchor.year, anchor.month)] ?? <ScheduleGroupActionEvent>[]) {
-          groupActionsByKey[action.dedupeKey] = action;
-        }
-      }
-    }
     setState(() {
       _all = lessonsById.values.toList();
       _lessonsUnavailable = lessonsUnavailable;
@@ -837,10 +778,12 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     final revision = ++_loadRevision;
     setState(() => _loading = true);
     try {
-      final pages = await Future.wait(anchors.map(reader.readMonth));
-      final actionPages = await Future.wait(anchors.map((anchor) => reader.readGroupDeadlines(
-          from: DateTime(anchor.year, anchor.month, 1),
-          to: DateTime(anchor.year, anchor.month + 1, 0, 23, 59, 59))));
+      Future<(List<Lesson>?, bool)> readPage(DateTime month) async {
+        try { return (await reader.readMonth(month), false); }
+        on CachedHomeTemporarilyUnavailable { return (null, true); }
+      }
+      final results = await Future.wait(anchors.map(readPage));
+      final pages = results.map((result) => result.$1).toList();
       if (!mounted ||
           revision != _loadRevision ||
           widget.cachedReader != reader) return;
@@ -855,8 +798,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       setState(() {
         _all = seen.values.toList();
         _assignments = [];
-        _groupActions = actionPages.expand((page) => page.map(ScheduleGroupActionEvent.fromDeadline)).toList();
+        _groupActions = [];
         _lessonsUnavailable = pages.any((page) => page == null);
+        _cacheTemporarilyUnavailable = results.any((result) => result.$2);
         _showingCachedSchedule = pages.any((page) => page != null);
         _loading = false;
       });
@@ -867,6 +811,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         _assignments = [];
         _groupActions = [];
         _lessonsUnavailable = true;
+        _cacheTemporarilyUnavailable = false;
         _showingCachedSchedule = false;
         _loading = false;
       });
@@ -1154,9 +1099,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         _all.isEmpty &&
         _assignments.isEmpty &&
         _groupActions.isEmpty) {
-      return Center(
-          child: Text(
-              'Не удалось загрузить расписание. Подключитесь к сети и повторите.'));
+      return Center(child: Text(_cacheTemporarilyUnavailable
+          ? 'Сохранённое расписание временно недоступно.'
+          : 'Не удалось загрузить расписание. Подключитесь к сети и повторите.'));
     }
     final body = _weekMode ? _buildWeekBody(context) : _buildDayBody(context);
     if (!_showingCachedSchedule && !_lessonsUnavailable) return body;
@@ -1164,7 +1109,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
         child: Text(
-            _lessonsUnavailable
+            _cacheTemporarilyUnavailable
+                ? 'Часть сохранённого расписания временно недоступна.'
+                : _lessonsUnavailable
                 ? 'Не удалось загрузить часть расписания. Подключитесь к сети и повторите.'
                 : 'Сохранённое расписание. Данные могут быть неактуальны.',
             style: Theme.of(context).textTheme.bodySmall),
