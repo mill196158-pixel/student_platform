@@ -114,6 +114,14 @@ class AcademicContextService {
     return _loadFreshAndCache(authUser.id);
   }
 
+  /// Confirm the current enrollment from the server without the legacy
+  /// owner-only preferences fallback. Used for a session-scoped snapshot.
+  Future<AcademicContext> loadFreshStrict() async {
+    final user = _sb.auth.currentUser;
+    if (user == null) throw StateError('No authenticated session');
+    return _loadForUser(user.id);
+  }
+
   Future<AcademicContext?> loadCached([String? userId]) async {
     final id = userId ?? _sb.auth.currentUser?.id ?? '';
     if (id.isEmpty) return null;

@@ -14,6 +14,10 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:student_ui/student_ui.dart';
 
 import '../../core/auth_session.dart';
+import '../../core/online_side_effect_barrier.dart';
+import '../../core/session_capabilities.dart';
+import '../chats/core/project_chat_server_cache.dart';
+import 'offline_subject_catalog.dart';
 import '../../data/academic_context_service.dart';
 import '../../services/auth_service.dart';
 import '../content/content_deep_link_bus.dart';
@@ -338,6 +342,11 @@ class InfoScreen extends StatefulWidget {
     this.vacancyMediaService,
     this.referenceService,
     this.initialSectionName,
+    this.cachedStore,
+    this.cachedCapabilities,
+    this.debugOnlineStore,
+    this.debugStrictContextLoader,
+    this.onlineBarrier,
   });
 
   /// Optional DI for tests; production uses [UsefulSubjectsRepository].
@@ -368,6 +377,14 @@ class InfoScreen extends StatefulWidget {
   /// Allowed values: `subjects`, `help`, `jobs`.
   @visibleForTesting
   final String? initialSectionName;
+  /// An explicit cache-only route. It never reads the old UID-only cache.
+  final ProjectChatServerCache? cachedStore;
+  final SessionCapabilities? cachedCapabilities;
+  @visibleForTesting
+  final ProjectChatServerCache? debugOnlineStore;
+  @visibleForTesting
+  final Future<AcademicContext> Function()? debugStrictContextLoader;
+  final OnlineSideEffectBarrier? onlineBarrier;
 
   @visibleForTesting
   static void debugClearMemoryCache() => _InfoScreenState.clearMemoryCache();
@@ -377,6 +394,9 @@ class InfoScreen extends StatefulWidget {
 }
 
 class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
+  bool get _cacheOnly => widget.cachedStore != null || widget.cachedCapabilities != null;
+  bool get _onlineCurrent => mounted && !_cacheOnly && (widget.onlineBarrier?.isOpen ?? true);
+  int _modeRevision = 0;
   // In-memory (RAM) layer of the cache. Survives across screen re-creations
   // within one app session, so re-opening the tab is instant with no spinner.
   // The SharedPreferences layer keeps data across app restarts.
@@ -417,8 +437,6 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    ContentDeepLinkBus.instance.pending.addListener(_onDeepLinkPending);
     _vacancyService = widget.vacancyService ??
         VacancyService(
           currentUserId: () =>
@@ -443,6 +461,13 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
               widget.debugUserId ??
               Supabase.instance.client.auth.currentUser?.id,
         );
+    if (_cacheOnly) {
+      widget.cachedCapabilities?.addListener(_onOfflineAccessChanged);
+      _future = _readOfflinePlan();
+      return;
+    }
+    WidgetsBinding.instance.addObserver(this);
+    ContentDeepLinkBus.instance.pending.addListener(_onDeepLinkPending);
     if (widget.initialSectionName == 'help') {
       _section = _UsefulSection.help;
     } else if (widget.initialSectionName == 'jobs') {
@@ -469,12 +494,51 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_cacheOnly) return;
     if (state != AppLifecycleState.resumed) return;
     if (!mounted) return;
-    unawaited(AuthSession.ensureFreshSession(Supabase.instance.client));
+    unawaited(_trackOnline(() => AuthSession.ensureFreshSession(Supabase.instance.client)));
     unawaited(_loadReference());
     unawaited(_loadVacancies());
     unawaited(_reloadQuietly());
+  }
+
+  @override
+  void didUpdateWidget(covariant InfoScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (identical(oldWidget.cachedStore, widget.cachedStore) &&
+        identical(oldWidget.cachedCapabilities, widget.cachedCapabilities) &&
+        identical(oldWidget.onlineBarrier, widget.onlineBarrier)) return;
+    final wasOffline = oldWidget.cachedStore != null || oldWidget.cachedCapabilities != null;
+    _modeRevision++;
+    _referenceLoadGeneration++;
+    _vacancyLoadGeneration++;
+    oldWidget.cachedCapabilities?.removeListener(_onOfflineAccessChanged);
+    _latestState = null;
+    _selectedSemester = null;
+    if (_cacheOnly) {
+      if (!wasOffline) {
+        WidgetsBinding.instance.removeObserver(this);
+        ContentDeepLinkBus.instance.pending.removeListener(_onDeepLinkPending);
+        InfoSubjectsCache.revision.removeListener(_onSubjectsCacheInvalidated);
+        InfoSubjectsCache.detachMemoryClear(clearMemoryCache);
+      }
+      _section = _UsefulSection.subjects;
+      widget.cachedCapabilities?.addListener(_onOfflineAccessChanged);
+      _future = _readOfflinePlan();
+    } else if (wasOffline) {
+      WidgetsBinding.instance.addObserver(this);
+      ContentDeepLinkBus.instance.pending.addListener(_onDeepLinkPending);
+      InfoSubjectsCache.attachMemoryClear(clearMemoryCache);
+      InfoSubjectsCache.revision.addListener(_onSubjectsCacheInvalidated);
+      _future = _loadWithCache();
+      unawaited(_loadReference());
+      unawaited(_loadVacancies());
+    } else {
+      _future = _loadWithCache();
+      unawaited(_loadReference());
+      unawaited(_loadVacancies());
+    }
   }
 
   void _onDeepLinkPending() {
@@ -574,7 +638,7 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
   Future<void> _loadVacancies() {
     final existing = _vacancyLoadFuture;
     if (existing != null) return existing;
-    final future = _loadVacanciesBody();
+    final future = _trackOnline(_loadVacanciesBody);
     _vacancyLoadFuture = future;
     return future.whenComplete(() {
       if (identical(_vacancyLoadFuture, future)) {
@@ -586,19 +650,19 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
   Future<void> _loadVacanciesBody() async {
     final generation = ++_vacancyLoadGeneration;
     final cached = await _vacancyService.loadCached();
-    if (!mounted || generation != _vacancyLoadGeneration) return;
+    if (!_onlineCurrent || generation != _vacancyLoadGeneration) return;
     if (cached.cards.isNotEmpty) {
       setState(() => _vacancies = cached);
       unawaited(_hydrateVacancyMedia(cached));
     }
     try {
       final next = await _vacancyService.load();
-      if (!mounted || generation != _vacancyLoadGeneration) return;
+      if (!_onlineCurrent || generation != _vacancyLoadGeneration) return;
       setState(() => _vacancies = next);
       unawaited(_hydrateVacancyMedia(next));
     } catch (error) {
       debugPrint('[info] vacancies load failed: $error');
-      if (!mounted || generation != _vacancyLoadGeneration) return;
+      if (!_onlineCurrent || generation != _vacancyLoadGeneration) return;
       if (_vacancies.cards.isNotEmpty) {
         setState(
           () => _vacancies = VacancyLoadResult(
@@ -614,12 +678,15 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _hydrateVacancyMedia(VacancyLoadResult result) async {
+  Future<void> _hydrateVacancyMedia(VacancyLoadResult result) =>
+      _trackOnline(() => _hydrateVacancyMediaBody(result));
+
+  Future<void> _hydrateVacancyMediaBody(VacancyLoadResult result) async {
     final generation = ++_vacancyMediaGeneration;
     if (result.cards.isEmpty) return;
     final hydrated = <ManagedVacancyCard>[];
     for (final card in result.cards) {
-      if (!mounted || generation != _vacancyMediaGeneration) return;
+      if (!_onlineCurrent || generation != _vacancyMediaGeneration) return;
       final version = card.publishedAt?.toUtc().toIso8601String() ?? card.id;
       Future<List<int>?> bytesFor(String role) async {
         final asset = card.assetForRole(role);
@@ -632,7 +699,9 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
       }
 
       final logo = await bytesFor('logo');
+      if (!_onlineCurrent || generation != _vacancyMediaGeneration) return;
       final cover = await bytesFor('cover');
+      if (!_onlineCurrent || generation != _vacancyMediaGeneration) return;
       final background = await bytesFor('background');
       hydrated.add(
         card.copyWith(
@@ -642,7 +711,7 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
         ),
       );
     }
-    if (!mounted || generation != _vacancyMediaGeneration) return;
+    if (!_onlineCurrent || generation != _vacancyMediaGeneration) return;
     final currentIds = _vacancies.cards.map((c) => c.id).join('|');
     final sourceIds = result.cards.map((c) => c.id).join('|');
     if (currentIds != sourceIds && _vacancies.cards.isNotEmpty) return;
@@ -660,7 +729,7 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
   Future<void> _loadReference() {
     final existing = _referenceLoadFuture;
     if (existing != null) return existing;
-    final future = _loadReferenceBody();
+    final future = _trackOnline(_loadReferenceBody);
     _referenceLoadFuture = future;
     return future.whenComplete(() {
       if (identical(_referenceLoadFuture, future)) {
@@ -672,17 +741,17 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
   Future<void> _loadReferenceBody() async {
     final generation = ++_referenceLoadGeneration;
     final cached = await _referenceService.loadCached();
-    if (!mounted || generation != _referenceLoadGeneration) return;
+    if (!_onlineCurrent || generation != _referenceLoadGeneration) return;
     if (cached.bundle != null && cached.bundle!.articles.isNotEmpty) {
       setState(() => _reference = cached);
     }
     try {
       final next = await _referenceService.load();
-      if (!mounted || generation != _referenceLoadGeneration) return;
+      if (!_onlineCurrent || generation != _referenceLoadGeneration) return;
       setState(() => _reference = next);
     } catch (error) {
       debugPrint('[info] reference load failed: $error');
-      if (!mounted || generation != _referenceLoadGeneration) return;
+      if (!_onlineCurrent || generation != _referenceLoadGeneration) return;
       if (_reference.bundle != null && _reference.bundle!.articles.isNotEmpty) {
         setState(
           () => _reference = ReferenceLoadResult(
@@ -700,10 +769,13 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    ContentDeepLinkBus.instance.pending.removeListener(_onDeepLinkPending);
-    InfoSubjectsCache.revision.removeListener(_onSubjectsCacheInvalidated);
-    InfoSubjectsCache.detachMemoryClear(clearMemoryCache);
+    widget.cachedCapabilities?.removeListener(_onOfflineAccessChanged);
+    if (!_cacheOnly) {
+      WidgetsBinding.instance.removeObserver(this);
+      ContentDeepLinkBus.instance.pending.removeListener(_onDeepLinkPending);
+      InfoSubjectsCache.revision.removeListener(_onSubjectsCacheInvalidated);
+      InfoSubjectsCache.detachMemoryClear(clearMemoryCache);
+    }
     super.dispose();
   }
 
@@ -776,12 +848,13 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
 
   Future<void> _reloadQuietly() {
     if (_reloadInFlight != null) return _reloadInFlight!;
+    final revision = _modeRevision;
 
     late final Future<void> future;
     future = () async {
       try {
         final fresh = await _loadFreshAndCache();
-        if (!mounted) return;
+        if (!mounted || _cacheOnly || revision != _modeRevision) return;
         if (_sameDifficultySnapshot(_latestState, fresh)) {
           _latestState = fresh;
           return;
@@ -801,6 +874,14 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _openSubjectAndRefresh(UsefulSubject item) async {
+    if (_cacheOnly) {
+      final caps = widget.cachedCapabilities;
+      final permit = caps?.capture(SessionCapability.cachedRead);
+      if (caps == null || permit == null || caps.mode != SessionCapabilityMode.cacheOnly) return;
+      await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) =>
+        _SavedSubjectDetails(subject: item, capabilities: caps, permit: permit)));
+      return;
+    }
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => subjectInfoScreenFor(item),
@@ -840,12 +921,18 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
     return true;
   }
 
-  Future<InfoPlanState> _loadFresh() async {
+  Future<InfoPlanState> _loadFresh({bool strictContext = false, bool Function()? valid}) async {
     if (widget.planLoader != null) {
-      return widget.planLoader!();
+      final value = await widget.planLoader!();
+      if (valid != null && !valid()) throw StateError('Subject plan session changed');
+      return value;
     }
 
-    final contextData = await _academicContextService.loadFresh();
+    final contextData = strictContext
+        ? await (kDebugMode && widget.debugStrictContextLoader != null
+            ? widget.debugStrictContextLoader!() : _academicContextService.loadFreshStrict())
+        : await _academicContextService.loadFresh();
+    if (valid != null && !valid()) throw StateError('Subject plan session changed');
     final groupId = contextData.groupId;
 
     if (groupId == null) {
@@ -856,7 +943,8 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
       );
     }
 
-    final subjects = await _subjectsRepository.load(groupId: groupId);
+    final subjects = await _subjectsRepository.load(groupId: groupId, isCurrent: valid);
+    if (valid != null && !valid()) throw StateError('Subject plan session changed');
 
     return InfoPlanState(
       contextData: contextData,
@@ -865,7 +953,13 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
   }
 
   Future<InfoPlanState> _loadWithCache() async {
+    final revision = _modeRevision;
+    final barrier = widget.onlineBarrier;
     final cached = await _readCachedPlan();
+    if (!_onlineCurrent || revision != _modeRevision ||
+        !identical(barrier, widget.onlineBarrier)) {
+      throw StateError('Subject plan online work stopped');
+    }
     if (cached != null) {
       _latestState = cached;
       _refreshSilently();
@@ -874,16 +968,88 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
     return _loadFreshAndCache();
   }
 
+  Future<void> _trackOnline(Future<void> Function() action) async {
+    if (!_onlineCurrent) return;
+    final barrier = widget.onlineBarrier;
+    if (barrier == null) {
+      await action();
+    } else {
+      await barrier.run(action);
+    }
+  }
+
   Future<InfoPlanState> _loadFreshAndCache() async {
-    final fresh = await _loadFresh();
+    final barrier = widget.onlineBarrier;
+    if (barrier == null) return _loadFreshAndCacheBody();
+    final result = await barrier.run(_loadFreshAndCacheBody);
+    if (result == null) throw StateError('Subject plan online work stopped');
+    return result;
+  }
+
+  Future<InfoPlanState> _loadFreshAndCacheBody() async {
+    final revision = _modeRevision;
+    final barrier = widget.onlineBarrier;
+    final cache = kDebugMode ? widget.debugOnlineStore ?? ProjectChatServerCache.qaInstance
+        : ProjectChatServerCache.qaInstance;
+    final snapshotStore = cache == null || widget.planLoader != null ||
+        (widget.academicContextService != null && widget.debugStrictContextLoader == null)
+        ? null : OfflineSubjectCatalog(cache);
+    final owner = snapshotStore == null ? null : cache!.scope.capture();
+    bool current() => _onlineCurrent && identical(barrier, widget.onlineBarrier) && revision == _modeRevision &&
+        (snapshotStore == null || owner != null && cache!.scope.isCurrent(owner));
+    final ticket = await snapshotStore?.begin(isCurrent: current);
+    InfoPlanState fresh;
+    var strictSucceeded = false;
+    if (ticket != null) {
+      try {
+        fresh = await _loadFresh(strictContext: true, valid: current);
+        strictSucceeded = true;
+      } catch (error) {
+        final denied = error is AuthException && (error.statusCode == '401' || error.statusCode == '403') ||
+            error is PostgrestException && const {'401','403','42501','PGRST301','PGRST302','PGRST303'}.contains(error.code);
+        if (denied) await snapshotStore!.deny(ticket);
+        if (!current()) rethrow;
+        fresh = await _loadFresh(valid: current);
+      }
+    } else {
+      fresh = await _loadFresh(valid: current);
+    }
+    if (!current()) throw StateError('Subject plan session changed');
     _latestState = fresh;
     if (fresh.warning == null) await _saveCachedPlan(fresh);
+    if (strictSucceeded && ticket != null && fresh.warning == null &&
+        fresh.contextData.loadWarning == null) {
+      await snapshotStore!.commit(ticket, _planToJson(fresh));
+    }
     return fresh;
   }
 
+  Future<InfoPlanState> _readOfflinePlan() async {
+    final cache = widget.cachedStore, caps = widget.cachedCapabilities;
+    if (cache != null && caps != null) {
+      final map = await OfflineSubjectCatalog(cache).read(caps);
+      if (map != null) {
+        try { return _planFromJson(map); } catch (_) {}
+      }
+    }
+    return const InfoPlanState(contextData: AcademicContext.empty(), subjects: [],
+        warning: 'Предметы ещё не сохранены. Откройте «Базу» при подключении к сети.');
+  }
+
+  void _onOfflineAccessChanged() {
+    if (!mounted || !_cacheOnly) return;
+    final caps = widget.cachedCapabilities;
+    if (caps?.mode != SessionCapabilityMode.cacheOnly ||
+        caps?.capture(SessionCapability.cachedRead) == null) {
+      setState(() { _latestState = null; _future = Future.value(const InfoPlanState(
+        contextData: AcademicContext.empty(), subjects: [], warning: 'Сохранённые предметы недоступны.')); });
+    }
+  }
+
   void _refreshSilently() {
+    final revision = _modeRevision;
     _loadFreshAndCache().then((fresh) {
-      if (!mounted) return;
+      if (!mounted || _cacheOnly || revision != _modeRevision) return;
       setState(() => _publishState(fresh));
     }, onError: (_) {
       // Keep last-good cache already shown on screen.
@@ -1024,7 +1190,9 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
                 child: StudentInfoHeader(
                   subtitle: _sectionSubtitle(_section),
                   sectionIcon: _sectionIcon(_section),
-                  onSectionTap: () => _showSectionSheet(context),
+                  onSectionTap: _cacheOnly ? () => ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Этот раздел доступен при подключении к сети.')))
+                    : () => _showSectionSheet(context),
                   onInfoTap: () => _showInfoSheet(context),
                 ),
               ),
@@ -1116,12 +1284,15 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
 
     return RefreshIndicator(
       onRefresh: () async {
-        setState(() => _future = _loadFreshAndCache());
+        setState(() => _future = _cacheOnly ? _readOfflinePlan() : _loadFreshAndCache());
         await _future;
       },
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
+          if (_cacheOnly) Padding(padding: const EdgeInsets.only(bottom: 12),
+            child: Text('Сохранённые предметы · без сети',
+              style: Theme.of(context).textTheme.bodySmall)),
           if (state.subjects.isEmpty)
             const _EmptyState(
               text: 'Предметы учебного плана пока не найдены',
@@ -1361,6 +1532,41 @@ class InfoPlanState {
       ..sort();
     return values;
   }
+}
+
+/// View only the fields actually saved with the subject list. Materials and
+/// actions that require a server are explicitly not represented as empty.
+class _SavedSubjectDetails extends StatelessWidget {
+  const _SavedSubjectDetails({required this.subject, required this.capabilities, required this.permit});
+  final UsefulSubject subject;
+  final SessionCapabilities capabilities;
+  final CapabilityPermit permit;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: capabilities,
+    builder: (context, _) {
+      final allowed = capabilities.mode == SessionCapabilityMode.cacheOnly &&
+          capabilities.permits(permit, SessionCapability.cachedRead);
+      if (!allowed) return const Scaffold(body: Center(child: Text('Сохранённый предмет недоступен.')));
+      return Scaffold(appBar: AppBar(title: const Text('Предмет')),
+        body: ListView(padding: const EdgeInsets.all(20), children: [
+          Text(subject.title, style: Theme.of(context).textTheme.headlineSmall),
+          const SizedBox(height: 8),
+          const Text('Сохранённая информация · без сети'),
+          if (subject.controlForm.trim().isNotEmpty) ...[
+            const SizedBox(height: 16), Text(subject.controlForm),
+          ],
+          if (subject.teacherName.trim().isNotEmpty) ...[
+            const SizedBox(height: 16), Text('Преподаватель: ${subject.teacherName}'),
+          ],
+          if (subject.description.trim().isNotEmpty) ...[
+            const SizedBox(height: 20), Text(subject.description),
+          ],
+          const SizedBox(height: 20),
+          const Text('Материалы и другие сведения могут быть недоступны без сети.'),
+        ]));
+    });
 }
 
 String _sectionSubtitle(_UsefulSection section) {

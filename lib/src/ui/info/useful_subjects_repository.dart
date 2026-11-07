@@ -28,20 +28,28 @@ class UsefulSubjectsRepository {
 
   SupabaseClient get _sb => _client ??= Supabase.instance.client;
 
-  Future<List<UsefulSubject>> load({required String groupId}) async {
+  Future<List<UsefulSubject>> load({required String groupId, bool Function()? isCurrent}) async {
+    void checkCurrent() {
+      if (isCurrent != null && !isCurrent()) throw StateError('Subject plan session changed');
+    }
+    checkCurrent();
     Object? rpcError;
 
     try {
       final rows = await _loadRpcRows();
+      checkCurrent();
       if (rows.isNotEmpty) {
         return rows.map(UsefulSubject.fromRpcMap).toList(growable: false);
       }
     } catch (error) {
+      checkCurrent();
       rpcError = error;
     }
 
     try {
+      checkCurrent();
       final fallbackRows = await _loadFallbackRows(groupId);
+      checkCurrent();
       return fallbackRows
           .map(UsefulSubject.fromFallbackMap)
           .toList(growable: false);

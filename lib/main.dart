@@ -25,6 +25,7 @@ import 'src/ui/splash/splash_screen.dart';
 import 'src/ui/authentication/authenticate_screen.dart';
 import 'src/ui/authentication/screens/change_password_screen.dart';
 import 'src/ui/navigation/navigation_screen.dart';
+import 'src/ui/info/info_screen.dart';
 import 'src/ui/profile/profile_screen.dart';
 import 'src/ui/profile/edit_profile_screen.dart';
 import 'src/ui/profile/personal_diary_screen.dart';
@@ -265,8 +266,8 @@ final GoRouter appRouter = GoRouter(
                 cachedReader: reader,
                 homeContent: _qaHomeContent,
                 homeContentCapabilities: caps,
-                cachedInfo: chats == null ? null : (_) => CachedTeamChatDirectory(
-                    store: chats, capabilities: caps, subjectsOnly: true),
+                cachedInfo: chats == null ? null : (_) => InfoScreen(
+                    cachedStore: chats, cachedCapabilities: caps),
                 cachedLearning: chats == null ? null : (_) => CachedTeamChatDirectory(
                     store: chats, capabilities: caps, subjectsOnly: false),
                 cachedProfile: chats == null ? null : (_) => ProfileScreen(
@@ -320,8 +321,8 @@ final GoRouter appRouter = GoRouter(
                       cachedReader: reader,
                       homeContent: _qaHomeContent,
                       homeContentCapabilities: caps,
-                      cachedInfo: chats == null ? null : (_) => CachedTeamChatDirectory(
-                        store: chats, capabilities: caps, subjectsOnly: true),
+                      cachedInfo: chats == null ? null : (_) => InfoScreen(
+                        cachedStore: chats, cachedCapabilities: caps),
                       cachedLearning: chats == null ? null : (_) => CachedTeamChatDirectory(
                         store: chats, capabilities: caps, subjectsOnly: false),
                       cachedProfile: chats == null
