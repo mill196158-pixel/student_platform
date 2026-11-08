@@ -17,6 +17,9 @@ import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:student_platform/src/ui/home/home_content_coordinator.dart';
 import 'package:student_platform/src/ui/info/home_content_snapshot_store.dart';
 import 'package:student_platform/src/ui/home/home_content_verified_loader.dart';
+import 'package:student_platform/src/ui/home/home_dashboard_service.dart';
+import 'package:student_platform/src/ui/home/news_sqlite_image_store.dart';
+import 'package:student_platform/src/ui/home/public_news_image_cache.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class _Storage extends LocalStorage {
@@ -33,6 +36,7 @@ class _Storage extends LocalStorage {
   @override
   Future<void> removePersistedSession() async => raw = null;
 }
+
 
 class _DelayedDenyStore implements HomeContentSnapshotStore {
   _DelayedDenyStore(this.inner);
@@ -136,6 +140,7 @@ void main() {
       'id': 'id',
       'title': 'News',
       'created_at': '2026-11-06T00:00:00Z',
+      'variant': 'imageOverlay',
       'image_path': 'private/path',
       'unexpected_secret': 'remove'
     }
@@ -152,7 +157,7 @@ void main() {
     };
     final result = await loader().load(HomeContentSection.news);
     expect(result.status, HomeContentLoadStatus.confirmed);
-    expect(result.rows.single.containsKey('image_path'), false);
+    expect(result.rows.single['image_path'], 'private/path');
     expect(jsonEncode(result.rows), isNot(contains('secret')));
     expect(result.media[result.rows.single['_offline_image']], [1, 2, 3]);
   });
@@ -210,7 +215,7 @@ void main() {
     expect(barrier.activeCount, 0);
   });
 
-  test('online warm persists scoped bytes for local read after SQLite reopen',
+  test('online warm survives SQLite reopen and validates offline cover',
       () async {
     if (Platform.isWindows) {
       open.overrideFor(
@@ -229,11 +234,12 @@ void main() {
         scope: scope,
         currentBinding: binding,
         project: SupabaseConfig.url);
+    final png = base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/afoAAAAASUVORK5CYII=');
     handler = (r) async {
       if (r.url.path.contains('/rpc/')) return jsonResponse(r, news);
       if (r.url.path.contains('/functions/'))
         return jsonResponse(r, {'signedUrl': '${SupabaseConfig.url}/file'});
-      return http.Response.bytes([1, 2, 3], 200, request: r);
+      return http.Response.bytes(png, 200, request: r);
     };
     await HomeContentCoordinator(
             store: store(), scope: scope, httpClient: transport)
@@ -248,7 +254,25 @@ void main() {
         true);
     final snapshot = await store().read('news', caps);
     expect(snapshot?.rows.single['title'], 'News');
-    expect(snapshot?.images[snapshot.rows.single['_offline_image']], [1, 2, 3]);
+    expect(snapshot?.images[snapshot.rows.single['_offline_image']], png);
+    expect(snapshot!.rows.single['image_path'], 'private/path');
+    final imageDb = await databaseFactoryFfi.openDatabase('${dir.path}/images.db');
+    final imageStore = NewsSqliteImageStore(database: imageDb,
+        root: Directory('${dir.path}/images'));
+    final cache = PublicNewsImageCache(openStore: () async => imageStore);
+    final service = HomeDashboardService(client: Supabase.instance.client,
+        publicImageCache: cache, httpClient: transport);
+    final row = snapshot.rows.single;
+    final item = mapPublishedNews(row).copyWith(
+        imageBytes: snapshot.images[row['_offline_image']]);
+    expect((await service.validateNewsImages([item])).single.imageBytes, png);
+    final noPath = Map<String, dynamic>.from(row)..remove('image_path');
+    final old = mapPublishedNews(noPath).copyWith(imageBytes: item.imageBytes);
+    expect((await service.validateNewsImages([old])).single.imageBytes, isNull);
+    await cache.invalidate(item.imagePath);
+    expect((await service.validateNewsImages([item])).single.imageBytes, isNull);
+    service.dispose();
+    await imageDb.close();
     caps.block();
     expect(await store().read('news', caps), isNull);
     caps.dispose();

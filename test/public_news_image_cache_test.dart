@@ -25,6 +25,25 @@ class _GatedLegacy extends NewsImageDiskCache {
   Future<Uint8List?> peekLegacyReadOnly(NewsImageCacheKey key) { entered.complete(); return release.future; }
 }
 
+class _CountingBudget extends OptionalImageCacheBudget {
+  _CountingBudget({required super.roots});
+  int calls = 0;
+  @override
+  void Function()? reserve(int bytes) { calls++; return super.reserve(bytes); }
+}
+
+class _CountingStore extends NewsSqliteImageStore {
+  _CountingStore({required super.database, required super.root});
+  int calls = 0;
+  final written = Completer<void>();
+  @override
+  Future<bool> put(NewsImageCacheKey key, Uint8List bytes, NewsImageWriteTicket ticket) async {
+    calls++;
+    if (!written.isCompleted) written.complete();
+    return true;
+  }
+}
+
 class _ServiceMount extends StatefulWidget {
   const _ServiceMount({required this.create, required this.observed});
   final HomeDashboardService Function() create;
@@ -79,6 +98,50 @@ void main() {
     final result = await a.read(key, legacyFallback: () async { fallbackCalls++; return Uint8List.fromList([2]); });
     expect(result.state, NewsImageReadState.miss);
     expect(fallbackCalls, 0);
+  });
+
+  test('8 MiB image is admitted for optional persistence', () async {
+    final spy = _CountingStore(database: dbA, root: Directory('${root.path}/blobs'));
+    final counting = _CountingBudget(roots: () async => [root]);
+    await counting.refreshForTesting();
+    final cache = PublicNewsImageCache(legacy: legacy, openStore: () async => spy, budget: counting);
+    final bytes = Uint8List(PublicNewsImageCache.maxOptionalImageBytes);
+    expect(await cache.getOrFetch(key, () async => bytes), same(bytes));
+    await spy.written.future.timeout(const Duration(seconds: 2));
+    expect(counting.calls, 1);
+    expect(spy.calls, 1);
+  });
+
+  for (final pendingScan in [false, true]) {
+    test('oversized image bypasses optional write with ${pendingScan ? 'pending' : 'ready'} scan', () async {
+      final roots = Completer<List<Directory>>();
+      if (!pendingScan) roots.complete([root]);
+      final counting = _CountingBudget(roots: () => roots.future);
+      final scan = counting.refreshForTesting();
+      if (!pendingScan) await scan;
+      final spy = _CountingStore(database: dbA, root: Directory('${root.path}/blobs'));
+      final cache = PublicNewsImageCache(legacy: legacy, openStore: () async => spy, budget: counting);
+      final bytes = Uint8List(PublicNewsImageCache.maxOptionalImageBytes + 1);
+      expect(await cache.getOrFetch(key, () async => bytes), same(bytes));
+      expect(counting.calls, 0);
+      expect(spy.calls, 0);
+      if (pendingScan) { roots.complete([root]); await scan; }
+    });
+  }
+
+  test('oversized download completing after invalidation is not displayed or written', () async {
+    final spy = _CountingStore(database: dbA, root: Directory('${root.path}/blobs'));
+    final counting = _CountingBudget(roots: () async => [root]);
+    await counting.refreshForTesting();
+    final cache = PublicNewsImageCache(legacy: legacy, openStore: () async => spy, budget: counting);
+    final entered = Completer<void>(), response = Completer<Uint8List?>();
+    final pending = cache.getOrFetch(key, () { entered.complete(); return response.future; });
+    await entered.future;
+    await b.invalidate(key.path);
+    response.complete(Uint8List(PublicNewsImageCache.maxOptionalImageBytes + 1));
+    expect(await pending, isNull);
+    expect(counting.calls, 0);
+    expect(spy.calls, 0);
   });
 
   test('default services share one app-lifetime news coordinator', () async {

@@ -164,6 +164,12 @@ class HomeContentVerifiedLoader {
           }
           final mediaKey = '${asset.$1}:${sha256.convert(bytes)}';
           media[mediaKey] = bytes;
+          // Preserve the exact Storage identity only after its authorised
+          // download succeeded. Cold reads still consult the suppression
+          // index using path + version before displaying these bytes.
+          if (section == HomeContentSection.news) {
+            safeRow['image_path'] = asset.$2;
+          }
           safeRow[asset.$1.endsWith(':icon')
               ? '_offline_icon'
               : '_offline_image'] = mediaKey;

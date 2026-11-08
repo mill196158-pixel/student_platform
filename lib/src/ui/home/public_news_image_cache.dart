@@ -14,6 +14,7 @@ import 'news_sqlite_image_store.dart';
 class PublicNewsImageCache {
   /// One default coordinator per Dart isolate; screens do not own it.
   static final PublicNewsImageCache shared = PublicNewsImageCache();
+  static const int maxOptionalImageBytes = 8 * 1024 * 1024;
 
   PublicNewsImageCache({NewsImageDiskCache? legacy,
       Future<NewsSqliteImageStore> Function()? openStore,
@@ -118,6 +119,8 @@ class PublicNewsImageCache {
       if (!await store.isCurrent(key, ticket).timeout(operationTimeout)) return null;
     } catch (_) { return null; }
     if (!current()) return null;
+    // Display large downloads, but do not copy or persist them as optional cache.
+    if (bytes.length > maxOptionalImageBytes) return bytes;
     final release = _budget.reserve(bytes.length);
     if (release != null) {
       if (_pendingWrites >= 16) { release(); return bytes; }
