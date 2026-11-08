@@ -12,6 +12,9 @@ import 'news_sqlite_image_store.dart';
 
 /// Public news only. Legacy is read-only and only under the SQLite guard.
 class PublicNewsImageCache {
+  /// One default coordinator per Dart isolate; screens do not own it.
+  static final PublicNewsImageCache shared = PublicNewsImageCache();
+
   PublicNewsImageCache({NewsImageDiskCache? legacy,
       Future<NewsSqliteImageStore> Function()? openStore,
       OptionalImageCacheBudget? budget,
@@ -33,17 +36,26 @@ class PublicNewsImageCache {
 
   static Future<NewsSqliteImageStore> _openDefault() async {
     final root = await getTemporaryDirectory();
-    final db = await sqlite.openDatabase('${await sqlite.getDatabasesPath()}/public_news_index_v2.db');
-    return NewsSqliteImageStore(database: db,
+    return NewsSqliteImageStore.openOwned(
+        databasePath: '${await sqlite.getDatabasesPath()}/public_news_index_v2.db',
         root: Directory('${root.path}/public_news_blobs_v2'));
   }
 
   Future<NewsSqliteImageStore> _store() async {
     final opening = _opening ??= _openStore();
-    try { return await opening; } catch (_) {
+    late final NewsSqliteImageStore store;
+    try {
+      store = await opening;
+    } catch (_) {
       if (identical(_opening, opening)) _opening = null;
       rethrow;
     }
+    if (store.usable) return store;
+    await store.waitForOwnedClose();
+    if (identical(_opening, opening)) _opening = null;
+    final replacement = await (_opening ??= _openStore());
+    if (!replacement.usable) throw StateError('Image index unavailable');
+    return replacement;
   }
 
   Future<NewsImageReadResult> read(NewsImageCacheKey key,

@@ -25,6 +25,28 @@ class _GatedLegacy extends NewsImageDiskCache {
   Future<Uint8List?> peekLegacyReadOnly(NewsImageCacheKey key) { entered.complete(); return release.future; }
 }
 
+class _ServiceMount extends StatefulWidget {
+  const _ServiceMount({required this.create, required this.observed});
+  final HomeDashboardService Function() create;
+  final List<PublicNewsImageCache> observed;
+  @override
+  State<_ServiceMount> createState() => _ServiceMountState();
+}
+
+class _ServiceMountState extends State<_ServiceMount> {
+  late final HomeDashboardService service;
+  @override
+  void initState() {
+    super.initState();
+    service = widget.create();
+    widget.observed.add(service.debugPublicImageCache);
+  }
+  @override
+  void dispose() { service.dispose(); super.dispose(); }
+  @override
+  Widget build(BuildContext context) => const SizedBox();
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
@@ -57,6 +79,55 @@ void main() {
     final result = await a.read(key, legacyFallback: () async { fallbackCalls++; return Uint8List.fromList([2]); });
     expect(result.state, NewsImageReadState.miss);
     expect(fallbackCalls, 0);
+  });
+
+  test('default services share one app-lifetime news coordinator', () async {
+    final httpClient = MockClient((_) async => http.Response('', 503));
+    final client = SupabaseClient('https://example.invalid', 'synthetic', httpClient: httpClient);
+    HomeDashboardService service() => HomeDashboardService(client: client,
+        scheduleRepository: ScheduleRepository(client: client),
+        learningRepository: SupabaseLearningRepository(client: client), httpClient: httpClient);
+    final first = service(), second = service();
+    expect(identical(first.debugPublicImageCache, second.debugPublicImageCache), isTrue);
+    expect(identical(first.debugPublicImageCache, PublicNewsImageCache.shared), isTrue);
+    first.dispose(); second.dispose(); await client.dispose();
+  });
+
+  testWidgets('repeated widget mounts reuse the default coordinator', (tester) async {
+    final httpClient = MockClient((_) async => http.Response('', 503));
+    final client = SupabaseClient('https://example.invalid', 'synthetic', httpClient: httpClient,
+        authOptions: const AuthClientOptions(autoRefreshToken: false));
+    HomeDashboardService create() => HomeDashboardService(client: client,
+        scheduleRepository: ScheduleRepository(client: client),
+        learningRepository: SupabaseLearningRepository(client: client), httpClient: httpClient);
+    final observed = <PublicNewsImageCache>[];
+    for (var i = 0; i < 5; i++) {
+      await tester.pumpWidget(_ServiceMount(create: create, observed: observed));
+      await tester.pumpWidget(const SizedBox());
+    }
+    expect(observed, hasLength(5));
+    expect(observed.every((item) => identical(item, PublicNewsImageCache.shared)), isTrue);
+    unawaited(client.dispose());
+  });
+
+  test('disposing one service does not close supplied shared cache or cancel fetch', () async {
+    final httpClient = MockClient((_) async => http.Response('', 503));
+    final client = SupabaseClient('https://example.invalid', 'synthetic', httpClient: httpClient);
+    HomeDashboardService service() => HomeDashboardService(client: client,
+        scheduleRepository: ScheduleRepository(client: client),
+        learningRepository: SupabaseLearningRepository(client: client),
+        publicImageCache: a, httpClient: httpClient);
+    final first = service(), second = service();
+    final started = Completer<void>(), response = Completer<Uint8List?>();
+    final pending = a.getOrFetch(key, () { started.complete(); return response.future; });
+    await started.future;
+    first.dispose();
+    response.complete(Uint8List.fromList([2]));
+    expect(await pending, [2]);
+    expect(dbA.isOpen, isTrue);
+    expect(identical(second.debugPublicImageCache, a), isTrue);
+    second.dispose(); await client.dispose();
+    await Future<void>.delayed(const Duration(milliseconds: 100));
   });
 
   test('same-instance invalidation fences an already running legacy read', () async {
@@ -135,6 +206,45 @@ void main() {
     expect(await secondFuture, [2]);
     expect(await joined, [2]);
     expect(secondCalls, 1);
+  });
+
+  test('ambiguous commit closes only owned connection before reopening', () async {
+    final path = '${root.path}/reopen.db', blobRoot = Directory('${root.path}/reopen-blobs');
+    final owned = await NewsSqliteImageStore.openOwned(databasePath: path, root: blobRoot, factory: databaseFactoryFfi);
+    final reader = await databaseFactoryFfi.openDatabase(path, options: OpenDatabaseOptions(singleInstance: false));
+    final replacements = <NewsSqliteImageStore>[];
+    var opens = 0;
+    final cache = PublicNewsImageCache(legacy: legacy, budget: budget, openStore: () async {
+      opens++;
+      if (opens == 1) return owned;
+      final fresh = await NewsSqliteImageStore.openOwned(databasePath: path, root: blobRoot, factory: databaseFactoryFfi);
+      replacements.add(fresh);
+      return fresh;
+    });
+    try {
+      await owned.database.rawQuery('PRAGMA journal_mode=DELETE');
+      expect(await owned.put(key, Uint8List.fromList([8]), await owned.capture(key)), isTrue);
+      expect((await cache.read(key)).bytes, [8]);
+      final ticket = await owned.capture(key);
+      await reader.execute('BEGIN'); await reader.rawQuery('SELECT * FROM news_store_images');
+      final entered = Completer<void>(), proceed = Completer<void>();
+      owned.debugAfterBlobRename = () async { entered.complete(); await proceed.future; };
+      final write = owned.put(key, Uint8List.fromList([1]), ticket).then((v) => v, onError: (Object _) => false);
+      await entered.future;
+      final queuedRead = cache.read(key);
+      proceed.complete();
+      expect(await write, isFalse);
+      expect((await queuedRead).state, NewsImageReadState.unknown);
+      await reader.execute('COMMIT');
+      final recovered = await cache.read(key);
+      expect(recovered.bytes, anyOf(equals([8]), equals([1])));
+      expect(opens, 2);
+      expect(owned.database.isOpen, isFalse);
+    } finally {
+      if (owned.database.isOpen) await owned.database.close();
+      await reader.close();
+      for (final replacement in replacements) { await replacement.database.close(); }
+    }
   });
 
   test('slow budget scan does not delay the fetched image or resurrect after clear', () async {

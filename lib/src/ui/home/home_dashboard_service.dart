@@ -61,7 +61,8 @@ class HomeDashboardService {
               currentUserId: () =>
                   (client ?? Supabase.instance.client).auth.currentUser?.id,
             ),
-        _publicImages = publicImageCache ?? PublicNewsImageCache(legacy: imageCache),
+        _publicImages = publicImageCache ??
+            (imageCache == null ? PublicNewsImageCache.shared : PublicNewsImageCache(legacy: imageCache)),
         _http = httpClient ?? http.Client(),
         _ownsHttpClient = httpClient == null;
 
@@ -118,6 +119,8 @@ class HomeDashboardService {
   final SupabaseLearningRepository _learningRepository;
   final PublishedNewsCache _newsCache;
   final PublicNewsImageCache _publicImages;
+  @visibleForTesting
+  PublicNewsImageCache get debugPublicImageCache => _publicImages;
   final http.Client _http;
   final bool _ownsHttpClient;
   final AuthSessionScope? _sessionScope;

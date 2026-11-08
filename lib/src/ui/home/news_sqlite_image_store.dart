@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -25,9 +26,32 @@ class NewsImageReadResult {
 /// A new-namespace store. No legacy files or orphaned blobs are deleted.
 /// Callers must use the same coordination database for this namespace.
 class NewsSqliteImageStore {
-  NewsSqliteImageStore({required this.database, required this.root});
+  NewsSqliteImageStore({required this.database, required this.root}) : ownsDatabase = false;
+  NewsSqliteImageStore._owned(this.database, this.root) : ownsDatabase = true;
+  static Future<NewsSqliteImageStore> openOwned({required String databasePath,
+      required Directory root, sqlite.DatabaseFactory? factory}) async {
+    final db = await (factory ?? sqlite.databaseFactory).openDatabase(databasePath,
+        options: sqlite.OpenDatabaseOptions(singleInstance: false));
+    return NewsSqliteImageStore._owned(db, root);
+  }
   final sqlite.Database database;
   final Directory root;
+  final bool ownsDatabase;
+  bool _poisoned = false;
+  Future<void> _tail = Future<void>.value();
+  Future<void>? _closing;
+  bool get usable => !_poisoned && database.isOpen;
+
+  Future<void> waitForOwnedClose() async {
+    if (!_poisoned || !ownsDatabase || _closing == null) throw StateError('No owned close');
+    await _closing;
+    if (database.isOpen) throw StateError('Image database still open');
+  }
+
+  Future<void> _poison() async {
+    _poisoned = true;
+    if (ownsDatabase) await (_closing ??= database.close());
+  }
   @visibleForTesting
   Future<void> Function()? debugAfterBlobRename;
   @visibleForTesting
@@ -96,22 +120,55 @@ class NewsSqliteImageStore {
     return root.resolveSymbolicLinks();
   }
 
-  Future<T> _transaction<T>(Future<T> Function(sqlite.Transaction) action) async {
-    for (var attempt = 0;; attempt++) {
-      var started = false;
-      try {
-        return await database.transaction((tx) async {
-          started = true;
-          return action(tx);
-        });
-      } catch (error) {
-        // Once entered, the callback may have written a blob or committed
-        // ambiguously. It must never be replayed automatically.
-        if (started || attempt >= 39 ||
-            !error.toString().toLowerCase().contains('database is locked')) rethrow;
-        await Future<void>.delayed(const Duration(milliseconds: 25));
+  Future<T> _transaction<T>(Future<T> Function(sqlite.Transaction) action) {
+    var allowed = true, started = false;
+    final expiry = Completer<T>();
+    final timer = Timer(const Duration(milliseconds: 500), () {
+      if (!started) {
+        allowed = false;
+        expiry.completeError(TimeoutException('Image index acquisition timed out'));
       }
-    }
+    });
+    final operation = _tail.then((_) async {
+      if (!allowed || !usable) throw StateError('Image index unavailable');
+      if (ownsDatabase) await database.rawQuery('PRAGMA busy_timeout=100');
+      if (!allowed || !usable) throw StateError('Image index unavailable');
+      for (var attempt = 0;; attempt++) {
+        var entered = false, actionCompleted = false;
+        Object? actionError;
+        try {
+          return await database.transaction((tx) async {
+            entered = true;
+            try {
+              if (!allowed || !usable) throw StateError('Image index acquisition cancelled');
+              started = true;
+              timer.cancel();
+              final value = await action(tx);
+              actionCompleted = true;
+              return value;
+            } catch (error) {
+              actionError = error;
+              rethrow;
+            }
+          });
+        } catch (error) {
+          // A successful callback followed by a failed COMMIT, or an error
+          // replacing its exception during rollback, poisons this handle.
+          if (entered && (actionCompleted ||
+              (actionError != null && !identical(actionError, error)))) {
+            await _poison();
+          }
+          if (entered || !allowed || attempt >= 39 ||
+              !error.toString().toLowerCase().contains('database is locked')) rethrow;
+          await Future<void>.delayed(const Duration(milliseconds: 25));
+        }
+      }
+    });
+    // Keep the queue until the real transaction and any owned close settle,
+    // even if the caller's acquisition deadline expires first.
+    _tail = operation.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+    operation.ignore();
+    return Future.any([operation, expiry.future]).whenComplete(timer.cancel);
   }
 
   Future<(int, int)> _generation(sqlite.Transaction tx, String namespace, String path) async {

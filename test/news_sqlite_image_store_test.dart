@@ -11,10 +11,10 @@ import 'package:student_ui/student_ui.dart';
 
 Future<void> _writeIsolated(String root, String path, int value) async {
   sqfliteFfiInit();
-  final db = await databaseFactoryFfi.openDatabase('$root/store.db',
-      options: OpenDatabaseOptions(singleInstance: false));
+  final store = await NewsSqliteImageStore.openOwned(databasePath: '$root/store.db',
+      root: Directory('$root/blobs'), factory: databaseFactoryFfi);
+  final db = store.database;
   try {
-    final store = NewsSqliteImageStore(database: db, root: Directory('$root/blobs'));
     final key = NewsImageCacheKey(path: path, version: '1');
     if (!await store.put(key, Uint8List.fromList([value]), await store.capture(key))) {
       throw StateError('Synthetic publication rejected');
@@ -22,18 +22,31 @@ Future<void> _writeIsolated(String root, String path, int value) async {
   } finally { await db.close(); }
 }
 
+Future<void> _holdDatabaseLock(List<Object> args) async {
+  final dbPath = args[0] as String, port = args[1] as SendPort;
+  final writeLock = args[2] as bool;
+  sqfliteFfiInit();
+  final db = await databaseFactoryFfi.openDatabase(dbPath, options: OpenDatabaseOptions(singleInstance: false));
+  final release = ReceivePort();
+  try {
+    await db.execute(writeLock ? 'BEGIN IMMEDIATE' : 'BEGIN');
+    await db.rawQuery('SELECT * FROM news_store_images');
+    port.send(release.sendPort);
+    await release.first;
+    await db.execute('COMMIT');
+    port.send('released');
+  } finally { release.close(); await db.close(); }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
   test('two handles preserve both publications and stale tickets are rejected', () async {
     final dir = await Directory.systemTemp.createTemp('news-store-');
-    final dbA = await databaseFactoryFfi.openDatabase('${dir.path}/store.db',
-        options: OpenDatabaseOptions(singleInstance: false));
-    final dbB = await databaseFactoryFfi.openDatabase('${dir.path}/store.db',
-        options: OpenDatabaseOptions(singleInstance: false));
+    final a = await NewsSqliteImageStore.openOwned(databasePath: '${dir.path}/store.db', root: Directory('${dir.path}/blobs'), factory: databaseFactoryFfi);
+    final b = await NewsSqliteImageStore.openOwned(databasePath: '${dir.path}/store.db', root: Directory('${dir.path}/blobs'), factory: databaseFactoryFfi);
+    final dbA = a.database, dbB = b.database;
     addTearDown(() async { await dbA.close(); await dbB.close(); await dir.delete(recursive: true); });
-    final a = NewsSqliteImageStore(database: dbA, root: Directory('${dir.path}/blobs'));
-    final b = NewsSqliteImageStore(database: dbB, root: Directory('${dir.path}/blobs'));
     final first = NewsImageCacheKey(path: 'first', version: '1');
     final second = NewsImageCacheKey(path: 'second', version: '1');
     final firstTicket = await a.capture(first);
@@ -58,6 +71,119 @@ void main() {
     final staleAll = await a.capture(second);
     await b.invalidate();
     expect(await a.put(second, Uint8List.fromList([4]), staleAll), isFalse);
+  });
+
+  test('same-worker reader contention fails closed without replaying write', () async {
+    final dir = await Directory.systemTemp.createTemp('news-store-commit-lock-');
+    final store = await NewsSqliteImageStore.openOwned(databasePath: '${dir.path}/store.db',
+        root: Directory('${dir.path}/blobs'), factory: databaseFactoryFfi);
+    final dbA = store.database;
+    final dbB = await databaseFactoryFfi.openDatabase('${dir.path}/store.db', options: OpenDatabaseOptions(singleInstance: false));
+    addTearDown(() async { await dbA.close(); await dbB.close(); await dir.delete(recursive: true); });
+    await dbA.rawQuery('PRAGMA journal_mode=DELETE');
+    final key = NewsImageCacheKey(path: 'image', version: '1');
+    expect(await store.put(key, Uint8List.fromList([8]), await store.capture(key)), isTrue);
+    final ticket = await store.capture(key);
+    await dbB.execute('BEGIN');
+    await dbB.rawQuery('SELECT * FROM news_store_images');
+    var writes = 0;
+    store.debugAfterBlobRename = () async { writes++; };
+    final pending = store.put(key, Uint8List.fromList([1]), ticket)
+        .then((value) => value, onError: (Object _) => false);
+    expect(await pending.timeout(const Duration(seconds: 2)), isFalse);
+    await dbB.execute('COMMIT');
+    await store.waitForOwnedClose().timeout(const Duration(seconds: 2));
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(writes, 1);
+    List<Map<String, Object?>>? rows;
+    for (var i = 0; i < 40 && rows == null; i++) {
+      try { rows = await dbB.query('news_store_images', where: 'id=?', whereArgs: [key.id]); }
+      catch (_) { await Future<void>.delayed(const Duration(milliseconds: 50)); }
+    }
+    expect(rows, isNotNull, reason: 'late cancelled BEGIN must eventually roll back');
+    expect(rows, hasLength(1));
+    expect(await File('${dir.path}/blobs/${rows!.single['filename']}').readAsBytes(), [8]);
+  });
+
+  test('busy timeout is connection-specific on the dedicated database', () async {
+    final dir = await Directory.systemTemp.createTemp('news-store-pragma-');
+    final store = await NewsSqliteImageStore.openOwned(databasePath: '${dir.path}/store.db', root: Directory('${dir.path}/blobs'), factory: databaseFactoryFfi);
+    final dbA = store.database;
+    final dbB = await databaseFactoryFfi.openDatabase('${dir.path}/store.db', options: OpenDatabaseOptions(singleInstance: false));
+    addTearDown(() async { await dbA.close(); await dbB.close(); await dir.delete(recursive: true); });
+    await dbB.rawQuery('PRAGMA busy_timeout=4321');
+    await store.capture(NewsImageCacheKey(path: 'image', version: '1'));
+    expect((await dbB.rawQuery('PRAGMA busy_timeout')).single.values.single, 4321);
+    expect((await dbA.rawQuery('PRAGMA busy_timeout')).single.values.single, 100);
+  });
+
+  test('ambiguous commit poisons injected shared handle without closing it', () async {
+    final dir = await Directory.systemTemp.createTemp('news-store-injected-');
+    final dbA = await databaseFactoryFfi.openDatabase('${dir.path}/store.db', options: OpenDatabaseOptions(singleInstance: false));
+    final dbB = await databaseFactoryFfi.openDatabase('${dir.path}/store.db', options: OpenDatabaseOptions(singleInstance: false));
+    addTearDown(() async { await dbA.close(); await dbB.close(); await dir.delete(recursive: true); });
+    await dbA.rawQuery('PRAGMA journal_mode=DELETE');
+    await dbA.rawQuery('PRAGMA busy_timeout=10');
+    final store = NewsSqliteImageStore(database: dbA, root: Directory('${dir.path}/blobs'));
+    final key = NewsImageCacheKey(path: 'image', version: '1');
+    final ticket = await store.capture(key);
+    expect((await dbA.rawQuery('PRAGMA busy_timeout')).single.values.single, 10);
+    await dbB.execute('BEGIN');
+    await dbB.rawQuery('SELECT * FROM news_store_images');
+    final result = store.put(key, Uint8List.fromList([1]), ticket).then((v) => v, onError: (Object _) => false);
+    expect(await result.timeout(const Duration(seconds: 2)), isFalse);
+    expect(store.usable, isFalse);
+    expect(dbA.isOpen, isTrue);
+    await expectLater(store.read(key), throwsStateError);
+    await dbB.execute('COMMIT');
+  });
+
+  test('independent reader worker can release a brief commit lock', () async {
+    final dir = await Directory.systemTemp.createTemp('news-store-isolate-lock-');
+    final store = await NewsSqliteImageStore.openOwned(databasePath: '${dir.path}/store.db', root: Directory('${dir.path}/blobs'), factory: databaseFactoryFfi);
+    final db = store.database;
+    final port = ReceivePort();
+    Isolate? holder;
+    SendPort? control;
+    try {
+      await db.rawQuery('PRAGMA journal_mode=DELETE');
+      final key = NewsImageCacheKey(path: 'image', version: '1');
+      final ticket = await store.capture(key);
+      final ready = Completer<SendPort>(), done = Completer<void>();
+      port.listen((message) { if (message is SendPort) { ready.complete(message); } else if (message == 'released') { done.complete(); } });
+      holder = await Isolate.spawn(_holdDatabaseLock, [db.path, port.sendPort, false]);
+      control = await ready.future.timeout(const Duration(seconds: 5));
+      var writes = 0;
+      store.debugAfterBlobRename = () async { writes++; control!.send(true); };
+      expect(await store.put(key, Uint8List.fromList([1]), ticket), isTrue);
+      await done.future.timeout(const Duration(seconds: 5));
+      expect(writes, 1);
+      expect(await store.read(key), [1]);
+    } finally { control?.send(true); holder?.kill(priority: Isolate.immediate); port.close(); await db.close(); try { await dir.delete(recursive: true); } on FileSystemException {} }
+  });
+
+  test('long-held writer lock has bounded acquisition without executing write', () async {
+    final dir = await Directory.systemTemp.createTemp('news-store-long-lock-');
+    final store = await NewsSqliteImageStore.openOwned(databasePath: '${dir.path}/store.db', root: Directory('${dir.path}/blobs'), factory: databaseFactoryFfi);
+    final db = store.database;
+    final port = ReceivePort();
+    Isolate? holder;
+    SendPort? control;
+    try {
+      final key = NewsImageCacheKey(path: 'image', version: '1');
+      final ticket = await store.capture(key);
+      final ready = Completer<SendPort>(), done = Completer<void>();
+      port.listen((message) { if (message is SendPort) { ready.complete(message); } else if (message == 'released') { done.complete(); } });
+      holder = await Isolate.spawn(_holdDatabaseLock, [db.path, port.sendPort, true]);
+      control = await ready.future.timeout(const Duration(seconds: 5));
+      var writes = 0;
+      store.debugAfterBlobRename = () async { writes++; };
+      final watch = Stopwatch()..start();
+      await expectLater(store.put(key, Uint8List.fromList([1]), ticket), throwsA(anything));
+      expect(watch.elapsed, lessThan(const Duration(seconds: 2)));
+      expect(writes, 0);
+      control.send(true); await done.future.timeout(const Duration(seconds: 5));
+    } finally { control?.send(true); holder?.kill(priority: Isolate.immediate); port.close(); await db.close(); try { await dir.delete(recursive: true); } on FileSystemException {} }
   });
 
   test('failed publication preserves old index and corrupted blob is rejected', () async {
