@@ -191,6 +191,11 @@ class RefreshAdmissionClient extends http.BaseClient {
   bool _suspended = false;
   bool _drainTimedOut = false;
   int _activeAuth = 0;
+  int _refreshEntrants = 0;
+  int _refreshEntryRevision = 0;
+  /// Includes refresh sends waiting for admission, without changing drain semantics.
+  int get refreshEntrants => _refreshEntrants;
+  int get refreshEntryRevision => _refreshEntryRevision;
   int _nonRefreshAuthRevision = 0;
   int _suppressedAuthRevision = 0;
   final ValueNotifier<int> authSignals = ValueNotifier<int>(0);
@@ -350,6 +355,16 @@ class RefreshAdmissionClient extends http.BaseClient {
         _authFinished();
       }
     }
+    _refreshEntrants++;
+    _refreshEntryRevision++;
+    try {
+      return await _sendRefresh(request);
+    } finally {
+      _refreshEntrants--;
+    }
+  }
+
+  Future<http.StreamedResponse> _sendRefresh(http.BaseRequest request) async {
     final heldGeneration = _heldRefreshGeneration;
     Future<http.StreamedResponse> Function(http.Client, http.BaseRequest)? qaDispatch;
     if (qaAuthorityRequired) {

@@ -14,7 +14,8 @@ class QaCapabilityView extends StatefulWidget {
       required this.blockedBuilder,
       this.drainTimeout = const Duration(seconds: 10),
       this.coordinator,
-      this.retainOnlineForRotation = false});
+      this.retainOnlineForRotation = false,
+      this.suppressOffstageCachePromotion = false});
   final SessionCapabilities capabilities;
   final Widget Function(BuildContext, OnlineSideEffectBarrier) onlineBuilder;
   final WidgetBuilder cachedBuilder;
@@ -23,6 +24,8 @@ class QaCapabilityView extends StatefulWidget {
   final QaOnlineSideEffectCoordinator? coordinator;
   /// Experimental: retains State while blocked; does not stop child work.
   final bool retainOnlineForRotation;
+  /// The ordinary cold cache route may outlive the splash transition.
+  final bool suppressOffstageCachePromotion;
   @override
   State<QaCapabilityView> createState() => _QaCapabilityViewState();
 }
@@ -30,6 +33,8 @@ class QaCapabilityView extends StatefulWidget {
 class _QaCapabilityViewState extends State<QaCapabilityView> {
   late QaOnlineSideEffectCoordinator _coordinator;
   Widget? _retainedOnline;
+  OnlineSideEffectBarrier? _ownedBarrier;
+  bool _builtCached = false;
   bool _refreshScheduled = false;
 
   Widget _retained({required bool showOnline, required Widget fallback}) =>
@@ -70,12 +75,20 @@ class _QaCapabilityViewState extends State<QaCapabilityView> {
     _coordinatorChanged();
   }
 
+  void _closeOwned() {
+    final owned = _ownedBarrier;
+    _ownedBarrier = null;
+    if (owned != null && identical(owned, _coordinator.barrier)) {
+      _coordinator.close(timeout: widget.drainTimeout);
+    }
+  }
+
   @override
   void didUpdateWidget(covariant QaCapabilityView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.capabilities, widget.capabilities)) {
       oldWidget.capabilities.removeListener(_changed);
-      _coordinator.close(timeout: widget.drainTimeout);
+      _closeOwned();
       widget.capabilities.addListener(_changed);
     }
     // A mounted shell keeps its original coordinator; swapping it could let a
@@ -86,7 +99,7 @@ class _QaCapabilityViewState extends State<QaCapabilityView> {
   void dispose() {
     widget.capabilities.removeListener(_changed);
     _coordinator.removeListener(_coordinatorChanged);
-    _coordinator.close(timeout: widget.drainTimeout);
+    _closeOwned();
     super.dispose();
   }
 
@@ -98,6 +111,10 @@ class _QaCapabilityViewState extends State<QaCapabilityView> {
     final caps = widget.capabilities;
     switch (caps.mode) {
       case SessionCapabilityMode.online:
+        if (widget.suppressOffstageCachePromotion && _builtCached &&
+            ModalRoute.of(context)?.isCurrent != true) {
+          return widget.blockedBuilder(context);
+        }
         final permit = caps.capture(SessionCapability.networkRead);
         if (permit == null ||
             !caps.permits(permit, SessionCapability.networkRead)) {
@@ -113,11 +130,13 @@ class _QaCapabilityViewState extends State<QaCapabilityView> {
               ? _retained(showOnline: false, fallback: widget.blockedBuilder(context))
               : widget.blockedBuilder(context);
         }
+        _ownedBarrier = barrier;
         final online = widget.onlineBuilder(context, barrier);
         if (!widget.retainOnlineForRotation) return online;
         _retainedOnline = online;
         return _retained(showOnline: true, fallback: const SizedBox.shrink());
       case SessionCapabilityMode.cacheOnly:
+        _builtCached = true;
         final permit = caps.capture(SessionCapability.cachedRead);
         return permit != null &&
                 caps.permits(permit, SessionCapability.cachedRead)

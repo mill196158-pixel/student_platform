@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:student_platform/src/core/reconnect_chat_intent.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
 import 'package:student_platform/src/ui/learning/models/team.dart';
@@ -257,6 +258,8 @@ class _CachedTeamChatDirectoryState extends State<CachedTeamChatDirectory> {
             cachedStore: store,
             cachedCapabilities: caps,
             cachedChatId: chatId!));
+    final intentMarker = ReconnectChatIntent.instance.register(scope: store.scope,
+        route: route, chatId: chatId!, targetId: entry.team.id, dm: false);
     void close() {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (nav.mounted && route.isActive) nav.removeRoute(route);
@@ -272,6 +275,7 @@ class _CachedTeamChatDirectoryState extends State<CachedTeamChatDirectory> {
     _routeClosers.add(close);
     caps.addListener(check);
     unawaited(nav.push(route).whenComplete(() {
+      ReconnectChatIntent.instance.closed(intentMarker);
       caps.removeListener(check);
       _routeClosers.remove(close);
     }));

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:student_platform/src/core/auth_session.dart';
 import 'package:student_platform/src/core/offline_startup_admission.dart';
+import 'package:student_platform/src/core/reconnect_chat_intent.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen(
@@ -60,17 +61,25 @@ class _SplashScreenState extends State<SplashScreen> {
         if (!mounted) return;
         switch (result) {
           case OfflineStartupResult.online:
+            ReconnectChatIntent.instance.allowOnlineHome();
+            debugPrint('[startup-route] go home');
+            context.go('/home');
+            return;
           case OfflineStartupResult.cacheOnly:
+            ReconnectChatIntent.instance.cancel();
             debugPrint('[startup-route] go home');
             context.go('/home');
             return;
           case OfflineStartupResult.passwordChangeRequired:
+            ReconnectChatIntent.instance.cancel();
             context.go('/change-password');
             return;
           case OfflineStartupResult.denied:
+            ReconnectChatIntent.instance.cancel();
             context.go('/guest');
             return;
           case OfflineStartupResult.unavailable:
+            ReconnectChatIntent.instance.cancel();
             setState(() => _needsRetry = true);
             return;
         }

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:student_ui/student_ui.dart';
 import 'package:student_platform/src/core/online_side_effect_barrier.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
+import 'package:student_platform/src/core/reconnect_chat_intent.dart';
 import '../home/home_content_coordinator.dart';
 
 // Импорты по текущей структуре
@@ -89,6 +90,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
   }
 
   void _switchToTab(MainTab tab) {
+    ReconnectChatIntent.instance.cancel();
     final index = tab.index;
     if (index != _currentIndex) {
       setState(() => _currentIndex = index);

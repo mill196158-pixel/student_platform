@@ -29,6 +29,7 @@ import 'package:student_platform/src/ui/chats/data/chat_summary_card.dart';
 import 'package:student_platform/src/core/auth_session_scope_host.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
+import 'package:student_platform/src/core/reconnect_chat_intent.dart';
 import 'package:student_platform/src/core/session_capabilities_host.dart';
 import 'package:student_platform/src/ui/learning/widgets/qa_local_image_prewarm.dart';
 import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
@@ -1605,7 +1606,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
         chatId.isNotEmpty &&
         peerId != null &&
         peerId.isNotEmpty) {
-      await Navigator.of(context).push(MaterialPageRoute<void>(
+      final route = MaterialPageRoute<void>(
         builder: (_) => DirectChatScreen(
           peerId: peerId,
           peerName: c.title,
@@ -1613,7 +1614,11 @@ class _MyChatsScreenState extends State<MyChatsScreen>
           cachedStore: cache,
           cachedCapabilities: caps,
         ),
-      ));
+      );
+      final marker = ReconnectChatIntent.instance.register(scope: cache.scope,
+          route: route, chatId: chatId, targetId: peerId, dm: true);
+      try { await Navigator.of(context).push(route); }
+      finally { ReconnectChatIntent.instance.closed(marker); }
       return;
     }
     if (!_boundaryInvalidated &&
@@ -1626,14 +1631,18 @@ class _MyChatsScreenState extends State<MyChatsScreen>
         chatId != null &&
         chatId.isNotEmpty &&
         c.team.id.isNotEmpty) {
-      await Navigator.of(context).push(MaterialPageRoute<void>(
+      final route = MaterialPageRoute<void>(
         builder: (_) => TeamDetailsScreen(
             team: c.team,
             initialTabIndex: 1,
             cachedStore: cache,
             cachedCapabilities: caps,
             cachedChatId: chatId),
-      ));
+      );
+      final marker = ReconnectChatIntent.instance.register(scope: cache.scope,
+          route: route, chatId: chatId, targetId: c.team.id, dm: false);
+      try { await Navigator.of(context).push(route); }
+      finally { ReconnectChatIntent.instance.closed(marker); }
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(

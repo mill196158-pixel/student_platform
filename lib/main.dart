@@ -58,6 +58,8 @@ import 'src/core/auth_transition_host.dart';
 import 'src/core/serial_auth_local_storage.dart';
 import 'src/core/session_capabilities_host.dart';
 import 'src/core/session_capabilities.dart';
+import 'src/core/reconnect_chat_intent.dart';
+import 'src/ui/navigation/reconnect_chat_host.dart';
 import 'src/ui/home/cached_home_schedule_reader.dart';
 import 'src/ui/home/home_snapshot_cache.dart';
 import 'src/ui/navigation/cached_team_chat_directory.dart';
@@ -174,7 +176,7 @@ final GoRouter appRouter = GoRouter(
   navigatorKey: rootNavigatorKey,
   initialLocation: '/splash',
   refreshListenable: _ordinaryRouteRefresh,
-  observers: [routeObserver],
+  observers: [routeObserver, ReconnectNavigationObserver()],
   redirect: (context, state) {
     final caps = SessionCapabilitiesHost.maybeRead(context);
     if (((_sqlitePolicyQa && _offlineUiQa) || _ordinaryOffline) &&
@@ -281,12 +283,14 @@ final GoRouter appRouter = GoRouter(
             }
           }
           return QaCapabilityView(capabilities: caps,
+              suppressOffstageCachePromotion: true,
               blockedBuilder: (_) => const Scaffold(body: Center(
                   child: Text('Сохранённые данные недоступны.'))),
               onlineBuilder: (_, barrier) {
                 _ordinaryCleanColdStart = false;
-                return PushSessionHost(barrier: barrier,
-                    child: NavigationScreen(onlineBarrier: barrier, homeContent: _qaHomeContent));
+                return ReconnectChatHost(scope: scope, capabilities: caps,
+                    barrier: barrier, child: PushSessionHost(barrier: barrier,
+                    child: NavigationScreen(onlineBarrier: barrier, homeContent: _qaHomeContent)));
               },
               cachedBuilder: cached);
         }
@@ -555,6 +559,7 @@ Future<void> _initializeApp(
       await scope.ready;
       _policyQaScope = scope;
       _watchOrdinaryScope(scope);
+      ReconnectChatIntent.instance.bind(scope, gate, () => client.auth.currentSession);
       final project = SupabaseConfig.url.replaceFirst(RegExp(r'/$'), '');
       final issuer = '$project/auth/v1';
       OfflineSessionBinding? binding() {
@@ -693,6 +698,7 @@ Future<void> _initializeApp(
             probeConnection().then((available) {
               if (!timer.isActive || !available || enteringCache || !sameSession(expected)) return;
               timer.cancel();
+              ReconnectChatIntent.instance.suspendForReconnect();
               openGate();
               appRouter.go('/splash');
             }, onError: (Object _, StackTrace __) {}).whenComplete(() {
