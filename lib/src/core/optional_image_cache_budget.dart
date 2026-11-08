@@ -12,21 +12,37 @@ class OptionalImageCacheBudget {
     Future<List<Directory>> Function()? roots,
     this.limitBytes = 500000000,
     this.refreshInterval = const Duration(seconds: 30),
-  }) : _roots = roots ?? _runtimeRoots;
+    Duration Function()? elapsed,
+  }) : _roots = roots ?? _runtimeRoots,
+       _elapsed = elapsed ?? _newClock();
 
   static final instance = OptionalImageCacheBudget();
   final Future<List<Directory>> Function() _roots;
   final int limitBytes;
   final Duration refreshInterval;
+  final Duration Function() _elapsed;
   int? _observed;
   int _reserved = 0;
   int _revision = 0;
-  DateTime? _measuredAt;
+  Duration? _measuredAt;
   Future<void>? _refreshing;
+  bool _refreshAfterSettled = false;
+
+  static Duration Function() _newClock() {
+    final clock = Stopwatch()..start();
+    return () => clock.elapsed;
+  }
+
+  bool get _fresh {
+    final at = _measuredAt;
+    if (at == null) return false;
+    final age = _elapsed() - at;
+    return !age.isNegative && age < refreshInterval;
+  }
 
   /// A pending initial scan can support one bounded background retry.
   Future<void>? get pendingInitialMeasurement =>
-      _observed == null ? _refreshing : null;
+      _observed == null || !_fresh ? _refreshing : null;
 
   static Future<List<Directory>> _runtimeRoots() async => [
         await getTemporaryDirectory(),
@@ -39,7 +55,7 @@ class OptionalImageCacheBudget {
   void Function()? reserve(int bytes) {
     if (bytes < 0) throw ArgumentError.value(bytes, 'bytes');
     _scheduleRefresh();
-    if (_observed == null || _observed! + _reserved + bytes > limitBytes) {
+    if (_observed == null || !_fresh || _observed! + _reserved + bytes > limitBytes) {
       return null;
     }
     _reserved += bytes;
@@ -53,30 +69,42 @@ class OptionalImageCacheBudget {
       // Charge the entire reservation until a later measurement replaces it.
       if (_observed != null) _observed = _observed! + bytes;
       _revision++;
+      if (_refreshAfterSettled && _reserved == 0 && _refreshing == null) {
+        _refreshAfterSettled = false;
+        _measuredAt = null;
+      }
       _scheduleRefresh();
     };
   }
 
   void _scheduleRefresh() {
     if (_refreshing != null) return;
-    if (_measuredAt != null &&
-        DateTime.now().difference(_measuredAt!) < refreshInterval) return;
+    if (_fresh) return;
     final revision = _revision;
+    final startedAt = _elapsed();
     final future = _measure().then((value) {
       if (_revision == revision && _reserved == 0) {
         _observed = value;
-        _measuredAt = DateTime.now();
+        _measuredAt = startedAt;
+      } else {
+        _refreshAfterSettled = true;
       }
     }).catchError((Object _) {
       if (_revision == revision && _reserved == 0) {
         _observed = null;
-        _measuredAt = DateTime.now();
+        _measuredAt = startedAt;
+      } else {
+        _refreshAfterSettled = true;
       }
     });
     _refreshing = future;
     unawaited(future.whenComplete(() {
       _refreshing = null;
-      if (_measuredAt == null && _reserved == 0) _scheduleRefresh();
+      if (_refreshAfterSettled && _reserved == 0) {
+        _refreshAfterSettled = false;
+        _measuredAt = null;
+        _scheduleRefresh();
+      }
     }));
   }
 

@@ -324,6 +324,30 @@ void main() {
     expect(await storeA.read(key), isNull);
   });
 
+  for (final overLimit in [false, true]) {
+    test('stale public news measurement ${overLimit ? 'rejects' : 'retries'} persistence', () async {
+      final measured = await Directory('${root.path}/measured').create();
+      var now = Duration.zero;
+      var scans = 0;
+      final pending = Completer<List<Directory>>();
+      final budget = OptionalImageCacheBudget(
+          roots: () => ++scans == 1 ? Future.value([measured]) : pending.future,
+          elapsed: () => now, refreshInterval: const Duration(seconds: 1), limitBytes: 10);
+      await budget.refreshForTesting();
+      if (overLimit) await File('${measured.path}/protected').writeAsBytes(List.filled(11, 1));
+      now = const Duration(seconds: 2);
+      final spy = _CountingStore(database: dbA, root: Directory('${root.path}/blobs'));
+      final cache = PublicNewsImageCache(legacy: legacy, openStore: () async => spy, budget: budget);
+      expect(await cache.getOrFetch(key, () async => Uint8List.fromList([5])), [5]);
+      expect(spy.calls, 0);
+      pending.complete([measured]);
+      await budget.refreshForTesting();
+      if (!overLimit) await spy.written.future.timeout(const Duration(seconds: 2));
+      else await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(spy.calls, overLimit ? 0 : 1);
+    });
+  }
+
   test('home snapshot and story do not trust preloaded bytes after clear', () async {
     final httpClient = MockClient((_) async => http.Response('', 503));
     final client = SupabaseClient('https://example.invalid', 'synthetic', httpClient: httpClient);

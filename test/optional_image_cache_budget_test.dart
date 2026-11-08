@@ -172,4 +172,68 @@ void main() {
     await budget.refreshForTesting();
     expect(budget.reserve(1), isNull);
   });
+
+  for (final overLimit in [false, true]) {
+    test('stale scan ${overLimit ? 'rejects' : 'retries'} optional disk write without blocking display', () async {
+      final cacheRoot = await Directory('${root.path}/cache').create();
+      var now = Duration.zero;
+      var scans = 0;
+      final pending = Completer<List<Directory>>();
+      final budget = OptionalImageCacheBudget(
+        roots: () => ++scans == 1 ? Future.value([root]) : pending.future,
+        elapsed: () => now, refreshInterval: const Duration(seconds: 1), limitBytes: 10);
+      await budget.refreshForTesting();
+      if (overLimit) await File('${root.path}/protected').writeAsBytes(List.filled(11, 1));
+      now = const Duration(seconds: 2);
+      final memory = NewsImageBytesCache();
+      final disk = NewsImageDiskCache(rootOverride: () => cacheRoot,
+          memory: memory, debugOptionalBudget: budget);
+      final key = NewsImageCacheKey(path: 'news/stale', version: '1');
+      final bytes = Uint8List.fromList([1, 2, 3]);
+      await disk.put(key, bytes);
+      expect(await disk.peek(key), bytes);
+      expect(await File('${cacheRoot.path}/index.json').exists(), isFalse);
+      pending.complete([root]);
+      await budget.refreshForTesting();
+      for (var i = 0; i < 100 && !await File('${cacheRoot.path}/index.json').exists(); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      memory.clear();
+      expect(await disk.peek(key), overLimit ? isNull : bytes);
+      if (overLimit) expect(await File('${root.path}/protected').length(), 11);
+    });
+  }
+
+  test('scan older than freshness window cannot authorise persistence', () async {
+    var now = Duration.zero;
+    final pending = Completer<List<Directory>>();
+    final budget = OptionalImageCacheBudget(roots: () => pending.future,
+        elapsed: () => now, refreshInterval: const Duration(seconds: 1));
+    final scan = budget.refreshForTesting();
+    now = const Duration(seconds: 2);
+    pending.complete([root]);
+    await scan;
+    expect(budget.reserve(1), isNull);
+  });
+
+  test('a scan conflicting with a settled reservation is retried once', () async {
+    var now = Duration.zero;
+    var scans = 0;
+    final stalled = Completer<List<Directory>>();
+    final budget = OptionalImageCacheBudget(
+        roots: () { scans++; return scans == 2 ? stalled.future : Future.value([root]); },
+        elapsed: () => now, refreshInterval: const Duration(seconds: 1));
+    await budget.refreshForTesting();
+    final hold = budget.reserve(1)!;
+    now = const Duration(seconds: 2);
+    expect(budget.reserve(1), isNull);
+    hold();
+    stalled.complete([root]);
+    for (var i = 0; i < 100 && scans < 3; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    await budget.refreshForTesting();
+    expect(scans, 3);
+    expect(budget.reserve(1), isNotNull);
+  });
 }
