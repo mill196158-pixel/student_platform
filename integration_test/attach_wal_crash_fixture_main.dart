@@ -25,7 +25,7 @@ Future<Database> _open(String path) async {
       throw StateError('WAL unavailable');
     }
     await db.execute('PRAGMA synchronous=FULL');
-    await db.execute('PRAGMA busy_timeout=0');
+    await db.rawQuery('PRAGMA busy_timeout=0');
   });
 }
 

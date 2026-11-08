@@ -9,7 +9,7 @@ val offlineFixture = System.getenv("STUDENT_OFFLINE_FIXTURE") == "1"
 val attachFixture = System.getenv("STUDENT_ATTACH_FIXTURE") == "1"
 require(!(offlineFixture && attachFixture)) { "Select only one isolated fixture" }
 
-if (offlineFixture) {
+if (offlineFixture || attachFixture) {
     listOf(project, rootProject.project(":integration_test")).forEach { target ->
         target.configurations.configureEach {
             resolutionStrategy.eachDependency {
