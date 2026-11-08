@@ -11,6 +11,7 @@ import 'package:student_platform/src/core/online_side_effect_barrier.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:student_platform/src/ui/chats/guarded_push_dm_read_only.dart';
 import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
+import 'package:student_platform/src/ui/chats/core/chat_history_route_host.dart';
 import 'package:student_platform/src/ui/chats/core/dm_chat_service.dart';
 import 'package:student_platform/src/ui/chats/core/cached_chat_message_bubble.dart';
 import 'package:student_platform/src/ui/chats/core/cached_chat_composer.dart';
@@ -68,6 +69,18 @@ class TeamDetailsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (guardedPushClient == null && guardedPushUserId == null &&
+        guardedPushChatId == null && guardedPushBarrier == null &&
+        guardedPushSessionIsCurrent == null) {
+      return ChatHistoryRouteHost(
+        cache: cachedStore ?? ProjectChatServerCache.qaInstance,
+        child: Builder(builder: _buildDetails),
+      );
+    }
+    return _buildDetails(context);
+  }
+
+  Widget _buildDetails(BuildContext context) {
     if (guardedPushClient != null || guardedPushUserId != null ||
         guardedPushChatId != null || guardedPushBarrier != null ||
         guardedPushSessionIsCurrent != null) {

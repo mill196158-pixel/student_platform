@@ -360,7 +360,22 @@ class ChatHistoryRouteHold {
   Future<void> _start() async {
     try {
       final cache = _cache;
-      final lease = cache == null ? null : await cache.acquireHistoryRouteLease('*');
+      ChatHistoryRouteLease? lease;
+      if (cache != null) {
+        final acquisition = cache.acquireHistoryRouteLease('*');
+        var timedOut = false;
+        lease = await acquisition.timeout(const Duration(milliseconds: 300),
+            onTimeout: () { timedOut = true; return null; });
+        if (timedOut) {
+          // The underlying operation is not cancelled. Never adopt a late
+          // lease: release it once it settles, even if this route has closed.
+          unawaited(acquisition.then<void>((lateLease) async {
+            if (lateLease != null) {
+              try { await cache.releaseHistoryRouteLease(lateLease); } catch (_) {}
+            }
+          }, onError: (Object _, StackTrace __) {}));
+        }
+      }
       if (_closed) {
         if (lease != null && cache != null) await cache.releaseHistoryRouteLease(lease);
       } else if (lease == null) {

@@ -14,11 +14,42 @@ import 'package:student_platform/src/ui/chats/dm_title.dart';
 import 'direct_chat_info_screen.dart';
 import 'guarded_push_dm_read_only.dart';
 import 'core/scoped_forward_author_resolver.dart';
+import 'core/chat_history_route_host.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-class DirectChatScreen extends StatefulWidget {
-  const DirectChatScreen({
-    super.key,
+class DirectChatScreen extends StatelessWidget {
+  const DirectChatScreen({super.key, required this.peerId, required this.peerName,
+    this.peerAvatarUrl, this.initialChatId, this.cachedStore, this.cachedCapabilities,
+    this.onlineBarrier, this.sessionIsCurrent, this.guardedPushClient,
+    this.guardedPushUserId, this.debugResolveProfile, this.debugChatBuilder});
+  final String peerId, peerName;
+  final String? peerAvatarUrl, initialChatId;
+  final ProjectChatServerCache? cachedStore;
+  final SessionCapabilities? cachedCapabilities;
+  final OnlineSideEffectBarrier? onlineBarrier;
+  final bool Function()? sessionIsCurrent;
+  final SupabaseClient? guardedPushClient;
+  final String? guardedPushUserId;
+  @visibleForTesting
+  final Future<({String name, String? avatar})> Function(String)? debugResolveProfile;
+  @visibleForTesting
+  final Widget Function(BuildContext, String)? debugChatBuilder;
+
+  @override
+  Widget build(BuildContext context) {
+    final child = _DirectChatScreenBody(peerId: peerId, peerName: peerName,
+        peerAvatarUrl: peerAvatarUrl, initialChatId: initialChatId,
+        cachedStore: cachedStore, cachedCapabilities: cachedCapabilities,
+        onlineBarrier: onlineBarrier, sessionIsCurrent: sessionIsCurrent,
+        guardedPushClient: guardedPushClient, guardedPushUserId: guardedPushUserId,
+        debugResolveProfile: debugResolveProfile, debugChatBuilder: debugChatBuilder);
+    if (guardedPushClient != null) return child;
+    return ChatHistoryRouteHost(cache: cachedStore ?? ProjectChatServerCache.qaInstance, child: child);
+  }
+}
+
+class _DirectChatScreenBody extends StatefulWidget {
+  const _DirectChatScreenBody({
     required this.peerId,
     required this.peerName,
     this.peerAvatarUrl,
@@ -53,10 +84,10 @@ class DirectChatScreen extends StatefulWidget {
   final Widget Function(BuildContext, String)? debugChatBuilder;
 
   @override
-  State<DirectChatScreen> createState() => _DirectChatScreenState();
+  State<_DirectChatScreenBody> createState() => _DirectChatScreenState();
 }
 
-class _DirectChatScreenState extends State<DirectChatScreen> {
+class _DirectChatScreenState extends State<_DirectChatScreenBody> {
   DmChatService? _service;
   int _serviceRevision = 0;
   bool get _wantsCached =>
@@ -109,7 +140,7 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
   }
 
   @override
-  void didUpdateWidget(covariant DirectChatScreen oldWidget) {
+  void didUpdateWidget(covariant _DirectChatScreenBody oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.peerId == widget.peerId &&
         oldWidget.initialChatId == widget.initialChatId &&
