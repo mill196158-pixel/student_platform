@@ -53,6 +53,62 @@ final class NewsPrivateStoreFactoryFixture {
         final NewsPrivateStoreFactory writable = NewsPrivateStoreFactory.openForMutationTesting(synthetic, 200L * 1024L * 1024L);
         require(writable != null && writable.beginFetch("new") != null, "test beginFetch rejected");
         require(writable.beginFetch("new") != null && pathGeneration(root.resolve("index.db"), "new") == 2L, "path generation did not advance");
+        final NewsPrivateStoreFactory.WriteTicket olderWrite = writable.beginFetch("upload");
+        final NewsPrivateStoreFactory.WriteTicket currentWrite = writable.beginFetch("upload");
+        require(olderWrite != null && currentWrite != null, "write tickets missing");
+        require(factory.putForMutationTesting(currentWrite, new byte[] {4, 5}) == NewsPrivateStoreFactory.PutResult.SKIPPED && holdCount(root.resolve("ledger.db")) == 0, "ordinary factory wrote without profile");
+        require(writable.putForMutationTesting(olderWrite, new byte[] {4, 5}) == NewsPrivateStoreFactory.PutResult.SKIPPED, "old write ticket accepted");
+        require(holdCount(root.resolve("ledger.db")) == 0, "stale write created hold");
+        require(writable.putForMutationTesting(currentWrite, new byte[] {4, 5}) == NewsPrivateStoreFactory.PutResult.CONFIRMED_HELD, "synthetic put failed");
+        require(holdCount(root.resolve("ledger.db")) == 1, "synthetic successful hold lost");
+        require(writable.putForMutationTesting(currentWrite, new byte[] {6, 7}) == NewsPrivateStoreFactory.PutResult.SKIPPED, "write ticket replay accepted");
+        require(holdCount(root.resolve("ledger.db")) == 1, "replay created extra hold");
+        final NewsPrivateStoreFactory.WriteTicket foreignTicket = writable.beginFetch("foreign");
+        require(foreignTicket != null, "foreign ticket unavailable");
+        checkForeignTicket(context, foreignTicket);
+        final NewsPrivateStoreFactory.ReadTicket uploaded = writable.capture("upload");
+        require(uploaded != null && writable.read(uploaded).state == NewsPrivateStoreFactory.ReadState.HIT &&
+                Arrays.equals(writable.read(uploaded).bytes, new byte[] {4, 5}), "synthetic uploaded bytes unavailable");
+        final long physical = fixtureBytes(root);
+        final NewsPrivateStoreFactory heldBudget = NewsPrivateStoreFactory.openForMutationTesting(synthetic, physical + 100L * 1024L * 1024L);
+        require(heldBudget != null && heldBudget.beginFetch("must-count-held") == null, "retained hold was not charged");
+        require(heldBudget.read(uploaded).state == NewsPrivateStoreFactory.ReadState.HIT, "held budget blocked existing read");
+        checkDelayedPut(synthetic, root, writable);
+        for (String stage : new String[] {"afterHold", "afterTemp", "afterRename", "afterDirSync", "afterIndex"}) {
+            final String key = "fault-" + stage;
+            final NewsPrivateStoreFactory.WriteTicket baseline = writable.beginFetch(key);
+            require(baseline != null && writable.putForMutationTesting(baseline, new byte[] {1, 1}) == NewsPrivateStoreFactory.PutResult.CONFIRMED_HELD, "fault baseline missing");
+            final long before = holdCount(root.resolve("ledger.db"));
+            final long beforeFiles = blobCount(root);
+            final NewsPrivateStoreFactory fault = NewsPrivateStoreFactory.openForMutationTesting(synthetic,
+                    200L * 1024L * 1024L, null, name -> { if (stage.equals(name)) throw new IllegalStateException("synthetic stage failure"); });
+            require(fault != null, "fault factory unavailable");
+            final NewsPrivateStoreFactory.WriteTicket faultTicket = fault.beginFetch(key);
+            require(faultTicket != null, "fault ticket unavailable");
+            require(fault.putForMutationTesting(faultTicket, new byte[] {3, 1, 4}) == NewsPrivateStoreFactory.PutResult.UNCERTAIN, "fault did not report uncertain");
+            require(holdCount(root.resolve("ledger.db")) == before + 1, "fault released durable hold");
+            final NewsPrivateStoreFactory.ReadTicket after = writable.capture(key);
+            final byte[] expected = stage.equals("afterIndex") ? new byte[] {3, 1, 4} : new byte[] {1, 1};
+            require(after != null && writable.read(after).state == NewsPrivateStoreFactory.ReadState.HIT &&
+                    Arrays.equals(writable.read(after).bytes, expected), "fault damaged same-key indexed version");
+            require(blobCount(root) == beforeFiles + (stage.equals("afterHold") ? 0 : 1), "fault evidence missing");
+            if (stage.equals("afterIndex")) {
+                require(fault.putForMutationTesting(faultTicket, new byte[] {6}) == NewsPrivateStoreFactory.PutResult.SKIPPED, "committed ticket replay accepted");
+                require(holdCount(root.resolve("ledger.db")) == before + 1, "committed replay created hold");
+            }
+        }
+        final String collisionName = new String(new char[64]).replace('\0', 'f');
+        final Path collision = root.resolve("blobs").resolve(collisionName + ".bin");
+        Files.write(collision, new byte[] {9, 9});
+        final NewsPrivateStoreFactory collisionFactory = NewsPrivateStoreFactory.openForMutationTesting(synthetic,
+                200L * 1024L * 1024L, null, new NewsPrivateStoreFactory.PutHook() {
+                    @Override public void stage(String name) {}
+                    @Override public String blobName() { return collisionName; }
+                });
+        require(collisionFactory != null, "collision factory unavailable");
+        final NewsPrivateStoreFactory.WriteTicket collisionTicket = collisionFactory.beginFetch("collision");
+        require(collisionTicket != null && collisionFactory.putForMutationTesting(collisionTicket, new byte[] {4}) == NewsPrivateStoreFactory.PutResult.UNCERTAIN, "collision was not uncertain");
+        require(Arrays.equals(Files.readAllBytes(collision), new byte[] {9, 9}), "collision target overwritten");
         setGeneration(root.resolve("index.db"), Long.MAX_VALUE);
         final NewsPrivateStoreFactory.ReadTicket saturatedRead = writable.capture("saved");
         require(saturatedRead != null && writable.read(saturatedRead).state == NewsPrivateStoreFactory.ReadState.HIT, "saturated generation blocked read");
@@ -115,6 +171,69 @@ final class NewsPrivateStoreFactoryFixture {
         checkUnsettledClose(context);
         checkMutationCloseFailure(context);
         checkSqliteFull(context);
+        checkPutFull(context, true);
+        checkPutFull(context, false);
+    }
+
+    private static void checkPutFull(Context context, boolean ledgerFull) throws Exception {
+        final Path sandbox = context.getCacheDir().toPath().resolve("news_factory_put_full_" + UUID.randomUUID());
+        Files.createDirectory(sandbox);
+        final Context synthetic = new ContextWrapper(context) {
+            @Override public File getNoBackupFilesDir() { return sandbox.toFile(); }
+        };
+        final Path root = sandbox.resolve("news_quota_v1");
+        Files.createDirectory(root); Files.createDirectory(root.resolve("blobs"));
+        Files.createFile(root.resolve("lease.lock"));
+        final String token = "v1:" + new String(new char[64]).replace('\0', ledgerFull ? '7' : '8');
+        Files.write(root.resolve("marker"), token.getBytes(StandardCharsets.US_ASCII));
+        createDb(root.resolve("index.db"), root.toRealPath().toString(), token, true);
+        createDb(root.resolve("ledger.db"), root.toRealPath().toString(), token, false);
+        final boolean[] targetFull = {false};
+        final NewsPrivateStoreFactory factory = NewsPrivateStoreFactory.openForMutationTesting(synthetic,
+                200L * 1024L * 1024L, null, stage -> {
+                    if (stage.equals(ledgerFull ? "ledgerFull" : "indexFull")) targetFull[0] = true;
+                });
+        require(factory != null, "put FULL factory unavailable");
+        final NewsPrivateStoreFactory.WriteTicket[] tickets = new NewsPrivateStoreFactory.WriteTicket[64];
+        final String writeSuffix = new String(new char[500]).replace('\0', 'z');
+        for (int i = 0; i < tickets.length; i++) {
+            tickets[i] = factory.beginFetch(String.format(java.util.Locale.ROOT, "%08d", i) + writeSuffix);
+            require(tickets[i] != null, "put FULL ticket unavailable");
+        }
+        final Path dbPath = root.resolve(ledgerFull ? "ledger.db" : "index.db");
+        final SQLiteDatabase.OpenParams params = new SQLiteDatabase.OpenParams.Builder()
+                .setOpenFlags(SQLiteDatabase.OPEN_READWRITE | SQLiteDatabase.NO_LOCALIZED_COLLATORS)
+                .setJournalMode("DELETE").setSynchronousMode("FULL").build();
+        boolean full = false;
+        try (SQLiteDatabase db = SQLiteDatabase.openDatabase(dbPath.toFile(), params)) {
+            try (android.database.Cursor cap = db.rawQuery("PRAGMA max_page_count=256", null)) {
+                require(cap.moveToFirst() && cap.getLong(0) == 256, "put FULL page cap unavailable");
+            }
+            final String insert = ledgerFull ? "INSERT INTO news_holds(token,bytes) VALUES(?,1)" :
+                    "INSERT INTO news_images(image_key,filename,size,sha) VALUES(?,'" + new String(new char[64]).replace('\0', 'a') + ".bin',3,'039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81')";
+            final String huge = new String(new char[350000]).replace('\0', 'q');
+            db.execSQL(insert, new Object[] {huge});
+            final String suffix = new String(new char[ledgerFull ? 56 : 500]).replace('\0', 'x');
+            for (int i = 0; i < 3000; i++) {
+                try { db.execSQL(insert, new Object[] {String.format(java.util.Locale.ROOT, "%08d", i) + suffix}); }
+                catch (android.database.sqlite.SQLiteFullException expected) { full = true; break; }
+            }
+        }
+        require(full, "put FULL fixture did not fill database");
+        for (NewsPrivateStoreFactory.WriteTicket ticket : tickets) {
+            final long beforeBlobs = blobCount(root), beforeHolds = holdCount(root.resolve("ledger.db"));
+            final NewsPrivateStoreFactory.PutResult result = factory.putForMutationTesting(ticket, new byte[] {7, 8, 9});
+            if (targetFull[0]) {
+                require(result == NewsPrivateStoreFactory.PutResult.UNCERTAIN, "target FULL not uncertain");
+                require(blobCount(root) == beforeBlobs + (ledgerFull ? 0 : 1), "target FULL blob evidence wrong");
+                require(holdCount(root.resolve("ledger.db")) == beforeHolds + (ledgerFull ? 0 : 1), "target FULL hold evidence wrong");
+                final NewsPrivateStoreFactory.ReadTicket old = factory.capture("saved");
+                require(old != null && factory.read(old).state == NewsPrivateStoreFactory.ReadState.HIT, "target FULL lost old image");
+                break;
+            }
+            require(result == NewsPrivateStoreFactory.PutResult.CONFIRMED_HELD, "unexpected put before target FULL");
+        }
+        require(targetFull[0], "actual target mutation did not reach SQLITE_FULL");
     }
 
     private static void checkSqliteFull(Context context) throws Exception {
@@ -170,7 +289,7 @@ final class NewsPrivateStoreFactoryFixture {
         final boolean[] committed = {false};
         final NewsPrivateStoreFactory factory = NewsPrivateStoreFactory.openForMutationTesting(synthetic,
                 200L * 1024L * 1024L, db -> {
-                    if (inject[0] && ++closes[0] == 3) {
+                    if (inject[0] && ++closes[0] == 4) {
                         try (android.database.Cursor row = db.rawQuery("SELECT generation FROM news_paths WHERE image_key=?", new String[] {"close-after-commit"})) {
                             committed[0] = !db.inTransaction() && row.moveToFirst() && row.getLong(0) == 1L;
                         }
@@ -180,10 +299,61 @@ final class NewsPrivateStoreFactoryFixture {
         require(factory != null, "mutation close fixture rejected");
         inject[0] = true;
         require(factory.beginFetch("close-after-commit") == null, "ticket escaped failed close");
-        require(closes[0] == 3, "post-commit close failure not reached");
+        require(closes[0] == 4, "post-commit close failure not reached");
         require(committed[0], "mutation was not committed before injected close failure");
         require(factory.capture("saved") == null, "mutation close quarantine admitted capture");
         // Commit may have happened; the quarantined store is not cleaned up.
+    }
+
+    private static void checkDelayedPut(Context synthetic, Path root, NewsPrivateStoreFactory reader) throws Exception {
+        final java.util.concurrent.CountDownLatch entered = new java.util.concurrent.CountDownLatch(1);
+        final java.util.concurrent.CountDownLatch proceed = new java.util.concurrent.CountDownLatch(1);
+        final NewsPrivateStoreFactory delayed = NewsPrivateStoreFactory.openForMutationTesting(synthetic,
+                200L * 1024L * 1024L, null, name -> {
+                    if ("afterHold".equals(name)) { entered.countDown(); proceed.await(); }
+                });
+        require(delayed != null, "delayed writer unavailable");
+        final NewsPrivateStoreFactory.WriteTicket ticket = delayed.beginFetch("delayed");
+        require(ticket != null, "delayed ticket missing");
+        final byte[] original = new byte[] {2, 4, 6};
+        final long before = holdCount(root.resolve("ledger.db"));
+        final java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newSingleThreadExecutor();
+        try {
+            final java.util.concurrent.Future<NewsPrivateStoreFactory.PutResult> work = executor.submit(() -> delayed.putForMutationTesting(ticket, original));
+            require(entered.await(5, java.util.concurrent.TimeUnit.SECONDS), "delayed write did not start");
+            original[0] = 9;
+            try { work.get(30, java.util.concurrent.TimeUnit.MILLISECONDS); throw new AssertionError("missing observer timeout"); }
+            catch (java.util.concurrent.TimeoutException expected) { /* no cancellation */ }
+            require(reader.capture("saved") == null, "timeout released live writer gate");
+            proceed.countDown();
+            require(work.get(10, java.util.concurrent.TimeUnit.SECONDS) == NewsPrivateStoreFactory.PutResult.CONFIRMED_HELD, "delayed write did not settle");
+            require(holdCount(root.resolve("ledger.db")) == before + 1, "timeout path lost hold");
+            final NewsPrivateStoreFactory.ReadTicket result = reader.capture("delayed");
+            require(result != null && Arrays.equals(reader.read(result).bytes, new byte[] {2, 4, 6}), "snapshot bytes changed after dispatch");
+        } finally {
+            proceed.countDown();
+            executor.shutdown();
+        }
+    }
+
+    private static void checkForeignTicket(Context context, NewsPrivateStoreFactory.WriteTicket ticket) throws Exception {
+        final Path sandbox = context.getCacheDir().toPath().resolve("news_factory_foreign_" + UUID.randomUUID());
+        Files.createDirectory(sandbox);
+        final Context synthetic = new ContextWrapper(context) {
+            @Override public File getNoBackupFilesDir() { return sandbox.toFile(); }
+        };
+        final Path root = sandbox.resolve("news_quota_v1");
+        Files.createDirectory(root); Files.createDirectory(root.resolve("blobs"));
+        Files.createFile(root.resolve("lease.lock"));
+        final String token = "v1:" + new String(new char[64]).replace('\0', 'a');
+        Files.write(root.resolve("marker"), token.getBytes(StandardCharsets.US_ASCII));
+        createDb(root.resolve("index.db"), root.toRealPath().toString(), token, true);
+        createDb(root.resolve("ledger.db"), root.toRealPath().toString(), token, false);
+        setGeneration(root.resolve("index.db"), 1L);
+        setPathGeneration(root.resolve("index.db"), "foreign", 1L);
+        final NewsPrivateStoreFactory foreign = NewsPrivateStoreFactory.openForMutationTesting(synthetic, 200L * 1024L * 1024L);
+        require(foreign != null && foreign.putForMutationTesting(ticket, new byte[] {1}) == NewsPrivateStoreFactory.PutResult.SKIPPED, "foreign write ticket admitted");
+        require(holdCount(root.resolve("ledger.db")) == 0, "foreign ticket created hold");
     }
 
     private static void checkUnsettledClose(Context context) throws Exception {
@@ -238,7 +408,7 @@ final class NewsPrivateStoreFactoryFixture {
                 Files.write(path.getParent().resolve("blobs").resolve(filename), bytes);
                 db.execSQL("INSERT INTO news_images(image_key,filename,size,sha) VALUES(?,?,?,?)", new Object[] {
                     "saved", filename, 3, "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81"});
-            }
+            } else db.execSQL("CREATE TABLE news_holds (token TEXT PRIMARY KEY NOT NULL, bytes INTEGER NOT NULL CHECK(bytes>0))");
         }
     }
 
@@ -276,6 +446,28 @@ final class NewsPrivateStoreFactoryFixture {
              android.database.Cursor row = db.rawQuery("SELECT generation FROM news_paths WHERE image_key=?", new String[] {key})) {
             return row.moveToFirst() ? row.getLong(0) : 0;
         }
+    }
+
+    private static long holdCount(Path path) {
+        final SQLiteDatabase.OpenParams params = new SQLiteDatabase.OpenParams.Builder()
+                .setOpenFlags(SQLiteDatabase.OPEN_READONLY | SQLiteDatabase.NO_LOCALIZED_COLLATORS).build();
+        try (SQLiteDatabase db = SQLiteDatabase.openDatabase(path.toFile(), params);
+             android.database.Cursor row = db.rawQuery("SELECT COUNT(*) FROM news_holds", null)) {
+            return row.moveToFirst() ? row.getLong(0) : -1;
+        }
+    }
+
+    private static long fixtureBytes(Path root) throws Exception {
+        long total = Files.size(root.resolve("marker")) + Files.size(root.resolve("lease.lock")) +
+                Files.size(root.resolve("index.db")) + Files.size(root.resolve("ledger.db"));
+        try (java.nio.file.DirectoryStream<Path> blobs = Files.newDirectoryStream(root.resolve("blobs"))) {
+            for (Path file : blobs) total += Files.size(file);
+        }
+        return total;
+    }
+
+    private static long blobCount(Path root) throws Exception {
+        try (java.util.stream.Stream<Path> files = Files.list(root.resolve("blobs"))) { return files.count(); }
     }
 
     private static void setPathGeneration(Path path, String key, long generation) {

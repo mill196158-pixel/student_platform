@@ -4,41 +4,53 @@ import android.content.Context;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteException;
+import android.database.sqlite.SQLiteFullException;
 import android.os.Build;
+import android.system.Os;
+import android.system.OsConstants;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.DirectoryStream;
 import java.security.MessageDigest;
+import java.security.SecureRandom;
+import java.io.FileDescriptor;
 import java.util.regex.Pattern;
 
-/** Standalone validation component. Not an admission authority or a writer;
- * provisioning and all production wiring are disabled. */
+/** Standalone synthetic validation/writer component. It is not an admission
+ * authority; provisioning and all production wiring are disabled. */
 final class NewsPrivateStoreFactory {
     private static final Pattern MARKER = Pattern.compile("v1:[0-9a-f]{64}");
     private static final String SCHEMA = "CREATE TABLE news_quota_custody (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL, token TEXT NOT NULL, root TEXT NOT NULL)";
     private static final String STATE_SCHEMA = "CREATE TABLE news_state (id INTEGER PRIMARY KEY CHECK(id=1), generation INTEGER NOT NULL CHECK(generation>=0))";
     private static final String IMAGE_SCHEMA = "CREATE TABLE news_images (image_key TEXT PRIMARY KEY NOT NULL, filename TEXT NOT NULL, size INTEGER NOT NULL, sha TEXT NOT NULL)";
     private static final String PATH_SCHEMA = "CREATE TABLE news_paths (image_key TEXT PRIMARY KEY NOT NULL, generation INTEGER NOT NULL CHECK(generation>=0))";
+    private static final String HOLD_SCHEMA = "CREATE TABLE news_holds (token TEXT PRIMARY KEY NOT NULL, bytes INTEGER NOT NULL CHECK(bytes>0))";
     private static final Pattern FILE_NAME = Pattern.compile("[0-9a-f]{64}\\.bin");
     private static final Pattern SHA = Pattern.compile("[0-9a-f]{64}");
     private final Path root;
     private final CloseHook testCloseHook;
     private final Long syntheticLimit;
+    private final PutHook testPutHook;
 
     interface CloseHook { void beforeClose(SQLiteDatabase db) throws Exception; }
-    private NewsPrivateStoreFactory(Path root, CloseHook testCloseHook, Long syntheticLimit) { this.root = root; this.testCloseHook = testCloseHook; this.syntheticLimit = syntheticLimit; }
+    interface PutHook { void stage(String name) throws Exception; default String blobName() { return null; } }
+    private NewsPrivateStoreFactory(Path root, CloseHook testCloseHook, Long syntheticLimit, PutHook testPutHook) { this.root = root; this.testCloseHook = testCloseHook; this.syntheticLimit = syntheticLimit; this.testPutHook = testPutHook; }
 
     /** Fixed app-private location only. Never creates or repairs a store. */
     static NewsPrivateStoreFactory openExisting(Context context) {
         if (context == null || Build.VERSION.SDK_INT < 28) return null;
         try {
             final Path root = context.getNoBackupFilesDir().toPath().resolve("news_quota_v1");
-            final NewsPrivateStoreFactory factory = new NewsPrivateStoreFactory(root, null, null);
+            final NewsPrivateStoreFactory factory = new NewsPrivateStoreFactory(root, null, null, null);
             return factory.validateExisting() ? factory : null;
         } catch (Exception failure) { return null; }
     }
@@ -49,7 +61,7 @@ final class NewsPrivateStoreFactory {
                 !"com.mill453020.studentplatform.newsfactoryfixture".equals(context.getPackageName())) return null;
         try {
             final Path root = context.getNoBackupFilesDir().toPath().resolve("news_quota_v1");
-            final NewsPrivateStoreFactory factory = new NewsPrivateStoreFactory(root, hook, null);
+            final NewsPrivateStoreFactory factory = new NewsPrivateStoreFactory(root, hook, null, null);
             return factory.validateExisting() ? factory : null;
         } catch (Exception failure) { return null; }
     }
@@ -60,11 +72,15 @@ final class NewsPrivateStoreFactory {
     }
 
     static NewsPrivateStoreFactory openForMutationTesting(Context context, long limit, CloseHook hook) {
+        return openForMutationTesting(context, limit, hook, null);
+    }
+
+    static NewsPrivateStoreFactory openForMutationTesting(Context context, long limit, CloseHook hook, PutHook putHook) {
         if (context == null || Build.VERSION.SDK_INT < 28 || limit < 0 ||
                 !"com.mill453020.studentplatform.newsfactoryfixture".equals(context.getPackageName())) return null;
         try {
             final Path root = context.getNoBackupFilesDir().toPath().resolve("news_quota_v1");
-            final NewsPrivateStoreFactory factory = new NewsPrivateStoreFactory(root, hook, limit);
+            final NewsPrivateStoreFactory factory = new NewsPrivateStoreFactory(root, hook, limit, putHook);
             return factory.validateExisting() ? factory : null;
         } catch (Exception failure) { return null; }
     }
@@ -120,7 +136,7 @@ final class NewsPrivateStoreFactory {
         final WriteTicket[] result = {null};
         try {
             if (!NewsQuotaExclusiveGate.runSync(root.resolve("lease.lock"), () -> {
-                if (!validateLocked() || !syntheticHeadroom()) return;
+                if (!validateLocked() || !syntheticHeadroom(0)) return;
                 final String canonical = root.toRealPath().toString();
                 final String token = new String(Files.readAllBytes(root.resolve("marker")), StandardCharsets.US_ASCII);
                 final SQLiteDatabase db = openIndexForRead();
@@ -134,7 +150,7 @@ final class NewsPrivateStoreFactory {
                         long prior = 0;
                         try (Cursor row = db.rawQuery("SELECT generation FROM news_paths WHERE image_key=?", new String[] {key})) {
                             if (row.moveToFirst()) {
-                                if (row.getType(0) != Cursor.FIELD_TYPE_INTEGER || row.getLong(0) < 0 || row.getLong(0) == Long.MAX_VALUE) return;
+                                if (row.getType(0) != Cursor.FIELD_TYPE_INTEGER || row.getLong(0) < 0 || row.getLong(0) >= Long.MAX_VALUE - 1) return;
                                 prior = row.getLong(0);
                                 if (row.moveToNext()) return;
                             }
@@ -152,7 +168,7 @@ final class NewsPrivateStoreFactory {
     }
 
     /** Synthetic bound only: never interpreted as proof for an ordinary app. */
-    private boolean syntheticHeadroom() {
+    private boolean syntheticHeadroom(long prospectiveBytes) throws Exception {
         if (syntheticLimit == null) return false;
         try {
             long total = 0;
@@ -165,7 +181,8 @@ final class NewsPrivateStoreFactory {
                         if (!Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS)) return false;
                         try (DirectoryStream<Path> blobs = Files.newDirectoryStream(entry)) {
                             for (Path blob : blobs) {
-                                if (++count > 1024 || !FILE_NAME.matcher(blob.getFileName().toString()).matches() ||
+                                if (++count > 1024 || !(FILE_NAME.matcher(blob.getFileName().toString()).matches() ||
+                                        blob.getFileName().toString().matches("\\.[0-9a-f]{64}\\.tmp")) ||
                                         !Files.isRegularFile(blob, LinkOption.NOFOLLOW_LINKS)) return false;
                                 total = Math.addExact(total, Files.size(blob));
                             }
@@ -177,10 +194,153 @@ final class NewsPrivateStoreFactory {
                     }
                 }
             }
+            // Holds remain charged until a proven reconciliation exists.
+            final SQLiteDatabase ledger = openProfiled(root.resolve("ledger.db"));
+            try {
+                if (!validLedgerSchema(ledger)) return false;
+                try (Cursor invalid = ledger.rawQuery("SELECT 1 FROM news_holds WHERE typeof(token)<>'text' OR length(token)=0 OR typeof(bytes)<>'integer' OR bytes<=0 LIMIT 1", null)) {
+                    if (invalid.moveToFirst()) return false;
+                }
+                try (Cursor held = ledger.rawQuery("SELECT COALESCE(SUM(bytes),0) FROM news_holds", null)) {
+                    if (!held.moveToFirst() || held.getType(0) != Cursor.FIELD_TYPE_INTEGER || held.getLong(0) < 0 || held.moveToNext()) return false;
+                    held.moveToFirst();
+                    total = Math.addExact(total, held.getLong(0));
+                }
+            } finally { closeConfirmed(ledger); }
             // Synthetic envelope only: both 256-page DBs, rollback journals,
             // sector/header alignment and control; no Android proof claimed.
-            return Math.addExact(total, 100L * 1024L * 1024L) <= syntheticLimit;
-        } catch (Exception failure) { return false; }
+            total = Math.addExact(total, 100L * 1024L * 1024L);
+            total = Math.addExact(total, Math.multiplyExact(prospectiveBytes, 2));
+            return total <= syntheticLimit;
+        } catch (NewsQuotaExclusiveGate.UnsettledResourceException failure) { throw failure; }
+        catch (Exception failure) { return false; }
+    }
+
+    enum PutResult { CONFIRMED_HELD, SKIPPED, UNCERTAIN }
+
+    /** Synthetic writer only, never an ordinary runtime quota admission. */
+    PutResult putForMutationTesting(WriteTicket ticket, byte[] input) {
+        if (syntheticLimit == null || ticket == null || input == null || input.length == 0 || input.length > 8 * 1024 * 1024) return PutResult.SKIPPED;
+        final byte[] bytes = input.clone();
+        final PutResult[] result = {PutResult.SKIPPED};
+        try {
+            if (!NewsQuotaExclusiveGate.runSync(root.resolve("lease.lock"), () -> {
+                if (!validateLocked() || !syntheticHeadroom(bytes.length) ||
+                        !ticket.root.equals(root.toRealPath().toString()) ||
+                        !ticket.token.equals(new String(Files.readAllBytes(root.resolve("marker")), StandardCharsets.US_ASCII))) return;
+                final SQLiteDatabase index = openIndexForRead();
+                try {
+                    if (!validImageSchema(index) || !writeTicketCurrent(index, ticket)) return;
+                } finally { closeConfirmed(index); }
+
+                final String hold = randomHex();
+                final SQLiteDatabase ledger = openProfiled(root.resolve("ledger.db"));
+                try {
+                    if (!validLedgerSchema(ledger)) return;
+                    result[0] = PutResult.UNCERTAIN;
+                    ledger.beginTransaction();
+                    try {
+                        try { ledger.execSQL("INSERT INTO news_holds(token,bytes) VALUES(?,?)", new Object[] {hold, bytes.length}); }
+                        catch (SQLiteFullException full) {
+                            if (testPutHook != null) testPutHook.stage("ledgerFull");
+                            throw full;
+                        }
+                        ledger.setTransactionSuccessful();
+                    } finally { ledger.endTransaction(); }
+                } finally { closeConfirmed(ledger); }
+
+                // Once a hold may have committed, any failure retains it.
+                if (testPutHook != null) testPutHook.stage("afterHold");
+                final String filename = writeBlobUnderGate(bytes);
+                if (filename == null) return;
+                final String sha = hex(MessageDigest.getInstance("SHA-256").digest(bytes));
+                final SQLiteDatabase writeIndex = openIndexForRead();
+                try {
+                    if (!validImageSchema(writeIndex) || !writeTicketCurrent(writeIndex, ticket)) return;
+                    writeIndex.beginTransaction();
+                    try {
+                        if (!writeTicketCurrent(writeIndex, ticket) || ticket.pathGeneration == Long.MAX_VALUE) return;
+                        writeIndex.execSQL("UPDATE news_paths SET generation=generation+1 WHERE image_key=? AND generation=?", new Object[] {ticket.key, ticket.pathGeneration});
+                        if (!"1".equals(scalar(writeIndex, "SELECT changes()"))) return;
+                        try { writeIndex.execSQL("INSERT OR REPLACE INTO news_images(image_key,filename,size,sha) VALUES(?,?,?,?)", new Object[] {ticket.key, filename, bytes.length, sha}); }
+                        catch (SQLiteFullException full) {
+                            if (testPutHook != null) testPutHook.stage("indexFull");
+                            throw full;
+                        }
+                        writeIndex.setTransactionSuccessful();
+                    } finally { writeIndex.endTransaction(); }
+                } finally { closeConfirmed(writeIndex); }
+                if (testPutHook != null) testPutHook.stage("afterIndex");
+                // No automatic release: a caller may have timed out while this
+                // synchronous operation was still running. Reconciliation is
+                // not implemented, so the committed hold remains durable.
+                result[0] = PutResult.CONFIRMED_HELD;
+            })) return PutResult.SKIPPED;
+            return result[0];
+        } catch (Exception failure) { return result[0]; }
+    }
+
+    private boolean writeTicketCurrent(SQLiteDatabase index, WriteTicket ticket) {
+        final Long global = generation(index);
+        if (global == null || global.longValue() != ticket.globalGeneration) return false;
+        try (Cursor row = index.rawQuery("SELECT generation FROM news_paths WHERE image_key=?", new String[] {ticket.key})) {
+            return row.moveToFirst() && row.getType(0) == Cursor.FIELD_TYPE_INTEGER &&
+                    row.getLong(0) == ticket.pathGeneration && !row.moveToNext();
+        }
+    }
+
+    private static String randomHex() {
+        final byte[] random = new byte[32];
+        new SecureRandom().nextBytes(random);
+        return hex(random);
+    }
+
+    /** Invoked only while gate is held and after a durable hold. */
+    private String writeBlobUnderGate(byte[] bytes) throws Exception {
+        final Path directory = root.resolve("blobs");
+        final String override = testPutHook == null ? null : testPutHook.blobName();
+        final String name = override == null ? randomHex() : override;
+        if (!SHA.matcher(name).matches()) return null;
+        final Path temp = directory.resolve("." + name + ".tmp"), target = directory.resolve(name + ".bin");
+        if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) return null;
+        final FileChannel channel = FileChannel.open(temp, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+        try {
+            final ByteBuffer buffer = ByteBuffer.wrap(bytes);
+            while (buffer.hasRemaining()) if (channel.write(buffer) <= 0) throw new IOException("Blob write made no progress");
+            channel.force(true);
+        } finally {
+            try { channel.close(); }
+            catch (Throwable failure) { throw new NewsQuotaExclusiveGate.UnsettledResourceException(channel, failure); }
+        }
+        if (testPutHook != null) testPutHook.stage("afterTemp");
+        if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) return null;
+        Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE);
+        if (testPutHook != null) testPutHook.stage("afterRename");
+        final FileDescriptor directoryFd = Os.open(directory.toString(), OsConstants.O_RDONLY | OsConstants.O_NOFOLLOW, 0);
+        try {
+            if (!OsConstants.S_ISDIR(Os.fstat(directoryFd).st_mode)) throw new IOException("Blob parent is not a directory");
+            Os.fsync(directoryFd);
+        }
+        finally {
+            try { Os.close(directoryFd); }
+            catch (Throwable failure) { throw new NewsQuotaExclusiveGate.UnsettledResourceException(directoryFd, failure); }
+        }
+        if (testPutHook != null) testPutHook.stage("afterDirSync");
+        return name + ".bin";
+    }
+
+    private static boolean validLedgerSchema(SQLiteDatabase db) {
+        try (Cursor rows = db.rawQuery("SELECT type,name,sql FROM sqlite_master WHERE name NOT GLOB 'sqlite_*'", null)) {
+            int count = 0;
+            while (rows.moveToNext()) {
+                final String type = rows.getString(0), name = rows.getString(1), sql = rows.getString(2);
+                if (!"table".equals(type)) return false;
+                if (("news_quota_custody".equals(name) && SCHEMA.equals(sql)) ||
+                        ("news_holds".equals(name) && HOLD_SCHEMA.equals(sql))) count++;
+                else return false;
+            }
+            return count == 2;
+        }
     }
 
     enum ReadState { HIT, MISS, UNKNOWN }
@@ -243,11 +403,15 @@ final class NewsPrivateStoreFactory {
     }
 
     private SQLiteDatabase openIndexForRead() throws Exception {
+        return openProfiled(root.resolve("index.db"));
+    }
+
+    private SQLiteDatabase openProfiled(Path databasePath) throws Exception {
         final SQLiteDatabase.OpenParams params = new SQLiteDatabase.OpenParams.Builder()
                 .setOpenFlags(SQLiteDatabase.OPEN_READWRITE | SQLiteDatabase.NO_LOCALIZED_COLLATORS)
                 .setJournalMode("DELETE").setSynchronousMode("FULL")
                 .setErrorHandler(ignored -> { throw new SQLiteException("Corrupt news index"); }).build();
-        final SQLiteDatabase db = SQLiteDatabase.openDatabase(root.resolve("index.db").toFile(), params);
+        final SQLiteDatabase db = SQLiteDatabase.openDatabase(databasePath.toFile(), params);
         boolean valid = false;
         try {
             if (!"delete".equalsIgnoreCase(scalar(db, "PRAGMA journal_mode")) ||
