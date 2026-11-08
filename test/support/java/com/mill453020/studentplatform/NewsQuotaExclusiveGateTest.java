@@ -17,6 +17,18 @@ public final class NewsQuotaExclusiveGateTest {
 
     public static void main(String[] args) throws Exception {
         if (args.length > 0) {
+            if ("quarantine".equals(args[0])) {
+                Path path = Path.of(args[1]);
+                try {
+                    NewsQuotaExclusiveGate.runSync(path, () -> {
+                        throw new NewsQuotaExclusiveGate.UnsettledResourceException(new Object(), new IOException("synthetic close failure"));
+                    });
+                    throw new AssertionError("uncertain close accepted");
+                } catch (NewsQuotaExclusiveGate.UnsettledResourceException expected) { /* quarantine */ }
+                check(!NewsQuotaExclusiveGate.runSync(path, () -> { throw new AssertionError("entered quarantine"); }), "quarantine same-process");
+                child(path, "busy");
+                return;
+            }
             boolean result = NewsQuotaExclusiveGate.runSync(Path.of(args[1]), () -> {});
             check(args[0].equals(result ? "entered" : "busy"), "child lock result");
             return;
@@ -51,6 +63,8 @@ public final class NewsQuotaExclusiveGateTest {
                 check(!NewsQuotaExclusiveGate.runSync(lock, () -> {
                     throw new AssertionError("reentrant callback entered");
                 }), "reentrant operation not denied")), "outer operation rejected");
+            child(lock, "quarantine");
+            check(NewsQuotaExclusiveGate.runSync(lock, () -> {}), "child quarantine survived process exit");
             System.out.println("NEWS_GATE_SYNTHETIC_PASS");
         } finally {
             executor.shutdownNow();
