@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:student_ui/student_ui.dart';
 import 'package:student_platform/src/ui/home/news_image_disk_cache.dart';
+import 'package:student_platform/src/ui/home/news_sqlite_image_store.dart';
+import 'package:student_platform/src/ui/home/public_news_image_cache.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -102,6 +104,22 @@ class GatedDiskReads extends NewsImageDiskCache {
   }
 }
 
+// Isolate service worker scheduling from the separately tested SQLite guard.
+class GatedPublicImages extends PublicNewsImageCache {
+  GatedPublicImages(this.disk);
+  final NewsImageDiskCache disk;
+  @override
+  Future<NewsImageReadResult> read(NewsImageCacheKey key,
+      {Future<Uint8List?> Function()? legacyFallback}) async {
+    final bytes = await disk.peek(key);
+    return bytes == null ? const NewsImageReadResult(NewsImageReadState.miss)
+        : NewsImageReadResult(NewsImageReadState.hit, bytes);
+  }
+  @override
+  Future<Uint8List?> getOrFetch(NewsImageCacheKey key,
+      Future<Uint8List?> Function() fetch) => disk.getOrFetch(key, fetch);
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   test('cached covers read in bounded parallel order and tolerate a failure',
@@ -124,7 +142,7 @@ void main() {
         client: client,
         scheduleRepository: Schedule(),
         learningRepository: Learning(),
-        imageCache: disk);
+        publicImageCache: GatedPublicImages(disk));
     addTearDown(service.dispose);
     final result = service.loadCachedNews();
     await Future<void>.delayed(Duration.zero);
@@ -178,7 +196,7 @@ void main() {
         client: client,
         scheduleRepository: schedule,
         learningRepository: learning,
-        imageCache: images);
+        publicImageCache: GatedPublicImages(images));
     final result = await service.load(onUpdate: updates.add);
     expect(result.news, hasLength(8));
     expect(images.started, [0, 1, 2, 3, 4, 5]);

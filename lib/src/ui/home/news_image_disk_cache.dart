@@ -343,6 +343,28 @@ class NewsImageDiskCache {
     }
   }
 
+  /// Read-only legacy lookup for a guarded migration. It never updates memory,
+  /// index state, access times, or the filesystem after a caller times out.
+  Future<Uint8List?> peekLegacyReadOnly(NewsImageCacheKey key) async {
+    try {
+      final root = _rootOverride?.call() ??
+          Directory('${(await getTemporaryDirectory()).path}/$directoryName');
+      if (await FileSystemEntity.type(root.path, followLinks: false) != FileSystemEntityType.directory) return null;
+      final index = File('${root.path}/$_indexName');
+      if (await FileSystemEntity.type(index.path, followLinks: false) != FileSystemEntityType.file) return null;
+      final decoded = jsonDecode(await index.readAsString());
+      if (decoded is! Map || decoded[key.id] is! Map) return null;
+      final data = decoded[key.id] as Map;
+      final name = '${_fileId(key.id)}.bin';
+      if (data['file'] != name || data['path'] != key.path || data['version'] != key.version) return null;
+      final file = File('${root.path}/$name');
+      if (await FileSystemEntity.type(file.path, followLinks: false) != FileSystemEntityType.file ||
+          File(await file.resolveSymbolicLinks()).parent.path != await root.resolveSymbolicLinks()) return null;
+      final bytes = await file.readAsBytes();
+      return bytes.isEmpty ? null : bytes;
+    } catch (_) { return null; }
+  }
+
   Future<Uint8List?> getOrFetch(
     NewsImageCacheKey key,
     Future<Uint8List?> Function() fetch,

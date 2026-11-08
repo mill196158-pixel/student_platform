@@ -16,6 +16,8 @@ import 'package:student_platform/src/ui/home/home_snapshot_codec.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/data/chat_group_actions_repository.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_group_actions.dart';
 import 'package:student_platform/src/ui/home/news_image_disk_cache.dart';
+import 'package:student_platform/src/ui/home/public_news_image_cache.dart';
+import 'package:student_platform/src/ui/home/news_sqlite_image_store.dart';
 import 'package:student_platform/src/ui/learning/data/supabase_learning_repository.dart';
 import 'package:student_platform/src/ui/learning/models/team.dart';
 import 'package:student_platform/src/ui/schedule/models/lesson.dart';
@@ -33,6 +35,7 @@ class HomeDashboardService {
     SupabaseLearningRepository? learningRepository,
     PublishedNewsCache? newsCache,
     NewsImageDiskCache? imageCache,
+    PublicNewsImageCache? publicImageCache,
     http.Client? httpClient,
     AuthSessionScope? sessionScope,
     HomeSnapshotCache? snapshotCache,
@@ -58,7 +61,7 @@ class HomeDashboardService {
               currentUserId: () =>
                   (client ?? Supabase.instance.client).auth.currentUser?.id,
             ),
-        _imageCache = imageCache ?? NewsImageDiskCache(),
+        _publicImages = publicImageCache ?? PublicNewsImageCache(legacy: imageCache),
         _http = httpClient ?? http.Client(),
         _ownsHttpClient = httpClient == null;
 
@@ -114,7 +117,7 @@ class HomeDashboardService {
   final ScheduleRepository _scheduleRepository;
   final SupabaseLearningRepository _learningRepository;
   final PublishedNewsCache _newsCache;
-  final NewsImageDiskCache _imageCache;
+  final PublicNewsImageCache _publicImages;
   final http.Client _http;
   final bool _ownsHttpClient;
   final AuthSessionScope? _sessionScope;
@@ -136,6 +139,9 @@ class HomeDashboardService {
     if (cached.isEmpty) return const [];
     return _hydrateImagesFromDisk(cached);
   }
+
+  Future<List<HomeNewsItem>> validateNewsImages(List<HomeNewsItem> items) =>
+      _hydrateImagesFromDisk(items);
 
   Future<HomeDashboardData> load({
     void Function(HomeDashboardData)? onUpdate,
@@ -184,6 +190,14 @@ class HomeDashboardService {
     var assignments = validPrevious?.assignments ?? <HomeAssignmentPreview>[];
     var reads = validPrevious?.readNotificationIds ?? <String>{};
     var news = validPrevious?.news ?? <HomeNewsItem>[];
+    if (news.isNotEmpty) {
+      try {
+        news = await _hydrateImagesFromDisk(news).timeout(const Duration(seconds: 1));
+      } catch (_) {
+        news = news.map((item) => item.copyWith(clearImageBytes: true)).toList();
+      }
+      if (!current()) throw HomeLoadCancelled();
+    }
     var actions = validPrevious?.groupActions ?? <HomeGroupActionPreview>[];
     String? scheduleStatus = 'Загружаем расписание…';
     String? assignmentsStatus = 'Загружаем ближайшие дела…';
@@ -356,6 +370,7 @@ class HomeDashboardService {
         publish();
       }),
       _loadPublishedNews(
+          previous: news,
           isCurrent: current,
           onMetadata: (value) {
             news = value;
@@ -403,6 +418,7 @@ class HomeDashboardService {
   /// - On network failure the feed + last good images are kept.
   /// - Refresh never clears working image bytes for an unchanged cache key.
   Future<List<HomeNewsItem>> _loadPublishedNews({
+    List<HomeNewsItem> previous = const [],
     void Function(List<HomeNewsItem>)? onMetadata,
     bool Function()? isCurrent,
   }) async {
@@ -411,7 +427,17 @@ class HomeDashboardService {
         _sb.auth.currentUser?.id == newsUser && (isCurrent?.call() ?? true);
     final cached = await _newsCache.read(owner: newsUser, isCurrent: current);
     if (!current()) return const [];
-    final cachedWithImages = await _hydrateImagesFromDisk(cached);
+    List<HomeNewsItem> candidates(List<HomeNewsItem> items, List<HomeNewsItem> prior) {
+      final byId = {for (final item in prior) item.id: item};
+      return items.map((item) {
+        final old = byId[item.id];
+        return old?.imageBytes != null && item.imageCacheKey?.id != null &&
+                old!.imageCacheKey?.id == item.imageCacheKey?.id
+            ? item.copyWith(imageBytes: old.imageBytes)
+            : item;
+      }).toList();
+    }
+    final cachedWithImages = await _hydrateImagesFromDisk(candidates(cached, previous));
     if (!current()) return const [];
     if (cachedWithImages.isNotEmpty) onMetadata?.call(cachedWithImages);
     try {
@@ -423,8 +449,9 @@ class HomeDashboardService {
       await _newsCache.write(rows, owner: newsUser, isCurrent: current);
       if (!current()) return const [];
       final fresh = rows.map(mapPublishedNews).toList();
-      final merged =
-          _mergeKeepingImages(previous: cachedWithImages, next: fresh);
+      final merged = await _hydrateImagesFromDisk(candidates(fresh,
+          cachedWithImages.isEmpty ? previous : cachedWithImages));
+      if (!current()) return const [];
       onMetadata?.call(merged);
       // Media owns its own deadlines; the dashboard timeout must not discard
       // a successful cover arriving after other sections have finished.
@@ -442,25 +469,6 @@ class HomeDashboardService {
     }
   }
 
-  List<HomeNewsItem> _mergeKeepingImages({
-    required List<HomeNewsItem> previous,
-    required List<HomeNewsItem> next,
-  }) {
-    final prevById = {for (final item in previous) item.id: item};
-    final merged = <HomeNewsItem>[];
-    for (final item in next) {
-      final old = prevById[item.id];
-      if (old?.imageBytes != null &&
-          old!.imageCacheKey?.id != null &&
-          old.imageCacheKey!.id == item.imageCacheKey?.id) {
-        merged.add(item.copyWith(imageBytes: old.imageBytes));
-      } else {
-        merged.add(item);
-      }
-    }
-    return merged;
-  }
-
   Future<List<HomeNewsItem>> _hydrateImagesFromDisk(
     List<HomeNewsItem> items,
   ) async {
@@ -471,10 +479,15 @@ class HomeDashboardService {
         final index = next++;
         final item = items[index];
         final key = item.imageCacheKey;
-        if (key == null || item.imageBytes != null) continue;
+        out[index] = item.copyWith(clearImageBytes: true);
+        if (key == null) continue;
         try {
-          final bytes = await _imageCache.peek(key);
-          if (bytes != null) out[index] = item.copyWith(imageBytes: bytes);
+          final preloaded = item.imageBytes;
+          final result = await _publicImages.read(key,
+              legacyFallback: preloaded == null ? null : () async => preloaded);
+          out[index] = result.state == NewsImageReadState.hit
+              ? item.copyWith(imageBytes: result.bytes)
+              : item.copyWith(clearImageBytes: true);
         } catch (_) {
           // One damaged cache entry must not hide the remaining news.
         }
@@ -518,14 +531,11 @@ class HomeDashboardService {
   Future<Uint8List?> resolveNewsImageBytes(HomeNewsItem item) async {
     final key = item.imageCacheKey;
     if (key == null) return null;
-    if (item.imageBytes != null && item.imageBytes!.isNotEmpty) {
-      return item.imageBytes;
-    }
     return _fetchNewsImage(key);
   }
 
   Future<Uint8List?> _fetchNewsImage(NewsImageCacheKey key) {
-    return _imageCache.getOrFetch(key, () => _downloadNewsImage(key.path));
+    return _publicImages.getOrFetch(key, () => _downloadNewsImage(key.path));
   }
 
   Future<Uint8List?> _downloadNewsImage(String path) async {

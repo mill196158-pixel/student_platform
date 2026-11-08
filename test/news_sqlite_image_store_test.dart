@@ -201,6 +201,21 @@ void main() {
     expect(await store.read(key), [1, 2, 3]);
   });
 
+  test('cancelled late capture cannot invalidate a newer ticket', () async {
+    final dir = await Directory.systemTemp.createTemp('news-store-cancel-ticket-');
+    final dbA = await databaseFactoryFfi.openDatabase('${dir.path}/store.db', options: OpenDatabaseOptions(singleInstance: false));
+    final dbB = await databaseFactoryFfi.openDatabase('${dir.path}/store.db', options: OpenDatabaseOptions(singleInstance: false));
+    addTearDown(() async { await dbA.close(); await dbB.close(); await dir.delete(recursive: true); });
+    final a = NewsSqliteImageStore(database: dbA, root: Directory('${dir.path}/blobs'));
+    final b = NewsSqliteImageStore(database: dbB, root: Directory('${dir.path}/blobs'));
+    final key = NewsImageCacheKey(path: 'image', version: '1');
+    final newer = await b.capture(key);
+    var calls = 0;
+    await expectLater(a.capture(key, current: () => ++calls < 3), throwsStateError);
+    expect(calls, 3);
+    expect(await b.isCurrent(key, newer), isTrue);
+  });
+
   test('process crash before and after SQLite commit preserves a complete version', () async {
     for (final phase in ['before', 'after']) {
       final dir = await Directory.systemTemp.createTemp('news-store-crash-');

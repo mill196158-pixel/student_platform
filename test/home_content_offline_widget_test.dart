@@ -18,6 +18,7 @@ import 'package:student_platform/src/ui/home/home_promo_service.dart';
 import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
 import 'package:student_platform/src/ui/info/home_content_snapshot_store.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:student_ui/student_ui.dart';
 import 'auth_session_scope_test.dart' show fakeSession;
 
 class _Reader implements CachedHomeScheduleReader {
@@ -45,8 +46,16 @@ class _Reader implements CachedHomeScheduleReader {
 }
 
 class _Dashboard implements HomeDashboardService {
+  _Dashboard({this.rejectImages = false});
+  bool rejectImages;
+  int imageValidationCalls = 0;
   @override
   String? get currentUserId => 'qa';
+  @override
+  Future<List<HomeNewsItem>> validateNewsImages(List<HomeNewsItem> items) async {
+    imageValidationCalls++;
+    return rejectImages ? items.map((item) => item.copyWith(clearImageBytes: true)).toList() : items;
+  }
   @override
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
@@ -87,6 +96,27 @@ class _OnlineDashboard extends _Dashboard {
     reads++;
     return null;
   }
+}
+
+class _RefreshDashboard extends _Dashboard {
+  _RefreshDashboard(this.first);
+  final HomeNewsItem first;
+  Completer<void>? loadGate;
+  bool returnCached = false;
+  @override
+  Future<List<HomeNewsItem>> loadCachedNews() async =>
+      returnCached ? [first.copyWith(clearImageBytes: true)] : [];
+  @override
+  Future<HomeDashboardData> load({void Function(HomeDashboardData)? onUpdate,
+      HomeDashboardData? previous}) async {
+    await loadGate?.future;
+    final news = await validateNewsImages(previous?.news ?? [first]);
+    return HomeDashboardData(profile: const HomeUserProfile(id: 'qa', name: 'QA'),
+        scheduleDate: DateTime.now(), todayLessons: const [],
+        assignments: const [], news: news);
+  }
+  @override
+  Future<void> prewarmSchedule(OnlineSideEffectBarrier barrier) async {}
 }
 
 class _Promo implements HomePromoService {
@@ -156,6 +186,92 @@ class _DisposeActionState extends State<_DisposeAction> {
 }
 
 void main() {
+  testWidgets('refresh keeps validated current news frame and drops it on denial', (tester) async {
+    final bytes = Uint8List.fromList(base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/afoAAAAASUVORK5CYII='));
+    final item = HomeNewsItem(id: 'n', title: 'Refresh news', subtitle: '', body: '',
+        icon: Icons.info, gradientColors: const [], type: HomeNewsType.update,
+        createdAt: DateTime.utc(2026), imagePath: 'news/a.png', imageBytes: bytes);
+    final dashboard = _RefreshDashboard(item);
+    await tester.pumpWidget(MaterialApp(home: HomeScreen(dashboardService: dashboard,
+        promoService: _Promo(), notificationsApi: _Notifications())));
+    await tester.pumpAndSettle();
+    expect(tester.widget<StudentHomeView>(find.byType(StudentHomeView)).data.news.single.imageBytes, bytes);
+    dashboard.returnCached = true;
+    dashboard.loadGate = Completer<void>();
+    final before = dashboard.imageValidationCalls;
+    final refreshing = tester.widget<StudentHomeView>(find.byType(StudentHomeView)).onRefresh!();
+    await tester.pump();
+    await tester.pump();
+    expect(dashboard.imageValidationCalls, greaterThan(before));
+    expect(tester.widget<StudentHomeView>(find.byType(StudentHomeView)).data.news.single.imageBytes, bytes);
+    dashboard.loadGate!.complete();
+    await refreshing;
+    dashboard.loadGate = null;
+    await tester.pumpAndSettle();
+    expect(tester.widget<StudentHomeView>(find.byType(StudentHomeView)).data.news.single.imageBytes, bytes);
+    dashboard.rejectImages = true;
+    await tester.widget<StudentHomeView>(find.byType(StudentHomeView)).onRefresh!();
+    await tester.pumpAndSettle();
+    expect(tester.widget<StudentHomeView>(find.byType(StudentHomeView)).data.news.single.imageBytes, isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+  testWidgets('opening cached story revalidates bytes shown on the home card', (tester) async {
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final session = fakeSession('story-check');
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final caps = SessionCapabilities(scope);
+    expect(caps.grant(SessionCapabilityMode.cacheOnly,
+        caps.beginAuthorization(scope.capture()!)!), isTrue);
+    final bytes = Uint8List.fromList(base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/afoAAAAASUVORK5CYII='));
+    final content = _Content(HomeContentSnapshot([{
+      'id': 'n', 'title': 'Story news', 'body': 'Story text',
+      'created_at': '2026-11-06T00:00:00Z', 'variant': 'imageOverlay',
+      'image_path': 'news/a.png', '_offline_image': 'n',
+    }], {'n': bytes}), const HomeContentSnapshot([], {}));
+    final dashboard = _Dashboard();
+    await tester.pumpWidget(MaterialApp(home: HomeScreen(dashboardService: dashboard,
+        cachedReader: _Reader(caps), homeContent: content, homeContentCapabilities: caps)));
+    await tester.pumpAndSettle();
+    expect(find.text('Story news'), findsWidgets);
+    final before = dashboard.imageValidationCalls;
+    dashboard.rejectImages = true;
+    await tester.tap(find.text('Story news').first);
+    await tester.pumpAndSettle();
+    expect(dashboard.imageValidationCalls, greaterThan(before));
+    final sheet = tester.widget<StudentNewsStorySheet>(find.byType(StudentNewsStorySheet));
+    expect(sheet.news.single.imageBytes, isNull);
+    await tester.pumpWidget(const SizedBox());
+    caps.dispose(); scope.dispose(); await events.close();
+  });
+  testWidgets('cold snapshot uses validated news bytes rather than preloaded bytes', (tester) async {
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final session = fakeSession('snapshot-check');
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final caps = SessionCapabilities(scope);
+    expect(caps.grant(SessionCapabilityMode.cacheOnly,
+        caps.beginAuthorization(scope.capture()!)!), isTrue);
+    final bytes = Uint8List.fromList(base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/afoAAAAASUVORK5CYII='));
+    final content = _Content(HomeContentSnapshot([{
+      'id': 'n', 'title': 'Snapshot news', 'body': 'Text',
+      'created_at': '2026-11-06T00:00:00Z', 'variant': 'imageOverlay',
+      'image_path': 'news/a.png', '_offline_image': 'n',
+    }], {'n': bytes}), const HomeContentSnapshot([], {}));
+    final dashboard = _Dashboard(rejectImages: true);
+    await tester.pumpWidget(MaterialApp(home: HomeScreen(dashboardService: dashboard,
+        cachedReader: _Reader(caps), homeContent: content, homeContentCapabilities: caps)));
+    await tester.pumpAndSettle();
+    expect(find.text('Snapshot news'), findsWidgets);
+    expect(dashboard.imageValidationCalls, greaterThan(0));
+    expect(find.byWidgetPredicate((w) => w is Image && w.image is MemoryImage &&
+        identical((w.image as MemoryImage).bytes, bytes)), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    caps.dispose(); scope.dispose(); await events.close();
+  });
   testWidgets('content revoke during sibling disposal leaves home usable', (tester) async {
     final events = StreamController<AuthState>.broadcast(sync: true);
     final session = fakeSession('dispose-content');

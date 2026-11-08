@@ -1,0 +1,173 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:student_platform/src/core/optional_image_cache_budget.dart';
+import 'package:student_platform/src/ui/home/news_image_disk_cache.dart';
+import 'package:student_platform/src/ui/home/news_sqlite_image_store.dart';
+import 'package:student_platform/src/ui/home/public_news_image_cache.dart';
+import 'package:student_platform/src/ui/home/home_dashboard_service.dart';
+import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
+import 'package:student_platform/src/ui/schedule/schedule_screen.dart';
+import 'package:student_platform/src/ui/learning/data/supabase_learning_repository.dart';
+import 'package:student_ui/student_ui.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+class _GatedLegacy extends NewsImageDiskCache {
+  final entered = Completer<void>();
+  final release = Completer<Uint8List?>();
+  @override
+  Future<Uint8List?> peekLegacyReadOnly(NewsImageCacheKey key) { entered.complete(); return release.future; }
+}
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  sqfliteFfiInit();
+  late Directory root;
+  late Database dbA, dbB;
+  late NewsSqliteImageStore storeA, storeB;
+  late NewsImageDiskCache legacy;
+  late OptionalImageCacheBudget budget;
+  late PublicNewsImageCache a, b;
+  final key = NewsImageCacheKey(path: 'public/news', version: '1');
+  setUp(() async {
+    root = await Directory.systemTemp.createTemp('public-news-');
+    dbA = await databaseFactoryFfi.openDatabase('${root.path}/store.db', options: OpenDatabaseOptions(singleInstance: false));
+    dbB = await databaseFactoryFfi.openDatabase('${root.path}/store.db', options: OpenDatabaseOptions(singleInstance: false));
+    storeA = NewsSqliteImageStore(database: dbA, root: Directory('${root.path}/blobs'));
+    storeB = NewsSqliteImageStore(database: dbB, root: Directory('${root.path}/blobs'));
+    legacy = NewsImageDiskCache(rootOverride: () => Directory('${root.path}/legacy'), memory: NewsImageBytesCache());
+    budget = OptionalImageCacheBudget(roots: () async => [root]);
+    await budget.refreshForTesting();
+    a = PublicNewsImageCache(legacy: legacy, openStore: () async => storeA, budget: budget);
+    b = PublicNewsImageCache(legacy: legacy, openStore: () async => storeB, budget: budget);
+  });
+  tearDown(() async { await dbA.close(); await dbB.close(); await root.delete(recursive: true); });
+
+  test('other instance clear suppresses legacy and preloaded bytes', () async {
+    await legacy.put(key, Uint8List.fromList([1]));
+    expect((await a.read(key)).bytes, [1]);
+    await b.invalidate();
+    var fallbackCalls = 0;
+    final result = await a.read(key, legacyFallback: () async { fallbackCalls++; return Uint8List.fromList([2]); });
+    expect(result.state, NewsImageReadState.miss);
+    expect(fallbackCalls, 0);
+  });
+
+  test('same-instance invalidation fences an already running legacy read', () async {
+    final gated = _GatedLegacy();
+    final cache = PublicNewsImageCache(legacy: gated, openStore: () async => storeA, budget: budget);
+    final old = cache.read(key);
+    await gated.entered.future;
+    final invalidating = cache.invalidate(key.path);
+    gated.release.complete(Uint8List.fromList([1]));
+    expect((await old).state, NewsImageReadState.unknown);
+    await invalidating;
+  });
+
+  test('hung DB read times out to fresh network and cannot publish late bytes', () async {
+    final gated = _GatedLegacy();
+    final cache = PublicNewsImageCache(legacy: gated, openStore: () async => storeA,
+        budget: budget, operationTimeout: const Duration(milliseconds: 40));
+    var downloads = 0;
+    final result = cache.getOrFetch(key, () async { downloads++; return Uint8List.fromList([7]); });
+    await gated.entered.future;
+    expect(await result.timeout(const Duration(seconds: 2)), [7]);
+    expect(downloads, 1);
+    gated.release.complete(Uint8List.fromList([1]));
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(await storeA.read(key), anyOf(isNull, equals([7])));
+  });
+
+  test('hung legacy read releases transaction so clear completes and late data stays hidden', () async {
+    final gated = _GatedLegacy();
+    final cache = PublicNewsImageCache(legacy: gated, openStore: () async => storeA,
+        budget: budget, operationTimeout: const Duration(milliseconds: 80));
+    final pending = cache.read(key);
+    await gated.entered.future;
+    final clear = b.invalidate(key.path);
+    expect((await pending.timeout(const Duration(seconds: 2))).state, NewsImageReadState.unknown);
+    await clear.timeout(const Duration(seconds: 2));
+    gated.release.complete(Uint8List.fromList([1]));
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+    expect((await cache.read(key)).state, NewsImageReadState.miss);
+  });
+
+  test('unknown DB never uses legacy or preloaded bytes, network remains usable', () async {
+    await legacy.put(key, Uint8List.fromList([1]));
+    await a.read(key);
+    await dbB.execute('DROP TABLE news_store_suppression');
+    var fallbackCalls = 0;
+    final read = await a.read(key, legacyFallback: () async { fallbackCalls++; return Uint8List.fromList([2]); });
+    expect(read.state, NewsImageReadState.unknown);
+    expect(fallbackCalls, 0);
+    expect(await a.getOrFetch(key, () async => Uint8List.fromList([3])), [3]);
+  });
+
+  test('delayed fetch cannot return bytes after other instance invalidation', () async {
+    final requested = Completer<void>(), release = Completer<Uint8List?>();
+    final old = a.getOrFetch(key, () { requested.complete(); return release.future; });
+    await requested.future;
+    await b.invalidate(key.path);
+    release.complete(Uint8List.fromList([1]));
+    expect(await old, isNull);
+    expect((await a.read(key)).state, NewsImageReadState.miss);
+  });
+
+  test('old in-flight completion does not remove the new one', () async {
+    final firstStarted = Completer<void>(), first = Completer<Uint8List?>();
+    final firstFuture = a.getOrFetch(key, () { firstStarted.complete(); return first.future; });
+    await firstStarted.future;
+    await a.invalidate(key.path);
+    final secondStarted = Completer<void>(), second = Completer<Uint8List?>();
+    var secondCalls = 0;
+    final secondFuture = a.getOrFetch(key, () { secondCalls++; secondStarted.complete(); return second.future; });
+    await secondStarted.future;
+    first.complete(Uint8List.fromList([1]));
+    expect(await firstFuture, isNull);
+    final joined = a.getOrFetch(key, () async { secondCalls++; return Uint8List.fromList([9]); });
+    second.complete(Uint8List.fromList([2]));
+    expect(await secondFuture, [2]);
+    expect(await joined, [2]);
+    expect(secondCalls, 1);
+  });
+
+  test('slow budget scan does not delay the fetched image or resurrect after clear', () async {
+    final rootsReady = Completer<List<Directory>>();
+    final delayedBudget = OptionalImageCacheBudget(roots: () => rootsReady.future);
+    final cache = PublicNewsImageCache(legacy: legacy, openStore: () async => storeA, budget: delayedBudget);
+    expect(await cache.getOrFetch(key, () async => Uint8List.fromList([5]))
+        .timeout(const Duration(seconds: 1)), [5]);
+    expect(await storeA.read(key), isNull);
+    await b.invalidate();
+    rootsReady.complete([root]);
+    await delayedBudget.refreshForTesting();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(await storeA.read(key), isNull);
+  });
+
+  test('home snapshot and story do not trust preloaded bytes after clear', () async {
+    final httpClient = MockClient((_) async => http.Response('', 503));
+    final client = SupabaseClient('https://example.invalid', 'synthetic', httpClient: httpClient);
+    final service = HomeDashboardService(client: client,
+        scheduleRepository: ScheduleRepository(client: client),
+        learningRepository: SupabaseLearningRepository(client: client),
+        publicImageCache: a, httpClient: httpClient);
+    addTearDown(() { service.dispose(); client.dispose(); });
+    final item = HomeNewsItem(id: 'n', title: 't', subtitle: '', body: '',
+        icon: Icons.info, gradientColors: const [], type: HomeNewsType.update,
+        createdAt: DateTime.utc(2026), imagePath: key.path,
+        imageBytes: Uint8List.fromList([7]));
+    expect((await service.validateNewsImages([item])).single.imageBytes, [7],
+        reason: 'already displayed bytes remain available on an ordinary cache miss');
+    await b.invalidate();
+    final validated = await service.validateNewsImages([item]);
+    expect(validated.single.imageBytes, isNull);
+    expect(await service.resolveNewsImageBytes(item), isNull);
+  });
+}

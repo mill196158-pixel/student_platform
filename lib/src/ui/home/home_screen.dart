@@ -468,6 +468,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             /* A malformed optional card cannot hide the dashboard. */
           }
         }
+        List<HomeNewsItem> verifiedNews;
+        try {
+          verifiedNews = news.isEmpty ? news :
+              await _service.validateNewsImages(news).timeout(const Duration(seconds: 1));
+        } catch (_) {
+          // A damaged or slow optional image store must not hide the dashboard.
+          verifiedNews = news.map((item) => item.copyWith(clearImageBytes: true)).toList();
+        }
+        if (!currentContext()) return;
         final promos = <ManagedContentCard>[];
         for (final row in savedPromo?.rows ?? <Map<String, dynamic>>[]) {
           final card = ManagedContentCard.tryParseHomePromo(row);
@@ -491,7 +500,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               scheduleDate: snapshot.scheduleDate,
               todayLessons: snapshot.todayLessons,
               assignments: snapshot.assignments,
-              news: news,
+              news: verifiedNews,
               scheduleStatus: snapshot.scheduleStatus,
               assignmentsStatus: snapshot.assignmentsStatus,
               readNotificationIds: snapshot.readNotificationIds,
@@ -657,6 +666,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           userId != _service.currentUserId ||
           cached.isEmpty ||
           _data == null) return;
+      final base = _data!;
+      final prior = base.profile.id == userId
+          ? {for (final item in base.news) item.id: item}
+          : <String, HomeNewsItem>{};
+      final candidates = cached.map((item) {
+        final old = prior[item.id];
+        return item.imageBytes == null && old?.imageBytes != null &&
+                item.imageCacheKey?.id != null &&
+                item.imageCacheKey?.id == old!.imageCacheKey?.id
+            ? item.copyWith(imageBytes: old.imageBytes)
+            : item;
+      }).toList();
+      final verified = await _service.validateNewsImages(candidates).timeout(const Duration(seconds: 1));
+      if (!mounted || generation != _promoLoadGeneration ||
+          userId != _service.currentUserId || !identical(_data, base)) return;
       setState(() {
         _data = _mergeDashboardNewsImages(
           _data,
@@ -667,7 +691,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             scheduleDate: _data!.scheduleDate,
             todayLessons: _data!.todayLessons,
             assignments: _data!.assignments,
-            news: cached,
+            news: verified,
             readNotificationIds: _data!.readNotificationIds,
             unreadMessagesCount: _data!.unreadMessagesCount,
             warning: _data!.warning,
@@ -683,16 +707,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     HomeDashboardData next,
   ) {
     if (previous == null) return next;
-    final prevById = {for (final item in previous.news) item.id: item};
-    final news = [
-      for (final item in next.news)
-        if (item.imageBytes == null &&
-            prevById[item.id]?.imageBytes != null &&
-            prevById[item.id]!.imageCacheKey?.id == item.imageCacheKey?.id)
-          item.copyWith(imageBytes: prevById[item.id]!.imageBytes)
-        else
-          item,
-    ];
     return HomeDashboardData(
       scheduleStatus: next.scheduleStatus,
       assignmentsStatus: next.assignmentsStatus,
@@ -700,7 +714,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       scheduleDate: next.scheduleDate,
       todayLessons: next.todayLessons,
       assignments: next.assignments,
-      news: news,
+      news: next.news,
       readNotificationIds: next.readNotificationIds,
       unreadMessagesCount: next.unreadMessagesCount,
       warning: next.warning,
@@ -1126,12 +1140,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  void _showNewsFeed(List<HomeNewsItem> news, int initialIndex) {
+  Future<void> _showNewsFeed(List<HomeNewsItem> news, int initialIndex) async {
     if (!_cachedContentAllowed) return;
     if (news.isEmpty) return;
-    final byId = {for (final item in news) item.id: item};
-    final presentation = _presentationNews(news);
-    final safeIndex = initialIndex.clamp(0, presentation.length - 1);
     final reader = widget.cachedReader;
     final barrier = widget.onlineBarrier;
     final content = widget.homeContent;
@@ -1139,6 +1150,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final contentPermit = _contentPermit;
     final scope = _authScope;
     final owner = scope?.capture();
+    List<HomeNewsItem> checked;
+    try {
+      checked = await _service.validateNewsImages(news).timeout(const Duration(seconds: 1));
+    } catch (_) {
+      checked = news.map((item) => item.copyWith(clearImageBytes: true)).toList();
+    }
+    if (!mounted || !identical(widget.cachedReader, reader) ||
+        !identical(widget.onlineBarrier, barrier) ||
+        !identical(widget.homeContent, content) ||
+        !identical(widget.homeContentCapabilities, contentCaps) ||
+        (reader != null && (!identical(_contentPermit, contentPermit) || !_cachedContentAllowed || !reader.canRead)) ||
+        (barrier != null && !barrier.isOpen) ||
+        (scope != null && (owner == null || !scope.isCurrent(owner))) ||
+        content?.isDenied('news') == true) return;
+    final byId = {for (final item in checked) item.id: item};
+    final presentation = _presentationNews(checked);
+    final safeIndex = initialIndex.clamp(0, presentation.length - 1);
     final active = ValueNotifier<bool>(true);
     final navigator = Navigator.of(context);
     ModalBottomSheetRoute<void>? sheetRoute;

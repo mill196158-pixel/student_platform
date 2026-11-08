@@ -126,19 +126,44 @@ class NewsSqliteImageStore {
   }
 
   /// Capture before network fetch; an invalidation makes the ticket stale.
-  Future<NewsImageWriteTicket> capture(NewsImageCacheKey key) async {
+  Future<NewsImageWriteTicket> capture(NewsImageCacheKey key,
+      {bool Function()? current}) async {
     if (key.path.isEmpty) throw ArgumentError.value(key.path);
     final ns = await _namespace();
+    // Bootstrap marker publication must commit separately. A cancelled ticket
+    // can then roll back its generation without orphaning that marker.
+    await _transaction((tx) => _schema(tx, ns));
+    if (current != null && !current()) throw StateError('Cancelled image ticket');
     return _transaction((tx) async {
       await _schema(tx, ns);
+      if (current != null && !current()) {
+        throw StateError('Cancelled image ticket');
+      }
       // Starting a newer fetch for this path invalidates every older ticket,
       // including a delayed prune from a previous version.
       await tx.rawInsert('INSERT INTO news_store_epochs(namespace,path,generation) VALUES(?,?,1) '
           'ON CONFLICT(namespace,path) DO UPDATE SET generation=generation+1', [ns, key.path]);
       final rows = await tx.query('news_store_protocol', columns: ['token'],
           where: 'namespace=?', whereArgs: [ns]);
+      final generation = await _generation(tx, ns, key.path);
+      if (current != null && !current()) {
+        throw StateError('Cancelled image ticket');
+      }
       return NewsImageWriteTicket._(ns, rows.single['token'] as String,
-          key.id, key.path, await _generation(tx, ns, key.path));
+          key.id, key.path, generation);
+    });
+  }
+
+  Future<bool> isCurrent(NewsImageCacheKey key, NewsImageWriteTicket ticket) async {
+    final ns = await _namespace();
+    return _transaction((tx) async {
+      await _schema(tx, ns);
+      final rows = await tx.query('news_store_protocol', columns: ['token'],
+          where: 'namespace=?', whereArgs: [ns]);
+      return ticket._namespace == ns && ticket._id == key.id &&
+          ticket._path == key.path && rows.length == 1 &&
+          rows.single['token'] == ticket._protocol &&
+          await _generation(tx, ns, key.path) == ticket._generation;
     });
   }
 
@@ -173,6 +198,7 @@ class NewsSqliteImageStore {
 
   Future<Uint8List?> read(NewsImageCacheKey key) async {
     final ns = await _namespace();
+    await _transaction((tx) => _schema(tx, ns));
     return _transaction((tx) async {
       await _schema(tx, ns);
       return _readInTransaction(tx, ns, key);
@@ -198,9 +224,13 @@ class NewsSqliteImageStore {
   /// Legacy is consulted only inside the shared transaction after checking
   /// durable suppression. Errors are unknown, never a cached miss.
   Future<NewsImageReadResult> readWithLegacy(NewsImageCacheKey key,
-      Future<Uint8List?> Function() readLegacy) async {
+      Future<Uint8List?> Function() readLegacy,
+      {Duration legacyTimeout = const Duration(milliseconds: 500)}) async {
     try {
       final ns = await _namespace();
+      // Bootstrap is committed before a timed callback can abort its own
+      // transaction; otherwise an orphan marker would strand a fresh store.
+      await _transaction((tx) => _schema(tx, ns));
       return await _transaction((tx) async {
         await _schema(tx, ns);
         final data = await _readInTransaction(tx, ns, key);
@@ -211,7 +241,8 @@ class NewsSqliteImageStore {
             (row['path'] == key.path && row['keep_version'] != key.version))) {
           return const NewsImageReadResult(NewsImageReadState.miss);
         }
-        final legacy = await readLegacy();
+        if (legacyTimeout <= Duration.zero) throw StateError('Invalid legacy timeout');
+        final legacy = await readLegacy().timeout(legacyTimeout);
         return legacy == null || legacy.isEmpty
             ? const NewsImageReadResult(NewsImageReadState.miss)
             : NewsImageReadResult(NewsImageReadState.hit, legacy);
@@ -245,6 +276,7 @@ class NewsSqliteImageStore {
   Future<void> invalidate([String? path]) async {
     if (path != null && path.isEmpty) throw ArgumentError.value(path);
     final ns = await _namespace();
+    await _transaction((tx) => _schema(tx, ns));
     await _transaction((tx) async {
       await _schema(tx, ns);
       await tx.rawInsert('INSERT INTO news_store_epochs(namespace,path,generation) VALUES(?,?,1) '
