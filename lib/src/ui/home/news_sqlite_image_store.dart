@@ -14,6 +14,14 @@ class NewsImageWriteTicket {
   final (int, int) _generation;
 }
 
+enum NewsImageReadState { hit, miss, unknown }
+
+class NewsImageReadResult {
+  const NewsImageReadResult(this.state, [this.bytes]);
+  final NewsImageReadState state;
+  final Uint8List? bytes;
+}
+
 /// A new-namespace store. No legacy files or orphaned blobs are deleted.
 /// Callers must use the same coordination database for this namespace.
 class NewsSqliteImageStore {
@@ -28,8 +36,8 @@ class NewsSqliteImageStore {
   Future<void> _schema(sqlite.Transaction tx, String namespace) async {
     final marker = File('$namespace/.news-store-protocol');
     final kind = await FileSystemEntity.type(marker.path, followLinks: false);
-    final names = ['news_store_epochs', 'news_store_images', 'news_store_protocol'];
-    final tables = await tx.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name IN (?,?,?)", names);
+    final names = ['news_store_epochs', 'news_store_images', 'news_store_protocol', 'news_store_suppression'];
+    final tables = await tx.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name IN (?,?,?,?)", names);
     if (tables.isEmpty && kind == FileSystemEntityType.notFound) {
       await tx.execute('CREATE TABLE news_store_epochs ('
         'namespace TEXT NOT NULL, path TEXT NOT NULL, generation INTEGER NOT NULL, '
@@ -40,6 +48,8 @@ class NewsSqliteImageStore {
         'PRIMARY KEY(namespace,id))');
       await tx.execute('CREATE TABLE news_store_protocol ('
         'namespace TEXT PRIMARY KEY, token TEXT NOT NULL, version INTEGER NOT NULL)');
+      await tx.execute('CREATE TABLE news_store_suppression ('
+        'namespace TEXT NOT NULL, path TEXT NOT NULL, keep_version TEXT, PRIMARY KEY(namespace,path))');
     } else if (tables.length != names.length) {
       throw StateError('Incomplete cache schema');
     }
@@ -47,6 +57,7 @@ class NewsSqliteImageStore {
       'news_store_epochs': ['namespace:TEXT:1:1', 'path:TEXT:1:2', 'generation:INTEGER:1:0'],
       'news_store_images': ['namespace:TEXT:1:1', 'id:TEXT:1:2', 'path:TEXT:1:0', 'filename:TEXT:1:0', 'sha:TEXT:1:0', 'size:INTEGER:1:0'],
       'news_store_protocol': ['namespace:TEXT:0:1', 'token:TEXT:1:0', 'version:INTEGER:1:0'],
+      'news_store_suppression': ['namespace:TEXT:1:1', 'path:TEXT:1:2', 'keep_version:TEXT:0:0'],
     };
     for (final entry in expected.entries) {
       final columns = await tx.rawQuery('PRAGMA table_info(${entry.key})');
@@ -60,11 +71,11 @@ class NewsSqliteImageStore {
       final token = base64UrlEncode(List<int>.generate(24, (_) => Random.secure().nextInt(256))).replaceAll('=', '');
       await marker.create(exclusive: true);
       await marker.writeAsString(token, flush: true);
-      await tx.insert('news_store_protocol', {'namespace': namespace, 'token': token, 'version': 1});
+      await tx.insert('news_store_protocol', {'namespace': namespace, 'token': token, 'version': 2});
       await tx.insert('news_store_epochs', {'namespace': namespace, 'path': '', 'generation': 0});
       return;
     }
-    if (kind != FileSystemEntityType.file || rows.length != 1 || rows.single['version'] != 1) {
+    if (kind != FileSystemEntityType.file || rows.length != 1 || rows.single['version'] != 2) {
       throw StateError('Unverified cache protocol');
     }
     final token = await marker.readAsString();
@@ -120,6 +131,10 @@ class NewsSqliteImageStore {
     final ns = await _namespace();
     return _transaction((tx) async {
       await _schema(tx, ns);
+      // Starting a newer fetch for this path invalidates every older ticket,
+      // including a delayed prune from a previous version.
+      await tx.rawInsert('INSERT INTO news_store_epochs(namespace,path,generation) VALUES(?,?,1) '
+          'ON CONFLICT(namespace,path) DO UPDATE SET generation=generation+1', [ns, key.path]);
       final rows = await tx.query('news_store_protocol', columns: ['token'],
           where: 'namespace=?', whereArgs: [ns]);
       return NewsImageWriteTicket._(ns, rows.single['token'] as String,
@@ -160,19 +175,70 @@ class NewsSqliteImageStore {
     final ns = await _namespace();
     return _transaction((tx) async {
       await _schema(tx, ns);
+      return _readInTransaction(tx, ns, key);
+    });
+  }
+
+  Future<Uint8List?> _readInTransaction(sqlite.Transaction tx, String ns, NewsImageCacheKey key) async {
       final rows = await tx.query('news_store_images', where: 'namespace=? AND id=? AND path=?',
           whereArgs: [ns, key.id, key.path]);
       if (rows.length != 1) return null;
       final row = rows.single;
       final filename = row['filename'];
-      if (filename is! String || !RegExp(r'^[A-Za-z0-9_-]{32}\.bin$').hasMatch(filename)) return null;
+      if (filename is! String || !RegExp(r'^[A-Za-z0-9_-]{32}\.bin$').hasMatch(filename)) throw StateError('Invalid image path');
       final file = File('$ns/$filename');
-      if (await FileSystemEntity.type(file.path, followLinks: false) != FileSystemEntityType.file) return null;
+      if (await FileSystemEntity.type(file.path, followLinks: false) != FileSystemEntityType.file) throw StateError('Missing image');
       try {
         final data = await file.readAsBytes();
-        if (data.length != row['size'] || sha256.convert(data).toString() != row['sha']) return null;
+        if (data.length != row['size'] || sha256.convert(data).toString() != row['sha']) throw StateError('Invalid image');
         return data;
-      } on FileSystemException { return null; }
+      } on FileSystemException { throw StateError('Image unavailable'); }
+  }
+
+  /// Legacy is consulted only inside the shared transaction after checking
+  /// durable suppression. Errors are unknown, never a cached miss.
+  Future<NewsImageReadResult> readWithLegacy(NewsImageCacheKey key,
+      Future<Uint8List?> Function() readLegacy) async {
+    try {
+      final ns = await _namespace();
+      return await _transaction((tx) async {
+        await _schema(tx, ns);
+        final data = await _readInTransaction(tx, ns, key);
+        if (data != null) return NewsImageReadResult(NewsImageReadState.hit, data);
+        final suppression = await tx.query('news_store_suppression',
+            where: 'namespace=? AND path IN (?,?)', whereArgs: [ns, '', key.path]);
+        if (suppression.any((row) => row['path'] == '' ||
+            (row['path'] == key.path && row['keep_version'] != key.version))) {
+          return const NewsImageReadResult(NewsImageReadState.miss);
+        }
+        final legacy = await readLegacy();
+        return legacy == null || legacy.isEmpty
+            ? const NewsImageReadResult(NewsImageReadState.miss)
+            : NewsImageReadResult(NewsImageReadState.hit, legacy);
+      });
+    } catch (_) {
+      return const NewsImageReadResult(NewsImageReadState.unknown);
+    }
+  }
+
+  /// Drop old versions only when the original fetch ticket is still current.
+  Future<bool> pruneOtherVersions(NewsImageCacheKey key, NewsImageWriteTicket ticket) async {
+    final ns = await _namespace();
+    return _transaction((tx) async {
+      await _schema(tx, ns);
+      final protocol = await tx.query('news_store_protocol', columns: ['token'],
+          where: 'namespace=?', whereArgs: [ns]);
+      if (ticket._namespace != ns || ticket._id != key.id || ticket._path != key.path ||
+          protocol.length != 1 || protocol.single['token'] != ticket._protocol ||
+          await _generation(tx, ns, key.path) != ticket._generation) return false;
+      await tx.rawInsert('INSERT INTO news_store_epochs(namespace,path,generation) VALUES(?,?,1) '
+          'ON CONFLICT(namespace,path) DO UPDATE SET generation=generation+1', [ns, key.path]);
+      await tx.insert('news_store_suppression',
+          {'namespace': ns, 'path': key.path, 'keep_version': key.version},
+          conflictAlgorithm: sqlite.ConflictAlgorithm.replace);
+      await tx.delete('news_store_images', where: 'namespace=? AND path=? AND id<>?',
+          whereArgs: [ns, key.path, key.id]);
+      return true;
     });
   }
 
@@ -183,6 +249,9 @@ class NewsSqliteImageStore {
       await _schema(tx, ns);
       await tx.rawInsert('INSERT INTO news_store_epochs(namespace,path,generation) VALUES(?,?,1) '
           'ON CONFLICT(namespace,path) DO UPDATE SET generation=generation+1', [ns, path ?? '']);
+      await tx.insert('news_store_suppression',
+          {'namespace': ns, 'path': path ?? '', 'keep_version': null},
+          conflictAlgorithm: sqlite.ConflictAlgorithm.replace);
       await tx.delete('news_store_images', where: path == null ? 'namespace=?' : 'namespace=? AND path=?',
           whereArgs: path == null ? [ns] : [ns, path]);
     });

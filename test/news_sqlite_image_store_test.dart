@@ -72,7 +72,7 @@ void main() {
     expect(await store.read(key), [1]);
     final row = (await db.query('news_store_images')).single;
     await File('${dir.path}/blobs/${row['filename']}').writeAsBytes([9]);
-    expect(await store.read(key), isNull);
+    await expectLater(store.read(key), throwsStateError);
   });
 
   test('lost coordination database does not recreate cleared state', () async {
@@ -140,6 +140,53 @@ void main() {
     await expectLater(store.put(key, Uint8List.fromList([1]), stale), throwsStateError);
     final tables = await db.rawQuery("SELECT name FROM sqlite_master WHERE name='news_store_epochs'");
     expect(tables, isEmpty);
+  });
+
+  test('legacy keep-version, path invalidation and global clear are durable', () async {
+    final dir = await Directory.systemTemp.createTemp('news-store-suppression-');
+    final dbA = await databaseFactoryFfi.openDatabase('${dir.path}/store.db', options: OpenDatabaseOptions(singleInstance: false));
+    final dbB = await databaseFactoryFfi.openDatabase('${dir.path}/store.db', options: OpenDatabaseOptions(singleInstance: false));
+    addTearDown(() async { await dbA.close(); await dbB.close(); await dir.delete(recursive: true); });
+    final a = NewsSqliteImageStore(database: dbA, root: Directory('${dir.path}/blobs'));
+    final b = NewsSqliteImageStore(database: dbB, root: Directory('${dir.path}/blobs'));
+    final old = NewsImageCacheKey(path: 'image', version: '1');
+    final current = NewsImageCacheKey(path: 'image', version: '2');
+    Future<Uint8List?> legacy() async => Uint8List.fromList([4]);
+    final stale = await a.capture(old);
+    final fresh = await b.capture(current);
+    expect(await a.pruneOtherVersions(old, stale), isFalse);
+    expect(await b.pruneOtherVersions(current, fresh), isTrue);
+    expect((await a.readWithLegacy(old, legacy)).state, NewsImageReadState.miss);
+    expect((await a.readWithLegacy(current, legacy)).state, NewsImageReadState.hit);
+    await b.invalidate(current.path);
+    expect((await a.readWithLegacy(current, legacy)).state, NewsImageReadState.miss);
+    await b.invalidate();
+    final afterClear = await a.capture(current);
+    expect(await a.pruneOtherVersions(current, afterClear), isTrue);
+    expect((await b.readWithLegacy(current, legacy)).state, NewsImageReadState.miss);
+    await dbB.execute('DROP TABLE news_store_suppression');
+    var calls = 0;
+    final unknown = await a.readWithLegacy(current, () async { calls++; return Uint8List.fromList([4]); });
+    expect(unknown.state, NewsImageReadState.unknown);
+    expect(calls, 0);
+  });
+
+  test('legacy read and invalidation serialize across handles', () async {
+    final dir = await Directory.systemTemp.createTemp('news-store-legacy-race-');
+    final dbA = await databaseFactoryFfi.openDatabase('${dir.path}/store.db', options: OpenDatabaseOptions(singleInstance: false));
+    final dbB = await databaseFactoryFfi.openDatabase('${dir.path}/store.db', options: OpenDatabaseOptions(singleInstance: false));
+    addTearDown(() async { await dbA.close(); await dbB.close(); await dir.delete(recursive: true); });
+    final a = NewsSqliteImageStore(database: dbA, root: Directory('${dir.path}/blobs'));
+    final b = NewsSqliteImageStore(database: dbB, root: Directory('${dir.path}/blobs'));
+    final key = NewsImageCacheKey(path: 'image', version: '1');
+    final entered = Completer<void>(), release = Completer<void>();
+    final reading = a.readWithLegacy(key, () async { entered.complete(); await release.future; return Uint8List.fromList([1]); });
+    await entered.future;
+    final clearing = b.invalidate(key.path);
+    release.complete();
+    expect((await reading).state, NewsImageReadState.hit);
+    await clearing;
+    expect((await a.readWithLegacy(key, () async => Uint8List.fromList([1]))).state, NewsImageReadState.miss);
   });
 
   test('caller mutation during publication cannot alter stored bytes or hash', () async {
