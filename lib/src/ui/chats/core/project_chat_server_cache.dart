@@ -593,10 +593,35 @@ class ProjectChatServerCache {
   /// engines must register a guard; stale guards deliberately stop eviction.
   Future<ChatHistoryAppGuard?> beginHistoryAppGuard(int targetLogicalBytes,
       {required bool allEnginesGuarded}) async {
+    return _beginHistoryAppGuard(targetLogicalBytes,
+        allEnginesGuarded: allEnginesGuarded);
+  }
+
+  /// One bounded maintenance pass. The caller must hold a fresh observation
+  /// and an online capability for this owner for the entire transaction.
+  Future<ChatHistoryAppGuard?> beginOrdinaryHistoryMaintenance(
+      int targetLogicalBytes, ProjectDatabaseOwnerCapability databaseOwner,
+      bool Function() observationAndOnlineCurrent) async {
+    bool eligible() {
+      try {
+        return databaseOwner.isCurrentFor(db) && observationAndOnlineCurrent();
+      } catch (_) { return false; }
+    }
+    if (!eligible() || targetLogicalBytes <= 0) return null;
+    return _beginHistoryAppGuard(
+        min(targetLogicalBytes, 4 * 1024 * 1024),
+        allEnginesGuarded: true, additionalCurrent: eligible,
+        maxSnapshots: 8, strictByteLimit: true);
+  }
+
+  Future<ChatHistoryAppGuard?> _beginHistoryAppGuard(int targetLogicalBytes,
+      {required bool allEnginesGuarded, bool Function()? additionalCurrent,
+      int? maxSnapshots, bool strictByteLimit = false}) async {
     final owner = scope.capture(), binding = currentBinding();
     if (!allEnginesGuarded || targetLogicalBytes < 0 || owner == null || binding == null ||
         owner.userId != binding.userId || binding.issuer != '$project/auth/v1') return null;
-    bool current() => scope.isCurrent(owner) && _matches(currentBinding(), binding);
+    bool current() => scope.isCurrent(owner) && _matches(currentBinding(), binding) &&
+        (additionalCurrent?.call() ?? true);
     final databaseGuard = _databaseAppGuards[db];
     if (databaseGuard == null || databaseGuard.file == null) return null;
     final token = _newGuardToken();
@@ -614,7 +639,8 @@ class ProjectChatServerCache {
         final removed = guards.isEmpty && mayEvict &&
                 _pendingRouteHolds == 0 && _failedRouteHolds == 0
             ? await _evictServerHistory(txn, binding, () => current() &&
-                _pendingRouteHolds == 0 && _failedRouteHolds == 0, targetLogicalBytes)
+                _pendingRouteHolds == 0 && _failedRouteHolds == 0, targetLogicalBytes,
+                maxSnapshots: maxSnapshots, strictByteLimit: strictByteLimit)
             : 0;
         await txn.insert('chat_app_guards', {'token': token, 'project': project,
           'uid': binding.userId, 'sid': binding.sessionId, 'database_token': databaseGuard.token});
@@ -682,19 +708,22 @@ class ProjectChatServerCache {
   }
 
   Future<int> _evictServerHistory(Transaction txn, OfflineSessionBinding binding,
-      bool Function() current, int targetLogicalBytes) async {
+      bool Function() current, int targetLogicalBytes,
+      {int? maxSnapshots, bool strictByteLimit = false}) async {
         final rows = await txn.rawQuery('SELECT s.chat, s.payload FROM chat_server_snapshot s '
             'JOIN chat_snapshot_access a ON s.project=a.project AND s.uid=a.uid AND s.sid=a.sid AND s.chat=a.chat '
             'WHERE s.project=? AND s.uid=? AND s.sid=? AND s.chat<>? '
             'AND NOT EXISTS (SELECT 1 FROM chat_route_leases l WHERE l.project=s.project AND l.uid=s.uid AND l.sid=s.sid AND (l.chat=s.chat OR l.chat=\'*\')) '
             'ORDER BY a.access_ms ASC, s.chat ASC', [project, binding.userId, binding.sessionId, summaryChatKey]);
-        var removed = 0;
+        var removed = 0, count = 0;
         for (final row in rows) {
-          if (removed >= targetLogicalBytes) break;
+          if (removed >= targetLogicalBytes || (maxSnapshots != null && count >= maxSnapshots)) break;
           if (!current()) throw const _StalePage();
           final chat = row['chat'], payload = row['payload'];
           if (chat is! String || payload is! String ||
               !_isRecoverableHistorySnapshot(chat, payload)) continue;
+          final bytes = utf8.encode(payload).length;
+          if (strictByteLimit && bytes > targetLogicalBytes - removed) continue;
           final args = [project, binding.userId, binding.sessionId, chat];
           final attempts = await txn.query('chat_server_attempt', columns: ['seq', 'blocked'],
               where: 'project=? AND uid=? AND sid=? AND chat=?', whereArgs: args);
@@ -710,7 +739,8 @@ class ProjectChatServerCache {
           if (changed != 1) continue;
           await txn.delete('chat_server_snapshot', where: 'project=? AND uid=? AND sid=? AND chat=?', whereArgs: args);
           await txn.delete('chat_snapshot_access', where: 'project=? AND uid=? AND sid=? AND chat=?', whereArgs: args);
-          removed += utf8.encode(payload).length;
+          removed += bytes;
+          count++;
         }
         await debugBeforeHistoryEvictCommit?.call();
         if (!current()) throw const _StalePage();
