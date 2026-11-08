@@ -128,6 +128,17 @@ void main() {
     expect(await publishing, isTrue);
     expect(await store.read(source, () => current), [4, 5, 6]);
     expect(await fence.canRead('p', 'u', 'key'), isTrue);
+    await db.delete('source_bound_proofs');
+    expect(await store.read(source, () => current), isNull,
+        reason: 'an older blob without source proof cannot be promoted');
+    expect(await db.query('source_bound_documents'), hasLength(1),
+        reason: 'older bytes are retained for safe recovery');
+    final confirm =
+        await authorizer.authorize(source, () => current, () async => allow);
+    expect(
+        await store.publish(
+            source, () => current, confirm!, Uint8List.fromList([4, 5, 6])),
+        isTrue);
     await db.update('source_bound_documents', {
       'bytes': Uint8List.fromList([9, 9, 9])
     });
@@ -167,6 +178,32 @@ void main() {
             source, () => current, stale!, Uint8List.fromList([7])),
         isFalse);
     expect(await store.read(source, () => current), [4, 5, 6]);
+    // A second engine can deny while an older generic check is in flight.
+    // Neither its late success nor a new generic allow revalidates the blob.
+    final otherDb = await databaseFactoryFfi.openDatabase(
+        '${root.path}/test.db',
+        options: OpenDatabaseOptions(singleInstance: false));
+    await otherDb.insert(
+        'chat_app_guards', {'token': 'other-guard', 'project': '*', 'sid': ''});
+    final otherFence = PinnedAccessFence(otherDb, databaseToken: 'other-guard');
+    final oldGeneric = await fence.begin('p', 'u', 'key');
+    final denial = await otherFence.begin('p', 'u', 'key');
+    await otherFence.finish(denial, allowed: false);
+    await fence.finish(oldGeneric, allowed: true);
+    expect(await store.read(source, () => current), isNull);
+    final genericAllow = await otherFence.begin('p', 'u', 'key');
+    await otherFence.finish(genericAllow, allowed: true);
+    expect(await fence.canRead('p', 'u', 'key'), isTrue);
+    expect(await store.read(source, () => current), isNull,
+        reason: 'generic allow does not attest to the saved source bytes');
+    final revalidated =
+        await authorizer.authorize(source, () => current, () async => allow);
+    expect(
+        await store.publish(
+            source, () => current, revalidated!, Uint8List.fromList([4, 5, 6])),
+        isTrue);
+    expect(await store.read(source, () => current), [4, 5, 6]);
+    await otherDb.close();
     final late = Completer<SourceAccessResponse>();
     expect(
         await authorizer.authorize(source, () => current, () => late.future,
