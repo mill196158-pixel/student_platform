@@ -429,13 +429,17 @@ Future<void> _initializeApp(
   SupabaseConfig.validate();
   final usePolicyQa = _sqlitePolicyQa && !kIsWeb;
   final useOrdinaryOffline = _ordinaryOffline;
-  final inner = (usePolicyQa || useOrdinaryOffline)
+  // Explicit QA only. Until a trusted native host binds the latch, refresh
+  // remains held; the ordinary default path and SDK storage are unchanged.
+  const sourceAuthorityQa = bool.fromEnvironment('SOURCE_DOCUMENT_AUTHORITY_QA');
+  final inner = (usePolicyQa || useOrdinaryOffline || sourceAuthorityQa)
       ? (useOrdinaryOffline ? _debugOrdinaryHttp : null) ?? http.Client() : null;
   final refreshFence = RefreshSecurityFence();
   final gate = inner == null
       ? null
       : RefreshAdmissionClient(inner, securityFence: refreshFence,
-          trackQaRefresh: _qaRotationNavigation);
+          trackQaRefresh: _qaRotationNavigation,
+          qaAuthorityRequired: sourceAuthorityQa);
   if (_qaRotationNavigation) _qaRefreshGate = gate;
   if (useOrdinaryOffline) _ordinaryRefreshGate = gate;
   sqlite.Database? policyDb;
