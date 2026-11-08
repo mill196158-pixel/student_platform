@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart' as sqlite;
@@ -80,7 +81,31 @@ class CacheInventoryCollector {
       required this.supportRoot,
       this.logicalHistory,
       Duration Function()? elapsed})
-      : _elapsed = elapsed ?? _clock();
+      : _platformRoots = false,
+        _elapsed = elapsed ?? _clock();
+
+  CacheInventoryCollector._platform(
+      {required this.temporaryRoot,
+      required this.databaseRoot,
+      required this.supportRoot,
+      Duration Function()? elapsed})
+      : _platformRoots = true,
+        logicalHistory = null,
+        _elapsed = elapsed ?? _clock();
+
+  /// Exercises the platform-root code path without platform plugin IO.
+  @visibleForTesting
+  factory CacheInventoryCollector.platformRootsForTesting({
+    required Future<Directory> Function() temporaryRoot,
+    required Future<Directory> Function() databaseRoot,
+    required Future<Directory> Function() supportRoot,
+  }) {
+    if (kReleaseMode) throw StateError('Test-only inventory constructor');
+    return CacheInventoryCollector._platform(
+        temporaryRoot: temporaryRoot,
+        databaseRoot: databaseRoot,
+        supportRoot: supportRoot);
+  }
 
   static Duration Function() _clock() {
     final clock = Stopwatch()..start();
@@ -95,13 +120,15 @@ class CacheInventoryCollector {
     return age.isNegative ? null : age;
   }
 
-  factory CacheInventoryCollector.platform() => CacheInventoryCollector(
+  factory CacheInventoryCollector.platform() =>
+      CacheInventoryCollector._platform(
         temporaryRoot: getTemporaryDirectory,
         databaseRoot: () async => Directory(await sqlite.getDatabasesPath()),
         supportRoot: getApplicationSupportDirectory,
       );
 
   static final shared = CacheInventoryCollector.platform();
+  final bool _platformRoots;
   final Future<Directory> Function() temporaryRoot, databaseRoot, supportRoot;
 
   /// Optional read-only collaborator using an already-open, owner-scoped DB.
@@ -131,17 +158,35 @@ class CacheInventoryCollector {
         final dir = (await getRoot()).absolute;
         if (await FileSystemEntity.type(dir.path, followLinks: false) !=
             FileSystemEntityType.directory) return null;
-        if (path.normalize(await dir.resolveSymbolicLinks()) !=
-            path.normalize(dir.path)) return null;
-        return dir;
+        final resolved = path.normalize(await dir.resolveSymbolicLinks());
+        if (!path.isAbsolute(resolved)) return null;
+        if (!_platformRoots && resolved != path.normalize(dir.path))
+          return null;
+        if (await FileSystemEntity.type(resolved, followLinks: false) !=
+            FileSystemEntityType.directory) return null;
+        return Directory(resolved);
       } catch (_) {
         return null;
       }
     }
 
-    final temp = await root(temporaryRoot);
-    final db = await root(databaseRoot);
-    final support = await root(supportRoot);
+    var temp = await root(temporaryRoot);
+    var db = await root(databaseRoot);
+    var support = await root(supportRoot);
+    // A child namespace overlapping a second root can otherwise count the
+    // same bytes twice under different classifications.
+    bool overlaps(Directory? a, Directory? b) =>
+        a != null &&
+        b != null &&
+        (path.equals(a.path, b.path) ||
+            path.isWithin(a.path, b.path) ||
+            path.isWithin(b.path, a.path));
+    final tempBad = overlaps(temp, db) || overlaps(temp, support);
+    final dbBad = overlaps(db, temp) || overlaps(db, support);
+    final supportBad = overlaps(support, temp) || overlaps(support, db);
+    if (tempBad) temp = null;
+    if (dbBad) db = null;
+    if (supportBad) support = null;
     Future<int?> size(Directory? parent, String child,
         {bool directory = false}) async {
       if (parent == null) return null;
