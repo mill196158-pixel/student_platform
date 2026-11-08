@@ -39,6 +39,7 @@ android {
     }
 
     defaultConfig {
+        manifestPlaceholders["sourceDocumentQaEnabled"] = attachFixture.toString()
         applicationId = when {
             offlineFixture -> "com.mill453020.studentplatform.offlinefixture"
             attachFixture -> "com.mill453020.studentplatform.attachfixture"

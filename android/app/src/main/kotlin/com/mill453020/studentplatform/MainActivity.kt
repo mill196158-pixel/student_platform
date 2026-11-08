@@ -51,10 +51,99 @@ class MainActivity : FlutterActivity() {
     private lateinit var channel: MethodChannel
     private var captureView: CommitEditText? = null
 
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        if (packageName == "com.mill453020.studentplatform.attachfixture") {
+            SourceDocumentNativeQa.unregister(flutterEngine)
+        }
+        super.cleanUpFlutterEngine(flutterEngine)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         startupTrace("plugins-start")
         super.configureFlutterEngine(flutterEngine)
         startupTrace("plugins-end")
+        if (packageName == "com.mill453020.studentplatform.attachfixture") {
+            SourceDocumentNativeQa.register(flutterEngine, primary = true)
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger,
+                "student_platform/source_document_qa_guard").setMethodCallHandler { call, result ->
+                val args = call.arguments as? Map<*, *>
+                when (call.method) {
+                    "dispatchSynthetic" -> result.success(args != null && SourceDocumentQaGuard.dispatch(this, args))
+                    "verifyRealSchemaSynthetic" -> Thread {
+                        val value = args != null && SourceDocumentProofQa.verifyFixture(this, args)
+                        runOnUiThread { result.success(value) }
+                    }.start()
+                    "claimNativeOwnerSynthetic" -> result.success(args != null && SourceDocumentNativeQa.claim(this, flutterEngine, args))
+                    "dispatchRealSchemaSynthetic" -> Thread {
+                        val value = if (args == null) "blocked" else SourceDocumentNativeQa.dispatch(this, flutterEngine, args)
+                        runOnUiThread { result.success(value) }
+                    }.start()
+                    "readPreparedSynthetic" -> Thread {
+                        val request = args?.get("request") as? String
+                        val value = try {
+                            if (request == null || !Regex("^[A-Za-z0-9_-]{16,80}$").matches(request)) null else {
+                                val uri = Uri.parse("content://${packageName}.source_document_qa/content/$request")
+                                contentResolver.openInputStream(uri)?.use { input ->
+                                    val digest = java.security.MessageDigest.getInstance("SHA-256")
+                                    val buffer = ByteArray(64*1024)
+                                    var total = 0
+                                    while (true) {
+                                        val n = input.read(buffer)
+                                        if (n < 0) break
+                                        total += n
+                                        if (total > 8*1024*1024) throw IllegalStateException()
+                                        digest.update(buffer,0,n)
+                                    }
+                                    digest.digest().joinToString("") { "%02x".format(it) }
+                                }
+                            }
+                        } catch (_: Exception) { null }
+                        runOnUiThread { result.success(value) }
+                    }.start()
+                    "holdPreparedSynthetic" -> Thread {
+                        val request = args?.get("request") as? String
+                        val value = try {
+                            if (request == null || !Regex("^[A-Za-z0-9_-]{16,80}$").matches(request)) false else {
+                                val uri = Uri.parse("content://${packageName}.source_document_qa/content/$request")
+                                val opened = mutableListOf<android.os.ParcelFileDescriptor>()
+                                try {
+                                    val first = contentResolver.openFileDescriptor(uri,"r")?.also { opened.add(it) }
+                                    val second = contentResolver.openFileDescriptor(uri,"r")?.also { opened.add(it) }
+                                    val third = try { contentResolver.openFileDescriptor(uri,"r")?.also { opened.add(it) } } catch (_: Exception) { null }
+                                    if (first == null || second == null || third != null) false else {
+                                        Thread.sleep(5500)
+                                        val afterTimeout = contentResolver.openFileDescriptor(uri,"r")?.also { opened.add(it) }
+                                        afterTimeout != null
+                                    }
+                                } finally { opened.forEach { try { it.close() } catch (_: Exception) {} } }
+                            }
+                        } catch (_: Exception) { false }
+                        runOnUiThread { result.success(value) }
+                    }.start()
+                    "dispatchOtherEngineSynthetic" -> {
+                        val other = FlutterEngine(applicationContext)
+                        SourceDocumentNativeQa.register(other, primary = false)
+                        Thread {
+                            val value = if (args == null) "blocked" else SourceDocumentNativeQa.dispatch(this, other, args)
+                            runOnUiThread { SourceDocumentNativeQa.unregister(other); other.destroy(); result.success(value) }
+                        }.start()
+                    }
+                    "claimOtherEngineSynthetic" -> {
+                        val other = FlutterEngine(applicationContext)
+                        SourceDocumentNativeQa.register(other, primary = false)
+                        try { result.success(args != null && SourceDocumentNativeQa.claim(this, other, args)) }
+                        finally { SourceDocumentNativeQa.unregister(other); other.destroy() }
+                    }
+                    "claimPrimaryContenderSynthetic" -> {
+                        val other = FlutterEngine(applicationContext)
+                        SourceDocumentNativeQa.register(other, primary = true)
+                        try { result.success(args != null && SourceDocumentNativeQa.claim(this, other, args)) }
+                        finally { SourceDocumentNativeQa.unregister(other); other.destroy() }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger,
             "student_platform/storage_space").setMethodCallHandler { call, result ->
             if (call.method == "availableSupportBytes") {
