@@ -2,13 +2,19 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:student_platform/src/core/cache_inventory_snapshot.dart';
+import 'package:student_platform/src/core/optional_image_cache_budget.dart';
 
 /// Partial read-only diagnostics; not an enforced cache quota.
 class CacheDiagnosticsScreen extends StatefulWidget {
   const CacheDiagnosticsScreen(
-      {super.key, this.measure, this.timeout = const Duration(seconds: 5)});
+      {super.key,
+      this.measure,
+      this.budget,
+      this.timeout = const Duration(seconds: 5)});
   @visibleForTesting
   final Future<InventorySnapshot> Function()? measure;
+  @visibleForTesting
+  final OptionalImageCacheBudget? budget;
   @visibleForTesting
   final Duration timeout;
   @override
@@ -18,6 +24,8 @@ class CacheDiagnosticsScreen extends StatefulWidget {
 class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
   int _revision = 0;
   InventorySnapshot? _snapshot;
+  int? _budgetObserved;
+  int _budgetReserved = 0;
   bool _loading = true;
   @override
   void initState() {
@@ -30,12 +38,25 @@ class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
     setState(() {
       _loading = true;
       _snapshot = null;
+      _budgetObserved = null;
     });
     InventorySnapshot? result;
     try {
+      final budget = widget.budget ??
+          (widget.measure == null ? OptionalImageCacheBudget.instance : null);
+      final budgetFuture = budget?.refreshForDisplay();
       result = await (widget.measure?.call() ??
               CacheInventoryCollector.shared.collect())
           .timeout(widget.timeout);
+      if (budgetFuture != null) {
+        try {
+          await budgetFuture.timeout(widget.timeout);
+        } catch (_) {}
+        if (mounted && revision == _revision) {
+          _budgetObserved = budget!.observedBytes;
+          _budgetReserved = budget.reservedBytes;
+        }
+      }
     } catch (_) {
       result = null;
     }
@@ -65,12 +86,22 @@ class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
   @override
   Widget build(BuildContext context) {
     final snapshot = _snapshot;
+    final budget = widget.budget ?? OptionalImageCacheBudget.instance;
     return Scaffold(
       appBar: AppBar(title: const Text('Данные приложения')),
       body: ListView(padding: const EdgeInsets.all(20), children: [
         const Text('Частичная оценка',
             style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
         const SizedBox(height: 12),
+        if (widget.measure == null || widget.budget != null) ...[
+          Text(
+              'Учтённые копии новостей и материалов: ${_value(_budgetObserved)}'),
+          Text(
+              'Резерв активных записей: ${_value(_budgetObserved == null ? null : _budgetReserved)}'),
+          Text(
+              'Цель для этих копий — ${_value(budget.limitBytes)}, включая служебный запас ${_value(budget.serviceReserveBytes)}. Остальные кэши и история этим ограничением пока не охвачены.'),
+          const SizedBox(height: 12),
+        ],
         if (_loading)
           const Text('Подсчёт…')
         else if (snapshot == null)

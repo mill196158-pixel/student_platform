@@ -4,21 +4,40 @@ import 'dart:io';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart' as sqlite;
+import 'cache_inventory_snapshot.dart';
 
 /// Best-effort admission for optional image cache writes, not a disk quota.
 /// Unknown measurements skip persistence; other writers and engines do not reserve.
 class OptionalImageCacheBudget {
   OptionalImageCacheBudget({
     Future<List<Directory>> Function()? roots,
+    CacheInventoryCollector? collector,
     this.limitBytes = 500000000,
+    int? serviceReserveBytes,
     this.refreshInterval = const Duration(seconds: 30),
     Duration Function()? elapsed,
-  }) : _roots = roots ?? _runtimeRoots,
-       _elapsed = elapsed ?? _newClock();
+  })  : _roots = roots ?? _runtimeRoots,
+        _collector = roots == null
+            ? (collector ?? CacheInventoryCollector.shared)
+            : null,
+        serviceReserveBytes =
+            serviceReserveBytes ?? (roots == null ? 16 * 1024 * 1024 : 0),
+        _elapsed = elapsed ?? _newClock() {
+    if (limitBytes < 0 ||
+        limitBytes > _maxExactBytes ||
+        this.serviceReserveBytes < 0 ||
+        this.serviceReserveBytes > _maxExactBytes) {
+      throw ArgumentError('Invalid cache budget');
+    }
+  }
+
+  static const int _maxExactBytes = 9007199254740991;
 
   static final instance = OptionalImageCacheBudget();
   final Future<List<Directory>> Function() _roots;
+  final CacheInventoryCollector? _collector;
   final int limitBytes;
+  final int serviceReserveBytes;
   final Duration refreshInterval;
   final Duration Function() _elapsed;
   int? _observed;
@@ -45,8 +64,30 @@ class OptionalImageCacheBudget {
       _observed == null || !_fresh ? _refreshing : null;
 
   /// True only for a fresh, known observation; unknown never triggers cleanup.
-  bool knownInsufficientFor(int bytes) => bytes >= 0 && _observed != null &&
-      _fresh && _observed! + _reserved + bytes > limitBytes;
+  bool knownInsufficientFor(int bytes) =>
+      bytes >= 0 && _observed != null && _fresh && !_fits(bytes);
+
+  bool _fits(int bytes) {
+    final observed = _observed;
+    if (observed == null ||
+        observed < 0 ||
+        bytes < 0 ||
+        serviceReserveBytes > limitBytes) return false;
+    var remaining = limitBytes - serviceReserveBytes;
+    if (observed > remaining) return false;
+    remaining -= observed;
+    if (_reserved > remaining) return false;
+    return bytes <= remaining - _reserved;
+  }
+
+  int? get observedBytes => _fresh ? _observed : null;
+  int get reservedBytes => _reserved;
+
+  /// Triggers the same measurement used for admission. Never modifies files.
+  Future<void> refreshForDisplay() async {
+    _scheduleRefresh();
+    await _refreshing;
+  }
 
   /// Never credit an unlink directly. Re-measure actual roots after it settles.
   void refreshAfterCollection() {
@@ -70,7 +111,7 @@ class OptionalImageCacheBudget {
   void Function()? reserve(int bytes) {
     if (bytes < 0) throw ArgumentError.value(bytes, 'bytes');
     _scheduleRefresh();
-    if (_observed == null || !_fresh || _observed! + _reserved + bytes > limitBytes) {
+    if (_observed == null || !_fresh || !_fits(bytes)) {
       return null;
     }
     _reserved += bytes;
@@ -99,8 +140,8 @@ class OptionalImageCacheBudget {
     final startedAt = _elapsed();
     final future = _measure().then((value) {
       if (_revision == revision && _reserved == 0) {
-        _observed = value;
-        _measuredAt = startedAt;
+        _observed = value.bytes;
+        _measuredAt = value.age == null ? startedAt : _elapsed() - value.age!;
       } else {
         _refreshAfterSettled = true;
       }
@@ -123,8 +164,37 @@ class OptionalImageCacheBudget {
     }));
   }
 
-  Future<int?> _measure() async {
+  Future<({int? bytes, Duration? age})> _measure() async {
     try {
+      final collector = _collector;
+      if (collector != null) {
+        final snapshot = await collector.collect();
+        final age = collector.ageOf(snapshot);
+        if (age == null || age >= refreshInterval)
+          return (bytes: null, age: age);
+        final names = <String>{
+          'public_news_blobs_v2',
+          'public_news_index_v2.db',
+          'news_images_v1',
+          'guest_news_images_v1',
+          'content_media_images_v1'
+        };
+        final expected = Set<String>.of(names);
+        var sum = 0;
+        for (final item in snapshot.observations) {
+          if (!expected.contains(item.name)) continue;
+          if (!names.remove(item.name)) return (bytes: null, age: age);
+          if ((item.classification != InventoryClass.optional &&
+                  item.classification !=
+                      InventoryClass.serverCopiesUnverified) ||
+              item.bytes == null ||
+              item.bytes! < 0) return (bytes: null, age: age);
+          if (item.bytes! > _maxExactBytes - sum)
+            return (bytes: null, age: age);
+          sum += item.bytes!;
+        }
+        return (bytes: names.isEmpty ? sum : null, age: age);
+      }
       final roots = await _roots();
       final visited = <String>{};
       var total = 0;
@@ -142,13 +212,14 @@ class OptionalImageCacheBudget {
         }
         return true;
       }
-      if (roots.isEmpty) return null;
+
+      if (roots.isEmpty) return (bytes: null, age: null);
       for (final root in roots) {
-        if (!await visit(root)) return null;
+        if (!await visit(root)) return (bytes: null, age: null);
       }
-      return total;
+      return (bytes: total, age: null);
     } catch (_) {
-      return null;
+      return (bytes: null, age: null);
     }
   }
 

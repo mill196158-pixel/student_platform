@@ -6,6 +6,8 @@ import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart' as sqlite;
 
+const int _maxExactBytes = 9007199254740991;
+
 enum InventoryClass { optional, serverCopiesUnverified, protectedOrMixed }
 
 /// A pathname-based estimate. It is not an inode or allocated-disk measurement.
@@ -23,9 +25,13 @@ class InventorySnapshot {
       {required this.startedAt,
       required this.finishedAt,
       required List<InventoryObservation> observations,
+      this.startedTick,
       this.logicalHistoryBytes})
       : observations = List.unmodifiable(observations);
   final DateTime startedAt, finishedAt;
+
+  /// Monotonic start in the producing collector's clock, not wall time.
+  final Duration? startedTick;
   final List<InventoryObservation> observations;
 
   /// Logical content size, never physical bytes or reclaimed space.
@@ -55,7 +61,9 @@ Future<int?> readLogicalHistory(sqlite.DatabaseExecutor database) async {
               message['delivery_status'] != 'sent' ||
               message['client_id'] != null ||
               message['clientId'] != null)) return null;
-      bytes += utf8.encode(payload).length;
+      final length = utf8.encode(payload).length;
+      if (length > _maxExactBytes - bytes) return null;
+      bytes += length;
     }
     return bytes;
   } catch (_) {
@@ -70,7 +78,22 @@ class CacheInventoryCollector {
       {required this.temporaryRoot,
       required this.databaseRoot,
       required this.supportRoot,
-      this.logicalHistory});
+      this.logicalHistory,
+      Duration Function()? elapsed})
+      : _elapsed = elapsed ?? _clock();
+
+  static Duration Function() _clock() {
+    final clock = Stopwatch()..start();
+    return () => clock.elapsed;
+  }
+
+  final Duration Function() _elapsed;
+  Duration? ageOf(InventorySnapshot snapshot) {
+    final start = snapshot.startedTick;
+    if (start == null) return null;
+    final age = _elapsed() - start;
+    return age.isNegative ? null : age;
+  }
 
   factory CacheInventoryCollector.platform() => CacheInventoryCollector(
         temporaryRoot: getTemporaryDirectory,
@@ -100,6 +123,7 @@ class CacheInventoryCollector {
   }
 
   Future<InventorySnapshot> _collect() async {
+    final tick = _elapsed();
     final started = DateTime.now().toUtc();
     final seen = <String>{};
     Future<Directory?> root(Future<Directory> Function() getRoot) async {
@@ -135,7 +159,8 @@ class CacheInventoryCollector {
           var total = 0;
           await for (final entry in Directory(name).list(followLinks: false)) {
             final result = await visit(entry.path);
-            if (result == null) return null;
+            if (result == null || result < 0 || result > _maxExactBytes - total)
+              return null;
             total += result;
           }
           return total;
@@ -175,10 +200,20 @@ class CacheInventoryCollector {
       final shm = await size(parent, '$name-shm');
       // Orphan sidecars cannot establish a healthy database footprint.
       final orphan = main == 0 && ((wal ?? 0) > 0 || (shm ?? 0) > 0);
+      final tooLarge = main != null &&
+          wal != null &&
+          shm != null &&
+          (main < 0 ||
+              wal < 0 ||
+              shm < 0 ||
+              main > _maxExactBytes ||
+              wal > _maxExactBytes - main ||
+              (wal <= _maxExactBytes - main &&
+                  shm > _maxExactBytes - main - wal));
       items.add(InventoryObservation(
           name,
           kind,
-          orphan || main == null || wal == null || shm == null
+          orphan || tooLarge || main == null || wal == null || shm == null
               ? null
               : main + wal + shm));
     }
@@ -206,6 +241,7 @@ class CacheInventoryCollector {
     return InventorySnapshot(
         startedAt: started,
         finishedAt: DateTime.now().toUtc(),
+        startedTick: tick,
         observations: items,
         logicalHistoryBytes: logical);
   }
