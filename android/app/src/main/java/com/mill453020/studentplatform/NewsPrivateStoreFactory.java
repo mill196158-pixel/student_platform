@@ -24,6 +24,8 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.io.FileDescriptor;
 import java.util.regex.Pattern;
+import java.util.HashMap;
+import java.util.Map;
 
 /** Standalone synthetic validation/writer component. It is not an admission
  * authority; provisioning and all production wiring are disabled. */
@@ -36,14 +38,23 @@ final class NewsPrivateStoreFactory {
     private static final String HOLD_SCHEMA = "CREATE TABLE news_holds (token TEXT PRIMARY KEY NOT NULL, bytes INTEGER NOT NULL CHECK(bytes>0))";
     private static final Pattern FILE_NAME = Pattern.compile("[0-9a-f]{64}\\.bin");
     private static final Pattern SHA = Pattern.compile("[0-9a-f]{64}");
+    private static final Map<String, RootFence> FENCES = new HashMap<>();
+    private static final class RootFence { long epoch; boolean blocked; }
     private final Path root;
+    private final RootFence fence;
     private final CloseHook testCloseHook;
     private final Long syntheticLimit;
     private final PutHook testPutHook;
 
     interface CloseHook { void beforeClose(SQLiteDatabase db) throws Exception; }
     interface PutHook { void stage(String name) throws Exception; default String blobName() { return null; } }
-    private NewsPrivateStoreFactory(Path root, CloseHook testCloseHook, Long syntheticLimit, PutHook testPutHook) { this.root = root; this.testCloseHook = testCloseHook; this.syntheticLimit = syntheticLimit; this.testPutHook = testPutHook; }
+    private NewsPrivateStoreFactory(Path root, CloseHook testCloseHook, Long syntheticLimit, PutHook testPutHook) throws IOException {
+        this.root = root; this.testCloseHook = testCloseHook; this.syntheticLimit = syntheticLimit; this.testPutHook = testPutHook;
+        synchronized (FENCES) { this.fence = FENCES.computeIfAbsent(root.toRealPath().toString(), ignored -> new RootFence()); }
+    }
+
+    private long fenceEpoch() { synchronized (fence) { return fence.blocked ? -1 : fence.epoch; } }
+    private boolean fenceCurrent(long epoch) { synchronized (fence) { return !fence.blocked && fence.epoch == epoch; } }
 
     /** Fixed app-private location only. Never creates or repairs a store. */
     static NewsPrivateStoreFactory openExisting(Context context) {
@@ -115,28 +126,30 @@ final class NewsPrivateStoreFactory {
     /** Opaque ticket captured before a network fetch; no disk mutation. */
     static final class ReadTicket {
         private final String root, token, key;
-        private final long generation;
-        private ReadTicket(String root, String token, String key, long generation) {
-            this.root = root; this.token = token; this.key = key; this.generation = generation;
+        private final long generation, localEpoch;
+        private ReadTicket(String root, String token, String key, long generation, long localEpoch) {
+            this.root = root; this.token = token; this.key = key; this.generation = generation; this.localEpoch = localEpoch;
         }
     }
 
     static final class WriteTicket {
         private final String root, token, key;
-        private final long globalGeneration, pathGeneration;
-        private WriteTicket(String root, String token, String key, long globalGeneration, long pathGeneration) {
+        private final long globalGeneration, pathGeneration, localEpoch;
+        private WriteTicket(String root, String token, String key, long globalGeneration, long pathGeneration, long localEpoch) {
             this.root = root; this.token = token; this.key = key;
-            this.globalGeneration = globalGeneration; this.pathGeneration = pathGeneration;
+            this.globalGeneration = globalGeneration; this.pathGeneration = pathGeneration; this.localEpoch = localEpoch;
         }
     }
 
     /** Synthetic-only mutation admission. Ordinary factory has no profile. */
     WriteTicket beginFetch(String key) {
         if (syntheticLimit == null || key == null || key.isEmpty() || key.length() > 512) return null;
+        final long localEpoch = fenceEpoch();
+        if (localEpoch < 0) return null;
         final WriteTicket[] result = {null};
         try {
             if (!NewsQuotaExclusiveGate.runSync(root.resolve("lease.lock"), () -> {
-                if (!validateLocked() || !syntheticHeadroom(0)) return;
+                if (!fenceCurrent(localEpoch) || !validateLocked() || !syntheticHeadroom(0) || !fenceCurrent(localEpoch)) return;
                 final String canonical = root.toRealPath().toString();
                 final String token = new String(Files.readAllBytes(root.resolve("marker")), StandardCharsets.US_ASCII);
                 final SQLiteDatabase db = openIndexForRead();
@@ -158,12 +171,12 @@ final class NewsPrivateStoreFactory {
                         final long next = prior + 1;
                         db.execSQL("INSERT OR REPLACE INTO news_paths(image_key,generation) VALUES(?,?)", new Object[] {key, next});
                         db.setTransactionSuccessful();
-                        pending = new WriteTicket(canonical, token, key, global, next);
+                        pending = new WriteTicket(canonical, token, key, global, next, localEpoch);
                     } finally { db.endTransaction(); }
                 } finally { closeConfirmed(db); }
-                result[0] = pending;
+                if (fenceCurrent(localEpoch)) result[0] = pending;
             })) return null;
-            return result[0];
+            return fenceCurrent(localEpoch) ? result[0] : null;
         } catch (Exception failure) { return null; }
     }
 
@@ -217,15 +230,73 @@ final class NewsPrivateStoreFactory {
     }
 
     enum PutResult { CONFIRMED_HELD, SKIPPED, UNCERTAIN }
+    enum ClearResult { CONFIRMED_HELD, SKIPPED, UNKNOWN }
+
+    /** Logical synthetic clear only. Blob files and durable holds are retained.
+     * Other processes observe the invalidation after the committed generation.
+     * Synchronous worker API: do not wrap it in an observer timeout; late
+     * acknowledgement semantics are not implemented. */
+    ClearResult clearForMutationTesting() {
+        if (syntheticLimit == null) return ClearResult.SKIPPED;
+        final long localEpoch;
+        synchronized (fence) {
+            fence.blocked = true;
+            if (fence.epoch == Long.MAX_VALUE) return ClearResult.UNKNOWN;
+            localEpoch = ++fence.epoch;
+        }
+        final boolean[] committed = {false};
+        try {
+            if (!NewsQuotaExclusiveGate.runSync(root.resolve("lease.lock"), () -> {
+                synchronized (fence) { if (fence.epoch != localEpoch) return; }
+                if (!validateLocked() || !syntheticHeadroom(0)) return;
+                final String hold = randomHex();
+                final SQLiteDatabase ledger = openProfiled(root.resolve("ledger.db"));
+                try {
+                    if (!validLedgerSchema(ledger)) return;
+                    synchronized (fence) { if (fence.epoch != localEpoch) return; }
+                    ledger.beginTransaction();
+                    try {
+                        ledger.execSQL("INSERT INTO news_holds(token,bytes) VALUES(?,1)", new Object[] {hold});
+                        ledger.setTransactionSuccessful();
+                    } finally { ledger.endTransaction(); }
+                } finally { closeConfirmed(ledger); }
+                if (testPutHook != null) testPutHook.stage("clearAfterHold");
+                synchronized (fence) { if (fence.epoch != localEpoch) return; }
+                final SQLiteDatabase index = openIndexForRead();
+                try {
+                    if (!validImageSchema(index)) return;
+                    final Long global = generation(index);
+                    if (global == null || global.longValue() == Long.MAX_VALUE) return;
+                    synchronized (fence) { if (fence.epoch != localEpoch) return; }
+                    index.beginTransaction();
+                    try {
+                        index.execSQL("UPDATE news_state SET generation=generation+1 WHERE id=1 AND generation=?", new Object[] {global});
+                        if (!"1".equals(scalar(index, "SELECT changes()"))) return;
+                        index.execSQL("DELETE FROM news_images");
+                        if (testPutHook != null) testPutHook.stage("clearBeforeCommit");
+                        index.setTransactionSuccessful();
+                    } finally { index.endTransaction(); }
+                } finally { closeConfirmed(index); }
+                committed[0] = true;
+            })) return ClearResult.UNKNOWN;
+            synchronized (fence) {
+                if (committed[0] && fence.epoch == localEpoch) {
+                    fence.blocked = false;
+                    return ClearResult.CONFIRMED_HELD;
+                }
+            }
+            return ClearResult.UNKNOWN;
+        } catch (Exception failure) { return ClearResult.UNKNOWN; }
+    }
 
     /** Synthetic writer only, never an ordinary runtime quota admission. */
     PutResult putForMutationTesting(WriteTicket ticket, byte[] input) {
-        if (syntheticLimit == null || ticket == null || input == null || input.length == 0 || input.length > 8 * 1024 * 1024) return PutResult.SKIPPED;
+        if (syntheticLimit == null || ticket == null || input == null || input.length == 0 || input.length > 8 * 1024 * 1024 || !fenceCurrent(ticket.localEpoch)) return PutResult.SKIPPED;
         final byte[] bytes = input.clone();
         final PutResult[] result = {PutResult.SKIPPED};
         try {
             if (!NewsQuotaExclusiveGate.runSync(root.resolve("lease.lock"), () -> {
-                if (!validateLocked() || !syntheticHeadroom(bytes.length) ||
+                if (!fenceCurrent(ticket.localEpoch) || !validateLocked() || !syntheticHeadroom(bytes.length) || !fenceCurrent(ticket.localEpoch) ||
                         !ticket.root.equals(root.toRealPath().toString()) ||
                         !ticket.token.equals(new String(Files.readAllBytes(root.resolve("marker")), StandardCharsets.US_ASCII))) return;
                 final SQLiteDatabase index = openIndexForRead();
@@ -236,7 +307,7 @@ final class NewsPrivateStoreFactory {
                 final String hold = randomHex();
                 final SQLiteDatabase ledger = openProfiled(root.resolve("ledger.db"));
                 try {
-                    if (!validLedgerSchema(ledger)) return;
+                    if (!validLedgerSchema(ledger) || !fenceCurrent(ticket.localEpoch)) return;
                     result[0] = PutResult.UNCERTAIN;
                     ledger.beginTransaction();
                     try {
@@ -251,12 +322,13 @@ final class NewsPrivateStoreFactory {
 
                 // Once a hold may have committed, any failure retains it.
                 if (testPutHook != null) testPutHook.stage("afterHold");
+                if (!fenceCurrent(ticket.localEpoch)) return;
                 final String filename = writeBlobUnderGate(bytes);
                 if (filename == null) return;
                 final String sha = hex(MessageDigest.getInstance("SHA-256").digest(bytes));
                 final SQLiteDatabase writeIndex = openIndexForRead();
                 try {
-                    if (!validImageSchema(writeIndex) || !writeTicketCurrent(writeIndex, ticket)) return;
+                    if (!fenceCurrent(ticket.localEpoch) || !validImageSchema(writeIndex) || !writeTicketCurrent(writeIndex, ticket)) return;
                     writeIndex.beginTransaction();
                     try {
                         if (!writeTicketCurrent(writeIndex, ticket) || ticket.pathGeneration == Long.MAX_VALUE) return;
@@ -274,10 +346,10 @@ final class NewsPrivateStoreFactory {
                 // No automatic release: a caller may have timed out while this
                 // synchronous operation was still running. Reconciliation is
                 // not implemented, so the committed hold remains durable.
-                result[0] = PutResult.CONFIRMED_HELD;
+                if (fenceCurrent(ticket.localEpoch)) result[0] = PutResult.CONFIRMED_HELD;
             })) return PutResult.SKIPPED;
-            return result[0];
-        } catch (Exception failure) { return result[0]; }
+            return fenceCurrent(ticket.localEpoch) ? result[0] : PutResult.UNCERTAIN;
+        } catch (Exception failure) { return fenceCurrent(ticket.localEpoch) ? result[0] : PutResult.UNCERTAIN; }
     }
 
     private boolean writeTicketCurrent(SQLiteDatabase index, WriteTicket ticket) {
@@ -353,30 +425,32 @@ final class NewsPrivateStoreFactory {
     /** No raw file/SQLite handle escapes the gate. Null means unknown. */
     ReadTicket capture(String key) {
         if (key == null || key.isEmpty() || key.length() > 512) return null;
+        final long localEpoch = fenceEpoch();
+        if (localEpoch < 0) return null;
         final ReadTicket[] result = {null};
         try {
             if (!NewsQuotaExclusiveGate.runSync(root.resolve("lease.lock"), () -> {
-                if (!validateLocked()) return;
+                if (!fenceCurrent(localEpoch) || !validateLocked() || !fenceCurrent(localEpoch)) return;
                 final String canonical = root.toRealPath().toString();
                 final String token = new String(Files.readAllBytes(root.resolve("marker")), StandardCharsets.US_ASCII);
                 final SQLiteDatabase db = openIndexForRead();
                 try {
                     if (!validImageSchema(db)) return;
                     final Long generation = generation(db);
-                    if (generation != null) result[0] = new ReadTicket(canonical, token, key, generation);
+                    if (generation != null && fenceCurrent(localEpoch)) result[0] = new ReadTicket(canonical, token, key, generation, localEpoch);
                 } finally { closeConfirmed(db); }
             })) return null;
-            return result[0];
+            return fenceCurrent(localEpoch) ? result[0] : null;
         } catch (Exception failure) { return null; }
     }
 
     ReadResult read(ReadTicket ticket) {
         final ReadResult unknown = new ReadResult(ReadState.UNKNOWN, null);
-        if (ticket == null) return unknown;
+        if (ticket == null || !fenceCurrent(ticket.localEpoch)) return unknown;
         final ReadResult[] result = {unknown};
         try {
             if (!NewsQuotaExclusiveGate.runSync(root.resolve("lease.lock"), () -> {
-                if (!validateLocked() || !ticket.root.equals(root.toRealPath().toString()) ||
+                if (!fenceCurrent(ticket.localEpoch) || !validateLocked() || !fenceCurrent(ticket.localEpoch) || !ticket.root.equals(root.toRealPath().toString()) ||
                         !ticket.token.equals(new String(Files.readAllBytes(root.resolve("marker")), StandardCharsets.US_ASCII))) return;
                 final SQLiteDatabase db = openIndexForRead();
                 try {
@@ -397,8 +471,9 @@ final class NewsPrivateStoreFactory {
                         result[0] = new ReadResult(ReadState.HIT, bytes);
                     }
                 } finally { closeConfirmed(db); }
+                if (testPutHook != null) testPutHook.stage("readBeforeReturn");
             })) return unknown;
-            return result[0];
+            return fenceCurrent(ticket.localEpoch) ? result[0] : unknown;
         } catch (Exception failure) { return unknown; }
     }
 
