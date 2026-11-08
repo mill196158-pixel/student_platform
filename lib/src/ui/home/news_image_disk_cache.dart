@@ -68,6 +68,7 @@ class NewsImageDiskCache {
   bool _ready = false;
   int _clearEpoch = 0;
   final Map<String, int> _pathEpoch = {};
+  int _pendingBudgetRetries = 0;
   Future<void> _mutations = Future<void>.value();
   @visibleForTesting
   Future<void> Function()? debugAfterFileWrite;
@@ -397,7 +398,8 @@ class NewsImageDiskCache {
         await _write(key, bytes);
       });
 
-  Future<void> _write(NewsImageCacheKey key, Uint8List bytes) async {
+  Future<void> _write(NewsImageCacheKey key, Uint8List bytes,
+      {bool allowBudgetRetry = true}) async {
     await ensureReady();
     if (_immutableQa) {
       await _writeImmutableQa(key, bytes);
@@ -408,7 +410,29 @@ class NewsImageDiskCache {
     final budget = debugOptionalBudget ??
         (_rootOverride == null ? OptionalImageCacheBudget.instance : null);
     final release = budget?.reserve(bytes.length);
-    if (budget != null && release == null) return;
+    if (budget != null && release == null) {
+      final pending = budget.pendingInitialMeasurement;
+      if (allowBudgetRetry && pending != null && _pendingBudgetRetries < 16) {
+        final clearEpoch = _clearEpoch;
+        final pathEpoch = _pathEpoch[key.path] ?? 0;
+        _pendingBudgetRetries++;
+        unawaited(() async {
+          try {
+            await pending.timeout(const Duration(seconds: 3));
+            await _mutate(() async {
+              if (!_current(key.path, clearEpoch, pathEpoch) ||
+                  !identical(_memory.peek(key), bytes)) return;
+              await _write(key, bytes, allowBudgetRetry: false);
+            });
+          } catch (_) {
+            // Persistence is optional; the displayed image stays in memory.
+          } finally {
+            _pendingBudgetRetries--;
+          }
+        }());
+      }
+      return;
+    }
     final fileName = '${_fileId(key.id)}.bin';
     try {
       final file = File('${_root!.path}/$fileName');
