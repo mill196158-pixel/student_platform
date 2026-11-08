@@ -47,7 +47,9 @@ void main() {
         home: CacheDiagnosticsScreen(measure: () async => result!)));
     await tester.pump();
     expect(find.text('Частичная оценка'), findsOneWidget);
-    expect(find.text('Логический размер истории: неизвестно'), findsOneWidget);
+    expect(
+        find.text('Логический размер подтверждённой части истории: неизвестно'),
+        findsOneWidget);
     await tester.drag(find.byType(ListView), const Offset(0, -700));
     await tester.pump();
     expect(find.textContaining('не общий размер'), findsOneWidget);

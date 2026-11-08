@@ -452,13 +452,22 @@ class ProjectChatServerCache {
   final OfflineSessionBinding? Function() currentBinding;
   final String project;
   final Object _issuer = Object();
-  static ProjectChatServerCache? qaInstance;
+  static ProjectChatServerCache? _qaInstance;
+  static ProjectChatServerCache? get qaInstance => _qaInstance;
+  static final ValueNotifier<int> instanceChanges = ValueNotifier<int>(0);
+  static set qaInstance(ProjectChatServerCache? value) {
+    if (identical(_qaInstance, value)) return;
+    _qaInstance = value;
+    instanceChanges.value++;
+  }
   @visibleForTesting
   Future<void> Function()? debugBeforeSummaryCommit;
   @visibleForTesting
   Future<void> Function()? debugBeforePageCommit;
   @visibleForTesting
   Future<void> Function()? debugBeforeHistoryEvictCommit;
+  @visibleForTesting
+  Future<void> Function()? debugBeforeLogicalHistoryQuery;
   @visibleForTesting
   void Function(String)? debugHistoryPayloadFetch;
   static final Map<String, int> _eventVersions = {};
@@ -819,6 +828,58 @@ class ProjectChatServerCache {
         await debugBeforeHistoryEvictCommit?.call();
         if (!current()) throw const _StalePage();
         return removed;
+  }
+
+  /// Read-only size of the confirmed portion for the exact admitted owner.
+  /// The value is logical JSON bytes, never physical or reclaimable space.
+  Future<int?> readScopedLogicalHistory(SessionCapabilities capabilities,
+      {required bool Function() isCurrent}) async {
+    final owner = scope.capture(), binding = currentBinding();
+    final permit = capabilities.capture(SessionCapability.cachedRead);
+    final databaseOwner = captureProjectDatabaseOwner(db);
+    final snapshotRevision = snapshotChanges.value;
+    if (owner == null || binding == null || permit == null || databaseOwner == null ||
+        owner.userId != binding.userId || binding.issuer != '$project/auth/v1') return null;
+    bool valid() {
+      try {
+        return identical(qaInstance, this) && isCurrent() &&
+            scope.isCurrent(owner) && _matches(currentBinding(), binding) &&
+            databaseOwner.isCurrentFor(db) &&
+            capabilities.owns(permit, owner) && !snapshotMutationInProgress &&
+            snapshotChanges.value == snapshotRevision;
+      } catch (_) { return false; }
+    }
+    if (!valid()) return null;
+    try {
+      await debugBeforeLogicalHistoryQuery?.call();
+      if (!valid()) return null;
+      final result = await db.readTransaction<int?>((txn) async {
+        if (!valid()) return null;
+        final args = [project, binding.userId, binding.sessionId, summaryChatKey];
+        final rows = await txn.rawQuery(
+          'SELECT s.chat, length(CAST(s.payload AS BLOB)) AS bytes '
+          'FROM chat_server_snapshot s '
+          'JOIN chat_snapshot_access a ON s.project=a.project AND s.uid=a.uid AND s.sid=a.sid AND s.chat=a.chat '
+          'JOIN chat_server_attempt t ON s.project=t.project AND s.uid=t.uid AND s.sid=t.sid AND s.chat=t.chat '
+          'WHERE s.project=? AND s.uid=? AND s.sid=? AND s.chat<>? AND t.blocked=0 LIMIT 129', args);
+        if (!valid() || rows.length > 128) return null;
+        var total = 0;
+        for (final row in rows) {
+          final chat = row['chat'], bytes = row['bytes'];
+          if (chat is! String || bytes is! int || bytes < 0 || bytes > 8 * 1024 * 1024 - total) return null;
+          final selected = await txn.query('chat_server_snapshot', columns: ['payload'],
+              where: 'project=? AND uid=? AND sid=? AND chat=?',
+              whereArgs: [project, binding.userId, binding.sessionId, chat], limit: 1);
+          if (!valid() || selected.length != 1) return null;
+          final payload = selected.single['payload'];
+          if (payload is! String || !_isRecoverableHistorySnapshot(chat, payload) ||
+              utf8.encode(payload).length != bytes) return null;
+          total += bytes;
+        }
+        return valid() ? total : null;
+      });
+      return valid() ? result : null;
+    } catch (_) { return null; }
   }
 
   // Unknown or mixed rows can contain unsent data from older versions. Only

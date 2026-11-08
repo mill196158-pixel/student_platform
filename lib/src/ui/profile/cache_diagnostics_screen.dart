@@ -3,6 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:student_platform/src/core/cache_inventory_snapshot.dart';
 import 'package:student_platform/src/core/optional_image_cache_budget.dart';
+import 'package:student_platform/src/core/auth_session_scope.dart';
+import 'package:student_platform/src/core/session_capabilities.dart';
+import 'package:student_platform/src/core/session_capabilities_host.dart';
+import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
 
 /// Partial read-only diagnostics; not an enforced cache quota.
 class CacheDiagnosticsScreen extends StatefulWidget {
@@ -10,11 +14,14 @@ class CacheDiagnosticsScreen extends StatefulWidget {
       {super.key,
       this.measure,
       this.budget,
+      this.debugCapabilities,
       this.timeout = const Duration(seconds: 5)});
   @visibleForTesting
   final Future<InventorySnapshot> Function()? measure;
   @visibleForTesting
   final OptionalImageCacheBudget? budget;
+  @visibleForTesting
+  final SessionCapabilities? debugCapabilities;
   @visibleForTesting
   final Duration timeout;
   @override
@@ -28,14 +35,107 @@ class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
   int _budgetReserved = 0;
   bool _loading = true;
   bool _changing = false;
+  final ValueNotifier<int?> _logicalHistory = ValueNotifier<int?>(null);
+  SessionCapabilities? _historyCapabilities;
+  AuthSessionScope? _historyScope;
+  Future<int?>? _historyPending;
+  int _historyRevision = 0;
   @override
   void initState() {
     super.initState();
+    ProjectChatServerCache.instanceChanges.addListener(_onCacheChanged);
+    ProjectChatServerCache.snapshotChanges.addListener(_invalidateHistory);
     _measure();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final caps =
+        widget.debugCapabilities ?? SessionCapabilitiesHost.maybeOf(context);
+    _bindCapabilities(caps);
+  }
+
+  @override
+  void didUpdateWidget(covariant CacheDiagnosticsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.debugCapabilities, widget.debugCapabilities)) {
+      _bindCapabilities(widget.debugCapabilities ??
+          SessionCapabilitiesHost.maybeRead(context));
+    }
+  }
+
+  void _bindCapabilities(SessionCapabilities? caps) {
+    if (!identical(caps, _historyCapabilities)) {
+      _historyCapabilities?.removeListener(_invalidateHistory);
+      _historyCapabilities = caps;
+      _historyCapabilities?.addListener(_invalidateHistory);
+      _bindHistoryScope();
+      _invalidateHistory();
+      _startHistory();
+    }
+  }
+
+  void _bindHistoryScope() {
+    final next = ProjectChatServerCache.qaInstance?.scope;
+    if (identical(next, _historyScope)) return;
+    _historyScope?.removeListener(_invalidateHistory);
+    _historyScope = next;
+    _historyScope?.addListener(_invalidateHistory);
+  }
+
+  void _onCacheChanged() {
+    _bindHistoryScope();
+    _invalidateHistory();
+  }
+
+  void _invalidateHistory() {
+    _historyRevision++;
+    _logicalHistory.value = null;
+  }
+
+  void _startHistory() {
+    _invalidateHistory();
+    final cache = ProjectChatServerCache.qaInstance,
+        caps = _historyCapabilities;
+    if (cache == null || caps == null || _historyPending != null) return;
+    final revision = _historyRevision;
+    bool current() =>
+        mounted &&
+        revision == _historyRevision &&
+        identical(ProjectChatServerCache.qaInstance, cache) &&
+        identical(_historyCapabilities, caps);
+    final raw = cache.readScopedLogicalHistory(caps, isCurrent: current);
+    _historyPending = raw;
+    unawaited(raw.then<void>((_) {
+      if (identical(_historyPending, raw)) _historyPending = null;
+    }, onError: (Object _, StackTrace __) {
+      if (identical(_historyPending, raw)) _historyPending = null;
+    }));
+    unawaited(() async {
+      try {
+        final result = await raw.timeout(widget.timeout);
+        if (current()) _logicalHistory.value = result;
+      } catch (_) {
+        if (current()) _invalidateHistory();
+      }
+    }());
+  }
+
+  @override
+  void dispose() {
+    _historyRevision++;
+    ProjectChatServerCache.instanceChanges.removeListener(_onCacheChanged);
+    ProjectChatServerCache.snapshotChanges.removeListener(_invalidateHistory);
+    _historyCapabilities?.removeListener(_invalidateHistory);
+    _historyScope?.removeListener(_invalidateHistory);
+    _logicalHistory.dispose();
+    super.dispose();
   }
 
   Future<void> _measure() async {
     final revision = ++_revision;
+    if (_historyCapabilities != null) _startHistory();
     setState(() {
       _loading = true;
       _snapshot = null;
@@ -151,8 +251,10 @@ class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
             Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Text('${_label(item.name)}: ${_value(item.bytes)}')),
-          Text(
-              'Логический размер истории: ${_value(snapshot.logicalHistoryBytes)}'),
+          ValueListenableBuilder<int?>(
+              valueListenable: _logicalHistory,
+              builder: (_, value, __) => Text(
+                  'Логический размер подтверждённой части истории: ${_value(value)}')),
         ],
         const SizedBox(height: 12),
         const Text(
