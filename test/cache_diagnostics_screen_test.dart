@@ -51,7 +51,8 @@ void main() {
     await tester.drag(find.byType(ListView), const Offset(0, -700));
     await tester.pump();
     expect(find.textContaining('не общий размер'), findsOneWidget);
-    expect(find.textContaining('очистка пока недоступны'), findsOneWidget);
+    expect(
+        find.textContaining('ручная очистка пока недоступны'), findsOneWidget);
   });
 
   test('logical history is separate and malformed data is unknown', () async {

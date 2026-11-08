@@ -81,7 +81,7 @@ class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
     final choice = await showDialog<int>(
         context: context,
         builder: (context) => SimpleDialog(
-              title: const Text('Лимит копий изображений'),
+              title: const Text('Целевой лимит кэша'),
               children: [
                 for (final bytes in [250000000, 500000000, 1000000000])
                   SimpleDialogOption(
@@ -131,13 +131,15 @@ class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
           Text(
               'Резерв активных записей: ${_value(_budgetObserved == null ? null : _budgetReserved)}'),
           Text(budget.policyReady
-              ? 'Лимит для этих копий — ${_value(budget.limitBytes)}, включая служебный запас ${_value(budget.serviceReserveBytes)}. Остальные кэши и история этим ограничением пока не охвачены.'
-              : 'Лимит для этих копий сейчас недоступен. Остальные кэши и история этим ограничением пока не охвачены.'),
+              ? 'Целевой лимит учтённого серверного кэша — ${_value(budget.limitBytes)}, включая служебный запас ${_value(budget.serviceReserveBytes)}.'
+              : 'Целевой лимит учтённого серверного кэша сейчас недоступен.'),
+          const Text(
+              'Учитываются копии изображений новостей и материалов и часть подтверждённой истории чатов. При превышении лимита старая подтверждённая история может очищаться в фоне при подключении к сети и доступности необходимых проверок. Черновики, неотправленные данные и сохранённые офлайн файлы не входят в эту очистку; остальные данные охвачены не полностью.'),
           OutlinedButton(
               onPressed: _loading || _changing || budget.policyBusy
                   ? null
                   : () => _chooseLimit(budget),
-              child: const Text('Изменить лимит копий')),
+              child: const Text('Изменить целевой лимит')),
           const SizedBox(height: 12),
         ],
         if (_loading)
@@ -160,7 +162,7 @@ class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
             'Логический размер истории не равен физическому месту. Это не общий размер и не объём, доступный для очистки. Черновики, неотправленные сообщения и сохранённые офлайн файлы могут учитываться не полностью.'),
         const SizedBox(height: 12),
         const Text(
-            'Управление общим лимитом приложения и очистка пока недоступны.'),
+            'Общий физический лимит приложения и ручная очистка пока недоступны.'),
         const SizedBox(height: 16),
         OutlinedButton(
             onPressed: _loading ? null : _measure,

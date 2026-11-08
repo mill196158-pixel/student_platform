@@ -6,6 +6,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
 import 'package:student_platform/src/core/offline_policy_grant.dart';
+import 'package:student_platform/src/core/optional_image_cache_budget.dart';
+import 'package:student_platform/src/core/ordinary_history_maintenance_host.dart';
+import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:student_platform/src/ui/chats/core/chat_history_route_host.dart';
 import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -59,6 +62,33 @@ class _StatefulComposerState extends State<_StatefulComposer> {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
+
+  testWidgets('maintenance host never delays child and cancels on disposal', (tester) async {
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final session = fakeSession('a');
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final caps = SessionCapabilities(scope);
+    final cache = ProjectChatServerCache(db: _UnusedDatabase(), scope: scope,
+      currentBinding: () => null, project: 'https://a.invalid');
+    final budget = OptionalImageCacheBudget(roots: () async => []);
+    var starts = 0;
+    Widget host([bool allowed = true]) => MaterialApp(home: OrdinaryHistoryMaintenanceHost(cache: cache,
+      capabilities: caps, budget: budget, probeOnline: () async => false,
+      isCurrent: () => allowed, debugOnStart: () => starts++, child: const Text('home')));
+    await tester.pumpWidget(host());
+    expect(find.text('home'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 4)); expect(starts, 0);
+    await tester.pump(const Duration(seconds: 1)); expect(starts, 1);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(host());
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpWidget(host(false));
+    await tester.pump(const Duration(seconds: 2)); expect(starts, 1);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 6)); expect(starts, 1);
+    caps.dispose(); scope.dispose(); await events.close();
+  });
 
   testWidgets('late old hold does not disturb the replacement route', (tester) async {
     final events = StreamController<AuthState>.broadcast(sync: true);

@@ -81,6 +81,8 @@ import 'src/ui/learning/state/team_cubit.dart';
 import 'src/ui/learning/models/team.dart';
 import 'src/ui/chats/core/chat_message_cache_store.dart';
 import 'src/ui/chats/core/project_chat_server_cache.dart';
+import 'src/core/ordinary_history_maintenance_host.dart';
+import 'src/core/optional_image_cache_budget.dart';
 import 'src/ui/chats/data/chat_summaries_cache.dart';
 import 'src/ui/friends/data/friends_snapshot_cache.dart';
 
@@ -108,6 +110,7 @@ RefreshAdmissionClient? _ordinaryRefreshGate;
 HomeContentCoordinator? _qaHomeContent;
 LocalSnapshotStartup? _ordinarySnapshotStartup;
 VoidCallback? _ordinaryRejectHeldGate;
+Future<bool> Function()? _ordinaryHistoryOnlineProbe;
 http.Client? _debugOrdinaryHttp;
 RealtimeClientOptions? _debugOrdinaryRealtime;
 String? _debugOrdinaryDatabasePath;
@@ -288,9 +291,29 @@ final GoRouter appRouter = GoRouter(
                   child: Text('Сохранённые данные недоступны.'))),
               onlineBuilder: (_, barrier) {
                 _ordinaryCleanColdStart = false;
+                final cache = ProjectChatServerCache.qaInstance;
+                final probe = _ordinaryHistoryOnlineProbe;
+                final Widget home = cache == null || probe == null ||
+                    const bool.fromEnvironment('SOURCE_DOCUMENT_AUTHORITY_QA') ||
+                    const bool.fromEnvironment('SOURCE_DOCUMENT_FENCE_QA') ||
+                    const bool.fromEnvironment('QA_NO_AUTOMATIC_WRITES') ||
+                    const bool.fromEnvironment('MEDIA_CACHE_EVICTION_QA') ||
+                    const bool.fromEnvironment('CHAT_ATTACHMENT_SESSION_FENCE_QA') ||
+                    const bool.fromEnvironment('FORWARD_DURABLE_ANDROID_QA') ||
+                    const bool.fromEnvironment('QA_LOCAL_IMAGE_PREWARM') ||
+                    const bool.fromEnvironment('CHAT_HISTORY_SNAPSHOT_FALLBACK_QA')
+                    ? NavigationScreen(onlineBarrier: barrier, homeContent: _qaHomeContent)
+                    : OrdinaryHistoryMaintenanceHost(cache: cache, capabilities: caps,
+                        budget: OptionalImageCacheBudget.instance, probeOnline: probe,
+                        isCurrent: () {
+                          final session = Supabase.instance.client.auth.currentSession;
+                          return identical(cache, ProjectChatServerCache.qaInstance) &&
+                              session != null && !session.isExpired;
+                        },
+                        child: NavigationScreen(onlineBarrier: barrier, homeContent: _qaHomeContent));
                 return ReconnectChatHost(scope: scope, capabilities: caps,
                     barrier: barrier, child: PushSessionHost(barrier: barrier,
-                    child: NavigationScreen(onlineBarrier: barrier, homeContent: _qaHomeContent)));
+                    child: home));
               },
               cachedBuilder: cached);
         }
@@ -686,6 +709,7 @@ Future<void> _initializeApp(
             if (!abort.isCompleted) abort.complete();
           }
         }
+        _ordinaryHistoryOnlineProbe = probeConnection;
         void watchForReconnect(OfflineSessionBinding expected) {
           reconnectTimer?.cancel();
           reconnectTimer = Timer.periodic(const Duration(seconds: 10), (timer) {

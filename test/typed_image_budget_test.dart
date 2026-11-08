@@ -131,7 +131,8 @@ void main() {
     expect(find.text('Учтённые копии новостей и материалов: 0.0 МБ'),
         findsOneWidget);
     expect(budget.observedBytes, 14);
-    expect(find.textContaining('Остальные кэши и история'), findsOneWidget);
+    expect(find.textContaining('часть подтверждённой истории чатов'),
+        findsOneWidget);
   });
 }
 

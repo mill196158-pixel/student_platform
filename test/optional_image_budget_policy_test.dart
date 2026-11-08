@@ -198,7 +198,8 @@ void main() {
         home:
             CacheDiagnosticsScreen(measure: () async => snapshot, budget: b)));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Изменить лимит копий'));
+    await tester.ensureVisible(find.text('Изменить целевой лимит'));
+    await tester.tap(find.text('Изменить целевой лимит'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('250 МБ'));
     await tester.pumpAndSettle();
@@ -208,8 +209,17 @@ void main() {
       await tester.pump(const Duration(milliseconds: 20));
     }
     expect(b.limitBytes, 250000000);
+    await tester.drag(find.byType(ListView), const Offset(0, 700));
+    await tester.pump();
     expect(
-        find.textContaining('Лимит для этих копий — 250.0 МБ'), findsOneWidget);
+        find.textContaining(
+            'Целевой лимит учтённого серверного кэша — 250.0 МБ'),
+        findsOneWidget);
+    expect(find.textContaining('часть подтверждённой истории чатов'),
+        findsOneWidget);
+    expect(
+        find.textContaining('сохранённые офлайн файлы не входят в эту очистку'),
+        findsOneWidget);
   });
 }
 

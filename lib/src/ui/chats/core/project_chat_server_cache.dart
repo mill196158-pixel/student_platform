@@ -616,9 +616,29 @@ class ProjectChatServerCache {
         maxSnapshots: 8, strictByteLimit: true);
   }
 
+  /// Rechecks the known optional cost and a conservative owner-only history
+  /// estimate in the deletion transaction. The estimate is logical, not
+  /// physical disk usage; unverified rows are never counted or deleted.
+  Future<ChatHistoryAppGuard?> beginOrdinaryBudgetMaintenance(
+      ProjectDatabaseOwnerCapability databaseOwner, {
+      required int knownOptionalCost,
+      required int budgetLimit,
+      required bool Function() observationAndOnlineCurrent}) async {
+    bool eligible() {
+      try { return databaseOwner.isCurrentFor(db) && observationAndOnlineCurrent(); }
+      catch (_) { return false; }
+    }
+    if (knownOptionalCost < 0 || budgetLimit < 0 || !eligible()) return null;
+    return _beginHistoryAppGuard(4 * 1024 * 1024,
+        allEnginesGuarded: true, additionalCurrent: eligible,
+        maxSnapshots: 8, strictByteLimit: true,
+        knownOptionalCost: knownOptionalCost, budgetLimit: budgetLimit);
+  }
+
   Future<ChatHistoryAppGuard?> _beginHistoryAppGuard(int targetLogicalBytes,
       {required bool allEnginesGuarded, bool Function()? additionalCurrent,
-      int? maxSnapshots, bool strictByteLimit = false}) async {
+      int? maxSnapshots, bool strictByteLimit = false,
+      int? knownOptionalCost, int? budgetLimit}) async {
     final owner = scope.capture(), binding = currentBinding();
     if (!allEnginesGuarded || targetLogicalBytes < 0 || owner == null || binding == null ||
         owner.userId != binding.userId || binding.issuer != '$project/auth/v1') return null;
@@ -638,10 +658,17 @@ class ProjectChatServerCache {
         if (!current()) throw const _StalePage();
         final guards = await txn.query('chat_app_guards', columns: ['token'],
             where: 'token<>?', whereArgs: [databaseGuard.token], limit: 1);
-        final removed = guards.isEmpty && mayEvict &&
+        var target = targetLogicalBytes;
+        if (knownOptionalCost != null && budgetLimit != null && guards.isEmpty && mayEvict) {
+          final history = await _recoverableHistoryLowerBound(txn, binding, current);
+          if (!current()) throw const _StalePage();
+          final remaining = budgetLimit > knownOptionalCost ? budgetLimit - knownOptionalCost : 0;
+          target = history > remaining ? min(targetLogicalBytes, history - remaining) : 0;
+        }
+        final removed = guards.isEmpty && mayEvict && target > 0 &&
                 _pendingRouteHolds == 0 && _failedRouteHolds == 0
             ? await _evictServerHistory(txn, binding, () => current() &&
-                _pendingRouteHolds == 0 && _failedRouteHolds == 0, targetLogicalBytes,
+                _pendingRouteHolds == 0 && _failedRouteHolds == 0, target,
                 maxSnapshots: maxSnapshots, strictByteLimit: strictByteLimit)
             : 0;
         await txn.insert('chat_app_guards', {'token': token, 'project': project,
@@ -661,6 +688,34 @@ class ProjectChatServerCache {
         settled.complete();
       }
     }
+  }
+
+  Future<int> _recoverableHistoryLowerBound(Transaction txn,
+      OfflineSessionBinding binding, bool Function() current) async {
+    final args = [project, binding.userId, binding.sessionId, summaryChatKey];
+    final rows = await txn.rawQuery(
+      'SELECT s.chat, length(CAST(s.payload AS BLOB)) AS payload_bytes '
+      'FROM chat_server_snapshot s '
+      'JOIN chat_snapshot_access a ON s.project=a.project AND s.uid=a.uid AND s.sid=a.sid AND s.chat=a.chat '
+      'JOIN chat_server_attempt t ON s.project=t.project AND s.uid=t.uid AND s.sid=t.sid AND s.chat=t.chat '
+      "WHERE s.project=? AND s.uid=? AND s.sid=? AND s.chat<>? AND typeof(t.seq)='integer' "
+      "AND t.seq>=0 AND t.seq<9223372036854775807 AND typeof(t.blocked)='integer' AND t.blocked=0 "
+      'ORDER BY s.chat LIMIT 128', args);
+    var total = 0;
+    for (final row in rows) {
+      if (!current()) throw const _StalePage();
+      final chat = row['chat'], length = row['payload_bytes'];
+      if (chat is! String || length is! int || length < 0 || length > 4 * 1024 * 1024) continue;
+      final found = await txn.query('chat_server_snapshot', columns: ['payload'],
+        where: 'project=? AND uid=? AND sid=? AND chat=?',
+        whereArgs: [project, binding.userId, binding.sessionId, chat]);
+      if (!current()) throw const _StalePage();
+      if (found.length != 1 || found.single['payload'] is! String) continue;
+      final payload = found.single['payload'] as String;
+      final bytes = utf8.encode(payload).length;
+      if (bytes <= 4 * 1024 * 1024 && _isRecoverableHistorySnapshot(chat, payload)) total += bytes;
+    }
+    return total;
   }
 
   Future<void> releaseHistoryAppGuard(ChatHistoryAppGuard guard) async {
