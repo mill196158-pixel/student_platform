@@ -16,3 +16,16 @@ bool pinnedMediaRuntimeEnabled({bool? web, TargetPlatform? platform, bool? overr
   // Kept explicit so Android can be enabled independently after approval.
   return target == TargetPlatform.android && false;
 }
+
+/// Shared source-document access fence; the pinned-media archive is separate.
+bool sourceDocumentFenceEnabled({bool? web, TargetPlatform? platform, bool? overrideValue, bool? policyQa}) {
+  if (web ?? kIsWeb) return false;
+  if (policyQa ?? const bool.fromEnvironment('SQLITE_POLICY_QA')) return false;
+  final target = platform ?? defaultTargetPlatform;
+  if (target != TargetPlatform.android && target != TargetPlatform.iOS) return false;
+  if (overrideValue != null) return overrideValue;
+  if (const bool.hasEnvironment('SOURCE_DOCUMENT_FENCE_QA')) {
+    return const bool.fromEnvironment('SOURCE_DOCUMENT_FENCE_QA');
+  }
+  return false;
+}

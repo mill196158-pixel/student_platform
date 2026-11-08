@@ -5,6 +5,7 @@ import 'qa_receipt_probe.dart';
 import 'dart:collection';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:crypto/crypto.dart' as crypto;
@@ -32,6 +33,7 @@ class ChatFileAccess {
   // enabled build. An engine that has not installed its durable guard must
   // not send access checks that could later revoke an archived object.
   static bool get _pinnedRuntime => pinnedMediaRuntimeEnabled();
+  static bool get _accessFenceRequired => _pinnedRuntime || sourceDocumentFenceEnabled();
   /// Optional until the protected media protocol is initialized. Eviction
   /// must never be enabled while any reader can operate without this store.
   static MediaCacheProtection? _mediaProtection;
@@ -440,6 +442,50 @@ class ChatFileAccess {
         _ownerFileQueues.remove(uid);
     }));
     return result;
+  }
+
+  /// Exports confirmed source bytes under the same owner queue as logout.
+  /// Callers must revalidate the source-fence immediately before dispatch.
+  static Future<File?> exportVerifiedSource({required String url,
+      required String fileName, required Uint8List bytes,
+      required Future<bool> Function() stillVerified}) async {
+    final uid = userId, sid = currentSessionBinding, epoch = generation;
+    if (uid == null || sid == null || bytes.isEmpty || bytes.length > 8 * 1024 * 1024 ||
+        !RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(uid)) return null;
+    bool current() => isViewerCurrent(url, user: uid, epoch: epoch, sessionBinding: sid);
+    return _withOwnerFiles(uid, () async {
+      File? temp;
+      try {
+        if (!current() || !await stillVerified() || !current()) return null;
+        final root = await getApplicationCacheDirectory();
+        final parent = Directory('${root.path}/authorized_chat_files/$uid');
+        await parent.create(recursive: true);
+        for (final dir in [root, Directory('${root.path}/authorized_chat_files'), parent]) {
+          if (await FileSystemEntity.type(dir.path, followLinks: false) != FileSystemEntityType.directory) return null;
+        }
+        final extension = RegExp(r'\.([A-Za-z0-9]{1,12})$').firstMatch(fileName)?.group(1)?.toLowerCase();
+        final digest = crypto.sha256.convert(bytes).toString();
+        final id = crypto.sha256.convert(utf8.encode(jsonEncode([uid, sid, url, digest]))).toString();
+        final target = File('${parent.path}/source_$id${extension == null ? '' : '.$extension'}');
+        final existing = await FileSystemEntity.type(target.path, followLinks: false);
+        if (existing != FileSystemEntityType.notFound && existing != FileSystemEntityType.file) return null;
+        if (existing == FileSystemEntityType.file) {
+          if (await target.length() != bytes.length || crypto.sha256.convert(await target.readAsBytes()).toString() != digest) return null;
+        } else {
+          final random = Random.secure();
+          final nonce = base64UrlEncode(List<int>.generate(18, (_) => random.nextInt(256)));
+          temp = File('${parent.path}/.source_$nonce.tmp');
+          await temp.create(exclusive: true);
+          await temp.writeAsBytes(bytes, flush: true);
+          if (!current() || !await stillVerified() || !current()) return null;
+          await temp.rename(target.path);
+          temp = null;
+        }
+        if (!current() || !await stillVerified() || !current()) return null;
+        return target;
+      } catch (_) { return null; }
+      finally { if (temp != null) { try { await temp.delete(); } catch (_) {} } }
+    });
   }
 
   /// JWT claims are used only to bind a local receipt to the current session;
@@ -1149,10 +1195,10 @@ class ChatFileAccess {
   static Future<String> resolve(String url) async {
     final key = keyFor(url);
     if (key == null) return url;
-    if (_pinnedRuntime && (mediaProtection == null || !_mediaOwnerCurrent(mediaProtection!))) {
+    if (_logoutFenced) throw StateError('Выход из аккаунта не завершён.');
+    if (_accessFenceRequired && (mediaProtection == null || !_mediaOwnerCurrent(mediaProtection!))) {
       throw const MediaProtectionUnavailable();
     }
-    if (_logoutFenced) throw StateError('Выход из аккаунта не завершён.');
     final uid = userId, epoch = generation;
     if (uid == null) throw StateError('Войдите, чтобы открыть вложение.');
     final token = _currentAccessToken();
@@ -1210,10 +1256,10 @@ class ChatFileAccess {
               token == _currentAccessToken() &&
               (_revisions[id] ?? 0) == revision);
       final protection = mediaProtection;
-      if (_pinnedRuntime && (protection == null || !_mediaOwnerCurrent(protection))) {
+      if (_accessFenceRequired && (protection == null || !_mediaOwnerCurrent(protection))) {
         throw const MediaProtectionUnavailable();
       }
-      if (_pinnedRuntime) {
+      if (_accessFenceRequired) {
         final recovery = protection!.accessRecovery;
         if (recovery == null || !await recovery.timeout(const Duration(seconds: 2), onTimeout: () => false) ||
             !identical(mediaProtection, protection) || !_mediaOwnerCurrent(protection)) {

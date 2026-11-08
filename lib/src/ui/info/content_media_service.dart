@@ -209,8 +209,6 @@ class ContentMediaService {
         _bytesMemory[key] = bytes;
         if (persistBytes) {
           try {
-            await _disk.pruneOtherVersions(diskKey.path, diskKey.version);
-            if (!current()) return null;
             await _disk.put(diskKey, bytes);
           } catch (_) {}
         }

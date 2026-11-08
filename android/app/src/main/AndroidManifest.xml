@@ -14,6 +14,11 @@
         android:label="student_platform"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <service android:name=".SourceAuthorityRecoveryFixtureService"
+            android:enabled="${sourceRecoveryQaEnabled}" android:exported="false"
+            android:process=":qa_recovery_owner" />
+        <activity android:name=".SourceAuthorityViewerFixtureActivity"
+            android:enabled="${sourceAuthorityViewerQaEnabled}" android:exported="false" />
         <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false" />
         <meta-data android:name="firebase_analytics_collection_enabled" android:value="false" />
         <activity
@@ -54,6 +59,18 @@
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="messages" />
+        <provider
+            android:name=".SourceDocumentQaProvider"
+            android:authorities="${applicationId}.source_document_qa"
+            android:enabled="${sourceDocumentQaEnabled}"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+        <provider
+            android:name=".SourceDocumentAuthorityQaProvider"
+            android:authorities="${applicationId}.authority_document_qa"
+            android:enabled="${sourceAuthorityProviderQaEnabled}"
+            android:exported="false"
+            android:grantUriPermissions="true" />
         <provider
             android:name="com.superlist.super_native_extensions.DataProvider"
             android:authorities="${applicationId}.SuperClipboardDataProvider"

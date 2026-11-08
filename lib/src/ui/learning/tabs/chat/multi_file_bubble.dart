@@ -496,6 +496,7 @@ class MultiFileBubble extends StatelessWidget {
           fileSize: file.fileSize,
           mimeType: file.fileType,
           sourceFileId: file.id,
+          sourceFile: file,
         ),
       ),
     );

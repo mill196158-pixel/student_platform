@@ -15,6 +15,8 @@ import 'package:student_platform/src/core/auth_transition_coordinator.dart';
 import 'package:student_platform/src/core/session_capabilities_host.dart';
 import 'package:student_platform/src/core/offline_policy_grant_host.dart';
 import 'package:student_platform/src/core/offline_grant_logout.dart';
+import 'package:student_platform/src/core/pinned_media_switch.dart';
+import 'package:student_platform/src/core/qa_document_authority_host.dart';
 import 'package:student_platform/src/config/supabase_config.dart';
 import 'package:student_platform/src/ui/learning/state/team_snapshot_host.dart';
 import 'package:student_platform/src/ui/learning/state/team_snapshot_logout.dart';
@@ -82,11 +84,12 @@ class AuthService {
     final access = OfflinePolicyGrantHost.maybeRead(context);
     final sqliteStore = access?.sqliteStore;
     final sqliteBinding = sqliteStore == null ? null : access?.currentBinding();
-    // Captured before the memory fence invalidates the active scope. This
-    // experimental barrier is never enabled in an ordinary build.
+    // Capture the SID before the in-memory logout fence invalidates the scope.
     const qaEviction = bool.fromEnvironment('MEDIA_CACHE_EVICTION_QA');
-    final mediaStore = qaEviction ? ChatFileAccess.mediaProtection : null;
-    final mediaSid = qaEviction ? ChatFileAccess.currentSessionBinding : null;
+    const qaDocumentAuthority = bool.fromEnvironment('SOURCE_DOCUMENT_AUTHORITY_QA');
+    final mediaFence = qaEviction || sourceDocumentFenceEnabled();
+    final mediaStore = mediaFence ? ChatFileAccess.mediaProtection : null;
+    final mediaSid = mediaFence ? ChatFileAccess.currentSessionBinding : null;
     Object? attachmentFence;
     PushLogoutReservation? pushReservation;
     var result = LogoutCleanupResult.blockedBeforeSignOut;
@@ -105,10 +108,11 @@ class AuthService {
             },
             () => attachmentFence = ChatFileAccess.fenceForLogout(),
           ]),
-          durableRevoke: sqliteStore == null && !qaEviction
+          durableRevoke: sqliteStore == null && !mediaFence && !qaDocumentAuthority
               ? null
               : () async {
-                  if (qaEviction) {
+                  if (qaDocumentAuthority && !await QaDocumentAuthorityLifecycle.revokeBeforeLogout()) return false;
+                  if (mediaFence) {
                     if (mediaStore == null || mediaSid == null || oldUserId == null ||
                         mediaStore.project.replaceFirst(RegExp(r'/+$'), '') !=
                             SupabaseConfig.url.replaceFirst(RegExp(r'/+$'), '') ||

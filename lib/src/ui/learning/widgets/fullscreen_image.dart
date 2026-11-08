@@ -1,6 +1,18 @@
 import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:student_platform/src/ui/learning/widgets/authorized_file_image.dart';
 import 'package:student_platform/src/services/chat_file_access.dart';
+import 'package:student_platform/src/core/pinned_media_switch.dart';
+import 'package:student_platform/src/core/session_capabilities.dart';
+import 'package:student_platform/src/core/session_capabilities_host.dart';
+import 'package:student_platform/src/core/qa_document_authority_host.dart';
+import 'package:student_platform/src/core/qa_native_document_authority.dart';
+import 'package:student_platform/src/core/qa_document_open_flow.dart';
+import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
+import 'package:student_platform/src/ui/chats/core/source_bound_document_bridge.dart';
+import 'package:student_platform/src/ui/chats/core/source_bound_document_store.dart';
+import 'package:student_platform/src/ui/learning/models/chat_file.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:photo_view/photo_view.dart';
@@ -8,6 +20,7 @@ import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:math' as math;
 import 'package:pdfrx/pdfrx.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:open_filex/open_filex.dart';
@@ -17,6 +30,7 @@ import '../utils/chat_copied_file_cache.dart';
 import 'file_card.dart';
 
 int _viewerTempSequence = 0;
+class _DispatchStillRunning implements Exception {}
 final _viewerWriteVersions = <String, int>{};
 final _viewerPublishQueues = <String, Future<void>>{};
 @visibleForTesting
@@ -706,6 +720,7 @@ class FullscreenFileViewer extends StatefulWidget {
   final int fileSize;
   final String? mimeType;
   final String? sourceFileId;
+  final ChatFile? sourceFile;
 
   const FullscreenFileViewer({
     super.key,
@@ -714,6 +729,7 @@ class FullscreenFileViewer extends StatefulWidget {
     required this.fileSize,
     this.mimeType,
     this.sourceFileId,
+    this.sourceFile,
   });
 
   @override
@@ -723,6 +739,11 @@ class FullscreenFileViewer extends StatefulWidget {
 class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
   bool _opening = false;
   Future<File>? _namedExport;
+  Future<File>? _sourceWork;
+  SourceBoundDocumentBridge? _sourceBridge;
+  Future<Object?>? _platformInFlight;
+  bool _platformStarting = false;
+  bool _qaOutcomeUncertain = false;
   late Future<File> _previewFileFuture;
   late _ViewerAccessTicket _access;
   late Object? _previewClient;
@@ -740,10 +761,14 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
     _access = _ViewerAccessTicket();
     _previewClient = ChatFileAccess.currentClientIdentity;
     _namedExport = null;
+    _sourceWork = null;
+    _sourceBridge = null;
     _opening = false;
+    _qaOutcomeUncertain = false;
     // Keep named exports for share, clipboard and external viewers. A PDF
     // preview can use an already authorized local copy without exporting it.
-    _previewFileFuture = _isPdf ? _ensurePdfPreview(revision) : _ensureCachedFile();
+    _previewFileFuture = _nativeQaDocx ? Future.value(File('')) :
+        (_isPdf ? _ensurePdfPreview(revision) : _ensureCachedFile());
     unawaited(_previewFileFuture.then<void>((_) {},
         onError: (Object _, StackTrace __) {}));
   }
@@ -754,7 +779,7 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
     if (oldWidget.fileUrl != widget.fileUrl ||
         oldWidget.fileName != widget.fileName ||
         oldWidget.mimeType != widget.mimeType ||
-        oldWidget.sourceFileId != widget.sourceFileId) {
+        oldWidget.sourceFileId != widget.sourceFileId || oldWidget.sourceFile != widget.sourceFile) {
       _resetSource();
     }
   }
@@ -770,6 +795,14 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
   }
 
   String get _fileName => FileUiUtils.cleanFileName(widget.fileName);
+  bool get _sourceEnabled => sourceDocumentFenceEnabled() &&
+      widget.sourceFile != null && supportsSourceBoundDocument(widget.sourceFile!) &&
+      widget.sourceFile!.fileUrl == widget.fileUrl && widget.sourceFile!.id == widget.sourceFileId;
+  bool get _nativeQaDocx => !kIsWeb && defaultTargetPlatform==TargetPlatform.android && sourceDocumentFenceEnabled() &&
+      const bool.fromEnvironment('SOURCE_DOCUMENT_AUTHORITY_QA') &&
+      (_fileName.toLowerCase().endsWith('.docx') ||
+       (widget.mimeType ?? '').toLowerCase()=='application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  bool get _nativeQaSource => _nativeQaDocx && _sourceEnabled;
   bool get _isPdf {
     final name = _fileName.toLowerCase();
     final mime = (widget.mimeType ?? '').toLowerCase();
@@ -782,18 +815,46 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
       _access.isCurrent(widget.fileUrl);
 
   Future<void> _downloadAndOpen() async {
-    if (_opening || !_access.isCurrent(widget.fileUrl)) return;
+    if (_opening || _qaOutcomeUncertain || !_access.isCurrent(widget.fileUrl)) return;
     final revision = _sourceRevision;
     setState(() => _opening = true);
     try {
+      if (_nativeQaDocx && !_nativeQaSource) throw StateError('Источник файла не подтверждён.');
+      if (_nativeQaSource) {
+        final random=math.Random.secure();
+        final request=List.generate(16,(_)=>random.nextInt(256).toRadixString(16).padLeft(2,'0')).join();
+        QaNativeDocumentAuthorityDriver? native;
+        final pending=qaOpenDocument(
+          prepare:() async => (await _ensureSourceBridge()).source,
+          current:()=>_previewCurrent(revision),
+          dispatch:(source) {
+            final driver=QaDocumentAuthorityLifecycle.current?.native;
+            if(driver is! QaNativeDocumentAuthorityDriver) return Future.value('blocked');
+            native=driver;
+            return driver.dispatchSource(source,request);
+          },
+          acknowledge:()=>native?.acknowledgeStarted(request) ?? Future.value(false));
+        _platformInFlight=pending;
+        final outcome=await pending;
+        if (outcome==QaDocumentOpenOutcome.uncertain) _qaOutcomeUncertain=true;
+        if (outcome!=QaDocumentOpenOutcome.started && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(outcome==QaDocumentOpenOutcome.uncertain
+              ? 'Результат открытия неизвестен. Проверьте открытые приложения.'
+              : 'Файл пока недоступен для открытия.')));
+        }
+        return;
+      }
       final file = await _ensureCachedFile();
       if (!_previewCurrent(revision)) return;
-      final res = await OpenFilex.open(file.path);
+      final res = await _dispatchSource(file, (path) => OpenFilex.open(path));
       if (res.type != ResultType.done && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Не удалось открыть файл: ${res.message}')),
         );
       }
+    } on _DispatchStillRunning {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Запрос отправлен, приложение ещё отвечает.')));
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -801,11 +862,22 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
         );
       }
     } finally {
-      if (mounted && revision == _sourceRevision) setState(() => _opening = false);
+      if (_nativeQaSource) _platformInFlight=null;
+      if (mounted && revision == _sourceRevision && _platformInFlight == null) setState(() => _opening = false);
     }
   }
 
   Future<File> _ensureCachedFile() {
+    if (_sourceEnabled || _nativeQaDocx) {
+      final existing = _sourceWork;
+      if (existing != null) return existing;
+      late Future<File> work;
+      work = _ensureSourceFile().whenComplete(() {
+        if (identical(_sourceWork, work)) _sourceWork = null;
+      });
+      _sourceWork = work;
+      return work;
+    }
     if (_namedExport != null) return _namedExport!;
     final revision = _sourceRevision;
     final url = widget.fileUrl;
@@ -816,6 +888,67 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
         access.isCurrent(url);
     return _namedExport = _downloadRemoteFileToCache(
         url: url, fileName: _fileName, access: access, sourceCurrent: current);
+  }
+
+  Future<File> _ensureSourceFile() async {
+    final revision=_sourceRevision;
+    final bridge=await _ensureSourceBridge();
+    final file = await bridge.export(_fileName);
+    if (file == null || !_previewCurrent(revision)) throw StateError('Подтверждённая копия недоступна.');
+    return file;
+  }
+
+  Future<SourceBoundDocumentBridge> _ensureSourceBridge() async {
+    final revision = _sourceRevision;
+    final source = widget.sourceFile;
+    if (source == null || source.fileUrl != widget.fileUrl || source.id != widget.sourceFileId) {
+      throw StateError('Источник файла не подтверждён.');
+    }
+    final protection = ChatFileAccess.mediaProtection;
+    final cache = ProjectChatServerCache.qaInstance;
+    final caps = SessionCapabilitiesHost.maybeRead(context);
+    if (protection == null || cache == null || caps == null || !_previewCurrent(revision)) {
+      throw StateError('Подтверждённая копия недоступна.');
+    }
+    bool current() => _previewCurrent(revision) &&
+        identical(ChatFileAccess.mediaProtection, protection) &&
+        identical(ProjectChatServerCache.qaInstance, cache) &&
+        caps.capture(SessionCapability.cachedRead) != null;
+    bool online() => current() && caps.capture(SessionCapability.networkRead) != null;
+    final bridge = await SourceBoundDocumentBridge.open(file: source,
+        protection: protection, chatCache: cache, client: Supabase.instance.client,
+        ownerCurrent: current, online: online);
+    if (bridge == null || !current()) throw StateError('Подтверждённая копия недоступна.');
+    _sourceBridge = bridge;
+    var bytes = await bridge.read();
+    if (bytes == null && online()) {
+      if (!await bridge.refresh() || !current()) throw StateError('Файл не удалось сохранить.');
+      bytes = await bridge.read();
+    }
+    if (bytes == null || !current()) throw StateError('Подтверждённая копия недоступна.');
+    return bridge;
+  }
+
+  Future<T> _dispatchSource<T>(File file, Future<T> Function(String) action) async {
+    if (!_sourceEnabled) {
+      return action(file.path);
+    }
+    if (_platformInFlight != null || _platformStarting) throw StateError('Предыдущий запрос ещё выполняется.');
+    _platformStarting = true;
+    SourceDispatch<T>? started;
+    try { started = await _sourceBridge?.dispatch<T>(file, action); }
+    finally { _platformStarting = false; }
+    if (started == null) throw StateError('Доступ к файлу изменился.');
+    final pending = started.result;
+    _platformInFlight = pending;
+    void settled() {
+      if (!identical(_platformInFlight, pending)) return;
+      _platformInFlight = null;
+      if (mounted && _opening) setState(() => _opening = false);
+    }
+    unawaited(pending.then<void>((_) => settled(), onError: (Object _, StackTrace __) => settled()));
+    try { return await started.result.timeout(const Duration(seconds: 15)); }
+    on TimeoutException { throw _DispatchStillRunning(); }
   }
 
   Future<File> _ensurePdfPreview(int revision) async {
@@ -837,14 +970,21 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
   }
 
   Future<void> _shareCachedFile() async {
+    if (_sourceEnabled || _nativeQaDocx) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
+          content: Text('Поделиться этим файлом пока недоступно.')));
+      return;
+    }
     if (!_access.isCurrent(widget.fileUrl)) return;
     final revision = _sourceRevision;
     try {
       final file = await _ensureCachedFile();
       if (!_previewCurrent(revision)) return;
-      await SharePlus.instance.share(
-        ShareParams(files: [XFile(file.path, name: _fileName)]),
-      );
+      await _dispatchSource(file, (path) => SharePlus.instance.share(
+        ShareParams(files: [XFile(path, name: _fileName)])));
+    } on _DispatchStillRunning {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Запрос отправлен, приложение ещё отвечает.')));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -854,6 +994,11 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
   }
 
   Future<void> _copyCachedFileToClipboard() async {
+    if (_sourceEnabled || _nativeQaDocx) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
+          content: Text('Копирование этого файла пока недоступно.')));
+      return;
+    }
     final url = widget.fileUrl;
     final revision = _sourceRevision;
     bool current() => widget.fileUrl == url && _previewCurrent(revision);
@@ -861,12 +1006,12 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
     try {
       final file = await _ensureCachedFile();
       if (!current()) return;
-      final meta = await _writeFileBytesToClipboard(
-        file: file,
+      final meta = await _dispatchSource(file, (path) => _writeFileBytesToClipboard(
+        file: File(path),
         fileName: _fileName,
         mimeType: widget.mimeType,
         isCurrent: current,
-      );
+      ));
       if (!current()) return;
       ChatCopiedFileCache.remember(
         path: file.path,
@@ -876,6 +1021,9 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
         fileId: widget.sourceFileId,
       );
       if (mounted) _showShortCopiedSnack(context);
+    } on _DispatchStillRunning {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Запрос отправлен, приложение ещё отвечает.')));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

@@ -178,7 +178,9 @@ bool rejectHeldRefreshesSafely(
 class RefreshAdmissionClient extends http.BaseClient {
   RefreshAdmissionClient(this._inner,
       {Uri? backend, RefreshSecurityFence? securityFence,
-      this.trackQaRefresh = false})
+      this.trackQaRefresh = false, this.qaRefreshDispatch,
+      this.qaAuthorityRequired = false,
+      this.qaAuthorityTimeout = const Duration(seconds: 3)})
       : _securityFence = securityFence ?? RefreshSecurityFence(),
         _backend = backend ?? Uri.parse(SupabaseConfig.url);
   final http.Client _inner;
@@ -196,6 +198,28 @@ class RefreshAdmissionClient extends http.BaseClient {
   /// This signal is not proof of authorization or of a completed refresh.
   final ValueNotifier<int> refreshStarts = ValueNotifier<int>(0);
   final bool trackQaRefresh;
+  /// Injection for isolated QA only. Never configured by the production app.
+  final Future<http.StreamedResponse> Function(http.Client, http.BaseRequest)?
+      qaRefreshDispatch;
+  /// QA-only early bootstrap latch. Ordinary mode never waits on it.
+  final bool qaAuthorityRequired;
+  final Duration qaAuthorityTimeout;
+  final Completer<Future<http.StreamedResponse> Function(http.Client, http.BaseRequest)?>
+      _qaAuthority = Completer();
+  int _qaAuthorityWaiters = 0;
+  @visibleForTesting
+  int get qaAuthorityWaiters => _qaAuthorityWaiters;
+
+  void bindQaAuthority(Future<http.StreamedResponse> Function(http.Client, http.BaseRequest) dispatch) {
+    if (!qaAuthorityRequired || _closed || _qaAuthority.isCompleted) {
+      throw StateError('QA authority already resolved');
+    }
+    _qaAuthority.complete(dispatch);
+  }
+
+  void rejectQaAuthority() {
+    if (qaAuthorityRequired && !_qaAuthority.isCompleted) _qaAuthority.complete(null);
+  }
   bool _qaRefreshPending = false;
   bool _qaRefreshAmbiguous = false;
   int _heldRefreshGeneration = 0;
@@ -236,6 +260,9 @@ class RefreshAdmissionClient extends http.BaseClient {
   /// Blocks new auth sends synchronously, then waits for dispatched auth sends.
   /// This does not stop WebSockets or other HTTP clients.
   Future<void> suspendAndDrain({Duration? timeout}) {
+    // QA authority admission may be pending without a transport counted in
+    // _activeAuth. Such an old request must not resume after a later owner.
+    if (qaAuthorityRequired) _heldRefreshGeneration++;
     _suspended = true;
     if (_activeAuth == 0) return Future.value();
     final done = Completer<void>();
@@ -276,6 +303,7 @@ class RefreshAdmissionClient extends http.BaseClient {
   void discardHeldRefreshes() => _heldRefreshGeneration++;
 
   void block() {
+    rejectQaAuthority();
     if (!_admission.isCompleted) _admission.complete(null);
   }
 
@@ -323,6 +351,19 @@ class RefreshAdmissionClient extends http.BaseClient {
       }
     }
     final heldGeneration = _heldRefreshGeneration;
+    Future<http.StreamedResponse> Function(http.Client, http.BaseRequest)? qaDispatch;
+    if (qaAuthorityRequired) {
+      if (_qaAuthorityWaiters >= 1 || qaAuthorityTimeout <= Duration.zero) throw RefreshTransportSuppressed();
+      _qaAuthorityWaiters++;
+      try {
+        qaDispatch = await _qaAuthority.future.timeout(qaAuthorityTimeout,
+            onTimeout: () => throw RefreshTransportSuppressed());
+      } finally { _qaAuthorityWaiters--; }
+    } else { qaDispatch = qaRefreshDispatch; }
+    if (qaAuthorityRequired && qaDispatch == null) throw RefreshTransportSuppressed();
+    if (_closed || heldGeneration != _heldRefreshGeneration || _suspended) {
+      throw RefreshTransportSuppressed();
+    }
     final guarded = await _admission.future;
     if (_closed || guarded == null) _securityFence.reject();
     if (heldGeneration != _heldRefreshGeneration) {
@@ -341,7 +382,7 @@ class RefreshAdmissionClient extends http.BaseClient {
     authSignals.value++;
     _activeAuth++;
     try {
-      return await guarded.send(request);
+      return await (qaDispatch == null ? guarded.send(request) : qaDispatch(guarded, request));
     } finally {
       _authFinished();
     }
@@ -360,6 +401,7 @@ class RefreshAdmissionClient extends http.BaseClient {
   @override
   void close() {
     _closed = true;
+    rejectQaAuthority();
     authSignals.value++;
     block();
     _inner.close();

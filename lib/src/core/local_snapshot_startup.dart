@@ -31,6 +31,7 @@ class LocalSnapshotStartup {
     this.wait = const Duration(seconds: 3),
     this.onLateDenial,
     this.onCacheOnly,
+    this.onCacheOnlyGranted,
     this.onOnline,
   });
 
@@ -41,6 +42,7 @@ class LocalSnapshotStartup {
   final Duration wait;
   final void Function(bool passwordChangeRequired)? onLateDenial;
   final Future<void> Function()? onCacheOnly;
+  final void Function(SessionCapabilities)? onCacheOnlyGranted;
   final Future<void> Function()? onOnline;
   int _revision = 0;
 
@@ -64,7 +66,11 @@ class LocalSnapshotStartup {
       if (!current()) return false;
       final attempt = caps.beginAuthorization(owner);
       if (attempt == null || !current() || !caps.grant(mode, attempt)) return false;
-      return current() && caps.mode == mode;
+      final valid=current() && caps.mode == mode;
+      if (valid && mode == SessionCapabilityMode.cacheOnly) {
+        try { onCacheOnlyGranted?.call(caps); } catch (_) {}
+      }
+      return valid;
     }
     void denyLate({bool passwordChangeRequired = false}) {
       // A later attempt must not hide a real denial for the same unchanged

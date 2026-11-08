@@ -5,6 +5,7 @@ import 'package:student_platform/src/core/auth_session_scope.dart';
 import 'package:student_platform/src/core/offline_policy_grant.dart';
 import 'package:student_platform/src/core/pinned_media_runtime.dart';
 import 'package:student_platform/src/core/pinned_media_availability.dart';
+import 'package:student_platform/src/core/qa_native_project_guard.dart';
 import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -13,13 +14,16 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 class PinnedMediaHost {
   PinnedMediaHost({required this.scope, required this.project, required this.currentSession,
     required this.currentBinding, required this.supportDirectory, required this.cacheDirectory,
-    this.databaseFactory, this.retryDelays = const [Duration(seconds: 1), Duration(seconds: 2), Duration(seconds: 4)]});
+    this.databaseFactory, this.onQaGuardReady, this.qaUseNativeGuard=false,
+    this.retryDelays = const [Duration(seconds: 1), Duration(seconds: 2), Duration(seconds: 4)]});
   final AuthSessionScope scope;
   final String project;
   final Session? Function() currentSession;
   final OfflineSessionBinding? Function() currentBinding;
   final Future<Directory> Function() supportDirectory, cacheDirectory;
   final sqlite.DatabaseFactory? databaseFactory;
+  final Future<void> Function(sqlite.Database)? onQaGuardReady;
+  final bool qaUseNativeGuard;
   final List<Duration> retryDelays;
   sqlite.Database? _db;
   PinnedMediaRuntime? _runtime;
@@ -48,7 +52,8 @@ class PinnedMediaHost {
       if (_stopped) return;
       var abandoned = false;
       final opening = openProjectChatServerDatabase('${root.path}/pinned_media_guard_ordinary_v1.db',
-          factory: databaseFactory);
+          factory: databaseFactory,
+          qaNativeGuard:qaUseNativeGuard ? QaNativeProjectGuard.acquire : null);
       unawaited(opening.then<void>((lateDb) async {
         if (abandoned) { try { await lateDb.close(); } catch (_) {} }
       }, onError: (Object _, StackTrace __) {}));
@@ -61,8 +66,17 @@ class PinnedMediaHost {
       final runtime = PinnedMediaRuntime(scope: scope, cache: cache,
           currentSession: currentSession, cacheDirectory: cacheDirectory,
           onUnavailable: () => PinnedMediaAvailability.unavailable(this));
-      runtime.start();
-      _db = opened; _runtime = runtime;
+      final callback = onQaGuardReady;
+      if (callback == null) {
+        runtime.start();
+        _db = opened; _runtime = runtime;
+      } else {
+        _db = opened; _runtime = runtime;
+        // QA recovery must consume old guard evidence before media cleanup.
+        await callback(opened);
+        if (_stopped || !opened.isOpen) return;
+        runtime.start();
+      }
       _failures = 0;
       _retry?.cancel(); _retry = null;
     } catch (_) {
@@ -84,7 +98,10 @@ class PinnedMediaHost {
     _stopped = true; _retry?.cancel();
     PinnedMediaAvailability.detach(this);
     await _runtime?.dispose(); _runtime = null;
-    final db = _db; _db = null;
-    if (db != null) await db.close();
+    final db = _db;
+    if (db != null) {
+      await db.close();
+      if (identical(_db, db)) _db = null;
+    }
   }
 }

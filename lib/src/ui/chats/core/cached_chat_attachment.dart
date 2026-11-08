@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,10 @@ import 'package:open_filex/open_filex.dart';
 import 'package:student_platform/src/services/chat_file_access.dart';
 import 'package:student_platform/src/ui/learning/models/chat_file.dart';
 import 'package:student_platform/src/ui/learning/widgets/file_card.dart';
+import 'package:student_platform/src/core/pinned_media_switch.dart';
+import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
+import 'package:student_platform/src/ui/chats/core/source_bound_document_bridge.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'dm_chat_service.dart';
 
@@ -44,6 +49,10 @@ class _CachedChatAttachmentState extends State<CachedChatAttachment> {
   LocalHistoryEntry? _history;
   Listenable? _changes;
   late Future<Uint8List?> _bytes;
+  Future<SourceBoundDocumentBridge?>? _sourceBridge;
+  bool _sourceDispatchInFlight = false;
+  bool get _sourceEnabled => sourceDocumentFenceEnabled() &&
+      supportsSourceBoundDocument(widget.file) && widget.debugRead == null && widget.debugOpen == null;
 
   @override
   void initState() {
@@ -85,7 +94,18 @@ class _CachedChatAttachmentState extends State<CachedChatAttachment> {
     bool current() => mounted && revision == _revision &&
         widget.file.fileUrl == url && _allowed();
     final debugRead = widget.debugRead, debugBeforeRead = widget.debugBeforeRead;
-    if (debugRead == null && debugBeforeRead == null) {
+    _sourceBridge = null;
+    if (_sourceEnabled) {
+      final protection = ChatFileAccess.mediaProtection;
+      final cache = ProjectChatServerCache.qaInstance;
+      if (protection != null && cache != null) {
+        _sourceBridge = SourceBoundDocumentBridge.open(file: file, protection: protection,
+            chatCache: cache, client: Supabase.instance.client,
+            ownerCurrent: () => current() && identical(ChatFileAccess.mediaProtection, protection) &&
+                identical(ProjectChatServerCache.qaInstance, cache), online: () => false);
+      }
+      _bytes = () async { return (await _sourceBridge)?.read(); }();
+    } else if (debugRead == null && debugBeforeRead == null) {
       _bytes = ChatFileAccess.readCachedOnly(url, permit: current);
     } else {
       _bytes = () async {
@@ -145,6 +165,30 @@ class _CachedChatAttachmentState extends State<CachedChatAttachment> {
     }
     try {
       if (!current()) return;
+      if (_sourceEnabled) {
+        if (_sourceDispatchInFlight) return;
+        _sourceDispatchInFlight = true;
+        var platformStarted = false;
+        try {
+        final bridge = await _sourceBridge;
+        final exported = await bridge?.export(widget.file.fileName);
+        if (exported == null || !current() || await bridge?.read() == null || !current()) {
+          notify('Локальная копия недоступна.');
+          return;
+        }
+        final started = await bridge?.dispatch(exported,
+            (path) => OpenFilex.open(path, type: widget.file.fileType));
+        if (started == null) { notify('Локальная копия недоступна.'); return; }
+        platformStarted = true;
+        unawaited(started.result.then<void>((_) { _sourceDispatchInFlight = false; },
+            onError: (Object _, StackTrace __) { _sourceDispatchInFlight = false; }));
+        final result = await started.result.timeout(const Duration(seconds: 15));
+        if (!current()) return;
+        if (result.type == ResultType.noAppToOpen) notify('Нет приложения для открытия файла.');
+        else if (result.type != ResultType.done) notify('Не удалось открыть сохранённый файл.');
+        return;
+        } finally { if (!platformStarted) _sourceDispatchInFlight = false; }
+      }
       final result = await ChatFileAccess.dispatchCachedPath<Object>(widget.file.fileUrl,
           permit: current, dispatch: (path) {
         final debugOpen = widget.debugOpen;
@@ -165,6 +209,8 @@ class _CachedChatAttachmentState extends State<CachedChatAttachment> {
           notify('Не удалось открыть сохранённый файл.');
         }
       }
+    } on TimeoutException {
+      notify('Запрос отправлен, приложение ещё отвечает.');
     } catch (_) {
       notify('Не удалось открыть сохранённый файл.');
     }
@@ -199,6 +245,7 @@ class _CachedChatAttachmentState extends State<CachedChatAttachment> {
                 ScaffoldMessenger.maybeOf(context)?.showSnackBar(
                   const SnackBar(content: Text('Файл ещё читается.')));
               } else if (bytes == null) {
+                if (_sourceEnabled) setState(_bind);
                 ScaffoldMessenger.maybeOf(context)?.showSnackBar(
                   const SnackBar(content: Text('Локальная копия недоступна.')));
               } else {

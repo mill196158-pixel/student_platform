@@ -748,6 +748,7 @@ class _FilesTabState extends State<FilesTab>
           fileSize: file.fileSize,
           mimeType: file.fileType,
           sourceFileId: file.id,
+          sourceFile: file,
         ),
       ),
     );

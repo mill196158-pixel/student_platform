@@ -29,6 +29,11 @@ class SerialAuthLocalStorage extends LocalStorage {
   /// Waits for calls already enqueued; it does not stop future SDK events.
   Future<void> drain() => _enqueue(() async {});
 
+  /// Runs with this adapter's queue held; callback must not call this wrapper.
+  /// Other adapter instances are not serialized by this operation.
+  Future<T> withExclusiveStorage<T>(Future<T> Function(LocalStorage) action) =>
+      _enqueue(() => action(delegate));
+
   @override
   Future<void> initialize() => _enqueue(delegate.initialize);
   @override

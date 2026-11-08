@@ -73,6 +73,11 @@ class AuthTransitionOwner {
 /// Serializes app-owned authentication transitions. This does not intercept
 /// SDK-owned refreshes or persistence and is not yet wired into production.
 class AuthTransitionCoordinator {
+  AuthTransitionCoordinator({this.qaTransition});
+
+  /// Optional integration point for isolated QA. Production creates the
+  /// coordinator without it. The wrapper must cover both success and errors.
+  final Future<dynamic> Function(Future<dynamic> Function())? qaTransition;
   Future<void> _tail = Future<void>.value();
   final _logouts = <AuthTransitionOwner, Future<bool>>{};
   bool _disposed = false;
@@ -85,7 +90,11 @@ class AuthTransitionCoordinator {
     _tail = _tail.then((_) async {
       try {
         if (_disposed) throw StateError('Coordinator disposed');
-        result.complete(await action());
+        final wrapped = qaTransition;
+        final T value = wrapped == null
+            ? await action()
+            : await wrapped(action) as T;
+        result.complete(value);
       } catch (error, stack) {
         result.completeError(error, stack);
       }

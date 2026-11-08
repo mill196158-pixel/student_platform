@@ -45,6 +45,9 @@ import 'src/core/pinned_media_status_host.dart';
 import 'src/core/offline_policy_grant.dart';
 import 'src/core/sqlite_policy_grant_store.dart';
 import 'src/core/coordinated_refresh_client.dart';
+import 'src/core/durable_active_session_registry.dart';
+import 'src/core/qa_document_authority_host.dart';
+import 'src/core/qa_native_document_authority.dart';
 import 'src/core/refresh_security_fence.dart';
 import 'src/core/offline_startup_admission.dart';
 import 'src/core/local_snapshot_startup.dart';
@@ -88,11 +91,12 @@ const _qaRotationNavigation = bool.fromEnvironment('QA_ROTATION_NAVIGATION_EXPER
 final _qaRotationReceipt = QaRotationReceipt();
 AuthSessionScope? _policyQaScope;
 PinnedMediaHost? _pinnedMediaHost;
+QaDocumentAuthorityHost? _qaDocumentAuthorityHost;
 @visibleForTesting
 Future<void> debugDisposePinnedMediaHost() async {
   final host = _pinnedMediaHost;
-  _pinnedMediaHost = null;
   await host?.dispose();
+  if (identical(_pinnedMediaHost, host)) _pinnedMediaHost = null;
 }
 SqlitePolicyGrantStore? _policyQaStore;
 OfflineStartupAdmission? _policyQaAdmission;
@@ -429,13 +433,17 @@ Future<void> _initializeApp(
   SupabaseConfig.validate();
   final usePolicyQa = _sqlitePolicyQa && !kIsWeb;
   final useOrdinaryOffline = _ordinaryOffline;
-  final inner = (usePolicyQa || useOrdinaryOffline)
+  // Explicit QA only. Until a trusted native host binds the latch, refresh
+  // remains held; the ordinary default path and SDK storage are unchanged.
+  const sourceAuthorityQa = bool.fromEnvironment('SOURCE_DOCUMENT_AUTHORITY_QA');
+  final inner = (usePolicyQa || useOrdinaryOffline || sourceAuthorityQa)
       ? (useOrdinaryOffline ? _debugOrdinaryHttp : null) ?? http.Client() : null;
   final refreshFence = RefreshSecurityFence();
   final gate = inner == null
       ? null
       : RefreshAdmissionClient(inner, securityFence: refreshFence,
-          trackQaRefresh: _qaRotationNavigation);
+          trackQaRefresh: _qaRotationNavigation,
+          qaAuthorityRequired: sourceAuthorityQa);
   if (_qaRotationNavigation) _qaRefreshGate = gate;
   if (useOrdinaryOffline) _ordinaryRefreshGate = gate;
   sqlite.Database? policyDb;
@@ -553,12 +561,53 @@ Future<void> _initializeApp(
         final session = client.auth.currentSession;
         return session == null ? null : OfflineSessionBinding.fromSession(session, issuer);
       }
-      if (pinnedMediaRuntimeEnabled()) {
+      final qaCachedAdmission=QaCachedAdmissionLatch();
+      if (pinnedMediaRuntimeEnabled() || sourceDocumentFenceEnabled() || sourceAuthorityQa) {
         _pinnedMediaHost = PinnedMediaHost(scope: scope, project: project,
             currentSession: () => client.auth.currentSession, currentBinding: binding,
             supportDirectory: getApplicationSupportDirectory,
             cacheDirectory: getApplicationCacheDirectory,
-            databaseFactory: _debugOrdinaryDatabaseFactory)..start();
+            databaseFactory: _debugOrdinaryDatabaseFactory,
+            qaUseNativeGuard:sourceAuthorityQa,
+            onQaGuardReady: !sourceAuthorityQa ? null : (db) async {
+              try {
+                final captured=scope.capture();
+                final claims=binding();
+                final guard=captureProjectDatabaseOwner(db);
+                if (captured==null || claims==null || guard==null || !scope.isCurrent(captured)) return;
+                final registry=DurableActiveSessionRegistry(db,project);
+                await registry.initialize();
+                var state=await registry.read();
+                final driver=QaNativeDocumentAuthorityDriver(db,guard);
+                if (state==null || !scope.isCurrent(captured) || !guard.isCurrentFor(db)) { gate.rejectQaAuthority(); return; }
+                if (state.state=='empty') {
+                  final transition=await registry.begin(state,nextUid:claims.userId,nextSid:claims.sessionId,
+                      current:()=>scope.isCurrent(captured) && guard.isCurrentFor(db));
+                  if (transition==null || !await registry.finish(transition,handoffOwner:guard,
+                      current:()=>scope.isCurrent(captured) && guard.isCurrentFor(db))) { gate.rejectQaAuthority(); return; }
+                  state=await registry.read();
+                }
+                if (state==null || state.uid!=claims.userId || state.sid!=claims.sessionId) { gate.rejectQaAuthority(); return; }
+                var owned=await db.transaction((txn)=>registry.permitsHandoffInTransaction(txn,state!,
+                    uid:claims.userId,sid:claims.sessionId,owner:guard));
+                if (!owned && state.state=='active' && scope.isCurrent(captured) && guard.isCurrentFor(db)) {
+                  if (await driver.recoverClosed(project,claims.userId,claims.sessionId,state)) {
+                    state=await registry.read();
+                    owned=state!=null && await db.transaction((txn)=>registry.permitsHandoffInTransaction(txn,state!,
+                        uid:claims.userId,sid:claims.sessionId,owner:guard));
+                  }
+                }
+                if (!owned || state==null || !scope.isCurrent(captured) || !guard.isCurrentFor(db)) { gate.rejectQaAuthority(); return; }
+                final host=QaDocumentAuthorityHost(client:client,scope:scope,gate:gate,registry:registry,
+                    owner:guard,native:driver,
+                    policy:SettledPolicyTransport(inner),publicKey:SupabaseConfig.anonKey);
+                if (await host.prepare()) {
+                  _qaDocumentAuthorityHost=host;
+                  qaCachedAdmission.bind(host);
+                }
+                else { await host.dispose(); gate.rejectQaAuthority(); }
+              } catch (_) { gate.rejectQaAuthority(); }
+            })..start();
       }
       sqlite.Database? chatDb;
       try {
@@ -690,15 +739,35 @@ Future<void> _initializeApp(
               }
               finally { enteringCache = false; }
             },
+            onCacheOnlyGranted: !sourceAuthorityQa ? null : (caps) {
+              qaCachedAdmission.onGranted(caps);
+            },
             onOnline: () async {
+              qaCachedAdmission.clear();
               gate.requireAuthDrained();
               reconnectTimer?.cancel();
               openGate();
+              if (sourceAuthorityQa) {
+                final host=_qaDocumentAuthorityHost;
+                if (host!=null) {
+                  try { await host.admitAfterPolicy().timeout(const Duration(seconds:3)); }
+                  catch (_) { await host.dispose(); }
+                }
+              }
             },
             onLateDenial: (passwordChangeRequired) {
+              qaCachedAdmission.clear();
               reconnectTimer?.cancel();
-              rejectHeldGate();
-              appRouter.go(passwordChangeRequired ? '/change-password' : '/login');
+              if (!sourceAuthorityQa) {
+                rejectHeldGate();
+                appRouter.go(passwordChangeRequired ? '/change-password' : '/login');
+              } else {
+                final drain=gate.suspendAndDrain(timeout:const Duration(seconds:8));
+                unawaited(qaRevokeThenRoute(QaDocumentAuthorityLifecycle.revokeBeforeLogout, () {
+                  appRouter.go(passwordChangeRequired ? '/change-password' : '/login');
+                }));
+                unawaited(drain.catchError((Object _) {}));
+              }
             });
       }
       if (scope.capture() == null || binding() == null) {
