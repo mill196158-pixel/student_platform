@@ -37,7 +37,9 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final package=(await PackageInfo.fromPlatform()).packageName;
   final denyFixture=package=='com.mill453020.studentplatform.authorityrecoverdenyfixture';
-  final sourceFixture=package=='com.mill453020.studentplatform.authoritysourcefixture' || package=='com.mill453020.studentplatform.authoritysourcediagnosticv6';
+  final dispatchFixture=package=='com.mill453020.studentplatform.authoritydispatchfixturev4';
+  final gateFixture=package=='com.mill453020.studentplatform.authoritygatefixture';
+  final sourceFixture=gateFixture || dispatchFixture || package=='com.mill453020.studentplatform.authoritysourcefixture' || package=='com.mill453020.studentplatform.authoritysourcediagnosticv6';
   final revokedFixture=package=='com.mill453020.studentplatform.authorityrecoverrevokedfixture';
   if (!Platform.isAndroid || (!denyFixture && !revokedFixture && !sourceFixture && package!='com.mill453020.studentplatform.authorityrecoverfixture' && package!='com.mill453020.studentplatform.authorityrecoverdiagnosticfixture')) throw StateError('isolated fixture only');
   final root=await getApplicationSupportDirectory();
@@ -172,16 +174,74 @@ Future<void> main() async {
         await chat.insert('chat_server_snapshot',{...chatCommon,'payload':jsonEncode([{'id':'m','chat_id':'c','client_id':null,'delivery_status':'sent','attachments':[file]}])});
         mark('SOURCE_VERIFY');
         if(await bounded(driver.verifySource(src))!=hash) throw StateError('source proof rejected');
-        mark('SOURCE_TOMBSTONE');
-        await db.insert('media_cache_logout_tombstones',{'project':src.project,'uid':src.uid,'sid':src.sid});
-        if(await bounded(driver.verifySource(src))!=null) throw StateError('revoked proof accepted');
-        await db.delete('media_cache_logout_tombstones',where:'project=? AND uid=? AND sid=?',whereArgs:[src.project,src.uid,src.sid]);
+        if (dispatchFixture) {
+          mark('DISPATCH_EAGER_VIEWER');
+          if(await bounded(driver.dispatchSource(src,'synthetic_dispatch_0001'))!='started') throw StateError('dispatch did not start');
+          if(!await bounded(driver.acknowledgeStarted('synthetic_dispatch_0001'))) throw StateError('dispatch ack failed');
+          final resultFile=File('${root.path}/qa_authority_viewer_result');
+          for(var i=0;i<500 && !await resultFile.exists();i++) {
+            await Future<void>.delayed(const Duration(milliseconds:10));
+          }
+          if(!await resultFile.exists() || await resultFile.readAsString()!='ok:$hash') throw StateError('viewer read failed');
+        }
+        if (gateFixture) {
+          mark('EXPIRED_BEFORE_RESERVATION');
+          const authorityChannel=MethodChannel('student_platform/document_authority_qa');
+          if(await bounded(authorityChannel.invokeMethod<String>('dispatchExpiredForTest',{
+            'project':src.project,'uid':src.uid,'sid':src.sid,'chat':src.chatId,'message':src.messageId,'file':src.fileId,
+            'key':src.fileKey,'url':src.fileUrl,'request':'synthetic_expired_001'}))!='blocked') throw StateError('expired dispatch accepted');
+          mark('EXPIRED_DURING_PROOF');
+          if(await bounded(authorityChannel.invokeMethod<String>('dispatchSlowProofForTest',{
+            'project':src.project,'uid':src.uid,'sid':src.sid,'chat':src.chatId,'message':src.messageId,'file':src.fileId,
+            'key':src.fileKey,'url':src.fileUrl,'request':'synthetic_slowproof_01','delayProofForTest':true}))!='blocked') throw StateError('slow proof dispatch accepted');
+          if(await bounded(authorityChannel.invokeMethod<bool>('slowProofReachedForTest'))!=true) throw StateError('slow proof was not reached');
+          mark('DURABLE_RESERVATION');
+          if(await bounded(driver.reserveSourceForTest(src,'synthetic_request_0001'))!='reserved') throw StateError('reservation failed');
+          if(await bounded(driver.reserveSourceForTest(src,'synthetic_request_0001'))!='blocked') throw StateError('same request replayed');
+          if(await bounded(driver.reserveSourceForTest(src,'synthetic_request_0002'))!='blocked') throw StateError('uncertain source replayed');
+          mark('QUEUE_OVERFLOW');
+          final held=authorityChannel.invokeMethod<bool>('holdWorkerForTest');
+          var workerHeld=false;
+          for(var i=0;i<100 && !workerHeld;i++) {
+            workerHeld=await authorityChannel.invokeMethod<bool>('workerHeldForTest')==true;
+            if(!workerHeld) await Future<void>.delayed(const Duration(milliseconds:10));
+          }
+          if(!workerHeld) throw StateError('worker not held');
+          final queued=List.generate(34,(_)=>authorityChannel.invokeMethod<int>('elapsedRealtime'));
+          final first=await bounded(Future.any(queued));
+          if(first!=null) throw StateError('queue unexpectedly drained');
+          mark('GATE_DETACH');
+          await db.transaction((_) async {
+            if(await bounded(authorityChannel.invokeMethod<bool>('closeGateForTest'))!=true) throw StateError('gate detach failed');
+            if(await bounded(authorityChannel.invokeMethod<bool>('releaseWorkerForTest'))!=true) throw StateError('worker release failed');
+          });
+          await bounded(held);
+          await bounded(Future.wait(queued));
+          if(await bounded(driver.verifySource(src))!=null) throw StateError('detached engine accepted');
+          var revoked=false;
+          for(var i=0;i<200 && !revoked;i++) {
+            revoked=(await registry.read())?.state=='revoked';
+            if(!revoked) await Future<void>.delayed(const Duration(milliseconds:10));
+          }
+          if(!revoked) throw StateError('durable close incomplete');
+        } else {
+          mark('SOURCE_TOMBSTONE');
+          await db.insert('media_cache_logout_tombstones',{'project':src.project,'uid':src.uid,'sid':src.sid});
+          if(await bounded(driver.verifySource(src))!=null) throw StateError('revoked proof accepted');
+          await db.delete('media_cache_logout_tombstones',where:'project=? AND uid=? AND sid=?',whereArgs:[src.project,src.uid,src.sid]);
+        }
         await chat.close();
       }
-      mark('LOGOUT_FENCE');
-      if(!await bounded(host.revokeBeforeLogout())) throw StateError('close failed');
+      if (!gateFixture) {
+        mark('LOGOUT_FENCE');
+        if(!await bounded(host.revokeBeforeLogout())) throw StateError('close failed');
+      }
       mark('LOGOUT_REGISTRY');
       if((await registry.read())?.state!='revoked') throw StateError('logout not committed');
+      if (dispatchFixture) {
+        mark('PROVIDER_AFTER_REVOKE');
+        if(await bounded(control.invokeMethod<bool>('testProviderOpen',{'request':'synthetic_dispatch_0001'}))!=false) throw StateError('revoked URI opened');
+      }
       mark('LOGOUT_NO_RECOVERY');
       if(await driver.recoverClosed(registry.project,'synthetic',sid,(await registry.read())!)) throw StateError('revoked recovery allowed');
     }

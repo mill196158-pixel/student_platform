@@ -10,12 +10,14 @@ val attachFixture = System.getenv("STUDENT_ATTACH_FIXTURE") == "1"
 val authorityQa = System.getenv("STUDENT_AUTHORITY_QA") == "1"
 val authorityFixture = System.getenv("STUDENT_AUTHORITY_FIXTURE") == "1"
 val recoveryFixture = System.getenv("STUDENT_AUTHORITY_RECOVERY_FIXTURE") == "1"
+val authorityDispatchFixture = System.getenv("STUDENT_AUTHORITY_DISPATCH_FIXTURE") == "1"
+val authorityGateFixture = System.getenv("STUDENT_AUTHORITY_GATE_FIXTURE") == "1"
 val recoverySourceDiagnostic = System.getenv("STUDENT_AUTHORITY_SOURCE_DIAGNOSTIC") == "1"
 val recoverySourceFixture = System.getenv("STUDENT_AUTHORITY_SOURCE_FIXTURE") == "1"
 val recoveryDiagnosticFixture = System.getenv("STUDENT_AUTHORITY_RECOVERY_DIAGNOSTIC_FIXTURE") == "1"
 val recoveryRevokedFixture = System.getenv("STUDENT_AUTHORITY_RECOVERY_REVOKED_FIXTURE") == "1"
 val recoveryDenyFixture = System.getenv("STUDENT_AUTHORITY_RECOVERY_DENY_FIXTURE") == "1"
-require(listOf(offlineFixture, attachFixture, authorityQa, authorityFixture, recoveryFixture, recoveryDenyFixture, recoveryRevokedFixture, recoveryDiagnosticFixture, recoverySourceFixture, recoverySourceDiagnostic).count { it } <= 1) { "Select only one isolated fixture" }
+require(listOf(offlineFixture, attachFixture, authorityQa, authorityFixture, recoveryFixture, recoveryDenyFixture, recoveryRevokedFixture, recoveryDiagnosticFixture, recoverySourceFixture, recoverySourceDiagnostic, authorityGateFixture, authorityDispatchFixture).count { it } <= 1) { "Select only one isolated fixture" }
 
 if (offlineFixture || attachFixture) {
     listOf(project, rootProject.project(":integration_test")).forEach { target ->
@@ -48,14 +50,17 @@ android {
 
     defaultConfig {
         manifestPlaceholders["sourceDocumentQaEnabled"] = attachFixture.toString()
-        manifestPlaceholders["sourceAuthorityProviderQaEnabled"] = (authorityQa || recoverySourceDiagnostic).toString()
-        manifestPlaceholders["sourceRecoveryQaEnabled"] = (recoveryFixture || recoveryDenyFixture || recoveryRevokedFixture || recoveryDiagnosticFixture || recoverySourceFixture || recoverySourceDiagnostic).toString()
+        manifestPlaceholders["sourceAuthorityProviderQaEnabled"] = (authorityQa || recoverySourceDiagnostic || authorityGateFixture || authorityDispatchFixture).toString()
+        manifestPlaceholders["sourceAuthorityViewerQaEnabled"] = authorityDispatchFixture.toString()
+        manifestPlaceholders["sourceRecoveryQaEnabled"] = (recoveryFixture || recoveryDenyFixture || recoveryRevokedFixture || recoveryDiagnosticFixture || recoverySourceFixture || recoverySourceDiagnostic || authorityGateFixture || authorityDispatchFixture).toString()
         applicationId = when {
             offlineFixture -> "com.mill453020.studentplatform.offlinefixture"
             attachFixture -> "com.mill453020.studentplatform.attachfixture"
             authorityQa -> "com.mill453020.studentplatform.authorityqa"
             authorityFixture -> "com.mill453020.studentplatform.authorityfixture"
             recoveryFixture -> "com.mill453020.studentplatform.authorityrecoverfixture"
+            authorityDispatchFixture -> "com.mill453020.studentplatform.authoritydispatchfixturev4"
+            authorityGateFixture -> "com.mill453020.studentplatform.authoritygatefixture"
             recoverySourceDiagnostic -> "com.mill453020.studentplatform.authoritysourcediagnosticv6"
             recoverySourceFixture -> "com.mill453020.studentplatform.authoritysourcefixture"
             recoveryDiagnosticFixture -> "com.mill453020.studentplatform.authorityrecoverdiagnosticfixture"
@@ -91,6 +96,6 @@ dependencies {
 // Apply Google Services only when a real google-services.json is present.
 // Do not commit a fake config file.
 val googleServicesFile = file("google-services.json")
-if (googleServicesFile.exists() && !offlineFixture && !attachFixture && !authorityQa && !authorityFixture && !recoveryFixture && !recoveryDenyFixture && !recoveryRevokedFixture && !recoveryDiagnosticFixture && !recoverySourceFixture && !recoverySourceDiagnostic) {
+if (googleServicesFile.exists() && !offlineFixture && !attachFixture && !authorityQa && !authorityFixture && !recoveryFixture && !recoveryDenyFixture && !recoveryRevokedFixture && !recoveryDiagnosticFixture && !recoverySourceFixture && !recoverySourceDiagnostic && !authorityGateFixture && !authorityDispatchFixture) {
     apply(plugin = "com.google.gms.google-services")
 }

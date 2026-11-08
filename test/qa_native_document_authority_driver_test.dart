@@ -62,7 +62,7 @@ void main() {
     const channel=MethodChannel('qa-native-dispatch-test');
     final messenger=TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     var calls=0;
-    messenger.setMockMethodCallHandler(channel,(call) async { calls++; throw PlatformException(code:'unknown'); });
+    messenger.setMockMethodCallHandler(channel,(call) async { if(call.method=='elapsedRealtime') return 100; calls++; throw PlatformException(code:'unknown'); });
     addTearDown(() => messenger.setMockMethodCallHandler(channel,null));
     const source=SourceAttachmentIdentity(project:'https://example.invalid',uid:'u',sid:'s',chatId:'c',messageId:'m',fileId:'f',fileKey:'k',fileUrl:'https://example.invalid/f');
     final driver=QaNativeDocumentAuthorityDriver(db,owner,channel:channel);
@@ -70,6 +70,47 @@ void main() {
     expect(calls,1);
     expect(await driver.dispatchSource(source,'bad'), 'blocked');
     expect(calls,1);
+  });
+  test('reservation rejects malformed ids and preserves unknown result', () async {
+    final dir=await Directory.systemTemp.createTemp('qa-native-reserve-');
+    final db=await openProjectChatServerDatabase('${dir.path}/db',factory:databaseFactoryFfi);
+    addTearDown(() async { if(db.isOpen) await db.close(); await dir.delete(recursive:true); });
+    final owner=captureProjectDatabaseOwner(db)!;
+    const channel=MethodChannel('qa-native-reserve-test');
+    final messenger=TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    var calls=0;
+    messenger.setMockMethodCallHandler(channel,(call) async { calls++; return 'unexpected'; });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel,null));
+    const source=SourceAttachmentIdentity(project:'https://example.invalid',uid:'u',sid:'s',chatId:'c',messageId:'m',fileId:'f',fileKey:'k',fileUrl:'https://example.invalid/f');
+    final driver=QaNativeDocumentAuthorityDriver(db,owner,channel:channel);
+    expect(await driver.reserveSourceForTest(source,'bad'),'blocked');
+    expect(await driver.reserveSourceForTest(source,'synthetic_request_0001'),'uncertain');
+    expect(calls,1);
+  });
+  test('late started result is not automatically acknowledged', () async {
+    final dir=await Directory.systemTemp.createTemp('qa-late-dispatch-');
+    final db=await openProjectChatServerDatabase('${dir.path}/db',factory:databaseFactoryFfi);
+    addTearDown(() async { if(db.isOpen) await db.close(); await dir.delete(recursive:true); });
+    final owner=captureProjectDatabaseOwner(db)!;
+    const channel=MethodChannel('qa-late-dispatch-test');
+    final messenger=TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final release=Completer<String>(); var acks=0; int? deadline;
+    messenger.setMockMethodCallHandler(channel,(call) async {
+      if(call.method=='elapsedRealtime') return 100;
+      if(call.method=='dispatchSource') { deadline=(call.arguments as Map)['deadline'] as int; return release.future; }
+      if(call.method=='ackDispatch') { acks++; return true; }
+      throw StateError('unexpected');
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel,null));
+    const source=SourceAttachmentIdentity(project:'https://example.invalid',uid:'u',sid:'s',chatId:'c',messageId:'m',fileId:'f',fileKey:'k',fileUrl:'https://example.invalid/f');
+    final driver=QaNativeDocumentAuthorityDriver(db,owner,channel:channel);
+    final pending=driver.dispatchSource(source,'synthetic_request_0001');
+    expect(await pending.timeout(const Duration(milliseconds:10),onTimeout:()=> 'uncertain'),'uncertain');
+    release.complete('started');
+    expect(await pending,'started');
+    expect(acks,0);
+    expect(deadline,isNotNull);
+    expect(deadline!,lessThanOrEqualTo(12100));
   });
   test('late native bind after guard close is abandoned', () async {
     final dir=await Directory.systemTemp.createTemp('qa-native-bind-');

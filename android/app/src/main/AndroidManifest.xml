@@ -17,6 +17,8 @@
         <service android:name=".SourceAuthorityRecoveryFixtureService"
             android:enabled="${sourceRecoveryQaEnabled}" android:exported="false"
             android:process=":qa_recovery_owner" />
+        <activity android:name=".SourceAuthorityViewerFixtureActivity"
+            android:enabled="${sourceAuthorityViewerQaEnabled}" android:exported="false" />
         <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false" />
         <meta-data android:name="firebase_analytics_collection_enabled" android:value="false" />
         <activity

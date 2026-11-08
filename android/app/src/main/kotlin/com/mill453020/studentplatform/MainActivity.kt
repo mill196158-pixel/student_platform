@@ -30,6 +30,11 @@ import android.os.Handler
 import android.os.Looper
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.Executors
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.CountDownLatch
 import java.io.File
 import java.io.FileOutputStream
 
@@ -37,6 +42,10 @@ class MainActivity : FlutterActivity() {
     private val startupOrigin = SystemClock.elapsedRealtime()
     private val fixtureIoDelegate = lazy { Executors.newSingleThreadExecutor() }
     private val fixtureIo by fixtureIoDelegate
+    private val authorityIoDelegate = lazy { ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,ArrayBlockingQueue<Runnable>(32)) }
+    private val authorityIo by authorityIoDelegate
+    private val fixtureAuthorityHold=CountDownLatch(1)
+    private val fixtureAuthorityHeld=AtomicBoolean(false)
 
     private fun startupTrace(stage: String) {
         if (intent?.getBooleanExtra("startupTrace", false) == true) {
@@ -51,6 +60,7 @@ class MainActivity : FlutterActivity() {
     }
     override fun onDestroy() {
         if (fixtureIoDelegate.isInitialized()) fixtureIo.shutdown()
+        if (authorityIoDelegate.isInitialized()) authorityIo.shutdown()
         super.onDestroy()
     }
 
@@ -66,9 +76,9 @@ class MainActivity : FlutterActivity() {
     private var heldAuthorityFixtureEngine: FlutterEngine? = null
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
-        if (packageName == "com.mill453020.studentplatform.authorityqa" || packageName == "com.mill453020.studentplatform.authorityfixture" || packageName == "com.mill453020.studentplatform.authorityrecoverfixture" || packageName == "com.mill453020.studentplatform.authorityrecoverdenyfixture" || packageName == "com.mill453020.studentplatform.authorityrecoverrevokedfixture" || packageName == "com.mill453020.studentplatform.authorityrecoverdiagnosticfixture" || packageName == "com.mill453020.studentplatform.authoritysourcefixture" || packageName == "com.mill453020.studentplatform.authoritysourcediagnosticv6") {
-            SourceDocumentAuthorityQa.unregister(this,flutterEngine)
-            heldAuthorityFixtureEngine?.let { SourceDocumentAuthorityQa.unregister(this,it); it.destroy() }
+        if (packageName == "com.mill453020.studentplatform.authorityqa" || packageName == "com.mill453020.studentplatform.authorityfixture" || packageName == "com.mill453020.studentplatform.authorityrecoverfixture" || packageName == "com.mill453020.studentplatform.authorityrecoverdenyfixture" || packageName == "com.mill453020.studentplatform.authorityrecoverrevokedfixture" || packageName == "com.mill453020.studentplatform.authorityrecoverdiagnosticfixture" || packageName == "com.mill453020.studentplatform.authoritysourcefixture" || packageName == "com.mill453020.studentplatform.authoritysourcediagnosticv6" || packageName == "com.mill453020.studentplatform.authoritygatefixture" || packageName == "com.mill453020.studentplatform.authoritydispatchfixturev4") {
+            SourceDocumentAuthorityQa.unregisterOffMain(this,flutterEngine)
+            heldAuthorityFixtureEngine?.let { SourceDocumentAuthorityQa.unregisterOffMain(this,it); it.destroy() }
             heldAuthorityFixtureEngine = null
         }
         if (packageName == "com.mill453020.studentplatform.attachfixture") {
@@ -87,7 +97,7 @@ class MainActivity : FlutterActivity() {
             SourceDocumentAuthorityQa.register(flutterEngine)
             installAuthorityChannel(flutterEngine)
         }
-        if (packageName == "com.mill453020.studentplatform.authorityrecoverfixture" || packageName == "com.mill453020.studentplatform.authorityrecoverdenyfixture" || packageName == "com.mill453020.studentplatform.authorityrecoverrevokedfixture" || packageName == "com.mill453020.studentplatform.authorityrecoverdiagnosticfixture" || packageName == "com.mill453020.studentplatform.authoritysourcefixture" || packageName == "com.mill453020.studentplatform.authoritysourcediagnosticv6") {
+        if (packageName == "com.mill453020.studentplatform.authorityrecoverfixture" || packageName == "com.mill453020.studentplatform.authorityrecoverdenyfixture" || packageName == "com.mill453020.studentplatform.authorityrecoverrevokedfixture" || packageName == "com.mill453020.studentplatform.authorityrecoverdiagnosticfixture" || packageName == "com.mill453020.studentplatform.authoritysourcefixture" || packageName == "com.mill453020.studentplatform.authoritysourcediagnosticv6" || packageName == "com.mill453020.studentplatform.authoritygatefixture" || packageName == "com.mill453020.studentplatform.authoritydispatchfixturev4") {
             SourceDocumentAuthorityQa.register(flutterEngine)
             installAuthorityChannel(flutterEngine)
             MethodChannel(flutterEngine.dartExecutor.binaryMessenger,"student_platform/authority_recovery_fixture").setMethodCallHandler { call,result ->
@@ -97,6 +107,14 @@ class MainActivity : FlutterActivity() {
                         val mode=call.argument<String>("mode")
                         if(mode !in setOf("guardOnly","docOnly","both")) result.success(false)
                         else { startService(Intent(this,SourceAuthorityRecoveryFixtureService::class.java).putExtra("fixtureLockMode",mode)); result.success(true) }
+                    }
+                    "testProviderOpen" -> fixtureIo.execute {
+                        val request=call.argument<String>("request")
+                        val opened=try {
+                            if(packageName!="com.mill453020.studentplatform.authoritydispatchfixturev4" || request==null || !Regex("^[A-Za-z0-9_-]{16,80}$").matches(request)) false
+                            else contentResolver.openFileDescriptor(Uri.parse("content://$packageName.authority_document_qa/document/$request"),"r")?.use { true } ?: false
+                        } catch (_:Exception) { false }
+                        runOnUiThread { result.success(opened) }
                     }
                     "ownerDead" -> fixtureIo.execute {
                         val dead=try {
@@ -381,9 +399,25 @@ class MainActivity : FlutterActivity() {
 
     private fun installAuthorityChannel(engine:FlutterEngine) {
         MethodChannel(engine.dartExecutor.binaryMessenger,"student_platform/document_authority_qa").setMethodCallHandler { call, result ->
+            if (call.method=="workerHeldForTest" && packageName=="com.mill453020.studentplatform.authoritygatefixture") {
+                result.success(fixtureAuthorityHeld.get()); return@setMethodCallHandler
+            }
+            if (call.method=="releaseWorkerForTest" && packageName=="com.mill453020.studentplatform.authoritygatefixture") {
+                fixtureAuthorityHold.countDown(); result.success(true); return@setMethodCallHandler
+            }
+            if (call.method=="closeGateForTest" && packageName=="com.mill453020.studentplatform.authoritygatefixture") {
+                SourceDocumentAuthorityQa.unregisterOffMain(this,engine)
+                result.success(true)
+                return@setMethodCallHandler
+            }
             val args=call.arguments as? Map<*,*>
-            Thread {
-                val value:Any? = when(call.method) {
+            // Shorter than the Dart visible timeout; a queued request must not
+            // begin a new OS handoff after that caller has already timed out.
+            val arrivalDeadline=SystemClock.elapsedRealtime()+10000L
+            val requestedDeadline=(args?.get("deadline") as? Number)?.toLong() ?: 0L
+            val dispatchDeadline=minOf(arrivalDeadline,requestedDeadline)
+            try { authorityIo.execute {
+                val value:Any? = try { when(call.method) {
                     "createGuard" -> SourceDocumentAuthorityQa.createGuard(this,engine)?.let {
                         mapOf("guard" to it,"path" to File(filesDir.canonicalFile,"pinned_media_guard_ordinary_v1.db").canonicalPath)
                     }
@@ -391,6 +425,14 @@ class MainActivity : FlutterActivity() {
                     "captureClosed" -> if(args==null) null else SourceDocumentAuthorityQa.capture(this,engine,args)
                     "recoverClosed" -> if(args==null) null else SourceDocumentAuthorityQa.recover(this,engine,args)
                     "verifySource" -> if(args==null) null else SourceDocumentAuthorityQa.verifySource(this,engine,args)
+                    "elapsedRealtime" -> SystemClock.elapsedRealtime()
+                    "holdWorkerForTest" -> if(packageName=="com.mill453020.studentplatform.authoritygatefixture") { fixtureAuthorityHeld.set(true); fixtureAuthorityHold.await(5,TimeUnit.SECONDS) } else false
+                    "reserveDispatch" -> if(args==null) "blocked" else SourceDocumentAuthorityQa.reserveDispatch(this,engine,args)
+                    "dispatchSource" -> if(args==null) "blocked" else SourceDocumentAuthorityQa.dispatchSource(this,engine,args,dispatchDeadline)
+                    "dispatchExpiredForTest" -> if(args==null || packageName!="com.mill453020.studentplatform.authoritygatefixture") "blocked" else SourceDocumentAuthorityQa.dispatchSource(this,engine,args,0L)
+                    "dispatchSlowProofForTest" -> if(args==null || packageName!="com.mill453020.studentplatform.authoritygatefixture") "blocked" else SourceDocumentAuthorityQa.dispatchSource(this,engine,args,SystemClock.elapsedRealtime()+200L)
+                    "slowProofReachedForTest" -> packageName=="com.mill453020.studentplatform.authoritygatefixture" && SourceDocumentAuthorityQa.testSlowProofReached
+                    "ackDispatch" -> (args?.get("request") as? String)?.let { SourceDocumentAuthorityQa.acknowledgeDispatch(this,engine,it) } ?: false
                     "admit" -> {
                         val ticket=args?.get("ticket") as? String
                         val instance=args?.get("instance") as? String
@@ -399,9 +441,9 @@ class MainActivity : FlutterActivity() {
                     }
                     "close" -> SourceDocumentAuthorityQa.close(this,engine,args?.get("ticket") as? String)
                     else -> null
-                }
+                } } catch (_:Exception) { null }
                 runOnUiThread { result.success(value) }
-            }.start()
+            } } catch (_:RejectedExecutionException) { result.success(null) }
         }
     }
 

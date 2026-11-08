@@ -20,7 +20,7 @@ class SourceAuthorityRecoveryFixtureService : Service() {
     override fun onBind(intent:Intent?):IBinder? = null
     override fun onDestroy() { worker.shutdown(); super.onDestroy() }
     override fun onStartCommand(intent:Intent?,flags:Int,startId:Int):Int {
-        if (packageName !in setOf("com.mill453020.studentplatform.authorityrecoverfixture","com.mill453020.studentplatform.authorityrecoverdenyfixture","com.mill453020.studentplatform.authorityrecoverrevokedfixture","com.mill453020.studentplatform.authorityrecoverdiagnosticfixture","com.mill453020.studentplatform.authoritysourcefixture","com.mill453020.studentplatform.authoritysourcediagnosticv6")) return START_NOT_STICKY
+        if (packageName !in setOf("com.mill453020.studentplatform.authorityrecoverfixture","com.mill453020.studentplatform.authorityrecoverdenyfixture","com.mill453020.studentplatform.authorityrecoverrevokedfixture","com.mill453020.studentplatform.authorityrecoverdiagnosticfixture","com.mill453020.studentplatform.authoritysourcefixture","com.mill453020.studentplatform.authoritysourcediagnosticv6","com.mill453020.studentplatform.authoritygatefixture","com.mill453020.studentplatform.authoritydispatchfixturev4")) return START_NOT_STICKY
         val mode=intent?.getStringExtra("fixtureLockMode")
         worker.execute { process(mode) }
         return START_NOT_STICKY

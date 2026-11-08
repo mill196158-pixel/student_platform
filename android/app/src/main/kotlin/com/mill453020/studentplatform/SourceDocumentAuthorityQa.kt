@@ -2,6 +2,9 @@ package com.mill453020.studentplatform
 
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.SystemClock
 import android.database.sqlite.SQLiteDatabase
 import io.flutter.embedding.engine.FlutterEngine
 import java.io.File
@@ -10,6 +13,8 @@ import java.nio.channels.FileLock
 import java.util.IdentityHashMap
 import java.util.UUID
 import java.security.MessageDigest
+import java.util.concurrent.Executors
+import java.util.concurrent.ConcurrentHashMap
 
 /** Isolated authorityqa package only. No path comes from Dart; no SDK token is
  * persisted here. A native engine object owns its own OS lease and ticket. */
@@ -22,11 +27,14 @@ internal object SourceDocumentAuthorityQa {
     private val leases = IdentityHashMap<FlutterEngine,Lease>()
     private val guards = IdentityHashMap<FlutterEngine,NativeGuard>()
     private var primary: FlutterEngine? = null
+    private val cleanupWorker=Executors.newSingleThreadExecutor()
+    private val closedEngines=ConcurrentHashMap.newKeySet<FlutterEngine>()
+    @Volatile var testSlowProofReached=false
     @Synchronized fun register(engine:FlutterEngine) {
-        if (primary == null) { primary=engine; registered[engine]=UUID.randomUUID().toString() }
+        if (primary == null && !closedEngines.contains(engine)) { primary=engine; registered[engine]=UUID.randomUUID().toString() }
     }
     private fun dbFile(activity:Context):File? {
-        if (activity.packageName !in setOf("com.mill453020.studentplatform.authorityqa","com.mill453020.studentplatform.authorityfixture","com.mill453020.studentplatform.authorityrecoverfixture","com.mill453020.studentplatform.authorityrecoverdenyfixture","com.mill453020.studentplatform.authorityrecoverrevokedfixture","com.mill453020.studentplatform.authorityrecoverdiagnosticfixture","com.mill453020.studentplatform.authoritysourcefixture","com.mill453020.studentplatform.authoritysourcediagnosticv6")) return null
+        if (activity.packageName !in setOf("com.mill453020.studentplatform.authorityqa","com.mill453020.studentplatform.authorityfixture","com.mill453020.studentplatform.authorityrecoverfixture","com.mill453020.studentplatform.authorityrecoverdenyfixture","com.mill453020.studentplatform.authorityrecoverrevokedfixture","com.mill453020.studentplatform.authorityrecoverdiagnosticfixture","com.mill453020.studentplatform.authoritysourcefixture","com.mill453020.studentplatform.authoritysourcediagnosticv6","com.mill453020.studentplatform.authoritygatefixture","com.mill453020.studentplatform.authoritydispatchfixturev4")) return null
         val file=File(activity.filesDir.canonicalFile,"pinned_media_guard_ordinary_v1.db")
         return if (file.absolutePath==file.canonicalPath && file.isFile) file else null
     }
@@ -34,11 +42,11 @@ internal object SourceDocumentAuthorityQa {
      * the exact current engine lease and source remain valid. No UI calls or
      * waits for main thread are made under this monitor. */
     @Synchronized fun providerBytes(context:Context,request:String):ByteArray? {
-        if (context.packageName !in setOf("com.mill453020.studentplatform.authorityqa","com.mill453020.studentplatform.authoritysourcediagnosticv6")) return null
+        if (context.packageName !in setOf("com.mill453020.studentplatform.authorityqa","com.mill453020.studentplatform.authoritysourcediagnosticv6","com.mill453020.studentplatform.authoritygatefixture","com.mill453020.studentplatform.authoritydispatchfixturev4")) return null
         if (!Regex("^[A-Za-z0-9_-]{16,80}$").matches(request)) return null
         val engine=primary ?: return null
         val lease=leases[engine] ?: return null
-        if (registered[engine]!=lease.engine) return null
+        if (closedEngines.contains(engine) || registered[engine]!=lease.engine) return null
         val media=dbFile(context) ?: return null
         val snapshot=File(context.getDatabasePath("offline_chat_ordinary_v1.db").parentFile!!.canonicalFile,"offline_chat_ordinary_v1.db")
         if (snapshot.absolutePath!=snapshot.canonicalPath || !snapshot.isFile || media==snapshot) return null
@@ -49,7 +57,7 @@ internal object SourceDocumentAuthorityQa {
                 db.execSQL("ATTACH DATABASE ? AS source_snapshot",arrayOf(snapshot.path))
                 db.beginTransactionNonExclusive()
                 try {
-                    val row=db.rawQuery("SELECT s.chat,s.message,s.file,s.key,s.url,s.sha,s.revision,s.ticket FROM qa_authority_dispatch_snapshot s JOIN qa_authority_dispatch d ON d.request=s.request AND d.state='uncertain' WHERE s.request=? AND s.project=? AND s.uid=? AND s.sid=? AND s.instance=? AND s.guard=? AND s.engine=?",arrayOf(request,lease.project,lease.uid,lease.sid,lease.instance,lease.guard,lease.engine)).use {
+                    val row=db.rawQuery("SELECT s.chat,s.message,s.file,s.key,s.url,s.sha,s.revision,s.ticket FROM qa_authority_dispatch_snapshot s JOIN qa_authority_dispatch d ON d.request=s.request AND d.state IN ('uncertain','started') WHERE s.request=? AND s.project=? AND s.uid=? AND s.sid=? AND s.instance=? AND s.guard=? AND s.engine=?",arrayOf(request,lease.project,lease.uid,lease.sid,lease.instance,lease.guard,lease.engine)).use {
                         if (!it.moveToFirst()) return null
                         val values=(0..5).map { index -> it.getString(index) ?: return null }
                         val revision=it.getLong(6); val ticket=it.getString(7)
@@ -57,13 +65,13 @@ internal object SourceDocumentAuthorityQa {
                         Pair(values,revision)
                     }
                     val values=row.first; val revision=row.second
-                    if (!valid(db,lease,revision) || primary !== engine || registered[engine]!=lease.engine) return null
+                    if (!valid(db,lease,revision) || closedEngines.contains(engine) || primary !== engine || registered[engine]!=lease.engine) return null
                     val open=db.rawQuery("SELECT 1 FROM qa_native_document_authority_v2 WHERE project=? AND uid=? AND sid=? AND instance=? AND revision=? AND guard=? AND engine=? AND ticket=? AND state='open'",arrayOf(lease.project,lease.uid,lease.sid,lease.instance,revision.toString(),lease.guard,lease.engine,lease.ticket)).use { it.count==1 }
                     if (!open) return null
                     val source=SourceDocumentProofQa.Source(lease.project,lease.uid,lease.sid,values[0],values[1],values[2],values[3],values[4])
                     val bytes=SourceDocumentProofQa.bytesInTransaction(db,source,snapshot) ?: return null
                     val sha=MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
-                    if (sha!=values[5] || !valid(db,lease,revision)) return null
+                    if (sha!=values[5] || closedEngines.contains(engine) || !valid(db,lease,revision)) return null
                     db.setTransactionSuccessful(); bytes
                 } finally { db.endTransaction() }
             } finally { db.close() }
@@ -76,14 +84,134 @@ internal object SourceDocumentAuthorityQa {
         val args=arrayOf(lease.project,lease.uid,lease.sid,lease.instance,revision.toString(),lease.guard)
         return db.rawQuery("SELECT 1 FROM active_session_registry a JOIN chat_app_guards g ON g.token=a.owner_engine WHERE a.project=? AND a.uid=? AND a.sid=? AND a.instance=? AND a.revision=? AND a.state='active' AND a.owner_engine=? AND g.project='*' AND g.sid=''",args).use { it.count==1 }
     }
+    /** Durable QA reservation only; performs no external side effect. Once a
+     * commit is attempted its result must never be replayed automatically. */
+    @Synchronized fun reserveDispatch(activity:Activity,engine:FlutterEngine,args:Map<*,*>,deadline:Long=Long.MAX_VALUE):String {
+        if (SystemClock.elapsedRealtime()>=deadline) return "blocked"
+        if (activity.packageName !in setOf("com.mill453020.studentplatform.authorityqa","com.mill453020.studentplatform.authoritygatefixture","com.mill453020.studentplatform.authoritydispatchfixturev4")) return "blocked"
+        val lease=leases[engine] ?: return "blocked"
+        if (closedEngines.contains(engine) || primary !== engine || registered[engine]!=lease.engine) return "blocked"
+        if (args["project"]!=lease.project || args["uid"]!=lease.uid || args["sid"]!=lease.sid) return "blocked"
+        val request=args["request"] as? String ?: return "blocked"
+        if (!Regex("^[A-Za-z0-9_-]{16,80}$").matches(request)) return "blocked"
+        val source=SourceDocumentProofQa.Source(lease.project,lease.uid,lease.sid,
+            args["chat"] as? String ?: return "blocked",args["message"] as? String ?: return "blocked",
+            args["file"] as? String ?: return "blocked",args["key"] as? String ?: return "blocked",args["url"] as? String ?: return "blocked")
+        val media=dbFile(activity) ?: return "blocked"
+        val snapshot=File(activity.getDatabasePath("offline_chat_ordinary_v1.db").parentFile!!.canonicalFile,"offline_chat_ordinary_v1.db")
+        if (snapshot.absolutePath!=snapshot.canonicalPath || !snapshot.isFile || media==snapshot) return "blocked"
+        var commitAttempted=false
+        return try {
+            val db=SQLiteDatabase.openDatabase(media.path,null,SQLiteDatabase.OPEN_READWRITE)
+            try {
+                db.rawQuery("PRAGMA busy_timeout=0",null).use { it.moveToFirst() }
+                db.execSQL("ATTACH DATABASE ? AS source_snapshot",arrayOf(snapshot.path))
+                db.execSQL("CREATE TABLE IF NOT EXISTS qa_authority_dispatch(request TEXT PRIMARY KEY,state TEXT NOT NULL)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS qa_authority_dispatch_snapshot(request TEXT PRIMARY KEY,project TEXT NOT NULL,uid TEXT NOT NULL,sid TEXT NOT NULL,chat TEXT NOT NULL,message TEXT NOT NULL,file TEXT NOT NULL,key TEXT NOT NULL,url TEXT NOT NULL,sha TEXT NOT NULL,instance TEXT NOT NULL,revision INTEGER NOT NULL,guard TEXT NOT NULL,engine TEXT NOT NULL,ticket TEXT NOT NULL)")
+                db.beginTransactionNonExclusive()
+                try {
+                    val revision=db.rawQuery("SELECT revision FROM qa_native_document_authority_v2 WHERE project=? AND uid=? AND sid=? AND instance=? AND guard=? AND engine=? AND ticket=? AND state='open'",arrayOf(lease.project,lease.uid,lease.sid,lease.instance,lease.guard,lease.engine,lease.ticket)).use {
+                        if (!it.moveToFirst()) return "blocked"
+                        val v=it.getLong(0); if(it.moveToNext()) return "blocked"; v
+                    }
+                    if (closedEngines.contains(engine) || !valid(db,lease,revision)) return "blocked"
+                    if (db.rawQuery("SELECT COUNT(*) FROM qa_authority_dispatch",null).use { !it.moveToFirst() || it.getLong(0)>=10000 }) return "blocked"
+                    val pending=db.rawQuery("SELECT 1 FROM qa_authority_dispatch d JOIN qa_authority_dispatch_snapshot s ON d.request=s.request WHERE d.state='uncertain' AND s.project=? AND s.uid=? AND s.sid=? AND s.chat=? AND s.message=? AND s.file=? LIMIT 1",arrayOf(source.project,source.uid,source.sid,source.chat,source.message,source.file)).use { it.moveToFirst() }
+                    if (pending) return "blocked"
+                    val bytes=SourceDocumentProofQa.bytesInTransaction(db,source,snapshot) ?: return "blocked"
+                    val sha=MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+                    if (activity.packageName=="com.mill453020.studentplatform.authoritygatefixture" && args["delayProofForTest"]==true) {
+                        testSlowProofReached=true
+                        Thread.sleep(500)
+                    }
+                    if (closedEngines.contains(engine) || !valid(db,lease,revision) || SystemClock.elapsedRealtime()>=deadline) return "blocked"
+                    db.execSQL("INSERT INTO qa_authority_dispatch(request,state) VALUES(?,'uncertain')",arrayOf(request))
+                    db.execSQL("INSERT INTO qa_authority_dispatch_snapshot(request,project,uid,sid,chat,message,file,key,url,sha,instance,revision,guard,engine,ticket) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",arrayOf(request,source.project,source.uid,source.sid,source.chat,source.message,source.file,source.key,source.url,sha,lease.instance,revision,lease.guard,lease.engine,lease.ticket))
+                    if (SystemClock.elapsedRealtime()>=deadline || closedEngines.contains(engine)) return "blocked"
+                    commitAttempted=true
+                    db.setTransactionSuccessful()
+                } finally { db.endTransaction() }
+                "reserved"
+            } finally { db.close() }
+        } catch (_:Exception) { if (commitAttempted) "uncertain" else "blocked" }
+    }
+    /** QA only. Runs on the channel worker: it never waits for Android main
+     * while holding the authority monitor or the SQLite transaction. */
+    @Synchronized fun dispatchSource(activity:Activity,engine:FlutterEngine,args:Map<*,*>,deadline:Long):String {
+        if (activity.packageName !in setOf("com.mill453020.studentplatform.authorityqa","com.mill453020.studentplatform.authoritydispatchfixturev4","com.mill453020.studentplatform.authoritygatefixture")) return "blocked"
+        if (SystemClock.elapsedRealtime()>=deadline) return "blocked"
+        val reserved=reserveDispatch(activity,engine,args,deadline)
+        if (reserved!="reserved") return reserved
+        val lease=leases[engine] ?: return "uncertain"
+        val request=args["request"] as? String ?: return "uncertain"
+        val source=SourceDocumentProofQa.Source(lease.project,lease.uid,lease.sid,
+            args["chat"] as? String ?: return "uncertain",args["message"] as? String ?: return "uncertain",
+            args["file"] as? String ?: return "uncertain",args["key"] as? String ?: return "uncertain",args["url"] as? String ?: return "uncertain")
+        val media=dbFile(activity) ?: return "uncertain"
+        val snapshot=File(activity.getDatabasePath("offline_chat_ordinary_v1.db").parentFile!!.canonicalFile,"offline_chat_ordinary_v1.db")
+        if (snapshot.absolutePath!=snapshot.canonicalPath || !snapshot.isFile) return "uncertain"
+        return try {
+            val db=SQLiteDatabase.openDatabase(media.path,null,SQLiteDatabase.OPEN_READWRITE)
+            try {
+                db.rawQuery("PRAGMA busy_timeout=0",null).use { it.moveToFirst() }
+                db.execSQL("ATTACH DATABASE ? AS source_snapshot",arrayOf(snapshot.path))
+                db.beginTransactionNonExclusive()
+                try {
+                    val proof=db.rawQuery("SELECT s.sha,s.revision FROM qa_authority_dispatch d JOIN qa_authority_dispatch_snapshot s ON s.request=d.request WHERE d.request=? AND d.state='uncertain' AND s.project=? AND s.uid=? AND s.sid=? AND s.chat=? AND s.message=? AND s.file=? AND s.key=? AND s.url=? AND s.instance=? AND s.guard=? AND s.engine=? AND s.ticket=?",arrayOf(request,source.project,source.uid,source.sid,source.chat,source.message,source.file,source.key,source.url,lease.instance,lease.guard,lease.engine,lease.ticket)).use {
+                        if(!it.moveToFirst()) return "uncertain"
+                        val row=Pair(it.getString(0),it.getLong(1)); if(it.moveToNext()) return "uncertain"; row
+                    }
+                    val open=db.rawQuery("SELECT 1 FROM qa_native_document_authority_v2 WHERE project=? AND uid=? AND sid=? AND instance=? AND revision=? AND guard=? AND engine=? AND ticket=? AND state='open'",arrayOf(lease.project,lease.uid,lease.sid,lease.instance,proof.second.toString(),lease.guard,lease.engine,lease.ticket)).use { it.count==1 }
+                    if (!open || closedEngines.contains(engine) || primary !== engine || registered[engine]!=lease.engine || !valid(db,lease,proof.second)) return "uncertain"
+                    val bytes=SourceDocumentProofQa.bytesInTransaction(db,source,snapshot) ?: return "uncertain"
+                    val sha=MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+                    if (sha!=proof.first || closedEngines.contains(engine) || !valid(db,lease,proof.second) || SystemClock.elapsedRealtime()>=deadline) return "uncertain"
+                    val uri=Uri.parse("content://${activity.packageName}.authority_document_qa/document/$request")
+                    val intent=Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(uri,"application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        if (activity.packageName=="com.mill453020.studentplatform.authoritydispatchfixturev4") setClass(activity,SourceAuthorityViewerFixtureActivity::class.java)
+                    }
+                    activity.applicationContext.startActivity(intent)
+                    // Keep the reservation uncertain even after start. Only
+                    // an acknowledgement received from Dart may settle it;
+                    // a lost channel response must not permit replay.
+                    db.setTransactionSuccessful()
+                } finally { db.endTransaction() }
+                "started"
+            } finally { db.close() }
+        } catch (_:Exception) { "uncertain" }
+    }
+    @Synchronized fun acknowledgeDispatch(activity:Activity,engine:FlutterEngine,request:String):Boolean {
+        if (activity.packageName !in setOf("com.mill453020.studentplatform.authorityqa","com.mill453020.studentplatform.authoritydispatchfixturev4")) return false
+        val lease=leases[engine] ?: return false
+        if (closedEngines.contains(engine) || primary !== engine || registered[engine]!=lease.engine) return false
+        val file=dbFile(activity) ?: return false
+        return try {
+            val db=SQLiteDatabase.openDatabase(file.path,null,SQLiteDatabase.OPEN_READWRITE)
+            try {
+                db.beginTransactionNonExclusive()
+                try {
+                    val revision=db.rawQuery("SELECT s.revision FROM qa_authority_dispatch d JOIN qa_authority_dispatch_snapshot s ON s.request=d.request WHERE d.request=? AND d.state='uncertain' AND s.project=? AND s.uid=? AND s.sid=? AND s.instance=? AND s.guard=? AND s.engine=? AND s.ticket=?",arrayOf(request,lease.project,lease.uid,lease.sid,lease.instance,lease.guard,lease.engine,lease.ticket)).use {
+                        if(!it.moveToFirst()) return false
+                        val value=it.getLong(0); if(it.moveToNext()) return false; value
+                    }
+                    if (closedEngines.contains(engine) || !valid(db,lease,revision)) return false
+                    val values=android.content.ContentValues().apply { put("state","started") }
+                    if(db.update("qa_authority_dispatch",values,"request=? AND state='uncertain'",arrayOf(request))!=1) return false
+                    db.setTransactionSuccessful(); true
+                } finally { db.endTransaction() }
+            } finally { db.close() }
+        } catch (_:Exception) { false }
+    }
     /** QA only: verify a cached source under the exact live native owner.
      * No bytes, URI or filesystem path cross the channel. */
     @Synchronized fun verifySource(activity:Activity,engine:FlutterEngine,args:Map<*,*>):String? {
         var stage="ENTRY"
         fun mark(next:String) { stage=next; android.util.Log.i("AuthoritySourceQA","VERIFY_$next") }
-        if (activity.packageName !in setOf("com.mill453020.studentplatform.authorityqa","com.mill453020.studentplatform.authoritysourcefixture","com.mill453020.studentplatform.authoritysourcediagnosticv6")) return null
+        if (activity.packageName !in setOf("com.mill453020.studentplatform.authorityqa","com.mill453020.studentplatform.authoritysourcefixture","com.mill453020.studentplatform.authoritysourcediagnosticv6","com.mill453020.studentplatform.authoritygatefixture","com.mill453020.studentplatform.authoritydispatchfixturev4")) return null
         val lease=leases[engine] ?: return null
-        if (primary !== engine || registered[engine]!=lease.engine) return null
+        if (closedEngines.contains(engine) || primary !== engine || registered[engine]!=lease.engine) return null
         if (args["project"]!=lease.project || args["uid"]!=lease.uid || args["sid"]!=lease.sid) return null
         val source=SourceDocumentProofQa.Source(lease.project,lease.uid,lease.sid,
             args["chat"] as? String ?: return null,args["message"] as? String ?: return null,
@@ -110,10 +238,10 @@ internal object SourceDocumentAuthorityQa {
                         if (!it.moveToFirst()) return null
                         val value=it.getLong(0); if (it.moveToNext()) return null; value
                     }
-                    if (!valid(db,lease,revision) || registered[engine]!=lease.engine || primary !== engine) return null
+                    if (!valid(db,lease,revision) || closedEngines.contains(engine) || registered[engine]!=lease.engine || primary !== engine) return null
                     mark("SOURCE")
                     val bytes=SourceDocumentProofQa.bytesInTransaction(db,source,snapshot) ?: return null
-                    if (!valid(db,lease,revision) || registered[engine]!=lease.engine || primary !== engine) return null
+                    if (!valid(db,lease,revision) || closedEngines.contains(engine) || registered[engine]!=lease.engine || primary !== engine) return null
                     val hash=MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
                     db.setTransactionSuccessful()
                     mark("OK")
@@ -123,7 +251,7 @@ internal object SourceDocumentAuthorityQa {
         } catch (e:Exception) { android.util.Log.i("AuthoritySourceQA","VERIFY_FAIL stage=$stage type=${e.javaClass.simpleName}"); null }
     }
     @Synchronized fun createGuard(activity:Activity,engine:FlutterEngine):String? {
-        if (registered[engine]==null || primary !== engine || guards.containsKey(engine)) return null
+        if (closedEngines.contains(engine) || registered[engine]==null || primary !== engine || guards.containsKey(engine)) return null
         val dbFile=dbFile(activity) ?: return null
         var file:RandomAccessFile?=null
         var lock:FileLock?=null
@@ -162,7 +290,7 @@ internal object SourceDocumentAuthorityQa {
     }
     @Synchronized fun capture(activity:Activity,engine:FlutterEngine,args:Map<*,*>):String? {
         val engineId=registered[engine] ?: return null
-        if (primary !== engine || leases.containsKey(engine)) return null
+        if (closedEngines.contains(engine) || primary !== engine || leases.containsKey(engine)) return null
         val dbFile=dbFile(activity) ?: return null
         val project=args["project"] as? String ?: return null
         val uid=args["uid"] as? String ?: return null
@@ -191,11 +319,11 @@ internal object SourceDocumentAuthorityQa {
                 db.execSQL("CREATE TABLE IF NOT EXISTS media_cache_logout_tombstones(project TEXT NOT NULL,uid TEXT NOT NULL,sid TEXT NOT NULL,PRIMARY KEY(project,uid,sid))")
                 db.beginTransactionNonExclusive()
                 try {
-                    if (!valid(db,lease,revision) || registered[engine]!=engineId || primary !== engine) return null
+                    if (!valid(db,lease,revision) || closedEngines.contains(engine) || registered[engine]!=engineId || primary !== engine) return null
                     val legacy=db.rawQuery("SELECT 1 FROM sqlite_master WHERE type='table' AND name='qa_native_document_authority'",null).use { it.moveToFirst() }
                     if (legacy && db.rawQuery("SELECT 1 FROM qa_native_document_authority WHERE project=? LIMIT 1",arrayOf(project)).use { it.moveToFirst() }) return null
                     db.execSQL("INSERT INTO qa_native_document_authority_v2(project,uid,sid,instance,revision,guard,engine,ticket,state,marker,pid) VALUES(?,?,?,?,?,?,?,?, 'closed',?,?)",arrayOf(project,uid,sid,instance,revision,guard,engineId,ticket,marker.name,android.os.Process.myPid()))
-                    if (!valid(db,lease,revision)) return null
+                    if (closedEngines.contains(engine) || !valid(db,lease,revision)) return null
                     db.setTransactionSuccessful()
                 } finally { db.endTransaction() }
             } finally { db.close() }
@@ -209,7 +337,7 @@ internal object SourceDocumentAuthorityQa {
      * by nonblocking OS locks from a different PID and held through COMMIT. */
     @Synchronized fun recover(activity:Activity,engine:FlutterEngine,args:Map<*,*>):String? {
         val engineId=registered[engine] ?: return null
-        if (primary !== engine || leases.containsKey(engine)) return null
+        if (closedEngines.contains(engine) || primary !== engine || leases.containsKey(engine)) return null
         val dbFile=dbFile(activity) ?: return null
         val nextGuard=guards[engine] ?: return null
         if (!nextGuard.lock.isValid || !nextGuard.file.channel.isOpen) return null
@@ -266,7 +394,7 @@ internal object SourceDocumentAuthorityQa {
                     if (changed!=1) return null
                     val update=android.content.ContentValues().apply { put("guard",nextGuard.token); put("engine",engineId); put("ticket",ticket); put("state","closed"); put("revision",nextRevision); put("marker",newMarker.name); put("pid",android.os.Process.myPid()) }
                     val changedDoc=db.update("qa_native_document_authority_v2",update,"project=? AND uid=? AND sid=? AND instance=? AND revision=? AND guard=? AND ticket=? AND state='open'",arrayOf(project,uid,sid,instance,revision.toString(),old[0],old[3]))
-                    if (changedDoc!=1 || !valid(db,lease,nextRevision) || registered[engine]!=engineId || primary !== engine) return null
+                    if (changedDoc!=1 || !valid(db,lease,nextRevision) || closedEngines.contains(engine) || registered[engine]!=engineId || primary !== engine) return null
                     db.setTransactionSuccessful()
                 } finally { db.endTransaction() }
             } finally { db.close() }
@@ -281,7 +409,7 @@ internal object SourceDocumentAuthorityQa {
     }
     @Synchronized fun admit(activity:Activity,engine:FlutterEngine,ticket:String,instance:String,revision:Long):Boolean {
         val lease=leases[engine] ?: return false
-        if (lease.ticket!=ticket || lease.instance!=instance || registered[engine]!=lease.engine || primary !== engine ||
+        if (closedEngines.contains(engine) || lease.ticket!=ticket || lease.instance!=instance || registered[engine]!=lease.engine || primary !== engine ||
             (revision!=lease.initialRevision && revision!=lease.initialRevision+2)) return false
         val file=dbFile(activity) ?: return false
         return try {
@@ -289,11 +417,11 @@ internal object SourceDocumentAuthorityQa {
             try {
                 db.beginTransactionNonExclusive()
                 try {
-                    if (!valid(db,lease,revision)) return false
+                    if (closedEngines.contains(engine) || !valid(db,lease,revision)) return false
                     val values=android.content.ContentValues().apply { put("state","open"); put("revision",revision) }
                     val count=db.update("qa_native_document_authority_v2",values,"project=? AND uid=? AND sid=? AND instance=? AND guard=? AND engine=? AND ticket=? AND state='closed'",arrayOf(lease.project,lease.uid,lease.sid,lease.instance,lease.guard,lease.engine,ticket))
                     val alreadyOpen=count==0 && db.rawQuery("SELECT 1 FROM qa_native_document_authority_v2 WHERE project=? AND uid=? AND sid=? AND instance=? AND revision=? AND guard=? AND engine=? AND ticket=? AND state='open'",arrayOf(lease.project,lease.uid,lease.sid,lease.instance,revision.toString(),lease.guard,lease.engine,ticket)).use { it.count==1 }
-                    if ((count!=1 && !alreadyOpen) || !valid(db,lease,revision)) return false
+                    if ((count!=1 && !alreadyOpen) || closedEngines.contains(engine) || !valid(db,lease,revision)) return false
                     db.setTransactionSuccessful(); true
                 } finally { db.endTransaction() }
             } finally { db.close() }
@@ -332,5 +460,12 @@ internal object SourceDocumentAuthorityQa {
     }
     @Synchronized fun unregister(activity:Activity,engine:FlutterEngine) {
         if (close(activity,engine)) { registered.remove(engine); if (primary === engine) primary=null }
+    }
+    /** Close the process-local gate immediately; retain OS leases until the
+     * durable close succeeds off the Android UI thread. A failed close stays
+     * fenced and keeps its lease for later recovery, never a false success. */
+    fun unregisterOffMain(activity:Activity,engine:FlutterEngine) {
+        closedEngines.add(engine)
+        cleanupWorker.execute { unregister(activity,engine) }
     }
 }

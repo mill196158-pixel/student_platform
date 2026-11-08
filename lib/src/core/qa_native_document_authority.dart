@@ -37,12 +37,39 @@ class QaNativeDocumentAuthorityDriver implements QaNativeDocumentAuthority {
   Future<String> dispatchSource(SourceAttachmentIdentity source,String request) async {
     if (!source.valid || !owner.isCurrentFor(db) || !RegExp(r'^[A-Za-z0-9_-]{16,80}$').hasMatch(request)) return 'blocked';
     try {
+      // Obtain the native monotonic clock before enqueueing. The deadline is
+      // deliberately shorter than the viewer's visible 15 second timeout.
+      final elapsed=Stopwatch()..start();
+      final clock=await _channel.invokeMethod<int>('elapsedRealtime').timeout(const Duration(seconds:12));
+      final remaining=12000-elapsed.elapsedMilliseconds;
+      if (clock==null || remaining<=0 || !owner.isCurrentFor(db)) return 'blocked';
       final value=await _channel.invokeMethod<String>('dispatchSource',{
+        'project':source.project,'uid':source.uid,'sid':source.sid,
+        'chat':source.chatId,'message':source.messageId,'file':source.fileId,
+        'key':source.fileKey,'url':source.fileUrl,'request':request,'deadline':clock+remaining,
+      });
+      return value=='started' ? 'started' : value=='blocked' ? 'blocked' : 'uncertain';
+    } catch (_) { return 'uncertain'; }
+  }
+
+  /// Call only after the visible caller received `started`, never after a
+  /// timeout. Failure leaves the durable reservation conservatively pending.
+  Future<bool> acknowledgeStarted(String request) async {
+    if (!owner.isCurrentFor(db)) return false;
+    try { return await _channel.invokeMethod<bool>('ackDispatch',{'request':request})==true; }
+    catch (_) { return false; }
+  }
+
+  /// QA-only durable reservation; this does not open a document.
+  Future<String> reserveSourceForTest(SourceAttachmentIdentity source,String request) async {
+    if (!source.valid || !owner.isCurrentFor(db) || !RegExp(r'^[A-Za-z0-9_-]{16,80}$').hasMatch(request)) return 'blocked';
+    try {
+      final value=await _channel.invokeMethod<String>('reserveDispatch',{
         'project':source.project,'uid':source.uid,'sid':source.sid,
         'chat':source.chatId,'message':source.messageId,'file':source.fileId,
         'key':source.fileKey,'url':source.fileUrl,'request':request,
       });
-      return value=='started' ? 'started' : value=='blocked' ? 'blocked' : 'uncertain';
+      return value=='reserved' ? 'reserved' : value=='blocked' ? 'blocked' : 'uncertain';
     } catch (_) { return 'uncertain'; }
   }
 

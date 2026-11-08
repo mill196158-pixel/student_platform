@@ -26,7 +26,7 @@ class SourceDocumentAuthorityQaProvider:ContentProvider() {
         private val worker=HandlerThread("qa-authority-docs").apply { start() }
         private val handler=Handler(worker.looper)
     }
-    override fun onCreate():Boolean = context?.packageName in setOf("com.mill453020.studentplatform.authorityqa","com.mill453020.studentplatform.authoritysourcediagnosticv6")
+    override fun onCreate():Boolean = context?.packageName in setOf("com.mill453020.studentplatform.authorityqa","com.mill453020.studentplatform.authoritysourcediagnosticv6","com.mill453020.studentplatform.authoritygatefixture","com.mill453020.studentplatform.authoritydispatchfixturev4")
     override fun getType(uri:Uri):String = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     private fun request(uri:Uri):String? {
         val ctx=context ?: return null
