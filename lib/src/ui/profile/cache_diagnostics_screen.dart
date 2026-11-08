@@ -27,6 +27,7 @@ class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
   int? _budgetObserved;
   int _budgetReserved = 0;
   bool _loading = true;
+  bool _changing = false;
   @override
   void initState() {
     super.initState();
@@ -44,7 +45,12 @@ class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
     try {
       final budget = widget.budget ??
           (widget.measure == null ? OptionalImageCacheBudget.instance : null);
-      final budgetFuture = budget?.refreshForDisplay();
+      final budgetFuture = budget == null
+          ? null
+          : Future.wait<void>([
+              budget.waitForPolicy(),
+              budget.refreshForDisplay(),
+            ]);
       result = await (widget.measure?.call() ??
               CacheInventoryCollector.shared.collect())
           .timeout(widget.timeout);
@@ -70,6 +76,32 @@ class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
   String _value(int? bytes) => bytes == null
       ? 'неизвестно'
       : '${(bytes / 1000000).toStringAsFixed(1)} МБ';
+
+  Future<void> _chooseLimit(OptionalImageCacheBudget budget) async {
+    final choice = await showDialog<int>(
+        context: context,
+        builder: (context) => SimpleDialog(
+              title: const Text('Лимит копий изображений'),
+              children: [
+                for (final bytes in [250000000, 500000000, 1000000000])
+                  SimpleDialogOption(
+                      onPressed: () => Navigator.pop(context, bytes),
+                      child: Text(bytes == 1000000000
+                          ? '1 ГБ'
+                          : '${bytes ~/ 1000000} МБ'))
+              ],
+            ));
+    if (!mounted || choice == null) return;
+    setState(() => _changing = true);
+    final success = await budget.setLimit(choice);
+    if (!mounted) return;
+    setState(() => _changing = false);
+    if (!success)
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Не удалось сохранить лимит. Попробуйте ещё раз.')));
+    await _measure();
+  }
+
   String _label(String name) => switch (name) {
         'public_news_blobs_v2' => 'Копии публичных новостей',
         'public_news_index_v2.db' => 'Индекс публичных новостей (DB/WAL/SHM)',
@@ -98,8 +130,14 @@ class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
               'Учтённые копии новостей и материалов: ${_value(_budgetObserved)}'),
           Text(
               'Резерв активных записей: ${_value(_budgetObserved == null ? null : _budgetReserved)}'),
-          Text(
-              'Цель для этих копий — ${_value(budget.limitBytes)}, включая служебный запас ${_value(budget.serviceReserveBytes)}. Остальные кэши и история этим ограничением пока не охвачены.'),
+          Text(budget.policyReady
+              ? 'Лимит для этих копий — ${_value(budget.limitBytes)}, включая служебный запас ${_value(budget.serviceReserveBytes)}. Остальные кэши и история этим ограничением пока не охвачены.'
+              : 'Лимит для этих копий сейчас недоступен. Остальные кэши и история этим ограничением пока не охвачены.'),
+          OutlinedButton(
+              onPressed: _loading || _changing || budget.policyBusy
+                  ? null
+                  : () => _chooseLimit(budget),
+              child: const Text('Изменить лимит копий')),
           const SizedBox(height: 12),
         ],
         if (_loading)
@@ -121,7 +159,8 @@ class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
         const Text(
             'Логический размер истории не равен физическому месту. Это не общий размер и не объём, доступный для очистки. Черновики, неотправленные сообщения и сохранённые офлайн файлы могут учитываться не полностью.'),
         const SizedBox(height: 12),
-        const Text('Управление общим лимитом и очистка пока недоступны.'),
+        const Text(
+            'Управление общим лимитом приложения и очистка пока недоступны.'),
         const SizedBox(height: 16),
         OutlinedButton(
             onPressed: _loading ? null : _measure,

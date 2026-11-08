@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart' as sqlite;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'cache_inventory_snapshot.dart';
 
 /// Process-local freshness evidence only; it does not authorize eviction.
@@ -28,16 +29,22 @@ class OptionalImageCacheBudget {
   OptionalImageCacheBudget({
     Future<List<Directory>> Function()? roots,
     CacheInventoryCollector? collector,
-    this.limitBytes = 500000000,
+    int limitBytes = 500000000,
     int? serviceReserveBytes,
     this.refreshInterval = const Duration(seconds: 30),
     Duration Function()? elapsed,
+    bool persistPolicy = false,
+    Future<SharedPreferences> Function()? preferences,
   })  : _roots = roots ?? _runtimeRoots,
         _collector = roots == null
             ? (collector ?? CacheInventoryCollector.shared)
             : null,
         serviceReserveBytes =
             serviceReserveBytes ?? (roots == null ? 16 * 1024 * 1024 : 0),
+        _limitBytes = limitBytes,
+        _persistPolicy = persistPolicy,
+        _preferences = preferences ?? SharedPreferences.getInstance,
+        _policyKnown = !persistPolicy,
         _elapsed = elapsed ?? _newClock() {
     if (limitBytes < 0 ||
         limitBytes > _maxExactBytes ||
@@ -45,15 +52,28 @@ class OptionalImageCacheBudget {
         this.serviceReserveBytes > _maxExactBytes) {
       throw ArgumentError('Invalid cache budget');
     }
+    if (persistPolicy) _startPolicyLoad();
   }
 
   static const int _maxExactBytes = 9007199254740991;
 
-  static final instance = OptionalImageCacheBudget();
+  static final instance = OptionalImageCacheBudget(persistPolicy: true);
   final Object _observationIssuer = Object();
   final Future<List<Directory>> Function() _roots;
   final CacheInventoryCollector? _collector;
-  final int limitBytes;
+  static const policyKey = 'optional_image_budget_limit_v1';
+  static const allowedLimits = <int>{250000000, 500000000, 1000000000};
+  int _limitBytes;
+  int get limitBytes => _limitBytes;
+  final bool _persistPolicy;
+  final Future<SharedPreferences> Function() _preferences;
+  bool _policyKnown;
+  int _policyGeneration = 0, _policyWrites = 0;
+  Future<void>? _policyPending;
+  Future<void> _policyQueue = Future<void>.value();
+  bool get policyReady =>
+      _policyKnown && _policyPending == null && _policyWrites == 0;
+  bool get policyBusy => _policyPending != null || _policyWrites != 0;
   final int serviceReserveBytes;
   final Duration refreshInterval;
   final Duration Function() _elapsed;
@@ -63,6 +83,71 @@ class OptionalImageCacheBudget {
   Duration? _measuredAt;
   Future<void>? _refreshing;
   bool _refreshAfterSettled = false;
+
+  void _startPolicyLoad() {
+    final generation = ++_policyGeneration;
+    _revision++;
+    final operation = () async {
+      try {
+        final prefs = await _preferences();
+        final value = prefs.get(policyKey);
+        if (generation != _policyGeneration) return;
+        if (value == null) {
+          _limitBytes = 500000000;
+          _policyKnown = true;
+        } else if (value is int && allowedLimits.contains(value)) {
+          _limitBytes = value;
+          _policyKnown = true;
+        } else {
+          _policyKnown = false;
+        }
+      } catch (_) {
+        if (generation == _policyGeneration) _policyKnown = false;
+      } finally {
+        _revision++;
+      }
+    }();
+    _policyPending = operation;
+    unawaited(operation.whenComplete(() {
+      if (identical(_policyPending, operation)) _policyPending = null;
+    }));
+  }
+
+  Future<void> waitForPolicy() async {
+    while (_policyPending != null) {
+      await _policyPending;
+    }
+  }
+
+  /// Persist a device-wide choice. Failure leaves admission unavailable until
+  /// an explicit successful choice; it never deletes or cancels active writes.
+  Future<bool> setLimit(int value) {
+    if (!_persistPolicy || !allowedLimits.contains(value))
+      return Future.value(false);
+    ++_policyGeneration;
+    ++_policyWrites;
+    ++_revision;
+    final done = Completer<bool>();
+    final operation = _policyQueue.then((_) async {
+      var success = false;
+      try {
+        success = await (await _preferences()).setInt(policyKey, value);
+      } catch (_) {
+        success = false;
+      }
+      _policyKnown = success;
+      if (success) _limitBytes = value;
+      --_policyWrites;
+      ++_revision;
+      done.complete(success);
+    });
+    _policyQueue = operation;
+    _policyPending = operation;
+    unawaited(operation.whenComplete(() {
+      if (identical(_policyPending, operation)) _policyPending = null;
+    }));
+    return done.future;
+  }
 
   static Duration Function() _newClock() {
     final clock = Stopwatch()..start();
@@ -77,12 +162,26 @@ class OptionalImageCacheBudget {
   }
 
   /// A pending initial scan can support one bounded background retry.
-  Future<void>? get pendingInitialMeasurement =>
-      _observed == null || !_fresh ? _refreshing : null;
+  Future<void>? get pendingInitialMeasurement {
+    if (_policyPending == null &&
+        (_refreshing == null || (_observed != null && _fresh))) return null;
+    return () async {
+      while (true) {
+        final pending = <Future<void>>[
+          if (_policyPending != null) _policyPending!,
+          if (_refreshing != null && (_observed == null || !_fresh))
+            _refreshing!,
+        ];
+        if (pending.isEmpty) return;
+        await Future.wait<void>(pending);
+        await Future<void>.value();
+      }
+    }();
+  }
 
   /// True only for a fresh, known observation; unknown never triggers cleanup.
   bool knownInsufficientFor(int bytes) =>
-      bytes >= 0 && _observed != null && _fresh && !_fits(bytes);
+      bytes >= 0 && policyReady && _observed != null && _fresh && !_fits(bytes);
 
   bool _fits(int bytes) {
     final observed = _observed;
@@ -97,14 +196,15 @@ class OptionalImageCacheBudget {
     return bytes <= remaining - _reserved;
   }
 
-  int? get observedBytes => _fresh ? _observed : null;
+  int? get observedBytes => policyReady && _fresh ? _observed : null;
   int get reservedBytes => _reserved;
 
   /// Captures a reusable process-local observation; pending or unknown scans
   /// and expired observations return null. This grants no deletion authority.
   CacheBudgetObservation? captureFreshObservation() {
     final observed = _observed, measuredAt = _measuredAt;
-    if (_refreshing != null ||
+    if (!policyReady ||
+        _refreshing != null ||
         observed == null ||
         measuredAt == null ||
         !_fresh) return null;
@@ -115,6 +215,7 @@ class OptionalImageCacheBudget {
   /// Non-mutating check for the exact observation and current freshness.
   bool isObservationCurrent(CacheBudgetObservation token) =>
       identical(token._issuer, _observationIssuer) &&
+      policyReady &&
       _refreshing == null &&
       token._revision == _revision &&
       token._measuredAt == _measuredAt &&
@@ -152,7 +253,7 @@ class OptionalImageCacheBudget {
   void Function()? reserve(int bytes) {
     if (bytes < 0) throw ArgumentError.value(bytes, 'bytes');
     _scheduleRefresh();
-    if (_observed == null || !_fresh || !_fits(bytes)) {
+    if (!policyReady || _observed == null || !_fresh || !_fits(bytes)) {
       return null;
     }
     _reserved += bytes;
