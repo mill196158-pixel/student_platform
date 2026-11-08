@@ -11,17 +11,52 @@ import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:student_platform/src/core/guarded_database.dart';
 import 'package:student_platform/src/core/media_cache_protection.dart';
 import 'package:student_platform/src/core/pinned_access_fence.dart';
+import 'package:student_platform/src/core/qa_native_project_guard.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
 
 /// A separate local DB. Transactions ensure incomplete writes do not become
 /// visible after a crash. This is not an offline authorization mechanism.
 class _DatabaseAppGuard {
-  _DatabaseAppGuard(this.token, this.file);
+  _DatabaseAppGuard(this.token, this.file, {this.nativeGuard});
   final String token;
   final RandomAccessFile? file;
+  final QaNativeProjectGuard? nativeGuard;
+  bool get isHeld => file != null || nativeGuard?.isCurrent == true;
 }
 
 final Map<Database, _DatabaseAppGuard> _databaseAppGuards = {};
+// QA-only opt-in: a native authority must close before the Dart guard lease.
+final Map<Database, Future<bool> Function()> _qaNativeCloseBarriers = {};
+final Set<Database> _qaGuardClosing = {};
+
+/// Process-local capability bound to the exact guarded DB handle and its
+/// still-held OS lease. It cannot be constructed from a token read from DB.
+class ProjectDatabaseOwnerCapability {
+  ProjectDatabaseOwnerCapability._(this._database, this._guard);
+  final Database _database;
+  final _DatabaseAppGuard _guard;
+  bool isCurrentFor(Database database) => identical(database, _database) &&
+      database.isOpen && _guard.isHeld &&
+      !_qaGuardClosing.contains(database) &&
+      identical(_databaseAppGuards[database], _guard);
+  String? tokenFor(Database database) => isCurrentFor(database) ? _guard.token : null;
+}
+
+ProjectDatabaseOwnerCapability? captureProjectDatabaseOwner(Database database) {
+  final guard = _databaseAppGuards[database];
+  if (guard == null || !guard.isHeld || !database.isOpen) return null;
+  return ProjectDatabaseOwnerCapability._(database, guard);
+}
+
+/// Registers only for the exact live handle. The callback must be idempotent:
+/// an underlying close can fail after authority has already been revoked.
+bool registerQaNativeCloseBarrier(Database database,
+    ProjectDatabaseOwnerCapability owner, Future<bool> Function() closeNative) {
+  if (!owner.isCurrentFor(database) || _qaGuardClosing.contains(database) ||
+      _qaNativeCloseBarriers.containsKey(database)) return false;
+  _qaNativeCloseBarriers[database] = closeNative;
+  return true;
+}
 
 @visibleForTesting
 Future<void> Function()? debugBeforeDatabaseGuard;
@@ -48,7 +83,7 @@ String _newGuardToken() {
 }
 
 Future<Database> openProjectChatServerDatabase(String path,
-    {DatabaseFactory? factory}) async {
+    {DatabaseFactory? factory, Future<QaNativeProjectGuard?> Function()? qaNativeGuard}) async {
   final opener = factory ?? databaseFactory;
   final db = await opener.openDatabase(path,
       options: OpenDatabaseOptions(
@@ -95,6 +130,15 @@ Future<Database> openProjectChatServerDatabase(String path,
   RandomAccessFile? guardFile;
   try {
     await debugBeforeDatabaseGuard?.call();
+    if (qaNativeGuard != null) {
+      final native = await qaNativeGuard();
+      if (native == null || !native.isCurrent || !await native.claimForPath(db.path)) throw StateError('Native guard unavailable');
+      late GuardedDatabase wrapped;
+      wrapped = GuardedDatabase(db, () => _closeWithQaBarrier(wrapped, db, opener),
+          retryClosed:()=>_databaseAppGuards[wrapped]?.nativeGuard?.isCurrent == true);
+      _databaseAppGuards[wrapped] = _DatabaseAppGuard(native.token, null, nativeGuard:native);
+      return wrapped;
+    }
     final directory = Directory('${db.path}.guards');
     if (!await directory.exists()) await directory.create(recursive: true);
     if (await FileSystemEntity.type(directory.path, followLinks: false) != FileSystemEntityType.directory) {
@@ -109,7 +153,7 @@ Future<Database> openProjectChatServerDatabase(String path,
     await db.insert('chat_app_guards', {'token': token, 'project': '*',
       'uid': pid.toString(), 'sid': '', 'database_token': token});
     late GuardedDatabase wrapped;
-    wrapped = GuardedDatabase(db, () => _closeProjectChatServerDatabase(wrapped, db, opener));
+    wrapped = GuardedDatabase(db, () => _closeWithQaBarrier(wrapped, db, opener));
     _databaseAppGuards[wrapped] = _DatabaseAppGuard(token, guardFile);
     return wrapped;
   } catch (_) {
@@ -117,13 +161,14 @@ Future<Database> openProjectChatServerDatabase(String path,
       try { await guardFile.unlock(); } catch (_) {}
       try { await guardFile.close(); } catch (_) {}
     }
+    if (qaNativeGuard != null) { await db.close(); rethrow; }
     // Preserve reads using a durable, deliberately unverifiable guard. It
     // cannot be recovered automatically and forbids eviction on all handles.
     try {
       await db.insert('chat_app_guards', {'token': token, 'project': '*',
         'uid': 'unverifiable', 'sid': '', 'database_token': token});
       late GuardedDatabase wrapped;
-      wrapped = GuardedDatabase(db, () => _closeProjectChatServerDatabase(wrapped, db, opener));
+      wrapped = GuardedDatabase(db, () => _closeWithQaBarrier(wrapped, db, opener));
       _databaseAppGuards[wrapped] = _DatabaseAppGuard(token, null);
       return wrapped;
     } catch (_) {
@@ -139,10 +184,21 @@ Future<void> closeProjectChatServerDatabase(Database db) async {
   await db.close();
 }
 
+Future<void> _closeWithQaBarrier(Database wrapped, Database db, DatabaseFactory factory) async {
+  final barrier = _qaNativeCloseBarriers[wrapped];
+  if (barrier == null) return _closeProjectChatServerDatabase(wrapped, db, factory);
+  _qaGuardClosing.add(wrapped);
+  try {
+    if (!await barrier()) throw StateError('Native authority could not close');
+    await _closeProjectChatServerDatabase(wrapped, db, factory);
+    _qaNativeCloseBarriers.remove(wrapped);
+  } finally { _qaGuardClosing.remove(wrapped); }
+}
+
 Future<void> _closeProjectChatServerDatabase(Database wrapped, Database db,
     DatabaseFactory factory) async {
   final guard = _databaseAppGuards[wrapped];
-  if (guard != null) {
+  if (guard != null && db.isOpen) {
     await db.transaction((txn) async {
       final tables = await txn.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name='pinned_fence_pending'");
       if (tables.isNotEmpty) {
@@ -166,7 +222,7 @@ Future<void> _closeProjectChatServerDatabase(Database wrapped, Database db,
     await debugAfterCloseAdmission?.call();
   }
   // Keep the guard and FD if close fails: other engines must not evict.
-  await db.close();
+  if (db.isOpen) await db.close();
   if (guard != null) {
     // The old handle is closed; use an unguarded maintenance connection only
     // to release this exact token. Failure leaves the OS lock held fail-closed.
@@ -184,6 +240,9 @@ Future<void> _closeProjectChatServerDatabase(Database wrapped, Database db,
       });
     } finally {
       await maintenance.close();
+    }
+    if (guard.nativeGuard != null && !await guard.nativeGuard!.release()) {
+      throw StateError('Native guard could not be released');
     }
     _databaseAppGuards.remove(wrapped);
     await guard.file?.unlock();
@@ -401,7 +460,7 @@ class ProjectChatServerCache {
   Future<ProjectMediaProtectionSession?> openMediaProtection(Directory root) async {
     final owner = scope.capture(), binding = currentBinding(), guard = _databaseAppGuards[db];
     final issuerBase = project.replaceFirst(RegExp(r'/+$'), '');
-    if (owner == null || binding == null || guard?.file == null ||
+    if (owner == null || binding == null || guard?.isHeld != true ||
         owner.userId != binding.userId || binding.issuer != '$issuerBase/auth/v1') return null;
     bool current() => scope.isCurrent(owner) && _matches(currentBinding(), binding);
     try {

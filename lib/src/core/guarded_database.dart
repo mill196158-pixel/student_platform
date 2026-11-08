@@ -3,9 +3,10 @@ import 'package:sqflite/sqflite.dart';
 /// Delegates the database API while making ordinary `close()` release the
 /// associated process guard. Callers must finish all work before closing.
 class GuardedDatabase implements Database {
-  GuardedDatabase(this.inner, this.onClose);
+  GuardedDatabase(this.inner, this.onClose, {this.retryClosed});
   final Database inner;
   final Future<void> Function() onClose;
+  final bool Function()? retryClosed;
   Future<void>? _closing;
 
   @override
@@ -13,7 +14,7 @@ class GuardedDatabase implements Database {
     if (_closing != null) return _closing!;
     late final Future<void> operation;
     operation = onClose().catchError((Object error, StackTrace stack) {
-      if (inner.isOpen && identical(_closing, operation)) _closing = null;
+      if ((inner.isOpen || (retryClosed?.call() ?? false)) && identical(_closing, operation)) _closing = null;
       Error.throwWithStackTrace(error, stack);
     });
     _closing = operation;

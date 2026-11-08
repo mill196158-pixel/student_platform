@@ -10,6 +10,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:student_platform/src/config/auth_email_adapter.dart';
 import 'package:student_platform/src/core/password_policy.dart';
 import 'package:student_platform/src/core/auth_transition_host.dart';
+import 'package:student_platform/src/core/qa_document_authority_host.dart';
 import 'change_password_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -41,6 +42,11 @@ class _LoginScreenState extends State<LoginScreen> {
       final coordinator = AuthTransitionHost.maybeRead(context);
       if (coordinator == null) throw StateError('Вход временно недоступен');
       await coordinator.run(() async {
+        const qaDocumentAuthority=bool.fromEnvironment('SOURCE_DOCUMENT_AUTHORITY_QA');
+        if (qaDocumentAuthority && _sb.auth.currentSession!=null &&
+            !await QaDocumentAuthorityLifecycle.revokeBeforeLogout()) {
+          throw StateError('Вход временно недоступен');
+        }
         await _sb.auth.signInWithPassword(email: authEmail, password: pass);
 
         // 2) Профиль. Сначала RPC (устойчиво к рассинхрону id/login),

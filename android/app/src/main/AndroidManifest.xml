@@ -14,6 +14,9 @@
         android:label="student_platform"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <service android:name=".SourceAuthorityRecoveryFixtureService"
+            android:enabled="${sourceRecoveryQaEnabled}" android:exported="false"
+            android:process=":qa_recovery_owner" />
         <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false" />
         <meta-data android:name="firebase_analytics_collection_enabled" android:value="false" />
         <activity
@@ -58,6 +61,12 @@
             android:name=".SourceDocumentQaProvider"
             android:authorities="${applicationId}.source_document_qa"
             android:enabled="${sourceDocumentQaEnabled}"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+        <provider
+            android:name=".SourceDocumentAuthorityQaProvider"
+            android:authorities="${applicationId}.authority_document_qa"
+            android:enabled="${sourceAuthorityProviderQaEnabled}"
             android:exported="false"
             android:grantUriPermissions="true" />
         <provider
