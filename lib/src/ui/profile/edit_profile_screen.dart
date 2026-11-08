@@ -11,6 +11,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:student_platform/src/core/legacy_user_cache.dart';
 import '../../themes/theme_service.dart';
 import 'theme_mode_picker.dart';
+import 'cache_diagnostics_screen.dart';
 
 class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({super.key});
@@ -339,6 +340,18 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             const SizedBox(height: 14),
             const _SettingsSectionLabel('Оформление'),
             const _ProfileFieldsCard(children: [_ThemePreference()]),
+            const SizedBox(height: 14),
+            const _SettingsSectionLabel('Данные'),
+            _ProfileFieldsCard(children: [
+              _SettingsNavRow(
+                icon: Icons.storage_outlined,
+                title: 'Данные приложения',
+                subtitle: 'Частичная оценка хранилища',
+                onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                  builder: (_) => const CacheDiagnosticsScreen(),
+                )),
+              ),
+            ]),
             const SizedBox(height: 14),
             const _SettingsSectionLabel('Безопасность и уведомления'),
             _ProfileFieldsCard(
