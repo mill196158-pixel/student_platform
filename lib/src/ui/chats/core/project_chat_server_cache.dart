@@ -459,6 +459,8 @@ class ProjectChatServerCache {
   Future<void> Function()? debugBeforePageCommit;
   @visibleForTesting
   Future<void> Function()? debugBeforeHistoryEvictCommit;
+  @visibleForTesting
+  void Function(String)? debugHistoryPayloadFetch;
   static final Map<String, int> _eventVersions = {};
   /// Invalidates in-process consumers before a snapshot mutation can begin.
   /// This does not provide cross-process invalidation.
@@ -710,16 +712,33 @@ class ProjectChatServerCache {
   Future<int> _evictServerHistory(Transaction txn, OfflineSessionBinding binding,
       bool Function() current, int targetLogicalBytes,
       {int? maxSnapshots, bool strictByteLimit = false}) async {
-        final rows = await txn.rawQuery('SELECT s.chat, s.payload FROM chat_server_snapshot s '
+        final columns = strictByteLimit
+            ? 's.chat, length(CAST(s.payload AS BLOB)) AS payload_bytes'
+            : 's.chat, s.payload';
+        final rows = await txn.rawQuery('SELECT $columns FROM chat_server_snapshot s '
             'JOIN chat_snapshot_access a ON s.project=a.project AND s.uid=a.uid AND s.sid=a.sid AND s.chat=a.chat '
             'WHERE s.project=? AND s.uid=? AND s.sid=? AND s.chat<>? '
             'AND NOT EXISTS (SELECT 1 FROM chat_route_leases l WHERE l.project=s.project AND l.uid=s.uid AND l.sid=s.sid AND (l.chat=s.chat OR l.chat=\'*\')) '
-            'ORDER BY a.access_ms ASC, s.chat ASC', [project, binding.userId, binding.sessionId, summaryChatKey]);
+            'ORDER BY a.access_ms ASC, s.chat ASC${strictByteLimit ? ' LIMIT 128' : ''}',
+            [project, binding.userId, binding.sessionId, summaryChatKey]);
         var removed = 0, count = 0;
         for (final row in rows) {
           if (removed >= targetLogicalBytes || (maxSnapshots != null && count >= maxSnapshots)) break;
           if (!current()) throw const _StalePage();
-          final chat = row['chat'], payload = row['payload'];
+          final chat = row['chat'];
+          Object? payload = row['payload'];
+          if (strictByteLimit) {
+            final length = row['payload_bytes'];
+            if (chat is! String || length is! int || length < 0 ||
+                length > targetLogicalBytes - removed) continue;
+            debugHistoryPayloadFetch?.call(chat);
+            final selected = await txn.query('chat_server_snapshot', columns: ['payload'],
+                where: 'project=? AND uid=? AND sid=? AND chat=?',
+                whereArgs: [project, binding.userId, binding.sessionId, chat]);
+            if (!current()) throw const _StalePage();
+            if (selected.length != 1) continue;
+            payload = selected.single['payload'];
+          }
           if (chat is! String || payload is! String ||
               !_isRecoverableHistorySnapshot(chat, payload)) continue;
           final bytes = utf8.encode(payload).length;

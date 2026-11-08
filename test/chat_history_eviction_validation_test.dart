@@ -35,6 +35,28 @@ void main() {
       expect(await cache.saveServerPage(ticket, [message], hasMore: false), isTrue);
     }
     final owner = captureProjectDatabaseOwner(db)!;
+    for (var i = 0; i < 128; i++) {
+      final chat = 'invalid-${i.toString().padLeft(3, '0')}';
+      await db.insert('chat_server_snapshot', {'project': 'https://a.invalid', 'uid': 'owner',
+        'sid': 'sid', 'chat': chat, 'payload': '{bad'});
+      await db.insert('chat_snapshot_access', {'project': 'https://a.invalid', 'uid': 'owner',
+        'sid': 'sid', 'chat': chat, 'access_ms': 0});
+    }
+    await db.insert('chat_server_snapshot', {'project': 'https://a.invalid', 'uid': 'owner',
+      'sid': 'sid', 'chat': 'huge', 'payload': 'x' * (4 * 1024 * 1024 + 1)});
+    await db.insert('chat_snapshot_access', {'project': 'https://a.invalid', 'uid': 'owner',
+      'sid': 'sid', 'chat': 'huge', 'access_ms': -1});
+    final fetched = <String>[];
+    cache.debugHistoryPayloadFetch = fetched.add;
+    final boundedScan = (await cache.beginOrdinaryHistoryMaintenance(10000000, owner, () => true))!;
+    expect(boundedScan.logicalBytesEvicted, 0);
+    expect(fetched, hasLength(127));
+    expect(fetched, isNot(contains('huge')));
+    expect(fetched, isNot(contains('invalid-127')));
+    await cache.releaseHistoryAppGuard(boundedScan);
+    cache.debugHistoryPayloadFetch = null;
+    await db.delete('chat_server_snapshot', where: "chat LIKE 'invalid-%' OR chat='huge'");
+    await db.delete('chat_snapshot_access', where: "chat LIKE 'invalid-%' OR chat='huge'");
     expect(await cache.beginOrdinaryHistoryMaintenance(10000000, owner, () => false), isNull);
     expect(await db.query('chat_server_snapshot'), hasLength(10));
     final tooSmall = (await cache.beginOrdinaryHistoryMaintenance(1, owner, () => true))!;
