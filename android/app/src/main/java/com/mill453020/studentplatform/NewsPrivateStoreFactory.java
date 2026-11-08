@@ -7,6 +7,7 @@ import android.database.sqlite.SQLiteException;
 import android.os.Build;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -24,7 +25,7 @@ final class NewsPrivateStoreFactory {
 
     /** Fixed app-private location only. Never creates or repairs a store. */
     static NewsPrivateStoreFactory openExisting(Context context) {
-        if (context == null || Build.VERSION.SDK_INT < 26) return null;
+        if (context == null || Build.VERSION.SDK_INT < 28) return null;
         try {
             final Path root = context.getNoBackupFilesDir().toPath().resolve("news_quota_v1");
             final NewsPrivateStoreFactory factory = new NewsPrivateStoreFactory(root);
@@ -47,12 +48,30 @@ final class NewsPrivateStoreFactory {
                 final String token = new String(Files.readAllBytes(marker), StandardCharsets.US_ASCII);
                 if (!MARKER.matcher(token).matches()) return;
                 final String canonical = root.toRealPath().toString();
-                if (hasSidecars("index.db") || hasSidecars("ledger.db")) return;
+                if (hasSidecars("index.db") || hasSidecars("ledger.db") ||
+                        !hasRollbackHeader(root.resolve("index.db")) || !hasRollbackHeader(root.resolve("ledger.db"))) return;
                 valid[0] = verifyDb(root.resolve("index.db"), canonical, token) &&
                         verifyDb(root.resolve("ledger.db"), canonical, token);
             });
             return entered && valid[0];
         } catch (Exception failure) { return false; }
+    }
+
+    private static boolean hasRollbackHeader(Path file) throws IOException {
+        final long size = Files.size(file);
+        if (size < 20 || size > 256L * 4096L) return false;
+        final byte[] header = new byte[20];
+        try (InputStream input = Files.newInputStream(file)) {
+            int offset = 0;
+            while (offset < header.length) {
+                final int read = input.read(header, offset, header.length - offset);
+                if (read <= 0) return false;
+                offset += read;
+            }
+        }
+        final byte[] magic = "SQLite format 3\0".getBytes(StandardCharsets.US_ASCII);
+        for (int i = 0; i < magic.length; i++) if (header[i] != magic[i]) return false;
+        return header[18] == 1 && header[19] == 1;
     }
 
     private boolean hasSidecars(String base) {
@@ -66,11 +85,15 @@ final class NewsPrivateStoreFactory {
         SQLiteDatabase db = null;
         try {
             // No CREATE flag. Unexpected hot journals were rejected above.
-            db = SQLiteDatabase.openDatabase(file.toString(), null,
-                    SQLiteDatabase.OPEN_READWRITE | SQLiteDatabase.NO_LOCALIZED_COLLATORS,
-                    ignored -> { throw new SQLiteException("Corrupt news validation database"); });
+            final SQLiteDatabase.OpenParams params = new SQLiteDatabase.OpenParams.Builder()
+                    .setOpenFlags(SQLiteDatabase.OPEN_READWRITE | SQLiteDatabase.NO_LOCALIZED_COLLATORS)
+                    .setJournalMode("DELETE").setSynchronousMode("FULL")
+                    .setErrorHandler(ignored -> { throw new SQLiteException("Corrupt news validation database"); })
+                    .build();
+            db = SQLiteDatabase.openDatabase(file.toFile(), params);
             if (!"delete".equalsIgnoreCase(scalar(db, "PRAGMA journal_mode")) ||
-                    !"0".equals(scalar(db, "PRAGMA auto_vacuum"))) return false;
+                    !"0".equals(scalar(db, "PRAGMA auto_vacuum")) ||
+                    !"2".equals(scalar(db, "PRAGMA synchronous"))) return false;
             final int page = Integer.parseInt(scalar(db, "PRAGMA page_size"));
             final long maxPages = Long.parseLong(scalar(db, "PRAGMA max_page_count=256"));
             if (page != 4096 || maxPages <= 0 || maxPages > 256) return false;

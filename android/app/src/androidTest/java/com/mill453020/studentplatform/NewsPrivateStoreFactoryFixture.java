@@ -38,16 +38,40 @@ final class NewsPrivateStoreFactoryFixture {
         setVersion(root.resolve("index.db"), "invalid");
         require(NewsPrivateStoreFactory.openExisting(synthetic) == null, "text version admitted");
         setVersion(root.resolve("index.db"), 1L);
+        require(NewsPrivateStoreFactory.openExisting(synthetic) != null, "valid restored version rejected");
+        final Path index = root.resolve("index.db");
+        final byte[] original = Files.readAllBytes(index);
+        final byte[] walHeader = original.clone();
+        walHeader[18] = 2;
+        walHeader[19] = 2;
+        Files.write(index, walHeader);
+        require(NewsPrivateStoreFactory.openExisting(synthetic) == null, "WAL header admitted");
+        require(Arrays.equals(Files.readAllBytes(index), walHeader), "WAL header converted");
+        Files.write(index, original);
+        require(NewsPrivateStoreFactory.openExisting(synthetic) != null, "valid restored WAL header rejected");
+        final byte[] shortHeader = new byte[] {1, 2, 3};
+        Files.write(index, shortHeader);
+        require(NewsPrivateStoreFactory.openExisting(synthetic) == null, "short header admitted");
+        require(Arrays.equals(Files.readAllBytes(index), shortHeader), "short header modified");
+        Files.write(index, original);
+        require(NewsPrivateStoreFactory.openExisting(synthetic) != null, "valid restored short header rejected");
         Files.write(root.resolve("marker"), "invalid".getBytes(StandardCharsets.US_ASCII));
         require(NewsPrivateStoreFactory.openExisting(synthetic) == null, "bad marker admitted");
         Files.write(root.resolve("marker"), token.getBytes(StandardCharsets.US_ASCII));
+        require(NewsPrivateStoreFactory.openExisting(synthetic) != null, "valid restored marker rejected");
         Files.createFile(root.resolve("index.db-wal"));
         require(NewsPrivateStoreFactory.openExisting(synthetic) == null, "unexpected WAL admitted");
         Files.delete(root.resolve("index.db-wal"));
-        final byte[] corrupt = new byte[] {1, 7, 2, 8};
+        require(NewsPrivateStoreFactory.openExisting(synthetic) != null, "valid removed WAL rejected");
+        final Path ledger = root.resolve("ledger.db");
+        final byte[] goodLedger = Files.readAllBytes(ledger);
+        final byte[] corrupt = goodLedger.clone();
+        corrupt[100] = (byte) 0xff; // Valid SQLite header; invalid first B-tree page.
         Files.write(root.resolve("ledger.db"), corrupt);
         require(NewsPrivateStoreFactory.openExisting(synthetic) == null, "corrupt DB admitted");
         require(Arrays.equals(Files.readAllBytes(root.resolve("ledger.db")), corrupt), "corrupt DB modified or deleted");
+        Files.write(ledger, goodLedger);
+        require(NewsPrivateStoreFactory.openExisting(synthetic) != null, "valid restored ledger rejected");
         Files.delete(root.resolve("lease.lock"));
         require(NewsPrivateStoreFactory.openExisting(synthetic) == null, "missing lock admitted");
         require(!Files.exists(root.resolve("lease.lock")), "lock recreated");
@@ -58,6 +82,10 @@ final class NewsPrivateStoreFactoryFixture {
                 SQLiteDatabase.OPEN_READWRITE | SQLiteDatabase.CREATE_IF_NECESSARY |
                         SQLiteDatabase.NO_LOCALIZED_COLLATORS)) {
             db.execSQL("PRAGMA page_size=4096");
+            db.execSQL("PRAGMA auto_vacuum=NONE");
+            try (android.database.Cursor cursor = db.rawQuery("PRAGMA journal_mode=DELETE", null)) {
+                require(cursor.moveToFirst() && "delete".equalsIgnoreCase(cursor.getString(0)), "fixture DELETE journal unavailable");
+            }
             db.execSQL(SCHEMA);
             db.execSQL("INSERT INTO news_quota_custody(id,version,token,root) VALUES(1,1,?,?)", new Object[] {token, root});
         }
@@ -72,8 +100,10 @@ final class NewsPrivateStoreFactoryFixture {
     }
 
     private static void setVersion(Path path, Object version) {
-        try (SQLiteDatabase db = SQLiteDatabase.openDatabase(path.toString(), null,
-                SQLiteDatabase.OPEN_READWRITE | SQLiteDatabase.NO_LOCALIZED_COLLATORS)) {
+        final SQLiteDatabase.OpenParams params = new SQLiteDatabase.OpenParams.Builder()
+                .setOpenFlags(SQLiteDatabase.OPEN_READWRITE | SQLiteDatabase.NO_LOCALIZED_COLLATORS)
+                .setJournalMode("DELETE").setSynchronousMode("FULL").build();
+        try (SQLiteDatabase db = SQLiteDatabase.openDatabase(path.toFile(), params)) {
             db.execSQL("UPDATE news_quota_custody SET version=?", new Object[] {version});
         }
     }
