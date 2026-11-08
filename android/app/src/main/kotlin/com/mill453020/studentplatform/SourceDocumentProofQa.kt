@@ -26,7 +26,7 @@ internal object SourceDocumentProofQa {
         try {
             Log.i("SourceProofQA", "VERIFY_PATH")
             Log.i("SourceProofQA", "PATH_CANON_ROOT")
-            val expectedRoot = File(activity.filesDir.canonicalFile,"qa_native_fixture_v5")
+            val expectedRoot = File(activity.filesDir.canonicalFile,"qa_native_fixture_v9")
             val expectedMedia = File(expectedRoot,"media.db")
             val expectedSnapshot = File(expectedRoot,"chat.db")
             if (expectedMedia.absolutePath != expectedMedia.canonicalPath || expectedSnapshot.absolutePath != expectedSnapshot.canonicalPath ||
@@ -36,7 +36,8 @@ internal object SourceDocumentProofQa {
             val db = SQLiteDatabase.openDatabase(media.canonicalPath,null,SQLiteDatabase.OPEN_READWRITE)
             try {
                 Log.i("SourceProofQA", "DB_OPEN_OK")
-                db.execSQL("PRAGMA busy_timeout=0")
+                db.rawQuery("PRAGMA busy_timeout=0", null).use { it.moveToFirst() }
+                Log.i("SourceProofQA", "PRAGMA_OK")
                 db.execSQL("ATTACH DATABASE ? AS source_snapshot", arrayOf(snapshot.canonicalPath))
                 Log.i("SourceProofQA", "ATTACH_OK")
                 db.beginTransactionNonExclusive()

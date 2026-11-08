@@ -55,7 +55,7 @@ internal object SourceDocumentNativeQa {
     }
 
     private fun safeDb(activity: Activity, name: String): File? {
-        val file = File(activity.filesDir.canonicalFile,"qa_native_fixture_v5/$name")
+        val file = File(activity.filesDir.canonicalFile,"qa_native_fixture_v9/$name")
         val root = activity.filesDir.canonicalPath + File.separator
         return if (file.absolutePath == file.canonicalPath && file.canonicalPath.startsWith(root) && file.isFile) file else null
     }
@@ -69,7 +69,7 @@ internal object SourceDocumentNativeQa {
         try {
             val db = SQLiteDatabase.openDatabase(media.path,null,SQLiteDatabase.OPEN_READWRITE)
             try {
-                db.execSQL("PRAGMA busy_timeout=0")
+                db.rawQuery("PRAGMA busy_timeout=0", null).use { it.moveToFirst() }
                 db.execSQL("CREATE TABLE IF NOT EXISTS qa_docx_native_owner(project TEXT PRIMARY KEY, instance TEXT NOT NULL, revision INTEGER NOT NULL, engine TEXT NOT NULL)")
                 db.beginTransactionNonExclusive()
                 try {
@@ -101,7 +101,7 @@ internal object SourceDocumentNativeQa {
         try {
             val db = SQLiteDatabase.openDatabase(media.path,null,SQLiteDatabase.OPEN_READWRITE)
             try {
-                db.execSQL("PRAGMA busy_timeout=0")
+                db.rawQuery("PRAGMA busy_timeout=0", null).use { it.moveToFirst() }
                 db.execSQL("ATTACH DATABASE ? AS source_snapshot", arrayOf(chat.path))
                 db.execSQL("CREATE TABLE IF NOT EXISTS qa_docx_dispatch(request TEXT PRIMARY KEY,state TEXT NOT NULL)")
                 db.execSQL("CREATE TABLE IF NOT EXISTS qa_docx_dispatch_snapshot(request TEXT PRIMARY KEY,sha TEXT NOT NULL,bytes BLOB NOT NULL,project TEXT NOT NULL,uid TEXT NOT NULL,sid TEXT NOT NULL,chat TEXT NOT NULL,message TEXT NOT NULL,file TEXT NOT NULL,key TEXT NOT NULL,url TEXT NOT NULL,instance TEXT NOT NULL,revision INTEGER NOT NULL)")

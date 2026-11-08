@@ -24,6 +24,11 @@ import androidx.core.view.inputmethod.InputConnectionCompat.OnCommitContentListe
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.FlutterInjector
+import io.flutter.embedding.engine.dart.DartExecutor
+import android.os.Handler
+import android.os.Looper
+import java.util.concurrent.atomic.AtomicBoolean
 import java.io.File
 import java.io.FileOutputStream
 
@@ -111,11 +116,38 @@ class MainActivity : FlutterActivity() {
                                     val second = contentResolver.openFileDescriptor(uri,"r")?.also { opened.add(it) }
                                     val third = try { contentResolver.openFileDescriptor(uri,"r")?.also { opened.add(it) } } catch (_: Exception) { null }
                                     if (first == null || second == null || third != null) false else {
-                                        Thread.sleep(5500)
-                                        val afterTimeout = contentResolver.openFileDescriptor(uri,"r")?.also { opened.add(it) }
-                                        afterTimeout != null
+                                        Thread.sleep(8500)
+                                        val oldError = try {
+                                            val byte = ByteArray(1)
+                                            android.system.Os.read(first.fileDescriptor,byte,0,1)
+                                            false
+                                        } catch (e: android.system.ErrnoException) { e.errno == android.system.OsConstants.EIO }
+                                        var afterClose: android.os.ParcelFileDescriptor? = null
+                                        for (i in 0 until 100) {
+                                            afterClose = try { contentResolver.openFileDescriptor(uri,"r")?.also { opened.add(it) } } catch (_: Exception) { null }
+                                            if (afterClose != null) break
+                                            Thread.sleep(20)
+                                        }
+                                        oldError && afterClose != null
                                     }
                                 } finally { opened.forEach { try { it.close() } catch (_: Exception) {} } }
+                            }
+                        } catch (_: Exception) { false }
+                        runOnUiThread { result.success(value) }
+                    }.start()
+                    "seekPreparedSynthetic" -> Thread {
+                        val request = args?.get("request") as? String
+                        val value = try {
+                            if (request == null || !Regex("^[A-Za-z0-9_-]{16,80}$").matches(request)) false else {
+                                val uri = Uri.parse("content://${packageName}.source_document_qa/content/$request")
+                                contentResolver.openFileDescriptor(uri,"r")?.use { fd ->
+                                    Thread.sleep(5500) // an idle/slow reader must not be truncated
+                                    val size = 3L*1024*1024
+                                    val at = size-1
+                                    android.system.Os.lseek(fd.fileDescriptor,at,android.system.OsConstants.SEEK_SET)
+                                    val one = ByteArray(1)
+                                    android.system.Os.read(fd.fileDescriptor,one,0,1) == 1 && (one[0].toInt() and 0xff) == (at % 251).toInt()
+                                } ?: false
                             }
                         } catch (_: Exception) { false }
                         runOnUiThread { result.success(value) }
@@ -139,6 +171,16 @@ class MainActivity : FlutterActivity() {
                         SourceDocumentNativeQa.register(other, primary = true)
                         try { result.success(args != null && SourceDocumentNativeQa.claim(this, other, args)) }
                         finally { SourceDocumentNativeQa.unregister(other); other.destroy() }
+                    }
+                    "restartNativeOwnerSynthetic" -> {
+                        SourceDocumentNativeQa.unregister(flutterEngine)
+                        val next = FlutterEngine(applicationContext)
+                        SourceDocumentNativeQa.register(next, primary = true)
+                        try { result.success(args != null && SourceDocumentNativeQa.claim(this, next, args)) }
+                        finally { SourceDocumentNativeQa.unregister(next); next.destroy(); SourceDocumentNativeQa.register(flutterEngine, primary = true) }
+                    }
+                    "runDartSecondarySynthetic" -> {
+                        if (args == null) result.success(null) else runSecondaryQa(args,result)
                     }
                     else -> result.notImplemented()
                 }
@@ -235,6 +277,45 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    private fun runSecondaryQa(input: Map<*, *>, parentResult: MethodChannel.Result) {
+        val other = FlutterEngine(applicationContext)
+        SourceDocumentNativeQa.register(other, primary = false)
+        val main = Handler(Looper.getMainLooper())
+        val finished = AtomicBoolean(false)
+        lateinit var timeout: Runnable
+        fun finish(value: Any?) {
+            if (!finished.compareAndSet(false,true)) return
+            main.removeCallbacks(timeout)
+            SourceDocumentNativeQa.unregister(other)
+            other.destroy()
+            parentResult.success(value)
+        }
+        timeout = Runnable { finish(null) }
+        MethodChannel(other.dartExecutor.binaryMessenger,"student_platform/source_document_qa_guard").setMethodCallHandler { call, result ->
+            val args = call.arguments as? Map<*, *>
+            when (call.method) {
+                "claimNativeOwnerSynthetic" -> result.success(args != null && SourceDocumentNativeQa.claim(this,other,args))
+                "dispatchRealSchemaSynthetic" -> Thread {
+                    val value = if (args == null) "blocked" else SourceDocumentNativeQa.dispatch(this,other,args)
+                    runOnUiThread { result.success(value) }
+                }.start()
+                else -> result.notImplemented()
+            }
+        }
+        MethodChannel(other.dartExecutor.binaryMessenger,"student_platform/source_document_qa_secondary").setMethodCallHandler { call, result ->
+            when (call.method) {
+                "getInput" -> result.success(input)
+                "report" -> { result.success(null); finish(call.arguments) }
+                else -> result.notImplemented()
+            }
+        }
+        main.postDelayed(timeout,15000)
+        try {
+            other.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint(
+                FlutterInjector.instance().flutterLoader().findAppBundlePath(),"secondaryEngineMain"))
+        } catch (_: Exception) { finish(null) }
     }
 
     private fun openNotificationSettings() {

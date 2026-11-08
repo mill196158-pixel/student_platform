@@ -12,14 +12,25 @@ import java.io.File
 import java.io.FileNotFoundException
 import java.security.MessageDigest
 import java.util.concurrent.Semaphore
-import android.system.Os
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import android.system.OsConstants
 import android.system.ErrnoException
 import android.provider.OpenableColumns
+import android.os.Build
+import android.os.Handler
+import android.os.HandlerThread
+import android.os.storage.StorageManager
+import android.os.ProxyFileDescriptorCallback
 
 /** Synthetic fixture provider; app-private immutable snapshot, no file path. */
 class SourceDocumentQaProvider : ContentProvider() {
-    companion object { private val transfers = Semaphore(2) }
+    companion object {
+        private val transfers = Semaphore(2)
+        private val callbacks = HandlerThread("qa-docx-proxies").apply { start() }
+        private val callbackHandler = Handler(callbacks.looper)
+        private const val leaseMs = 8000L
+    }
     override fun onCreate(): Boolean = context?.packageName == "com.mill453020.studentplatform.attachfixture"
     override fun getType(uri: Uri): String = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor? {
@@ -42,12 +53,15 @@ class SourceDocumentQaProvider : ContentProvider() {
         if (ctx.packageName != "com.mill453020.studentplatform.attachfixture" || mode != "r" ||
             uri.authority != "${ctx.packageName}.source_document_qa" || uri.pathSegments.size != 2 ||
             uri.pathSegments[0] != "content" || !Regex("^[A-Za-z0-9_-]{16,80}$").matches(request)) throw FileNotFoundException()
-        val file = File(ctx.filesDir.canonicalFile,"qa_native_fixture_v5/media.db")
-        val snapshot = File(ctx.filesDir.canonicalFile,"qa_native_fixture_v5/chat.db")
+        val file = File(ctx.filesDir.canonicalFile,"qa_native_fixture_v9/media.db")
+        val snapshot = File(ctx.filesDir.canonicalFile,"qa_native_fixture_v9/chat.db")
         if (file.absolutePath != file.canonicalPath || !file.isFile || snapshot.absolutePath != snapshot.canonicalPath || !snapshot.isFile) throw FileNotFoundException()
-        if (!transfers.tryAcquire()) throw FileNotFoundException()
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || !transfers.tryAcquire()) throw FileNotFoundException()
         val bytes: ByteArray
-        var pipe: Array<ParcelFileDescriptor>? = null
+        var descriptor: ParcelFileDescriptor? = null
+        val released = AtomicBoolean(false)
+        val content = AtomicReference<ByteArray?>(null)
+        fun release() { if (released.compareAndSet(false,true)) { content.set(null); transfers.release() } }
         try {
             val db = SQLiteDatabase.openDatabase(file.path,null,SQLiteDatabase.OPEN_READWRITE)
             try {
@@ -83,38 +97,30 @@ class SourceDocumentQaProvider : ContentProvider() {
                     bytes = result.toByteArray()
                     val sha = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
                     if (bytes.size != meta.second || sha != meta.first) throw FileNotFoundException()
-                    val created = ParcelFileDescriptor.createPipe()
-                    pipe = created
-                    Os.fcntlInt(created[1].fileDescriptor, OsConstants.F_SETFL, OsConstants.O_NONBLOCK)
-                    if (Os.write(created[1].fileDescriptor,bytes,0,1) != 1) throw FileNotFoundException()
+                    val manager = ctx.getSystemService(StorageManager::class.java) ?: throw FileNotFoundException()
+                    content.set(bytes)
+                    descriptor = manager.openProxyFileDescriptor(ParcelFileDescriptor.MODE_READ_ONLY,
+                        object : ProxyFileDescriptorCallback() {
+                            override fun onGetSize(): Long = (content.get() ?: throw ErrnoException("size",OsConstants.EIO)).size.toLong()
+                            override fun onRead(offset: Long, size: Int, data: ByteArray): Int {
+                                val bytes = content.get() ?: throw ErrnoException("read",OsConstants.EIO)
+                                if (offset < 0 || size < 0 || size > data.size) throw ErrnoException("read",OsConstants.EINVAL)
+                                if (offset >= bytes.size) return 0
+                                val n = minOf(size,bytes.size-offset.toInt())
+                                System.arraycopy(bytes,offset.toInt(),data,0,n)
+                                return n
+                            }
+                            override fun onRelease() = release()
+                        }, callbackHandler)
+                    callbackHandler.postDelayed({ release() },leaseMs)
                     db.setTransactionSuccessful()
                 } finally { db.endTransaction() }
             } finally { db.close() }
         } catch (_: Exception) {
-            pipe?.forEach { try { it.close() } catch (_: Exception) {} }
-            transfers.release()
+            try { descriptor?.close() } catch (_: Exception) {}
+            release()
             throw FileNotFoundException()
         }
-        val opened = pipe ?: run { transfers.release(); throw FileNotFoundException() }
-        Thread {
-            try {
-                var offset = 1
-                val deadline = android.os.SystemClock.elapsedRealtime() + 5000
-                while (offset < bytes.size && android.os.SystemClock.elapsedRealtime() < deadline) {
-                    try {
-                        val written = Os.write(opened[1].fileDescriptor,bytes,offset,minOf(64*1024,bytes.size-offset))
-                        if (written <= 0) break
-                        offset += written
-                    } catch (e: ErrnoException) {
-                        if (e.errno != OsConstants.EAGAIN) break
-                        Thread.sleep(10)
-                    }
-                }
-            } catch (_: Exception) {} finally {
-                try { opened[1].close() } catch (_: Exception) {}
-                transfers.release()
-            }
-        }.start()
-        return opened[0]
+        return descriptor ?: run { release(); throw FileNotFoundException() }
     }
 }
