@@ -693,8 +693,21 @@ class ProjectChatServerCache {
           if (removed >= targetLogicalBytes) break;
           if (!current()) throw const _StalePage();
           final chat = row['chat'], payload = row['payload'];
-          if (chat is! String || payload is! String) continue;
+          if (chat is! String || payload is! String ||
+              !_isRecoverableHistorySnapshot(chat, payload)) continue;
           final args = [project, binding.userId, binding.sessionId, chat];
+          final attempts = await txn.query('chat_server_attempt', columns: ['seq', 'blocked'],
+              where: 'project=? AND uid=? AND sid=? AND chat=?', whereArgs: args);
+          if (!current()) throw const _StalePage();
+          if (attempts.length != 1) continue;
+          final seq = attempts.single['seq'], blocked = attempts.single['blocked'];
+          if (seq is! int || seq < 0 || seq >= 9223372036854775807 ||
+              blocked is! int || blocked != 0) continue;
+          final changed = await txn.rawUpdate(
+              'UPDATE chat_server_attempt SET seq=seq+1 WHERE project=? AND uid=? AND sid=? AND chat=? AND seq=? AND blocked=0',
+              [...args, seq]);
+          if (!current()) throw const _StalePage();
+          if (changed != 1) continue;
           await txn.delete('chat_server_snapshot', where: 'project=? AND uid=? AND sid=? AND chat=?', whereArgs: args);
           await txn.delete('chat_snapshot_access', where: 'project=? AND uid=? AND sid=? AND chat=?', whereArgs: args);
           removed += utf8.encode(payload).length;
@@ -702,6 +715,36 @@ class ProjectChatServerCache {
         await debugBeforeHistoryEvictCommit?.call();
         if (!current()) throw const _StalePage();
         return removed;
+  }
+
+  // Unknown or mixed rows can contain unsent data from older versions. Only
+  // discard an entire snapshot when every entry is a confirmed server copy.
+  bool _isRecoverableHistorySnapshot(String chat, String payload) {
+    try {
+      if (chat.trim().isEmpty) return false;
+      final decoded = jsonDecode(payload);
+      if (decoded is! List) return false;
+      for (final raw in decoded) {
+        if (raw is! Map || raw['chat_id'] != chat ||
+            raw['id'] is! String || (raw['id'] as String).isEmpty ||
+            (raw['id'] as String).trim().isEmpty ||
+            (raw['id'] as String).startsWith('local_') ||
+            raw['delivery_status'] != 'sent' ||
+            raw['client_id'] != null || raw['clientId'] != null ||
+            DateTime.tryParse((raw['created_at'] ?? raw['at'] ?? '').toString()) == null) return false;
+        for (final key in ['imagePath', 'image_path']) {
+          final value = raw[key];
+          if (value != null && (value is! String || value.isNotEmpty)) return false;
+        }
+        for (final key in ['outbound_file_ids', 'outboundFileIds']) {
+          final value = raw[key];
+          if (value != null && (value is! List || value.isNotEmpty)) return false;
+        }
+      }
+      return _parse(payload, chat) != null;
+    } catch (_) {
+      return false;
+    }
   }
   String _eventKey(OfflineSessionBinding b, String chat) =>
       jsonEncode([project, b.userId, b.sessionId, chat]);

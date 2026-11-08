@@ -279,6 +279,8 @@ void main() {
       'uid': 'owner', 'sid': 'sid', 'chat': 'cached', 'payload': '[]'});
     await db.insert('chat_snapshot_access', {'project': 'https://a.invalid',
       'uid': 'owner', 'sid': 'sid', 'chat': 'cached', 'access_ms': 1});
+    await db.insert('chat_server_attempt', {'project': 'https://a.invalid',
+      'uid': 'owner', 'sid': 'sid', 'chat': 'cached', 'seq': 1, 'blocked': 0});
     final live = (await cache.beginHistoryAppGuard(1, allEnginesGuarded: true))!;
     expect(live.logicalBytesEvicted, 0);
     await cache.releaseHistoryAppGuard(live);
