@@ -6,6 +6,22 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart' as sqlite;
 import 'cache_inventory_snapshot.dart';
 
+/// Process-local freshness evidence only; it does not authorize eviction.
+class CacheBudgetObservation {
+  const CacheBudgetObservation._(
+      this._issuer,
+      this._revision,
+      this._measuredAt,
+      this.observedBytes,
+      this.reservedBytes,
+      this.limitBytes,
+      this.serviceReserveBytes);
+  final Object _issuer;
+  final int _revision;
+  final Duration _measuredAt;
+  final int observedBytes, reservedBytes, limitBytes, serviceReserveBytes;
+}
+
 /// Best-effort admission for optional image cache writes, not a disk quota.
 /// Unknown measurements skip persistence; other writers and engines do not reserve.
 class OptionalImageCacheBudget {
@@ -34,6 +50,7 @@ class OptionalImageCacheBudget {
   static const int _maxExactBytes = 9007199254740991;
 
   static final instance = OptionalImageCacheBudget();
+  final Object _observationIssuer = Object();
   final Future<List<Directory>> Function() _roots;
   final CacheInventoryCollector? _collector;
   final int limitBytes;
@@ -82,6 +99,30 @@ class OptionalImageCacheBudget {
 
   int? get observedBytes => _fresh ? _observed : null;
   int get reservedBytes => _reserved;
+
+  /// Captures a reusable process-local observation; pending or unknown scans
+  /// and expired observations return null. This grants no deletion authority.
+  CacheBudgetObservation? captureFreshObservation() {
+    final observed = _observed, measuredAt = _measuredAt;
+    if (_refreshing != null ||
+        observed == null ||
+        measuredAt == null ||
+        !_fresh) return null;
+    return CacheBudgetObservation._(_observationIssuer, _revision, measuredAt,
+        observed, _reserved, limitBytes, serviceReserveBytes);
+  }
+
+  /// Non-mutating check for the exact observation and current freshness.
+  bool isObservationCurrent(CacheBudgetObservation token) =>
+      identical(token._issuer, _observationIssuer) &&
+      _refreshing == null &&
+      token._revision == _revision &&
+      token._measuredAt == _measuredAt &&
+      token.observedBytes == _observed &&
+      token.reservedBytes == _reserved &&
+      token.limitBytes == limitBytes &&
+      token.serviceReserveBytes == serviceReserveBytes &&
+      _fresh;
 
   /// Triggers the same measurement used for admission. Never modifies files.
   Future<void> refreshForDisplay() async {
@@ -136,12 +177,13 @@ class OptionalImageCacheBudget {
   void _scheduleRefresh() {
     if (_refreshing != null) return;
     if (_fresh) return;
-    final revision = _revision;
+    final revision = ++_revision;
     final startedAt = _elapsed();
     final future = _measure().then((value) {
       if (_revision == revision && _reserved == 0) {
         _observed = value.bytes;
         _measuredAt = value.age == null ? startedAt : _elapsed() - value.age!;
+        _revision++;
       } else {
         _refreshAfterSettled = true;
       }
@@ -149,6 +191,7 @@ class OptionalImageCacheBudget {
       if (_revision == revision && _reserved == 0) {
         _observed = null;
         _measuredAt = startedAt;
+        _revision++;
       } else {
         _refreshAfterSettled = true;
       }
