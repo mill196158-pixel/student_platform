@@ -175,6 +175,70 @@ final class NewsPrivateStoreFactoryFixture {
         checkPutFull(context, false);
         checkLogicalClear(context);
         checkClearFailureCases(context);
+        checkClearObserverTimeout(context, "clearAfterHold");
+        checkClearObserverTimeout(context, "clearAfterCommit");
+        checkRunnerQueuedFence(context);
+    }
+
+    private static void checkRunnerQueuedFence(Context context) throws Exception {
+        final SyntheticRoot a = newSyntheticRoot(context), b = newSyntheticRoot(context);
+        final java.util.concurrent.CountDownLatch entered = new java.util.concurrent.CountDownLatch(1), proceed = new java.util.concurrent.CountDownLatch(1);
+        final NewsPrivateStoreFactory blocker = NewsPrivateStoreFactory.openForMutationTesting(a.context,
+                200L * 1024L * 1024L, null, stage -> { if ("clearAfterHold".equals(stage)) { entered.countDown(); proceed.await(); } });
+        final NewsPrivateStoreFactory queued = NewsPrivateStoreFactory.openForMutationTesting(b.context, 200L * 1024L * 1024L);
+        require(blocker != null && queued != null, "queued fence fixtures unavailable");
+        final NewsPrivateStoreFactory.ReadTicket old = queued.capture("saved");
+        require(old != null && queued.read(old).state == NewsPrivateStoreFactory.ReadState.HIT, "queued fence baseline missing");
+        final java.util.concurrent.ExecutorService observer = java.util.concurrent.Executors.newSingleThreadExecutor();
+        try {
+            final java.util.concurrent.Future<NewsPrivateStoreFactory.ClearResult> active = observer.submit(() -> NewsQuotaOperationRunner.clear(blocker, 200));
+            require(entered.await(5, java.util.concurrent.TimeUnit.SECONDS), "blocking worker did not enter");
+            require(NewsQuotaOperationRunner.clear(queued, 30) == NewsPrivateStoreFactory.ClearResult.UNKNOWN, "queued clear did not expire");
+            require(queued.read(old).state == NewsPrivateStoreFactory.ReadState.UNKNOWN && queued.capture("saved") == null, "queued clear failed to block immediately");
+            require(holdCount(b.root.resolve("ledger.db")) == 0, "queued clear wrote a hold");
+            require(active.get(5, java.util.concurrent.TimeUnit.SECONDS) == NewsPrivateStoreFactory.ClearResult.UNKNOWN, "blocking clear did not expire");
+            proceed.countDown();
+            NewsQuotaOperationRunner.awaitIdleForTesting();
+            require(queued.capture("saved") == null && holdCount(b.root.resolve("ledger.db")) == 0, "expired queue later mutated or unblocked");
+            require(NewsQuotaOperationRunner.clear(queued, 10000) == NewsPrivateStoreFactory.ClearResult.CONFIRMED_HELD, "queued clear explicit retry failed");
+        } finally { proceed.countDown(); observer.shutdown(); }
+
+        final SyntheticRoot c = newSyntheticRoot(context);
+        final NewsPrivateStoreFactory factory = NewsPrivateStoreFactory.openForMutationTesting(c.context, 200L * 1024L * 1024L);
+        require(factory != null, "competing ack factory unavailable");
+        final Object first = new Object(), second = new Object();
+        final NewsPrivateStoreFactory.PendingClear receipt = factory.clearRawForMutationTesting(first);
+        factory.prepareClearForMutationTesting(second);
+        require(factory.acknowledgeClear(receipt, first) == NewsPrivateStoreFactory.ClearResult.UNKNOWN, "older ack unblocked newer clear");
+        require(factory.capture("saved") == null, "newer prepared clear not blocked");
+        require(NewsQuotaOperationRunner.clear(factory, 10000) == NewsPrivateStoreFactory.ClearResult.CONFIRMED_HELD, "competing clear explicit retry failed");
+    }
+
+    private static void checkClearObserverTimeout(Context context, String pauseAt) throws Exception {
+        final SyntheticRoot s = newSyntheticRoot(context);
+        final java.util.concurrent.CountDownLatch entered = new java.util.concurrent.CountDownLatch(1), proceed = new java.util.concurrent.CountDownLatch(1);
+        final java.util.concurrent.atomic.AtomicBoolean first = new java.util.concurrent.atomic.AtomicBoolean(true);
+        final NewsPrivateStoreFactory factory = NewsPrivateStoreFactory.openForMutationTesting(s.context,
+                200L * 1024L * 1024L, null, stage -> {
+                    if (pauseAt.equals(stage) && first.compareAndSet(true, false)) { entered.countDown(); proceed.await(); }
+                });
+        require(factory != null, "runner factory unavailable");
+        final java.util.concurrent.ExecutorService observer = java.util.concurrent.Executors.newSingleThreadExecutor();
+        try {
+            final java.util.concurrent.Future<NewsPrivateStoreFactory.ClearResult> result = observer.submit(() -> NewsQuotaOperationRunner.clear(factory, 250));
+            require(entered.await(5, java.util.concurrent.TimeUnit.SECONDS), "runner did not reach stage");
+            require(result.get(5, java.util.concurrent.TimeUnit.SECONDS) == NewsPrivateStoreFactory.ClearResult.UNKNOWN, "timed out clear accepted");
+            require(factory.capture("saved") == null, "timed out clear released gate");
+            final long holdsBeforeQueued = holdCount(s.root.resolve("ledger.db"));
+            require(NewsQuotaOperationRunner.clear(factory, 30) == NewsPrivateStoreFactory.ClearResult.UNKNOWN, "queued timeout accepted");
+            proceed.countDown();
+            NewsQuotaOperationRunner.awaitIdleForTesting();
+            require(holdCount(s.root.resolve("ledger.db")) == holdsBeforeQueued, "expired queued clear mutated ledger");
+            require(factory.capture("saved") == null, "late clear unblocked readers");
+            require(NewsQuotaOperationRunner.clear(factory, 10000) == NewsPrivateStoreFactory.ClearResult.CONFIRMED_HELD, "explicit retry clear failed");
+            final NewsPrivateStoreFactory.ReadTicket after = factory.capture("saved");
+            require(after != null && factory.read(after).state == NewsPrivateStoreFactory.ReadState.MISS, "retry did not clear index");
+        } finally { proceed.countDown(); observer.shutdown(); }
     }
 
     private static final class SyntheticRoot {
@@ -209,22 +273,22 @@ final class NewsPrivateStoreFactoryFixture {
             final NewsPrivateStoreFactory.ReadTicket ticket = f.capture("saved");
             require(ticket != null && f.read(ticket).state == NewsPrivateStoreFactory.ReadState.HIT, "MAX clear baseline unavailable");
             final long holds = holdCount(s.root.resolve("ledger.db"));
-            require(f.clearForMutationTesting() == NewsPrivateStoreFactory.ClearResult.UNKNOWN, "MAX clear accepted");
+            require(clearSync(f) == NewsPrivateStoreFactory.ClearResult.UNKNOWN, "MAX clear accepted");
             require(f.capture("saved") == null && f.read(ticket).state == NewsPrivateStoreFactory.ReadState.UNKNOWN, "MAX clear unblocked");
             require(holdCount(s.root.resolve("ledger.db")) == holds + 1, "MAX clear lost hold");
             setGeneration(s.root.resolve("index.db"), 0L);
-            require(f.clearForMutationTesting() == NewsPrivateStoreFactory.ClearResult.CONFIRMED_HELD, "MAX recovery clear failed");
+            require(clearSync(f) == NewsPrivateStoreFactory.ClearResult.CONFIRMED_HELD, "MAX recovery clear failed");
         }
         {
             final SyntheticRoot s = newSyntheticRoot(context);
             final NewsPrivateStoreFactory fault = NewsPrivateStoreFactory.openForMutationTesting(s.context, limit, null,
                     stage -> { if ("clearBeforeCommit".equals(stage)) throw new IllegalStateException("synthetic clear rollback"); });
-            require(fault != null && fault.clearForMutationTesting() == NewsPrivateStoreFactory.ClearResult.UNKNOWN, "clear rollback accepted");
+            require(fault != null && clearSync(fault) == NewsPrivateStoreFactory.ClearResult.UNKNOWN, "clear rollback accepted");
             require(fault.capture("saved") == null, "rollback clear unblocked");
             require(imageRowCount(s.root.resolve("index.db")) == 1, "rollback removed index row");
             require(holdCount(s.root.resolve("ledger.db")) == 1, "rollback lost hold");
             final NewsPrivateStoreFactory retry = NewsPrivateStoreFactory.openForMutationTesting(s.context, limit);
-            require(retry != null && retry.clearForMutationTesting() == NewsPrivateStoreFactory.ClearResult.CONFIRMED_HELD, "rollback retry failed");
+            require(retry != null && clearSync(retry) == NewsPrivateStoreFactory.ClearResult.CONFIRMED_HELD, "rollback retry failed");
         }
         {
             final SyntheticRoot s = newSyntheticRoot(context);
@@ -240,7 +304,7 @@ final class NewsPrivateStoreFactoryFixture {
             });
             require(f != null, "clear close fixture unavailable");
             inject[0] = true;
-            require(f.clearForMutationTesting() == NewsPrivateStoreFactory.ClearResult.UNKNOWN && closes[0] == 5 && committed[0], "clear close failure not observed");
+            require(clearSync(f) == NewsPrivateStoreFactory.ClearResult.UNKNOWN && closes[0] == 5 && committed[0], "clear close failure not observed");
             require(f.capture("saved") == null, "clear close quarantine allowed capture");
         }
         checkClearInterleavings(context);
@@ -267,15 +331,15 @@ final class NewsPrivateStoreFactoryFixture {
             require(delayed != null && peer != null && unrelated != null, "delayed clear factories unavailable");
             final java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newSingleThreadExecutor();
             try {
-                final java.util.concurrent.Future<NewsPrivateStoreFactory.ClearResult> first = executor.submit(delayed::clearForMutationTesting);
+                final java.util.concurrent.Future<NewsPrivateStoreFactory.ClearResult> first = executor.submit(() -> clearSync(delayed));
                 require(entered.await(5, java.util.concurrent.TimeUnit.SECONDS), "delayed clear did not enter");
-                require(peer.clearForMutationTesting() == NewsPrivateStoreFactory.ClearResult.UNKNOWN, "newer busy clear accepted");
+                require(clearSync(peer) == NewsPrivateStoreFactory.ClearResult.UNKNOWN, "newer busy clear accepted");
                 final NewsPrivateStoreFactory.ReadTicket independent = unrelated.capture("saved");
                 require(independent != null && unrelated.read(independent).state == NewsPrivateStoreFactory.ReadState.HIT, "other root blocked");
                 proceed.countDown();
                 require(first.get(10, java.util.concurrent.TimeUnit.SECONDS) == NewsPrivateStoreFactory.ClearResult.UNKNOWN, "old clear unblocked newer epoch");
                 require(peer.capture("saved") == null, "newer clear epoch unblocked");
-                require(peer.clearForMutationTesting() == NewsPrivateStoreFactory.ClearResult.CONFIRMED_HELD, "newer clear retry failed");
+                require(clearSync(peer) == NewsPrivateStoreFactory.ClearResult.CONFIRMED_HELD, "newer clear retry failed");
             } finally { proceed.countDown(); executor.shutdown(); }
         }
         {
@@ -291,10 +355,10 @@ final class NewsPrivateStoreFactoryFixture {
             try {
                 final java.util.concurrent.Future<NewsPrivateStoreFactory.ReadResult> work = executor.submit(() -> reader.read(ticket));
                 require(entered.await(5, java.util.concurrent.TimeUnit.SECONDS), "read did not pause");
-                require(peer.clearForMutationTesting() == NewsPrivateStoreFactory.ClearResult.UNKNOWN, "busy clear accepted during read");
+                require(clearSync(peer) == NewsPrivateStoreFactory.ClearResult.UNKNOWN, "busy clear accepted during read");
                 proceed.countDown();
                 require(work.get(10, java.util.concurrent.TimeUnit.SECONDS).state == NewsPrivateStoreFactory.ReadState.UNKNOWN, "stale read escaped failed clear");
-                require(peer.clearForMutationTesting() == NewsPrivateStoreFactory.ClearResult.CONFIRMED_HELD, "paused read clear retry failed");
+                require(clearSync(peer) == NewsPrivateStoreFactory.ClearResult.CONFIRMED_HELD, "paused read clear retry failed");
             } finally { proceed.countDown(); executor.shutdown(); }
         }
     }
@@ -320,14 +384,14 @@ final class NewsPrivateStoreFactoryFixture {
         final NewsPrivateStoreFactory.ReadTicket oldRead = first.capture("saved");
         final NewsPrivateStoreFactory.WriteTicket oldWrite = first.beginFetch("saved");
         require(oldRead != null && oldWrite != null && first.read(oldRead).state == NewsPrivateStoreFactory.ReadState.HIT, "clear baseline unavailable");
-        require(ordinary.clearForMutationTesting() == NewsPrivateStoreFactory.ClearResult.SKIPPED &&
+        require(clearSync(ordinary) == NewsPrivateStoreFactory.ClearResult.SKIPPED &&
                 first.read(oldRead).state == NewsPrivateStoreFactory.ReadState.HIT, "ordinary skip blocked read");
         final long blobs = blobCount(root), holds = holdCount(root.resolve("ledger.db"));
-        require(low.clearForMutationTesting() == NewsPrivateStoreFactory.ClearResult.UNKNOWN, "low budget clear accepted");
+        require(clearSync(low) == NewsPrivateStoreFactory.ClearResult.UNKNOWN, "low budget clear accepted");
         require(first.read(oldRead).state == NewsPrivateStoreFactory.ReadState.UNKNOWN && second.capture("saved") == null, "failed clear did not block readers");
         require(first.putForMutationTesting(oldWrite, new byte[] {1}) == NewsPrivateStoreFactory.PutResult.SKIPPED, "failed clear admitted old writer");
         require(blobCount(root) == blobs && holdCount(root.resolve("ledger.db")) == holds, "failed clear changed blobs/holds");
-        require(second.clearForMutationTesting() == NewsPrivateStoreFactory.ClearResult.CONFIRMED_HELD, "retry clear failed");
+        require(clearSync(second) == NewsPrivateStoreFactory.ClearResult.CONFIRMED_HELD, "retry clear failed");
         require(first.read(oldRead).state == NewsPrivateStoreFactory.ReadState.UNKNOWN, "old read revived");
         final NewsPrivateStoreFactory.ReadTicket after = first.capture("saved");
         require(after != null && first.read(after).state == NewsPrivateStoreFactory.ReadState.MISS, "cleared row revived");
@@ -345,12 +409,12 @@ final class NewsPrivateStoreFactoryFixture {
         try {
             final java.util.concurrent.Future<NewsPrivateStoreFactory.PutResult> work = executor.submit(() -> delayed.putForMutationTesting(overlap, new byte[] {7}));
             require(entered.await(5, java.util.concurrent.TimeUnit.SECONDS), "overlap writer did not enter");
-            require(second.clearForMutationTesting() == NewsPrivateStoreFactory.ClearResult.UNKNOWN, "busy clear incorrectly confirmed");
+            require(clearSync(second) == NewsPrivateStoreFactory.ClearResult.UNKNOWN, "busy clear incorrectly confirmed");
             require(first.capture("overlap") == null, "busy clear did not block capture");
             proceed.countDown();
             require(work.get(10, java.util.concurrent.TimeUnit.SECONDS) == NewsPrivateStoreFactory.PutResult.UNCERTAIN, "old writer reported confirmed after clear request");
             require(first.capture("overlap") == null, "failed clear unblocked after old put");
-            require(second.clearForMutationTesting() == NewsPrivateStoreFactory.ClearResult.CONFIRMED_HELD, "overlap retry clear failed");
+            require(clearSync(second) == NewsPrivateStoreFactory.ClearResult.CONFIRMED_HELD, "overlap retry clear failed");
             final NewsPrivateStoreFactory.ReadTicket absent = first.capture("overlap");
             require(absent != null && first.read(absent).state == NewsPrivateStoreFactory.ReadState.MISS, "old put appeared after clear");
         } finally { proceed.countDown(); executor.shutdown(); }
@@ -658,6 +722,11 @@ final class NewsPrivateStoreFactoryFixture {
         try (SQLiteDatabase db = SQLiteDatabase.openDatabase(path.toFile(), params)) {
             db.execSQL("INSERT OR REPLACE INTO news_paths(image_key,generation) VALUES(?,?)", new Object[] {key, generation});
         }
+    }
+
+    private static NewsPrivateStoreFactory.ClearResult clearSync(NewsPrivateStoreFactory factory) {
+        final Object operation = new Object();
+        return factory.acknowledgeClear(factory.clearRawForMutationTesting(operation), operation);
     }
 
     private static void require(boolean condition, String message) {

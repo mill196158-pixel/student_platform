@@ -232,17 +232,50 @@ final class NewsPrivateStoreFactory {
     enum PutResult { CONFIRMED_HELD, SKIPPED, UNCERTAIN }
     enum ClearResult { CONFIRMED_HELD, SKIPPED, UNKNOWN }
 
-    /** Logical synthetic clear only. Blob files and durable holds are retained.
-     * Other processes observe the invalidation after the committed generation.
-     * Synchronous worker API: do not wrap it in an observer timeout; late
-     * acknowledgement semantics are not implemented. */
-    ClearResult clearForMutationTesting() {
-        if (syntheticLimit == null) return ClearResult.SKIPPED;
-        final long localEpoch;
+    static final class PendingClear {
+        private final ClearResult state;
+        private final NewsPrivateStoreFactory issuer;
+        private final Object operation;
+        private final long epoch;
+        private boolean consumed;
+        private PendingClear(ClearResult state, NewsPrivateStoreFactory issuer, Object operation, long epoch) {
+            this.state = state; this.issuer = issuer; this.operation = operation; this.epoch = epoch;
+        }
+    }
+
+    static final class PreparedClear {
+        private final ClearResult initial;
+        private final NewsPrivateStoreFactory issuer;
+        private final Object operation;
+        private final long epoch;
+        private boolean dispatched;
+        private PreparedClear(ClearResult initial, NewsPrivateStoreFactory issuer, Object operation, long epoch) {
+            this.initial = initial; this.issuer = issuer; this.operation = operation; this.epoch = epoch;
+        }
+    }
+
+    /** Synchronously block new local deliveries before a clear is queued. */
+    PreparedClear prepareClearForMutationTesting(Object operation) {
+        if (syntheticLimit == null || operation == null) return new PreparedClear(ClearResult.SKIPPED, this, operation, -1);
         synchronized (fence) {
             fence.blocked = true;
-            if (fence.epoch == Long.MAX_VALUE) return ClearResult.UNKNOWN;
-            localEpoch = ++fence.epoch;
+            if (fence.epoch == Long.MAX_VALUE) return new PreparedClear(ClearResult.UNKNOWN, this, operation, -1);
+            return new PreparedClear(null, this, operation, ++fence.epoch);
+        }
+    }
+
+    PendingClear clearRawForMutationTesting(Object operation) {
+        return executePreparedClear(prepareClearForMutationTesting(operation), operation);
+    }
+
+    /** Raw clear never unblocks readers: the matching live observer must ack. */
+    PendingClear executePreparedClear(PreparedClear prepared, Object operation) {
+        if (prepared == null || prepared.issuer != this || prepared.operation != operation) return new PendingClear(ClearResult.UNKNOWN, this, operation, -1);
+        if (prepared.initial != null) return new PendingClear(prepared.initial, this, operation, prepared.epoch);
+        final long localEpoch = prepared.epoch;
+        synchronized (fence) {
+            if (prepared.dispatched || fence.epoch != localEpoch || !fence.blocked) return new PendingClear(ClearResult.UNKNOWN, this, operation, localEpoch);
+            prepared.dispatched = true;
         }
         final boolean[] committed = {false};
         try {
@@ -277,16 +310,29 @@ final class NewsPrivateStoreFactory {
                         index.setTransactionSuccessful();
                     } finally { index.endTransaction(); }
                 } finally { closeConfirmed(index); }
+                if (testPutHook != null) testPutHook.stage("clearAfterCommit");
                 committed[0] = true;
-            })) return ClearResult.UNKNOWN;
-            synchronized (fence) {
-                if (committed[0] && fence.epoch == localEpoch) {
-                    fence.blocked = false;
-                    return ClearResult.CONFIRMED_HELD;
-                }
-            }
-            return ClearResult.UNKNOWN;
-        } catch (Exception failure) { return ClearResult.UNKNOWN; }
+            })) return new PendingClear(ClearResult.UNKNOWN, this, operation, localEpoch);
+            return new PendingClear(committed[0] ? ClearResult.CONFIRMED_HELD : ClearResult.UNKNOWN, this, operation, localEpoch);
+        } catch (Exception failure) { return new PendingClear(ClearResult.UNKNOWN, this, operation, localEpoch); }
+    }
+
+    /** Only the original live observer can acknowledge this exact epoch. */
+    ClearResult acknowledgeClear(PendingClear receipt, Object operation) {
+        return acknowledgeClear(receipt, operation, () -> true);
+    }
+
+    ClearResult acknowledgeClear(PendingClear receipt, Object operation, java.util.function.BooleanSupplier live) {
+        if (receipt == null || receipt.issuer != this || receipt.operation != operation) return ClearResult.UNKNOWN;
+        synchronized (fence) {
+            if (live == null || !live.getAsBoolean()) return ClearResult.UNKNOWN;
+            if (receipt.state == ClearResult.SKIPPED) return ClearResult.SKIPPED;
+            if (receipt.state != ClearResult.CONFIRMED_HELD || receipt.consumed ||
+                    !fence.blocked || fence.epoch != receipt.epoch) return ClearResult.UNKNOWN;
+            receipt.consumed = true;
+            fence.blocked = false;
+            return ClearResult.CONFIRMED_HELD;
+        }
     }
 
     /** Synthetic writer only, never an ordinary runtime quota admission. */
