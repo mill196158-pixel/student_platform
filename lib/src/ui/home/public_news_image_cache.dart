@@ -1,9 +1,6 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:path_provider/path_provider.dart';
-import 'package:sqflite/sqflite.dart' as sqlite;
 import 'package:student_ui/student_ui.dart';
 
 import '../../core/optional_image_cache_budget.dart';
@@ -32,14 +29,29 @@ class PublicNewsImageCache {
   final Map<String, Future<Uint8List?>> _inflight = {};
   final Map<String, String> _inflightPaths = {};
   int _pendingWrites = 0;
+  Future<void>? _collectingOrphans;
   int _clearEpoch = 0;
   final Map<String, int> _pathEpoch = {};
 
-  static Future<NewsSqliteImageStore> _openDefault() async {
-    final root = await getTemporaryDirectory();
-    return NewsSqliteImageStore.openOwned(
-        databasePath: '${await sqlite.getDatabasesPath()}/public_news_index_v2.db',
-        root: Directory('${root.path}/public_news_blobs_v2'));
+  static Future<NewsSqliteImageStore> _openDefault() => NewsSqliteImageStore.openPublicNews();
+
+  void _scheduleOrphanCollection(NewsSqliteImageStore store) {
+    if (_collectingOrphans != null) return;
+    var active = true;
+    final done = () async {
+      final deadline = Timer(const Duration(seconds: 2), () { active = false; });
+      try {
+        await store.collectOrphaned(current: () => active);
+      } catch (_) {
+        // Optional maintenance must never affect display.
+      } finally {
+        deadline.cancel();
+        active = false;
+        _budget.refreshAfterCollection();
+      }
+    }();
+    _collectingOrphans = done;
+    unawaited(done.whenComplete(() { if (identical(_collectingOrphans, done)) _collectingOrphans = null; }));
   }
 
   Future<NewsSqliteImageStore> _store() async {
@@ -131,6 +143,7 @@ class PublicNewsImageCache {
         try { await target.put(key, copy, proof); } catch (_) {} finally { release(); _pendingWrites--; }
       }());
     } else {
+      if (_budget.knownInsufficientFor(bytes.length)) _scheduleOrphanCollection(store);
       final pending = _budget.pendingInitialMeasurement;
       if (pending != null && _pendingWrites < 16) {
         final target = store, proof = ticket;

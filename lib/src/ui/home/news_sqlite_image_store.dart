@@ -5,6 +5,7 @@ import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart' as sqlite;
 import 'package:student_ui/student_ui.dart';
 
@@ -23,20 +24,38 @@ class NewsImageReadResult {
   final Uint8List? bytes;
 }
 
-/// A new-namespace store. No legacy files or orphaned blobs are deleted.
+class NewsOrphanCollectionResult {
+  const NewsOrphanCollectionResult(this.filesUnlinked, this.namedBytesUnlinked);
+  final int filesUnlinked, namedBytesUnlinked;
+}
+
+/// A new-namespace store. Only the fixed public-news binding may collect
+/// unreferenced immutable blobs; legacy files are never collected here.
 /// Callers must use the same coordination database for this namespace.
 class NewsSqliteImageStore {
-  NewsSqliteImageStore({required this.database, required this.root}) : ownsDatabase = false;
-  NewsSqliteImageStore._owned(this.database, this.root) : ownsDatabase = true;
+  NewsSqliteImageStore({required this.database, required this.root}) : ownsDatabase = false, _canCollectOrphans = false;
+  NewsSqliteImageStore._owned(this.database, this.root, this._canCollectOrphans) : ownsDatabase = true;
+  @visibleForTesting
+  NewsSqliteImageStore.forCollectionTest({required this.database, required this.root})
+      : ownsDatabase = false, _canCollectOrphans = true;
   static Future<NewsSqliteImageStore> openOwned({required String databasePath,
       required Directory root, sqlite.DatabaseFactory? factory}) async {
     final db = await (factory ?? sqlite.databaseFactory).openDatabase(databasePath,
         options: sqlite.OpenDatabaseOptions(singleInstance: false));
-    return NewsSqliteImageStore._owned(db, root);
+    return NewsSqliteImageStore._owned(db, root, false);
+  }
+  /// The only ordinary collector binding: fixed public-news namespace + DB.
+  static Future<NewsSqliteImageStore> openPublicNews() async {
+    final temp = await getTemporaryDirectory();
+    final dbPath = '${await sqlite.getDatabasesPath()}/public_news_index_v2.db';
+    final db = await sqlite.databaseFactory.openDatabase(dbPath,
+        options: sqlite.OpenDatabaseOptions(singleInstance: false));
+    return NewsSqliteImageStore._owned(db, Directory('${temp.path}/public_news_blobs_v2'), true);
   }
   final sqlite.Database database;
   final Directory root;
   final bool ownsDatabase;
+  final bool _canCollectOrphans;
   bool _poisoned = false;
   Future<void> _tail = Future<void>.value();
   Future<void>? _closing;
@@ -56,12 +75,23 @@ class NewsSqliteImageStore {
   Future<void> Function()? debugAfterBlobRename;
   @visibleForTesting
   Future<void> Function()? debugAfterCommit;
+  @visibleForTesting
+  Future<void> Function()? debugAfterOrphanListing;
+  @visibleForTesting
+  Future<void> Function(File)? debugBeforeOrphanUnlink;
+  @visibleForTesting
+  Future<void> Function()? debugAfterOrphanUnlink;
+  @visibleForTesting
+  Future<void> Function()? debugBeforeImageRead;
 
-  Future<void> _schema(sqlite.Transaction tx, String namespace) async {
+  Future<void> _schema(sqlite.Transaction tx, String namespace, {bool allowBootstrap = true}) async {
     final marker = File('$namespace/.news-store-protocol');
     final kind = await FileSystemEntity.type(marker.path, followLinks: false);
     final names = ['news_store_epochs', 'news_store_images', 'news_store_protocol', 'news_store_suppression'];
     final tables = await tx.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name IN (?,?,?,?)", names);
+    if (!allowBootstrap && (kind != FileSystemEntityType.file || tables.length != names.length)) {
+      throw StateError('Unverified cache protocol');
+    }
     if (tables.isEmpty && kind == FileSystemEntityType.notFound) {
       await tx.execute('CREATE TABLE news_store_epochs ('
         'namespace TEXT NOT NULL, path TEXT NOT NULL, generation INTEGER NOT NULL, '
@@ -262,6 +292,62 @@ class NewsSqliteImageStore {
     });
   }
 
+  /// Deletes only unreferenced immutable public-news files under the same
+  /// index transaction as all readers/writers. Bytes are named file lengths,
+  /// not a claim about physical disk space actually reclaimed.
+  Future<NewsOrphanCollectionResult?> collectOrphaned({
+      required bool Function() current, int maxFiles = 16}) async {
+    if (!_canCollectOrphans || maxFiles <= 0 || maxFiles > 16 || !current()) return null;
+    try {
+      if (await FileSystemEntity.type(root.path, followLinks: false) != FileSystemEntityType.directory || !current()) return null;
+      final ns = await root.resolveSymbolicLinks();
+      if (!current()) return null;
+      return await _transaction((tx) async {
+        if (!current()) return null;
+        await _schema(tx, ns, allowBootstrap: false);
+        if (!current()) return null;
+        final rows = await tx.query('news_store_images', columns: ['filename'], where: 'namespace=?', whereArgs: [ns]);
+        final namePattern = RegExp(r'^[A-Za-z0-9_-]{32}\.bin$');
+        final references = <String>{};
+        for (final row in rows) {
+          final name = row['filename'];
+          if (name is! String || !namePattern.hasMatch(name)) return null;
+          references.add(name);
+        }
+        final candidates = <File>[];
+        var scanned = 0;
+        await for (final entry in Directory(ns).list(followLinks: false)) {
+          if (!current() || ++scanned > 1024) return null;
+          final name = entry.uri.pathSegments.where((part) => part.isNotEmpty).last;
+          if (name == '.news-store-protocol' && entry is File) continue;
+          if (entry is! File || !namePattern.hasMatch(name)) return null;
+          if (!references.contains(name)) candidates.add(entry);
+        }
+        await debugAfterOrphanListing?.call();
+        if (!current()) return null;
+        var files = 0, bytes = 0;
+        for (final file in candidates.take(maxFiles)) {
+          if (!current()) break;
+          try {
+            if (await FileSystemEntity.type(file.path, followLinks: false) != FileSystemEntityType.file || !current()) continue;
+            final length = await file.length();
+            if (!current()) break;
+            await debugBeforeOrphanUnlink?.call(file);
+            if (!current()) break;
+            await file.delete();
+            if (await FileSystemEntity.type(file.path, followLinks: false) != FileSystemEntityType.notFound) continue;
+            files++;
+            bytes += length;
+            await debugAfterOrphanUnlink?.call();
+          } on FileSystemException {
+            // A missing/unremovable file does not earn accounting credit.
+          }
+        }
+        return NewsOrphanCollectionResult(files, bytes);
+      });
+    } catch (_) { return null; }
+  }
+
   Future<Uint8List?> _readInTransaction(sqlite.Transaction tx, String ns, NewsImageCacheKey key) async {
       final rows = await tx.query('news_store_images', where: 'namespace=? AND id=? AND path=?',
           whereArgs: [ns, key.id, key.path]);
@@ -272,6 +358,7 @@ class NewsSqliteImageStore {
       final file = File('$ns/$filename');
       if (await FileSystemEntity.type(file.path, followLinks: false) != FileSystemEntityType.file) throw StateError('Missing image');
       try {
+        await debugBeforeImageRead?.call();
         final data = await file.readAsBytes();
         if (data.length != row['size'] || sha256.convert(data).toString() != row['sha']) throw StateError('Invalid image');
         return data;

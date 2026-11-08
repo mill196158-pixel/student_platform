@@ -44,6 +44,21 @@ class OptionalImageCacheBudget {
   Future<void>? get pendingInitialMeasurement =>
       _observed == null || !_fresh ? _refreshing : null;
 
+  /// True only for a fresh, known observation; unknown never triggers cleanup.
+  bool knownInsufficientFor(int bytes) => bytes >= 0 && _observed != null &&
+      _fresh && _observed! + _reserved + bytes > limitBytes;
+
+  /// Never credit an unlink directly. Re-measure actual roots after it settles.
+  void refreshAfterCollection() {
+    _revision++;
+    _measuredAt = null;
+    if (_refreshing != null || _reserved != 0) {
+      _refreshAfterSettled = true;
+      return;
+    }
+    _scheduleRefresh();
+  }
+
   static Future<List<Directory>> _runtimeRoots() async => [
         await getTemporaryDirectory(),
         await getApplicationCacheDirectory(),
