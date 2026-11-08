@@ -45,6 +45,26 @@ final class NewsPrivateStoreFactoryFixture {
         require(factory.read(saved).state == NewsPrivateStoreFactory.ReadState.UNKNOWN, "stale ticket accepted");
         final NewsPrivateStoreFactory.ReadTicket refreshed = factory.capture("saved");
         require(refreshed != null && factory.read(refreshed).state == NewsPrivateStoreFactory.ReadState.HIT, "fresh ticket rejected");
+        require(factory.beginFetch("new") == null, "ordinary factory mutated without profile");
+        require(pathGeneration(root.resolve("index.db"), "new") == 0, "ordinary path mutated");
+        final NewsPrivateStoreFactory low = NewsPrivateStoreFactory.openForMutationTesting(synthetic, 1L);
+        require(low != null && low.beginFetch("new") == null, "low budget admitted mutation");
+        require(low.read(refreshed).state == NewsPrivateStoreFactory.ReadState.HIT, "low budget blocked existing read");
+        final NewsPrivateStoreFactory writable = NewsPrivateStoreFactory.openForMutationTesting(synthetic, 200L * 1024L * 1024L);
+        require(writable != null && writable.beginFetch("new") != null, "test beginFetch rejected");
+        require(writable.beginFetch("new") != null && pathGeneration(root.resolve("index.db"), "new") == 2L, "path generation did not advance");
+        setGeneration(root.resolve("index.db"), Long.MAX_VALUE);
+        final NewsPrivateStoreFactory.ReadTicket saturatedRead = writable.capture("saved");
+        require(saturatedRead != null && writable.read(saturatedRead).state == NewsPrivateStoreFactory.ReadState.HIT, "saturated generation blocked read");
+        require(writable.beginFetch("global-full") == null && pathGeneration(root.resolve("index.db"), "global-full") == 0, "saturated global generation mutated");
+        setGeneration(root.resolve("index.db"), 1L);
+        setPathGeneration(root.resolve("index.db"), "path-full", Long.MAX_VALUE);
+        require(writable.beginFetch("path-full") == null && pathGeneration(root.resolve("index.db"), "path-full") == Long.MAX_VALUE, "saturated path generation mutated");
+        final Path unknown = root.resolve("protected-unknown");
+        Files.write(unknown, new byte[] {9, 8, 7});
+        require(writable.beginFetch("unknown") == null && pathGeneration(root.resolve("index.db"), "unknown") == 0, "unknown file admitted mutation");
+        require(Arrays.equals(Files.readAllBytes(unknown), new byte[] {9, 8, 7}), "unknown file modified");
+        Files.delete(unknown);
         Files.write(root.resolve("marker"), ("v1:" + new String(new char[64]).replace('\0', 'b')).getBytes(StandardCharsets.US_ASCII));
         require(factory.read(refreshed).state == NewsPrivateStoreFactory.ReadState.UNKNOWN, "foreign marker accepted");
         Files.write(root.resolve("marker"), token.getBytes(StandardCharsets.US_ASCII));
@@ -93,6 +113,77 @@ final class NewsPrivateStoreFactoryFixture {
         require(NewsPrivateStoreFactory.openExisting(synthetic) == null, "missing lock admitted");
         require(!Files.exists(root.resolve("lease.lock")), "lock recreated");
         checkUnsettledClose(context);
+        checkMutationCloseFailure(context);
+        checkSqliteFull(context);
+    }
+
+    private static void checkSqliteFull(Context context) throws Exception {
+        final Path sandbox = context.getCacheDir().toPath().resolve("news_factory_full_" + UUID.randomUUID());
+        Files.createDirectory(sandbox);
+        final Context synthetic = new ContextWrapper(context) {
+            @Override public File getNoBackupFilesDir() { return sandbox.toFile(); }
+        };
+        final Path root = sandbox.resolve("news_quota_v1");
+        Files.createDirectory(root); Files.createDirectory(root.resolve("blobs"));
+        Files.createFile(root.resolve("lease.lock"));
+        final String token = "v1:" + new String(new char[64]).replace('\0', 'e');
+        Files.write(root.resolve("marker"), token.getBytes(StandardCharsets.US_ASCII));
+        createDb(root.resolve("index.db"), root.toRealPath().toString(), token, true);
+        createDb(root.resolve("ledger.db"), root.toRealPath().toString(), token, false);
+        final SQLiteDatabase.OpenParams params = new SQLiteDatabase.OpenParams.Builder()
+                .setOpenFlags(SQLiteDatabase.OPEN_READWRITE | SQLiteDatabase.NO_LOCALIZED_COLLATORS)
+                .setJournalMode("DELETE").setSynchronousMode("FULL").build();
+        final String suffix = new String(new char[500]).replace('\0', 'x');
+        boolean full = false;
+        try (SQLiteDatabase db = SQLiteDatabase.openDatabase(root.resolve("index.db").toFile(), params)) {
+            try (android.database.Cursor cap = db.rawQuery("PRAGMA max_page_count=256", null)) {
+                require(cap.moveToFirst() && cap.getLong(0) == 256, "FULL fixture page cap unavailable");
+            }
+            for (int i = 0; i < 3000; i++) {
+                try { db.execSQL("INSERT INTO news_paths(image_key,generation) VALUES(?,1)", new Object[] {String.format(java.util.Locale.ROOT, "%08d", i) + suffix}); }
+                catch (android.database.sqlite.SQLiteFullException expected) { full = true; break; }
+            }
+        }
+        require(full, "fixture failed to reach SQLITE_FULL");
+        final NewsPrivateStoreFactory factory = NewsPrivateStoreFactory.openForMutationTesting(synthetic, 200L * 1024L * 1024L);
+        require(factory != null, "FULL fixture could not reopen");
+        final String key = "fulltest" + suffix;
+        require(factory.beginFetch(key) == null, "SQLITE_FULL returned ticket");
+        require(pathGeneration(root.resolve("index.db"), key) == 0, "SQLITE_FULL committed generation");
+    }
+
+    private static void checkMutationCloseFailure(Context context) throws Exception {
+        final Path sandbox = context.getCacheDir().toPath().resolve("news_factory_mutation_close_" + UUID.randomUUID());
+        Files.createDirectory(sandbox);
+        final Context synthetic = new ContextWrapper(context) {
+            @Override public File getNoBackupFilesDir() { return sandbox.toFile(); }
+        };
+        final Path root = sandbox.resolve("news_quota_v1");
+        Files.createDirectory(root); Files.createDirectory(root.resolve("blobs"));
+        Files.createFile(root.resolve("lease.lock"));
+        final String token = "v1:" + new String(new char[64]).replace('\0', 'd');
+        Files.write(root.resolve("marker"), token.getBytes(StandardCharsets.US_ASCII));
+        createDb(root.resolve("index.db"), root.toRealPath().toString(), token, true);
+        createDb(root.resolve("ledger.db"), root.toRealPath().toString(), token, false);
+        final boolean[] inject = {false};
+        final int[] closes = {0};
+        final boolean[] committed = {false};
+        final NewsPrivateStoreFactory factory = NewsPrivateStoreFactory.openForMutationTesting(synthetic,
+                200L * 1024L * 1024L, db -> {
+                    if (inject[0] && ++closes[0] == 3) {
+                        try (android.database.Cursor row = db.rawQuery("SELECT generation FROM news_paths WHERE image_key=?", new String[] {"close-after-commit"})) {
+                            committed[0] = !db.inTransaction() && row.moveToFirst() && row.getLong(0) == 1L;
+                        }
+                        throw new IllegalStateException("synthetic post-commit close failure");
+                    }
+                });
+        require(factory != null, "mutation close fixture rejected");
+        inject[0] = true;
+        require(factory.beginFetch("close-after-commit") == null, "ticket escaped failed close");
+        require(closes[0] == 3, "post-commit close failure not reached");
+        require(committed[0], "mutation was not committed before injected close failure");
+        require(factory.capture("saved") == null, "mutation close quarantine admitted capture");
+        // Commit may have happened; the quarantined store is not cleaned up.
     }
 
     private static void checkUnsettledClose(Context context) throws Exception {
@@ -140,6 +231,7 @@ final class NewsPrivateStoreFactoryFixture {
             if (index) {
                 db.execSQL("CREATE TABLE news_state (id INTEGER PRIMARY KEY CHECK(id=1), generation INTEGER NOT NULL CHECK(generation>=0))");
                 db.execSQL("CREATE TABLE news_images (image_key TEXT PRIMARY KEY NOT NULL, filename TEXT NOT NULL, size INTEGER NOT NULL, sha TEXT NOT NULL)");
+                db.execSQL("CREATE TABLE news_paths (image_key TEXT PRIMARY KEY NOT NULL, generation INTEGER NOT NULL CHECK(generation>=0))");
                 db.execSQL("INSERT INTO news_state(id,generation) VALUES(1,0)");
                 final String filename = new String(new char[64]).replace('\0', 'a') + ".bin";
                 final byte[] bytes = new byte[] {1, 2, 3};
@@ -173,6 +265,25 @@ final class NewsPrivateStoreFactoryFixture {
                 .setJournalMode("DELETE").setSynchronousMode("FULL").build();
         try (SQLiteDatabase db = SQLiteDatabase.openDatabase(path.toFile(), params)) {
             db.execSQL("UPDATE news_state SET generation=?", new Object[] {generation});
+        }
+    }
+
+    private static long pathGeneration(Path path, String key) {
+        final SQLiteDatabase.OpenParams params = new SQLiteDatabase.OpenParams.Builder()
+                .setOpenFlags(SQLiteDatabase.OPEN_READWRITE | SQLiteDatabase.NO_LOCALIZED_COLLATORS)
+                .setJournalMode("DELETE").setSynchronousMode("FULL").build();
+        try (SQLiteDatabase db = SQLiteDatabase.openDatabase(path.toFile(), params);
+             android.database.Cursor row = db.rawQuery("SELECT generation FROM news_paths WHERE image_key=?", new String[] {key})) {
+            return row.moveToFirst() ? row.getLong(0) : 0;
+        }
+    }
+
+    private static void setPathGeneration(Path path, String key, long generation) {
+        final SQLiteDatabase.OpenParams params = new SQLiteDatabase.OpenParams.Builder()
+                .setOpenFlags(SQLiteDatabase.OPEN_READWRITE | SQLiteDatabase.NO_LOCALIZED_COLLATORS)
+                .setJournalMode("DELETE").setSynchronousMode("FULL").build();
+        try (SQLiteDatabase db = SQLiteDatabase.openDatabase(path.toFile(), params)) {
+            db.execSQL("INSERT OR REPLACE INTO news_paths(image_key,generation) VALUES(?,?)", new Object[] {key, generation});
         }
     }
 

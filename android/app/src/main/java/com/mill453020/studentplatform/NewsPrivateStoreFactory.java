@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.DirectoryStream;
 import java.security.MessageDigest;
 import java.util.regex.Pattern;
 
@@ -22,20 +23,22 @@ final class NewsPrivateStoreFactory {
     private static final String SCHEMA = "CREATE TABLE news_quota_custody (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL, token TEXT NOT NULL, root TEXT NOT NULL)";
     private static final String STATE_SCHEMA = "CREATE TABLE news_state (id INTEGER PRIMARY KEY CHECK(id=1), generation INTEGER NOT NULL CHECK(generation>=0))";
     private static final String IMAGE_SCHEMA = "CREATE TABLE news_images (image_key TEXT PRIMARY KEY NOT NULL, filename TEXT NOT NULL, size INTEGER NOT NULL, sha TEXT NOT NULL)";
+    private static final String PATH_SCHEMA = "CREATE TABLE news_paths (image_key TEXT PRIMARY KEY NOT NULL, generation INTEGER NOT NULL CHECK(generation>=0))";
     private static final Pattern FILE_NAME = Pattern.compile("[0-9a-f]{64}\\.bin");
     private static final Pattern SHA = Pattern.compile("[0-9a-f]{64}");
     private final Path root;
     private final CloseHook testCloseHook;
+    private final Long syntheticLimit;
 
     interface CloseHook { void beforeClose(SQLiteDatabase db) throws Exception; }
-    private NewsPrivateStoreFactory(Path root, CloseHook testCloseHook) { this.root = root; this.testCloseHook = testCloseHook; }
+    private NewsPrivateStoreFactory(Path root, CloseHook testCloseHook, Long syntheticLimit) { this.root = root; this.testCloseHook = testCloseHook; this.syntheticLimit = syntheticLimit; }
 
     /** Fixed app-private location only. Never creates or repairs a store. */
     static NewsPrivateStoreFactory openExisting(Context context) {
         if (context == null || Build.VERSION.SDK_INT < 28) return null;
         try {
             final Path root = context.getNoBackupFilesDir().toPath().resolve("news_quota_v1");
-            final NewsPrivateStoreFactory factory = new NewsPrivateStoreFactory(root, null);
+            final NewsPrivateStoreFactory factory = new NewsPrivateStoreFactory(root, null, null);
             return factory.validateExisting() ? factory : null;
         } catch (Exception failure) { return null; }
     }
@@ -46,7 +49,22 @@ final class NewsPrivateStoreFactory {
                 !"com.mill453020.studentplatform.newsfactoryfixture".equals(context.getPackageName())) return null;
         try {
             final Path root = context.getNoBackupFilesDir().toPath().resolve("news_quota_v1");
-            final NewsPrivateStoreFactory factory = new NewsPrivateStoreFactory(root, hook);
+            final NewsPrivateStoreFactory factory = new NewsPrivateStoreFactory(root, hook, null);
+            return factory.validateExisting() ? factory : null;
+        } catch (Exception failure) { return null; }
+    }
+
+    /** Only the isolated fixture may exercise the unproven mutation profile. */
+    static NewsPrivateStoreFactory openForMutationTesting(Context context, long limit) {
+        return openForMutationTesting(context, limit, null);
+    }
+
+    static NewsPrivateStoreFactory openForMutationTesting(Context context, long limit, CloseHook hook) {
+        if (context == null || Build.VERSION.SDK_INT < 28 || limit < 0 ||
+                !"com.mill453020.studentplatform.newsfactoryfixture".equals(context.getPackageName())) return null;
+        try {
+            final Path root = context.getNoBackupFilesDir().toPath().resolve("news_quota_v1");
+            final NewsPrivateStoreFactory factory = new NewsPrivateStoreFactory(root, hook, limit);
             return factory.validateExisting() ? factory : null;
         } catch (Exception failure) { return null; }
     }
@@ -85,6 +103,84 @@ final class NewsPrivateStoreFactory {
         private ReadTicket(String root, String token, String key, long generation) {
             this.root = root; this.token = token; this.key = key; this.generation = generation;
         }
+    }
+
+    static final class WriteTicket {
+        private final String root, token, key;
+        private final long globalGeneration, pathGeneration;
+        private WriteTicket(String root, String token, String key, long globalGeneration, long pathGeneration) {
+            this.root = root; this.token = token; this.key = key;
+            this.globalGeneration = globalGeneration; this.pathGeneration = pathGeneration;
+        }
+    }
+
+    /** Synthetic-only mutation admission. Ordinary factory has no profile. */
+    WriteTicket beginFetch(String key) {
+        if (syntheticLimit == null || key == null || key.isEmpty() || key.length() > 512) return null;
+        final WriteTicket[] result = {null};
+        try {
+            if (!NewsQuotaExclusiveGate.runSync(root.resolve("lease.lock"), () -> {
+                if (!validateLocked() || !syntheticHeadroom()) return;
+                final String canonical = root.toRealPath().toString();
+                final String token = new String(Files.readAllBytes(root.resolve("marker")), StandardCharsets.US_ASCII);
+                final SQLiteDatabase db = openIndexForRead();
+                WriteTicket pending = null;
+                try {
+                    if (!validImageSchema(db)) return;
+                    final Long global = generation(db);
+                    if (global == null || global.longValue() == Long.MAX_VALUE) return;
+                    db.beginTransaction();
+                    try {
+                        long prior = 0;
+                        try (Cursor row = db.rawQuery("SELECT generation FROM news_paths WHERE image_key=?", new String[] {key})) {
+                            if (row.moveToFirst()) {
+                                if (row.getType(0) != Cursor.FIELD_TYPE_INTEGER || row.getLong(0) < 0 || row.getLong(0) == Long.MAX_VALUE) return;
+                                prior = row.getLong(0);
+                                if (row.moveToNext()) return;
+                            }
+                        }
+                        final long next = prior + 1;
+                        db.execSQL("INSERT OR REPLACE INTO news_paths(image_key,generation) VALUES(?,?)", new Object[] {key, next});
+                        db.setTransactionSuccessful();
+                        pending = new WriteTicket(canonical, token, key, global, next);
+                    } finally { db.endTransaction(); }
+                } finally { closeConfirmed(db); }
+                result[0] = pending;
+            })) return null;
+            return result[0];
+        } catch (Exception failure) { return null; }
+    }
+
+    /** Synthetic bound only: never interpreted as proof for an ordinary app. */
+    private boolean syntheticHeadroom() {
+        if (syntheticLimit == null) return false;
+        try {
+            long total = 0;
+            int count = 0;
+            try (DirectoryStream<Path> entries = Files.newDirectoryStream(root)) {
+                for (Path entry : entries) {
+                    if (++count > 1024 || Files.isSymbolicLink(entry)) return false;
+                    final String name = entry.getFileName().toString();
+                    if ("blobs".equals(name)) {
+                        if (!Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS)) return false;
+                        try (DirectoryStream<Path> blobs = Files.newDirectoryStream(entry)) {
+                            for (Path blob : blobs) {
+                                if (++count > 1024 || !FILE_NAME.matcher(blob.getFileName().toString()).matches() ||
+                                        !Files.isRegularFile(blob, LinkOption.NOFOLLOW_LINKS)) return false;
+                                total = Math.addExact(total, Files.size(blob));
+                            }
+                        }
+                    } else {
+                        if (!(name.equals("marker") || name.equals("lease.lock") || name.equals("index.db") || name.equals("ledger.db")) ||
+                                !Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS)) return false;
+                        total = Math.addExact(total, Files.size(entry));
+                    }
+                }
+            }
+            // Synthetic envelope only: both 256-page DBs, rollback journals,
+            // sector/header alignment and control; no Android proof claimed.
+            return Math.addExact(total, 100L * 1024L * 1024L) <= syntheticLimit;
+        } catch (Exception failure) { return false; }
     }
 
     enum ReadState { HIT, MISS, UNKNOWN }
@@ -146,12 +242,24 @@ final class NewsPrivateStoreFactory {
         } catch (Exception failure) { return unknown; }
     }
 
-    private SQLiteDatabase openIndexForRead() {
+    private SQLiteDatabase openIndexForRead() throws Exception {
         final SQLiteDatabase.OpenParams params = new SQLiteDatabase.OpenParams.Builder()
                 .setOpenFlags(SQLiteDatabase.OPEN_READWRITE | SQLiteDatabase.NO_LOCALIZED_COLLATORS)
                 .setJournalMode("DELETE").setSynchronousMode("FULL")
                 .setErrorHandler(ignored -> { throw new SQLiteException("Corrupt news index"); }).build();
-        return SQLiteDatabase.openDatabase(root.resolve("index.db").toFile(), params);
+        final SQLiteDatabase db = SQLiteDatabase.openDatabase(root.resolve("index.db").toFile(), params);
+        boolean valid = false;
+        try {
+            if (!"delete".equalsIgnoreCase(scalar(db, "PRAGMA journal_mode")) ||
+                    !"2".equals(scalar(db, "PRAGMA synchronous")) ||
+                    !"0".equals(scalar(db, "PRAGMA auto_vacuum")) ||
+                    !"4096".equals(scalar(db, "PRAGMA page_size")) ||
+                    !"256".equals(scalar(db, "PRAGMA max_page_count=256"))) throw new SQLiteException("Unsupported index profile");
+            db.execSQL("PRAGMA temp_store=MEMORY");
+            if (!"2".equals(scalar(db, "PRAGMA temp_store"))) throw new SQLiteException("Unsupported temp profile");
+            valid = true;
+            return db;
+        } finally { if (!valid) closeConfirmed(db); }
     }
 
     private static boolean validImageSchema(SQLiteDatabase db) {
@@ -162,10 +270,11 @@ final class NewsPrivateStoreFactory {
                 if (!"table".equals(type)) return false;
                 if (("news_state".equals(name) && STATE_SCHEMA.equals(sql)) ||
                         ("news_images".equals(name) && IMAGE_SCHEMA.equals(sql)) ||
+                        ("news_paths".equals(name) && PATH_SCHEMA.equals(sql)) ||
                         ("news_quota_custody".equals(name) && SCHEMA.equals(sql))) count++;
                 else return false;
             }
-            return count == 3;
+            return count == 4;
         }
     }
 
