@@ -5,10 +5,56 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:student_platform/src/core/attachment_storage_inventory.dart';
 import 'package:student_platform/src/core/cache_inventory_snapshot.dart';
+import 'package:student_platform/src/core/optional_image_cache_budget.dart';
 import 'package:student_platform/src/ui/home/public_news_image_cache.dart';
 import 'package:student_platform/src/ui/profile/cache_diagnostics_screen.dart';
 
+class _CountingLimit extends OptionalImageCacheBudget {
+  _CountingLimit() : super(roots: () async => []);
+  int writes = 0;
+  @override
+  Future<bool> setLimit(int value) async {
+    writes++;
+    return true;
+  }
+}
+
 void main() {
+  testWidgets('a revoked offline permit blocks both outstanding dialogs',
+      (tester) async {
+    var allowed = true, clears = 0;
+    final budget = _CountingLimit();
+    await tester.pumpWidget(MaterialApp(home: CacheDiagnosticsScreen(
+      canAccess: () => allowed,
+      budget: budget,
+      measure: () async => InventorySnapshot(startedAt: DateTime.now(),
+          finishedAt: DateTime.now(), observations: []),
+      measureAttachments: () async => const AttachmentStorageReport(),
+      clearNews: () async {
+        clears++;
+        return const PublicNewsClearResult(PublicNewsClearStatus.complete);
+      },
+    )));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Изменить целевой лимит'));
+    await tester.tap(find.text('Изменить целевой лимит'));
+    await tester.pumpAndSettle();
+    allowed = false;
+    await tester.tap(find.text('250 МБ'));
+    await tester.pumpAndSettle();
+    expect(budget.writes, 0);
+
+    allowed = true;
+    final clear = find.text('Очистить кэш публичных новостей');
+    await tester.scrollUntilVisible(clear, 400);
+    await tester.tap(clear);
+    await tester.pumpAndSettle();
+    allowed = false;
+    await tester.tap(find.text('Удалить копии'));
+    await tester.pumpAndSettle();
+    expect(clears, 0);
+  });
+
   testWidgets('real collector shows named partial estimates without cleanup',
       (tester) async {
     late Directory root;

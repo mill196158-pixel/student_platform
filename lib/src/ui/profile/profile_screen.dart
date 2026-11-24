@@ -20,6 +20,7 @@ import 'package:student_platform/src/ui/friends/my_friends_screen.dart';
 import 'package:student_platform/src/ui/content/content_nav_executor.dart';
 import 'package:student_platform/src/ui/info/content_media_service.dart';
 import 'package:student_platform/src/ui/profile/profile_feed_service.dart';
+import 'package:student_platform/src/ui/profile/cache_diagnostics_screen.dart';
 import 'package:student_platform/src/ui/profile/profile_card_media_loader.dart';
 import 'package:student_platform/src/ui/profile/profile_avatar_image.dart';
 import 'package:student_platform/src/ui/profile/my_reviews_screen.dart';
@@ -47,6 +48,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   bool _loading = true;
   bool _cachedUnavailable = false;
   bool _boundaryInvalidated = false;
+  final _cachedBoundaryEnd = Completer<void>();
   bool get _cacheOnly =>
       widget.cachedReader != null ||
       widget.cachedChats != null ||
@@ -270,6 +272,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   @override
   void dispose() {
+    if (!_cachedBoundaryEnd.isCompleted) _cachedBoundaryEnd.complete();
     widget.cachedReader?.accessChanges.removeListener(_onCachedAccessChanged);
     widget.activeListenable?.removeListener(_onActiveChanged);
     routeObserver.unsubscribe(this);
@@ -615,6 +618,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     oldWidget.cachedReader?.accessChanges
         .removeListener(_onCachedAccessChanged);
     _boundaryInvalidated = true;
+    if (!_cachedBoundaryEnd.isCompleted) _cachedBoundaryEnd.complete();
     _feedLoadGeneration++;
     _feedMediaGeneration++;
     _stopPolling();
@@ -692,17 +696,46 @@ class _ProfileScreenState extends State<ProfileScreen>
             MyChatsScreen(cachedStore: cache, cachedCapabilities: caps)));
   }
 
+  Widget? _cachedStorageButton() {
+    final reader = widget.cachedReader, caps = widget.cachedCapabilities;
+    final permit = caps?.capture(SessionCapability.cachedRead);
+    if (reader == null || caps == null || permit == null) return null;
+    bool current() => mounted && !_cachedBoundaryEnd.isCompleted &&
+        identical(widget.cachedReader, reader) &&
+        identical(widget.cachedCapabilities, caps) &&
+        reader.permitsContent(caps, permit);
+    if (!current()) return null;
+    return TextButton.icon(
+        icon: const Icon(Icons.storage_outlined),
+        label: const Text('Данные приложения'),
+        onPressed: () {
+          if (!current()) return;
+          final access = Listenable.merge([caps, reader.accessChanges]);
+          Navigator.of(context).push(MaterialPageRoute<void>(
+              builder: (_) => FutureBuilder<void>(
+                  future: _cachedBoundaryEnd.future,
+                  builder: (_, __) => ListenableBuilder(
+                      listenable: access,
+                      builder: (_, __) => current()
+                          ? CacheDiagnosticsScreen(canAccess: current)
+                          : Scaffold(appBar: AppBar(),
+                              body: const Center(child: Text('Данные недоступны.')))))));
+        });
+  }
+
   Widget _buildCachedProfile(BuildContext context) {
     if (_loading)
       return const Scaffold(
           body: Center(child: ProductLoadingIndicator.page()));
     final canRead =
         !_boundaryInvalidated && (widget.cachedReader?.canRead ?? false);
+    final storage = canRead ? _cachedStorageButton() : null;
     if (_cachedUnavailable || _user == null || !canRead) {
       return Scaffold(
           body: Center(
               child: Column(mainAxisSize: MainAxisSize.min, children: [
         const Text('Сохранённый профиль недоступен.'),
+        if (storage != null) storage,
         if (canRead &&
             widget.cachedChats != null &&
             widget.cachedCapabilities != null)
@@ -718,12 +751,13 @@ class _ProfileScreenState extends State<ProfileScreen>
         .where((s) => s.isNotEmpty)
         .join(' ');
     return Scaffold(
+        appBar: storage == null ? null : AppBar(actions: [storage]),
         body: StudentProfileScreenPreview(
       displayName: name.isEmpty ? 'Студент' : name,
       groupLabel: (u['group_name'] ?? '').toString(),
       statusLabel: (u['status'] ?? '').toString(),
       padding: EdgeInsets.fromLTRB(
-          16, MediaQuery.paddingOf(context).top + 16, 16, 24),
+          16, storage == null ? MediaQuery.paddingOf(context).top + 16 : 16, 16, 24),
       onMessagesTap:
           widget.cachedChats == null || widget.cachedCapabilities == null
               ? null

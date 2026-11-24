@@ -17,6 +17,7 @@ class CacheDiagnosticsScreen extends StatefulWidget {
       this.measure,
       this.measureAttachments,
       this.clearNews,
+      this.canAccess,
       this.budget,
       this.debugCapabilities,
       this.timeout = const Duration(seconds: 5)});
@@ -26,6 +27,8 @@ class CacheDiagnosticsScreen extends StatefulWidget {
   final Future<AttachmentStorageReport> Function()? measureAttachments;
   @visibleForTesting
   final Future<PublicNewsClearResult> Function()? clearNews;
+  /// Rechecks the original offline route permit before dispatching an action.
+  final bool Function()? canAccess;
   @visibleForTesting
   final OptionalImageCacheBudget? budget;
   @visibleForTesting
@@ -37,6 +40,7 @@ class CacheDiagnosticsScreen extends StatefulWidget {
 }
 
 class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
+  bool get _accessible => mounted && (widget.canAccess?.call() ?? true);
   int _revision = 0;
   InventorySnapshot? _snapshot;
   int? _budgetObserved;
@@ -145,6 +149,7 @@ class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
   }
 
   Future<void> _measure() async {
+    if (!_accessible) return;
     final revision = ++_revision;
     if (_historyCapabilities != null) _startHistory();
     setState(() {
@@ -208,7 +213,7 @@ class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
   }
 
   Future<void> _confirmClearNews() async {
-    if (_clearPending) return;
+    if (_clearPending || !_accessible) return;
     setState(() => _clearPending = true);
     try {
       final confirmed = await showDialog<bool>(
@@ -227,12 +232,12 @@ class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
           ],
         ),
       );
-      if (confirmed != true || !mounted) return;
+      if (confirmed != true || !_accessible) return;
       setState(() => _clearMessage = 'Идёт очистка. Экран можно закрыть.');
       final clear =
           widget.clearNews ?? PublicNewsImageCache.shared.clearStoredCopies;
       final result = await clear();
-      if (!mounted) return;
+      if (!_accessible) return;
       setState(() => _clearMessage = switch (result.status) {
             PublicNewsClearStatus.complete =>
               'Очистка завершена. Удалено файлов: ${result.filesRemoved}.',
@@ -253,6 +258,7 @@ class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
   }
 
   Future<void> _chooseLimit(OptionalImageCacheBudget budget) async {
+    if (!_accessible) return;
     final choice = await showDialog<int>(
         context: context,
         builder: (context) => SimpleDialog(
@@ -266,10 +272,10 @@ class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
                           : '${bytes ~/ 1000000} МБ'))
               ],
             ));
-    if (!mounted || choice == null) return;
+    if (!_accessible || choice == null) return;
     setState(() => _changing = true);
     final success = await budget.setLimit(choice);
-    if (!mounted) return;
+    if (!_accessible) return;
     setState(() => _changing = false);
     if (!success)
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
