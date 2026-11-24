@@ -5,6 +5,7 @@ import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart' as sqlite;
 import 'package:student_ui/student_ui.dart';
@@ -25,8 +26,10 @@ class NewsImageReadResult {
 }
 
 class NewsOrphanCollectionResult {
-  const NewsOrphanCollectionResult(this.filesUnlinked, this.namedBytesUnlinked);
-  final int filesUnlinked, namedBytesUnlinked;
+  const NewsOrphanCollectionResult(this.filesUnlinked, this.namedBytesUnlinked,
+      {required this.remainingCandidates, this.hasUnrecognizedEntries = false});
+  final int filesUnlinked, namedBytesUnlinked, remainingCandidates;
+  final bool hasUnrecognizedEntries;
 }
 
 /// A new-namespace store. Only the fixed public-news binding may collect
@@ -51,6 +54,64 @@ class NewsSqliteImageStore {
     final db = await sqlite.databaseFactory.openDatabase(dbPath,
         options: sqlite.OpenDatabaseOptions(singleInstance: false));
     return NewsSqliteImageStore._owned(db, Directory('${temp.path}/public_news_blobs_v2'), true);
+  }
+
+  static Future<NewsSqliteImageStore?> openExistingPublicNews() async =>
+      _openExisting(await getTemporaryDirectory(),
+          Directory(await sqlite.getDatabasesPath()), sqlite.databaseFactory);
+
+  @visibleForTesting
+  static Future<NewsSqliteImageStore?> openExistingPublicNewsForTest(
+      Directory temporary, Directory databases, sqlite.DatabaseFactory factory) =>
+      _openExisting(temporary, databases, factory);
+
+  static Future<NewsSqliteImageStore?> _openExisting(Directory temporary,
+      Directory databases, sqlite.DatabaseFactory factory) async {
+    Future<Directory> trustedDirectory(Directory dir) async {
+      if (await FileSystemEntity.type(dir.path, followLinks: false) !=
+          FileSystemEntityType.directory) throw StateError('Unavailable cache parent');
+      return Directory(await dir.resolveSymbolicLinks());
+    }
+    final temp = await trustedDirectory(temporary);
+    final dbDir = await trustedDirectory(databases);
+    final root = Directory(path.join(temp.path, 'public_news_blobs_v2'));
+    final dbPath = path.join(dbDir.path, 'public_news_index_v2.db');
+    final hasRoot = await temp.list(followLinks: false)
+        .any((entry) => path.equals(entry.path, root.path));
+    var hasIndex = false, hasSidecar = false;
+    await for (final entry in dbDir.list(followLinks: false)) {
+      if (path.equals(entry.path, dbPath)) {
+        if (entry is! File) throw StateError('Unsafe news index');
+        hasIndex = true;
+      } else if (['-wal', '-shm', '-journal'].any((suffix) =>
+          path.equals(entry.path, dbPath + suffix))) {
+        if (entry is! File) throw StateError('Unsafe news index sidecar');
+        hasSidecar = true;
+      }
+    }
+    if (!hasRoot && !hasIndex && !hasSidecar) return null;
+    if (!hasIndex || await FileSystemEntity.type(root.path, followLinks: false) !=
+        FileSystemEntityType.directory) throw StateError('Incomplete news store');
+    final ns = await root.resolveSymbolicLinks();
+    // Android's read-only opener has a non-deleting corruption handler. Check
+    // the existing index before letting the normal writer open it.
+    final check = await factory.openDatabase(dbPath,
+        options: sqlite.OpenDatabaseOptions(readOnly: true, singleInstance: false));
+    try {
+      final existing = NewsSqliteImageStore(database: check, root: root);
+      await check.readTransaction((tx) async {
+        await existing._verifyClearProtocol(tx, ns);
+        final integrity = await tx.rawQuery('PRAGMA quick_check(1)');
+        if (integrity.length != 1 || integrity.single.values.single != 'ok') {
+          throw StateError('Invalid news index');
+        }
+      });
+    } finally {
+      await check.close();
+    }
+    final db = await factory.openDatabase(dbPath,
+        options: sqlite.OpenDatabaseOptions(singleInstance: false));
+    return NewsSqliteImageStore._owned(db, root, true);
   }
   final sqlite.Database database;
   final Directory root;
@@ -296,7 +357,15 @@ class NewsSqliteImageStore {
   /// index transaction as all readers/writers. Bytes are named file lengths,
   /// not a claim about physical disk space actually reclaimed.
   Future<NewsOrphanCollectionResult?> collectOrphaned({
-      required bool Function() current, int maxFiles = 16}) async {
+      required bool Function() current, int maxFiles = 16}) =>
+      _collectOrphaned(current, maxFiles, manual: false);
+
+  Future<NewsOrphanCollectionResult?> collectAfterUserClear({
+      required bool Function() current}) =>
+      _collectOrphaned(current, 16, manual: true);
+
+  Future<NewsOrphanCollectionResult?> _collectOrphaned(
+      bool Function() current, int maxFiles, {required bool manual}) async {
     if (!_canCollectOrphans || maxFiles <= 0 || maxFiles > 16 || !current()) return null;
     try {
       if (await FileSystemEntity.type(root.path, followLinks: false) != FileSystemEntityType.directory || !current()) return null;
@@ -316,12 +385,21 @@ class NewsSqliteImageStore {
         }
         final candidates = <File>[];
         var scanned = 0;
+        var unrecognized = false;
         await for (final entry in Directory(ns).list(followLinks: false)) {
-          if (!current() || ++scanned > 1024) return null;
+          if (!current() || (!manual && ++scanned > 1024)) return null;
           final name = entry.uri.pathSegments.where((part) => part.isNotEmpty).last;
           if (name == '.news-store-protocol' && entry is File) continue;
-          if (entry is! File || !namePattern.hasMatch(name)) return null;
-          if (!references.contains(name)) candidates.add(entry);
+          if (entry is! File || !namePattern.hasMatch(name)) {
+            if (!manual) return null;
+            unrecognized = true;
+            continue;
+          }
+          if (!references.contains(name)) {
+            candidates.add(entry);
+            // One lookahead tells the caller another batch is necessary.
+            if (manual && candidates.length > maxFiles) break;
+          }
         }
         await debugAfterOrphanListing?.call();
         if (!current()) return null;
@@ -343,7 +421,9 @@ class NewsSqliteImageStore {
             // A missing/unremovable file does not earn accounting credit.
           }
         }
-        return NewsOrphanCollectionResult(files, bytes);
+        return NewsOrphanCollectionResult(files, bytes,
+            remainingCandidates: candidates.length - files,
+            hasUnrecognizedEntries: unrecognized);
       });
     } catch (_) { return null; }
   }
@@ -423,6 +503,36 @@ class NewsSqliteImageStore {
     await _transaction((tx) => _schema(tx, ns));
     await _transaction((tx) async {
       await _schema(tx, ns);
+      await _invalidateInTransaction(tx, ns, path);
+    });
+  }
+
+  Future<void> _verifyClearProtocol(sqlite.Transaction tx, String ns) async {
+    await _schema(tx, ns, allowBootstrap: false);
+    final extra = await tx.rawQuery("SELECT 1 FROM sqlite_master WHERE "
+        "type IN ('trigger','view') OR (type='table' AND name NOT IN "
+        "('news_store_epochs','news_store_images','news_store_protocol',"
+        "'news_store_suppression','android_metadata') AND name NOT GLOB 'sqlite_*') LIMIT 1");
+    if (extra.isNotEmpty) throw StateError('Unexpected news index schema');
+  }
+
+  /// A user clear never provisions missing protocol state. Only after this
+  /// transaction commits can the orphan collector safely unlink its files.
+  Future<void> invalidateStoredPublicCopies() async {
+    if (!_canCollectOrphans || await FileSystemEntity.type(root.path,
+        followLinks: false) != FileSystemEntityType.directory) {
+      throw StateError('Unverified public news store');
+    }
+    final ns = await root.resolveSymbolicLinks();
+    await _transaction((tx) async {
+      await _verifyClearProtocol(tx, ns);
+      final generation = await _generation(tx, ns, '');
+      if (generation.$1 == 0x7fffffffffffffff) throw StateError('Exhausted news generation');
+      await _invalidateInTransaction(tx, ns, null);
+    });
+  }
+
+  Future<void> _invalidateInTransaction(sqlite.Transaction tx, String ns, String? path) async {
       await tx.rawInsert('INSERT INTO news_store_epochs(namespace,path,generation) VALUES(?,?,1) '
           'ON CONFLICT(namespace,path) DO UPDATE SET generation=generation+1', [ns, path ?? '']);
       await tx.insert('news_store_suppression',
@@ -430,6 +540,5 @@ class NewsSqliteImageStore {
           conflictAlgorithm: sqlite.ConflictAlgorithm.replace);
       await tx.delete('news_store_images', where: path == null ? 'namespace=?' : 'namespace=? AND path=?',
           whereArgs: path == null ? [ns] : [ns, path]);
-    });
   }
 }

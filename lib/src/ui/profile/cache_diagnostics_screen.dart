@@ -1,23 +1,31 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:student_platform/src/core/attachment_storage_inventory.dart';
 import 'package:student_platform/src/core/cache_inventory_snapshot.dart';
 import 'package:student_platform/src/core/optional_image_cache_budget.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:student_platform/src/core/session_capabilities_host.dart';
 import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
+import 'package:student_platform/src/ui/home/public_news_image_cache.dart';
 
-/// Partial read-only diagnostics; not an enforced cache quota.
+/// Storage estimates and controls for the caches the app can manage.
 class CacheDiagnosticsScreen extends StatefulWidget {
   const CacheDiagnosticsScreen(
       {super.key,
       this.measure,
+      this.measureAttachments,
+      this.clearNews,
       this.budget,
       this.debugCapabilities,
       this.timeout = const Duration(seconds: 5)});
   @visibleForTesting
   final Future<InventorySnapshot> Function()? measure;
+  @visibleForTesting
+  final Future<AttachmentStorageReport> Function()? measureAttachments;
+  @visibleForTesting
+  final Future<PublicNewsClearResult> Function()? clearNews;
   @visibleForTesting
   final OptionalImageCacheBudget? budget;
   @visibleForTesting
@@ -35,6 +43,9 @@ class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
   int _budgetReserved = 0;
   bool _loading = true;
   bool _changing = false;
+  bool _clearPending = false;
+  String? _clearMessage;
+  AttachmentStorageReport? _attachments;
   final ValueNotifier<int?> _logicalHistory = ValueNotifier<int?>(null);
   SessionCapabilities? _historyCapabilities;
   AuthSessionScope? _historyScope;
@@ -140,7 +151,9 @@ class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
       _loading = true;
       _snapshot = null;
       _budgetObserved = null;
+      _attachments = null;
     });
+    unawaited(_measureAttachments(revision));
     InventorySnapshot? result;
     try {
       final budget = widget.budget ??
@@ -173,9 +186,71 @@ class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
     });
   }
 
-  String _value(int? bytes) => bytes == null
-      ? 'неизвестно'
-      : '${(bytes / 1000000).toStringAsFixed(1)} МБ';
+  Future<void> _measureAttachments(int revision) async {
+    AttachmentStorageReport report;
+    try {
+      final measure = widget.measureAttachments ??
+          AttachmentStorageInventory.shared.collect;
+      report = await measure().timeout(widget.timeout);
+    } catch (_) {
+      report = const AttachmentStorageReport();
+    }
+    if (mounted && revision == _revision) {
+      setState(() => _attachments = report);
+    }
+  }
+
+  String _value(int? bytes) {
+    if (bytes == null) return 'неизвестно';
+    if (bytes < 1000) return '$bytes Б';
+    if (bytes < 1000000) return '${(bytes / 1000).toStringAsFixed(1)} кБ';
+    return '${(bytes / 1000000).toStringAsFixed(1)} МБ';
+  }
+
+  Future<void> _confirmClearNews() async {
+    if (_clearPending) return;
+    setState(() => _clearPending = true);
+    try {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Удалить копии изображений новостей?'),
+          content: const Text(
+              'Изображения из текущего кэша публичных новостей придётся загрузить снова. Старый кэш новостей, материалы, вложения чатов и черновики сохранятся.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Отмена')),
+            FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Удалить копии')),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+      setState(() => _clearMessage = 'Идёт очистка. Экран можно закрыть.');
+      final clear =
+          widget.clearNews ?? PublicNewsImageCache.shared.clearStoredCopies;
+      final result = await clear();
+      if (!mounted) return;
+      setState(() => _clearMessage = switch (result.status) {
+            PublicNewsClearStatus.complete =>
+              'Очистка завершена. Удалено файлов: ${result.filesRemoved}.',
+            PublicNewsClearStatus.partial =>
+              'Очистка завершена частично. Удалено файлов: ${result.filesRemoved}. Можно повторить.',
+            PublicNewsClearStatus.unavailable =>
+              'Не удалось подтвердить очистку. Попробуйте ещё раз.',
+          });
+      await _measure();
+    } catch (_) {
+      if (mounted) {
+        setState(() => _clearMessage =
+            'Не удалось подтвердить очистку. Попробуйте ещё раз.');
+      }
+    } finally {
+      if (mounted) setState(() => _clearPending = false);
+    }
+  }
 
   Future<void> _chooseLimit(OptionalImageCacheBudget budget) async {
     final choice = await showDialog<int>(
@@ -263,8 +338,26 @@ class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
         const Text(
             'Логический размер истории не равен физическому месту. Это не общий размер и не объём, доступный для очистки. Черновики, неотправленные сообщения и сохранённые офлайн файлы могут учитываться не полностью.'),
         const SizedBox(height: 12),
+        Text('Вложения чатов на устройстве',
+            style: Theme.of(context).textTheme.titleMedium),
         const Text(
-            'Общий физический лимит приложения и ручная очистка пока недоступны.'),
+            'Приблизительный объём для всех аккаунтов на этом устройстве. Вложения учитываются отдельно от целевого лимита.'),
+        if (_attachments == null)
+          const Text('Подсчёт вложений…')
+        else ...[
+          Text(
+              'Рабочие файлы чатов и данные доступа: ${_value(_attachments!.authorizedFilesBytes)}'),
+          Text(
+              'Копии для просмотра: ${_value(_attachments!.viewerFilesBytes)}'),
+          Text(
+              'Скачанные вложения: ${_value(_attachments!.downloadedFilesBytes)}'),
+        ],
+        const SizedBox(height: 16),
+        OutlinedButton(
+            onPressed: _clearPending ? null : _confirmClearNews,
+            child: const Text('Очистить кэш публичных новостей')),
+        if (_clearMessage != null)
+          Semantics(liveRegion: true, child: Text(_clearMessage!)),
         const SizedBox(height: 16),
         OutlinedButton(
             onPressed: _loading ? null : _measure,

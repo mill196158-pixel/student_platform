@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
 import 'package:student_platform/src/core/optional_image_cache_budget.dart';
+import 'package:student_platform/src/core/attachment_storage_inventory.dart';
 import 'package:student_platform/src/core/cache_inventory_snapshot.dart';
 import 'package:student_platform/src/ui/home/news_image_disk_cache.dart';
 import 'package:student_platform/src/ui/profile/cache_diagnostics_screen.dart';
@@ -195,8 +196,9 @@ void main() {
         finishedAt: DateTime.now(),
         observations: []);
     await tester.pumpWidget(MaterialApp(
-        home:
-            CacheDiagnosticsScreen(measure: () async => snapshot, budget: b)));
+        home: CacheDiagnosticsScreen(
+            measureAttachments: () async => const AttachmentStorageReport(),
+            measure: () async => snapshot, budget: b)));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Изменить целевой лимит'));
     await tester.tap(find.text('Изменить целевой лимит'));

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:student_platform/src/core/attachment_storage_inventory.dart';
 import 'package:student_platform/src/core/cache_inventory_snapshot.dart';
 import 'package:student_platform/src/core/optional_image_cache_budget.dart';
 import 'package:student_platform/src/ui/profile/cache_diagnostics_screen.dart';
@@ -126,9 +127,10 @@ void main() {
     });
     await tester.pumpWidget(MaterialApp(
         home: CacheDiagnosticsScreen(
+            measureAttachments: () async => const AttachmentStorageReport(),
             measure: () async => snapshot, budget: budget)));
     await tester.pump();
-    expect(find.text('Учтённые копии новостей и материалов: 0.0 МБ'),
+    expect(find.text('Учтённые копии новостей и материалов: 14 Б'),
         findsOneWidget);
     expect(budget.observedBytes, 14);
     expect(find.textContaining('часть подтверждённой истории чатов'),

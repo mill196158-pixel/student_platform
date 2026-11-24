@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
+import 'package:student_platform/src/core/attachment_storage_inventory.dart';
 import 'package:student_platform/src/core/cache_inventory_snapshot.dart';
 import 'package:student_platform/src/core/offline_policy_grant.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
@@ -255,12 +256,13 @@ void main() {
         observations: []);
     await tester.pumpWidget(MaterialApp(
         home: CacheDiagnosticsScreen(
+            measureAttachments: () async => const AttachmentStorageReport(),
             measure: () async => snapshot, debugCapabilities: caps)));
     await tester.runAsync(() async {
       await Future<void>.delayed(const Duration(milliseconds: 250));
     });
     await tester.pump();
-    expect(find.text('Логический размер подтверждённой части истории: 0.0 МБ'),
+    expect(find.text('Логический размер подтверждённой части истории: ${utf8.encode(expectedPayload).length} Б'),
         findsOneWidget);
     ProjectChatServerCache.qaInstance = ProjectChatServerCache(
         db: db,
@@ -282,6 +284,7 @@ void main() {
         observations: []);
     await tester.pumpWidget(MaterialApp(
         home: CacheDiagnosticsScreen(
+            measureAttachments: () async => const AttachmentStorageReport(),
             measure: () async => snapshot,
             debugCapabilities: caps,
             timeout: const Duration(milliseconds: 50))));
@@ -303,12 +306,13 @@ void main() {
         observations: []);
     await tester.pumpWidget(MaterialApp(
         home: CacheDiagnosticsScreen(
+            measureAttachments: () async => const AttachmentStorageReport(),
             measure: () async => snapshot, debugCapabilities: caps)));
     await tester.runAsync(() async {
       await Future<void>.delayed(const Duration(milliseconds: 250));
     });
     await tester.pump();
-    expect(find.text('Логический размер подтверждённой части истории: 0.0 МБ'),
+    expect(find.text('Логический размер подтверждённой части истории: ${utf8.encode(expectedPayload).length} Б'),
         findsOneWidget);
     caps.block();
     await tester.pump();
@@ -326,6 +330,7 @@ void main() {
         observations: []);
     await tester.pumpWidget(MaterialApp(
         home: CacheDiagnosticsScreen(
+            measureAttachments: () async => const AttachmentStorageReport(),
             measure: () async => snapshot, debugCapabilities: caps)));
     await tester.pumpWidget(const MaterialApp(home: SizedBox()));
     gate.complete();

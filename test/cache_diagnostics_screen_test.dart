@@ -3,7 +3,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:student_platform/src/core/attachment_storage_inventory.dart';
 import 'package:student_platform/src/core/cache_inventory_snapshot.dart';
+import 'package:student_platform/src/ui/home/public_news_image_cache.dart';
 import 'package:student_platform/src/ui/profile/cache_diagnostics_screen.dart';
 
 void main() {
@@ -44,7 +46,9 @@ void main() {
     });
     expect(result, isNotNull);
     await tester.pumpWidget(MaterialApp(
-        home: CacheDiagnosticsScreen(measure: () async => result!)));
+        home: CacheDiagnosticsScreen(
+            measureAttachments: () async => const AttachmentStorageReport(),
+            measure: () async => result!)));
     await tester.pump();
     expect(find.text('Частичная оценка'), findsOneWidget);
     expect(
@@ -53,8 +57,93 @@ void main() {
     await tester.drag(find.byType(ListView), const Offset(0, -700));
     await tester.pump();
     expect(find.textContaining('не общий размер'), findsOneWidget);
+    expect(find.text('Очистить кэш публичных новостей'), findsOneWidget);
+  });
+
+  testWidgets('attachment sizes display independently and never invoke cleanup',
+      (tester) async {
+    final busy = Completer<InventorySnapshot>();
+    var calls = 0;
+    await tester.pumpWidget(MaterialApp(
+        home: CacheDiagnosticsScreen(
+      measure: () => busy.future,
+      measureAttachments: () async => const AttachmentStorageReport(
+          authorizedFilesBytes: 1500000, downloadedFilesBytes: 352),
+      clearNews: () async {
+        calls++;
+        return const PublicNewsClearResult(PublicNewsClearStatus.complete);
+      },
+    )));
+    await tester.pump();
+    expect(find.text('Рабочие файлы чатов и данные доступа: 1.5 МБ'),
+        findsOneWidget);
+    expect(find.text('Копии для просмотра: неизвестно'), findsOneWidget);
+    expect(find.text('Скачанные вложения: 352 Б'), findsOneWidget);
+    expect(calls, 0);
+    busy.complete(InventorySnapshot(
+        startedAt: DateTime.now(),
+        finishedAt: DateTime.now(),
+        observations: []));
+    await tester.pump();
+  });
+
+  testWidgets(
+      'manual news cleanup requires confirmation and reports its result',
+      (tester) async {
+    final first = Completer<PublicNewsClearResult>();
+    var clears = 0, measurements = 0;
+    await tester.pumpWidget(MaterialApp(
+        home: CacheDiagnosticsScreen(
+      measure: () async {
+        measurements++;
+        return InventorySnapshot(
+            startedAt: DateTime.now(),
+            finishedAt: DateTime.now(),
+            observations: []);
+      },
+      measureAttachments: () async => const AttachmentStorageReport(),
+      clearNews: () async {
+        clears++;
+        if (clears == 1) return first.future;
+        if (clears == 2) throw StateError('unavailable');
+        return const PublicNewsClearResult(PublicNewsClearStatus.complete,
+            filesRemoved: 2);
+      },
+    )));
+    await tester.pumpAndSettle();
+    final action =
+        find.widgetWithText(OutlinedButton, 'Очистить кэш публичных новостей');
+    Future<void> openDialog() async {
+      await tester.ensureVisible(action);
+      await tester.tap(action);
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> confirm() async {
+      await openDialog();
+      await tester.tap(find.text('Удалить копии'));
+      await tester.pumpAndSettle();
+    }
+
+    await openDialog();
+    expect(clears, 0);
+    await tester.tap(find.text('Отмена'));
+    await tester.pumpAndSettle();
+    expect(clears, 0);
+    await confirm();
+    expect(clears, 1);
+    expect(tester.widget<OutlinedButton>(action).onPressed, isNull);
+    first.complete(const PublicNewsClearResult(PublicNewsClearStatus.partial,
+        filesRemoved: 3));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('частично. Удалено файлов: 3.'), findsOneWidget);
+    expect(measurements, 2);
+    await confirm();
     expect(
-        find.textContaining('ручная очистка пока недоступны'), findsOneWidget);
+        find.textContaining('Не удалось подтвердить очистку'), findsOneWidget);
+    await confirm();
+    expect(find.text('Очистка завершена. Удалено файлов: 2.'), findsOneWidget);
+    expect(clears, 3);
   });
 
   test('logical history is separate and malformed data is unknown', () async {
@@ -123,6 +212,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(
         home: CacheDiagnosticsScreen(
             timeout: const Duration(seconds: 1),
+            measureAttachments: () async => const AttachmentStorageReport(),
             measure: () => pending.future)));
     await tester.pump(const Duration(seconds: 2));
     expect(find.text('Сейчас недоступно'), findsOneWidget);
