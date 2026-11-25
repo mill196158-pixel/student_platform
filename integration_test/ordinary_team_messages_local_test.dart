@@ -25,6 +25,13 @@ class _Acknowledgement {
   final release = Completer<void>();
 }
 
+class _HeldDetail {
+  _HeldDetail(this.text);
+  final String text;
+  final received = Completer<String>();
+  final release = Completer<void>();
+}
+
 class _ObserveClosedChat extends BlocObserver {
   final errors = <Object>[];
   @override
@@ -37,6 +44,7 @@ class _ObserveClosedChat extends BlocObserver {
 class _HoldSendResponse extends http.BaseClient {
   final inner = IOClient(HttpClient()..findProxy = (_) => 'DIRECT');
   var pending = _Acknowledgement();
+  _HeldDetail? detail;
   bool interruptHydration = false;
   int interruptedReads = 0;
   int sends = 0;
@@ -59,6 +67,24 @@ class _HoldSendResponse extends http.BaseClient {
     final sending = request.url.path.endsWith('/send_chat_message');
     if (sending) sends++;
     final response = await inner.send(request);
+    final held = detail;
+    if (held != null &&
+        !held.received.isCompleted &&
+        response.statusCode == 200 &&
+        request.method == 'GET' &&
+        request.url.path == '/rest/v1/messages' &&
+        request.url.queryParameters.containsKey('id')) {
+      final bytes = await response.stream.toBytes();
+      final json = jsonDecode(utf8.decode(bytes));
+      final row = json is List && json.length == 1 ? json.single : json;
+      if (row is Map &&
+          (row['body'] == held.text || row['content'] == held.text)) {
+        held.received.complete(row['id'] as String);
+        await held.release.future;
+      }
+      return http.StreamedResponse(Stream.value(bytes), response.statusCode,
+          headers: response.headers, request: request);
+    }
     final acknowledgement = pending;
     if (sending &&
         !acknowledgement.committed.isCompleted &&
@@ -189,11 +215,25 @@ void main() {
       await wait(() => find.text(incoming).evaluate().isNotEmpty,
           'Reply in the open conversation');
       expect(tester.widget<EditableText>(composer).controller.text, nextDraft);
+      final delayed = _HeldDetail('Before leaving ${team.substring(0, 8)}');
+      client.detail = delayed;
+      final closing = tester.element(composer).read<TeamCubit>();
+      final delayedId = await peerSend(delayed.text);
+      await wait(() => delayed.received.isCompleted,
+          'The active conversation never requested the incoming message');
+      expect(await delayed.received.future, delayedId);
       await tester.tap(find.byTooltip('Назад'));
-      await tester.pump(const Duration(milliseconds: 500));
+      await wait(
+          () => closing.isClosed && row.hitTestable().evaluate().isNotEmpty,
+          'Back did not close the conversation while the detail was in flight');
+      delayed.release.complete();
       await open();
       await wait(
           () => find.text(incoming).evaluate().isNotEmpty, 'Restored reply');
+      await wait(() => find.text(delayed.text).evaluate().length == 1,
+          'Reopening should show exactly one copy of the delayed incoming message');
+      expect(closing.state.chat.where((message) => message.id == delayedId),
+          isEmpty);
       final page = await history();
       expect(page.where((r) => r['text'] == outgoing), hasLength(1));
       expect(page.where((r) => r['id'] == reply).single['reply_to_id'],
@@ -279,6 +319,9 @@ void main() {
           reason: 'Late send updated a closed conversation');
       expect(tester.takeException(), isNull);
     } finally {
+      final detail = client.detail;
+      if (detail != null && !detail.release.isCompleted)
+        detail.release.complete();
       if (!client.pending.release.isCompleted)
         client.pending.release.complete();
       await tester.pumpWidget(const SizedBox.shrink());

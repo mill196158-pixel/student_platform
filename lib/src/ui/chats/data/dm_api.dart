@@ -50,6 +50,11 @@ class ChatSyncResult {
       ChatSyncResult._(ok: false, error: error);
 }
 
+class _LatestDmSync {
+  late final Future<ChatSyncResult> result;
+  bool pageRequested = false;
+}
+
 class DmApi {
   static int _sessionGeneration = 0;
   static final SupabaseClient _sb = Supabase.instance.client;
@@ -59,8 +64,9 @@ class DmApi {
   static final Map<String, StreamController<ChatMessagesViewState>>
       _viewControllers = {};
   static final Map<String, ChatMessagesViewState> _viewStates = {};
-  static final Map<String, Future<ChatSyncResult>> _syncInFlight = {};
+  static final Map<String, _LatestDmSync> _syncInFlight = {};
   static final Map<String, RealtimeChannel> _channels = {};
+  static final Map<String, Timer> _channelRetries = {};
   static final Map<String, ChatSyncRealtimeGate> _syncGates = {};
 
   /// Per-chat clear boundary for the current user (one settings fetch).
@@ -356,6 +362,7 @@ class DmApi {
     String? beforeId,
     DateTime? clearedAt,
     int? boundaryRevision,
+    VoidCallback? onPageRequest,
   }) async {
     debugLoadMessagesCounts[chatId] =
         (debugLoadMessagesCounts[chatId] ?? 0) + 1;
@@ -376,6 +383,7 @@ class DmApi {
       throw StateError('Session changed');
 
     try {
+      onPageRequest?.call();
       final rows = await _sb.rpc('get_chat_messages_page', params: {
         'p_chat_id': chatId,
         'p_limit': limit.clamp(1, 100),
@@ -842,22 +850,24 @@ class DmApi {
     }
     final syncKey = '$generation:$owner:$chatId';
     final existing = _syncInFlight[syncKey];
-    if (existing != null) return existing;
+    if (existing != null) return existing.result;
 
-    final future = _syncLatestImpl(
+    final sync = _LatestDmSync();
+    sync.result = _syncLatestImpl(
       chatId: chatId,
       limit: limit,
       invalidateClearBoundary: invalidateClearBoundary,
       owner: owner!,
       generation: generation,
+      onPageRequest: () => sync.pageRequested = true,
     );
-    _syncInFlight[syncKey] = future;
-    future.whenComplete(() {
-      if (identical(_syncInFlight[syncKey], future)) {
+    _syncInFlight[syncKey] = sync;
+    sync.result.whenComplete(() {
+      if (identical(_syncInFlight[syncKey], sync)) {
         _syncInFlight.remove(syncKey);
       }
     });
-    return future;
+    return sync.result;
   }
 
   static Future<ChatSyncResult> _syncLatestImpl({
@@ -866,6 +876,7 @@ class DmApi {
     required bool invalidateClearBoundary,
     required String owner,
     required int generation,
+    required VoidCallback onPageRequest,
   }) async {
     final gate = _gateFor(chatId);
     return gate.runExclusiveSync(() async {
@@ -911,6 +922,7 @@ class DmApi {
             } catch (_) {/* Keep the last confirmed page on any failure. */}
           }());
         }
+        if (debugSyncPageLoader != null) onPageRequest();
         final page = debugSyncPageLoader != null
             ? await debugSyncPageLoader!(
                 chatId: chatId,
@@ -922,6 +934,7 @@ class DmApi {
                 limit: limit,
                 clearedAt: clearedAt,
                 boundaryRevision: boundaryRevision,
+                onPageRequest: onPageRequest,
               );
         if (!currentBoundary()) {
           return ChatSyncResult.failure(StateError('Session changed'));
@@ -993,6 +1006,7 @@ class DmApi {
 
   static Future<void> _ensureSynced(String chatId) async {
     final current = _viewStates[chatId];
+    if (current != null) _ensureRealtime(chatId);
     if (current == null ||
         current.phase == ChatMessagesLoadPhase.noSnapshot ||
         current.phase == ChatMessagesLoadPhase.ready ||
@@ -1106,10 +1120,12 @@ class DmApi {
           String chatId) =>
       _boundRealtimeUpsert(chatId, dedupe: false);
 
-  static void _ensureRealtime(String chatId) {
+  static void _ensureRealtime(String chatId, {bool retryOnClose = true}) {
     if (_channels.containsKey(chatId)) return;
     final owner = _currentSessionUserId;
     final generation = _sessionGeneration;
+    if (!_isCurrentSession(owner, generation)) return;
+    _channelRetries.remove(chatId)?.cancel();
     final gate = _gateFor(chatId);
     final projectCache = ProjectChatServerCache.qaInstance;
     final projectOwner = projectCache?.scope.capture();
@@ -1139,7 +1155,32 @@ class DmApi {
       await gate.handleDelete(id);
     }
 
-    final ch = _sb.channel('dm:messages:$chatId')
+    final ch = _sb.channel('dm:messages:$chatId');
+    _channels[chatId] = ch;
+    var feedReady = false;
+    var feedEpoch = 0;
+    var canRetry = retryOnClose;
+    bool hasViewer() =>
+        _isCurrentSession(owner, generation) &&
+        (_viewControllers[chatId]?.hasListener ?? false);
+    bool watching(int epoch) =>
+        feedReady &&
+        feedEpoch == epoch &&
+        hasViewer() &&
+        identical(_channels[chatId], ch);
+
+    Future<void> reconcile(int epoch) async {
+      if (!watching(epoch)) return;
+      final pending = _syncInFlight['$generation:$owner:$chatId'];
+      if (pending != null) {
+        // A request that starts after the feed is ready already covers the gap.
+        if (!pending.pageRequested) return;
+        await pending.result;
+      }
+      if (watching(epoch)) await syncLatest(chatId: chatId);
+    }
+
+    ch
       ..onPostgresChanges(
         event: PostgresChangeEvent.insert,
         schema: 'public',
@@ -1173,9 +1214,38 @@ class DmApi {
         ),
         callback: (payload) => deleteOne(payload),
       )
-      ..subscribe();
-
-    _channels[chatId] = ch;
+      ..onSystemEvents((payload) {
+        // Joining the socket topic can precede the Postgres subscription.
+        if (feedReady ||
+            payload is! Map ||
+            payload['extension'] != 'postgres_changes' ||
+            payload['status'] != 'ok') {
+          return;
+        }
+        feedReady = true;
+        canRetry = true;
+        unawaited(reconcile(++feedEpoch));
+      })
+      ..subscribe((status, _) {
+        if (status != RealtimeSubscribeStatus.subscribed) {
+          feedReady = false;
+          feedEpoch++;
+        }
+        if (status == RealtimeSubscribeStatus.closed &&
+            identical(_channels[chatId], ch)) {
+          _channels.remove(chatId);
+          if (canRetry && hasViewer()) {
+            // Unlike a transport error, terminal close removes the SDK channel.
+            // Retry once until the replacement actually joins Postgres.
+            _channelRetries[chatId] = Timer(const Duration(seconds: 1), () {
+              _channelRetries.remove(chatId);
+              if (hasViewer() && !_channels.containsKey(chatId)) {
+                _ensureRealtime(chatId, retryOnClose: false);
+              }
+            });
+          }
+        }
+      });
 
     final listCtrl = _streamControllers[chatId];
     listCtrl?.onCancel = () async {
@@ -1196,6 +1266,10 @@ class DmApi {
     final channels = _channels.values.toList();
     final streams = _streamControllers.values.toList();
     final views = _viewControllers.values.toList();
+    for (final retry in _channelRetries.values) {
+      retry.cancel();
+    }
+    _channelRetries.clear();
     _channels.clear();
     _streamControllers.clear();
     _viewControllers.clear();

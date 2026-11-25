@@ -28,12 +28,16 @@ class _LocalHttp extends http.BaseClient {
   final inner = IOClient(
       _LocalSockets().createHttpClient(null)..findProxy = (_) => 'DIRECT');
   final delays = <String, _Delay>{};
+  int incomingReads = 0;
+  int classmatesReads = 0;
   _Delay hold(String rpc) => delays[rpc] = _Delay();
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     if (request.url.origin != _origin) throw StateError('Loopback only');
     final path = request.url.pathSegments.last;
+    if (path == 'get_my_incoming_friend_requests') incomingReads++;
+    if (path == 'get_my_classmates') classmatesReads++;
     final delay = delays.remove(path);
     final response = await inner.send(request);
     if (delay == null) return response;
@@ -119,8 +123,17 @@ void main() {
       }
 
       Future<void> refresh() async {
+        await until(
+            () => find.byType(RefreshProgressIndicator).evaluate().isEmpty,
+            'The previous pull-to-refresh did not finish');
+        final previousIncoming = http.incomingReads;
+        final previousClassmates = http.classmatesReads;
         await tester.drag(find.byType(ListView).first, const Offset(0, 550));
-        await tester.pump(const Duration(milliseconds: 450));
+        await until(
+            () =>
+                http.incomingReads > previousIncoming &&
+                http.classmatesReads > previousClassmates,
+            'The pull gesture did not start a fresh list and inbox request');
       }
 
       Future<List<String>> ids(SupabaseClient client, String function) async =>
@@ -226,7 +239,12 @@ void main() {
         await tester.enterText(field, '');
         await visible(find.text('Мои друзья'));
         await peer.rpc('send_friend_request', params: {'p_user_id': myId});
+        final classmates = http.hold('get_my_classmates');
+        releases.add(classmates);
         await refresh();
+        await until(() => classmates.ready.isCompleted,
+            'The first refresh never reached the classmates endpoint');
+        expect(await classmates.ready.future, 200);
         await tap(find.byTooltip('Отклонить'));
         await until(() => find.byTooltip('Отклонить').evaluate().isEmpty,
             'Declined request stayed visible');
@@ -236,8 +254,14 @@ void main() {
             'PASS FRIEND-4 decline a received request without creating a friendship');
 
         await peer.rpc('send_friend_request', params: {'p_user_id': myId});
+        expect(await ids(me, 'get_my_incoming_friend_requests'), [peerId]);
+        expect(find.byType(RefreshProgressIndicator), findsOneWidget);
+        classmates.release.complete();
         await refresh();
-        await tap(find.byTooltip('Принять'));
+        final peerRequests =
+            find.widgetWithText(InkWell, 'Student ${students.last['surname']}');
+        await tap(find.descendant(
+            of: peerRequests, matching: find.byTooltip('Принять')));
         await until(() => find.byTooltip('Принять').evaluate().isEmpty,
             'Accepted request stayed visible');
         expect(await ids(me, 'get_my_friends_bulk'), [peerId]);

@@ -102,14 +102,14 @@ def dm_schema(users):
         """)
 
 
-def run(paths, users):
+def run(paths, users, *, hold_page=False):
     a, b = users
     pair = f"a=least('{a}'::uuid,'{b}'::uuid) and b=greatest('{a}'::uuid,'{b}'::uuid)"
     if value(f"select chat_id from public.dm_pairs where {pair};"):
         raise ValueError("Use two disposable students with no existing direct conversation")
     marker = uuid4().hex
     env = dict(os.environ, STUDENT_ORDINARY_DM_CONFIGS=json.dumps([str(p) for p in paths]),
-               STUDENT_DM_MARKER=marker)
+               STUDENT_DM_MARKER=marker, STUDENT_DM_HOLD_PAGE="1" if hold_page else "0")
     try:
         return subprocess.call(["flutter.bat" if os.name == "nt" else "flutter", "test", "--no-pub",
                                 "--reporter=expanded", "--dart-define=SUPABASE_URL=http://127.0.0.1:55321",
@@ -141,4 +141,9 @@ if __name__ == "__main__":
     paths = [p.resolve(strict=True) for p in args.accounts]
     users = qa_accounts(paths)
     with nullcontext() if args.prepared else dm_schema(users):
-        raise SystemExit(run(paths, users))
+        for hold_page in (False, True):
+            print("Testing Realtime join with initial history " +
+                  ("in flight" if hold_page else "already displayed"), flush=True)
+            result = run(paths, users, hold_page=hold_page)
+            if result:
+                raise SystemExit(result)

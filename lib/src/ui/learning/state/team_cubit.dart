@@ -181,6 +181,7 @@ class TeamCubit extends Cubit<TeamState> {
   String? _mainChatId;
 
   // realtime
+  int _chatSubscriptionGeneration = 0;
   RealtimeChannel? _rtChat;
   RealtimeChannel? _rtAssignments;
   RealtimeChannel? _rtReactions;
@@ -295,7 +296,7 @@ class TeamCubit extends Cubit<TeamState> {
           final ticket = await projectCache.begin(chatId);
           if (ticket == null) return;
           final page = await (repo as SupabaseLearningRepository)
-              .loadConfirmedChatPage(chatId!);
+              .loadConfirmedChatPage(chatId);
           if (isClosed || page.source != TeamPageSource.serverRpc) return;
           await projectCache.saveServerPage(ticket, page.messages,
               hasMore: page.hasMore);
@@ -1053,34 +1054,38 @@ class TeamCubit extends Cubit<TeamState> {
     return (record['id'] ?? '').toString();
   }
 
-  Future<void> _onRealtimeMessageInsert(PostgresChangePayload payload) async {
+  Future<void> _onRealtimeMessageInsert(
+      PostgresChangePayload payload, bool Function() current) async {
     final id = _messageIdFromPayload(payload);
     if (id.isEmpty || state.chat.any((m) => m.id == id)) return;
 
     final message = await repo.loadMessageById(state.team.id, id);
-    if (message == null) return;
+    if (message == null || !current()) return;
 
     emit(state.copyWith(chat: _reconcileCachedMessage(message)));
-    await _hydrateAssignmentIdsInChat();
+    await _hydrateAssignmentIdsInChat(current: current);
   }
 
-  Future<void> _onRealtimeMessageUpdate(PostgresChangePayload payload) async {
+  Future<void> _onRealtimeMessageUpdate(
+      PostgresChangePayload payload, bool Function() current) async {
     final id = _messageIdFromPayload(payload);
     if (id.isEmpty) return;
 
-    final idx = state.chat.indexWhere((m) => m.id == id);
-    if (idx == -1) return;
+    if (!state.chat.any((m) => m.id == id)) return;
 
     final message = await repo.loadMessageById(state.team.id, id);
-    if (message == null) return;
+    if (message == null || !current()) return;
 
     final updated = List<Message>.from(state.chat);
+    final idx = updated.indexWhere((m) => m.id == id);
+    if (idx == -1) return;
     updated[idx] = message;
     emit(state.copyWith(chat: _mergeCachedChat(updated)));
-    await _hydrateAssignmentIdsInChat();
+    await _hydrateAssignmentIdsInChat(current: current);
   }
 
-  Future<void> _onRealtimeMessageDelete(PostgresChangePayload payload) async {
+  Future<void> _onRealtimeMessageDelete(
+      PostgresChangePayload payload, bool Function() current) async {
     final id = _messageIdFromPayload(payload, old: true);
     if (id.isEmpty) return;
 
@@ -1088,19 +1093,36 @@ class TeamCubit extends Cubit<TeamState> {
     if (updated.length == state.chat.length) return;
 
     emit(state.copyWith(chat: updated));
-    await _hydrateAssignmentIdsInChat();
+    await _hydrateAssignmentIdsInChat(current: current);
   }
 
   Future<void> _subscribeToChat() async {
     final sb = Supabase.instance.client;
+    final ownerId = sb.auth.currentUser?.id;
+    final cacheOwner = _cacheOwner;
+    final scope = _authScope;
+    if (ownerId == null || _closing || isClosed) return;
+    if (scope != null &&
+        (cacheOwner == null ||
+            cacheOwner.userId != ownerId ||
+            cacheOwner.capture() == null)) return;
+    final subscription = ++_chatSubscriptionGeneration;
+    final ownerGeneration = scope?.generation;
+    bool current() =>
+        !_closing &&
+        !isClosed &&
+        subscription == _chatSubscriptionGeneration &&
+        sb.auth.currentUser?.id == ownerId &&
+        (scope == null ||
+            (!scope.logoutFenced && scope.generation == ownerGeneration));
     try {
       final chatId = await _resolveMainChatId();
-      if (chatId == null) return;
-      if (chatId.isEmpty) return;
+      if (!current() || chatId == null || chatId.isEmpty) return;
 
       try {
         await _rtChat?.unsubscribe();
       } catch (_) {}
+      if (!current()) return;
       _rtChat = sb.channel('public:messages');
 
       final filter = PostgresChangeFilter(
@@ -1111,9 +1133,9 @@ class TeamCubit extends Cubit<TeamState> {
 
       safeDebugLog('[TeamCubit] RT subscribe chat=${maskDebugId(chatId)}');
       final projectCache = ProjectChatServerCache.qaInstance;
-      final cacheOwner = _cacheOwner;
-      final eventTicket = cacheOwner?.capture();
       Future<void> invalidateSnapshot() async {
+        if (!current()) return;
+        final eventTicket = cacheOwner?.capture();
         if (projectCache == null ||
             cacheOwner == null ||
             eventTicket == null ||
@@ -1133,7 +1155,7 @@ class TeamCubit extends Cubit<TeamState> {
             callback: (payload) async {
               safeDebugLog('[TeamCubit] RT messages INSERT');
               await invalidateSnapshot();
-              await _onRealtimeMessageInsert(payload);
+              if (current()) await _onRealtimeMessageInsert(payload, current);
             },
           )
           .onPostgresChanges(
@@ -1144,7 +1166,7 @@ class TeamCubit extends Cubit<TeamState> {
             callback: (payload) async {
               safeDebugLog('[TeamCubit] RT messages UPDATE');
               await invalidateSnapshot();
-              await _onRealtimeMessageUpdate(payload);
+              if (current()) await _onRealtimeMessageUpdate(payload, current);
             },
           )
           .onPostgresChanges(
@@ -1155,77 +1177,50 @@ class TeamCubit extends Cubit<TeamState> {
             callback: (payload) async {
               safeDebugLog('[TeamCubit] RT messages DELETE');
               await invalidateSnapshot();
-              await _onRealtimeMessageDelete(payload);
+              if (current()) await _onRealtimeMessageDelete(payload, current);
             },
           );
 
-      await _rtChat!.subscribe();
+      _rtChat!.subscribe();
       // subscribe to reactions table for lightweight updates
       try {
         await _rtReactions?.unsubscribe();
       } catch (_) {}
+      if (!current()) return;
       _rtReactions = sb.channel('public:message_reactions');
+      Future<void> updateReactions(String? messageId) async {
+        if (!current() || messageId == null || messageId.isEmpty) return;
+        try {
+          final res = await repo.loadReactionsForMessage(messageId);
+          if (!current() || !state.chat.any((m) => m.id == messageId)) return;
+          await invalidateSnapshot();
+          if (!current()) return;
+          final chat = [...state.chat];
+          final idx = chat.indexWhere((m) => m.id == messageId);
+          if (idx == -1) return;
+          chat[idx] = chat[idx].copyWith(
+            reactions: Map<String, int>.from(res['counts'] ?? {}),
+            userReactions: (res['userReactions'] as List? ?? const [])
+                .map((emoji) => emoji.toString()).toList(),
+          );
+          emit(state.copyWith(chat: _mergeCachedChat(chat)));
+        } catch (_) {}
+      }
       _rtReactions!
           .onPostgresChanges(
             event: PostgresChangeEvent.insert,
             schema: 'public',
             table: 'message_reactions',
-            callback: (payload) async {
-              try {
-                final newRec = payload.newRecord as Map<String, dynamic>?;
-                final mid = newRec?['message_id']?.toString();
-                if (mid != null && mid.isNotEmpty) {
-                  final res = await repo.loadReactionsForMessage(mid);
-                  final counts = Map<String, int>.from(res['counts'] ?? {});
-                  final userReactions =
-                      (res['userReactions'] as List? ?? const [])
-                          .map((emoji) => emoji.toString())
-                          .toList();
-                  final chat = [...state.chat];
-                  final idx = chat.indexWhere((m) => m.id == mid);
-                  if (idx != -1) {
-                    await invalidateSnapshot();
-                    chat[idx] = chat[idx].copyWith(
-                      reactions: counts,
-                      userReactions: userReactions,
-                    );
-                    emit(state.copyWith(chat: _mergeCachedChat(chat)));
-                  }
-                }
-              } catch (_) {}
-            },
+            callback: (payload) => updateReactions(payload.newRecord['message_id']?.toString()),
           )
           .onPostgresChanges(
             event: PostgresChangeEvent.delete,
             schema: 'public',
             table: 'message_reactions',
-            callback: (payload) async {
-              try {
-                final oldRec = payload.oldRecord as Map<String, dynamic>?;
-                final mid = oldRec?['message_id']?.toString();
-                if (mid != null && mid.isNotEmpty) {
-                  final res = await repo.loadReactionsForMessage(mid);
-                  final counts = Map<String, int>.from(res['counts'] ?? {});
-                  final userReactions =
-                      (res['userReactions'] as List? ?? const [])
-                          .map((emoji) => emoji.toString())
-                          .toList();
-                  final chat = [...state.chat];
-                  final idx = chat.indexWhere((m) => m.id == mid);
-                  if (idx != -1) {
-                    await invalidateSnapshot();
-                    chat[idx] = chat[idx].copyWith(
-                      reactions: counts,
-                      userReactions: userReactions,
-                    );
-                    emit(state.copyWith(chat: _mergeCachedChat(chat)));
-                  }
-                }
-              } catch (_) {}
-            },
+            callback: (payload) => updateReactions(payload.oldRecord['message_id']?.toString()),
           );
 
-      await _rtReactions!.subscribe();
+      _rtReactions!.subscribe();
     } catch (_) {
       // тихо
     }
@@ -1457,8 +1452,8 @@ class TeamCubit extends Cubit<TeamState> {
   // Only reconcile assignment message type from server-backed assignment state.
   // Never invent assignmentId by title; new assignment bubbles must come from
   // messages.assignment_id returned by Supabase.
-  Future<void> _hydrateAssignmentIdsInChat() async {
-    if (isClosed || state.chat.isEmpty) return;
+  Future<void> _hydrateAssignmentIdsInChat({bool Function()? current}) async {
+    if (_closing || isClosed || current?.call() == false || state.chat.isEmpty) return;
 
     bool changed = false;
     final chat = [...state.chat];
@@ -1482,6 +1477,7 @@ class TeamCubit extends Cubit<TeamState> {
     if (changed) {
       emit(state.copyWith(chat: _mergeCachedChat(chat)));
       final prefs = await SharedPreferences.getInstance();
+      if (_closing || isClosed || current?.call() == false) return;
       await prefs.setString(
         'learning_chat_${state.team.id}',
         jsonEncode(chat.map((e) => e.toJson()).toList()),

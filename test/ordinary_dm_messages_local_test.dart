@@ -16,6 +16,7 @@ import 'package:student_platform/src/ui/chats/core/chat_message_cache_store.dart
 import 'package:student_platform/src/ui/chats/data/dm_api.dart';
 import 'package:student_platform/src/ui/chats/direct_chat_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:web_socket_channel/io.dart';
 
 const _origin = 'http://127.0.0.1:55321';
 
@@ -26,6 +27,8 @@ class _LocalTransport extends http.BaseClient {
       _LocalSockets().createHttpClient(null)..findProxy = (_) => 'DIRECT');
   final releaseFirst = Completer<void>();
   final firstCommitted = Completer<void>();
+  final firstPageReceived = Completer<void>();
+  final releasePage = Completer<void>();
   int sends = 0;
   bool offlineSend = false;
   bool loseAcknowledgement = false;
@@ -44,6 +47,15 @@ class _LocalTransport extends http.BaseClient {
       throw const SocketException('Test delivery interrupted');
     }
     final response = await inner.send(request);
+    if (request.url.path.endsWith('/rpc/get_chat_messages_page') &&
+        response.statusCode == 200 &&
+        !firstPageReceived.isCompleted) {
+      final bytes = await response.stream.toBytes();
+      firstPageReceived.complete();
+      await releasePage.future;
+      return http.StreamedResponse(Stream.value(bytes), response.statusCode,
+          headers: response.headers, request: request);
+    }
     if (isSend && loseAcknowledgement && response.statusCode == 200) {
       loseAcknowledgement = false;
       await response.stream.drain<void>();
@@ -96,10 +108,29 @@ void main() {
           const MethodChannel('keyboard_image_channel'), (_) async => null);
       await initializeDateFormatting('ru');
       final transport = _LocalTransport();
+      final holdPage = Platform.environment['STUDENT_DM_HOLD_PAGE'] == '1';
+      if (!holdPage) transport.releasePage.complete();
+      var allowRealtime = Completer<void>();
+      var socketAttempts = 0;
+      late WebSocket socket;
       await Supabase.initialize(
           url: _origin,
           publishableKey: accounts.first['anonKey'],
           httpClient: transport,
+          realtimeClientOptions:
+              RealtimeClientOptions(transport: (url, headers) {
+            final uri = Uri.parse(url);
+            if (uri.scheme != 'ws' ||
+                uri.host != '127.0.0.1' ||
+                uri.port != 55321) {
+              throw StateError('Local WebSocket required');
+            }
+            socketAttempts++;
+            return IOWebSocketChannel(allowRealtime.future.then((_) async {
+              socket = await WebSocket.connect(url, headers: headers);
+              return socket;
+            }));
+          }),
           authOptions: const FlutterAuthClientOptions(
               autoRefreshToken: false, detectSessionInUri: false));
       final me = Supabase.instance.client;
@@ -197,6 +228,75 @@ void main() {
         }
 
         await open();
+        await until(() => transport.firstPageReceived.isCompleted,
+            'The initial history request did not reach PostgREST');
+        if (!holdPage) {
+          await until(() => DmApi.viewStateFor(chat).hasSnapshot,
+              'The initial history was not applied');
+        }
+        final feedReady = Completer<void>();
+        Iterable<RealtimeChannel> dmChannels() => me.getChannels().where(
+            // The pinned SDK exposes the topic only for diagnostic use.
+            // ignore: invalid_use_of_internal_member
+            (channel) => channel.topic == 'realtime:dm:messages:$chat');
+        dmChannels().single.onSystemEvents((payload) {
+          if (!feedReady.isCompleted &&
+              payload is Map &&
+              payload['extension'] == 'postgres_changes' &&
+              payload['status'] == 'ok') {
+            feedReady.complete();
+          }
+        });
+        final duringJoin = 'До подключения $tag';
+        await peer.rpc('send_dm_message_once', params: {
+          'p_chat_id': chat,
+          'p_client_key': 'qa-before-join-$tag',
+          'p_text': duringJoin
+        });
+        expect(
+            (await page()).where((r) => r['text'] == duringJoin), hasLength(1));
+        expect(find.text(duringJoin), findsNothing);
+        allowRealtime.complete();
+        await until(() => feedReady.isCompleted,
+            'Postgres change feed did not become ready');
+        if (holdPage) transport.releasePage.complete();
+        await until(
+            () => find.text(duringJoin).hitTestable().evaluate().isNotEmpty,
+            'Committed peer message missed before Realtime join was not recovered in the open chat');
+        Future<String> peerWrites(String label, String clientKey) async {
+          final text = '$label $tag';
+          await peer.rpc('send_dm_message_once', params: {
+            'p_chat_id': chat,
+            'p_client_key': '$clientKey-$tag',
+            'p_text': text,
+          });
+          expect(
+              (await page()).where((row) => row['text'] == text), hasLength(1));
+          return text;
+        }
+
+        if (!holdPage) {
+          final previousAttempts = socketAttempts;
+          allowRealtime = Completer<void>();
+          await socket.close(WebSocketStatus.goingAway);
+          await until(() => socketAttempts > previousAttempts,
+              'The SDK never tried reconnecting the dropped socket');
+          final missed = await peerWrites('Пока сеть отключена', 'reconnect');
+          expect(find.text(missed), findsNothing);
+          allowRealtime.complete();
+          await until(
+              () => find.text(missed).hitTestable().evaluate().isNotEmpty,
+              'Message sent during socket downtime missing after reconnection');
+          final previous = dmChannels().single;
+          expect(await previous.unsubscribe(), 'ok');
+          final afterClose =
+              await peerWrites('После закрытия канала', 'terminal');
+          await until(() => dmChannels().any((c) => !identical(c, previous)),
+              'An active chat kept a terminally closed subscription');
+          await until(
+              () => find.text(afterClose).hitTestable().evaluate().isNotEmpty,
+              'Message missing after replacing a terminally closed subscription');
+        }
         await type(first);
         await until(() => transport.firstCommitted.isCompleted,
             'The first send was not acknowledged by PostgREST');
@@ -310,8 +410,31 @@ void main() {
                     1 &&
                 retry.evaluate().isEmpty,
             'Retry failed after reopening the conversation');
+        if (!holdPage) {
+          await closeChat();
+          expect(await dmChannels().single.unsubscribe(), 'ok');
+          final inactive = await peerWrites('Пока чат закрыт', 'inactive');
+          await tester.pump(const Duration(milliseconds: 1500));
+          expect(dmChannels(), isEmpty);
+          await open();
+          await until(
+              () =>
+                  dmChannels().length == 1 &&
+                  find.text(inactive).hitTestable().evaluate().isNotEmpty,
+              'The reopened chat failed to restore its subscription and missed history');
+          expect(await dmChannels().single.unsubscribe(), 'ok');
+          await tester.pumpWidget(const SizedBox.shrink());
+          await DmApi.clearSessionState();
+          await me.auth.signOut(scope: SignOutScope.local);
+          await tester.pump(const Duration(milliseconds: 1500));
+          expect(dmChannels(), isEmpty,
+              reason: 'A pending retry recreated the old account subscription');
+        }
         expect(tester.takeException(), isNull);
       } finally {
+        if (!allowRealtime.isCompleted) allowRealtime.complete();
+        if (!transport.releasePage.isCompleted)
+          transport.releasePage.complete();
         if (!transport.releaseFirst.isCompleted)
           transport.releaseFirst.complete();
         await tester.pumpWidget(const SizedBox.shrink());
