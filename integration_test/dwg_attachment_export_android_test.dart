@@ -46,7 +46,6 @@ void main() {
         detectSessionInUri: false,
       ),
     );
-    addTearDown(() => Supabase.instance.dispose());
     var blobDownloads = 0;
     ChatFileAccess.debugHttpClientFactory = () => MockClient((request) async {
           blobDownloads++;
@@ -62,6 +61,20 @@ void main() {
     await owners.create(recursive: true);
     final owner = await owners.createTemp('dwg-export-qa-');
     final uid = owner.uri.pathSegments.where((part) => part.isNotEmpty).last;
+    addTearDown(() async {
+      await Supabase.instance.dispose();
+      // The revalidation may have created additional authorization markers.
+      // This directory was uniquely created by this test in the fixture app.
+      if (owner.parent.path != owners.path ||
+          !uid.startsWith('dwg-export-qa-')) {
+        throw StateError('Unexpected fixture cleanup path.');
+      }
+      try {
+        await owner.delete(recursive: true);
+      } on PathNotFoundException {
+        if (await owner.exists()) rethrow;
+      }
+    });
     await signInWithFileSession(Supabase.instance.client, uid, sid);
     final digest =
         sha256.convert(utf8.encode('$uid:${ChatFileAccess.keyFor(url)!}'));
@@ -69,16 +82,6 @@ void main() {
     final receipt = File('${file.path}.grant');
     await file.writeAsBytes(bytes, flush: true);
     await receipt.writeAsString('chat-file-grant-v2:$sid', flush: true);
-    addTearDown(() async {
-      for (final entry in <FileSystemEntity>[receipt, file, owner]) {
-        try {
-          await entry.delete();
-        } on PathNotFoundException {
-          // The authorization check may already have removed a receipt.
-          if (await entry.exists()) rethrow;
-        }
-      }
-    });
 
     await tester.pumpWidget(MaterialApp(
       home: FullscreenFileViewer(

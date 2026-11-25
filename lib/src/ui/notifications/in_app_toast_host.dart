@@ -1,13 +1,25 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'package:student_platform/src/core/auth_session_scope_host.dart';
+import 'package:student_platform/src/core/session_capabilities.dart';
+import 'package:student_platform/src/core/session_capabilities_host.dart';
+import 'package:student_platform/src/services/push/active_chat_tracker.dart';
 import 'package:student_platform/src/services/push/in_app_notification_bus.dart';
 import 'package:student_platform/src/services/push/push_navigation.dart';
 import 'package:student_platform/src/services/push/push_payload.dart';
 import 'package:student_platform/src/ui/notifications/notification_center_sheet.dart';
 import 'package:student_platform/src/core/online_side_effect_barrier.dart';
 import 'package:student_platform/src/services/push/push_notification_service.dart';
+import 'package:student_platform/src/ui/chats/dm_title.dart';
+
+const _dmNotice = 'Личное сообщение';
+
+bool _genericDmTitle(String title) =>
+    isUnresolvedDmTitle(title) ||
+    const {_dmNotice, 'Уведомление', 'Новое сообщение'}.contains(title.trim());
 
 /// Floating iOS-style in-app banner (not a bottom SnackBar over the tab bar).
 class InAppToastHost extends StatefulWidget {
@@ -25,6 +37,8 @@ class _InAppToastHostState extends State<InAppToastHost>
   StreamSubscription<InAppNotificationEvent>? _sub;
   late final AnimationController _anim;
   InAppNotificationEvent? _event;
+  String? Function()? _senderName;
+  VoidCallback? _removeSenderCloseHook;
   Timer? _hideTimer;
   String? _lastDedupe;
   DateTime? _lastAt;
@@ -42,14 +56,20 @@ class _InAppToastHostState extends State<InAppToastHost>
 
   @override
   void dispose() {
+    _forgetSender();
     _hideTimer?.cancel();
     _sub?.cancel();
     _anim.dispose();
     super.dispose();
   }
 
+  void _forgetSender() {
+    _removeSenderCloseHook?.call();
+    _removeSenderCloseHook = null;
+    _senderName = null;
+  }
+
   void _onEvent(InAppNotificationEvent event) {
-    if (!(widget.barrier?.isOpen ?? true)) return;
     if (event.type == '_session_reset' || event.type == '_dismiss') {
       if (event.type == '_session_reset') {
         _seenNotificationIds.clear();
@@ -60,11 +80,13 @@ class _InAppToastHostState extends State<InAppToastHost>
           event.dismissedIds == null ||
           event.dismissedIds!.contains(_event?.payload?.notificationId)) {
         _hideTimer?.cancel();
+        _forgetSender();
         _anim.stop();
         setState(() => _event = null);
       }
       return;
     }
+    if (!(widget.barrier?.isOpen ?? true)) return;
     // Only events understood by the client can be routed from the banner.
     // Internal bus events and unknown payloads must never become visible.
     if (!PushPayload.knownTypes.contains(event.type)) return;
@@ -89,11 +111,105 @@ class _InAppToastHostState extends State<InAppToastHost>
     _lastAt = now;
 
     _hideTimer?.cancel();
+    _forgetSender();
+    final needsSender =
+        event.type == 'dm_message' && _genericDmTitle(event.title);
     setState(() => _event = event);
     _anim.forward(from: 0);
     _hideTimer = Timer(const Duration(seconds: 4), () {
       _dismiss();
     });
+    if (needsSender) unawaited(_resolveDmTitle(event));
+  }
+
+  Future<void> _resolveDmTitle(InAppNotificationEvent event) async {
+    final payload = event.payload;
+    if (payload == null ||
+        payload.type != 'dm_message' ||
+        (payload.notificationId ?? '').isEmpty ||
+        (payload.chatId ?? '').isEmpty) return;
+    final scope = AuthSessionScopeHost.maybeRead(context);
+    final owner = scope?.capture();
+    final caps = SessionCapabilitiesHost.maybeRead(context);
+    final permit = caps?.capture(SessionCapability.networkRead);
+    if (scope == null || owner == null || caps == null || permit == null)
+      return;
+
+    final client = Supabase.instance.client;
+    final barrier = widget.barrier;
+    bool ownerCurrent() =>
+        mounted &&
+        identical(widget.barrier, barrier) &&
+        (barrier?.isOpen ?? true) &&
+        identical(client, Supabase.instance.client) &&
+        identical(scope, AuthSessionScopeHost.maybeRead(context)) &&
+        identical(caps, SessionCapabilitiesHost.maybeRead(context)) &&
+        scope.matchesSession(owner, client.auth.currentSession) &&
+        caps.ownsFor(permit, owner, SessionCapability.networkRead);
+    bool current() =>
+        ownerCurrent() &&
+        identical(_event, event) &&
+        (_hideTimer?.isActive ?? false) &&
+        !InAppNotificationBus.instance.wasDismissed(payload.notificationId) &&
+        !ActiveChatTracker.instance.isActive(payload.chatId);
+
+    Future<void> resolve() async {
+      if (!current()) return;
+      final row = await client
+          .from('app_notifications')
+          .select('id,recipient_id,event_type,title,data,read_at,deleted_at')
+          .eq('id', payload.notificationId!)
+          .eq('recipient_id', owner.userId)
+          .maybeSingle();
+      if (!current() ||
+          row == null ||
+          row['id'] != payload.notificationId ||
+          row['recipient_id'] != owner.userId ||
+          row['event_type'] != payload.type ||
+          row['read_at'] != null ||
+          row['deleted_at'] != null) return;
+      final data = row['data'];
+      if (data is! Map ||
+          data['chat_id'] != payload.chatId ||
+          (data['type'] != null && data['type'] != payload.type) ||
+          (data['notification_id'] != null &&
+              data['notification_id'] != row['id'])) return;
+      final peer = data['peer_id'];
+      if (peer is! String ||
+          peer.trim().isEmpty ||
+          peer == owner.userId ||
+          data['author_id'] != peer ||
+          (payload.peerId != null && payload.peerId != peer) ||
+          (payload.raw['author_id'] != null &&
+              payload.raw['author_id'] != peer) ||
+          (payload.messageId != null &&
+              data['message_id'] != null &&
+              payload.messageId != data['message_id'])) return;
+
+      final title = row['title'];
+      final name = title is String && !_genericDmTitle(title)
+          ? title.trim()
+          : (await PushNavigation.resolvePeerProfile(peer)).name;
+      if (current() && !_genericDmTitle(name)) {
+        setState(() => _senderName = () => ownerCurrent() ? name : null);
+        // The guarded host may remain mounted after its barrier closes.
+        _removeSenderCloseHook = barrier?.onClose(() {
+          scheduleMicrotask(() {
+            if (mounted && identical(_event, event)) setState(_forgetSender);
+          });
+        });
+      }
+    }
+
+    try {
+      if (barrier == null) {
+        await resolve();
+      } else {
+        await barrier.run(resolve);
+      }
+    } catch (_) {
+      // Keep the neutral title if the original session cannot verify a sender.
+    }
   }
 
   Future<bool> _dismiss() async {
@@ -105,6 +221,7 @@ class _InAppToastHostState extends State<InAppToastHost>
       return false;
     }
     if (!mounted || !identical(_event, dismissedEvent)) return false;
+    _forgetSender();
     setState(() => _event = null);
     return true;
   }
@@ -148,6 +265,14 @@ class _InAppToastHostState extends State<InAppToastHost>
     final top = MediaQuery.paddingOf(context).top;
     final event = _event;
 
+    var title = event?.title ?? '';
+    if (event?.type == 'dm_message' && _genericDmTitle(title)) {
+      if (_senderName != null) {
+        AuthSessionScopeHost.maybeOf(context);
+        SessionCapabilitiesHost.maybeOf(context);
+      }
+      title = _senderName?.call() ?? _dmNotice;
+    }
     return Stack(
       children: [
         widget.child,
@@ -174,6 +299,7 @@ class _InAppToastHostState extends State<InAppToastHost>
                   direction: DismissDirection.up,
                   onDismissed: (_) {
                     _hideTimer?.cancel();
+                    _forgetSender();
                     setState(() => _event = null);
                     _anim.value = 0;
                   },
@@ -224,7 +350,7 @@ class _InAppToastHostState extends State<InAppToastHost>
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Text(
-                                      event.title,
+                                      title,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
