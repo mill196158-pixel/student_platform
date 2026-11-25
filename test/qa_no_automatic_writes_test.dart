@@ -41,6 +41,7 @@ class _Chat implements IChatService {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   testWidgets('QA suppresses automatic presence and DM mark, preserves read and manual mark', (tester) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await initializeDateFormatting('ru');
     SharedPreferences.setMockInitialValues({});
     const links = MethodChannel('com.llfbandit.app_links/events');

@@ -22,6 +22,7 @@ class _Repo implements LearningRepository {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   testWidgets('team chat suppresses automatic mark-read only in QA', (tester) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await initializeDateFormatting('ru');
     SharedPreferences.setMockInitialValues({});
     const links = MethodChannel('com.llfbandit.app_links/events');
