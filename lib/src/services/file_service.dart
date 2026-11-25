@@ -265,7 +265,7 @@ class FileService {
       case 'docx':
         return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
       case 'dwg':
-        return 'application/acad';
+        return ChatFile.drawingMimeType;
       case 'txt':
         return 'text/plain';
       case 'jpg':

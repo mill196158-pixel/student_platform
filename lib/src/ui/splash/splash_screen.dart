@@ -1,10 +1,15 @@
 import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:student_platform/src/core/auth_session.dart';
 import 'package:student_platform/src/core/offline_startup_admission.dart';
 import 'package:student_platform/src/core/reconnect_chat_intent.dart';
+
+// Only Android paints a Flutter view before the router is initialized.
+bool get usesEarlyStartupView =>
+    !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen(
@@ -154,11 +159,13 @@ class SplashLoadingView extends StatelessWidget {
   const SplashLoadingView(
       {super.key,
       this.failed = false,
+      this.initializing = false,
       this.networkUnavailable = false,
       this.retryEnabled = true,
       this.onRetry});
 
   final bool failed;
+  final bool initializing;
   final bool networkUnavailable;
   final bool retryEnabled;
   final VoidCallback? onRetry;
@@ -166,6 +173,12 @@ class SplashLoadingView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
+    final showMascot = initializing == usesEarlyStartupView;
+    // A replacing route can already be painting its login illustration while
+    // the outgoing splash is still mounted for the page transition.
+    if (ModalRoute.isCurrentOf(context) == false) {
+      return ColoredBox(color: t.colorScheme.surface);
+    }
     return Scaffold(
       backgroundColor: t.colorScheme.surface,
       body: Center(
@@ -191,10 +204,11 @@ class SplashLoadingView extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Flexible(
-                    child: const ProductLoadingIndicator(
-                      size: 260,
-                      semanticsLabel: 'Открываем приложение',
-                    ),
+                    child: showMascot
+                        ? const ProductLoadingIndicator(
+                            size: 260, semanticsLabel: 'Открываем приложение')
+                        : const ProductLoadingIndicator.inline(
+                            size: 28, semanticsLabel: 'Открываем приложение'),
                   ),
                   const SizedBox(height: 12),
                   ExcludeSemantics(

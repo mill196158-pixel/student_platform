@@ -8,14 +8,24 @@ class ProductLoadingIndicator extends StatelessWidget {
     this.color,
     this.size = 48,
     this.semanticsLabel = 'Загрузка',
-  });
+  }) : _inline = false;
 
   /// Use when loading replaces the main content of a screen or panel.
   const ProductLoadingIndicator.page({
     super.key,
     this.color,
     this.semanticsLabel = 'Загрузка',
-  }) : size = 120;
+  }) : size = 120, _inline = false;
+
+  /// A compact progress ring for controls and cards that may load together.
+  const ProductLoadingIndicator.inline({
+    super.key,
+    this.color,
+    this.size = 20,
+    this.semanticsLabel = 'Загрузка',
+  }) : _inline = true;
+
+  final bool _inline;
 
   final Color? color;
   final double size;
@@ -36,7 +46,22 @@ class ProductLoadingIndicator extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final animate =
-        !MediaQuery.disableAnimationsOf(context) && TickerMode.of(context);
+        !MediaQuery.disableAnimationsOf(context) && TickerMode.valuesOf(context).enabled;
+    if (_inline) {
+      return Center(
+        widthFactor: 1,
+        heightFactor: 1,
+        child: SizedBox.square(
+          dimension: size,
+          child: CircularProgressIndicator(
+            value: animate ? null : 0.65,
+            strokeWidth: 2,
+            color: color,
+            semanticsLabel: semanticsLabel,
+          ),
+        ),
+      );
+    }
     final fallback = Center(
       child: Image.asset(
         'assets/animations/pigeon_first_frame.png',

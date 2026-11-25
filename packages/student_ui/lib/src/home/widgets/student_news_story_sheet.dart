@@ -419,6 +419,12 @@ class _Dots extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (count > 7) {
+      return Text(
+        '${index + 1} из $count',
+        style: Theme.of(context).textTheme.labelMedium,
+      );
+    }
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: List.generate(count, (i) {

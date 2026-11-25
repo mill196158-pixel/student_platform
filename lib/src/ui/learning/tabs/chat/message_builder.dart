@@ -80,6 +80,7 @@ class _ForwardInfoTile extends StatelessWidget {
   bool _isImage(ForwardAttachmentModel attachment) {
     final name = (attachment.name ?? '').toLowerCase();
     final mime = (attachment.mime ?? '').toLowerCase();
+    if (ChatFile.drawingOpenMime(name, mime) != null) return false;
     return mime.startsWith('image/') ||
         name.endsWith('.jpg') ||
         name.endsWith('.jpeg') ||

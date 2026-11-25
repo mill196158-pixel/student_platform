@@ -819,7 +819,11 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
     super.dispose();
   }
 
-  String get _fileName => FileUiUtils.cleanFileName(widget.fileName);
+  String get _fileName {
+    final name = widget.fileName.trim().isEmpty ? '' : FileUiUtils.cleanFileName(widget.fileName);
+    final externalName = ChatFile.externalFileName(name, widget.mimeType);
+    return externalName.isEmpty ? 'Файл' : externalName;
+  }
   bool get _sourceEnabled => sourceDocumentFenceEnabled() &&
       widget.sourceFile != null && supportsSourceBoundDocument(widget.sourceFile!) &&
       widget.sourceFile!.fileUrl == widget.fileUrl && widget.sourceFile!.id == widget.sourceFileId;
@@ -829,6 +833,7 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
        (widget.mimeType ?? '').toLowerCase()=='application/vnd.openxmlformats-officedocument.wordprocessingml.document');
   bool get _nativeQaSource => _nativeQaDocx && _sourceEnabled;
   bool get _isPdf {
+    if (ChatFile.drawingOpenMime(_fileName, widget.mimeType) != null) return false;
     final name = _fileName.toLowerCase();
     final mime = (widget.mimeType ?? '').toLowerCase();
     return mime.contains('pdf') || name.endsWith('.pdf');
@@ -837,7 +842,7 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
   bool get _canSaveDrawing =>
       !kIsWeb &&
       defaultTargetPlatform == TargetPlatform.android &&
-      _fileName.toLowerCase().endsWith('.dwg') &&
+      ChatFile.drawingOpenMime(_fileName, widget.mimeType) != null &&
       !sourceDocumentFenceEnabled();
 
   bool _previewCurrent(int revision) => mounted &&
@@ -877,7 +882,8 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
       }
       final file = await _ensureCachedFile();
       if (!_previewCurrent(revision)) return;
-      final res = await _dispatchSource(file, (path) => OpenFilex.open(path));
+      final res = await _dispatchSource(file, (path) =>
+          OpenFilex.open(path, type: ChatFile.drawingOpenMime(_fileName, widget.mimeType)));
       if (res.type != ResultType.done && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Не удалось открыть файл: ${res.message}')),

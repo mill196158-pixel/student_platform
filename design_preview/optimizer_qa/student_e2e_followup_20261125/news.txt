@@ -1,0 +1,8 @@
+PASS E2E-083 ordinary archive read two distinct SQL pages; after real publication refresh preserves all 27 previous IDs, including the equal-timestamp boundary
+PASS E2E-081 home and archive open the same edited publication UUID, heading and paragraph
+00:27 +1: All tests passed!
+PASS cleanup of isolated news schema, REST container and test accounts
+PASS E2E-083 compatibility: refreshed the full archive through the legacy RPC, 27 previous IDs and one new ID
+PASS E2E-081 home and archive open the same edited publication UUID, heading and paragraph
+00:26 +1: All tests passed!
+PASS cleanup of isolated news schema, REST container and test accounts

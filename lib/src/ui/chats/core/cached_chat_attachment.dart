@@ -171,13 +171,15 @@ class _CachedChatAttachmentState extends State<CachedChatAttachment> {
         var platformStarted = false;
         try {
         final bridge = await _sourceBridge;
-        final exported = await bridge?.export(widget.file.fileName);
+        final exported = await bridge?.export(ChatFile.externalFileName(
+            widget.file.fileName, widget.file.fileType));
         if (exported == null || !current() || await bridge?.read() == null || !current()) {
           notify('Локальная копия недоступна.');
           return;
         }
         final started = await bridge?.dispatch(exported,
-            (path) => OpenFilex.open(path, type: widget.file.fileType));
+            (path) => OpenFilex.open(path, type: ChatFile.externalOpenMime(
+                widget.file.fileName, fallback: widget.file.fileType)));
         if (started == null) { notify('Локальная копия недоступна.'); return; }
         platformStarted = true;
         unawaited(started.result.then<void>((_) { _sourceDispatchInFlight = false; },
@@ -193,7 +195,8 @@ class _CachedChatAttachmentState extends State<CachedChatAttachment> {
           permit: current, dispatch: (path) {
         final debugOpen = widget.debugOpen;
         if (debugOpen != null) return debugOpen(path);
-        return OpenFilex.open(path, type: widget.file.fileType);
+        return OpenFilex.open(path, type: ChatFile.externalOpenMime(
+                widget.file.fileName, fallback: widget.file.fileType));
       });
       if (!current()) return;
       if (result == null) {

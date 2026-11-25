@@ -1,0 +1,23 @@
+Expected: not contains 'Subgroup B workshop'
+  Actual: MappedListIterable<Lesson, String>:['Subgroup B workshop']
+E2E-052 PASS both students saw the common lecture; only B saw the workshop before and after a new lesson UUID; a corrected assignment revoked B and admitted A.
+E2E-059 changed enrollment opens the new offering while peer keeps previous one
+01:02 +9: All tests passed!
+PASS cleanup of isolated timetable schema, REST container and test accounts
+PASS two ordinary sessions receive own schedule
+PASS replaced lesson UUID and teacher
+PASS corrected assignment removed from B
+PASS missing roster sees shared lecture only
+PASS new parallel room awaits review
+PASS explicit shared room shown to both
+PASS ambiguous rooms excluded pending verification
+PASS ended enrollment cannot use obsolete group profile
+PASS operator rejected ambiguous lesson; 2 signed-in test students
+PASS cleanup of isolated timetable schema, REST container and test accounts
+
+Group-based configuration, empty subgroup records
+E2E-052 PASS two active academic groups without a subgroup roster: both signed-in students saw only their own Friday lesson on screen and in the diary RPC.
+PASS synthetic subgroup compatibility: both students saw the common lecture; only B saw the workshop before and after a new lesson UUID; a corrected assignment revoked B and admitted A.
+E2E-059 changed enrollment opens the new offering while peer keeps previous one
+00:57 +10: All tests passed!
+PASS cleanup of isolated timetable schema, REST container and test accounts

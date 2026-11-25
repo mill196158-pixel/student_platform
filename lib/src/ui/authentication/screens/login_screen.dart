@@ -272,7 +272,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                                     width: 20,
                                                     height: 20,
                                                     child:
-                                                        ProductLoadingIndicator(),
+                                                        ProductLoadingIndicator.inline(),
                                                   )
                                                 : const Text('Войти'),
                                           ),

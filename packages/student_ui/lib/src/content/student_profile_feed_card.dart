@@ -280,7 +280,7 @@ class _FeedImageSkeleton extends StatelessWidget {
           child: SizedBox(
             width: 20,
             height: 20,
-            child: ProductLoadingIndicator(),
+            child: ProductLoadingIndicator.inline(),
           ),
         ),
       ),

@@ -411,11 +411,11 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   stage('binding-ready');
 
-  final android = !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+  final hasEarlyView = usesEarlyStartupView;
   await SystemChrome.setPreferredOrientations(const [DeviceOrientation.portraitUp]);
   stage('orientation-ready');
-  if (android) {
-    // Draw the branded loader while the session and disk caches initialize.
+  if (hasEarlyView) {
+    // Keep the first frame responsive while the real splash route is being prepared.
     await Future.wait([
       ProductLoadingIndicator.preload(),
       themeService.initialize(),
@@ -426,9 +426,12 @@ Future<void> main() async {
   }
 
   try {
-    await _initializeApp(stage, initializeTheme: !android);
+    await Future.wait<void>([
+      _initializeApp(stage, initializeTheme: !hasEarlyView),
+      if (hasEarlyView) WidgetsBinding.instance.waitUntilFirstFrameRasterized,
+    ]);
   } catch (error) {
-    if (!android) rethrow;
+    if (!hasEarlyView) rethrow;
     debugPrint('[startup] Initialization failed: ${error.runtimeType}');
     runApp(const _StartupApp(failed: true));
     return;
@@ -839,7 +842,7 @@ class _StartupApp extends StatelessWidget {
         theme: AppTheme.light().data,
         darkTheme: AppTheme.dark().data,
         themeMode: themeService.value,
-        builder: (_, __) => SplashLoadingView(failed: failed),
+        builder: (_, __) => SplashLoadingView(failed: failed, initializing: true),
       );
 }
 
@@ -875,42 +878,54 @@ class StudentPlatformApp extends StatelessWidget {
                               child: _QaAwareSessionKeeper(
                             child: ValueListenableBuilder<ThemeMode>(
                               valueListenable: themeService,
-                              builder: (context, mode, _) => MaterialApp.router(
-                                scaffoldMessengerKey: rootScaffoldMessengerKey,
-                                title: 'Student Platform',
-                                debugShowCheckedModeBanner: false,
-                                theme: AppTheme.light().data,
-                                darkTheme: AppTheme.dark().data,
-                                themeMode: mode,
-                                routerConfig: appRouter,
-                                builder: (context, child) {
-                                  final routes = child ?? const SizedBox.shrink();
-                                  if (_sqlitePolicyQa && _offlineUiQa && _qaRotationNavigation) {
-                                    final caps = SessionCapabilitiesHost.maybeRead(context);
-                                    final scope = AuthSessionScopeHost.maybeRead(context);
-                                    if (caps == null || scope == null) return const SizedBox.shrink();
-                                    return QaRotationNavigationGuard(scope: scope,
-                                        capabilities: caps, receipt: _qaRotationReceipt,
-                                        refreshStarts: _qaRefreshGate?.refreshStarts,
-                                        hasPendingRefresh: () => _qaRefreshGate?.qaRefreshPending ?? true,
-                                        child: routes);
-                                  }
-                                  final shell = _sqlitePolicyQa ? routes : InAppToastHost(child: routes);
-                                  return pinnedMediaRuntimeEnabled() ? PinnedMediaStatusHost(child: shell) : shell;
-                                },
+                              builder: (context, mode, _) {
+                                final light = AppTheme.light().data;
+                                final dark = AppTheme.dark().data;
+                                final useDark = mode == ThemeMode.dark ||
+                                    (mode == ThemeMode.system &&
+                                        MediaQuery.platformBrightnessOf(context) == Brightness.dark);
+                                // Keep an opaque surface while the router and its
+                                // localizations prepare their first visible child.
+                                return ColoredBox(
+                                  color: (useDark ? dark : light).colorScheme.surface,
+                                  child: MaterialApp.router(
+                                    scaffoldMessengerKey: rootScaffoldMessengerKey,
+                                    title: 'Student Platform',
+                                    debugShowCheckedModeBanner: false,
+                                    theme: light,
+                                    darkTheme: dark,
+                                    themeMode: mode,
+                                    routerConfig: appRouter,
+                                    builder: (context, child) {
+                                      final routes = child ?? const SizedBox.shrink();
+                                      if (_sqlitePolicyQa && _offlineUiQa && _qaRotationNavigation) {
+                                        final caps = SessionCapabilitiesHost.maybeRead(context);
+                                        final scope = AuthSessionScopeHost.maybeRead(context);
+                                        if (caps == null || scope == null) return const SizedBox.shrink();
+                                        return QaRotationNavigationGuard(scope: scope,
+                                            capabilities: caps, receipt: _qaRotationReceipt,
+                                            refreshStarts: _qaRefreshGate?.refreshStarts,
+                                            hasPendingRefresh: () => _qaRefreshGate?.qaRefreshPending ?? true,
+                                            child: routes);
+                                      }
+                                      final shell = _sqlitePolicyQa ? routes : InAppToastHost(child: routes);
+                                      return pinnedMediaRuntimeEnabled() ? PinnedMediaStatusHost(child: shell) : shell;
+                                    },
 
-                                // Локализация
-                                locale: const Locale('ru', 'RU'),
-                                supportedLocales: const [
-                                  Locale('ru', 'RU'),
-                                  Locale('en', 'US'),
-                                ],
-                                localizationsDelegates: const [
-                                  GlobalMaterialLocalizations.delegate,
-                                  GlobalCupertinoLocalizations.delegate,
-                                  GlobalWidgetsLocalizations.delegate,
-                                ],
-                              ),
+                                    // Локализация
+                                    locale: const Locale('ru', 'RU'),
+                                    supportedLocales: const [
+                                      Locale('ru', 'RU'),
+                                      Locale('en', 'US'),
+                                    ],
+                                    localizationsDelegates: const [
+                                      GlobalMaterialLocalizations.delegate,
+                                      GlobalCupertinoLocalizations.delegate,
+                                      GlobalWidgetsLocalizations.delegate,
+                                    ],
+                                  ),
+                                );
+                              },
                             ),
                           ))))))),
     );

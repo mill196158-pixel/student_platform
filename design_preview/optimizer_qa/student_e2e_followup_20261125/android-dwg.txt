@@ -1,0 +1,4 @@
+PASS qa-cad-8600098e-first.dwg: aeb8d86d2f9fe7171c56d2e2751c5f32bcb7f3952c3deab7ae8371eebdc02b42; CAD model label: QA SHEET 1 - ACADEMIC FLOOR
+PASS qa-cad-8600098e-second.dwg: 85a6418fc2da7644483950a05cbda10b3eb5012707ddd0e24530085cdc7acfb7; CAD model label: QA SHEET 2 - ACADEMIC FLOOR
+Direct Android launch entered CAD viewer
+PASS platform-open Android CAD reader rendered expected sheet 1 and text: 8:40 IO 1795639246... DWG 2D SCENE 2 ENTITIES QA SHEET 1 - ACADEMIC FLOOR VIEW ANNOTATE SELECT MEASURE

@@ -1179,6 +1179,7 @@ class PersonalDiaryService {
   }
 
   Future<List<PersonalDiaryLesson>> loadScheduleLessons() async {
+    final owner = _sb.auth.currentUser?.id;
     final context = await _academicContextService.loadFresh();
     final groupId = context.groupId ?? '';
     if (groupId.isEmpty) return const [];
@@ -1186,19 +1187,32 @@ class PersonalDiaryService {
     final now = DateTime.now();
     final from = now.subtract(const Duration(days: 180));
     final to = now.add(const Duration(days: 180));
-    final rows = await _sb
-        .from('lessons')
-        .select(
-          'id,date,subject,group_id,subject_id,subject_offering_id,semester_number,pair_num,time_start',
-        )
-        .eq('group_id', groupId)
-        .gte('date', _yyyyMmDd(from))
-        .lte('date', _yyyyMmDd(to))
-        .order('date', ascending: false)
-        .order('pair_num', ascending: true)
-        .limit(120);
+    List<dynamic> rows;
+    try {
+      rows = await _sb.rpc('get_my_diary_schedule_lessons', params: {
+        'p_group_id': groupId,
+        'p_from': _yyyyMmDd(from),
+        'p_to': _yyyyMmDd(to),
+      }) as List;
+    } on PostgrestException catch (error) {
+      // Older servers only provide the group-wide diary selection.
+      if (error.code != 'PGRST202') rethrow;
+      rows = await _sb
+          .from('lessons')
+          .select('id,date,subject,group_id,subject_id,subject_offering_id,'
+              'semester_number,pair_num,time_start')
+          .eq('group_id', groupId)
+          .gte('date', _yyyyMmDd(from))
+          .lte('date', _yyyyMmDd(to))
+          .order('date', ascending: false)
+          .order('pair_num', ascending: true)
+          .limit(120);
+    }
+    if (owner == null || owner != _sb.auth.currentUser?.id) {
+      throw StateError('Session changed');
+    }
 
-    return (rows as List)
+    return rows
         .map((row) => Map<String, dynamic>.from(row as Map))
         .where(
             (row) => (row['subject_offering_id'] ?? '').toString().isNotEmpty)

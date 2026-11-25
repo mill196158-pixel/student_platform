@@ -1,6 +1,6 @@
 {
-    "name": "student_platform",
-    "short_name": "student_platform",
+    "name": "Student Platform",
+    "short_name": "Student Platform",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

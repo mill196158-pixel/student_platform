@@ -973,7 +973,7 @@ class _TopicOptionsEditorScreenState extends State<TopicOptionsEditorScreen> {
                   ? SizedBox(
                       height: 20,
                       width: 20,
-                      child: ProductLoadingIndicator(
+                      child: ProductLoadingIndicator.inline(
                           color: Theme.of(context).colorScheme.onPrimary),
                     )
                   : const Text('Сохранить изменения'),
@@ -1277,7 +1277,7 @@ class _ConflictBanner extends StatelessWidget {
                 ? SizedBox(
                     width: 16,
                     height: 16,
-                    child: ProductLoadingIndicator(),
+                    child: ProductLoadingIndicator.inline(),
                   )
                 : const Text('Обновить'),
           ),

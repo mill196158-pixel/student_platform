@@ -812,7 +812,7 @@ class _CreateTopicSelectionScreenState
                               const SizedBox(
                                 width: 18,
                                 height: 18,
-                                child: ProductLoadingIndicator(),
+                                child: ProductLoadingIndicator.inline(),
                               ),
                               const SizedBox(width: 12),
                               Expanded(child: Text(_parseProgress!)),
@@ -890,7 +890,7 @@ class _CreateTopicSelectionScreenState
                         ? const SizedBox(
                             width: 18,
                             height: 18,
-                            child: ProductLoadingIndicator(
+                            child: ProductLoadingIndicator.inline(
                               color: Colors.white,
                             ),
                           )

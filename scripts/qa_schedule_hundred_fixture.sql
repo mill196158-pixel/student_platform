@@ -1,6 +1,6 @@
 -- Only for qa_local_timetable_backlog.py, in a fresh local schema.
 create table groups(id uuid primary key, name text);
-create table users(id uuid primary key, group_name text, subgroup text);
+create table users(id uuid primary key, group_name text);
 create table academic_terms(id uuid primary key, starts_on date, ends_on date, is_current boolean);
 create table group_term_semesters(group_id uuid, semester_number integer, academic_term_id uuid, academic_year_id uuid, created_at timestamptz default now());
 create table curriculum_subjects(id uuid primary key, display_name text, raw_subject_name text);
@@ -11,7 +11,7 @@ create table subject_offerings(id uuid primary key, subject_id uuid, group_id uu
 create table lessons(id uuid primary key default gen_random_uuid(), week int default 1, day text default 'ПН',
   date date, pair_num int, time_start time, time_end time, subject text, room text, teacher text,
   group_id uuid, semester_number integer, subject_id uuid, subject_offering_id uuid, academic_term_id uuid,
-  academic_year_id uuid, raw_subject_name text, normalized_subject_name text, alias_match_status text, subgroup text);
+  academic_year_id uuid, raw_subject_name text, normalized_subject_name text, alias_match_status text);
 alter table lessons enable row level security;
 create policy enrolled on lessons for select to authenticated
   using(exists(select 1 from groups g join users u on u.group_name=g.name where g.id=lessons.group_id and u.id=auth.uid()));
@@ -40,7 +40,7 @@ CREATE OR REPLACE FUNCTION "public"."get_my_lessons"("p_from" "date" DEFAULT CUR
 $$;
 -- Schedule cases
 insert into groups values (':a:','Group One'),(':b:','Group Two');
-insert into users values (':student:','Group One','A'),(':peer:','Group One','B');
+insert into users values (':student:','Group One'),(':peer:','Group One'),(':other_student:','Group Two');
 insert into academic_terms values(':term:','2026-12-01','2027-01-31',true);
 insert into group_term_semesters values(':a:',3,':term:',gen_random_uuid()),(':b:',3,':term:',gen_random_uuid());
 insert into subject_catalog values(':sub1:','Bridge mechanics','bridge mechanics'),(':sub2:','Bridge materials','bridge materials');
@@ -55,6 +55,10 @@ values ('2026-12-28',1,'09:00','10:30','Bridge mechanics','North 10','Lecturer O
        ('2026-12-30',1,'09:00','10:30', U&'BRIDGE\00A0  MECHANICS','West 40','Lecturer One',':a:',3,':term:'),
        ('2027-01-04',1,'09:00','10:30','Bridge mechanics','North 99','Lecturer One',':a:',3,':term:'),
        ('2027-01-04',1,'09:00','10:30','Bridge mechanics','New Group 11','Lecturer Three',':b:',3,':term:');
+-- Parallel lessons on the same day and at the same time in two independent academic groups.
+insert into lessons(date,day,pair_num,time_start,time_end,subject,room,teacher,group_id,semester_number,academic_term_id)
+values ('2027-01-08','ПТ',2,'11:00','12:30','Bridge materials','Materials hall A','Lecturer Two',':a:',3,':term:'),
+       ('2027-01-08','ПТ',2,'11:00','12:30','Bridge mechanics','Mechanics hall B','Lecturer Three',':b:',3,':term:');
 alter table subject_offerings add column status text default 'active';
 alter table subject_catalog add column description text;
 alter table curriculum_subjects add column control_form text, add column department text, add column hours_total numeric,
@@ -98,8 +102,8 @@ create function confirm_test_offering() returns void language sql security defin
 revoke all on function confirm_test_offering() from public,anon;
 grant execute on function confirm_test_offering() to authenticated;
 alter table users add column login text;
-create table student_enrollments(id uuid default gen_random_uuid(),user_id uuid,group_id uuid,status text,ended_at timestamptz);
-insert into student_enrollments(user_id,group_id,status) select id,':a:','active' from users;
+create table student_enrollments(id uuid primary key default gen_random_uuid(),user_id uuid,group_id uuid,status text,ended_at timestamptz);
+insert into student_enrollments(user_id,group_id,status) select u.id,g.id,'active' from users u join groups g on g.name=u.group_name;
 create table team_members(team_id uuid references teams,user_id uuid);
 insert into team_members select t.id,u.id from teams t join users u on t.group_name=u.group_name;
 alter table teams add column kind text default 'subject',add column group_id uuid,add column subject_id uuid,
@@ -130,6 +134,11 @@ create function advance_fixture(p_action text) returns void language plpgsql sec
 begin
   if auth.uid() <> ':student:'::uuid then raise exception 'unexpected actor'; end if;
   case p_action
+  when 'require_no_roster' then
+    if exists (select 1 from private.schedule_subgroup_roster) or
+       exists (select 1 from private.schedule_subgroup_occurrences) then
+      raise exception 'Expected an ordinary group timetable without subgroup data';
+    end if;
   when 'rename' then
     update teams set name='Renamed mechanics team' where subject_offering_id=':off1:';
     update subject_offerings set display_name='Updated bridge mechanics' where id=':off1:';
@@ -140,11 +149,27 @@ begin
     update lessons set subject='Bridge mechanics' where subject_offering_id=':off1:';
     update lessons set subject=U&'BRIDGE\00A0  MECHANICS' where room='West 40';
   when 'subgroup' then
-    insert into lessons(date,pair_num,time_start,time_end,subject,room,teacher,group_id,subgroup,semester_number)
-      values('2026-12-31',3,'13:00','14:30','Subgroup B workshop','Workshop','Instructor',':a:','B',3);
+    perform private.set_schedule_enrollment_subgroup(id, 'lab-winter',
+        case user_id when ':student:'::uuid then 'A' else 'B' end, 'QA approved roster')
+      from student_enrollments where user_id in (':student:',':peer:') and group_id=':a:';
+    insert into lessons(date,pair_num,time_start,time_end,subject,room,teacher,group_id,subject_offering_id,semester_number)
+      values ('2026-12-31',1,'09:00','10:30','Common lecture','Common hall','Instructor',':a:',':off1:',3),
+             ('2026-12-31',3,'13:00','14:30','Subgroup B workshop','Workshop','Instructor',':a:',':off1:',3);
+    perform private.tag_schedule_subgroup_lesson(
+      (select id from lessons where subject='Subgroup B workshop'), 'lab-winter','B','QA approved lesson');
+  when 'subgroup_correct' then
+    perform private.tag_schedule_subgroup_lesson((select id from lessons where subject='Subgroup B workshop'),
+      'lab-winter','A','QA corrected roster');
+  when 'subgroup_reimport' then
+    delete from lessons where subject='Subgroup B workshop';
+    insert into lessons(date,pair_num,time_start,time_end,subject,room,teacher,group_id,subject_offering_id,semester_number)
+      values ('2026-12-31',3,'13:00','14:30','Subgroup B workshop','Workshop','Substitute',':a:',':off1:',3);
   when 'move' then update lessons set date='2026-12-27' where date='2026-12-29' and group_id=':a:';
   when 'substitute' then update lessons set teacher='Replacement teacher' where date='2026-12-28' and pair_num=2;
-  when 'new_group' then update users set group_name='Group Two' where id=auth.uid();
+  when 'new_group' then
+    update users set group_name='Group Two' where id=auth.uid();
+    update student_enrollments set status='ended',ended_at=now() where user_id=auth.uid() and ended_at is null;
+    insert into student_enrollments(user_id,group_id,status) values(auth.uid(),':b:','active');
   else raise exception 'unknown fixture action';
   end case;
 end $$;

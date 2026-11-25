@@ -806,7 +806,7 @@ class _TopicListReviewScreenState extends State<TopicListReviewScreen> {
                 ? SizedBox(
                     height: 20,
                     width: 20,
-                    child: ProductLoadingIndicator(
+                    child: ProductLoadingIndicator.inline(
                         color: Theme.of(context).colorScheme.onPrimary),
                   )
                 : const Text('Опубликовать в чат'),

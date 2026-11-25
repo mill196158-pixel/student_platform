@@ -28,6 +28,11 @@ import 'package:student_platform/src/ui/schedule/schedule_prewarm.dart';
 import 'package:student_platform/src/core/online_side_effect_barrier.dart';
 import 'package:student_platform/src/core/transport_failure.dart';
 
+typedef PublishedNewsPage = ({
+  List<HomeNewsItem> items,
+  Map<String, dynamic>? next,
+});
+
 class HomeDashboardService {
   HomeDashboardService({
     SupabaseClient? client,
@@ -398,6 +403,37 @@ class HomeDashboardService {
     ]);
     if (!current()) throw HomeLoadCancelled();
     return snapshot();
+  }
+
+  /// The archive keeps pages in memory for this route only. Do not overwrite the
+  /// dashboard's last complete snapshot with one page.
+  Future<PublishedNewsPage> readNewsPage(Map<String, dynamic>? after,
+      {required bool Function() current}) async {
+    if (!current()) throw HomeLoadCancelled();
+    const pageSize = 20;
+    dynamic response;
+    try {
+      response = await _sb.rpc('get_my_published_news_page', params: {
+        'p_limit': pageSize, 'p_after': after,
+      });
+    } on PostgrestException catch (error) {
+      // Clients can be upgraded before the server. The legacy RPC enforces the
+      // same audience; use it only when the new function is absent.
+      if (error.code != 'PGRST202' || after != null || !current()) rethrow;
+      response = await _sb.rpc('get_my_published_news');
+      if (!current()) throw HomeLoadCancelled();
+      return (items: _asMapList(response).map(mapPublishedNews).toList(), next: null);
+    }
+    if (!current()) throw HomeLoadCancelled();
+    final rows = _asMapList(response);
+    final page = rows.take(pageSize).toList();
+    return (
+      items: page.map(mapPublishedNews).toList(),
+      next: rows.length > pageSize ? {
+        for (final key in ['sort_order', 'priority', 'published_at', 'id'])
+          key: page.last[key]
+      } : null,
+    );
   }
 
   /// Marks a published news post as seen (and optionally closed) for the user.

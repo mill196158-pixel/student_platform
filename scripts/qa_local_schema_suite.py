@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import secrets
 import subprocess
+import sys
 import time
 from urllib.error import URLError
 from urllib.parse import urlsplit
@@ -32,7 +33,26 @@ def drop_schema(schema):
     assert "(0 rows)" in sql(f"select 1 from pg_namespace where nspname='{schema}';")
 
 
-def run_suite(name, setup, target, env_key, student_count=1, phases=(None,), run_client=None):
+def run_with_required_markers(command, *, required_markers, **kwargs):
+    # Flutter in a shared checkout can run another generated integration entrypoint
+    # and exit successfully with every test skipped. Verify the requested journey.
+    missing = {marker.encode("utf-8") for marker in required_markers}
+    with subprocess.Popen(command, stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, **kwargs) as process:
+        for line in process.stdout:
+            sys.stdout.buffer.write(line)
+            sys.stdout.buffer.flush()
+            missing = {marker for marker in missing if marker not in line}
+        result = process.wait()
+    if missing:
+        names = ", ".join(marker.decode("utf-8") for marker in sorted(missing))
+        print(f"Missing E2E pass markers: {names}", flush=True)
+        result = result or 1
+    return subprocess.CompletedProcess(command, result)
+
+
+def run_suite(name, setup, target, env_key, student_count=1, phases=(None,),
+              run_client=None, required_markers=()):
     tag = uuid4().hex[:12]
     schema = "e2e_" + name + "_" + tag
     gateway = "e2e-" + name + "-rest-" + tag
@@ -87,7 +107,11 @@ def run_suite(name, setup, target, env_key, student_count=1, phases=(None,), run
                    "--dart-define=SUPABASE_URL=http://127.0.0.1:55321", target]
         for phase in phases:
             phase_env = env if phase is None else dict(env, STUDENT_QA_PHASE=phase)
-            result = (run_client or subprocess.run)(command, cwd=ROOT, env=phase_env)
+            if required_markers:
+                client = run_client or run_with_required_markers
+                result = client(command, cwd=ROOT, env=phase_env, required_markers=required_markers)
+            else:
+                result = (run_client or subprocess.run)(command, cwd=ROOT, env=phase_env)
             if result.returncode:
                 break
     print(f"PASS cleanup of isolated {name} schema, REST container and test accounts", flush=True)

@@ -12,7 +12,7 @@
         android:maxSdkVersion="32" />
 
     <application
-        android:label="student_platform"
+        android:label="Student Platform"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <!-- Honor the existing portrait activities on Android 16 large screens. -->

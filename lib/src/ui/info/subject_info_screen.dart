@@ -545,6 +545,7 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
           const SizedBox(height: 10),
         _QuickActions(
           canOpenChat: data.canOpenChat,
+          isCourseProject: data.isCourseProject,
           onChatTap: data.canOpenChat ? () => _openChat(context, data) : null,
           onDiaryTap: () => _openDiary(context, data),
           onFilesTap: _scrollToFiles,
@@ -578,7 +579,7 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
         const SizedBox(height: 10),
         _LargeActionCard(
           icon: Icons.chat_bubble_outline_rounded,
-          title: 'Чат предмета',
+          title: data.isCourseProject ? 'Чат курсового проекта' : 'Чат предмета',
           subtitle: data.canOpenChat
               ? 'Обсуждения, вопросы и материалы группы'
               : 'Чат пока не создан',
@@ -621,6 +622,7 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
   }
 
   void _openChat(BuildContext context, _SubjectInfoData data) {
+    if (ModalRoute.of(context)?.isCurrent == false) return;
     final team = Team(
       id: data.teamId!,
       name: data.teamName.isEmpty ? data.displayTitle : data.teamName,
@@ -738,7 +740,7 @@ class _SubjectInfoRepository {
       final teacherId = card != null && card.teachers.isNotEmpty
           ? card.teachers.first.id
           : await _resolveTeacherId(teacherName);
-      final subjectRating = await _loadSubjectRating(subjectOfferingId);
+      final studentOffering = await _loadStudentOffering(subjectOfferingId);
       final teacherRating = await _loadTeacherRating(teacherName);
       return _SubjectInfoData(
         title: _firstNonEmpty([card?.canonicalName, fallbackTitle]),
@@ -753,6 +755,7 @@ class _SubjectInfoRepository {
           card?.shortDescription,
         ]),
         controlForm: card?.controlForm ?? '',
+        planControlForm: studentOffering.controlForm,
         teacherName: teacherName,
         teacherId: teacherId,
         department: card?.department ?? '',
@@ -763,9 +766,9 @@ class _SubjectInfoRepository {
         teamIcon: _firstNonEmpty([team?['icon']]),
         teamGroupName: _firstNonEmpty([team?['group_name']]),
         chatId: _stringOrNull(chat?['id']),
-        subjectDifficultyAvg: subjectRating.$1,
-        mySubjectScore: subjectRating.$2,
-        canVoteSubject: subjectRating.$3,
+        subjectDifficultyAvg: studentOffering.average,
+        mySubjectScore: studentOffering.myScore,
+        canVoteSubject: studentOffering.canVote,
         teacherDifficultyAvg: teacherRating,
         cardPayload: card,
       );
@@ -834,7 +837,7 @@ class _SubjectInfoRepository {
 
     final teacherName = _firstNonEmpty([team?['teacher']]);
     final teacherId = await _resolveTeacherId(teacherName);
-    final subjectRating = await _loadSubjectRating(subjectOfferingId);
+    final studentOffering = await _loadStudentOffering(subjectOfferingId);
     final teacherRating = await _loadTeacherRating(teacherName);
 
     return _SubjectInfoData(
@@ -847,6 +850,10 @@ class _SubjectInfoRepository {
           _asInt(offeringMap?['semester_number']) ?? fallbackSemesterNumber,
       description: _firstNonEmpty([subject?['description']]),
       controlForm: _firstNonEmpty([curriculum?['control_form']]),
+      planControlForm: _firstNonEmpty([
+        studentOffering.controlForm,
+        curriculum?['control_form'],
+      ]),
       teacherName: teacherName,
       teacherId: teacherId,
       department: _firstNonEmpty([curriculum?['department']]),
@@ -857,15 +864,16 @@ class _SubjectInfoRepository {
       teamIcon: _firstNonEmpty([team?['icon']]),
       teamGroupName: _firstNonEmpty([team?['group_name']]),
       chatId: _stringOrNull(chat?['id']),
-      subjectDifficultyAvg: subjectRating.$1,
-      mySubjectScore: subjectRating.$2,
-      canVoteSubject: subjectRating.$3,
+      subjectDifficultyAvg: studentOffering.average,
+      mySubjectScore: studentOffering.myScore,
+      canVoteSubject: studentOffering.canVote,
       teacherDifficultyAvg: teacherRating,
       cardPayload: null,
     );
   }
 
-  Future<(double?, int?, bool)> _loadSubjectRating(String offeringId) async {
+  Future<({double? average, int? myScore, bool canVote, String controlForm})>
+      _loadStudentOffering(String offeringId) async {
     try {
       final res = await _sb.rpc('rpc_get_my_subjects_v2');
       final rows = (res as List)
@@ -885,13 +893,15 @@ class _SubjectInfoRepository {
         final myScore = vote == null ? null : _asInt(vote['difficulty_rating']);
         final canVote = row['can_vote'] == true;
         return (
-          avg,
-          (myScore != null && myScore >= 1 && myScore <= 5) ? myScore : null,
-          canVote,
+          average: avg,
+          myScore:
+              (myScore != null && myScore >= 1 && myScore <= 5) ? myScore : null,
+          canVote: canVote,
+          controlForm: _firstNonEmpty([row['control_form']]),
         );
       }
     } catch (_) {}
-    return (null, null, false);
+    return (average: null, myScore: null, canVote: false, controlForm: '');
   }
 
   Future<double?> _loadTeacherRating(String teacherName) async {
@@ -984,6 +994,7 @@ class _SubjectInfoData {
   final int? semesterNumber;
   final String description;
   final String controlForm;
+  final String planControlForm;
   final String teacherName;
   final String? teacherId;
   final String department;
@@ -1008,6 +1019,7 @@ class _SubjectInfoData {
     this.semesterNumber,
     required this.description,
     required this.controlForm,
+    this.planControlForm = '',
     required this.teacherName,
     this.teacherId,
     required this.department,
@@ -1026,6 +1038,15 @@ class _SubjectInfoData {
   });
 
   bool get canOpenChat => teamId != null && chatId != null;
+
+  // The curriculum import publishes assessment codes as a comma-separated
+  // control_form. Older reviewed plans can contain the Russian equivalents.
+  bool get isCourseProject {
+    const projectForms = {'course_project', 'кп', 'курсовой проект'};
+    return planControlForm.toLowerCase().split(RegExp(r'[,;]')).any(
+          (value) => projectForms.contains(value.trim()),
+        );
+  }
 
   String get displayTitle {
     final clean = _cleanHumanText(title);
@@ -1280,12 +1301,14 @@ class _HeroCard extends StatelessWidget {
 
 class _QuickActions extends StatelessWidget {
   final bool canOpenChat;
+  final bool isCourseProject;
   final VoidCallback? onChatTap;
   final VoidCallback onDiaryTap;
   final VoidCallback onFilesTap;
 
   const _QuickActions({
     required this.canOpenChat,
+    required this.isCourseProject,
     required this.onChatTap,
     required this.onDiaryTap,
     required this.onFilesTap,
@@ -1298,7 +1321,7 @@ class _QuickActions extends StatelessWidget {
         Expanded(
           child: _QuickActionCard(
             icon: Icons.chat_bubble_outline_rounded,
-            title: 'Чат',
+            title: isCourseProject ? 'Чат проекта' : 'Чат',
             subtitle: canOpenChat ? 'Открыть' : 'Позже',
             enabled: canOpenChat,
             onTap: onChatTap,

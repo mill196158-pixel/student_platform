@@ -33,8 +33,35 @@ class ChatFile {
     this.deletionVerified = false,
   });
 
+  static const drawingMimeType = 'application/acad';
+
+  static const _drawingTypes = {
+    drawingMimeType, 'image/vnd.dwg', 'application/dwg', 'application/x-dwg',
+    'application/x-acad', 'application/x-autocad',
+  };
+
+  // Some older attachments lost the extension or have a generic MIME type.
+  static String? drawingOpenMime(String name, String? mimeType) {
+    final mime = mimeType?.split(';').first.trim().toLowerCase();
+    if (_drawingTypes.contains(mime)) return mime;
+    return name.toLowerCase().endsWith('.dwg') ? drawingMimeType : null;
+  }
+
+  static String? externalOpenMime(String name, {String? fallback}) =>
+      drawingOpenMime(name, fallback) ?? fallback;
+
+  static String externalFileName(String name, String? mimeType) {
+    final trimmed = name.trim();
+    if (drawingOpenMime(trimmed, mimeType) == null) return name;
+    if (trimmed.isEmpty) return 'Чертёж.dwg';
+    return trimmed.toLowerCase().endsWith('.dwg') ? trimmed : '$trimmed.dwg';
+  }
+
+  bool get _isDrawing => drawingOpenMime(fileName, fileType) != null;
+
   // Определяем тип файла по MIME типу
   ChatFileType get type {
+    if (_isDrawing) return ChatFileType.document;
     if (fileType.startsWith('image/')) return ChatFileType.image;
     if (fileType.startsWith('application/') ||
         fileType.startsWith('text/') ||
@@ -48,25 +75,25 @@ class ChatFile {
   }
 
   // Проверяем, является ли файл изображением
-  bool get isImage => fileType.startsWith('image/');
+  bool get isImage => !_isDrawing && fileType.startsWith('image/');
 
   // Проверяем, является ли файл документом
   bool get isDocument {
+    if (_isDrawing) return true;
     return fileType.startsWith('application/') &&
         (fileName.toLowerCase().endsWith('.pdf') ||
             fileName.toLowerCase().endsWith('.doc') ||
             fileName.toLowerCase().endsWith('.docx') ||
-            fileName.toLowerCase().endsWith('.txt') ||
-            fileName.toLowerCase().endsWith('.dwg'));
+            fileName.toLowerCase().endsWith('.txt'));
   }
 
   // Получаем иконку для файла
   IconData get fileIcon {
     if (isImage) return Icons.image;
+    if (_isDrawing) return Icons.architecture;
     if (fileName.toLowerCase().endsWith('.pdf')) return Icons.picture_as_pdf;
     if (fileName.toLowerCase().endsWith('.doc') ||
         fileName.toLowerCase().endsWith('.docx')) return Icons.description;
-    if (fileName.toLowerCase().endsWith('.dwg')) return Icons.architecture;
     if (fileName.toLowerCase().endsWith('.txt')) return Icons.text_snippet;
     return Icons.attach_file;
   }

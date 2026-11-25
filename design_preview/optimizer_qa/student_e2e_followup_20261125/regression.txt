@@ -1,0 +1,12 @@
+Student app regression on Windows. Initial group 2 build failed during copying native_assets.json. Serial retry of group 2 completed.
+group1 50 files, exit 0 passed 158 skipped 4 failed 0
+group2 50 files, exit 0 passed 187 skipped 5 failed 0
+group3 50 files, exit 0 passed 294 skipped 1 failed 0
+group4 50 files, exit 0 passed 213 skipped 18 failed 0
+group5 50 files, exit 0 passed 149 skipped 10 failed 0
+group6 50 files, exit 0 passed 131 skipped 5 failed 0
+group7 50 files, exit 0 passed 239 skipped 0 failed 0
+group8 20 files, exit 0 passed 103 skipped 0 failed 0
+serial 6 files, exit 0 passed 31 skipped 0 failed 0
+376 test files; 1505 passed, 43 skipped, 0 failed.
+00:30 +172: All tests passed! student_ui.

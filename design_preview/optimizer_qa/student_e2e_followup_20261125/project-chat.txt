@@ -1,0 +1,4 @@
+PASS ordinary login, materials, actual course assessment, exact team, native PDF and SHA-256
+PASS 036 two system Back requests restored the original files tab then the original course, with one route each
+00:10 +1: All tests passed!
+PASS cleanup of isolated projectchat schema, REST container and test accounts

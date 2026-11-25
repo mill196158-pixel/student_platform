@@ -476,7 +476,7 @@ class _ForwardFilesList extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: objs.map((o) {
           final name = (o['name'] ?? 'Вложение').toString();
-          final type = (o['type'] ?? '').toString();
+          final type = (o['type'] ?? o['mime'] ?? '').toString();
           final url = (o['url'] ?? '').toString();
           final fileId = (o['fid'] ?? o['file_id'] ?? o['id'])?.toString();
           final size = int.tryParse((o['size'] ?? '').toString()) ?? 0;
@@ -512,6 +512,7 @@ class _ForwardFileChip extends StatelessWidget {
 
   bool get _isImage {
     final lowerName = name.toLowerCase();
+    if (ChatFile.drawingOpenMime(name, type) != null) return false;
     return type.startsWith('image/') ||
         lowerName.endsWith('.jpg') ||
         lowerName.endsWith('.jpeg') ||

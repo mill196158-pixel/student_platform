@@ -407,7 +407,7 @@ class _ImageSkeleton extends StatelessWidget {
             child: SizedBox(
               width: 24,
               height: 24,
-              child: ProductLoadingIndicator(),
+              child: ProductLoadingIndicator.inline(),
             ),
           ),
         ),

@@ -144,6 +144,47 @@ void main() {
     });
   }
 
+  journey('052 students in separate academic groups see only their own lessons without subgroup data',
+      (t) async {
+    await client.rpc('advance_fixture', params: {'p_action': 'require_no_roster'});
+    final date = DateTime(2027, 1, 8);
+    Future<void> verifyGroup(int account, String group, String otherGroup,
+        String title, String room, String otherTitle, String otherRoom, String offering) async {
+      await signIn(account);
+      final enrolled = await client.from('student_enrollments').select('group_id')
+          .eq('user_id', accounts[account]['student'] as String)
+          .eq('status', 'active').isFilter('ended_at', null).single();
+      expect(enrolled['group_id'], data[group]);
+      await schedule(t, date, room);
+      await visible(t, title);
+      expect(find.text(otherRoom), findsNothing);
+      expect(find.text(otherTitle), findsNothing);
+      final lesson = t.widget<LessonCard>(cardByRoom(room)).lesson;
+      expect(lesson.date, date);
+      expect(lesson.subject, title);
+      final opened = await details(t, room);
+      expect(opened.lesson.id, lesson.id);
+      expect(opened.lesson.date, date);
+
+      Future<List<dynamic>> diary(String groupKey) async =>
+          await client.rpc('get_my_diary_schedule_lessons', params: {
+            'p_group_id': data[groupKey], 'p_from': '2027-01-08', 'p_to': '2027-01-08',
+          }) as List;
+      final row = (await diary(group)).single;
+      expect(row['id'], lesson.id);
+      expect(row['date'], '2027-01-08');
+      expect(row['subject'], title);
+      expect(row['group_id'], data[group]);
+      expect(row['subject_offering_id'], data[offering]);
+      expect(await diary(otherGroup), isEmpty);
+    }
+    await verifyGroup(0, 'a', 'b', 'Bridge materials', 'Materials hall A',
+        'Bridge mechanics', 'Mechanics hall B', 'off2');
+    await verifyGroup(3, 'b', 'a', 'Bridge mechanics', 'Mechanics hall B',
+        'Bridge materials', 'Materials hall A', 'off3');
+    debugPrint('E2E-052 PASS two active academic groups without a subgroup roster: '
+        'both signed-in students saw only their own Friday lesson on screen and in the diary RPC.');
+  });
   journey(
       '051 058 060 change weeks, keep course, open both campuses and cross year',
       (t) async {
@@ -417,19 +458,40 @@ void main() {
     debugPrint(
         'E2E-055 PASS official RPC assigned reviewed plan, one student course remains, existing chat history visible');
   });
-  journey(
-      '052 subgroup audience of the archived get_my_lessons is explicitly measured',
+  journey('compatibility: an explicitly supplied synthetic subgroup roster selects a workshop',
       (t) async {
     await client.rpc('advance_fixture', params: {'p_action': 'subgroup'});
     final date = DateTime(2026, 12, 31, 12);
-    final own = await ScheduleRepository(client: client)
-        .loadRange(date, days: 1, strict: true);
-    await signIn(1);
-    await schedule(t, date, 'Workshop');
-    expect(
-        (await details(t, 'Workshop')).lesson.subject, 'Subgroup B workshop');
-    expect(own.map((l) => l.subject), isNot(contains('Subgroup B workshop')),
-        reason: 'student A must not see a B-only lesson');
+    Future<List<String>> diary() async {
+      final rows = await client.rpc('get_my_diary_schedule_lessons', params: {
+        'p_group_id': data['a'], 'p_from': '2026-12-31', 'p_to': '2026-12-31',
+      }) as List;
+      return [for (final row in rows) row['subject'] as String];
+    }
+    Future<void> verify(int account, {required bool workshopVisible}) async {
+      await signIn(account);
+      await schedule(t, date, 'Common hall');
+      if (workshopVisible) {
+        await visible(t, 'Workshop');
+        expect((await details(t, 'Workshop')).lesson.subject, 'Subgroup B workshop');
+        expect(await diary(), containsAll(['Common lecture', 'Subgroup B workshop']));
+      } else {
+        expect(find.text('Workshop'), findsNothing);
+        expect(await diary(), ['Common lecture']);
+      }
+    }
+    await verify(0, workshopVisible: false);
+    await verify(1, workshopVisible: true);
+    await signIn(0);
+    await client.rpc('advance_fixture', params: {'p_action': 'subgroup_reimport'});
+    await verify(0, workshopVisible: false);
+    await verify(1, workshopVisible: true);
+    await signIn(0);
+    await client.rpc('advance_fixture', params: {'p_action': 'subgroup_correct'});
+    await verify(1, workshopVisible: false);
+    await verify(0, workshopVisible: true);
+    debugPrint('PASS synthetic subgroup compatibility: both students saw the common lecture; only B saw '
+        'the workshop before and after a new lesson UUID; a corrected assignment revoked B and admitted A.');
   });
   journey('059 transfer one student and compare the neighbour account',
       (t) async {

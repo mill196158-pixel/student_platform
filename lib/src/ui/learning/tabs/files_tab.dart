@@ -718,17 +718,18 @@ class _FilesTabState extends State<FilesTab>
             ? ChatFileAccess.cachedPathForOpen(f.fileUrl, permit: currentFile)
             : Future<String?>.value(null),
         openCached: (path) async =>
-            (await OpenFilex.open(path, type: f.fileType)).type ==
-            ResultType.done,
+            (await OpenFilex.open(path, type: ChatFile.externalOpenMime(
+                f.fileName, fallback: f.fileType))).type == ResultType.done,
         exportPath: () async {
             final service = _fileService ??= _tryCreateFileService();
             if (service == null) return null;
             final res = await service.downloadFile(
-                fileKey: f.fileKey, fileName: f.fileName);
+                fileKey: f.fileKey, fileName: ChatFile.externalFileName(f.fileName, f.fileType));
             return res.success ? res.file?.path : null;
         },
         openExport: (path) async =>
-            (await OpenFilex.open(path)).type == ResultType.done,
+            (await OpenFilex.open(path,
+                type: ChatFile.drawingOpenMime(f.fileName, f.fileType))).type == ResultType.done,
         resolveUrl: () async => ChatFileAccess.resolve(f.fileUrl),
         launchUrl: (url) => launchUrl(Uri.parse(url),
             mode: LaunchMode.externalApplication),

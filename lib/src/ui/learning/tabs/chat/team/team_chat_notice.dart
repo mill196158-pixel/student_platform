@@ -449,7 +449,7 @@ class _TeamMembersSheetState extends State<_TeamMembersSheet> {
                         ? const SizedBox(
                             width: 18,
                             height: 18,
-                            child: ProductLoadingIndicator(
+                            child: ProductLoadingIndicator.inline(
                               color: Colors.white,
                             ),
                           )

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'news_archive_screen.dart';
 import 'package:student_platform/src/config/supabase_config.dart';
 import 'package:student_platform/src/core/qa_no_automatic_writes.dart';
 import 'dart:typed_data';
@@ -71,6 +72,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   late final AppNotificationsApi _notificationsApi =
       widget.notificationsApi ?? AppNotificationsApi();
 
+  VoidCallback? _checkNewsArchive;
+  bool _leavingHome = false;
   HomeDashboardData? _data;
   HomePromoLoadResult _promo =
       const HomePromoLoadResult(intentionallyEmpty: true);
@@ -205,6 +208,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _promoLoadGeneration++;
     }
     _authScope = source;
+    _checkNewsArchive?.call();
     _authScope?.addListener(_onAuthScopeChanged);
     _ownsService = widget.dashboardService == null;
     _service =
@@ -253,6 +257,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void didUpdateWidget(covariant HomeScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    _checkNewsArchive?.call();
     final contentChanged = !identical(oldWidget.homeContent, widget.homeContent) ||
         !identical(oldWidget.homeContentCapabilities, widget.homeContentCapabilities);
     if (contentChanged) {
@@ -321,6 +326,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _leavingHome = true;
+    _checkNewsArchive?.call();
     WidgetsBinding.instance.removeObserver(this);
     widget.activeListenable?.removeListener(_queuePromoImpressions);
     widget.homeContent?.removeListener(_onContentAccessChanged);
@@ -774,6 +781,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               onNotificationsTap:
                   widget.cachedReader == null ? _openNotifications : null,
               onNewsTap: (index) => _showNewsFeed(data.news, index),
+              onAllNewsTap: widget.cachedReader == null && _service.currentUserId != null
+                  ? _openNewsArchive : null,
               onSummaryTap: () => MainTabScope.switchToTab(
                 context,
                 MainTab.schedule,
@@ -1138,6 +1147,70 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         );
       },
     );
+  }
+
+  Future<void> _openNewsArchive() async {
+    final service = _service, uid = service.currentUserId;
+    final scope = _authScope, owner = scope?.capture();
+    final barrier = widget.onlineBarrier, content = widget.homeContent;
+    bool current() => mounted && !_leavingHome && uid != null && service.currentUserId == uid &&
+        identical(service, _service) && identical(scope, _authScope) &&
+        (scope == null || owner != null && scope.isCurrent(owner)) &&
+        widget.cachedReader == null && identical(barrier, widget.onlineBarrier) &&
+        (barrier?.isOpen ?? true) && identical(content, widget.homeContent) &&
+        content?.isDenied('news') != true;
+    if (!current() || _checkNewsArchive != null) return;
+    final navigator = Navigator.of(context);
+    late MaterialPageRoute<void> route;
+    final active = ValueNotifier(true);
+    void check() {
+      if (current()) return;
+      void close() {
+        if (active.value) active.value = false;
+        if (navigator.mounted && route.isActive) navigator.removeRoute(route);
+      }
+      if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.persistentCallbacks) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => close());
+      } else {
+        close();
+      }
+    }
+    route = MaterialPageRoute<void>(
+      settings: const RouteSettings(name: '/news'),
+      builder: (_) => ValueListenableBuilder<bool>(
+        valueListenable: active,
+        builder: (context, valid, child) => !valid || !current() ? const SizedBox.shrink()
+          : NewsArchiveScreen(
+              load: (cursor) async {
+                if (!current()) throw HomeLoadCancelled();
+                Future<PublishedNewsPage> read() =>
+                    service.readNewsPage(cursor, current: current);
+                final page = barrier == null ? await read() : await barrier.run(read);
+                if (page == null || !current()) throw HomeLoadCancelled();
+                return page;
+              },
+              open: (item) {
+                if (current()) unawaited(_showNewsFeed([item], 0));
+              },
+            ),
+      ),
+    );
+    _checkNewsArchive = check;
+    final removeClose = barrier?.onClose(check);
+    scope?.addListener(check);
+    content?.addListener(check);
+    try {
+      final closed = navigator.push(route);
+      check();
+      await closed;
+    } finally {
+      removeClose?.call();
+      scope?.removeListener(check);
+      content?.removeListener(check);
+      _checkNewsArchive = null;
+      // The outgoing route still builds while its transition runs.
+      unawaited(route.completed.then((_) => active.dispose()));
+    }
   }
 
   Future<void> _showNewsFeed(List<HomeNewsItem> news, int initialIndex) async {

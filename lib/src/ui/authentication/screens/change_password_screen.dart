@@ -148,7 +148,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                         ? const SizedBox(
                             width: 20,
                             height: 20,
-                            child: ProductLoadingIndicator(),
+                            child: ProductLoadingIndicator.inline(),
                           )
                         : const Text('Сохранить пароль'),
                   ),
