@@ -50,12 +50,18 @@ class _MemoryAuthStorage extends LocalStorage {
 }
 
 class _Home implements CachedHomeScheduleReader {
-  _Home(this.caps);
+  _Home(this.caps, this.owner)
+      : permit = caps.capture(SessionCapability.cachedRead)!;
   final SessionCapabilities caps;
+  final AuthOperationScope owner;
+  final CapabilityPermit permit;
   @override
   Listenable get accessChanges => caps;
   @override
-  bool get canRead => caps.capture(SessionCapability.cachedRead) != null;
+  bool get canRead => caps.mode == SessionCapabilityMode.cacheOnly && caps.owns(permit, owner);
+  @override
+  bool permitsContent(SessionCapabilities contentCapabilities, CapabilityPermit contentPermit) =>
+      canRead && contentCapabilities.owns(contentPermit, owner);
   @override
   Future<HomeDashboardData> readDashboard({DateTime? date}) async =>
       HomeDashboardData(
@@ -192,7 +198,7 @@ void main() {
       db = await openProjectChatServerDatabase('${dir.path}/chats.sqlite', factory: databaseFactoryFfi);
       cache = makeCache();
     });
-    final reader = _Home(caps);
+    late final reader = _Home(caps, scope.capture()!);
     final admissionResult = Completer<OfflineStartupResult>();
     var splashRequestedAdmission = false;
     final router = GoRouter(initialLocation: '/splash', routes: [

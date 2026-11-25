@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/profile_avatar.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
+import 'package:student_platform/src/core/offline_policy_grant.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
 import 'package:student_platform/src/ui/chats/my_chats_screen.dart';
@@ -16,22 +17,43 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'auth_session_scope_test.dart' show fakeSession;
 
-class _Store implements ProjectChatServerCache {
-  _Store(this.completer);
-  final Completer<List<Message>?> completer;
+abstract class _ScopedStore implements ProjectChatServerCache {
+  _ScopedStore(this.scope, SessionCapabilities caps)
+      : owner = scope.capture()!, permit = caps.capture(SessionCapability.cachedRead)!;
   @override
-  Future<List<Message>?> read(String chatId, SessionCapabilities caps) =>
-      completer.future;
+  final AuthSessionScope scope;
+  final AuthOperationScope owner;
+  final CapabilityPermit permit;
+  bool canRead(SessionCapabilities caps) =>
+      caps.mode == SessionCapabilityMode.cacheOnly && caps.owns(permit, owner);
+
+  // These in-memory message fixtures have no SQLite files or history leases.
+  @override
+  OfflineSessionBinding? Function() get currentBinding => () => null;
+  @override
+  Future<ChatHistoryRouteLease?> acquireHistoryRouteLease(String chat) async => null;
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-class _SummaryStore implements ProjectChatServerCache {
-  _SummaryStore(this.kind);
+class _Store extends _ScopedStore {
+  _Store(this.completer, super.scope, super.caps);
+  final Completer<List<Message>?> completer;
+  var reads = 0;
+  @override
+  Future<List<Message>?> read(String chatId, SessionCapabilities caps) async {
+    if (chatId != 'chat' || !canRead(caps)) return null;
+    reads++;
+    return completer.future;
+  }
+}
+
+class _SummaryStore extends _ScopedStore {
+  _SummaryStore(this.kind, super.scope, super.caps);
   final String? kind;
   @override
   Future<List<Map<String, dynamic>>?> readSummaries(
-          SessionCapabilities caps) async =>
+          SessionCapabilities caps) async => !canRead(caps) ? null :
       [
         {
           'team': {
@@ -52,6 +74,7 @@ class _SummaryStore implements ProjectChatServerCache {
       ];
   @override
   Future<List<Message>?> read(String chatId, SessionCapabilities caps) async =>
+      chatId != 'chat' || !canRead(caps) ? null :
       [
         Message(
             id: 'm',
@@ -62,8 +85,6 @@ class _SummaryStore implements ProjectChatServerCache {
             text: 'Текст группы',
             at: DateTime(2026))
       ];
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 void main() {
@@ -82,6 +103,7 @@ void main() {
     caps.grant(SessionCapabilityMode.cacheOnly,
         caps.beginAuthorization(scope.capture()!)!);
     final completer = Completer<List<Message>?>();
+    final store = _Store(completer, scope, caps);
     await tester.pumpWidget(MaterialApp(
         home: TeamDetailsScreen(
             team: const Team(
@@ -90,10 +112,11 @@ void main() {
                 teacher: '',
                 groupCode: '',
                 icon: 'https://example.invalid/network-avatar.png'),
-            cachedStore: _Store(completer),
+            cachedStore: store,
             cachedCapabilities: caps,
             cachedChatId: 'chat')));
     await tester.pump();
+    expect(store.reads, 1);
     expect(find.text('Открываем сохранённые сообщения…'), findsOneWidget);
     completer.complete([
       Message(
@@ -154,9 +177,11 @@ void main() {
           caps.beginAuthorization(scope.capture()!)!);
       await tester.pumpWidget(MaterialApp(
           home: MyChatsScreen(
-              cachedStore: _SummaryStore(kind), cachedCapabilities: caps)));
+              cachedStore: _SummaryStore(kind, scope, caps), cachedCapabilities: caps)));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Название чата'));
+      final title = kind == 'group_space' ? 'Чат группы' : 'Название чата';
+      expect(find.text(title), findsOneWidget);
+      await tester.tap(find.text(title));
       await tester.pumpAndSettle();
       expect(find.text('Текст группы'), findsOneWidget);
       expect(find.text('Общий чат группы'),
@@ -183,13 +208,16 @@ void main() {
     caps.grant(SessionCapabilityMode.cacheOnly,
         caps.beginAuthorization(scope.capture()!)!);
     final completer = Completer<List<Message>?>();
+    final store = _Store(completer, scope, caps);
     await tester.pumpWidget(MaterialApp(
         home: TeamDetailsScreen(
             team: const Team(id: 't', name: 'Команда', teacher: '',
                 groupCode: '', icon: ''),
-            cachedStore: _Store(completer),
+            cachedStore: store,
             cachedCapabilities: caps,
             cachedChatId: 'chat')));
+    await tester.pump();
+    expect(store.reads, 1);
     caps.block();
     completer.complete([Message(id: 'm', chatId: 'chat', authorId: 'peer',
         authorLogin: '', authorName: '', text: 'Поздние данные', at: DateTime(2026))]);

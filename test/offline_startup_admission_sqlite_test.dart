@@ -25,8 +25,8 @@ class _FaultGate extends RefreshAdmissionClient {
       : super(inner, backend: backend, securityFence: fence);
   final Future<void> Function() beforeDrain;
   @override
-  Future<void> suspendAndDrain() async {
-    final drained = super.suspendAndDrain();
+  Future<void> suspendAndDrain({Duration? timeout}) async {
+    final drained = super.suspendAndDrain(timeout: timeout);
     await beforeDrain();
     await drained;
   }

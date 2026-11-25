@@ -21,6 +21,7 @@ void main() {
       },
       debugChatBuilder: (_, title) => Text(title),
     )));
+    await tester.pump();
     expect(calls, 0);
   });
 
@@ -40,6 +41,7 @@ void main() {
       debugResolveProfile: (_) => response.future,
       debugChatBuilder: (_, title) => Text(title),
     )));
+    await tester.pump();
     expect(barrier.activeCount, 1);
     generation = 2;
     barrier.close();
@@ -69,6 +71,8 @@ void main() {
           debugChatBuilder: (_, title) => Text(title),
         ));
     await tester.pumpWidget(page('a'));
+    await tester.pump();
+    expect(barrier.activeCount, 1);
     await tester.pumpWidget(page('b'));
     first.complete((name: 'Old peer', avatar: null));
     await tester.pump();

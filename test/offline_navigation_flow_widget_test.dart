@@ -19,12 +19,18 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'auth_session_scope_test.dart' show fakeSession;
 
 class _Reader implements CachedHomeScheduleReader {
-  _Reader(this.caps);
+  _Reader(this.caps, this.owner)
+      : permit = caps.capture(SessionCapability.cachedRead)!;
   final SessionCapabilities caps;
+  final AuthOperationScope owner;
+  final CapabilityPermit permit;
   @override
   Listenable get accessChanges => caps;
   @override
-  bool get canRead => caps.capture(SessionCapability.cachedRead) != null;
+  bool get canRead => caps.mode == SessionCapabilityMode.cacheOnly && caps.owns(permit, owner);
+  @override
+  bool permitsContent(SessionCapabilities contentCapabilities, CapabilityPermit contentPermit) =>
+      canRead && contentCapabilities.owns(contentPermit, owner);
   @override
   Future<HomeDashboardData> readDashboard({DateTime? date}) async =>
       HomeDashboardData(
@@ -85,9 +91,8 @@ void main() {
     final scope = AuthSessionScope(
         currentSession: () => session, authEvents: events.stream);
     events.add(AuthState(AuthChangeEvent.initialSession, session));
-    final caps = SessionCapabilities(scope),
-        reader = _Reader(caps),
-        store = _Chats();
+    final caps = SessionCapabilities(scope), store = _Chats();
+    late final reader = _Reader(caps, scope.capture()!);
     final router = GoRouter(initialLocation: '/splash', routes: [
       GoRoute(
           path: '/splash',
