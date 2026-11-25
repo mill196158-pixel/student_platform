@@ -12,6 +12,8 @@ import 'package:student_platform/src/ui/schedule/schedule_screen.dart';
 import 'package:student_platform/src/ui/profile/profile_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'support/start_app.dart';
+
 // Explicit owner-provided account; no credentials committed. This checks login
 // and screen rendering, not every action in every nested screen.
 void main() {
@@ -28,7 +30,7 @@ void main() {
   }
   testWidgets('approved account login and primary navigation', (tester) async {
     SharedPreferences.setMockInitialValues({});
-    await app.main();
+    await startStudentApp(tester);
     Future<void> waitFor(Finder finder) async {
       for (var i = 0; i < 300; i++) {
         await tester.pump(const Duration(milliseconds: 100));

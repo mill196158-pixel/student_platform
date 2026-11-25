@@ -11,8 +11,7 @@ import 'package:student_platform/src/ui/shared/student_section_headers.dart'
     show StudentLearningHeader;
 import 'package:student_platform/src/ui/learning/team_details_screen.dart';
 
-/// Restricted QA adapter: these are saved chat snapshots, not a materials or
-/// subject catalogue. No legacy cache, media URLs, or network calls are used.
+/// Offline team directory backed by the saved catalogue and chat summaries.
 class CachedTeamChatDirectory extends StatefulWidget {
   const CachedTeamChatDirectory(
       {super.key,
@@ -28,11 +27,12 @@ class CachedTeamChatDirectory extends StatefulWidget {
 }
 
 class _Entry {
-  const _Entry(this.team, this.chatId, this.historyAvailable,
+  _Entry(this.team, this.chatId,
       {this.displayGroupName, this.confirmedSummaryKind});
   final Team team;
   final String? chatId;
-  final bool historyAvailable;
+  bool historyUnavailable = false;
+  Future<bool>? pendingRead;
   final String? displayGroupName;
   final String? confirmedSummaryKind;
   String get displayKind => team.kind == 'unknown'
@@ -44,7 +44,11 @@ class _CachedTeamChatDirectoryState extends State<CachedTeamChatDirectory> {
   List<_Entry>? _entries;
   DateTime? _catalogSavedAt;
   int _revision = 0;
+  int _openRevision = 0;
+  _Entry? _opening;
   final Set<VoidCallback> _routeClosers = {};
+  bool get _visible =>
+      TickerMode.valuesOf(context).enabled && ModalRoute.isCurrentOf(context) != false;
   bool get _allowed =>
       _permit != null &&
       widget.capabilities.mode == SessionCapabilityMode.cacheOnly &&
@@ -56,6 +60,15 @@ class _CachedTeamChatDirectoryState extends State<CachedTeamChatDirectory> {
     widget.capabilities.addListener(_changed);
     ScopedTeamCatalogStore.changes.addListener(_catalogChanged);
     unawaited(_load());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_visible && _opening != null) {
+      _openRevision++;
+      _opening = null;
+    }
   }
 
   @override
@@ -91,6 +104,8 @@ class _CachedTeamChatDirectoryState extends State<CachedTeamChatDirectory> {
     if (!mounted || _allowed) return;
     _revision++;
     setState(() {
+      _opening = null;
+      _openRevision++;
       _entries = null;
       _catalogSavedAt = null;
       _permit = null;
@@ -98,6 +113,8 @@ class _CachedTeamChatDirectoryState extends State<CachedTeamChatDirectory> {
   }
 
   Future<void> _load() async {
+    _opening = null;
+    _openRevision++;
     final caps = widget.capabilities, store = widget.store;
     final permit = caps.capture(SessionCapability.cachedRead);
     final revision = ++_revision;
@@ -189,11 +206,9 @@ class _CachedTeamChatDirectoryState extends State<CachedTeamChatDirectory> {
       for (final team in teams) {
         if (widget.subjectsOnly && team.kind != 'subject') continue;
         final chatId = summaries[team.id]?.$1;
-        final saved = chatId == null ? null : await store.read(chatId, caps);
-        if (!current()) return;
         final ownGroup = team.groupCode.trim();
         final summaryGroup = summaries[team.id]?.$2.groupCode.trim() ?? '';
-        result.add(_Entry(team, chatId, saved != null,
+        result.add(_Entry(team, chatId,
             displayGroupName: ownGroup.isNotEmpty ? ownGroup : summaryGroup,
             confirmedSummaryKind: summaries[team.id]?.$2.kind));
       }
@@ -225,31 +240,38 @@ class _CachedTeamChatDirectoryState extends State<CachedTeamChatDirectory> {
   }
 
   Future<void> _open(_Entry entry) async {
-    if (!_allowed) return;
+    if (!_allowed || identical(_opening, entry) || !_visible) return;
     final caps = widget.capabilities, permit = _permit!;
     final store = widget.store;
-    final revision = _revision, subjectsOnly = widget.subjectsOnly;
+    final revision = _revision, request = ++_openRevision;
+    bool current() => mounted && revision == _revision && request == _openRevision &&
+        identical(widget.store, store) && identical(widget.capabilities, caps) &&
+        _allowed && caps.permits(permit, SessionCapability.cachedRead) && _visible;
     final chatId = entry.chatId;
-    final saved = chatId == null ? null : await store.read(chatId, caps);
-    if (!mounted ||
-        !identical(store, widget.store) ||
-        !identical(caps, widget.capabilities) ||
-        revision != _revision ||
-        subjectsOnly != widget.subjectsOnly ||
-        !(_entries?.any((item) => identical(item, entry)) ?? false) ||
-        !_allowed ||
-        !caps.permits(permit, SessionCapability.cachedRead)) return;
-    if (saved == null) {
-      setState(() => _entries = _entries
-          ?.map((item) => identical(item, entry)
-              ? _Entry(item.team, item.chatId, false, displayGroupName: item.displayGroupName,
-                  confirmedSummaryKind: item.confirmedSummaryKind)
-              : item)
-          .toList());
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
-          content: Text('История этого чата не сохранена на устройстве.')));
+    if (chatId == null || !(_entries?.contains(entry) ?? false)) {
+      setState(() => _opening = null);
       return;
     }
+    setState(() => _opening = entry);
+    try {
+      // Reading a snapshot also updates its LRU timestamp. Only a tap should
+      // count as accessing that history. A timed-out read may still be running.
+      final available = entry.pendingRead ??= store.read(chatId, caps)
+          .then((saved) => saved != null)
+          .whenComplete(() { entry.pendingRead = null; });
+      if (!await available.timeout(const Duration(seconds: 3))) {
+        if (current()) setState(() => entry.historyUnavailable = true);
+        return;
+      }
+    } catch (_) {
+      if (current()) ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          const SnackBar(content: Text('Не удалось открыть историю. Попробуйте ещё раз.')));
+      return;
+    } finally {
+      if (mounted && request == _openRevision) setState(() => _opening = null);
+    }
+    if (!current()) return;
+    entry.historyUnavailable = false;
     final nav = Navigator.of(context);
     final route = MaterialPageRoute<void>(
         builder: (_) => TeamDetailsScreen(
@@ -257,9 +279,9 @@ class _CachedTeamChatDirectoryState extends State<CachedTeamChatDirectory> {
             initialTabIndex: 1,
             cachedStore: store,
             cachedCapabilities: caps,
-            cachedChatId: chatId!));
+            cachedChatId: chatId));
     final intentMarker = ReconnectChatIntent.instance.register(scope: store.scope,
-        route: route, chatId: chatId!, targetId: entry.team.id, dm: false);
+        route: route, chatId: chatId, targetId: entry.team.id, dm: false);
     void close() {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (nav.mounted && route.isActive) nav.removeRoute(route);
@@ -352,10 +374,12 @@ class _CachedTeamChatDirectoryState extends State<CachedTeamChatDirectory> {
                       padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
                       child: Text('Тип команды не подтверждён',
                           style: Theme.of(context).textTheme.bodySmall)),
-                if (!entry.historyAvailable)
+                if (entry.chatId == null || entry.historyUnavailable || identical(entry, _opening))
                   Padding(
                     padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
-                    child: Text('История не сохранена на устройстве',
+                    child: Text(identical(entry, _opening)
+                        ? 'Открываем историю…'
+                        : 'История этого чата недоступна на устройстве.',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: Theme.of(context)
                                 .colorScheme

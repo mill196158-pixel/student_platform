@@ -228,400 +228,293 @@ class _NotificationCenterBodyState extends State<_NotificationCenterBody> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final height = MediaQuery.sizeOf(context).height * 0.78;
-
+    final compact = MediaQuery.sizeOf(context).width < 360 ||
+        MediaQuery.textScalerOf(context).scale(16) > 20;
+    final hasUnread = _items.any((item) => item.isUnread);
     return SizedBox(
-      height: height,
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 12, 8),
-            child: Row(
-              children: [
-                Icon(Icons.notifications_none_rounded, color: cs.primary),
-                const SizedBox(width: 10),
+      height: MediaQuery.sizeOf(context).height * 0.78,
+      child: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 12, 10),
+              child: Row(children: [
                 Expanded(
-                  child: Text(
-                    'Уведомления',
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: cs.onSurface,
-                    ),
-                  ),
-                ),
-                TextButton(
-                  onPressed:
-                      _items.any((e) => e.isUnread) ? _markAllRead : null,
-                  child: const Text('Прочитать все'),
-                ),
-              ],
+                    child: Semantics(
+                        header: true,
+                        child: Text(
+                          'Уведомления',
+                          style: theme.textTheme.headlineSmall,
+                        ))),
+                if (_items.isNotEmpty && compact)
+                  IconButton(
+                    tooltip: 'Прочитать все',
+                    onPressed: hasUnread ? _markAllRead : null,
+                    icon: const Icon(Icons.done_all_rounded),
+                  )
+                else if (_items.isNotEmpty)
+                  TextButton(
+                      style: TextButton.styleFrom(
+                          textStyle: theme.textTheme.bodyMedium),
+                      onPressed: hasUnread ? _markAllRead : null,
+                      child: const Text('Прочитать все')),
+              ]),
             ),
-          ),
-          Expanded(
-            child: RefreshIndicator(
-              onRefresh: _load,
-              child: _buildList(theme),
-            ),
-          ),
-        ],
+            Divider(height: 1, color: cs.outlineVariant),
+            Expanded(
+                child: RefreshIndicator(
+                    onRefresh: _load, child: _buildList(theme))),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildList(ThemeData theme) {
     final cs = theme.colorScheme;
-
-    if (_loading && _items.isEmpty) {
-      return ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        children: const [
-          SizedBox(height: 120),
-          Center(child: ProductLoadingIndicator.page()),
-        ],
-      );
-    }
-
-    if (_error != null && _items.isEmpty) {
-      return ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(24),
-        children: [
-          const SizedBox(height: 40),
-          Text(
-            'Не удалось загрузить уведомления',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.titleMedium?.copyWith(color: cs.onSurface),
-          ),
-          const SizedBox(height: 12),
-          Center(
-            child: FilledButton(
-              onPressed: _load,
-              child: const Text('Повторить'),
-            ),
-          ),
-        ],
-      );
-    }
-
     if (_items.isEmpty) {
       return ListView(
         physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(24, 68, 24, 24),
         children: [
-          const SizedBox(height: 64),
-          Icon(
-            Icons.notifications_off_outlined,
-            size: 48,
-            color: cs.onSurface.withValues(alpha: 0.35),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'Пока нет уведомлений',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.titleMedium?.copyWith(
-              color: cs.onSurface.withValues(alpha: 0.55),
-            ),
-          ),
+          if (_loading)
+            const Center(child: ProductLoadingIndicator.page())
+          else ...[
+            Icon(
+                _error != null
+                    ? Icons.cloud_off_outlined
+                    : Icons.notifications_none_rounded,
+                size: 36,
+                color: cs.onSurfaceVariant),
+            const SizedBox(height: 12),
+            Text(
+                _error != null
+                    ? 'Не удалось загрузить уведомления'
+                    : 'Пока нет уведомлений',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.titleMedium),
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Center(
+                  child: FilledButton(
+                      onPressed: _load, child: const Text('Повторить'))),
+            ],
+          ],
         ],
       );
     }
-
     final grouped = _groupedThreads();
     final children = <Widget>[];
-
     for (final group in _NotifGroup.values) {
-      final threads = grouped[group] ?? const <_ThreadSummary>[];
+      final threads = grouped[group]!;
       if (threads.isEmpty) continue;
-
       final unread =
-          threads.fold<int>(0, (sum, t) => sum + t.unreadCount);
+          threads.fold<int>(0, (sum, thread) => sum + thread.unreadCount);
       final expanded = _expandedGroups.contains(group);
-      // Collapsed: only the newest thread; expanded: all threads.
-      final visible =
-          expanded ? threads : threads.take(1).toList(growable: false);
-      final hiddenCount = threads.length - visible.length;
-
-      children.add(
-        Padding(
-          padding: EdgeInsets.fromLTRB(4, children.isEmpty ? 0 : 10, 4, 6),
-          child: Material(
-            color: cs.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(14),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(14),
-              onTap: () {
-                setState(() {
-                  if (expanded) {
-                    _expandedGroups.remove(group);
-                  } else {
-                    _expandedGroups.add(group);
-                  }
-                });
-              },
-              child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                child: Row(
-                  children: [
-                    Icon(group.icon, size: 18, color: cs.primary),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        group.label,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          color: cs.onSurface,
-                        ),
-                      ),
-                    ),
-                    if (unread > 0)
-                      Container(
-                        margin: const EdgeInsets.only(right: 8),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: cs.primary,
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          '$unread',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: cs.onPrimary,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                    Text(
-                      '${threads.length}',
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        color: cs.onSurface.withValues(alpha: 0.45),
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Icon(
-                      expanded
-                          ? Icons.expand_less_rounded
-                          : Icons.expand_more_rounded,
-                      color: cs.onSurface.withValues(alpha: 0.55),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+      final canExpand = threads.length > 1;
+      void toggleGroup() => setState(() {
+            if (expanded) {
+              _expandedGroups.remove(group);
+            } else {
+              _expandedGroups.add(group);
+            }
+          });
+      children.add(Padding(
+        padding: EdgeInsets.only(top: children.isEmpty ? 8 : 12),
+        child: InkWell(
+          onTap: canExpand ? toggleGroup : null,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 48),
+            child: Row(children: [
+              Icon(group.icon, size: 20, color: cs.onSurfaceVariant),
+              const SizedBox(width: 10),
+              Expanded(
+                  child: Row(children: [
+                Flexible(
+                    child: Semantics(
+                        header: true,
+                        child: Text(group.label,
+                            style: theme.textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w700)))),
+                if (unread > 0) ...[
+                  const SizedBox(width: 8),
+                  Semantics(
+                      label: 'Непрочитанных: $unread',
+                      excludeSemantics: true,
+                      child: DecoratedBox(
+                          decoration: BoxDecoration(
+                              color: cs.primary.withValues(alpha: 0.10),
+                              borderRadius: BorderRadius.circular(6)),
+                          child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 1),
+                              child: Text('$unread',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                      color: cs.primary,
+                                      fontWeight: FontWeight.w700))))),
+                ],
+              ])),
+              if (canExpand) ...[
+                const SizedBox(width: 8),
+                Text(expanded ? 'Свернуть' : 'Ещё ${threads.length - 1}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                        color: cs.primary, fontWeight: FontWeight.w600)),
+                Icon(
+                    expanded
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded,
+                    size: 18,
+                    color: cs.primary),
+              ],
+            ]),
           ),
         ),
-      );
-
-      for (final thread in visible) {
-        children.add(
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: _ThreadCard(
-              thread: thread,
-              title: _displayTitle(thread.latest),
-              expanded: _expandedThreads.contains(thread.key),
-              onToggleExpand: thread.total > 1
-                  ? () {
-                      setState(() {
-                        if (_expandedThreads.contains(thread.key)) {
-                          _expandedThreads.remove(thread.key);
-                        } else {
-                          _expandedThreads.add(thread.key);
-                        }
-                      });
-                    }
-                  : null,
-              onOpenLatest: () => _openItem(thread.latest),
-              onOpenItem: _openItem,
-              onHideLatest: () async {
-                await _api.hide(thread.latest.id);
-                await _load();
-              },
-            ),
-          ),
-        );
-      }
-
-      if (!expanded && hiddenCount > 0) {
-        children.add(
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8, left: 4),
-            child: TextButton.icon(
-              onPressed: () => setState(() => _expandedGroups.add(group)),
-              icon: const Icon(Icons.unfold_more_rounded, size: 18),
-              label: Text('Ещё $hiddenCount'),
-            ),
-          ),
-        );
+      ));
+      for (final thread in expanded ? threads : threads.take(1)) {
+        final open = _expandedThreads.contains(thread.key);
+        children.add(_ThreadRow(
+          thread: thread,
+          title: _displayTitle(thread.latest),
+          expanded: open,
+          onOpenLatest: () => _openItem(thread.latest),
+          onOpenItem: _openItem,
+          onHideLatest: () async {
+            await _api.hide(thread.latest.id);
+            if (mounted) await _load();
+          },
+          onToggle: () => setState(() {
+            if (open) {
+              _expandedThreads.remove(thread.key);
+            } else {
+              _expandedThreads.add(thread.key);
+            }
+          }),
+        ));
       }
     }
-
     return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-      children: children,
-    );
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+        children: children);
   }
 }
 
-class _ThreadCard extends StatelessWidget {
-  const _ThreadCard({
-    required this.thread,
-    required this.title,
-    required this.expanded,
-    required this.onOpenLatest,
-    required this.onOpenItem,
-    required this.onHideLatest,
-    this.onToggleExpand,
-  });
+class _ThreadRow extends StatelessWidget {
+  const _ThreadRow(
+      {required this.thread,
+      required this.title,
+      required this.expanded,
+      required this.onOpenLatest,
+      required this.onOpenItem,
+      required this.onHideLatest,
+      required this.onToggle});
 
   final _ThreadSummary thread;
   final String title;
   final bool expanded;
-  final VoidCallback onOpenLatest;
+  final VoidCallback onOpenLatest, onHideLatest, onToggle;
   final void Function(AppNotificationItem item) onOpenItem;
-  final VoidCallback onHideLatest;
-  final VoidCallback? onToggleExpand;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final latest = thread.latest;
-    final time = DateFormat('d MMM, HH:mm', 'ru_RU').format(latest.createdAt);
     final unread = thread.unreadCount > 0;
-
-    final bg = unread ? cs.primaryContainer : cs.surfaceContainerHighest;
-    final titleColor = unread ? cs.onPrimaryContainer : cs.onSurface;
-    final bodyColor = unread
-        ? cs.onPrimaryContainer.withValues(alpha: 0.88)
-        : cs.onSurface.withValues(alpha: 0.78);
-    final metaColor = unread
-        ? cs.onPrimaryContainer.withValues(alpha: 0.62)
-        : cs.onSurface.withValues(alpha: 0.5);
-
-    final subtitle = thread.total > 1
-        ? '${latest.body}\n${thread.total} сообщ.'
-            '${thread.unreadCount > 0 ? ' · ${thread.unreadCount} новых' : ''}'
-        : latest.body;
-
-    return Material(
-      color: bg,
-      elevation: unread ? 0.5 : 0,
-      shadowColor: Colors.black26,
-      borderRadius: BorderRadius.circular(16),
-      child: Column(
-        children: [
-          InkWell(
-            borderRadius: expanded
-                ? const BorderRadius.vertical(top: Radius.circular(16))
-                : BorderRadius.circular(16),
-            onTap: onOpenLatest,
-            onLongPress: onHideLatest,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 10,
-                    height: 10,
-                    margin: const EdgeInsets.only(top: 5, right: 10),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: unread ? cs.primary : Colors.transparent,
-                    ),
-                  ),
-                  Expanded(
-                    child: Column(
+    final timestamp = DateFormat('d MMM, HH:mm', 'ru_RU');
+    final meta =
+        theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant);
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      InkWell(
+          onTap: onOpenLatest,
+          onLongPress: onHideLatest,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              SizedBox(
+                  width: 30,
+                  child: unread
+                      ? Padding(
+                          padding: const EdgeInsets.only(top: 7),
+                          child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: Semantics(
+                                label: 'Есть непрочитанные',
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: cs.primary),
+                                  child: const SizedBox.square(dimension: 7),
+                                ),
+                              )),
+                        )
+                      : null),
+              Expanded(
+                  child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          title,
-                          style: theme.textTheme.titleSmall?.copyWith(
+                    Text(title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
                             fontWeight:
-                                unread ? FontWeight.w800 : FontWeight.w600,
-                            color: titleColor,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          subtitle,
+                                unread ? FontWeight.w700 : FontWeight.w500)),
+                    if (latest.body.trim().isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(latest.body,
                           maxLines: expanded ? 4 : 2,
                           overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            height: 1.35,
-                            color: bodyColor,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          time,
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: metaColor,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (onToggleExpand != null)
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      onPressed: onToggleExpand,
-                      icon: Icon(
-                        expanded
-                            ? Icons.expand_less_rounded
-                            : Icons.expand_more_rounded,
-                        color: titleColor.withValues(alpha: 0.7),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-          if (expanded && thread.total > 1)
-            ...thread.items.skip(1).take(8).map((item) {
-              final t =
-                  DateFormat('d MMM, HH:mm', 'ru_RU').format(item.createdAt);
-              return InkWell(
+                          style: theme.textTheme.bodyMedium
+                              ?.copyWith(color: cs.onSurfaceVariant)),
+                    ],
+                    const SizedBox(height: 5),
+                    Text(timestamp.format(latest.createdAt), style: meta),
+                  ])),
+            ]),
+          )),
+      if (thread.total > 1)
+        Padding(
+            padding: const EdgeInsets.only(left: 22),
+            child: TextButton.icon(
+              style:
+                  TextButton.styleFrom(textStyle: theme.textTheme.bodyMedium),
+              onPressed: onToggle,
+              icon: Icon(
+                  expanded
+                      ? Icons.expand_less_rounded
+                      : Icons.expand_more_rounded,
+                  size: 18),
+              label: Text(
+                  expanded ? 'Свернуть историю' : 'История (${thread.total})'),
+            )),
+      if (expanded)
+        for (final item in thread.items.skip(1).take(8))
+          Padding(
+              padding: const EdgeInsets.only(left: 30),
+              child: InkWell(
                 onTap: () => onOpenItem(item),
                 child: Container(
                   width: double.infinity,
-                  padding:
-                      const EdgeInsets.fromLTRB(34, 8, 14, 10),
+                  constraints: const BoxConstraints(minHeight: 48),
+                  margin: const EdgeInsets.only(left: 2),
+                  padding: const EdgeInsets.fromLTRB(14, 6, 0, 8),
                   decoration: BoxDecoration(
-                    border: Border(
-                      top: BorderSide(
-                        color: cs.onSurface.withValues(alpha: 0.08),
-                      ),
-                    ),
-                  ),
+                      border: Border(
+                          left:
+                              BorderSide(color: cs.outlineVariant, width: 2))),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        item.body,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: bodyColor,
-                          height: 1.3,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        t,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: metaColor,
-                        ),
-                      ),
-                    ],
-                  ),
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(item.body.trim().isEmpty ? item.title : item.body,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium),
+                        Text(timestamp.format(item.createdAt), style: meta),
+                      ]),
                 ),
-              );
-            }),
-        ],
-      ),
-    );
+              )),
+      Divider(height: 1, indent: 30, color: cs.outlineVariant),
+    ]);
   }
 }

@@ -18,7 +18,7 @@ class _Store implements ProjectChatServerCache {
   final AuthSessionScope scope;
   @override
   OfflineSessionBinding? Function() get currentBinding => () => null;
-  final wait = Completer<List<Message>?>();
+  var wait = Completer<List<Message>?>();
   int reads = 0;
   @override
   Future<List<Map<String, dynamic>>?> readSummaries(
@@ -40,7 +40,7 @@ class _Store implements ProjectChatServerCache {
   @override
   Future<List<Message>?> read(String chat, SessionCapabilities caps) async {
     reads++;
-    return reads == 1 ? <Message>[] : wait.future;
+    return wait.future;
   }
 
   @override
@@ -55,10 +55,17 @@ class _SummaryStore implements ProjectChatServerCache {
   OfflineSessionBinding? Function() get currentBinding => () => null;
   final List<Map<String, dynamic>> rows;
   final Map<String, List<Message>?> histories;
+  final reads = <String>[];
+  final pending = <String, Completer<List<Message>?>>{};
   @override
   Future<List<Map<String, dynamic>>?> readSummaries(SessionCapabilities caps) async => rows;
   @override
-  Future<List<Message>?> read(String chat, SessionCapabilities caps) async => histories[chat];
+  Future<List<Message>?> read(String chat, SessionCapabilities caps) async {
+    reads.add(chat);
+    final delayed = pending[chat];
+    if (delayed != null) return delayed.future;
+    return histories[chat];
+  }
   @override
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
@@ -113,6 +120,7 @@ void main() {
         home: CachedTeamChatDirectory(
             store: first, capabilities: caps, subjectsOnly: true)));
     await tester.pumpAndSettle();
+    expect(first.reads, 0);
     await tester.tap(find.text('Предмет'));
     await tester.pumpAndSettle();
     expect(find.byType(TeamDetailsScreen), findsOneWidget);
@@ -143,8 +151,12 @@ void main() {
         home: CachedTeamChatDirectory(
             store: first, capabilities: caps, subjectsOnly: true)));
     await tester.pumpAndSettle();
+    expect(first.reads, 0);
     await tester.tap(find.text('Предмет'));
     await tester.pump();
+    expect(find.text('Открываем историю…'), findsOneWidget);
+    await tester.tap(find.text('Предмет'));
+    expect(first.reads, 1, reason: 'a repeated tap shares the pending history read');
     await tester.pumpWidget(MaterialApp(
         home: CachedTeamChatDirectory(
             store: second, capabilities: caps, subjectsOnly: false)));
@@ -156,6 +168,46 @@ void main() {
     caps.dispose();
     scope.dispose();
     await events.close();
+  });
+  testWidgets('expired, failed or offstage taps do not navigate; a visible retry can open', (tester) async {
+    final session = fakeSession('a');
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final caps = SessionCapabilities(scope);
+    expect(caps.grant(SessionCapabilityMode.cacheOnly,
+        caps.beginAuthorization(scope.capture()!)!), isTrue);
+    final store = _Store(scope);
+    Widget directory({bool active = true}) => MaterialApp(home: TickerMode(
+        enabled: active, child: CachedTeamChatDirectory(
+            store: store, capabilities: caps, subjectsOnly: true)));
+    await tester.pumpWidget(directory());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Предмет'));
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pump();
+    expect(find.text('Открываем историю…'), findsNothing);
+    expect(find.text('Не удалось открыть историю. Попробуйте ещё раз.'), findsOneWidget);
+    await tester.tap(find.text('Предмет'));
+    await tester.pump();
+    expect(store.reads, 1, reason: 'timeout does not duplicate a pending SQLite read');
+    store.wait.completeError(StateError('read failed'));
+    await tester.pump();
+    expect(find.byType(TeamDetailsScreen), findsNothing);
+    store.wait = Completer<List<Message>?>();
+    await tester.tap(find.text('Предмет'));
+    await tester.pump();
+    expect(store.reads, 2);
+    await tester.pumpWidget(directory(active: false));
+    await tester.pumpWidget(directory());
+    store.wait.complete(<Message>[]);
+    await tester.pump();
+    expect(find.byType(TeamDetailsScreen), findsNothing);
+    await tester.tap(find.text('Предмет'));
+    await tester.pumpAndSettle();
+    expect(find.byType(TeamDetailsScreen), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    caps.dispose(); scope.dispose(); await events.close();
   });
   testWidgets('offline lists preserve known types and keep unsaved histories visible', (tester) async {
     var session = fakeSession('a');
@@ -182,16 +234,24 @@ void main() {
       lessThan(tester.getTopLeft(find.text('Первый предмет')).dy));
     expect(tester.getTopLeft(find.text('Первый предмет')).dy,
       lessThan(tester.getTopLeft(find.text('Второй предмет')).dy));
-    expect(find.text('История не сохранена на устройстве'), findsOneWidget);
+    expect(store.reads, isEmpty);
+    expect(find.text('История этого чата недоступна на устройстве.'), findsNothing);
     expect(find.text('1-См(ВВ)-2 · общий чат'), findsOneWidget);
     final avatar = tester.widget<TeamAvatar>(find.descendant(
       of: find.byKey(const ValueKey('open-learning-group-chat')),
       matching: find.byType(TeamAvatar)));
     expect(avatar.name, 'Чат группы');
     expect(avatar.icon, 'groups', reason: 'offline tile does not load the saved remote avatar');
+    final delayed = store.pending['chat-s1'] = Completer<List<Message>?>();
+    await tester.tap(find.text('Первый предмет'));
+    await tester.pump();
+    expect(find.text('Открываем историю…'), findsOneWidget);
     await tester.tap(find.text('Второй предмет'));
     await tester.pump();
-    expect(find.text('История этого чата не сохранена на устройстве.'), findsOneWidget);
+    expect(store.reads, ['chat-s1', 'chat-s2']);
+    delayed.complete(<Message>[]);
+    await tester.pump();
+    expect(find.text('История этого чата недоступна на устройстве.'), findsOneWidget);
     expect(find.text('Второй предмет'), findsOneWidget);
     expect(find.byType(TeamDetailsScreen), findsNothing);
     await tester.tap(find.text('Чат группы'));

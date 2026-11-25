@@ -24,6 +24,7 @@ import 'dart:math' as math;
 import 'package:pdfrx/pdfrx.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:open_filex/open_filex.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:super_clipboard/super_clipboard.dart';
 import '../utils/chat_copied_file_cache.dart';
@@ -738,13 +739,14 @@ class FullscreenFileViewer extends StatefulWidget {
 
 class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
   bool _opening = false;
+  bool _savingDrawing = false;
   Future<File>? _namedExport;
   Future<File>? _sourceWork;
   SourceBoundDocumentBridge? _sourceBridge;
   Future<Object?>? _platformInFlight;
   bool _platformStarting = false;
   bool _qaOutcomeUncertain = false;
-  late Future<File> _previewFileFuture;
+  Future<File>? _previewFileFuture;
   late _ViewerAccessTicket _access;
   late Object? _previewClient;
   int _sourceRevision = 0;
@@ -765,12 +767,10 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
     _sourceBridge = null;
     _opening = false;
     _qaOutcomeUncertain = false;
-    // Keep named exports for share, clipboard and external viewers. A PDF
-    // preview can use an already authorized local copy without exporting it.
+    // Only the built-in PDF preview needs the file before the user acts.
     _previewFileFuture = _nativeQaDocx ? Future.value(File('')) :
-        (_isPdf ? _ensurePdfPreview(revision) : _ensureCachedFile());
-    unawaited(_previewFileFuture.then<void>((_) {},
-        onError: (Object _, StackTrace __) {}));
+        (_isPdf ? _ensurePdfPreview(revision) : null);
+    _previewFileFuture?.ignore();
   }
 
   @override
@@ -808,6 +808,12 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
     final mime = (widget.mimeType ?? '').toLowerCase();
     return mime.contains('pdf') || name.endsWith('.pdf');
   }
+
+  bool get _canSaveDrawing =>
+      !kIsWeb &&
+      defaultTargetPlatform == TargetPlatform.android &&
+      _fileName.toLowerCase().endsWith('.dwg') &&
+      !sourceDocumentFenceEnabled();
 
   bool _previewCurrent(int revision) => mounted &&
       revision == _sourceRevision &&
@@ -886,8 +892,41 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
     bool current() => mounted && revision == _sourceRevision &&
         widget.fileUrl == url && identical(client, ChatFileAccess.currentClientIdentity) &&
         access.isCurrent(url);
-    return _namedExport = _downloadRemoteFileToCache(
+    final work = _downloadRemoteFileToCache(
         url: url, fileName: _fileName, access: access, sourceCurrent: current);
+    _namedExport = work;
+    unawaited(work.then<void>((_) {}, onError: (Object _, StackTrace __) {
+      if (identical(_namedExport, work)) _namedExport = null;
+    }));
+    return work;
+  }
+
+  Future<void> _saveDrawing() async {
+    final revision = _sourceRevision;
+    if (_savingDrawing || !_canSaveDrawing || !_previewCurrent(revision)) {
+      return;
+    }
+    setState(() => _savingDrawing = true);
+    try {
+      await ChatFileAccess.authorize(widget.fileUrl);
+      if (!_previewCurrent(revision)) return;
+      final bytes = await ChatFileAccess.readBytes(widget.fileUrl);
+      if (!_previewCurrent(revision)) return;
+      if (bytes.isEmpty) throw StateError('Empty drawing');
+      final saved = await FilePicker.platform.saveFile(
+          fileName: _fileName, bytes: bytes);
+      if (saved != null && _previewCurrent(revision)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Файл сохранён')));
+      }
+    } catch (_) {
+      if (_previewCurrent(revision)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Не удалось сохранить файл. Попробуйте ещё раз.')));
+      }
+    } finally {
+      if (mounted) setState(() => _savingDrawing = false);
+    }
   }
 
   Future<File> _ensureSourceFile() async {
@@ -1189,6 +1228,17 @@ class _FullscreenFileViewerState extends State<FullscreenFileViewer> {
                       label: Text(_opening ? 'Открываем...' : 'Открыть файл'),
                     ),
                   ),
+                  if (_canSaveDrawing) ...[
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _savingDrawing ? null : _saveDrawing,
+                        icon: const Icon(Icons.file_download_outlined),
+                        label: Text(_savingDrawing ? 'Сохраняем…' : 'Сохранить файл'),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),

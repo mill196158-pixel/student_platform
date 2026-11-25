@@ -147,14 +147,16 @@ void main() {
     expect(find.text('Unknown'), findsOneWidget);
     expect(find.text('Чат группы'), findsOneWidget);
     expect(find.text('Тип команды не подтверждён'), findsOneWidget);
-    expect(find.text('История не сохранена на устройстве'), findsNWidgets(3));
+    // Only teams without a matching chat summary are known unavailable before
+    // a tap. Showing the catalogue does not read or touch a full history.
+    expect(find.text('История этого чата недоступна на устройстве.'), findsOneWidget);
     expect(find.textContaining('Данные могут устареть'), findsOneWidget);
     expect(tester.getTopLeft(find.text('Чат группы')).dy,
         lessThan(tester.getTopLeft(find.text('Subject')).dy));
     expect(find.text('1-См(ВВ)-2 · общий чат'), findsOneWidget);
     await tester.tap(find.text('Чат группы'));
     await tester.pump();
-    expect(find.text('История этого чата не сохранена на устройстве.'), findsOneWidget);
+    expect(find.text('История этого чата недоступна на устройстве.'), findsNWidgets(2));
     expect(find.text('Чат группы'), findsOneWidget);
     expect(await tester.runAsync(() => catalog.deny(ticket)), isTrue);
     await tester.runAsync(

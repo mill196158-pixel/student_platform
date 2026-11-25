@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:student_platform/src/services/push/active_chat_tracker.dart';
+import 'package:student_platform/src/services/push/app_notifications_api.dart';
 import 'package:student_platform/src/services/push/in_app_notification_bus.dart';
 import 'package:student_platform/src/services/push/push_navigation.dart';
 import 'package:student_platform/src/services/push/push_notification_service.dart';
@@ -16,7 +17,8 @@ import 'package:student_platform/src/services/push/push_payload.dart';
 class PushSessionHost extends StatefulWidget {
   const PushSessionHost({super.key, required this.child, this.barrier,
     this.debugStart, this.debugReconcile, this.debugAuthenticated,
-    this.debugFlush, this.debugCurrentUser, this.debugSubscribe});
+    this.debugFlush, this.debugCurrentUser, this.debugSubscribe,
+    this.debugUnreadCount, this.debugClearNotifications});
 
   final Widget child;
   final OnlineSideEffectBarrier? barrier;
@@ -32,6 +34,10 @@ class PushSessionHost extends StatefulWidget {
   final String? Function()? debugCurrentUser;
   @visibleForTesting
   final void Function(void Function(PostgresChangePayload))? debugSubscribe;
+  @visibleForTesting
+  final Future<int> Function()? debugUnreadCount;
+  @visibleForTesting
+  final Future<void> Function()? debugClearNotifications;
 
   @override
   State<PushSessionHost> createState() => _PushSessionHostState();
@@ -46,6 +52,11 @@ class _PushSessionHostState extends State<PushSessionHost>
   RealtimeChannel? _notificationChannel;
   int _channelRevision = 0;
   VoidCallback? _removeCloseHook;
+  Timer? _reconcileTimer;
+
+  String? get _currentUser => widget.debugCurrentUser == null
+      ? Supabase.instance.client.auth.currentUser?.id
+      : widget.debugCurrentUser!();
 
   void _bindCloseHook(OnlineSideEffectBarrier? barrier) {
     _removeCloseHook?.call();
@@ -54,6 +65,7 @@ class _PushSessionHostState extends State<PushSessionHost>
 
   void _teardownGuarded(OnlineSideEffectBarrier barrier) {
     _channelRevision++;
+    _reconcileTimer?.cancel();
     _systemNotifications.invalidate();
     PushNotificationService.instance.closeGuardedSession(barrier);
     final channel = _notificationChannel;
@@ -90,13 +102,10 @@ class _PushSessionHostState extends State<PushSessionHost>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _systemNotifications = SystemNotificationSync(
-      currentUser: () => Supabase.instance.client.auth.currentUser?.id,
-      unreadCount: () async {
-        final result = await Supabase.instance.client
-            .rpc('get_my_unread_notification_count');
-        if (result is! num) throw StateError('Invalid unread count');
-        return result.toInt();
-      },
+      currentUser: () => _currentUser,
+      clear: widget.debugClearNotifications,
+      unreadCount: widget.debugUnreadCount ??
+          () => AppNotificationsApi().unreadCount(),
     );
     _bindCloseHook(widget.barrier);
     _badgeSubscription = InAppNotificationBus.instance.stream.listen((event) {
@@ -118,9 +127,7 @@ class _PushSessionHostState extends State<PushSessionHost>
     if (!_allowed || _started) return;
     final startingBarrier = widget.barrier;
     bool current() => _currentBarrier(startingBarrier);
-    final user = widget.debugCurrentUser != null
-        ? widget.debugCurrentUser!()
-        : Supabase.instance.client.auth.currentUser?.id;
+    final user = _currentUser;
     if (user == null) return;
     _started = true;
 
@@ -157,18 +164,24 @@ class _PushSessionHostState extends State<PushSessionHost>
   }
 
   void _subscribeNotificationRealtime() {
-    final uid = widget.debugCurrentUser != null
-        ? widget.debugCurrentUser!() : Supabase.instance.client.auth.currentUser?.id;
+    final uid = _currentUser;
     if (!_allowed || uid == null || uid.isEmpty || _notificationChannel != null) return;
     final capturedBarrier = widget.barrier;
     final revision = ++_channelRevision;
 
+    bool current() => _currentBarrier(capturedBarrier) &&
+        revision == _channelRevision &&
+        _currentUser == uid;
+
     void handle(PostgresChangePayload payload) {
-            final currentUser = widget.debugCurrentUser != null
-                ? widget.debugCurrentUser!() : Supabase.instance.client.auth.currentUser?.id;
-            if (!_currentBarrier(capturedBarrier) || revision != _channelRevision ||
-                currentUser != uid) return;
+            if (!current()) return;
             final row = payload.newRecord;
+            final recipient = row['recipient_id'] ?? payload.oldRecord['recipient_id'];
+            // A physical DELETE may only carry the primary key. The
+            // subscription filter alone cannot attribute that event.
+            if (recipient != uid) return;
+            // A fresh event makes any outstanding global-zero response stale.
+            _systemNotifications.invalidate();
             if (payload.eventType != PostgresChangeEvent.insert) {
               final id = (row['id'] ?? payload.oldRecord['id'])?.toString();
               if (row['read_at'] != null ||
@@ -178,6 +191,12 @@ class _PushSessionHostState extends State<PushSessionHost>
                   InAppNotificationBus.instance.dismissNotifications({id});
               }
               InAppNotificationBus.instance.requestBadgeRefresh();
+              if (capturedBarrier != null) {
+                _reconcileTimer?.cancel();
+                _reconcileTimer = Timer(const Duration(milliseconds: 100), () {
+                  if (current()) unawaited(_dispatch(_reconcile));
+                });
+              }
               return;
             }
             if (row['read_at'] != null || row['deleted_at'] != null) return;
@@ -240,6 +259,7 @@ class _PushSessionHostState extends State<PushSessionHost>
   void didUpdateWidget(covariant PushSessionHost oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.barrier, widget.barrier)) {
+      _reconcileTimer?.cancel();
       final oldBarrier = oldWidget.barrier;
       if (oldBarrier == null) {
         _channelRevision++;
@@ -265,6 +285,7 @@ class _PushSessionHostState extends State<PushSessionHost>
     final barrier = widget.barrier;
     barrier?.close();
     _removeCloseHook?.call();
+    _reconcileTimer?.cancel();
     _channelRevision++;
     WidgetsBinding.instance.removeObserver(this);
     _systemNotifications.invalidate();

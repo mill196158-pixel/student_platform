@@ -3,7 +3,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_platform/main.dart' as app;
+import 'package:student_platform/src/ui/authentication/screens/login_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+import 'support/start_app.dart';
 
 // This smoke deliberately does not submit credentials or mutate server data.
 // Test preferences hide any existing device session without clearing it.
@@ -13,7 +16,7 @@ void main() {
   testWidgets('anonymous startup, validation, access screen and route guards',
       (tester) async {
     SharedPreferences.setMockInitialValues({});
-    await app.main();
+    await startStudentApp(tester);
 
     Future<void> waitFor(Finder target) async {
       for (var i = 0; i < 100; i++) {
@@ -26,8 +29,18 @@ void main() {
     // Do not pumpAndSettle: the login cat is a repeating animation.
     await waitFor(find.text('Войти'));
     expect(Supabase.instance.client.auth.currentSession, isNull);
-    await tester.ensureVisible(find.text('Войти'));
-    await tester.tap(find.text('Войти'));
+    final login = find.byType(LoginScreen);
+    if (login.evaluate().isEmpty) {
+      // A clean install starts in the guest catalog, which has its own
+      // "Войти" action that navigates to the form.
+      await tester.tap(find.text('Войти').hitTestable().first);
+      await waitFor(login);
+    }
+    await tester.pump(const Duration(milliseconds: 500));
+    final submit = find.descendant(
+        of: login, matching: find.widgetWithText(FilledButton, 'Войти'));
+    await tester.ensureVisible(submit);
+    await tester.tap(submit);
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('Введите логин'), findsOneWidget);
     expect(find.text('Минимум 4 символа'), findsOneWidget);
@@ -36,8 +49,8 @@ void main() {
     await tester.enterText(find.byType(TextFormField).last, '123');
     FocusManager.instance.primaryFocus?.unfocus();
     await tester.pump(const Duration(milliseconds: 500));
-    await tester.ensureVisible(find.text('Войти'));
-    await tester.tap(find.text('Войти'));
+    await tester.ensureVisible(submit);
+    await tester.tap(submit);
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('Введите логин'), findsNothing);
     expect(find.text('Минимум 4 символа'), findsOneWidget);

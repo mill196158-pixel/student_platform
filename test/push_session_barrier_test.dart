@@ -7,6 +7,77 @@ import 'package:student_platform/src/services/push/in_app_notification_bus.dart'
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 void main() {
+  testWidgets('guarded notification changes reconcile the launcher count',
+      (tester) async {
+    final barrier = OnlineSideEffectBarrier(ownerIsCurrent: () => true);
+    final firstCount = Completer<int>();
+    var queries = 0, clears = 0, count = 1;
+    late void Function(PostgresChangePayload) handle;
+    PostgresChangePayload event(PostgresChangeEvent type,
+            {String user = 'owner'}) =>
+        PostgresChangePayload(
+            schema: 'public',
+            table: 'app_notifications',
+            commitTimestamp: DateTime(2026),
+            eventType: type,
+            newRecord: {
+              'id': 'notification',
+              'recipient_id': user,
+              'event_type': 'announcement',
+              if (type == PostgresChangeEvent.update) 'read_at': '2026-11-25',
+            },
+            oldRecord: const {},
+            errors: null);
+    await tester.pumpWidget(MaterialApp(
+        home: PushSessionHost(
+            barrier: barrier,
+            debugCurrentUser: () => 'owner',
+            debugAuthenticated: () async {},
+            debugFlush: () async {},
+            debugSubscribe: (callback) => handle = callback,
+            debugUnreadCount: () async {
+              queries++;
+              return queries == 1 ? firstCount.future : count;
+            },
+            debugClearNotifications: () async {
+              clears++;
+            },
+            child: const Text('home'))));
+    expect(queries, 1);
+
+    handle(event(PostgresChangeEvent.insert));
+    firstCount.complete(0);
+    await tester.pump();
+    expect(clears, 0);
+
+    handle(event(PostgresChangeEvent.update));
+    handle(event(PostgresChangeEvent.update));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(queries, 2);
+    expect(clears, 0);
+
+    count = 0;
+    handle(event(PostgresChangeEvent.update, user: 'different'));
+    handle(PostgresChangePayload(
+        schema: 'public',
+        table: 'app_notifications',
+        commitTimestamp: DateTime(2026),
+        eventType: PostgresChangeEvent.delete,
+        newRecord: const {},
+        oldRecord: const {'id': 'other'},
+        errors: null));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(queries, 2);
+    handle(event(PostgresChangeEvent.update));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(clears, 1);
+
+    handle(event(PostgresChangeEvent.update));
+    barrier.close();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(queries, 3);
+  });
+
   testWidgets('push start remains tracked across disposal and blocks new dispatch', (tester) async {
     final barrier = OnlineSideEffectBarrier(ownerIsCurrent: () => true);
     final pending = Completer<void>();
@@ -88,7 +159,7 @@ void main() {
     expect(callbacks, hasLength(2));
     final payload = PostgresChangePayload(schema: 'public', table: 'app_notifications',
       commitTimestamp: DateTime(2026), eventType: PostgresChangeEvent.insert,
-      newRecord: {'id': 'n', 'event_type': 'announcement', 'title': 'QA', 'body': 'test'},
+      newRecord: {'id': 'n', 'recipient_id': 'same-user', 'event_type': 'announcement', 'title': 'QA', 'body': 'test'},
       oldRecord: const {}, errors: null);
     callbacks.first(payload);
     await tester.pump();
