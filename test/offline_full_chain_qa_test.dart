@@ -36,16 +36,20 @@ import 'package:student_platform/src/ui/profile/profile_screen.dart';
 import 'package:student_platform/src/ui/splash/splash_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'chat_file_durable_receipt_test.dart' show signInWithFileSession;
 import 'auth_session_scope_test.dart' show fakeSession;
 
 class _Home implements CachedHomeScheduleReader {
-  _Home(this.caps);
+  _Home(this.caps, this.owner) : permit = caps.capture(SessionCapability.cachedRead)!;
   final SessionCapabilities caps;
+  final AuthOperationScope owner;
+  final CapabilityPermit permit;
   @override
   Listenable get accessChanges => caps;
   @override
-  bool get canRead => caps.capture(SessionCapability.cachedRead) != null;
+  bool get canRead => caps.mode == SessionCapabilityMode.cacheOnly && caps.owns(permit, owner);
+  @override
+  bool permitsContent(SessionCapabilities contentCapabilities, CapabilityPermit contentPermit) =>
+      canRead && contentCapabilities.owns(contentPermit, owner);
   @override
   Future<HomeDashboardData> readDashboard({DateTime? date}) async =>
       HomeDashboardData(
@@ -78,16 +82,30 @@ void main() {
       authOptions: const FlutterAuthClientOptions(autoRefreshToken: false, detectSessionInUri: false)));
     const uid = 'qa-owner';
     const sid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-    await tester.runAsync(() => signInWithFileSession(Supabase.instance.client, uid, sid));
+    const issuer = 'https://example.invalid/auth/v1';
+    final now = DateTime.now().toUtc();
+    final issued = now.millisecondsSinceEpoch ~/ 1000 - 60;
+    final expires = issued + 3600;
+    String part(Object data) => base64Url.encode(utf8.encode(jsonEncode(data))).replaceAll('=', '');
+    final token = '${part({'alg': 'HS256'})}.${part({
+      'iss': issuer, 'sub': uid, 'session_id': sid, 'role': 'authenticated',
+      'aud': 'authenticated', 'iat': issued, 'exp': expires,
+    })}.sig';
+    await tester.runAsync(() => Supabase.instance.client.auth.recoverSession(jsonEncode({
+      'access_token': token, 'refresh_token': 'synthetic', 'token_type': 'bearer',
+      'expires_at': expires, 'expires_in': 3600,
+      'user': {'id': uid, 'aud': 'authenticated', 'app_metadata': {},
+        'user_metadata': {}, 'created_at': '2026-01-01T00:00:00Z'},
+    })));
     var session = Supabase.instance.client.auth.currentSession!;
     final events = StreamController<AuthState>.broadcast(sync: true);
     final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
     events.add(AuthState(AuthChangeEvent.initialSession, session));
     final caps = SessionCapabilities(scope);
-    final now = DateTime.now().toUtc();
-    var binding = OfflineSessionBinding(issuer: 'https://example.invalid/auth/v1',
-      userId: uid, sessionId: sid, notBefore: now.subtract(const Duration(hours: 1)),
-      expiresAt: now.add(const Duration(hours: 1)));
+    var binding = scope.bindingFor(scope.capture()!, issuer)!;
+    expect((binding.issuer, binding.userId, binding.sessionId), (issuer, uid, sid));
+    expect(binding.notBefore.millisecondsSinceEpoch, issued * 1000);
+    expect(binding.expiresAt.millisecondsSinceEpoch, expires * 1000);
     var db = (await tester.runAsync(() => openProjectChatServerDatabase(
         '${dir.path}/chats.sqlite', factory: databaseFactoryFfi)))!;
     ProjectChatServerCache makeCache() => ProjectChatServerCache(db: db, scope: scope,
@@ -134,16 +152,22 @@ void main() {
       db = await openProjectChatServerDatabase('${dir.path}/chats.sqlite', factory: databaseFactoryFfi);
       cache = makeCache();
     });
-    final reader = _Home(caps);
+    late _Home reader;
+    void grantCacheOnly() {
+      final owner = scope.capture()!;
+      expect(caps.grant(SessionCapabilityMode.cacheOnly, caps.beginAuthorization(owner)!), isTrue);
+      reader = _Home(caps, owner);
+    }
     final router = GoRouter(initialLocation: '/splash', routes: [
       GoRoute(path: '/splash', builder: (_, __) => SplashScreen(qaAdmission: () async {
-        caps.grant(SessionCapabilityMode.cacheOnly, caps.beginAuthorization(scope.capture()!)!);
+        grantCacheOnly();
         return OfflineStartupResult.cacheOnly;
       })),
-      GoRoute(path: '/home', builder: (_, __) => NavigationScreen(cachedReader: reader,
+      GoRoute(path: '/home', builder: (_, __) => ListenableBuilder(listenable: caps,
+        builder: (_, __) => NavigationScreen(key: ObjectKey(reader), cachedReader: reader,
         cachedInfo: (_) => CachedTeamChatDirectory(store: cache, capabilities: caps, subjectsOnly: true),
         cachedLearning: (_) => CachedTeamChatDirectory(store: cache, capabilities: caps, subjectsOnly: false),
-        cachedProfile: (_) => ProfileScreen(cachedReader: reader, cachedChats: cache, cachedCapabilities: caps))),
+        cachedProfile: (_) => ProfileScreen(cachedReader: reader, cachedChats: cache, cachedCapabilities: caps)))),
     ]);
     await tester.pumpWidget(MaterialApp.router(routerConfig: router));
     await tester.pumpAndSettle();
@@ -166,12 +190,15 @@ void main() {
       expect(find.textContaining('hidden'), findsNothing);
       expect(find.text('Сбор'), findsNothing);
       if (tab == 'База') {
+        final oldReader = reader;
         caps.block();
         await tester.pump();
         await tester.pump();
         expect(find.text('Сообщение команды QA'), findsNothing);
         expect(find.byType(TeamDetailsScreen), findsNothing);
-        caps.grant(SessionCapabilityMode.cacheOnly, caps.beginAuthorization(scope.capture()!)!);
+        grantCacheOnly();
+        expect(oldReader.canRead, isFalse);
+        expect(reader.canRead, isTrue);
         await tester.pumpAndSettle();
       } else {
         await tester.tap(find.byTooltip('Назад').last);

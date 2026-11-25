@@ -223,6 +223,16 @@ void main() {
     await events.close();
     await db.close();
     await databaseFactoryFfi.deleteDatabase(path);
+    // Closed database handles leave their marker files beside this fixture.
+    final root = Directory(await dir.resolveSymbolicLinks());
+    final guards = Directory.fromUri(root.uri.resolve('pages.db.guards'));
+    final type = await FileSystemEntity.type(guards.path, followLinks: false);
+    if (type != FileSystemEntityType.notFound) {
+      expect(type, FileSystemEntityType.directory);
+      final resolved = Directory(await guards.resolveSymbolicLinks());
+      expect(await FileSystemEntity.identical(resolved.parent.path, root.path), isTrue);
+      await guards.delete(recursive: true);
+    }
     await dir.delete();
   });
 }
