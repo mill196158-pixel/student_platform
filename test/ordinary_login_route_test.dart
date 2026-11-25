@@ -14,6 +14,7 @@ import 'package:sqlite3/open.dart';
 import 'package:student_platform/main.dart' as app;
 import 'package:student_platform/src/config/supabase_config.dart';
 import 'package:student_platform/src/core/auth_session_scope_host.dart';
+import 'package:student_platform/src/core/auth_transition_host.dart';
 import 'package:student_platform/src/ui/home/home_snapshot_cache.dart';
 import 'package:student_platform/src/ui/navigation/navigation_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -66,7 +67,15 @@ void main() {
     var loginCalls = 0;
     final transport = MockClient((request) async {
       Object body = [];
-      if (request.url.path.endsWith('/token')) { loginCalls++; body = session; }
+      if (request.url.path.endsWith('/token')) {
+        loginCalls++;
+        if (jsonDecode(request.body)['password'] == 'wrong-password') {
+          return http.Response(jsonEncode({'code': 'invalid_credentials',
+            'message': 'Invalid login credentials'}), 400, request: request,
+              headers: {'content-type': 'application/json'});
+        }
+        body = session;
+      }
       if (request.url.path.endsWith('/rpc/get_my_profile')) body = [{'id': uid, 'name': 'Тестовый вход'}];
       if (request.url.path.endsWith('/users')) {
         final row = {'id': uid, 'must_change_password': false};
@@ -81,7 +90,16 @@ void main() {
     app.appRouter.go('/login');
     for (var i = 0; i < 10; i++) await tester.pump(const Duration(milliseconds: 50));
     await tester.enterText(find.byType(TextFormField).at(0), 'synthetic');
+    await tester.enterText(find.byType(TextFormField).at(1), 'wrong-password');
+    final transitions = AuthTransitionHost.maybeRead(
+        tester.element(find.byType(TextFormField).first))!;
+    await tester.tap(find.text('Войти').last);
+    await transitions.run(() async {});
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Неверный логин или пароль.'), findsOneWidget);
+    expect(Supabase.instance.client.auth.currentUser, isNull);
     await tester.enterText(find.byType(TextFormField).at(1), 'synthetic-password');
+    await tester.tap(find.text('Войти').last);
     await tester.tap(find.text('Войти').last);
     for (var i = 0; i < 150; i++) {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
@@ -89,7 +107,8 @@ void main() {
       final nav = find.byType(NavigationScreen);
       if (nav.evaluate().isNotEmpty && !tester.widget<NavigationScreen>(nav).guest) break;
     }
-    expect(loginCalls, 1);
+    await transitions.run(() async {});
+    expect(loginCalls, 2);
     expect(Supabase.instance.client.auth.currentUser?.id, uid);
     expect(find.byType(NavigationScreen), findsOneWidget);
     final scope = AuthSessionScopeHost.maybeOf(tester.element(find.byType(NavigationScreen)))!;

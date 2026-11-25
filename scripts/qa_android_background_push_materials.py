@@ -23,12 +23,12 @@ ACTIVITY = PACKAGE + "/com.mill453020.studentplatform.MainActivity"
 
 
 class Device:
-    def __init__(self, serial):
+    def __init__(self, serial, *, avd_prefix="Student_Push_Materials_QA_"):
         if not re.fullmatch(r"emulator-\d+", serial):
             raise ValueError("Choose the dedicated QA emulator")
         self.prefix = ["adb", "-s", serial]
         name = self.run("emu", "avd", "name").decode().splitlines()[0].strip()
-        if not name.startswith("Student_Push_Materials_QA_"):
+        if not name.startswith(avd_prefix):
             raise ValueError("Expected a dedicated, disposable QA AVD")
         if PACKAGE.encode() not in self.run("shell", "pm", "list", "packages", PACKAGE):
             raise ValueError("Install the isolated fixture first")

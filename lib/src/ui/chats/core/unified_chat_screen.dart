@@ -484,7 +484,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     return null;
   }
 
-  Future<void> _loadDmBlockRelationship() async {
+  Future<void> _loadDmBlockRelationship({bool Function()? current}) async {
     final peerId = _dmPeerId;
     if (!_isDm || peerId == null || peerId.isEmpty) {
       if (mounted) {
@@ -498,7 +498,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     }
     try {
       final rel = await BlocksApi.getBlockRelationship(peerId);
-      if (!mounted) return;
+      if (!mounted || current?.call() == false) return;
       setState(() {
         _iBlockedPeer = rel.iBlocked;
         _dmAvailable = rel.dmAvailable;
@@ -506,7 +506,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       });
     } catch (e) {
       debugPrint('[UnifiedChat] get_block_relationship error: $e');
-      if (!mounted) return;
+      if (!mounted || current?.call() == false) return;
       setState(() {
         // Fail-open for reading; send path still has server checks.
         _dmBlockLoaded = true;
@@ -556,9 +556,10 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     }
   }
 
-  Future<void> _applyDmBlockedFromServer() async {
-    await _loadDmBlockRelationship();
-    if (!mounted) return;
+  Future<void> _applyDmBlockedFromServer(bool Function() current) async {
+    if (!current()) return;
+    await _loadDmBlockRelationship(current: current);
+    if (!current()) return;
     if (!_dmAvailable) {
       _att.clear();
       _ctrl.clear();
@@ -1807,6 +1808,19 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   }
 
   // ---------- Отправка ----------
+  bool Function() _captureSendTarget() {
+    final service = widget.service;
+    final chat = _currentChatIdDm;
+    final owner = ChatFileAccess.userId;
+    final epoch = ChatFileAccess.generation;
+    final binding = ChatFileAccess.currentSessionBinding;
+    final route = ModalRoute.of(context);
+    return () => mounted && identical(widget.service, service) &&
+        chat == _currentChatIdDm && owner != null && owner == ChatFileAccess.userId &&
+        epoch == ChatFileAccess.generation && binding == ChatFileAccess.currentSessionBinding &&
+        (route?.isCurrent ?? true);
+  }
+
   Future<void> _send(String text) async {
     if (_editingMessage != null) {
       await _submitInlineEdit();
@@ -1834,7 +1848,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         plainText(text) && _stagedForward == null &&
         !_forwardPackageAttached && _forwardSelectedIds.isEmpty &&
         _att.pending.isEmpty && _replyTo == null;
-    if (_durableForwards && _durableBlocked && !plainLegacyText) {
+    final durableForwards = _durableForwards;
+    if (durableForwards && _durableBlocked && !plainLegacyText) {
       final chat = _currentChatIdDm;
       if (chat != null) {
         await _consumeForwardOutboxIfAny(chat, ForwardOutbox.capture(context));
@@ -1845,9 +1860,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     }
 
     _isSending = true;
-    final sendChat = _currentChatIdDm;
-    final sendOwner = ChatFileAccess.userId;
-    final sendEpoch = ChatFileAccess.generation;
+    final personalChat = _isDm;
+    final currentSendTarget = _captureSendTarget();
     setState(() {});
     try {
       _forceSaveDraftDm();
@@ -2111,15 +2125,20 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         await widget.service.sendText(trimmed, replyToId: replyId);
       }
     } catch (e) {
-      if (_durableForwards && _durableBlocked && !plainLegacyText) {
-        if (mounted && sendChat == _currentChatIdDm && sendOwner != null &&
-            sendOwner == ChatFileAccess.userId && sendEpoch == ChatFileAccess.generation) {
+      if (durableForwards && _durableBlocked && !plainLegacyText) {
+        if (currentSendTarget()) {
           _showSnack('Отправка пересылки не подтверждена. Проверьте чат перед повтором.');
         }
         return;
       }
-      if (_isDm && BlocksApi.isDmBlockedError(e)) {
-        await _applyDmBlockedFromServer();
+      if (personalChat && BlocksApi.isDmBlockedError(e)) {
+        await _applyDmBlockedFromServer(currentSendTarget);
+        return;
+      }
+      if (personalChat && (ChatFileAccess.isOfflineFailure(e) || e is PostgrestException)) {
+        if (currentSendTarget()) {
+          _showSnack('Отправка не подтверждена. Проверьте сообщение в чате.');
+        }
         return;
       }
       rethrow;
@@ -2136,14 +2155,15 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     }
     final svc = widget.service;
     if (svc is! DmChatService) return;
+    final currentSendTarget = _captureSendTarget();
     try {
       await svc.retryFailedText(message);
     } catch (e) {
-      if (_isDm && BlocksApi.isDmBlockedError(e)) {
-        await _applyDmBlockedFromServer();
+      if (BlocksApi.isDmBlockedError(e)) {
+        await _applyDmBlockedFromServer(currentSendTarget);
         return;
       }
-      if (mounted) {
+      if (currentSendTarget()) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Не удалось отправить')),
         );

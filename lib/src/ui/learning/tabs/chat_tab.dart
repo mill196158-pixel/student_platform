@@ -726,9 +726,10 @@ class _ChatTabState extends State<ChatTab> {
       services.SystemChannels.textInput.invokeMethod('TextInput.hide');
     } catch (_) {}
     // И попросим нативный слой убрать captureView, если он использовался
-    try {
-      _keyboardChannel.invokeMethod('dispose');
-    } catch (_) {}
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      unawaited(_keyboardChannel.invokeMethod<void>('dispose')
+          .onError<services.MissingPluginException>((_, __) {}));
+    }
 
     _seenDebounce?.cancel();
     _scroll.removeListener(_onScroll);

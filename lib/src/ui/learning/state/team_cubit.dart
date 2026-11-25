@@ -18,6 +18,7 @@ import 'package:student_platform/src/ui/learning/models/team.dart';
 import 'package:student_platform/src/ui/chats/core/chat_message_cache_store.dart';
 import 'package:student_platform/src/ui/chats/core/chat_message_memory_cache.dart';
 import 'package:student_platform/src/utils/safe_debug_log.dart';
+import 'package:student_platform/src/services/chat_file_access.dart';
 import 'package:student_platform/src/core/legacy_user_cache.dart';
 import 'team_initial_load.dart';
 import 'team_cache_owner.dart';
@@ -109,6 +110,7 @@ class TeamState {
 
 class TeamCubit extends Cubit<TeamState> {
   final LearningRepository repo;
+  bool _closing = false;
   final AuthSessionScope? _authScope;
   final TeamCacheOwner? _cacheOwner;
   String? _verifiedEmptyChatId;
@@ -647,6 +649,7 @@ class TeamCubit extends Cubit<TeamState> {
   }
 
   void _markLocalMessageFailed(String clientId) {
+    if (_closing || isClosed) return;
     final updated = state.chat.map((message) {
       if (message.clientId == clientId || message.id == clientId) {
         return message.copyWith(deliveryStatus: MessageDeliveryStatus.failed);
@@ -805,7 +808,20 @@ class TeamCubit extends Cubit<TeamState> {
     final t = text.trim();
     if (t.isEmpty && imagePath == null && type == MessageType.text) return null;
 
-    final currentUid = Supabase.instance.client.auth.currentUser?.id ?? '';
+    final sessionOwner = _currentProfileOwner();
+    if (sessionOwner == null) return null;
+    final currentUid = sessionOwner.$1;
+    final scope = _authScope;
+    final owner = scope?.capture();
+    final binding = ChatFileAccess.currentSessionBinding;
+    final generation = ChatFileAccess.generation;
+    bool sameOwner() => _currentProfileOwner() == sessionOwner &&
+        (scope == null || (owner != null && scope.isCurrent(owner)));
+    bool sameSession() => scope?.logoutFenced != true &&
+        ChatFileAccess.userId == currentUid && generation == ChatFileAccess.generation &&
+        (binding == null ? sameOwner() : ChatFileAccess.currentSessionBinding == binding);
+    bool canUpdate() => !_closing && !isClosed && sameOwner();
+    if (!canUpdate()) return null;
 
     // оптимистично
     final clientId =
@@ -827,30 +843,48 @@ class TeamCubit extends Cubit<TeamState> {
       clientId: clientId,
       deliveryStatus: MessageDeliveryStatus.sending,
     );
+    if (!canUpdate()) return null;
     final optimistic = _mergeCachedChat([...state.chat, local]);
     emit(state.copyWith(chat: optimistic));
 
+    final String? messageId;
     try {
-      final messageId = await repo.saveChat(state.team.id, [local]);
-      if (messageId == null || messageId.isEmpty) {
-        _markLocalMessageFailed(clientId);
-        return null;
-      }
+      messageId = await repo.saveChat(state.team.id, [local]);
+    } catch (e) {
+      if (canUpdate()) _markLocalMessageFailed(clientId);
+      safeDebugLog('[TeamCubit] sendMessage failed: ${e.runtimeType}');
+      return null;
+    }
+    if (!sameSession()) return null;
+    if (messageId == null || messageId.isEmpty) {
+      if (canUpdate()) _markLocalMessageFailed(clientId);
+      return null;
+    }
+    if (!canUpdate()) return messageId;
 
+    // The server has acknowledged this send. Hydration belongs to this screen.
+    try {
+      final chatId = _mainChatId;
+      final cached = chatId == null ? state.chat : ChatMessageMemoryCache.snapshot(chatId);
+      final serverRow = cached.where((row) => row.id == messageId).firstOrNull ??
+          state.chat.where((row) => row.id == messageId).firstOrNull;
+      final confirmed = serverRow ?? local.copyWith(
+          id: messageId, deliveryStatus: MessageDeliveryStatus.sent, clearClientId: true);
+      emit(state.copyWith(chat: _reconcileCachedMessage(confirmed, clientId: clientId)));
       final serverMessage =
           await repo.loadMessageById(state.team.id, messageId);
+      if (!sameSession()) return null;
+      if (!canUpdate()) return messageId;
       if (serverMessage != null) {
         emit(state.copyWith(
           chat: _reconcileCachedMessage(serverMessage, clientId: clientId),
         ));
       }
       await _hydrateAssignmentIdsInChat();
-      return messageId;
     } catch (e) {
-      _markLocalMessageFailed(clientId);
-      safeDebugLog('[TeamCubit] sendMessage failed: ${e.runtimeType}');
-      return null;
+      safeDebugLog('[TeamCubit] acknowledged message refresh failed: ${e.runtimeType}');
     }
+    return sameSession() ? messageId : null;
   }
 
   Future<void> retryFailedTextMessage(Message message) async {
@@ -1549,6 +1583,7 @@ class TeamCubit extends Cubit<TeamState> {
 
   @override
   Future<void> close() async {
+    _closing = true;
     _cacheOwner?.dispose();
     try {
       await _rtChat?.unsubscribe();

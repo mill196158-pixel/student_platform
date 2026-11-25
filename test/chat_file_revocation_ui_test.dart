@@ -92,7 +92,19 @@ void main() {
       }
     }
 
-    await settleIo();
+    final pixels = find.descendant(
+      of: find.byType(AuthorizedFileImage),
+      matching: find.byWidgetPredicate((widget) =>
+          widget is RawImage && widget.image?.width == 40 && widget.image?.height == 40),
+    );
+    Future<void> waitForPhoto() async {
+      for (var i = 0; i < 30 && pixels.evaluate().isEmpty; i++) {
+        await settleIo();
+      }
+      expect(pixels, findsOneWidget);
+    }
+
+    await waitForPhoto();
     expect(find.text('revoked'), findsNothing);
     final owner = ChatFileAccess.userId;
     final epoch = ChatFileAccess.generation;
@@ -120,6 +132,7 @@ void main() {
     expect(done, isTrue);
     await tester.pump();
     expect(find.text('revoked'), findsOneWidget);
+    expect(pixels, findsNothing);
     expect(
         ChatFileAccess.isViewerCurrent(url,
             user: owner, epoch: epoch, sessionBinding: binding),
@@ -128,7 +141,7 @@ void main() {
 
     allowed = true;
     await tester.tap(find.text('revoked'));
-    await settleIo();
+    await waitForPhoto();
     expect(find.text('revoked'), findsNothing);
     expect(
         ChatFileAccess.isViewerCurrent(url,

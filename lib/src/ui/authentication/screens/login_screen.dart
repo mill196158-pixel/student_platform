@@ -31,7 +31,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _sb = Supabase.instance.client;
 
   Future<void> _doLogin() async {
-    if (!_formKey.currentState!.validate()) return;
+    if (_loading || !_formKey.currentState!.validate()) return;
 
     setState(() => _loading = true);
     final login = _loginCtrl.text.trim();
@@ -102,10 +102,14 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
       final serverTimeout =
           e.statusCode == '504' || e.message.toLowerCase().contains('timeout');
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(serverTimeout
+      final invalidCredentials = e.code == 'invalid_credentials' ||
+          e.message.toLowerCase() == 'invalid login credentials';
+      final message = invalidCredentials
+          ? 'Неверный логин или пароль.'
+          : serverTimeout
               ? 'Сервер входа не ответил вовремя. Повторите попытку позже.'
-              : e.message)));
+              : e.message;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
     } catch (e) {
       if (!mounted) return;
       // Показываем исходную ошибку, чтобы ловить серверные проблемы

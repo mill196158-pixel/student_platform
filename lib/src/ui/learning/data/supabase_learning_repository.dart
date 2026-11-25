@@ -5,6 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:student_platform/src/ui/learning/data/learning_repository.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/data/chat_repository.dart'
+    show parseSentChatMessageId;
 import 'package:student_platform/src/ui/learning/data/confirmed_team_catalog.dart';
 import 'package:student_platform/src/ui/chats/core/confirmed_chat_row.dart';
 import 'package:student_platform/src/ui/learning/models/team.dart';
@@ -774,7 +776,7 @@ class SupabaseLearningRepository implements LearningRepository {
         'p_assignment_id': last.assignmentId,
         'p_file_id': last.fileId,
       });
-      messageId = result?.toString();
+      messageId = parseSentChatMessageId(result);
     } catch (e, st) {
       debugPrint('[saveChat] send_chat_message error: $e\n$st');
       rethrow;
