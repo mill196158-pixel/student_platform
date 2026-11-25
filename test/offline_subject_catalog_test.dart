@@ -5,6 +5,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -17,6 +18,8 @@ import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dar
 import 'package:student_platform/src/ui/info/info_screen.dart';
 import 'package:student_platform/src/ui/info/info_subjects_cache.dart';
 import 'package:student_platform/src/ui/info/offline_subject_catalog.dart';
+import 'package:student_platform/src/ui/info/useful_subject.dart';
+import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/info/useful_subjects_repository.dart';
 import 'package:student_platform/src/ui/info/reference_service.dart';
 import 'package:student_platform/src/ui/info/vacancy_service.dart';
@@ -91,6 +94,7 @@ void main() {
     expect(fallbacks, 0);
   });
   testWidgets('ordinary Base shows only the current session saved subject plan', (tester) async {
+    await initializeDateFormatting('ru');
     if (Platform.isWindows) open.overrideFor(OperatingSystem.windows, () => DynamicLibrary.open('winsqlite3.dll'));
     sqfliteFfiInit();
     final dir = (await tester.runAsync(() => Directory.systemTemp.createTemp('subject-catalog-')))!;
@@ -124,7 +128,8 @@ void main() {
         'currentSemesterNumber': 4, 'hasActiveEnrollment': true},
       'subjects': [
         {'id': 'exam', 'title': 'Тестовый экзамен', 'groupId': 'group', 'semesterNumber': 4,
-          'controlForm': 'Экзамен', 'description': 'Описание предмета', 'teacherName': 'Преподаватель'},
+          'controlForm': 'Экзамен', 'description': 'Описание предмета', 'teacherName': 'Преподаватель',
+          'teamId': 'team', 'chatId': 'exam-chat'},
         {'id': 'practice', 'title': 'Учебная практика', 'groupId': 'group', 'semesterNumber': 4,
           'controlForm': 'Практика', 'description': '', 'teacherName': ''},
       ],
@@ -192,6 +197,13 @@ void main() {
     expect(await tester.runAsync(() => store.commit(pending!, plan)), isFalse);
     final restored = await tester.runAsync(() => store.begin(isCurrent: () => true));
     expect(await tester.runAsync(() => store.commit(restored!, plan)), isTrue);
+    await tester.runAsync(() async {
+      final ticket = (await chat.begin('exam-chat'))!;
+      expect(await chat.saveServerPage(ticket, [
+        Message(id: 'msg', chatId: 'exam-chat', authorId: 'author', authorLogin: '',
+            authorName: 'Участник', text: 'Сохранённое обсуждение', at: DateTime.utc(2026)),
+      ], hasMore: false), isTrue);
+    });
     await tester.runAsync(() => closeProjectChatServerDatabase(db!));
     db = await tester.runAsync(() => openProjectChatServerDatabase(path, factory: databaseFactoryFfi));
     chat = cache(); store = OfflineSubjectCatalog(chat);
@@ -220,7 +232,41 @@ void main() {
     expect(find.text('Как сдаётся'), findsOneWidget);
     expect(find.text('Описание предмета'), findsOneWidget);
     expect(find.text('Материалы пока не загружены'), findsNothing);
+    final openChat = find.text('Открыть чат');
+    final message = find.text('Сохранённое обсуждение');
+    Future<void> waitFor(Finder target) async {
+      for (var i = 0; i < 100 && target.evaluate().isEmpty; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
+        await tester.pump(const Duration(milliseconds: 20));
+        expect(find.text('Сообщений пока нет'), findsNothing);
+      }
+      expect(target, findsOneWidget);
+      await tester.pumpAndSettle();
+    }
+    await tester.ensureVisible(openChat);
+    await tester.tap(openChat);
+    await waitFor(message);
+    await tester.tap(find.text('Файлы'));
+    await tester.pumpAndSettle();
+    expect(find.text('Сохранённый список файлов недоступен.'), findsOneWidget);
+    await tester.tap(find.text('Чат'));
+    await tester.pumpAndSettle();
+    expect(message, findsOneWidget);
+    // Simulate the old card remaining mounted while the membership RPC denies
+    // the subject. Neither the active route nor the old card may open history.
+    final revoked = (await tester.runAsync(() => store.begin(isCurrent: () => true)))!;
+    await tester.runAsync(() => store.deny(revoked));
+    await tester.pumpAndSettle();
+    expect(message, findsNothing);
+    await tester.tap(openChat);
+    await waitFor(find.text('Сохранённый чат этого предмета недоступен.'));
+    expect(message, findsNothing);
+    final reissued = (await tester.runAsync(() => store.begin(isCurrent: () => true)))!;
+    expect(await tester.runAsync(() => store.commit(reissued, plan)), isTrue);
+    await tester.tap(openChat);
+    await waitFor(message);
     caps.block(); await tester.pump();
+    expect(message, findsNothing);
     expect(find.text('Описание предмета'), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
 
@@ -246,5 +292,17 @@ void main() {
     caps.dispose(); scope.dispose(); await events.close();
     await tester.runAsync(() => closeProjectChatServerDatabase(db!));
     await tester.runAsync(() => dir.delete(recursive: true));
+  });
+  test('saved subject chat preserves an explicit denial and bounds legacy rows to the semester', () {
+    final subject = UsefulSubject.fromRpcMap({
+      'subject_offering_id': 'off', 'team_id': 'team', 'chat_id': 'chat',
+      'semester_number': 4, 'can_open_chat': false,
+    });
+    final saved = subject.toJson();
+    expect(UsefulSubject.fromJson(saved, currentSemester: 4).canOpenChat, isFalse);
+    saved.remove('canOpenChat');
+    expect(UsefulSubject.fromJson(saved, currentSemester: 4).canOpenChat, isTrue);
+    expect(UsefulSubject.fromJson(saved, currentSemester: 3).canOpenChat, isFalse);
+    expect(UsefulSubject.fromJson(saved).canOpenChat, isFalse);
   });
 }

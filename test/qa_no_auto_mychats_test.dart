@@ -16,6 +16,7 @@ import 'chat_file_durable_receipt_test.dart' show signInWithFileSession;
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   testWidgets('chat list skips automatic settings migration only in QA', (tester) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     SharedPreferences.setMockInitialValues({});
     const links = MethodChannel('com.llfbandit.app_links/events');
     final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
@@ -36,6 +37,12 @@ void main() {
         if (request.url.path.endsWith('/chat_user_settings') && request.method != 'GET') {
           writes++;
           if (qaNoAutomaticWrites) throw StateError('Unexpected automatic settings write');
+        }
+        if (request.url.path.endsWith('/messages') && request.method == 'GET') {
+          return http.Response(jsonEncode([{
+            'id': '33333333-3333-4333-8333-333333333333',
+            'created_at': '2026-01-01T00:00:00Z',
+          }]), 200, request: request, headers: {'content-type': 'application/json'});
         }
         if (request.url.path.endsWith('/mark_chat_read')) manualMarks++;
         return http.Response('[]', 200, request: request,

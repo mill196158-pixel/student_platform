@@ -49,6 +49,7 @@ import 'package:student_platform/src/ui/learning/data/supabase_learning_reposito
 import 'package:student_platform/src/services/file_service.dart';
 import 'package:student_platform/src/services/push/active_chat_tracker.dart';
 import 'package:student_platform/src/services/push/app_notifications_api.dart';
+import 'package:student_platform/src/services/push/chat_read_progress.dart';
 import 'package:student_platform/src/ui/learning/global_cache.dart';
 import 'package:student_platform/src/ui/learning/account_draft_store.dart';
 import 'package:student_platform/src/ui/learning/draft_session_owner.dart';
@@ -203,7 +204,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   static const services.MethodChannel _keyboardChannel =
       services.MethodChannel('keyboard_image_channel');
 
-  String? _lastMarkedReadId;
+  final _readProgress = ChatReadProgress();
+  AppLifecycleListener? _readLifecycle;
   Timer? _seenDebounce;
   String? _lastRenderedLastId;
 
@@ -321,6 +323,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     // Do not initialize network, presence, draft, file or keyboard handlers
     // for a local-only service. This path is an experimental QA boundary.
     if (_initialCachedOnly) return;
+    _readLifecycle = AppLifecycleListener(onResume: _scheduleSeenCheck);
     _att = ChatAttachmentsController(
         _fileService, _globalCache, Supabase.instance.client,
         authScope: AuthSessionScopeHost.maybeRead(context),
@@ -439,6 +442,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
   @override
   void dispose() {
+    _readLifecycle?.dispose();
     DraftRecoveryJournal.changes.removeListener(_onDraftJournalChangedDm);
     if (_initialCachedOnly) {
       _scroll.dispose();
@@ -450,7 +454,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     ActiveChatTracker.instance.leave(_currentChatIdDm);
     try {
       final list = widget.service.currentMessages;
-      if (list.isNotEmpty && _autoWorkCurrent) _markReadSafely(list.last.id);
+      if (list.isNotEmpty && _autoWorkCurrent && _chatScroll.atBottom()) _markReadSafely(list.last.id);
     } catch (_) {}
     _forceSaveDraftDm();
     _draftOwnerDm?.changes.removeListener(_onDraftOwnerChangedDm);
@@ -1514,7 +1518,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
       final list = widget.service.currentMessages;
       if (list.isNotEmpty) {
         final last = list.last;
-        if (last.id != _lastMarkedReadId) _markReadSafely(last.id);
+        _markReadSafely(last.id);
       }
     }
   }
@@ -1572,30 +1576,32 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     final list = widget.service.currentMessages;
     if (list.isEmpty) return;
     final last = list.last;
-    if (last.id == _lastMarkedReadId) return;
     await _markReadSafely(last.id);
   }
 
   Future<void> _markReadSafely(String lastId) async {
     if (qaNoAutomaticWrites) return;
     if (lastId.isEmpty || lastId.startsWith('local_')) return;
-    await _runAutoWork((current) async { try {
-      await widget.service.markRead(lastId);
-      if (!current()) return;
-      _lastMarkedReadId = lastId;
-      final chatId = _currentChatIdDm;
-      if (chatId != null && chatId.isNotEmpty) {
-        try {
-          await AppNotificationsApi().markReadForChat(chatId);
-        } catch (e) {
-          if (kDebugMode) {
-            debugPrint('[UnifiedChat] notification read sync error: $e');
-          }
-        }
+    await _runAutoWork((allowed) async {
+      try {
+        final chat = _currentChatIdDm;
+        final owner = captureChatReadOwner(context);
+        final service = widget.service;
+        final message = service.currentMessages.lastOrNull;
+        if (chat == null || chat.isEmpty || owner == null ||
+            message == null || message.id != lastId) return;
+        final route = ModalRoute.of(context);
+        bool current() => mounted && allowed() && owner.current() &&
+            identical(widget.service, service) && _currentChatIdDm == chat &&
+            (route?.isCurrent ?? true);
+        await _readProgress.mark(scope: (owner.session, chat), messageId: lastId,
+            current: current, markCursor: () => service.markRead(lastId),
+            syncNotifications: () => AppNotificationsApi().markReadForChat(chat,
+                through: (messageId: lastId, at: message.at), isCurrent: current));
+      } catch (_) {
+        if (kDebugMode) debugPrint('[UnifiedChat] read sync pending');
       }
-    } catch (e) {
-      if (kDebugMode) debugPrint('[UnifiedChat] markRead error: $e');
-    } });
+    });
   }
 
   Future<void> _jumpToBottom() async {

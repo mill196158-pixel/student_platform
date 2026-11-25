@@ -18,7 +18,7 @@ class PushSessionHost extends StatefulWidget {
   const PushSessionHost({super.key, required this.child, this.barrier,
     this.debugStart, this.debugReconcile, this.debugAuthenticated,
     this.debugFlush, this.debugCurrentUser, this.debugSubscribe,
-    this.debugUnreadCount, this.debugClearNotifications});
+    this.debugSystemNotifications});
 
   final Widget child;
   final OnlineSideEffectBarrier? barrier;
@@ -35,9 +35,7 @@ class PushSessionHost extends StatefulWidget {
   @visibleForTesting
   final void Function(void Function(PostgresChangePayload))? debugSubscribe;
   @visibleForTesting
-  final Future<int> Function()? debugUnreadCount;
-  @visibleForTesting
-  final Future<void> Function()? debugClearNotifications;
+  final SystemNotificationSync? debugSystemNotifications;
 
   @override
   State<PushSessionHost> createState() => _PushSessionHostState();
@@ -53,6 +51,34 @@ class _PushSessionHostState extends State<PushSessionHost>
   int _channelRevision = 0;
   VoidCallback? _removeCloseHook;
   Timer? _reconcileTimer;
+
+  late final _receiptBinding = _captureReadReceipt;
+
+  void Function(Set<String>?)? _captureReadReceipt(SupabaseClient client) {
+    final owner = _currentUser;
+    final session = client.auth.currentSession;
+    final barrier = widget.barrier;
+    if (owner == null || session?.user.id != owner ||
+        !identical(client, Supabase.instance.client)) return null;
+    bool current() => _currentBarrier(barrier) && _currentUser == owner &&
+        identical(client.auth.currentSession, session);
+    return (ids) {
+      if (!current()) return;
+      if (ids != null) {
+        unawaited(_dispatch(() =>
+            _systemNotifications.dismissRead(owner, ids, isCurrent: current)));
+      }
+      _scheduleReconcile(current);
+    };
+  }
+
+  void _scheduleReconcile(bool Function() current) {
+    _systemNotifications.invalidate();
+    _reconcileTimer?.cancel();
+    _reconcileTimer = Timer(const Duration(milliseconds: 100), () {
+      if (current()) unawaited(_dispatch(_reconcile));
+    });
+  }
 
   String? get _currentUser => widget.debugCurrentUser == null
       ? Supabase.instance.client.auth.currentUser?.id
@@ -82,8 +108,11 @@ class _PushSessionHostState extends State<PushSessionHost>
       mounted && identical(widget.barrier, captured) && (captured?.isOpen ?? true);
   Future<void> _reconcile() {
     final captured = widget.barrier;
-    return widget.debugReconcile?.call() ?? _systemNotifications.reconcile(
-        isCurrent: captured == null ? null : () => _currentBarrier(captured));
+    if (widget.debugReconcile != null) return widget.debugReconcile!();
+    final client = widget.debugCurrentUser == null ? Supabase.instance.client : null;
+    final session = client?.auth.currentSession;
+    return _systemNotifications.reconcile(isCurrent: () => _currentBarrier(captured) &&
+        identical(session, client?.auth.currentSession));
   }
   Future<void> _startOperation() => widget.debugStart?.call() ?? _start();
 
@@ -101,12 +130,12 @@ class _PushSessionHostState extends State<PushSessionHost>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _systemNotifications = SystemNotificationSync(
+    _systemNotifications = widget.debugSystemNotifications ?? SystemNotificationSync(
       currentUser: () => _currentUser,
-      clear: widget.debugClearNotifications,
-      unreadCount: widget.debugUnreadCount ??
-          () => AppNotificationsApi().unreadCount(),
+      unreadCount: () => AppNotificationsApi().unreadCount(),
+      lookupRead: (owner, ids) => AppNotificationsApi().readDeliveredIds(owner, ids),
     );
+    AppNotificationsApi.captureReadReceipt = _receiptBinding;
     _bindCloseHook(widget.barrier);
     _badgeSubscription = InAppNotificationBus.instance.stream.listen((event) {
       // The legacy bus has no owner/session provenance. Guarded sessions must
@@ -181,22 +210,19 @@ class _PushSessionHostState extends State<PushSessionHost>
             // subscription filter alone cannot attribute that event.
             if (recipient != uid) return;
             // A fresh event makes any outstanding global-zero response stale.
-            _systemNotifications.invalidate();
+            _scheduleReconcile(current);
             if (payload.eventType != PostgresChangeEvent.insert) {
               final id = (row['id'] ?? payload.oldRecord['id'])?.toString();
               if (row['read_at'] != null ||
                   row['deleted_at'] != null ||
                   payload.eventType == PostgresChangeEvent.delete) {
-                if (id != null)
+                if (id != null) {
                   InAppNotificationBus.instance.dismissNotifications({id});
+                  unawaited(_dispatch(() => _systemNotifications
+                      .dismissRead(uid, {id}, isCurrent: current)));
+                }
               }
               InAppNotificationBus.instance.requestBadgeRefresh();
-              if (capturedBarrier != null) {
-                _reconcileTimer?.cancel();
-                _reconcileTimer = Timer(const Duration(milliseconds: 100), () {
-                  if (current()) unawaited(_dispatch(_reconcile));
-                });
-              }
               return;
             }
             if (row['read_at'] != null || row['deleted_at'] != null) return;
@@ -250,6 +276,9 @@ class _PushSessionHostState extends State<PushSessionHost>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      if (_started && widget.debugAuthenticated == null) {
+        unawaited(_dispatch(PushNotificationService.instance.retryTokenRegistration));
+      }
       unawaited(_dispatch(_startOperation));
       unawaited(_dispatch(_reconcile));
     }
@@ -282,6 +311,9 @@ class _PushSessionHostState extends State<PushSessionHost>
 
   @override
   void dispose() {
+    if (identical(AppNotificationsApi.captureReadReceipt, _receiptBinding)) {
+      AppNotificationsApi.captureReadReceipt = null;
+    }
     final barrier = widget.barrier;
     barrier?.close();
     _removeCloseHook?.call();

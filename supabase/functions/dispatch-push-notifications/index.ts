@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { SignJWT, importPKCS8 } from "npm:jose@5.9.6";
+import { androidReadMessage, visibleMessage } from "./fcm_message.ts";
 
 type ServiceAccount = {
   project_id: string;
@@ -226,16 +227,13 @@ async function processOutboxRow(args: {
 }): Promise<"sent" | "skipped" | "failed"> {
   const { supabase, row, accessToken, projectId } = args;
 
-  const { data: decisionRaw, error: decisionError } = await supabase.rpc(
-    "should_deliver_push_for_outbox",
-    { p_outbox_id: row.id },
-  );
-
-  if (decisionError) {
-    throw new Error(`decision_failed: ${decisionError.message}`);
+  const readSync = row.event_type === "notification_read";
+  let decision: DeliveryDecision = { allow: row.app_notification_id != null };
+  if (!readSync) {
+    const result = await supabase.rpc("should_deliver_push_for_outbox", { p_outbox_id: row.id });
+    if (result.error) throw new Error(`decision_failed: ${result.error.message}`);
+    decision = result.data as DeliveryDecision;
   }
-
-  const decision = decisionRaw as DeliveryDecision;
   if (!decision?.allow) {
     await supabase.rpc("complete_notification_outbox", {
       p_outbox_id: row.id,
@@ -256,7 +254,7 @@ async function processOutboxRow(args: {
   const hadPriorSuccess = hadSuccessRaw === true;
 
   const { data: tokensRaw, error: tokensError } = await supabase.rpc(
-    "list_pending_device_push_tokens",
+    readSync ? "list_pending_android_read_sync_tokens" : "list_pending_device_push_tokens",
     {
       p_outbox_id: row.id,
       p_user_id: row.recipient_id,
@@ -290,11 +288,12 @@ async function processOutboxRow(args: {
 
   const pushBody = resolvePushBody(decision);
   const pushTitle = String(decision.title ?? "Уведомление");
+  const notificationId = row.app_notification_id;
   const rawData = {
+    ...(decision.data ?? {}),
     version: "1",
     type: String(decision.event_type ?? row.event_type),
-    notification_id: String(decision.notification_id ?? row.app_notification_id ?? ""),
-    ...(decision.data ?? {}),
+    notification_id: notificationId ?? "",
     title: pushTitle,
     body: pushBody,
   };
@@ -313,15 +312,15 @@ async function processOutboxRow(args: {
 
   for (const device of tokens) {
     try {
+      const message = readSync && notificationId
+        ? androidReadMessage(device.token, row.recipient_id, notificationId)
+        : visibleMessage(device.token, {
+          title: pushTitle, body: pushBody, data: dataPayload, channelId,
+        }, row.recipient_id, notificationId);
       const result = await sendFcmHttpV1({
         accessToken,
         projectId,
-        token: device.token,
-        title: pushTitle,
-        body: pushBody,
-        data: dataPayload,
-        channelId,
-        platform: device.platform,
+        message,
       });
 
       await supabase.rpc("record_push_delivery_attempt", {
@@ -406,12 +405,7 @@ async function processOutboxRow(args: {
 async function sendFcmHttpV1(args: {
   accessToken: string;
   projectId: string;
-  token: string;
-  title: string;
-  body: string;
-  data: Record<string, string>;
-  channelId: string;
-  platform: string;
+  message: ReturnType<typeof visibleMessage> | ReturnType<typeof androidReadMessage>;
 }): Promise<{
   ok: boolean;
   httpStatus: number;
@@ -422,37 +416,13 @@ async function sendFcmHttpV1(args: {
   const url =
     `https://fcm.googleapis.com/v1/projects/${args.projectId}/messages:send`;
 
-  const message: Record<string, unknown> = {
-    token: args.token,
-    data: args.data,
-    notification: {
-      title: args.title,
-      body: args.body,
-    },
-    android: {
-      priority: "HIGH",
-      notification: {
-        channel_id: args.channelId,
-        sound: "default",
-      },
-    },
-    apns: {
-      payload: {
-        aps: {
-          sound: "default",
-          badge: 1,
-        },
-      },
-    },
-  };
-
   const res = await fetch(url, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${args.accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message: args.message }),
   });
 
   if (res.ok) {

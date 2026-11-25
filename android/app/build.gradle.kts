@@ -50,6 +50,7 @@ android {
     }
 
     defaultConfig {
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["sourceDocumentQaEnabled"] = attachFixture.toString()
         manifestPlaceholders["sourceAuthorityProviderQaEnabled"] = (authorityQa || recoverySourceDiagnostic || authorityGateFixture || authorityDispatchFixture || authorityColdLaunchFixture).toString()
         manifestPlaceholders["sourceAuthorityViewerQaEnabled"] = (authorityDispatchFixture || authorityColdLaunchFixture).toString()
@@ -89,6 +90,9 @@ flutter {
 }
 
 dependencies {
+    // The app's FlutterFire service subclass also calls the pinned native FCM SDK.
+    implementation("com.google.firebase:firebase-messaging:25.1.0")
+    androidTestImplementation("androidx.test:runner:1.3.0")
     if (offlineFixture) add("releaseImplementation", project(":integration_test"))
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
     // On-device Cyrillic OCR fallback for topic lists (Stage 13.9).

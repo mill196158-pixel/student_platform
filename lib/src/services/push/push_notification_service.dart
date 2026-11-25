@@ -58,6 +58,7 @@ class PushNotificationService {
   (PushPayload, OnlineSideEffectBarrier)? _guardedPending;
   bool _promptInFlight = false;
   String? _installationId;
+  PushTokenRegistration? _tokenRegistration;
   bool get isSupportedPlatform =>
       !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
@@ -121,6 +122,12 @@ class PushNotificationService {
         Supabase.instance.client.auth.currentUser?.id == userId;
     _sessionActive = true;
     _guardedCurrent = barrier == null ? null : sameSession;
+    _tokenRegistration = PushTokenRegistration(() async {
+      if (!sameSession() || !_firebaseReady) return false;
+      final settings = await FirebaseMessaging.instance.getNotificationSettings();
+      if (!sameSession() || !_isAuthorized(settings.authorizationStatus)) return false;
+      return _registerCurrentToken(isCurrent: sameSession);
+    });
     PushNavigation.markReady();
 
     await bootstrapFirebase();
@@ -137,10 +144,11 @@ class PushNotificationService {
       await maybeShowPermissionPrompt(context, isCurrent: sameSession);
     }
     if (!sameSession()) return;
-    final settings = await FirebaseMessaging.instance.getNotificationSettings();
-    if (sameSession() && _isAuthorized(settings.authorizationStatus)) {
-      await _registerCurrentToken(isCurrent: sameSession);
-    }
+    await retryTokenRegistration();
+  }
+
+  Future<void> retryTokenRegistration() async {
+    if (_sessionActive) await _tokenRegistration?.ensure();
   }
 
   Future<void> onLogout({PushLogoutReservation? reservation}) async {
@@ -229,7 +237,7 @@ class PushNotificationService {
     if (!current()) return;
     if (_isAuthorized(settings.authorizationStatus)) {
       await prefs.setBool(_kPermissionPromptSeenKey, true);
-      if (current()) await _registerCurrentToken(isCurrent: current);
+      if (current()) await retryTokenRegistration();
       return;
     }
 
@@ -266,7 +274,7 @@ class PushNotificationService {
 
     final granted = _isAuthorized(settings.authorizationStatus);
     if (granted && (isCurrent?.call() ?? true)) {
-      await _registerCurrentToken(isCurrent: isCurrent);
+      await retryTokenRegistration();
     }
     return granted;
   }
@@ -312,15 +320,15 @@ class PushNotificationService {
         FirebaseMessaging.onMessageOpenedApp.listen((message) =>
             dispatch(() => _onMessageOpened(message, isCurrent: current)));
     _tokenRefreshSub =
-        FirebaseMessaging.instance.onTokenRefresh.listen((token) {
+        FirebaseMessaging.instance.onTokenRefresh.listen((_) {
       if (!_sessionActive || !current()) return;
-      dispatch(() => _upsertToken(token, isCurrent: current));
+      dispatch(() async => _tokenRegistration?.ensure(tokenChanged: true));
     });
   }
 
   Future<void> _handleInitialMessage(bool Function() sameSession) async {
     final initial = await FirebaseMessaging.instance.getInitialMessage();
-    if (initial == null || !sameSession()) return;
+    if (initial == null || _isReadControl(initial) || !sameSession()) return;
     final payload = PushPayload.tryParse(initial.data);
     if (payload == null) return;
     if (_strictPushGuard) {
@@ -338,7 +346,11 @@ class PushNotificationService {
     await openGuardedPayload(pending.$1);
   }
 
+  bool _isReadControl(RemoteMessage message) => message.data['type'] == 'notification_read' ||
+      message.data.containsKey('student_sync_action');
+
   Future<void> _onForegroundMessage(RemoteMessage message, {bool Function()? isCurrent}) async {
+    if (_isReadControl(message)) return;
     final payload = PushPayload.tryParse(message.data);
     final chatId = payload?.chatId ?? message.data['chat_id']?.toString();
     final eventType = payload?.type ?? message.data['type']?.toString() ?? '';
@@ -409,6 +421,7 @@ class PushNotificationService {
   }
 
   Future<void> _onMessageOpened(RemoteMessage message, {bool Function()? isCurrent}) async {
+    if (_isReadControl(message)) return;
     if (!(isCurrent?.call() ?? true)) return;
     final payload = PushPayload.tryParse(message.data);
     if (payload == null) return;
@@ -572,17 +585,17 @@ class PushNotificationService {
     _localReady = true;
   }
 
-  Future<void> _registerCurrentToken({bool Function()? isCurrent}) async {
-    if (qaNoAutomaticWrites) return;
-    bool current() => _sessionActive && (isCurrent?.call() ?? true);
-    if (!_firebaseReady || !current()) return;
+  Future<bool> _registerCurrentToken({required bool Function() isCurrent}) async {
+    if (qaNoAutomaticWrites) return false;
+    bool current() => _sessionActive && isCurrent();
+    if (!_firebaseReady || !current()) return false;
 
     for (var attempt = 1; attempt <= 5; attempt++) {
-      if (!current()) return;
+      if (!current()) return false;
       try {
         if (Platform.isIOS) {
           final apns = await FirebaseMessaging.instance.getAPNSToken();
-          if (!current()) return;
+          if (!current()) return false;
           if (apns == null || apns.isEmpty) {
             if (kDebugMode) {
               debugPrint('[Push] APNs token is not ready, retry $attempt/5');
@@ -593,7 +606,7 @@ class PushNotificationService {
         }
 
         final token = await FirebaseMessaging.instance.getToken();
-        if (!current()) return;
+        if (!current()) return false;
         if (token == null || token.isEmpty) {
           if (kDebugMode) {
             debugPrint('[Push] FCM token is empty, retry $attempt/5');
@@ -602,13 +615,14 @@ class PushNotificationService {
           continue;
         }
         await _upsertToken(token, isCurrent: current);
-        return;
-      } catch (e) {
+        return current();
+      } catch (_) {
         if (kDebugMode)
-          debugPrint('[Push] getToken failed attempt $attempt: $e');
-        await Future<void>.delayed(Duration(seconds: attempt));
+          debugPrint('[Push] token registration failed (attempt $attempt)');
+        if (attempt < 5) await Future<void>.delayed(Duration(seconds: attempt));
       }
     }
+    return false;
   }
 
   Future<void> _upsertToken(String token, {bool Function()? isCurrent}) async {
@@ -628,27 +642,15 @@ class PushNotificationService {
     final locale = PlatformDispatcher.instance.locale.toLanguageTag();
     final timezone = DateTime.now().timeZoneName;
 
-    try {
-      await Supabase.instance.client.rpc(
-        'register_device_push_token',
-        params: {
+    await registerDevicePushToken(Supabase.instance.client, {
           'p_installation_id': installationId,
           'p_token': token,
           'p_platform': platform,
           'p_app_version': appVersion,
           'p_locale': locale,
           'p_timezone': timezone,
-        },
-      );
-      if (kDebugMode) {
-        final hint = token.length <= 8
-            ? '***'
-            : '${token.substring(0, 4)}…${token.substring(token.length - 4)}';
-        debugPrint('[Push] token registered ($hint)');
-      }
-    } catch (e) {
-      if (kDebugMode) debugPrint('[Push] register token failed: $e');
-    }
+        }, isCurrent: current);
+    if (kDebugMode) debugPrint('[Push] token registered');
   }
 
   Future<String> _ensureInstallationId() async {
@@ -708,6 +710,58 @@ class PushNotificationService {
     final now = DateTime.now().microsecondsSinceEpoch.toRadixString(16);
     final rand = UniqueKey().hashCode.toUnsigned(32).toRadixString(16);
     return '$now-$rand';
+  }
+}
+
+/// Android v2 explicitly opts this installation in to silent read receipts.
+/// Older servers still accept the original registration during deployment.
+Future<void> registerDevicePushToken(SupabaseClient client,
+    Map<String, dynamic> params, {required bool Function() isCurrent}) async {
+  if (!isCurrent()) return;
+  if (params['p_platform'] == 'android') {
+    try {
+      await client.rpc('register_android_push_token_v2', params: params);
+      return;
+    } on PostgrestException catch (error) {
+      if (error.code != 'PGRST202') rethrow;
+    }
+  }
+  if (isCurrent()) await client.rpc('register_device_push_token', params: params);
+}
+
+/// Serializes registration per authenticated session. A rotation during an
+/// old in-flight upsert must finish by registering the newest FCM token.
+class PushTokenRegistration {
+  PushTokenRegistration(this._register);
+  final Future<bool> Function() _register;
+  final _flight = SingleFlightInitialization();
+  int _version = 0;
+  bool _registered = false;
+
+  Future<void> ensure({bool tokenChanged = false}) async {
+    if (tokenChanged) {
+      _version++;
+      _registered = false;
+    }
+    while (!_registered) {
+      final requestedVersion = _version;
+      var dispatched = false;
+      await _flight.run(() async {
+        dispatched = true;
+        bool registered;
+        try {
+          registered = await _register();
+        } catch (_) {
+          registered = false;
+        }
+        if (requestedVersion == _version) {
+          _registered = registered;
+        }
+      });
+      // A failed attempt can retry on the next resume. A token rotation
+      // that only joined an older flight must get its own fresh attempt.
+      if (requestedVersion == _version && (dispatched || !tokenChanged)) return;
+    }
   }
 }
 

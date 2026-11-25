@@ -3,16 +3,20 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:student_platform/src/core/reconnect_chat_intent.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../chats/core/project_chat_server_cache.dart';
 import '../learning/models/team.dart';
+import '../learning/state/scoped_team_catalog.dart';
 import '../learning/team_details_screen.dart';
 import '../schedule/subject_diary/subject_diary.dart';
 import '../schedule/subject_diary_screen.dart';
 import 'package:student_ui/student_ui.dart';
 
 import 'info_subjects_cache.dart';
+import 'offline_subject_catalog.dart';
 import 'subject_attachment_open.dart';
 import 'subject_card_service.dart';
 import 'subject_difficulty.dart';
@@ -27,10 +31,11 @@ import 'useful_subject.dart';
 /// its repositories, download services or interactive mutations.
 class SavedSubjectInfoScreen extends StatelessWidget {
   const SavedSubjectInfoScreen({super.key, required this.subject,
-      required this.capabilities, required this.permit});
+      required this.capabilities, required this.permit, this.store});
   final UsefulSubject subject;
   final SessionCapabilities capabilities;
   final CapabilityPermit permit;
+  final ProjectChatServerCache? store;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -63,6 +68,9 @@ class SavedSubjectInfoScreen extends StatelessWidget {
                   Expanded(child: Text('Сохранённая информация · без сети',
                       style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant))),
                 ])),
+              if (store != null && subject.hasChat && subject.canOpenChat)
+                _SavedSubjectChatButton(subject: subject, store: store!,
+                    capabilities: capabilities, permit: permit),
               _ContentCard(icon: Icons.info_outline_rounded, title: 'Краткая информация',
                 child: Column(children: [
                   if (subject.description.trim().isNotEmpty)
@@ -85,6 +93,96 @@ class SavedSubjectInfoScreen extends StatelessWidget {
           );
         },
       );
+}
+
+class _SavedSubjectChatButton extends StatefulWidget {
+  const _SavedSubjectChatButton({required this.subject, required this.store,
+      required this.capabilities, required this.permit});
+  final UsefulSubject subject;
+  final ProjectChatServerCache store;
+  final SessionCapabilities capabilities;
+  final CapabilityPermit permit;
+
+  @override
+  State<_SavedSubjectChatButton> createState() => _SavedSubjectChatButtonState();
+}
+
+class _SavedSubjectChatButtonState extends State<_SavedSubjectChatButton> {
+  bool _opening = false;
+
+  Future<void> _open() async {
+    final caps = widget.capabilities, permit = widget.permit, store = widget.store;
+    final subject = widget.subject, teamId = subject.teamId!, chatId = subject.chatId!;
+    final teamRevision = ScopedTeamCatalogStore.changes.value;
+    final subjectRevision = OfflineSubjectCatalog.changes.value;
+    bool allowed() => caps.mode == SessionCapabilityMode.cacheOnly &&
+        caps.permits(permit, SessionCapability.cachedRead) &&
+        teamRevision == ScopedTeamCatalogStore.changes.value &&
+        subjectRevision == OfflineSubjectCatalog.changes.value;
+    bool current() => mounted && identical(caps, widget.capabilities) &&
+        identical(store, widget.store) && identical(subject, widget.subject) &&
+        identical(permit, widget.permit) && allowed() && ModalRoute.isCurrentOf(context) == true;
+    if (_opening || !current()) return;
+    setState(() => _opening = true);
+    try {
+      // Honour newer negative membership evidence from Learning, even when
+      // this subject card was opened before that catalogue changed.
+      final teams = ScopedTeamCatalogStore(db: store.db, scope: store.scope,
+          currentBinding: store.currentBinding, project: store.project);
+      final denied = await teams.isDenied(caps);
+      if (!current()) return;
+      final catalog = denied == false ? await teams.read(caps) : null;
+      if (!current()) return;
+      final plan = await OfflineSubjectCatalog(store).read(caps);
+      if (!current()) return;
+      final semester = (plan?['contextData'] as Map?)?['currentSemesterNumber'];
+      final matches = (plan?['subjects'] as List? ?? const []).whereType<Map>().where(
+          (row) => row['id'] == subject.id && row['teamId'] == teamId && row['chatId'] == chatId);
+      if (denied != false || (catalog != null && !catalog.teams.any((t) =>
+          t.id == teamId && t.kind != 'group_space' &&
+          (t.subjectOfferingId == null || t.subjectOfferingId == subject.id))) ||
+          matches.length != 1 || !UsefulSubject.fromJson(
+              Map<String, dynamic>.from(matches.single),
+              currentSemester: semester is int ? semester : null).canOpenChat) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Сохранённый чат этого предмета недоступен.')));
+        return;
+      }
+      final team = Team(id: teamId, name: subject.teamName.isEmpty ? subject.title : subject.teamName,
+          teacher: subject.teacherName, groupCode: subject.teamGroupName, icon: '',
+          kind: 'subject', subjectOfferingId: subject.id);
+      final nav = Navigator.of(context);
+      final access = Listenable.merge([caps, ScopedTeamCatalogStore.changes, OfflineSubjectCatalog.changes]);
+      final route = MaterialPageRoute<void>(builder: (_) => ListenableBuilder(
+          listenable: access, builder: (_, __) => allowed()
+              ? TeamDetailsScreen(team: team, initialTabIndex: 1, cachedStore: store,
+                    cachedCapabilities: caps, cachedChatId: chatId)
+              : const SizedBox.shrink()));
+      final marker = ReconnectChatIntent.instance.register(scope: store.scope,
+          route: route, chatId: chatId, targetId: teamId, dm: false);
+      void closeOnRevoke() {
+        if (allowed()) return;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (nav.mounted && route.isActive) nav.removeRoute(route);
+        });
+      }
+      access.addListener(closeOnRevoke);
+      try {
+        await nav.push(route);
+      } finally {
+        access.removeListener(closeOnRevoke);
+        ReconnectChatIntent.instance.closed(marker);
+      }
+    } finally {
+      if (mounted) setState(() => _opening = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: OutlinedButton.icon(onPressed: _opening ? null : _open,
+          icon: const Icon(Icons.chat_bubble_outline_rounded), label: const Text('Открыть чат')));
 }
 
 class SubjectInfoScreen extends StatefulWidget {

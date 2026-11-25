@@ -61,6 +61,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   testWidgets('closing scoped route does not mark messages read on dispose',
       (tester) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     SharedPreferences.setMockInitialValues({});
     const links = MethodChannel('com.llfbandit.app_links/events');
     final messenger =

@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:student_platform/src/core/online_side_effect_barrier.dart';
 import 'package:student_platform/src/ui/notifications/push_session_host.dart';
 import 'package:student_platform/src/services/push/in_app_notification_bus.dart';
+import 'package:student_platform/src/services/push/system_notification_sync.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 void main() {
@@ -35,13 +36,14 @@ void main() {
             debugAuthenticated: () async {},
             debugFlush: () async {},
             debugSubscribe: (callback) => handle = callback,
-            debugUnreadCount: () async {
+            debugSystemNotifications: SystemNotificationSync(
+              currentUser: () => 'owner',
+              lookupRead: (owner, ids) async => {},
+              listDelivered: () async => [(tag: 'FCM-Notification:123', id: 0)],
+              unreadCount: () async {
               queries++;
               return queries == 1 ? firstCount.future : count;
-            },
-            debugClearNotifications: () async {
-              clears++;
-            },
+            }, cancelDelivered: (_) async { clears++; }),
             child: const Text('home'))));
     expect(queries, 1);
 

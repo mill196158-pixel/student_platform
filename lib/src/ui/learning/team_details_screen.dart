@@ -473,6 +473,7 @@ class _BodyState extends State<_Body> with SingleTickerProviderStateMixin {
                 children: [
                   AssignmentsTab(team: team),
                   ChatTab(
+                    isActive: _tabController.index == 1,
                     onSelectingChanged: (v) => setState(() => _selecting = v),
                     readOnly: widget.readOnly,
                     highlightMessageId: widget.highlightMessageId,

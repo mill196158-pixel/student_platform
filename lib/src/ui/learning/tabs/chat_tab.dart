@@ -9,6 +9,7 @@ import 'package:student_platform/src/core/qa_rotation_navigation_guard.dart';
 
 import 'dart:async';
 import 'package:student_platform/src/core/qa_no_automatic_writes.dart';
+import 'package:student_platform/src/services/push/chat_read_progress.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -93,6 +94,7 @@ class _ClipboardFilePayload {
 }
 
 class ChatTab extends StatefulWidget {
+  final bool isActive;
   final ValueChanged<bool>? onSelectingChanged;
 
   /// Completed-semester academic chat: view history/files only.
@@ -105,6 +107,7 @@ class ChatTab extends StatefulWidget {
     super.key,
     this.onSelectingChanged,
     this.readOnly = false,
+    this.isActive = true,
     this.highlightMessageId,
     this.forwardTargetOverride,
     this.copyForwardFileOverride,
@@ -430,7 +433,8 @@ class _ChatTabState extends State<ChatTab> {
   final _recoveryJournal = DraftRecoveryJournal();
   List<Map<String, dynamic>> _recoveryDrafts = const [];
   String? _lastAutoScrollTarget;
-  String? _lastMarkedReadId; // ➜ NEW: чтобы не спамить RPC
+  final _readProgress = ChatReadProgress();
+  late final AppLifecycleListener _readLifecycle;
   Timer? _seenDebounce; // ➜ NEW: debounce для автопрочтения
   String? _lastRenderedLastId; // ➜ NEW: отслеживаем последний id в ленте
   ForwardPayload? _stagedForward; // пакет для пересылки из других чатов
@@ -567,6 +571,7 @@ class _ChatTabState extends State<ChatTab> {
   @override
   void initState() {
     super.initState();
+    _readLifecycle = AppLifecycleListener(onResume: _scheduleSeenCheck);
     _draftSeed = DraftSessionSeed.capture(AuthSessionScopeHost.maybeRead(context));
     _currentChatId = context.read<TeamCubit>().state.team.id;
     DraftRecoveryJournal.changes.addListener(_onDraftJournalChanged);
@@ -689,7 +694,14 @@ class _ChatTabState extends State<ChatTab> {
   }
 
   @override
+  void didUpdateWidget(covariant ChatTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!oldWidget.isActive && widget.isActive) _scheduleSeenCheck();
+  }
+
+  @override
   void dispose() {
+    _readLifecycle.dispose();
     _disposingDraft = true;
     DraftRecoveryJournal.changes.removeListener(_onDraftJournalChanged);
     final boundCardsChat = _boundActionCardsChatId;
@@ -701,7 +713,7 @@ class _ChatTabState extends State<ChatTab> {
     // ➜ NEW: финальная подстраховка
     try {
       final list = context.read<TeamCubit>().state.chat;
-      if (list.isNotEmpty) _markReadSafely(list.last.id);
+      if (list.isNotEmpty && _chatScroll.atBottom()) _markReadSafely(list.last.id);
     } catch (_) {}
     // Принудительно сохраняем черновик перед уничтожением
     _forceSaveDraft();
@@ -750,9 +762,7 @@ class _ChatTabState extends State<ChatTab> {
       final list = context.read<TeamCubit>().state.chat;
       if (list.isNotEmpty) {
         final last = list.last;
-        if (last.id != _lastMarkedReadId) {
-          _markReadSafely(last.id);
-        }
+        _markReadSafely(last.id);
       }
     }
   }
@@ -853,22 +863,31 @@ class _ChatTabState extends State<ChatTab> {
 
   // ➜ NEW: помощник для вызова RPC mark_read
   Future<void> _markReadSafely(String lastMsgId) async {
-    if (qaNoAutomaticWrites) return;
+    if (qaNoAutomaticWrites || !widget.isActive) return;
     try {
-      final teamId = context.read<TeamCubit>().state.team.id;
-      final chatId = await _getChatIdForTeam(teamId);
-      if (chatId.isEmpty) return; // ← NEW safeguard
-      await _repo.markRead(chatId: chatId, messageId: lastMsgId);
-      _lastMarkedReadId = lastMsgId;
-      try {
-        await AppNotificationsApi().markReadForChat(chatId);
-      } catch (e) {
-        if (kDebugMode) {
-          debugPrint('[ChatTab] notification read sync error: $e');
-        }
-      }
-    } catch (e) {
-      if (kDebugMode) debugPrint('[ChatTab] markRead error: $e');
+      final cubit = context.read<TeamCubit>();
+      final teamId = cubit.state.team.id;
+      final message = cubit.state.chat.lastOrNull;
+      final owner = captureChatReadOwner(context);
+      if (owner == null || message == null || message.id != lastMsgId) return;
+      final route = ModalRoute.of(context);
+      bool current() => mounted && widget.isActive && owner.current() &&
+          !cubit.isClosed && cubit.state.team.id == teamId && (route?.isCurrent ?? true);
+      Future<String>? chat;
+      Future<String> resolveChat() => chat ??= _getChatIdForTeam(teamId);
+      await _readProgress.mark(scope: (owner.session, teamId), messageId: lastMsgId,
+          current: current, markCursor: () async {
+            final id = await resolveChat();
+            if (id.isEmpty || !current()) throw StateError('Chat unavailable');
+            await _repo.markRead(chatId: id, messageId: lastMsgId);
+          }, syncNotifications: () async {
+            final id = await resolveChat();
+            if (id.isEmpty || !current()) throw StateError('Chat unavailable');
+            await AppNotificationsApi().markReadForChat(id,
+                through: (messageId: lastMsgId, at: message.at), isCurrent: current);
+          });
+    } catch (_) {
+      if (kDebugMode) debugPrint('[ChatTab] read sync pending');
     }
   }
 
@@ -1209,7 +1228,6 @@ class _ChatTabState extends State<ChatTab> {
     final list = context.read<TeamCubit>().state.chat;
     if (list.isEmpty) return;
     final last = list.last;
-    if (last.id == _lastMarkedReadId) return;
     await _markReadSafely(last.id);
   }
 

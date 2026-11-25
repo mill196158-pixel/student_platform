@@ -12,6 +12,7 @@ import 'package:student_platform/src/ui/learning/models/team.dart';
 import 'package:student_platform/src/ui/learning/team_details_screen.dart';
 import 'package:student_platform/src/services/push/active_chat_tracker.dart';
 import 'package:student_platform/src/services/push/app_notifications_api.dart';
+import 'package:student_platform/src/services/push/chat_read_progress.dart';
 import 'package:student_platform/src/services/push/push_navigation.dart';
 import 'package:student_platform/src/ui/chats/archive_screen.dart';
 import 'package:student_platform/src/ui/chats/direct_chat_screen.dart';
@@ -102,24 +103,9 @@ class _MyChatsScreenState extends State<MyChatsScreen>
   String get _currentUserId =>
       Supabase.instance.client.auth.currentUser?.id ?? '';
 
-  Future<void> _markChatReadServerSide(String chatId) async {
-    // ➜ NEW
+  Future<void> _markChatReadServerSide(String chatId, bool Function() current) async {
     try {
-      final sb = Supabase.instance.client;
-      final last = await sb
-          .from('messages')
-          .select('id')
-          .eq('chat_id', chatId)
-          .order('created_at', ascending: false)
-          .limit(1)
-          .maybeSingle();
-      final lastId =
-          (last != null && last is Map) ? (last['id'] as String?) : null;
-      await sb.rpc('mark_chat_read', params: {
-        'p_chat_id': chatId,
-        if (lastId != null && lastId.isNotEmpty) 'p_message_id': lastId,
-      });
-      await AppNotificationsApi(client: sb).markReadForChat(chatId);
+      await AppNotificationsApi().markLatestChatRead(chatId, isCurrent: current);
     } catch (e) {
       debugPrint('[MyChatsScreen] mark read RPC error: $e');
     }
@@ -1007,6 +993,8 @@ class _MyChatsScreenState extends State<MyChatsScreen>
 
   Future<void> _markChatRead(_ChatSummary c) async {
     final chatId = c.chatId;
+    final owner = captureChatReadOwner(context);
+    bool current() => mounted && !_cacheOnly && (owner?.current() ?? false);
     Navigator.of(context).pop();
     setState(() {
       final idx =
@@ -1015,9 +1003,9 @@ class _MyChatsScreenState extends State<MyChatsScreen>
       _applyFilter();
     });
     await _saveCache(_all);
-    if (chatId != null && chatId.isNotEmpty) {
-      await _markChatReadServerSide(chatId);
-      await _refreshUnreadFor(chatId);
+    if (chatId != null && chatId.isNotEmpty && current()) {
+      await _markChatReadServerSide(chatId, current);
+      if (current()) await _refreshUnreadFor(chatId);
     }
   }
 

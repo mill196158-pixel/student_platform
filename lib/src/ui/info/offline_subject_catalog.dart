@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
 import 'package:student_platform/src/core/offline_policy_grant.dart';
@@ -11,6 +12,7 @@ import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dar
 class OfflineSubjectCatalog {
   OfflineSubjectCatalog(this.cache);
   final ProjectChatServerCache cache;
+  static final changes = ValueNotifier<int>(0);
   static const _table = 'offline_subject_catalog_v1';
   static const _where = 'project=? AND uid=? AND sid=?';
   static final Map<String, int> _pendingDenials = {};
@@ -78,13 +80,15 @@ class OfflineSubjectCatalog {
     final payload = jsonEncode(value);
     if (utf8.encode(payload).length > 512 * 1024) return false;
     try {
-      return await cache.db.transaction((txn) async {
+      final saved = await cache.db.transaction((txn) async {
         if (!_current(ticket)) throw const _Stale();
         final n = await txn.rawUpdate('UPDATE $_table SET payload=?,denied=0 WHERE $_where AND seq=?',
             [payload, ..._args(ticket.binding), ticket.seq]);
         if (n != 1 || !_current(ticket)) throw const _Stale();
         return true;
       });
+      if (saved) changes.value++;
+      return saved;
     } catch (_) { return false; }
   }
 
@@ -92,6 +96,7 @@ class OfflineSubjectCatalog {
     if (!_valid(ticket.owner, ticket.binding, () => true)) return;
     final key = _key(ticket.binding);
     _pendingDenials[key] = (_pendingDenials[key] ?? 0) + 1;
+    changes.value++;
     try {
       await cache.db.transaction((txn) async {
         if (!_valid(ticket.owner, ticket.binding, () => true)) throw const _Stale();

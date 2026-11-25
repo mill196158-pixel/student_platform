@@ -827,6 +827,7 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
         teamIcon: subject.teamIcon,
         teamGroupName: subject.teamGroupName,
         chatId: subject.chatId,
+        canOpenChat: subject.canOpenChat,
         avgDifficultyGlobal: nextGlobal,
         avgDifficultyLocal: nextLocal,
         votesCountGlobal:
@@ -879,7 +880,8 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
       final permit = caps?.capture(SessionCapability.cachedRead);
       if (caps == null || permit == null || caps.mode != SessionCapabilityMode.cacheOnly) return;
       await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) =>
-        SavedSubjectInfoScreen(subject: item, capabilities: caps, permit: permit)));
+        SavedSubjectInfoScreen(subject: item, capabilities: caps, permit: permit,
+            store: widget.cachedStore)));
       return;
     }
     await Navigator.of(context).push(
@@ -1110,10 +1112,11 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
       };
 
   InfoPlanState _planFromJson(Map<String, dynamic> json) {
+    final academic = _academicContextFromJson(_mapFrom(json['contextData']));
     return InfoPlanState(
-      contextData: _academicContextFromJson(_mapFrom(json['contextData'])),
-      subjects:
-          _listFrom(json['subjects']).map(UsefulSubject.fromJson).toList(),
+      contextData: academic,
+      subjects: _listFrom(json['subjects']).map((row) => UsefulSubject.fromJson(
+          row, currentSemester: academic.currentSemesterNumber)).toList(),
       warning: _nullIfEmpty(json['warning']),
     );
   }

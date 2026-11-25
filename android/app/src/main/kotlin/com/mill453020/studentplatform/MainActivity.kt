@@ -24,6 +24,7 @@ import androidx.core.view.inputmethod.InputConnectionCompat.OnCommitContentListe
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.StandardMethodCodec
 import io.flutter.FlutterInjector
 import io.flutter.embedding.engine.dart.DartExecutor
 import android.os.Handler
@@ -335,16 +336,50 @@ class MainActivity : FlutterActivity() {
 
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
-            "student_platform/notifications"
+            "student_platform/notifications",
+            StandardMethodCodec.INSTANCE,
+            flutterEngine.dartExecutor.binaryMessenger.makeBackgroundTaskQueue()
         ).setMethodCallHandler { call, result ->
             when (call.method) {
+                "listDeliveredNotifications" -> {
+                    val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                    val alerts = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        manager.activeNotifications.mapNotNull { alert ->
+                            val tag = alert.tag ?: return@mapNotNull null
+                            if (tag.startsWith("student:") || tag.startsWith("FCM-Notification:")) {
+                                mapOf("tag" to tag, "id" to alert.id)
+                            } else null
+                        }
+                    } else emptyList()
+                    result.success(alerts)
+                }
+                "cancelDeliveredNotifications" -> {
+                    val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                    for (entry in call.arguments as? List<*> ?: emptyList<Any>()) {
+                        val row = entry as? Map<*, *> ?: continue
+                        val tag = row["tag"] as? String ?: continue
+                        val id = row["id"] as? Int ?: continue
+                        if (tag.startsWith("student:")) {
+                            StudentReadNotificationSync.dismiss(this, tag, id)
+                        } else if (tag.startsWith("FCM-Notification:")) {
+                            manager.cancel(tag, id)
+                        }
+                    }
+                    result.success(null)
+                }
                 "clearNotifications" -> {
                     (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancelAll()
                     result.success(null)
                 }
                 "openNotificationSettings" -> {
-                    openNotificationSettings()
-                    result.success(null)
+                    runOnUiThread {
+                        try {
+                            openNotificationSettings()
+                            result.success(null)
+                        } catch (_: Exception) {
+                            result.error("settings_unavailable", "Notification settings unavailable", null)
+                        }
+                    }
                 }
                 else -> result.notImplemented()
             }

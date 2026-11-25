@@ -15,6 +15,7 @@ class UsefulSubject {
   final String teamIcon;
   final String teamGroupName;
   final String? chatId;
+  final bool canOpenChat;
   final double avgDifficultyGlobal;
   final double avgDifficultyLocal;
   final int votesCountGlobal;
@@ -34,6 +35,7 @@ class UsefulSubject {
     required this.teamIcon,
     required this.teamGroupName,
     this.chatId,
+    this.canOpenChat = false,
     this.avgDifficultyGlobal = 0,
     this.avgDifficultyLocal = 0,
     this.votesCountGlobal = 0,
@@ -71,6 +73,7 @@ class UsefulSubject {
       teamIcon: '',
       teamGroupName: '',
       chatId: _nullIfEmpty(row['chat_id']),
+      canOpenChat: row['can_open_chat'] == true,
       avgDifficultyGlobal: _asDouble(row['avg_difficulty_global']),
       avgDifficultyLocal: _asDouble(row['avg_difficulty_local']),
       votesCountGlobal: _asInt(row['votes_count_global']),
@@ -121,19 +124,21 @@ class UsefulSubject {
         'teamIcon': teamIcon,
         'teamGroupName': teamGroupName,
         'chatId': chatId,
+        'canOpenChat': canOpenChat,
         'avgDifficultyGlobal': avgDifficultyGlobal,
         'avgDifficultyLocal': avgDifficultyLocal,
         'votesCountGlobal': votesCountGlobal,
         'votesCountLocal': votesCountLocal,
       };
 
-  factory UsefulSubject.fromJson(Map<String, dynamic> json) {
+  factory UsefulSubject.fromJson(Map<String, dynamic> json, {int? currentSemester}) {
+    final semester = _asIntOrNull(json['semesterNumber']);
     return UsefulSubject(
       id: (json['id'] ?? '').toString(),
       title: (json['title'] ?? '').toString(),
       subjectId: _nullIfEmpty(json['subjectId']),
       groupId: _nullIfEmpty(json['groupId']),
-      semesterNumber: _asIntOrNull(json['semesterNumber']),
+      semesterNumber: semester,
       controlForm: (json['controlForm'] ?? '').toString(),
       description: (json['description'] ?? '').toString(),
       teacherName: (json['teacherName'] ?? '').toString(),
@@ -142,6 +147,12 @@ class UsefulSubject {
       teamIcon: (json['teamIcon'] ?? '').toString(),
       teamGroupName: (json['teamGroupName'] ?? '').toString(),
       chatId: _nullIfEmpty(json['chatId']),
+      // Older verified catalogues saved the two membership-filtered IDs and
+      // both semesters, but omitted the RPC's can_open_chat field.
+      canOpenChat: json.containsKey('canOpenChat')
+          ? json['canOpenChat'] == true
+          : currentSemester != null && semester != null &&
+              semester > 0 && semester <= currentSemester,
       avgDifficultyGlobal: _asDouble(json['avgDifficultyGlobal']),
       avgDifficultyLocal: _asDouble(json['avgDifficultyLocal']),
       votesCountGlobal: _asInt(json['votesCountGlobal']),
