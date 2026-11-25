@@ -54,6 +54,37 @@ class _MyVacancySubmissionsScreenState
   }
 
   Future<void> _openItem(MyVacancySubmissionItem item) async {
+    if (item.status != 'draft') {
+      final details = item.toDraft();
+      await Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (_) => Scaffold(
+          appBar: AppBar(title: Text(item.title)),
+          body: SafeArea(child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              for (final field in <String,String?>{
+                'Статус': _statusLabel(item.status),
+                'Организация': item.companyName,
+                'Краткое описание': item.summary,
+                'Описание': details.description,
+                'Требования': details.requirements,
+                'Формат занятости': details.employmentType?.labelRu,
+                'Формат работы': details.workFormat?.labelRu,
+                'Местоположение': item.location,
+                'Зарплата': item.salaryText,
+                'Ссылка': item.externalUrl,
+                'Email': item.contacts['email']?.toString(),
+                'Телефон': item.contacts['phone']?.toString(),
+                'Комментарий': item.rejectionReason,
+              }.entries)
+                if (field.value?.trim().isNotEmpty == true)
+                  ListTile(title: Text(field.key), subtitle: SelectableText(field.value!)),
+            ],
+          )),
+        ),
+      ));
+      return;
+    }
     var listIsStale = false;
     final changed = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
@@ -107,9 +138,7 @@ class _MyVacancySubmissionsScreenState
                         trailing: item.status == 'draft'
                             ? const Icon(Icons.edit_outlined)
                             : const Icon(Icons.chevron_right),
-                        onTap: item.status == 'draft'
-                            ? () => _openItem(item)
-                            : null,
+                        onTap: () => _openItem(item),
                       ),
                     ),
                 ],

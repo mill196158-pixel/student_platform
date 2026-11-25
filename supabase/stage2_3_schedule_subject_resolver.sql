@@ -153,7 +153,7 @@ begin
       rcm.subject_id,
       rcm.subject_offering_id,
       min(rcm.matched_alias) as matched_alias
-    from raw_candidate_matches
+    from raw_candidate_matches rcm
     group by rcm.subject_id, rcm.subject_offering_id
   ),
   counts as (

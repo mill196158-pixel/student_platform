@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'dart:ffi';
+import 'dart:ffi' show DynamicLibrary;
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -19,6 +19,9 @@ import 'package:student_platform/main.dart' as app;
 import 'package:student_platform/src/config/supabase_config.dart';
 import 'package:student_platform/src/core/auth_transition_host.dart';
 import 'package:student_platform/src/ui/authentication/screens/login_screen.dart';
+import 'package:student_platform/src/ui/profile/cache_diagnostics_screen.dart';
+import 'package:student_platform/src/ui/profile/edit_profile_screen.dart';
+import 'package:student_platform/src/ui/profile/profile_screen.dart';
 import 'package:student_platform/src/ui/navigation/navigation_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -177,11 +180,91 @@ void main() {
       expect(prefs.getString('user'), isNull);
     }
 
+    Future<void> checkSavedLimit({required bool choose}) async {
+      await tap(find.text('Профиль'));
+      await tap(find.byTooltip('Редактировать'));
+      final editor=find.byType(EditProfileScreen);
+      await until(()=>editor.evaluate().isNotEmpty,'Profile editor');
+      final link=find.text('Данные приложения');
+      if (link.evaluate().isEmpty) await tester.scrollUntilVisible(link,180,
+          scrollable:find.descendant(of:editor,matching:find.byType(Scrollable)).first);
+      await tap(link);
+      await until(()=>find.byType(CacheDiagnosticsScreen).evaluate().isNotEmpty,'Cache screen');
+      tester.platformDispatcher.textScaleFactorTestValue=1.6;
+      try {
+        await tester.binding.setSurfaceSize(const Size(350,720));
+        await tester.pump(const Duration(milliseconds:350));
+        final scroll=find.descendant(of:find.byType(CacheDiagnosticsScreen),
+            matching:find.byType(Scrollable)).first;
+        if (choose) {
+          final action=find.widgetWithText(OutlinedButton,'Изменить целевой лимит');
+          if (action.evaluate().isEmpty) await tester.scrollUntilVisible(action,150,scrollable:scroll);
+          await until(()=>action.evaluate().isNotEmpty &&
+              tester.widget<OutlinedButton>(action).onPressed!=null,'Cache policy ready');
+          await tap(action);
+          await tap(find.text('250 МБ'));
+        }
+        tester.state<ScrollableState>(scroll).position.jumpTo(0);
+        await until(()=>find.textContaining('250.0 МБ').evaluate().isNotEmpty,'Saved 250 MB limit visible');
+        debugPrint('E2E-091 ${choose ? "set on a narrow screen" : "restored in a new process"} with 160% platform text');
+      } finally {
+        tester.platformDispatcher.clearTextScaleFactorTestValue();
+        await tester.binding.setSurfaceSize(null);
+      }
+      await tester.binding.handlePopRoute();
+      await tester.pump(const Duration(milliseconds:350));
+      await tester.binding.handlePopRoute();
+      await tester.pump(const Duration(milliseconds:350));
+    }
+
+    Future<void> checkSystemTheme(String marker) async {
+      await tap(find.byTooltip('Редактировать'));
+      final editor=find.byType(EditProfileScreen);
+      await until(()=>editor.evaluate().isNotEmpty,'Profile editor before theme change');
+      final themeSetting=find.text('Тема');
+      if (themeSetting.evaluate().isEmpty) await tester.scrollUntilVisible(themeSetting,180,
+          scrollable:find.descendant(of:editor,matching:find.byType(Scrollable)).first);
+      await tap(themeSetting);
+      await tap(find.text('Как на устройстве').last);
+      await tester.binding.handlePopRoute();
+      await tester.pump(const Duration(milliseconds:350));
+      tester.platformDispatcher.platformBrightnessTestValue=Brightness.dark;
+      try {
+        final profileScreen=find.byType(ProfileScreen);
+        await until(()=> profileScreen.evaluate().isNotEmpty &&
+            Theme.of(tester.element(profileScreen)).brightness==Brightness.dark,'Dark profile');
+        final inboxLink=find.descendant(of:profileScreen,matching:find.text('Сообщения'));
+        await Scrollable.ensureVisible(tester.element(inboxLink.first),alignment:.55);
+        await tester.pump(const Duration(milliseconds:350));
+        await tester.tap(inboxLink.hitTestable().first);
+        final thread=find.textContaining(marker);
+        await until(()=>thread.hitTestable().evaluate().isNotEmpty,'Seeded DM in Messages');
+        await tester.tap(thread.hitTestable().first);
+        await tester.pump(const Duration(milliseconds:350));
+        final composer=find.byWidgetPredicate((w)=>w is TextField && w.decoration?.hintText=='Сообщение');
+        await until(()=>composer.evaluate().isNotEmpty,'Open DM composer');
+        await tester.enterText(composer.first,'Черновик оформления');
+        tester.testTextInput.hide();
+        final send=find.byTooltip('Отправить');
+        await until(()=>send.evaluate().isNotEmpty,'Send action in dark theme');
+        final theme=Theme.of(tester.element(composer.first));
+        expect(theme.brightness,Brightness.dark);
+        final text=theme.colorScheme.onSurface.computeLuminance();
+        final bg=theme.colorScheme.surface.computeLuminance();
+        expect((text+0.05)/(bg+0.05),greaterThanOrEqualTo(4.5));
+        expect(find.text('Черновик оформления'),findsOneWidget);
+        debugPrint('E2E-094 system theme selection, platform brightness, actual profile and DM compose verified');
+      } finally {
+        tester.platformDispatcher.clearPlatformBrightnessTestValue();
+      }
+    }
+
     try {
       await tester.pumpWidget(const app.StudentPlatformApp());
       if (restoring) {
         await confirmAccount(accounts[1]);
         expect(transport.passwordResponses, isEmpty);
+        await checkSavedLimit(choose:false);
         await logout();
         return;
       }
@@ -221,6 +304,9 @@ void main() {
           'The settled route still shows the login form');
       expect(transport.passwordResponses.where((status) => status == 200),
           hasLength(2));
+      await checkSavedLimit(choose:true);
+      final marker=accounts[1]['themeMessage'];
+      if (marker is String) await checkSystemTheme(marker);
     } finally {
       await tester.pumpWidget(const SizedBox.shrink());
       await Supabase.instance.client.realtime.disconnect();

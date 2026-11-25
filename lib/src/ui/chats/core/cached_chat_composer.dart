@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
-/// Offline presentation only: it never reads, writes or sends a draft.
+/// Read-only offline composer. Its caller supplies any authorized saved text.
 class CachedChatComposer extends StatelessWidget {
-  const CachedChatComposer({super.key});
+  const CachedChatComposer({super.key, this.draftText});
+
+  final String? draftText;
 
   @override
   Widget build(BuildContext context) {
@@ -12,7 +14,7 @@ class CachedChatComposer extends StatelessWidget {
       child: Semantics(label: 'Отправка сообщений недоступна без сети', enabled: false,
         child: Row(children: [
           const IconButton(onPressed: null, icon: Icon(Icons.add_circle_outline)),
-          Expanded(child: TextField(enabled: false, decoration: InputDecoration(
+          Expanded(child: TextFormField(key: ValueKey(draftText), initialValue: draftText, enabled: false, decoration: InputDecoration(
             hintText: 'Сообщение', filled: true,
             fillColor: colors.surfaceContainerHighest,
             suffixIcon: const Icon(Icons.attach_file),

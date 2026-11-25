@@ -6,15 +6,13 @@ paths, the seeded DM manifest and the public CA from qa_local_android_gateway.
 """
 import argparse
 import json
-import os
 from pathlib import Path
 import re
-import shutil
 import subprocess
-import tempfile
 import time
 from uuid import UUID, uuid4
 
+from android_qa_probe import install_probe, probe_command, require_observation
 from local_e2e_api import request, rpc
 from qa_android_background_push_materials import Device, PACKAGE
 
@@ -26,28 +24,11 @@ def read_json(path):
 def check_invalid_password(device):
     # The usual uiautomator dump waits for UI idle and may miss a SnackBar.
     # Use the SDK's native UIAutomator runner to watch the actual transient view.
-    sdk = Path(shutil.which("adb")).resolve().parents[1]
-    platform = sdk / "platforms/android-34"
-    libs = [str(platform / name) for name in
-            ("android.jar", "uiautomator.jar", "optional/android.test.base.jar")]
-    compiler = Path(shutil.which("javac")).resolve()
-    env = {**os.environ, "JAVA_HOME": str(compiler.parents[1])}
-    source = Path(__file__).parent / "android_qa/OrdinaryLoginProbe.java"
-    jar_name = "ordinary-login-probe.jar"
-    d8 = sdk / "build-tools/36.0.0" / ("d8.bat" if os.name == "nt" else "d8")
-    with tempfile.TemporaryDirectory() as output:
-        dest = Path(output)
-        subprocess.run([compiler, "-encoding", "UTF-8", "-source", "8", "-target", "8",
-                        "-classpath", os.pathsep.join(libs), "-d", dest, source],
-                       check=True, env=env, stdout=subprocess.DEVNULL)
-        subprocess.run([d8, *[v for lib in libs for v in ("--lib", lib)], "--output",
-                        dest / jar_name, dest / "qa/ordinary/OrdinaryLoginProbe.class"],
-                       check=True, env=env, stdout=subprocess.DEVNULL)
-        device.run("push", str(dest / jar_name), "/data/local/tmp/" + jar_name)
-    result = device.run("shell", "uiautomator", "runtest", jar_name, "-c",
-                        "qa.ordinary.OrdinaryLoginProbe#testWrongPassword")
-    if not re.search(rb"OK\s*\(1 test\)", result):
-        raise RuntimeError("The on-device login error assertion failed")
+    jar = "ordinary-login-probe.jar"
+    cls = "qa.ordinary.OrdinaryLoginProbe"
+    install_probe(device, cls, jar)
+    result = device.run(*probe_command(jar, cls + "#testWrongPassword"))
+    require_observation(result, "observed localized login error")
 
 
 def enter(device, index, value, *, password=False):
@@ -76,10 +57,14 @@ def enter(device, index, value, *, password=False):
         device.run("shell", "input", "keyevent", *(["KEYCODE_DEL"] * previous_length))
     device.run("shell", "-T", input=("input text '" + value.replace(" ", "%s") + "'\n").encode())
     # Android IME can lose the first keystroke before focus is ready.
-    displayed = field().get("text", "")
-    entered = len(displayed) == len(value) if password else displayed == value
-    if not entered:
-        raise RuntimeError("Test keyboard did not enter the requested value")
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        displayed = field().get("text", "")
+        entered = len(displayed) == len(value) if password else displayed == value
+        if entered:
+            return
+        time.sleep(.15)
+    raise RuntimeError("Test keyboard did not enter the requested value")
 
 
 def profile(device):

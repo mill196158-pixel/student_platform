@@ -33,7 +33,7 @@ abstract class SubjectDiaryRepository {
   });
 
   Future<List<SubjectDiaryEntry>> listBySubject(String subjectKey);
-  Future<List<SubjectDiaryEntry>> listByArgs(SubjectDiaryArgs args);
+  Future<List<SubjectDiaryEntry>> listByArgs(SubjectDiaryArgs args, {String? onlyLessonId});
   Future<void> deleteEntry(String id);
 
   Uint8List? getLocalThumb(String url); // только для мок-превью локальных фото
@@ -67,6 +67,7 @@ class SubjectDiaryRepositoryInMemory implements SubjectDiaryRepository {
     final e = SubjectDiaryEntry(
       id: (++_seq).toString(),
       subjectKey: subjectKey,
+      lessonId: args?.lessonId,
       date: DateTime(date.year, date.month, date.day),
       text: text.trim(),
     );
@@ -83,7 +84,7 @@ class SubjectDiaryRepositoryInMemory implements SubjectDiaryRepository {
   }) async {
     // найти запись с фото за этот день
     final existing = (await listBySubject(subjectKey))
-        .where((e) => _sameDay(e.date, date) && e.hasImages)
+        .where((e) => _sameDay(e.date, date) && e.lessonId == args?.lessonId && e.hasImages)
         .toList();
 
     // закачать новые изображения
@@ -109,6 +110,7 @@ class SubjectDiaryRepositoryInMemory implements SubjectDiaryRepository {
       final merged = SubjectDiaryEntry(
         id: old.id,
         subjectKey: old.subjectKey,
+        lessonId: old.lessonId,
         date: old.date,
         text: old.text,
         files: [...old.files, ...newFiles],
@@ -119,6 +121,7 @@ class SubjectDiaryRepositoryInMemory implements SubjectDiaryRepository {
       final e = SubjectDiaryEntry(
         id: baseId,
         subjectKey: subjectKey,
+        lessonId: args?.lessonId,
         date: DateTime(date.year, date.month, date.day),
         text: null,
         files: newFiles,
@@ -137,7 +140,7 @@ class SubjectDiaryRepositoryInMemory implements SubjectDiaryRepository {
   }) async {
     // найти запись с документами за этот день
     final existing = (await listBySubject(subjectKey))
-        .where((e) => _sameDay(e.date, date) && e.hasDocs)
+        .where((e) => _sameDay(e.date, date) && e.lessonId == args?.lessonId && e.hasDocs)
         .toList();
 
     // закачать файлы
@@ -166,6 +169,7 @@ class SubjectDiaryRepositoryInMemory implements SubjectDiaryRepository {
       final merged = SubjectDiaryEntry(
         id: old.id,
         subjectKey: old.subjectKey,
+        lessonId: old.lessonId,
         date: old.date,
         text: old.text,
         files: [...old.files, ...newFiles],
@@ -176,6 +180,7 @@ class SubjectDiaryRepositoryInMemory implements SubjectDiaryRepository {
       final e = SubjectDiaryEntry(
         id: baseId,
         subjectKey: subjectKey,
+        lessonId: args?.lessonId,
         date: DateTime(date.year, date.month, date.day),
         text: null,
         files: newFiles,
@@ -212,6 +217,7 @@ class SubjectDiaryRepositoryInMemory implements SubjectDiaryRepository {
     final e = SubjectDiaryEntry(
       id: baseId,
       subjectKey: subjectKey,
+      lessonId: args?.lessonId,
       date: DateTime(date.year, date.month, date.day),
       text: null,
       files: list,
@@ -226,8 +232,9 @@ class SubjectDiaryRepositoryInMemory implements SubjectDiaryRepository {
   }
 
   @override
-  Future<List<SubjectDiaryEntry>> listByArgs(SubjectDiaryArgs args) {
-    return listBySubject(args.fallbackSubjectKey);
+  Future<List<SubjectDiaryEntry>> listByArgs(SubjectDiaryArgs args, {String? onlyLessonId}) async {
+    final entries = await listBySubject(args.fallbackSubjectKey);
+    return onlyLessonId == null ? entries : entries.where((entry) => entry.lessonId == onlyLessonId).toList();
   }
 
   @override
@@ -253,6 +260,7 @@ class SubjectDiaryRepositoryInMemory implements SubjectDiaryRepository {
         final updated = SubjectDiaryEntry(
           id: old.id,
           subjectKey: old.subjectKey,
+          lessonId: old.lessonId,
           date: old.date,
           text: newText.trim(),
           files: old.files,
@@ -277,6 +285,7 @@ class SubjectDiaryRepositoryInMemory implements SubjectDiaryRepository {
         final updated = SubjectDiaryEntry(
           id: old.id,
           subjectKey: old.subjectKey,
+          lessonId: old.lessonId,
           date: old.date,
           text: old.text,
           files: nf,
@@ -306,6 +315,7 @@ class SubjectDiaryRepositoryInMemory implements SubjectDiaryRepository {
           _store[key]![idx] = SubjectDiaryEntry(
             id: old.id,
             subjectKey: old.subjectKey,
+            lessonId: old.lessonId,
             date: old.date,
             text: old.text,
             files: const [],
@@ -340,6 +350,7 @@ class SubjectDiaryRepositoryInMemory implements SubjectDiaryRepository {
         _store[key]![idx] = SubjectDiaryEntry(
           id: old.id,
           subjectKey: old.subjectKey,
+          lessonId: old.lessonId,
           date: old.date,
           text: old.text,
           files: filtered,

@@ -136,11 +136,43 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--planner", action="store_true", help="Run the two-student diary journeys")
+    mode.add_argument("--backlog", action="store_true", help="Check the numbered diary backlog on two local accounts")
+    mode.add_argument("--deadline", action="store_true", help="Run the own-task month change on fresh accounts")
     mode.add_argument("--receipt-contract", action="store_true", help="Rehearse three receipt table versions")
     args = parser.parse_args()
     if args.receipt_contract:
         check_receipt_contract()
         sys.exit(0)
+    if args.backlog or args.deadline:
+        def backlog_setup(schema, students):
+            ddl, values = planner_setup(schema, students[:2])
+            ddl += f"""
+                alter table assignments add column link text, add column attachments jsonb,
+                  add column created_by uuid, add column group_id uuid, add column subject_id uuid,
+                  add column academic_year_id uuid, add column academic_term_id uuid, add column semester_number integer;
+                create table assignment_votes(assignment_id uuid,value integer);
+                create table lessons(id uuid primary key,date date,subject text, group_id uuid,
+                  subject_id uuid,subject_offering_id uuid,semester_number integer,pair_num integer,time_start time);
+                grant select on lessons to authenticated;
+                create function get_my_lessons(p_from date,p_days integer) returns table (id uuid)
+                    language sql stable as $$ select null::uuid where false $$;
+                alter table assignments enable row level security;
+                create policy visible_fixture_assignments on assignments for select to authenticated using (true);
+                create policy edit_own_fixture_assignment on assignments for update to authenticated
+                    using (created_by=auth.uid()) with check (created_by=auth.uid());
+                update assignments set created_by='{students[2]}' where title='Frame calculation';
+                grant update(due_at) on assignments to authenticated;
+                insert into assignments(subject_offering_id,team_id,title,description,status,published_at,due_at)
+                  select subject_offering_id,id,'Deadline notification example','Last-day assignment instructions',
+                    'published',now(), date_trunc('month',current_date)+interval '2 months'-interval '12 hours'
+                    from teams;
+            """
+            source = (ROOT / "supabase/migrations/20261125183102_respect_team_assignment_receipt_flags.sql").read_text("utf-8")
+            ddl += scoped(source, schema)
+            return ddl, dict(values, backlog=True, secondLesson=str(uuid4()))
+        sys.exit(run_suite("diary", backlog_setup, "integration_test/ordinary_academic_diary_local_test.dart",
+                           "STUDENT_DIARY_LOCAL", student_count=3,
+                           phases=("deadline",) if args.deadline else ("create","restart","deadline")))
     planner = args.planner
     sys.exit(run_suite("diary", planner_setup if planner else setup,
                        "integration_test/ordinary_academic_diary_local_test.dart",

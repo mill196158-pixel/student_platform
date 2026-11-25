@@ -1,3 +1,4 @@
+import '../profile/personal_task_deadline_button.dart';
 import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 import '../shared/workspace_page_header.dart';
@@ -397,6 +398,10 @@ class _SubjectDiaryScreenState extends State<SubjectDiaryScreen> {
       builder: (ctx) => _SubjectTaskDetailsSheet(
         task: task,
         statusOverride: _taskStatus(task),
+        onSetDeadline: (date) async {
+          await _diaryService.updatePersonalTaskDeadline(task.id, date);
+          if (mounted) _refreshSubjectTasksSilently();
+        },
         onSetStatus: (status) async {
           Navigator.pop(ctx);
           await _setTaskStatus(task, status);
@@ -1049,11 +1054,13 @@ class _SubjectTaskDetailsSheet extends StatelessWidget {
   final PersonalDiaryTask task;
   final String statusOverride;
   final Future<void> Function(String status) onSetStatus;
+  final Future<void> Function(DateTime date) onSetDeadline;
 
   const _SubjectTaskDetailsSheet({
     required this.task,
     required this.statusOverride,
     required this.onSetStatus,
+    required this.onSetDeadline,
   });
 
   @override
@@ -1100,7 +1107,8 @@ class _SubjectTaskDetailsSheet extends StatelessWidget {
                   .bodyMedium
                   ?.copyWith(color: theme.colorScheme.onSurface, height: 1.35),
             ),
-            const SizedBox(height: 16),
+            PersonalTaskDeadlineButton(current: task.dueAt, save: onSetDeadline),
+            const SizedBox(height: 8),
             Row(
               children: [
                 Expanded(
@@ -1328,6 +1336,7 @@ class _SubjectTaskFormSheetState extends State<_SubjectTaskFormSheet> {
   }
 
   Future<void> _save() async {
+    if (_saving) return;
     final title = _titleController.text.trim();
     if (title.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(

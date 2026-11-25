@@ -35,6 +35,7 @@ void main() {
         authOptions: const FlutterAuthClientOptions(autoRefreshToken: false));
     addTearDown(() async {
       if (!response.isCompleted) response.complete(http.Response('{}', 500));
+      await ChatFileAccess.clear();
       await Supabase.instance.dispose();
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(channel, null);
@@ -64,6 +65,5 @@ void main() {
     ChatFileAccess.debugResetProcessMemory();
     offline = true;
     expect(await ChatFileAccess.readBytes(url), [1, 2, 3]);
-    await Future<void>.delayed(const Duration(milliseconds: 100));
   }, timeout: const Timeout(Duration(seconds: 35)));
 }

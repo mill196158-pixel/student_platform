@@ -40,8 +40,8 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
   bool _ratingLoading = true;
   bool _ratingSubmitting = false;
   double? _subjectDifficultyAvg;
-  String? _publishedName;
-  String? _publishedAbout;
+  String? _requestedProfileId;
+  Map? _publishedProfile;
 
   @override
   void initState() {
@@ -49,48 +49,40 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
     _subjectDifficultyAvg = widget.subjectDifficultyAvg;
     _loadRating();
     _loadSubjectDifficulty();
-    _loadPublishedProfile();
+    _loadPublishedProfile(widget.teacherId);
   }
 
-  Future<void> _loadPublishedProfile() async {
-    final id = (widget.teacherId ?? '').trim();
-    if (id.isEmpty) return;
+  Future<void> _loadPublishedProfile(String? teacherId) async {
+    final id = _clean(teacherId);
+    if (_requestedProfileId == id) return;
+    _requestedProfileId = id;
+    if (_publishedProfile != null && mounted)
+      setState(() => _publishedProfile = null);
+    if (id == null) return;
     final cacheKey = 'teacher_published_profile_v1_$id';
+    bool current() => mounted && _requestedProfileId == id;
     try {
       final prefs = await SharedPreferences.getInstance();
       final cached = prefs.getString(cacheKey);
-      if (cached != null && cached.isNotEmpty && mounted) {
-        final map = jsonDecode(cached);
-        if (map is Map) {
-          setState(() {
-            final name = map['full_name']?.toString().trim();
-            final about = map['about_text']?.toString().trim();
-            _publishedName = name?.isEmpty == false ? name : null;
-            _publishedAbout = about?.isEmpty == false ? about : null;
-          });
-        }
+      if (cached != null && current()) {
+        final raw = jsonDecode(cached);
+        if (raw is Map) setState(() => _publishedProfile = raw);
       }
     } catch (_) {}
     try {
-      final raw = await Supabase.instance.client.rpc(
-        'get_published_teacher',
-        params: {'p_id': id},
-      );
-      if (raw is! Map || !mounted) return;
-      final name = raw['full_name']?.toString().trim();
-      final about = raw['about_text']?.toString().trim();
-      setState(() {
-        _publishedName = name?.isEmpty == false ? name : null;
-        _publishedAbout = about?.isEmpty == false ? about : null;
-      });
+      final raw = await Supabase.instance.client
+          .rpc('get_published_teacher', params: {'p_id': id});
+      if (!current()) return;
+      final profile = raw is Map ? raw : null;
+      setState(() => _publishedProfile = profile);
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(cacheKey, jsonEncode(raw));
-    } on PostgrestException catch (error) {
-      // Keep the legacy name-based profile only when this local-only RPC has
-      // not reached the backend/schema cache yet.
-      if (error.code != 'PGRST202' && error.code != '42883') return;
+      if (profile == null) {
+        await prefs.remove(cacheKey);
+      } else {
+        await prefs.setString(cacheKey, jsonEncode(profile));
+      }
     } catch (_) {
-      // Existing name-based difficulty flow remains available offline.
+      // Older deployments may only have name-based difficulty; keep the offline snapshot.
     }
   }
 
@@ -101,6 +93,7 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
         _rating = cached;
         _ratingLoading = false;
       });
+      _loadPublishedProfile(cached.canonicalTeacherId ?? widget.teacherId);
     }
 
     try {
@@ -110,6 +103,7 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
         _rating = rating;
         _ratingLoading = false;
       });
+      _loadPublishedProfile(rating.canonicalTeacherId ?? widget.teacherId);
     } catch (_) {
       if (!mounted) return;
       setState(() => _ratingLoading = false);
@@ -169,10 +163,15 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final name =
-        _clean(_publishedName) ?? _clean(widget.teacherName) ?? 'Преподаватель';
+    final name = _clean(_publishedProfile?['full_name']?.toString()) ??
+        _clean(widget.teacherName) ??
+        'Преподаватель';
     final subject = _clean(widget.subjectTitle);
-    final departmentName = _clean(widget.department);
+    final departmentName = _publishedProfile?.containsKey('department') == true
+        ? _clean(_publishedProfile?['department']?.toString())
+        : _clean(widget.department);
+    final about = _clean(_publishedProfile?['about_text']?.toString()) ??
+        _rating?.aboutOrNull;
     final averageScore = _rating?.averageScore ?? widget.difficultyScore;
     final difficulty = _TeacherDifficultyPresentation.fromScore(averageScore);
     final media = MediaQuery.of(context);
@@ -209,17 +208,12 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
                         ),
                         child: Column(
                           children: [
-                            if ((_clean(_publishedAbout) ??
-                                    _rating?.aboutOrNull) !=
-                                null) ...[
+                            if (about != null) ...[
                               _ProfileCard(
                                 icon: Icons.info_outline_rounded,
                                 title: 'О преподавателе',
                                 compact: true,
-                                child: _AboutTeacherBlock(
-                                  text: _clean(_publishedAbout) ??
-                                      _rating!.aboutOrNull!,
-                                ),
+                                child: _AboutTeacherBlock(text: about),
                               ),
                               const SizedBox(height: 10),
                             ],
@@ -236,7 +230,9 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
                               ),
                             const SizedBox(height: 10),
                             _TeacherReviewEntry(
-                              teacherId: widget.teacherId ?? _rating?.teacherId,
+                              teacherId: widget.teacherId ??
+                                  _rating?.canonicalTeacherId ??
+                                  _rating?.teacherId,
                               teacherName: name,
                             ),
                           ],
@@ -262,6 +258,7 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
 
 class _TeacherDifficultySnapshot {
   final String? teacherId;
+  final String? canonicalTeacherId;
   final double? averageScore;
   final int voteCount;
   final int? myScore;
@@ -269,6 +266,7 @@ class _TeacherDifficultySnapshot {
 
   const _TeacherDifficultySnapshot({
     required this.teacherId,
+    this.canonicalTeacherId,
     required this.averageScore,
     required this.voteCount,
     required this.myScore,
@@ -312,6 +310,7 @@ class _TeacherDifficultyRepository {
       final json = jsonDecode(raw) as Map<String, dynamic>;
       final snapshot = _TeacherDifficultySnapshot(
         teacherId: json['teacherId'] as String?,
+        canonicalTeacherId: json['canonicalTeacherId'] as String?,
         averageScore: (json['averageScore'] as num?)?.toDouble(),
         voteCount: _asInt(json['voteCount']),
         myScore: json['myScore'] == null ? null : _asInt(json['myScore']),
@@ -332,6 +331,7 @@ class _TeacherDifficultyRepository {
     _memoryCache[key] = snapshot;
     final raw = jsonEncode({
       'teacherId': snapshot.teacherId,
+      'canonicalTeacherId': snapshot.canonicalTeacherId,
       'averageScore': snapshot.averageScore,
       'voteCount': snapshot.voteCount,
       'myScore': snapshot.myScore,
@@ -354,9 +354,11 @@ class _TeacherDifficultyRepository {
       return snapshot;
     }
 
+    // This compact lookup row carries the optional canonical ID on newer
+    // schemas. A wildcard lets older schemas return the fields they have.
     final target = await _client
         .from('teacher_difficulty_targets')
-        .select('id, about_text')
+        .select()
         .eq('normalized_name', normalizedName)
         .maybeSingle();
     final teacherId = (target?['id'] ?? '').toString().trim();
@@ -396,6 +398,7 @@ class _TeacherDifficultyRepository {
 
     final snapshot = _TeacherDifficultySnapshot(
       teacherId: teacherId,
+      canonicalTeacherId: target?['canonical_teacher_id'] as String?,
       averageScore: voteCount == 0 ? null : scoreTotal / voteCount,
       voteCount: voteCount,
       myScore: myScore,
@@ -560,8 +563,6 @@ class _TeacherHero extends StatelessWidget {
           SizedBox(height: 12),
           Text(
             name,
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
             style: theme.textTheme.headlineSmall?.copyWith(
               color: theme.colorScheme.onSurface,
@@ -601,8 +602,7 @@ class _TeacherHero extends StatelessWidget {
           SizedBox(height: 12),
           Text(
             difficulty.isKnown
-                ? '${averageScore!.toStringAsFixed(1)} из 5 · '
-                    '$voteCount ${_votesWord(voteCount)}'
+                ? _ratingLabel(averageScore!, voteCount)
                 : 'Сложность сдачи преподавателю пока не оценена',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodySmall?.copyWith(
@@ -630,6 +630,9 @@ class _TeacherHero extends StatelessWidget {
       ),
     );
   }
+
+  static String _ratingLabel(double score, int count) =>
+      '${score.toStringAsFixed(1)} из 5 · $count ${_votesWord(count)}';
 
   static String _votesWord(int count) {
     final mod100 = count % 100;
@@ -705,12 +708,14 @@ class TeacherDifficultyAvatar extends StatefulWidget {
   final String teacherName;
   final double size;
   final double? initialScore;
+  final Widget Function(Widget avatar, String? rating)? contentBuilder;
 
   const TeacherDifficultyAvatar({
     super.key,
     required this.teacherName,
     this.size = 38,
     this.initialScore,
+    this.contentBuilder,
   });
 
   @override
@@ -721,6 +726,8 @@ class TeacherDifficultyAvatar extends StatefulWidget {
 class _TeacherDifficultyAvatarState extends State<TeacherDifficultyAvatar> {
   final _repository = _TeacherDifficultyRepository();
   double? _score;
+  int _voteCount = 0;
+  int _loadVersion = 0;
 
   @override
   void initState() {
@@ -728,6 +735,16 @@ class _TeacherDifficultyAvatarState extends State<TeacherDifficultyAvatar> {
     _score = widget.initialScore;
     _TeacherDifficultyRepository.ratingRevision.addListener(_refresh);
     _load();
+  }
+
+  @override
+  void didUpdateWidget(TeacherDifficultyAvatar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.teacherName != oldWidget.teacherName) {
+      _score = widget.initialScore;
+      _voteCount = 0;
+      _load();
+    }
   }
 
   @override
@@ -741,15 +758,20 @@ class _TeacherDifficultyAvatarState extends State<TeacherDifficultyAvatar> {
   }
 
   Future<void> _load() async {
-    final cached = await _repository.loadCached(widget.teacherName);
-    if (cached != null && mounted) {
-      setState(() => _score = cached.averageScore);
+    final version = ++_loadVersion;
+    final teacher = widget.teacherName;
+    void apply(_TeacherDifficultySnapshot? value) {
+      if (value == null || !mounted || version != _loadVersion) return;
+      if (value.averageScore == _score && value.voteCount == _voteCount) return;
+      setState(() {
+        _score = value.averageScore;
+        _voteCount = value.voteCount;
+      });
     }
+
+    apply(await _repository.loadCached(teacher));
     try {
-      final current = await _repository.load(widget.teacherName);
-      if (mounted && current.averageScore != _score) {
-        setState(() => _score = current.averageScore);
-      }
+      apply(await _repository.load(teacher));
     } catch (_) {
       // Keep the cached avatar visible while offline.
     }
@@ -758,7 +780,7 @@ class _TeacherDifficultyAvatarState extends State<TeacherDifficultyAvatar> {
   @override
   Widget build(BuildContext context) {
     final difficulty = _TeacherDifficultyPresentation.fromScore(_score);
-    return Container(
+    final avatar = Container(
       width: widget.size,
       height: widget.size,
       decoration: BoxDecoration(
@@ -775,6 +797,10 @@ class _TeacherDifficultyAvatarState extends State<TeacherDifficultyAvatar> {
         ),
       ),
     );
+    final label = _score != null && _voteCount > 0
+        ? _TeacherHero._ratingLabel(_score!, _voteCount)
+        : null;
+    return widget.contentBuilder?.call(avatar, label) ?? avatar;
   }
 }
 

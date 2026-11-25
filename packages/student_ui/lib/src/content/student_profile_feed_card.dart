@@ -920,7 +920,8 @@ class _StudentProfileFeedCarouselState
   Widget build(BuildContext context) {
     if (widget.cards.isEmpty) return const SizedBox.shrink();
     return SizedBox(
-      height: 160,
+      // Allow two title and subtitle lines alongside the badge, icon and CTA.
+      height: 100 + MediaQuery.textScalerOf(context).scale(112),
       child: PageView.builder(
         controller: _controller,
         itemCount: widget.cards.length,

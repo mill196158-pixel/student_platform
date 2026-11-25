@@ -13,6 +13,7 @@ abstract class LearningRepository {
   // Чат
   Future<List<Message>> loadChat(String teamId);
   Future<Message?> loadMessageById(String teamId, String messageId);
+  Future<Message?> loadFileSourceMessage(String teamId, String messageId);
   Future<List<Message>> loadOlderMessages(String teamId, Message before,
       {int limit = 50});
 

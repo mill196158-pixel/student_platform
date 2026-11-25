@@ -16,10 +16,17 @@ import 'support/local_schema_http_client.dart';
 class _VacancyTransport extends LocalSchemaHttpClient {
   _VacancyTransport(super.port);
   int contactReads = 0;
+  bool refuseContacts = false;
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
-    if (request.url.path.endsWith('/rpc/get_vacancy_contacts')) contactReads++;
+    if (request.url.path.endsWith('/rpc/get_vacancy_contacts')) {
+      contactReads++;
+      if (refuseContacts) {
+        return http.StreamedResponse(Stream.value(utf8.encode('{"message":"offline"}')),
+            503, headers: {'content-type':'application/json'}, request: request);
+      }
+    }
     return super.send(request);
   }
 }
@@ -132,7 +139,7 @@ void main() {
     expect(SupabaseConfig.url, localSupabaseUrl);
     accounts = data['accounts'] as List;
     expect(accounts.map((a) => a['email']),
-        ['$schema@student.local', '${schema}1@student.local']);
+        ['$schema@student.local', for (final i in [1,2,3]) '$schema$i@student.local']);
     SharedPreferences.setMockInitialValues({});
     transport = _VacancyTransport(data['restPort'] as int);
     await Supabase.initialize(
@@ -400,6 +407,104 @@ void main() {
         findsNothing);
     expect(find.descendant(of: sheet, matching: find.text('Пожаловаться')),
         findsOneWidget);
+  });
+
+  Future<void> twins(_Jobs j) async {
+    await client.rpc('fixture_board', params: {'action':'open'});
+    await j.board();
+    await j.until(find.text('Atlas'));
+    await j.until(find.text('Boreal'));
+  }
+
+  Future<void> switchAuthor(_Jobs j, int index) async {
+    await j.tester.pumpWidget(const SizedBox.shrink());
+    await signIn(index);
+    await j.board();
+  }
+
+  Future<void> proposal(_Jobs j, String title, String summary, {String? location}) async {
+    await j.tap('Предложить');
+    await j.fill('Название *', title);
+    await j.fill('Организация', 'КБ Практика');
+    await j.fill('Краткое описание *', summary);
+    if (location != null) await j.fill('Местоположение (текст)', location);
+    await j.tap('Отправить на модерацию');
+    await j.accepted('Заявка отправлена');
+  }
+
+  journey('E2E-085 two identical vacancy titles reveal their own contacts', (j) async {
+    await twins(j);
+    for (final name in ['Atlas','Boreal']) {
+      await j.tap(name);
+      await j.tap('Показать контакты');
+      await j.until(find.text('Email: ${name.toLowerCase()}@example.invalid',findRichText: true));
+      expect(find.textContaining(name=='Atlas'?'boreal@':'atlas@',findRichText: true), findsNothing);
+      await j.tap('Закрыть');
+    }
+  });
+
+  journey('E2E-087 closing an offer removes it after returning to the board', (j) async {
+    await twins(j);
+    await j.tap('Atlas');
+    await j.until(find.text('Показать контакты'));
+    await client.rpc('fixture_board', params: {'action':'close-atlas'});
+    await j.tap('Закрыть');
+    await j.board();
+    await j.until(find.text('Boreal'));
+    final until = DateTime.now().add(const Duration(seconds: 10));
+    while (find.text('Atlas').evaluate().isNotEmpty && DateTime.now().isBefore(until)) {
+      await j.tester.pump(const Duration(milliseconds: 80));
+    }
+    expect(find.text('Atlas'),findsNothing);
+    expect(find.text('Fixture internship'),findsOneWidget);
+    await j.tap('Boreal');
+    await j.tap('Показать контакты');
+    await j.until(find.text('Email: boreal@example.invalid',findRichText: true));
+  });
+
+  journey('E2E-088 applications with identical names remain separate after editing', (j) async {
+    await switchAuthor(j,2);
+    await proposal(j,'Joint placement','Author A');
+    await client.rpc('fixture_board',params:{'action':'request-clarification'});
+    await switchAuthor(j,3);
+    await proposal(j,'Joint placement','Author B');
+    final peer = await j.row('Joint placement');
+    await switchAuthor(j,2);
+    await j.openDraft('Joint placement');
+    await j.fill('Краткое описание *','Edited A');
+    await j.tap('Сохранить и отправить снова');
+    await j.accepted('Заявка отправлена снова');
+    expect((await j.row('Joint placement'))['summary'],'Edited A');
+    await switchAuthor(j,3);
+    expect(await j.row('Joint placement'),peer);
+  });
+
+  journey('E2E-089 contact request can be retried when the connection returns', (j) async {
+    await twins(j);
+    await j.tap('Atlas');
+    transport.refuseContacts = true;
+    try {
+      await j.tap('Показать контакты');
+      await j.until(find.text('Контакты недоступны.'));
+    } finally {
+      transport.refuseContacts = false;
+    }
+    await j.tap('Повторить');
+    await j.until(find.text('Email: atlas@example.invalid',findRichText:true));
+    expect(find.textContaining('boreal@', findRichText:true), findsNothing);
+  });
+
+  journey('E2E-090 submitted Cyrillic title and multiline address are readable after login', (j) async {
+    const title = 'Стажировка в КБ';
+    const address = 'ул. Учебная, 10\nкорпус Б, аудитория 42';
+    await switchAuthor(j,2);
+    await proposal(j,title,'Описание стажировки',location:address);
+    await switchAuthor(j,2);
+    await j.tap('Мои заявки');
+    await j.tap(title);
+    await j.until(find.text(address));
+    expect(find.text('Описание стажировки'),findsOneWidget);
+    expect((await j.row(title))['location'],address);
   });
 
   journey(

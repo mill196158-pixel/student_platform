@@ -1,6 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { SignJWT, importPKCS8 } from "npm:jose@5.9.6";
-import { androidReadMessage, visibleMessage } from "./fcm_message.ts";
+import { androidReadMessage, visibleMessage, visiblePushData } from "./fcm_message.ts";
 
 type ServiceAccount = {
   project_id: string;
@@ -297,13 +297,7 @@ async function processOutboxRow(args: {
     title: pushTitle,
     body: pushBody,
   };
-  const filteredData: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(rawData)) {
-    if (allowedPushDataKeys.has(key)) {
-      filteredData[key] = value;
-    }
-  }
-  const dataPayload = toStringMap(filteredData);
+  const dataPayload = visiblePushData(rawData);
 
   const channelId = channelForEvent(String(decision.event_type ?? row.event_type));
   let successCount = 0;
@@ -487,29 +481,6 @@ function channelForEvent(eventType: string): string {
     default:
       return "messages";
   }
-}
-
-const allowedPushDataKeys = new Set([
-  "version",
-  "type",
-  "notification_id",
-  "chat_id",
-  "team_id",
-  "selection_id",
-  "collection_id",
-  "card_message_id",
-  "message_id",
-  "title",
-  "body",
-]);
-
-function toStringMap(input: Record<string, unknown>): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(input)) {
-    if (value === null || value === undefined) continue;
-    out[key] = typeof value === "string" ? value : String(value);
-  }
-  return out;
 }
 
 function backoffSeconds(attempts: number): number {

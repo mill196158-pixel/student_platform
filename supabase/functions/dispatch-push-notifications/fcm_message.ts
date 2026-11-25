@@ -1,3 +1,27 @@
+const allowedPushDataKeys = new Set([
+  "version",
+  "type",
+  "notification_id",
+  "chat_id",
+  "assignment_id",
+  "team_id",
+  "selection_id",
+  "collection_id",
+  "card_message_id",
+  "message_id",
+  "title",
+  "body",
+]);
+
+export function visiblePushData(input: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (!allowedPushDataKeys.has(key) || value === null || value === undefined) continue;
+    out[key] = typeof value === "string" ? value : String(value);
+  }
+  return out;
+}
+
 type VisibleNotification = {
   title: string;
   body: string;

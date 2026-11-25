@@ -15,6 +15,7 @@ import 'package:student_platform/src/ui/chats/core/chat_history_route_host.dart'
 import 'package:student_platform/src/ui/chats/core/dm_chat_service.dart';
 import 'package:student_platform/src/ui/chats/core/cached_chat_message_bubble.dart';
 import 'package:student_platform/src/ui/chats/core/cached_chat_composer.dart';
+import 'package:student_platform/src/ui/learning/account_draft_store.dart';
 import 'package:student_platform/src/ui/chats/core/scoped_forward_author_resolver.dart';
 import 'package:student_platform/src/ui/learning/models/message.dart';
 import 'package:student_platform/src/ui/learning/models/assignment.dart';
@@ -158,6 +159,7 @@ class _CachedTeamDetailsState extends State<_CachedTeamDetails>
   CapabilityPermit? _permit;
   Future<List<Message>?>? _messages;
   Future<List<Assignment>?>? _assignments;
+  Future<String?>? _draftText;
   int _revision = 0;
 
   @override
@@ -184,6 +186,17 @@ class _CachedTeamDetailsState extends State<_CachedTeamDetails>
       _permit = permit;
       _messages = widget.store.read(widget.chatId, caps);
       _assignments = OfflineAssignmentStore(widget.store).read(widget.team.id, caps);
+      final store = widget.store, binding = store.currentBinding();
+      final owner = store.scope.capture();
+      final revision = _revision;
+      if (owner != null && binding != null && owner.userId == binding.userId) {
+        bool current() => mounted && _revision == revision && _allowed &&
+            store.scope.isCurrent(owner) &&
+            store.currentBinding()?.sessionId == binding.sessionId;
+        // Team chat composers store their drafts by the team conversation ID.
+        _draftText = AccountDraftStore().read(store.project, owner.userId, widget.team.id, current)
+            .then((draft) => current() && draft?['text'] is String ? draft!['text'] as String : null);
+      }
     } catch (_) {
       _filePermit = null;
       _permit = null;
@@ -208,6 +221,7 @@ class _CachedTeamDetailsState extends State<_CachedTeamDetails>
       _permit = null;
       _messages = null;
       _assignments = null;
+      _draftText = null;
       _bind();
     }
   }
@@ -330,7 +344,9 @@ class _CachedTeamDetailsState extends State<_CachedTeamDetails>
                               store: widget.store, capabilities: widget.capabilities));
                       });
                   });
-                })), const CachedChatComposer()]),
+                })), FutureBuilder<String?>(
+              key: ValueKey(_revision), future: _draftText,
+              builder: (context, snapshot) => CachedChatComposer(draftText: _allowed ? snapshot.data : null))]),
             const Center(child: Text('Сохранённый список файлов недоступен.')),
           ]))
         ]));
@@ -355,6 +371,16 @@ class _Body extends StatefulWidget {
 class _BodyState extends State<_Body> with SingleTickerProviderStateMixin {
   late final TabController _tabController;
   bool _selecting = false;
+  String? _fileMessageId;
+  int _fileMessageRequest = 0;
+
+  void _openFileMessage(String id) {
+    setState(() {
+      _fileMessageId = id;
+      _fileMessageRequest++;
+    });
+    _tabController.animateTo(1);
+  }
 
   // Compact header: more room for chat / assignments below.
   static const double _kHeaderContentHeight = 64.0;
@@ -476,9 +502,10 @@ class _BodyState extends State<_Body> with SingleTickerProviderStateMixin {
                     isActive: _tabController.index == 1,
                     onSelectingChanged: (v) => setState(() => _selecting = v),
                     readOnly: widget.readOnly,
-                    highlightMessageId: widget.highlightMessageId,
+                    highlightMessageId: _fileMessageId ?? widget.highlightMessageId,
+                    fileMessageRequest: _fileMessageRequest,
                   ),
-                  FilesTab(isActive: _tabController.index == 2),
+                  FilesTab(isActive: _tabController.index == 2, onOpenMessage: _openFileMessage),
                 ],
               ),
             ),

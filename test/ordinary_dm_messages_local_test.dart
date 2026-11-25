@@ -15,6 +15,7 @@ import 'package:student_platform/src/themes/themes.dart';
 import 'package:student_platform/src/ui/chats/core/chat_message_cache_store.dart';
 import 'package:student_platform/src/ui/chats/data/dm_api.dart';
 import 'package:student_platform/src/ui/chats/direct_chat_screen.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/messages/chat_message_list.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:web_socket_channel/io.dart';
 
@@ -31,6 +32,7 @@ class _LocalTransport extends http.BaseClient {
   final releasePage = Completer<void>();
   int sends = 0;
   bool offlineSend = false;
+  bool disconnected = false;
   bool loseAcknowledgement = false;
   var offlineAttempt = Completer<void>();
   var failOfflineAttempt = Completer<void>();
@@ -39,6 +41,7 @@ class _LocalTransport extends http.BaseClient {
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     if (request.url.origin != _origin)
       throw StateError('Local test service required');
+    if (disconnected) throw const SocketException('Student is offline');
     final isSend = request.url.path.endsWith('/rpc/send_dm_message_once');
     final delay = isSend && ++sends == 1;
     if (isSend && offlineSend) {
@@ -355,6 +358,64 @@ void main() {
             saved.where((r) => [first, incoming, edited].contains(r['text'])),
             hasLength(3));
         expect(saved.where((r) => r['text'] == quote), isEmpty);
+        if (!holdPage) {
+          ChatMessageList messages() =>
+              tester.widget<ChatMessageList>(find.byType(ChatMessageList));
+          final received = <String>[];
+          for (var cycle = 0; cycle < 2; cycle++) {
+            final attempts = socketAttempts;
+            allowRealtime = Completer<void>();
+            transport.disconnected = true;
+            await socket.close(WebSocketStatus.goingAway);
+            await until(() => socketAttempts > attempts, 'Socket stayed open');
+            for (var i = 0; i < 2; i++) {
+              final number = received.length + 1;
+              final text = await peerWrites('Номер $number', 'ordinal-$number');
+              received.add(text);
+              expect(find.text(text), findsNothing);
+            }
+            transport.disconnected = false;
+            allowRealtime.complete();
+            await until(
+                () => messages().messages.any((m) => m.text == received.last),
+                'History did not recover after outage ${cycle + 1}');
+          }
+          final server = (await page())
+              .where((r) => received.contains(r['text'])).toList()
+            ..sort((a, b) {
+              final time = a['created_at'].compareTo(b['created_at']) as int;
+              return time == 0 ? a['id'].compareTo(b['id']) as int : time;
+            });
+          expect(server.map((r) => r['text']), orderedEquals(received));
+          final visible = messages().messages.where((m) => received.contains(m.text));
+          expect(visible.map((m) => m.id), orderedEquals(server.map((r) => r['id'])));
+          debugPrint('PASS E2E-029 four unique server IDs in UI history after two offline cycles');
+
+          final twin = 'Одинаковый текст $tag';
+          Future<String> write(SupabaseClient client, String key, String body,
+              {String? reply}) async => await client.rpc('send_dm_message_once', params: {
+            'p_chat_id': chat, 'p_client_key': '$key-$tag', 'p_text': body,
+            if (reply != null) 'p_reply_to': reply,
+          }) as String;
+          final original = await write(peer, 'twin-original', twin);
+          final other = await write(me, 'twin-other', twin);
+          for (var i = 0; i < 16; i++) {
+            await write(peer, 'distance-$i', 'Сообщение между цитатой и ответом $i $tag');
+          }
+          final quoted = await write(peer, 'twin-quote', 'Цитата близнеца $tag', reply: original);
+          Finder row(String id) => find.byKey(ValueKey('message-$id'));
+          final preview = find.descendant(of: row(quoted), matching: find.text(twin));
+          await until(() => preview.evaluate().isNotEmpty, 'Duplicate-text quote did not render');
+          await tester.ensureVisible(preview);
+          expect(row(original).hitTestable(), findsNothing,
+              reason: 'The quoted original must be outside the visible viewport');
+          await tester.tap(preview);
+          await until(() => messages().hoveredMessageId == original &&
+              row(original).hitTestable().evaluate().isNotEmpty, 'Original author row was not highlighted');
+          expect(messages().hoveredMessageId, isNot(other));
+          await until(() => messages().hoveredMessageId == null, 'Quote highlight did not clear');
+          debugPrint('PASS E2E-038 tapped an actual quote and highlighted only the original author ID');
+        }
         final lost = 'Повтор $tag';
         transport.offlineSend = true;
         await type(lost);
@@ -386,7 +447,8 @@ void main() {
         expect(tester.widget<EditableText>(field).controller.text, nextDraft);
         final sendError =
             find.text('Отправка не подтверждена. Проверьте сообщение в чате.');
-        await until(() => sendError.evaluate().isEmpty,
+        // A failed retry can enqueue a second snackbar over the send button.
+        await until(() => find.byType(SnackBar).evaluate().isEmpty,
             'Earlier send feedback did not dismiss');
         final departed = 'После возврата $tag';
         transport.offlineAttempt = Completer<void>();

@@ -5,12 +5,14 @@ part of subject_diary;
 class SubjectQuickNoteScreen extends StatefulWidget {
   final String subjectKey;
   final SubjectDiaryArgs? args;
+  final String? onlyLessonId;
   final DateTime date;
 
   SubjectQuickNoteScreen({
     super.key,
     String? subjectKey,
     this.args,
+    this.onlyLessonId,
     required this.date,
   }) : subjectKey = subjectKey ??
             args?.subjectTitle ??
@@ -75,7 +77,7 @@ class _SubjectQuickNoteScreenState extends State<SubjectQuickNoteScreen> {
       _loadError = false;
     });
     try {
-      final all = await _repo.listByArgs(_args);
+      final all = await _repo.listByArgs(_args, onlyLessonId: widget.onlyLessonId);
       if (!mounted) return;
       setState(() {
         _dayEntries = all

@@ -82,10 +82,12 @@ class UsefulSubject {
   }
 
   /// Bounded nested-select fallback row (no per-subject difficulty).
-  factory UsefulSubject.fromFallbackMap(Map<String, dynamic> row) {
+  factory UsefulSubject.fromFallbackMap(Map<String, dynamic> row,
+      {(String, String)? membership, int? currentSemester}) {
     final curriculum = _asMap(row['curriculum_subjects']);
     final catalog = _asMap(row['subject_catalog']);
     final controlForm = (curriculum['control_form'] ?? '').toString().trim();
+    final semester = _asIntOrNull(row['semester_number']);
 
     return UsefulSubject(
       id: (row['id'] ?? '').toString(),
@@ -98,15 +100,17 @@ class UsefulSubject {
       ]),
       subjectId: _nullIfEmpty(row['subject_id']),
       groupId: _nullIfEmpty(row['group_id']),
-      semesterNumber: _asIntOrNull(row['semester_number']),
+      semesterNumber: semester,
       controlForm: controlForm,
       description: (catalog['description'] ?? '').toString().trim(),
       teacherName: '',
-      teamId: null,
+      teamId: membership?.$1,
       teamName: '',
       teamIcon: '',
       teamGroupName: '',
-      chatId: null,
+      chatId: membership?.$2,
+      canOpenChat: membership != null && semester != null && semester > 0 &&
+          currentSemester != null && semester <= currentSemester,
     );
   }
 

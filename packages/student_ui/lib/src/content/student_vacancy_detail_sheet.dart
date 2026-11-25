@@ -16,6 +16,7 @@ class StudentVacancyDetailSheet extends StatefulWidget {
     this.backgroundBytes,
     this.showCloseButton = true,
     this.onOpenExternalUrl,
+    this.onComposeEmail,
     this.onRevealContacts,
     this.onOpenAsset,
     this.onReport,
@@ -31,6 +32,7 @@ class StudentVacancyDetailSheet extends StatefulWidget {
   final bool showCloseButton;
 
   final Future<void> Function(String httpsUrl)? onOpenExternalUrl;
+  final Future<bool> Function(Uri recipient)? onComposeEmail;
   final Future<VacancyContacts?> Function()? onRevealContacts;
   final Future<void> Function(String assetId)? onOpenAsset;
   final Future<void> Function(VacancyReportReason reason, String? note)?
@@ -138,6 +140,29 @@ class _StudentVacancyDetailSheetState extends State<StudentVacancyDetailSheet> {
     }
   }
 
+  Widget _emailContact(String address) {
+    final compose = widget.onComposeEmail;
+    final valid = RegExp(r'^[^\s@,;:?/#%<>]+@[^\s@,;:?/#%<>]+\.[^\s@,;:?/#%<>]+$');
+    if (compose == null || !valid.hasMatch(address)) {
+      return _contactRow('Email', address);
+    }
+    return Align(alignment: Alignment.centerLeft, child: TextButton(
+      onPressed: () async {
+        var opened = false;
+        try {
+          opened = await compose(Uri(scheme: 'mailto', path: address));
+        } catch (_) {
+          // Some platforms throw when no mail client is installed.
+        }
+        if (!opened && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Не удалось открыть почтовое приложение')));
+        }
+      },
+      child: Text('Email: $address'),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -222,26 +247,22 @@ class _StudentVacancyDetailSheetState extends State<StudentVacancyDetailSheet> {
                 ),
               ),
               const SizedBox(height: 8),
+              if (_contactsError)
+                Text('Контакты недоступны.',
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error)),
               if (_contacts == null && !_contactsLoading)
                 OutlinedButton(
                   onPressed:
                       widget.onRevealContacts == null ? null : _revealContacts,
-                  child: const Text('Показать контакты'),
+                  child: Text(_contactsError ? 'Повторить' : 'Показать контакты'),
                 )
               else if (_contactsLoading)
                 const Text('Загружаем контакты…')
-              else if (_contactsError)
-                Text(
-                  'Контакты недоступны.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.error,
-                  ),
-                )
               else if (_contacts != null && !_contacts!.isEmpty) ...[
                 if (_contacts!.person != null)
                   _contactRow('Контакт', _contacts!.person!),
                 if (_contacts!.email != null)
-                  _contactRow('Email', _contacts!.email!),
+                  _emailContact(_contacts!.email!),
                 if (_contacts!.phone != null)
                   _contactRow('Телефон', _contacts!.phone!),
                 if (_contacts!.telegram != null)
@@ -266,7 +287,12 @@ class _StudentVacancyDetailSheetState extends State<StudentVacancyDetailSheet> {
               ),
               const SizedBox(height: 8),
             ],
-            Row(
+            OverflowBar(
+              alignment: widget.onReport != null && !widget.showDemoBadge
+                  ? MainAxisAlignment.spaceBetween
+                  : MainAxisAlignment.end,
+              overflowAlignment: OverflowBarAlignment.end,
+              overflowSpacing: 4,
               children: [
                 if (widget.onReport != null && !widget.showDemoBadge)
                   TextButton.icon(
@@ -276,7 +302,6 @@ class _StudentVacancyDetailSheetState extends State<StudentVacancyDetailSheet> {
                       _reportSent ? 'Жалоба отправлена' : 'Пожаловаться',
                     ),
                   ),
-                const Spacer(),
                 if (widget.showCloseButton)
                   FilledButton(
                     onPressed: () => Navigator.of(context).pop(),

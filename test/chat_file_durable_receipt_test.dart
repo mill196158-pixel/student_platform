@@ -140,7 +140,8 @@ void main() {
     expect(
         await ChatFileAccess.readBytes(url).timeout(const Duration(seconds: 2)),
         [1, 2, 3]);
-    await Future<void>.delayed(const Duration(milliseconds: 100));
+    // Drain the same in-flight offline check before the fixture starts serving denials.
+    await expectLater(ChatFileAccess.resolve(url), throwsA(isA<SocketException>()));
 
     // Access denial blocks immediately and durably but does not delete bytes.
     mode = 'deny';
@@ -162,7 +163,7 @@ void main() {
     expect(
         await ChatFileAccess.readBytes(url).timeout(const Duration(seconds: 2)),
         [1, 2, 3]);
-    await Future<void>.delayed(const Duration(milliseconds: 100));
+    await expectLater(ChatFileAccess.resolve(url), throwsA(isA<SocketException>()));
 
     // A different session of the same account cannot consume the old receipt.
     await signInWithFileSession(

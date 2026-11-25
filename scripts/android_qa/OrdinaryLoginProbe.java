@@ -22,6 +22,7 @@ public class OrdinaryLoginProbe extends UiAutomatorTestCase {
         long deadline = SystemClock.uptimeMillis() + 10000;
         while (SystemClock.uptimeMillis() < deadline) {
             if (label.exists() || text.exists()) {
+                System.out.println("observed localized login error");
                 return;
             }
             SystemClock.sleep(50);

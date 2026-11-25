@@ -344,6 +344,13 @@ class _ProfileScreenState extends State<ProfileScreen>
     if (mounted) setState(() => _loading = false);
     await _ensureSession();
     if (!mounted || _cacheOnly || _boundaryInvalidated) return;
+    if (_user == null) {
+      try {
+        await _refreshHeader();
+      } catch (error) {
+        debugPrint('[Profile] header unavailable: ${error.runtimeType}');
+      }
+    }
     // 3) первый тик — только если вкладка активна. Не блокируем профиль
     // подготовкой chat ids: unread_total считает серверный RPC.
     if (mounted && (widget.activeListenable?.value ?? true)) {
@@ -563,31 +570,28 @@ class _ProfileScreenState extends State<ProfileScreen>
   // realtime disabled — polling only
 
   // ===== ручной refresh =====
+  Future<void> _refreshHeader() async {
+    final id = _sb.auth.currentUser?.id;
+    bool current() => mounted && !_cacheOnly && !_boundaryInvalidated &&
+        id != null && _sb.auth.currentUser?.id == id;
+    if (id == null || !current()) return;
+    final fresh = await _sb.from('users')
+        .select('id, login, name, surname, university, group_name, avatar_url, status')
+        .eq('id', id).maybeSingle();
+    if (!current() || fresh == null || fresh['id'] != id) return;
+    final prefs = await SharedPreferences.getInstance();
+    if (!current()) return;
+    setState(() => _user = fresh);
+    await prefs.setString('user', jsonEncode(fresh));
+  }
+
   Future<void> _refreshFromServer() async {
     if (_cacheOnly || _boundaryInvalidated || !mounted) return;
     try {
       await _ensureSession();
       if (!mounted || _cacheOnly || _boundaryInvalidated) return;
 
-      final id = _uid ?? _user?['id'] as String?;
-      if (id == null || id.isEmpty) return;
-
-      final fresh = await _sb
-          .from('users')
-          .select(
-              'id, login, name, surname, university, group_name, avatar_url, status')
-          .eq('id', id)
-          .maybeSingle();
-
-      if (!mounted || _cacheOnly || _boundaryInvalidated) return;
-      if (fresh != null) {
-        final mapFresh = Map<String, dynamic>.from(fresh as Map);
-        _user = mapFresh;
-        final prefs = await SharedPreferences.getInstance();
-        if (!mounted || _cacheOnly || _boundaryInvalidated) return;
-        await prefs.setString('user', jsonEncode(mapFresh));
-        setState(() {}); // обновим шапку
-      }
+      await _refreshHeader();
 
       await _pollOnce(); // подтянуть бейджи сразу
       await _loadFeed();

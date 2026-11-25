@@ -26,6 +26,29 @@ import 'offline_assignment_store.dart';
 import 'verified_empty_team_chat.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
 
+/// Shares one follow-up page among requests that arrive while a read is active.
+/// Each caller completes with its own scheduled read, even during a busy chat.
+class TeamChatRefreshQueue {
+  bool _running = false;
+  Completer<void>? _pending;
+  Future<void> Function()? _next;
+
+  Future<void> schedule(Future<void> Function() read) {
+    if (_running) {
+      _next = read;
+      return (_pending ??= Completer<void>()).future;
+    }
+    _running = true;
+    return Future.sync(read).whenComplete(() {
+      _running = false;
+      final pending = _pending, next = _next;
+      _pending = null;
+      _next = null;
+      if (pending != null && next != null) pending.complete(schedule(next));
+    });
+  }
+}
+
 class TeamState {
   final Team team;
   final List<Message> chat;
@@ -286,25 +309,82 @@ class TeamCubit extends Cubit<TeamState> {
     ));
   }
 
-  Future<void> _loadChatInBackground(String? chatId) async {
-    final projectCache = ProjectChatServerCache.qaInstance;
-    if (projectCache != null &&
-        chatId != null &&
-        repo is SupabaseLearningRepository) {
-      unawaited(() async {
-        try {
-          final ticket = await projectCache.begin(chatId);
-          if (ticket == null) return;
-          final page = await (repo as SupabaseLearningRepository)
-              .loadConfirmedChatPage(chatId);
-          if (isClosed || page.source != TeamPageSource.serverRpc) return;
-          await projectCache.saveServerPage(ticket, page.messages,
-              hasMore: page.hasMore);
-        } catch (_) {/* Never save a cache fallback as a server page. */}
-      }());
+  final _durableChatRefresh = TeamChatRefreshQueue();
+
+  Future<void> _refreshDurableChat(String chatId) {
+    final cache = ProjectChatServerCache.qaInstance, repository = repo;
+    final owner = cache?.scope.capture();
+    if (cache == null || owner == null || repository is! SupabaseLearningRepository ||
+        owner.userId != _currentProfileOwner()?.$1) return Future.value();
+    bool current() => identical(cache, ProjectChatServerCache.qaInstance) && cache.scope.isCurrent(owner);
+    return _durableChatRefresh.schedule(() async {
+      try {
+        final ticket = await cache.begin(chatId, isCurrent: current);
+        if (ticket == null) return;
+        final page = await repository.loadConfirmedChatPage(chatId);
+        if (current() && page.source == TeamPageSource.serverRpc) {
+          // The ticket fences a page which was superseded by a Realtime event.
+          await cache.saveServerPage(ticket, page.messages, hasMore: page.hasMore);
+        }
+      } catch (_) {
+        // A confirmed send remains valid if the optional offline cache fails.
+      }
+    });
+  }
+
+  Future<List<Message>> _loadOpeningChatPage(String? chatId) async {
+    final teamId = state.team.id;
+    final store = ProjectChatServerCache.qaInstance, repository = repo;
+    final scope = _authScope ?? store?.scope;
+    final session = scope?.capture();
+    final owner = store?.scope.capture();
+    bool current() => !isClosed && state.team.id == teamId && _mainChatId == chatId &&
+        (scope == null || session != null && scope.isCurrent(session));
+    void checkCurrent() {
+      if (!current()) throw StateError('Chat session changed');
     }
+    Future<List<Message>> loadLegacy() async {
+      checkCurrent();
+      final messages = await repository.loadChat(teamId);
+      checkCurrent();
+      return messages;
+    }
+    if (chatId == null || store == null || owner == null ||
+        repository is! SupabaseLearningRepository ||
+        owner.userId != _currentProfileOwner()?.$1) {
+      return loadLegacy();
+    }
+    bool cacheCurrent() => current() && store.scope.isCurrent(owner) &&
+        identical(store, ProjectChatServerCache.qaInstance);
+    ProjectChatPageTicket? ticket;
     try {
-      final chat = await repo.loadChat(state.team.id);
+      ticket = await store.begin(chatId, isCurrent: cacheCurrent);
+    } catch (error) {
+      safeDebugLog('[TeamCubit] chat cache ticket failed: ${error.runtimeType}');
+    }
+    checkCurrent();
+    final ConfirmedTeamChatPage page;
+    try {
+      page = await repository.loadConfirmedChatPage(chatId);
+    } on PostgrestException catch (error) {
+      if (error.code != 'PGRST202') rethrow;
+      return loadLegacy();
+    }
+    checkCurrent();
+    if (ticket != null && cacheCurrent()) {
+      try {
+        await store.saveServerPage(ticket, page.messages, hasMore: page.hasMore);
+      } catch (error) {
+        safeDebugLog('[TeamCubit] chat cache write failed: ${error.runtimeType}');
+      }
+    }
+    checkCurrent();
+    return page.messages;
+  }
+
+  Future<void> _loadChatInBackground(String? chatId) async {
+    try {
+      final chat = await _loadOpeningChatPage(chatId);
       if (isClosed) return;
       final reconciled = chatId == null
           ? _dedupeAndSort(chat)
@@ -513,7 +593,9 @@ class TeamCubit extends Cubit<TeamState> {
       chatId: chatId,
       messages: merged,
     ));
-    return merged;
+    // The persisted preview is intentionally bounded. An open conversation can
+    // contain older pages the student has already fetched.
+    return _dedupeAndSort([...merged, ...messages]);
   }
 
   String get _teamChatSnapshotKey => 'team_chat_snapshot_v1_${state.team.id}';
@@ -606,11 +688,14 @@ class TeamCubit extends Cubit<TeamState> {
             serverMessage.copyWith(deliveryStatus: MessageDeliveryStatus.sent));
       return _dedupeAndSort(updated);
     }
-    return ChatMessageMemoryCache.reconcileUpsert(
-      chatId,
-      serverMessage,
-      clientId: clientId,
+    final cached = ChatMessageMemoryCache.reconcileUpsert(
+      chatId, serverMessage, clientId: clientId,
     );
+    return _dedupeAndSort([
+      ...state.chat.where((message) => !message.isLocal),
+      ...cached,
+      serverMessage.copyWith(deliveryStatus: MessageDeliveryStatus.sent),
+    ]);
   }
 
   List<Message> _removeCachedMessage(String messageId) {
@@ -618,7 +703,11 @@ class TeamCubit extends Cubit<TeamState> {
     if (chatId == null || chatId.isEmpty) {
       return state.chat.where((m) => m.id != messageId).toList();
     }
-    return ChatMessageMemoryCache.remove(chatId, messageId);
+    final cached = ChatMessageMemoryCache.remove(chatId, messageId);
+    return _dedupeAndSort([
+      ...state.chat.where((message) => message.id != messageId),
+      ...cached.where((message) => message.id != messageId),
+    ]);
   }
 
   List<Message> _dedupeAndSort(Iterable<Message> messages) {
@@ -863,6 +952,10 @@ class TeamCubit extends Cubit<TeamState> {
     }
     if (!canUpdate()) return messageId;
 
+    final durableChatId = _mainChatId;
+    if (durableChatId != null) await _refreshDurableChat(durableChatId);
+    if (!canUpdate()) return sameSession() ? messageId : null;
+
     // The server has acknowledged this send. Hydration belongs to this screen.
     try {
       final chatId = _mainChatId;
@@ -953,10 +1046,13 @@ class TeamCubit extends Cubit<TeamState> {
 
   Future<List<Message>> loadOlderMessages({int limit = 50}) async {
     if (state.chat.isEmpty) return [];
-    final oldest = state.chat.reduce((a, b) => a.at.isBefore(b.at) ? a : b);
+    final oldest = state.chat.reduce((a, b) {
+      final byDate = a.at.compareTo(b.at);
+      return byDate < 0 || (byDate == 0 && a.id.compareTo(b.id) < 0) ? a : b;
+    });
     final older =
         await repo.loadOlderMessages(state.team.id, oldest, limit: limit);
-    if (older.isEmpty) return [];
+    if (isClosed || older.isEmpty) return [];
 
     final existingIds = state.chat.map((m) => m.id).toSet();
     final uniqueOlder = older.where((m) => existingIds.add(m.id)).toList();
@@ -971,6 +1067,7 @@ class TeamCubit extends Cubit<TeamState> {
   Future<bool> ensureMessageVisible(
     String messageId, {
     int maxOlderPages = 5,
+    bool verifyFileOrigin = false,
   }) async {
     final target = messageId.trim();
     if (target.isEmpty) return false;
@@ -978,19 +1075,32 @@ class TeamCubit extends Cubit<TeamState> {
     bool contains(List<Message> chat) =>
         chat.any((message) => message.id == target);
 
-    if (contains(state.chat)) return true;
+    if (!verifyFileOrigin && contains(state.chat)) return true;
 
-    final direct = await repo.loadMessageById(state.team.id, target);
+    final direct = verifyFileOrigin
+        ? await repo.loadFileSourceMessage(state.team.id, target)
+        : await repo.loadMessageById(state.team.id, target);
+    if (isClosed || (verifyFileOrigin && direct == null)) return false;
     if (direct != null) {
+      if (verifyFileOrigin) {
+        for (var page = 0; page < maxOlderPages && state.chat.isNotEmpty &&
+            direct.at.isBefore(state.chat.first.at); page++) {
+          final older = await loadOlderMessages();
+          if (isClosed) return false;
+          if (older.isEmpty) break;
+        }
+      }
       emit(state.copyWith(chat: _mergeCachedChat([...state.chat, direct])));
       return true;
     }
 
     for (var page = 0; page < maxOlderPages; page++) {
       if (state.chat.isEmpty) break;
-      await loadOlderMessages(limit: 50);
+      final older = await loadOlderMessages(limit: 50);
+      if (isClosed || older.isEmpty) break;
       if (contains(state.chat)) return true;
       final loaded = await repo.loadMessageById(state.team.id, target);
+      if (isClosed) return false;
       if (loaded != null) {
         emit(state.copyWith(chat: _mergeCachedChat([...state.chat, loaded])));
         return true;
@@ -1142,7 +1252,9 @@ class TeamCubit extends Cubit<TeamState> {
             !cacheOwner.belongsTo(projectCache.scope) ||
             !cacheOwner.isCurrent(eventTicket)) return;
         try {
-          await projectCache.invalidate(chatId);
+          if (await projectCache.invalidate(chatId) && current()) {
+            await _refreshDurableChat(chatId);
+          }
         } catch (_) {}
       }
 

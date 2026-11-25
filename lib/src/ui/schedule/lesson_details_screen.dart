@@ -99,6 +99,7 @@ class LessonDetailsScreen extends StatelessWidget {
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
                       builder: (_) => SubjectQuickNoteScreen(
+                        onlyLessonId: lesson.hasSubjectLink ? lesson.id : null,
                         subjectKey: lesson.subject.trim(),
                         args: lesson.hasSubjectLink
                             ? SubjectDiaryArgs(
@@ -342,41 +343,43 @@ class _TeacherLinkCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: theme.colorScheme.outlineVariant),
             ),
-            child: Row(
-              children: [
-                TeacherDifficultyAvatar(
-                  teacherName: lesson.teacher!,
-                  size: 38,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Преподаватель',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
+            child: TeacherDifficultyAvatar(
+              teacherName: lesson.teacher!,
+              contentBuilder: (avatar, rating) => Row(
+                children: [
+                  avatar,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Преподаватель',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        lesson.teacher!,
-                        softWrap: true,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurface,
-                          fontWeight: FontWeight.w700,
+                        const SizedBox(height: 4),
+                        Text(
+                          lesson.teacher!,
+                          softWrap: true,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurface,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
-                      ),
-                    ],
+                        if (rating != null)
+                          Text(rating, style: theme.textTheme.bodySmall),
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Icon(
-                  Icons.chevron_right_rounded,
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ],
+                  const SizedBox(width: 8),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ],
+              ),
             ),
           ),
         ));

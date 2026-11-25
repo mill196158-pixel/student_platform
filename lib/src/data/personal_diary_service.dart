@@ -272,6 +272,7 @@ class PersonalDiaryService {
 
   final SupabaseClient _sb;
   final AcademicContextService _academicContextService;
+  String? get authenticatedUserId => _sb.auth.currentUser?.id;
 
   // In-memory (RAM) layer of the cache. Survives across screen re-creations
   // within one app session, so re-opening the diary tab is instant with no
@@ -328,6 +329,7 @@ class PersonalDiaryService {
     final data = await load(semesterNumber: semesterNumber);
     if (_sb.auth.currentUser?.id != userId) throw StateError('Session changed');
     await saveCached(data, semesterNumber: semesterNumber);
+    if (_sb.auth.currentUser?.id != userId) throw StateError('Session changed');
     return data;
   }
 
@@ -1151,6 +1153,29 @@ class PersonalDiaryService {
       'completed_at':
           status == 'done' ? DateTime.now().toIso8601String() : null,
     }).eq('id', taskId);
+  }
+
+  Future<void> updatePersonalTaskDeadline(String taskId, DateTime date) async {
+    final userId = _sb.auth.currentUser?.id;
+    if (userId == null) throw StateError('Пользователь не авторизован');
+    // A diary deadline is a calendar date. Keep its day stable on SQL round trips.
+    final due = DateTime.utc(date.year, date.month, date.day).toIso8601String();
+    final updated = DateTime.now().toUtc().toIso8601String();
+    if (taskId.startsWith('local-')) {
+      final rows = await _loadLocalTaskRows(userId);
+      final task = rows.firstWhere((row) => row['id'] == taskId);
+      task['due_at'] = due;
+      task['updated_at'] = updated;
+      await _saveLocalTaskRows(userId, rows);
+      return;
+    }
+    await _sb
+        .from('personal_diary_tasks')
+        .update({'due_at': due, 'updated_at': updated})
+        .eq('author_id', userId)
+        .eq('id', taskId)
+        .select('id')
+        .single();
   }
 
   Future<List<PersonalDiaryLesson>> loadScheduleLessons() async {

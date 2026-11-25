@@ -1,3 +1,5 @@
+import 'package:student_platform/src/ui/schedule/lesson_details_screen.dart';
+import 'package:student_platform/src/ui/schedule/models/lesson.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -37,7 +39,8 @@ class _Repo implements SubjectDiaryRepository {
   Completer<List<SubjectDiaryEntry>>? pending;
   int writes = 0;
   @override
-  Future<List<SubjectDiaryEntry>> listByArgs(SubjectDiaryArgs args) async {
+  Future<List<SubjectDiaryEntry>> listByArgs(SubjectDiaryArgs args,
+      {String? onlyLessonId}) async {
     if (pending != null) return pending!.future;
     if (fail) throw StateError('local read failure');
     return [];
@@ -114,6 +117,55 @@ void main() {
     expect(find.text('По запросу ничего не найдено.'), findsOneWidget);
     expect(repo.writes, 0);
     expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+    await Supabase.instance.client.realtime.removeAllChannels();
+    await Supabase.instance.client.realtime.disconnect();
+    Supabase.instance.client.realtime.heartbeatTimer?.cancel();
+  });
+  testWidgets(
+      'Opening the second lesson does not lock its note after the first',
+      (tester) async {
+    final repo = SubjectDiaryRepositoryInMemory();
+    SubjectDiaryRepository.instance = repo;
+    final first = SubjectDiaryArgs(
+        subjectOfferingId: 'offering',
+        subjectTitle: 'Материаловедение',
+        lessonId: 'first',
+        date: day);
+    final second = SubjectDiaryArgs(
+        subjectOfferingId: 'offering',
+        subjectTitle: 'Материаловедение',
+        lessonId: 'second',
+        date: day);
+    await repo.addText(
+        subjectKey: first.subjectTitle,
+        date: day,
+        text: 'Only the first lesson',
+        args: first);
+    final lesson = Lesson(
+        id: 'second',
+        date: day,
+        week: 1,
+        day: '',
+        pairNum: 2,
+        start: const TimeOfDay(hour: 10, minute: 0),
+        end: const TimeOfDay(hour: 11, minute: 30),
+        subjectRaw: second.subjectTitle,
+        subjectOfferingId: 'offering');
+    await tester.pumpWidget(app(LessonDetailsScreen(lesson: lesson), false));
+    await tester.scrollUntilVisible(
+        find.text('Добавить запись по предмету'), 180,
+        scrollable: find.byType(Scrollable).first);
+    await tester.tap(find.text('Добавить запись по предмету'));
+    await tester.pumpAndSettle();
+    expect(find.text('Only the first lesson'), findsNothing);
+    await tester.tap(find.byTooltip('Добавить'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Заметка по предмету'));
+    await tester.tap(find.text('Заметка по предмету'));
+    await tester.pumpAndSettle();
+    expect(find.text('Заметка с пары'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
     await Supabase.instance.client.realtime.removeAllChannels();

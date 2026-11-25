@@ -102,6 +102,7 @@ class ChatTab extends StatefulWidget {
 
   /// Deeplink: scroll to and briefly highlight this message in chat history.
   final String? highlightMessageId;
+  final int fileMessageRequest;
 
   const ChatTab({
     super.key,
@@ -109,6 +110,7 @@ class ChatTab extends StatefulWidget {
     this.readOnly = false,
     this.isActive = true,
     this.highlightMessageId,
+    this.fileMessageRequest = 0,
     this.forwardTargetOverride,
     this.copyForwardFileOverride,
     this.debugAfterDurableCancel,
@@ -696,6 +698,11 @@ class _ChatTabState extends State<ChatTab> {
   @override
   void didUpdateWidget(covariant ChatTab oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.fileMessageRequest != widget.fileMessageRequest ||
+        oldWidget.highlightMessageId != widget.highlightMessageId) {
+      _deeplinkHighlightStarted = false;
+      _deeplinkHighlightId = null;
+    }
     if (!oldWidget.isActive && widget.isActive) _scheduleSeenCheck();
   }
 
@@ -1239,22 +1246,35 @@ class _ChatTabState extends State<ChatTab> {
   Future<void> _runDeeplinkHighlight(String messageId) async {
     if (!mounted || messageId.trim().isEmpty) return;
     final cubit = context.read<TeamCubit>();
-    final found = await cubit.ensureMessageVisible(messageId);
-    if (!mounted) return;
-    if (!found) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Сообщение не найдено или недоступно.'),
-        ),
-      );
+    final request = widget.fileMessageRequest;
+    bool current() => mounted && widget.fileMessageRequest == request &&
+        widget.highlightMessageId == messageId;
+    void feedback(String message) {
+      if (!current()) return;
+      ScaffoldMessenger.of(context)
+        ..removeCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(message)));
+    }
+    final bool found;
+    try {
+      found = await cubit.ensureMessageVisible(messageId, verifyFileOrigin: request != 0);
+    } catch (_) {
+      feedback('Не удалось загрузить сообщение. Попробуйте ещё раз.');
       return;
     }
+    if (!current()) return;
+    if (!found) {
+      feedback('Сообщение не найдено или недоступно.');
+      return;
+    }
+    await WidgetsBinding.instance.endOfFrame;
+    if (!current()) return;
     await _scrollToMessage(messageId);
-    if (!mounted) return;
+    if (!current()) return;
     setState(() => _deeplinkHighlightId = messageId);
     Future<void>.delayed(const Duration(seconds: 2), () {
       if (!mounted) return;
-      if (_deeplinkHighlightId == messageId) {
+      if (current() && _deeplinkHighlightId == messageId) {
         setState(() => _deeplinkHighlightId = null);
       }
     });
@@ -1356,13 +1376,18 @@ class _ChatTabState extends State<ChatTab> {
     if (!mounted || _currentChatId == null) return;
     final teamId = _currentChatId!;
     final outbox = ForwardOutbox.capture(context);
-    if (!await _restoreDraft() || !mounted) return;
+    final restore = _restoreDraft();
+    final owner = Supabase.instance.client.auth.currentUser?.id;
+    final route = ModalRoute.of(context);
     final chatId = await _getChatIdForTeam(teamId);
     if (!mounted || _currentChatId != teamId) return;
     if (chatId.isNotEmpty) {
       _trackedChatId = chatId;
-      ActiveChatTracker.instance.enter(chatId);
+      ActiveChatTracker.instance.enter(chatId, teamId: teamId, isCurrentRoute: () =>
+          mounted && widget.isActive && route?.isCurrent == true &&
+          owner != null && Supabase.instance.client.auth.currentUser?.id == owner);
     }
+    if (!await restore || !mounted || _currentChatId != teamId) return;
     await _consumeForwardOutboxIfAny(chatId, outbox, fromInitialization: true);
   }
 

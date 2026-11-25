@@ -490,6 +490,8 @@ void main() {
       ),
     );
     expect(find.text('Не удалось загрузить сообщения'), findsOneWidget);
+    expect(find.textContaining('Сохранённые сообщения на устройстве недоступны.'), findsOneWidget);
+
     expect(find.text('Повторить'), findsOneWidget);
     expect(find.text('Сообщений пока нет'), findsNothing);
   });

@@ -388,7 +388,7 @@ final GoRouter appRouter = GoRouter(
     ),
     GoRoute(
       path: '/my-diary',
-      builder: (_, __) => const PersonalDiaryScreen(),
+      builder: (_, state) => PersonalDiaryScreen(assignmentId: state.uri.queryParameters['assignment']),
     ),
     GoRoute(
       path: '/my-reviews',

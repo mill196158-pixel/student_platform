@@ -59,7 +59,9 @@ List<ChatFile> mergeFilesByObjectIdentity(
 }
 
 class FilesTab extends StatefulWidget {
-  const FilesTab({super.key, this.isActive = true});
+  const FilesTab({super.key, this.isActive = true, this.onOpenMessage});
+
+  final ValueChanged<String>? onOpenMessage;
 
   final bool isActive;
 
@@ -383,6 +385,18 @@ class _FilesTabState extends State<FilesTab>
     );
   }
 
+  Widget? _messageButton(ChatFile file) {
+    final messageId = file.messageId?.trim();
+    final open = widget.onOpenMessage;
+    if (_selecting || open == null || messageId == null || messageId.isEmpty ||
+        _chatId == null || file.chatId != _chatId) return null;
+    return IconButton.filledTonal(
+      icon: const Icon(Icons.chat_bubble_outline, size: 18),
+      tooltip: 'К сообщению: ${file.fileName}',
+      onPressed: () => open(messageId),
+    );
+  }
+
   Widget _buildImagesGrid(List<ChatFile> list) {
     if (list.isEmpty) {
       return const FriendlyEmptyState(
@@ -441,6 +455,8 @@ class _FilesTabState extends State<FilesTab>
                     ),
                   ),
                 ),
+                if (_messageButton(f) case final button?)
+                  Positioned(top: 4, right: 4, child: button),
                 if (_selecting)
                   Positioned(
                     top: 6,
@@ -494,7 +510,8 @@ class _FilesTabState extends State<FilesTab>
         final isSelected = _selectedIds.contains(f.id);
         return Stack(
           children: [
-            AppFileCard(
+            Row(children: [
+              Expanded(child: AppFileCard(
               fileName: f.fileName,
               fileSize: f.fileSize,
               mimeType: f.fileType,
@@ -509,7 +526,9 @@ class _FilesTabState extends State<FilesTab>
                   _openFilePreview(f);
                 }
               },
-            ),
+            )),
+            if (_messageButton(f) case final button?) button,
+            ]),
             if (_selecting)
               Positioned(
                 top: 8,

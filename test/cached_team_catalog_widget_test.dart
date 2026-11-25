@@ -135,14 +135,20 @@ void main() {
         caps.grant(SessionCapabilityMode.cacheOnly,
             caps.beginAuthorization(scope.capture()!)!),
         isTrue);
+    Future<void> waitForSubject({required bool visible}) async {
+      final timer = Stopwatch()..start();
+      while (find.text('Subject').evaluate().isNotEmpty != visible &&
+          timer.elapsed < const Duration(seconds: 10)) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+        await tester.pump();
+      }
+    }
     await tester.pumpWidget(MaterialApp(
         home: CachedTeamChatDirectory(
             store: _Cache(db, scope, binding),
             capabilities: caps,
             subjectsOnly: false)));
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 200)));
-    await tester.pumpAndSettle();
+    await waitForSubject(visible: true);
     expect(find.text('Subject'), findsOneWidget);
     expect(find.text('Unknown'), findsOneWidget);
     expect(find.text('Чат группы'), findsOneWidget);
@@ -159,9 +165,7 @@ void main() {
     expect(find.text('История этого чата недоступна на устройстве.'), findsNWidgets(2));
     expect(find.text('Чат группы'), findsOneWidget);
     expect(await tester.runAsync(() => catalog.deny(ticket)), isTrue);
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 200)));
-    await tester.pumpAndSettle();
+    await waitForSubject(visible: false);
     expect(find.text('Subject'), findsNothing,
         reason: 'denied catalog cannot fall back to old chat summaries');
     expect(caps.capture(SessionCapability.cachedRead), isNotNull,

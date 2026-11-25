@@ -18,7 +18,7 @@ def function(source, name):
 
 
 def setup(schema, students):
-    owner, peer = students
+    owner, peer, author, other_author = students
     def read(name):
         return (MIGRATIONS / name).read_text("utf-8")
 
@@ -53,11 +53,13 @@ def setup(schema, students):
     # Set up the moderator's disposition of one synthetic application. Student actions
     # use the real production RPCs above, and the peer cannot see the owner's rows.
     statements += f"""
-        insert into users (id) values ('{owner}'), ('{peer}');
+        insert into users (id) values ('{owner}'), ('{peer}'), ('{author}'), ('{other_author}');
         insert into groups values (gen_random_uuid()), (gen_random_uuid());
         insert into student_enrollments values
           ('{owner}', (select id from groups order by id asc limit 1), 'active', null),
-          ('{peer}', (select id from groups order by id desc limit 1), 'active', null);
+          ('{peer}', (select id from groups order by id desc limit 1), 'active', null),
+          ('{author}', (select id from groups order by id asc limit 1), 'active', null),
+          ('{other_author}', (select id from groups order by id desc limit 1), 'active', null);
         alter table vacancy_assets add column working_draft_id uuid, add column role text default 'attachment';
         insert into vacancies(title, company_name, summary, status, priority, published_at, contacts,
                               description, audience_mode, origin, starts_at, expires_at) values
@@ -98,6 +100,28 @@ def setup(schema, students):
             row_version=row_version+1 where title='Blueprint placement' and submitted_by=auth.uid()
             and status='submitted' and auth.uid()='{owner}';
         $$;
+        create function fixture_board(action text) returns void language plpgsql security definer
+        set search_path = {schema}, pg_temp as $$
+        begin
+          if auth.uid() <> '{owner}' and not
+             (action='request-clarification' and auth.uid()='{author}') then
+            raise exception 'Wrong fixture student';
+          end if;
+          if action = 'open' then
+            delete from vacancies where title='Fixture internship' and origin='admin';
+            insert into vacancies(title,company_name,summary,status,priority,published_at,contacts,audience_mode,origin)
+              values ('Fixture internship','Atlas','Study structures','published',90,now(),
+                      '{{"email":"atlas@example.invalid"}}','all','admin'),
+                     ('Fixture internship','Boreal','Study soils','published',89,now(),
+                      '{{"email":"boreal@example.invalid"}}','all','admin');
+          elsif action = 'close-atlas' then
+            update vacancies set expires_at=now()-interval '1 second', starts_at=null
+              where title='Fixture internship' and company_name='Atlas';
+          elsif action = 'request-clarification' then
+            update vacancies set status='draft',rejection_reason='Add duties',row_version=row_version+1
+              where title='Joint placement' and submitted_by=auth.uid() and status='submitted';
+          else raise exception 'Unknown fixture action'; end if;
+        end $$;
         create function fixture_own_reports() returns jsonb language sql stable security definer
         set search_path = '' as $$
           select coalesce(jsonb_agg(jsonb_build_object('title', v.title, 'reason', r.reason_code,
@@ -109,11 +133,11 @@ def setup(schema, students):
         grant execute on function submit_vacancy(jsonb), get_my_vacancy_submissions(integer),
           update_my_vacancy_draft(uuid,jsonb,integer), resubmit_my_vacancy(uuid,integer),
           fixture_clarify_requirements(), get_my_vacancies(), get_vacancy_contacts(uuid),
-          report_vacancy(uuid,text,text), fixture_own_reports() to authenticated;
+          report_vacancy(uuid,text,text), fixture_own_reports(), fixture_board(text) to authenticated;
         """
     return statements, {}
 
 
 if __name__ == "__main__":
     sys.exit(run_suite("vacancy", setup, "integration_test/ordinary_vacancies_local_test.dart",
-                       "STUDENT_VACANCY_LOCAL", student_count=2))
+                       "STUDENT_VACANCY_LOCAL", student_count=4))

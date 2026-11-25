@@ -170,6 +170,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
   void _pruneMessageKeys(Set<String> aliveIds) =>
       _messageKeys.removeWhere((id, _) => !aliveIds.contains(id));
   String? _hoveredMessageId;
+  String? _quotedMessageId;
+  Timer? _quoteHighlightTimer;
+  int _quoteRequest = 0;
 
   bool _showJump = false;
   bool _loadingOlderMessages = false;
@@ -442,6 +445,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
   @override
   void dispose() {
+    _quoteHighlightTimer?.cancel();
     _readLifecycle?.dispose();
     DraftRecoveryJournal.changes.removeListener(_onDraftJournalChangedDm);
     if (_initialCachedOnly) {
@@ -1556,6 +1560,24 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     }
   }
 
+  Future<void> _showQuotedMessage(String id) async {
+    final request = ++_quoteRequest;
+    final chat = _currentChatIdDm;
+    final owner = widget.service.currentUserId;
+    bool current() => mounted && request == _quoteRequest &&
+        chat == _currentChatIdDm && owner == widget.service.currentUserId;
+    await _chatScroll.scrollToMessage(id,
+        orderedIds: widget.service.currentMessages.map((m) => m.id).toList(),
+        isCurrent: current);
+    if (!current() ||
+        _messageKeys[id]?.currentContext == null) return;
+    _quoteHighlightTimer?.cancel();
+    setState(() => _quotedMessageId = id);
+    _quoteHighlightTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _quotedMessageId = null);
+    });
+  }
+
   void _onTyping() {
     _typingUsers.add('Вы');
     _myTypingOff?.cancel();
@@ -2465,7 +2487,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
             final newLastId = list.last.id;
             final changed = (newLastId != _lastRenderedLastId);
             _lastRenderedLastId = newLastId;
-            if (changed && _chatScroll.nearBottom()) {
+            final sendingHere = list.last.isSending &&
+                list.last.isMine(widget.service.currentUserId);
+            if (changed && (sendingHere || _chatScroll.nearBottom())) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (!mounted) return;
                 _jumpToBottom();
@@ -2532,7 +2556,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                           currentUserId: widget.service.currentUserId,
                           entrySeenAt: _entrySeenAt,
                           showEntryNewBadge: _showEntryNewBadge,
-                          hoveredMessageId: _hoveredMessageId,
+                          hoveredMessageId: _hoveredMessageId ?? _quotedMessageId,
                           noAvatarSpacing: isDm,
                           hideAuthorLine: isDm,
                           enableDmReceipts: isDm,
@@ -2545,7 +2569,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                                       bubbleBytes: bytes,
                                       replyPreview: replyPreview,
                                       fallbackPosition: fallback),
-                          onReplyTap: (id) => _chatScroll.scrollToMessage(id),
+                          onReplyTap: _showQuotedMessage,
                           onReact: (ctx, id) =>
                               ca.ChatActions.showReactionPicker(
                                   ctx,

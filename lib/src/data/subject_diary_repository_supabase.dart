@@ -252,6 +252,7 @@ class SubjectDiaryRepositorySupabase implements SubjectDiaryRepository {
           final enriched = SubjectDiaryEntry(
             id: entry.id,
             subjectKey: entry.subjectKey,
+            lessonId: entry.lessonId,
             date: entry.date,
             text: entry.text,
             files: files,
@@ -273,7 +274,7 @@ class SubjectDiaryRepositorySupabase implements SubjectDiaryRepository {
   }
 
   @override
-  Future<List<SubjectDiaryEntry>> listByArgs(SubjectDiaryArgs args) async {
+  Future<List<SubjectDiaryEntry>> listByArgs(SubjectDiaryArgs args, {String? onlyLessonId}) async {
     if (!args.hasSubjectOffering) {
       return listBySubject(args.fallbackSubjectKey);
     }
@@ -283,13 +284,15 @@ class SubjectDiaryRepositorySupabase implements SubjectDiaryRepository {
     if (authorId.isEmpty || offeringId.isEmpty) return const [];
 
     try {
-      final rows = await _sb
+      var query = _sb
           .from('subject_diary_entries')
           .select(
             'id,team_id,author_id,lesson_id,entry_date,text,files_count,created_at,updated_at,subject_offering_id,subject_id,group_id,semester_number',
           )
           .eq('author_id', authorId)
-          .eq('subject_offering_id', offeringId)
+          .eq('subject_offering_id', offeringId);
+      if (onlyLessonId != null) query = query.eq('lesson_id', onlyLessonId);
+      final rows = await query
           .order('entry_date', ascending: false)
           .order('created_at', ascending: false)
           .limit(200);
@@ -304,6 +307,7 @@ class SubjectDiaryRepositorySupabase implements SubjectDiaryRepository {
           final enriched = SubjectDiaryEntry(
             id: entry.id,
             subjectKey: args.displayTitle,
+            lessonId: entry.lessonId,
             date: entry.date,
             text: entry.text,
             files: files,
@@ -447,6 +451,7 @@ class SubjectDiaryRepositorySupabase implements SubjectDiaryRepository {
               fallbackSubjectKey ??
               '')
           .toString(),
+      lessonId: _nullIfEmpty(m['lesson_id']?.toString()),
       date: parseDate(m['entry_date']),
       text: (m['text'] ?? m['note'] ?? '').toString().trim().isEmpty
           ? null

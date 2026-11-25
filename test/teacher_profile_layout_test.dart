@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -22,7 +23,8 @@ void main() {
           final path = request.url.path;
           if (path.endsWith('/get_published_teacher')) {
             body = {
-              'full_name': 'Преподаватель с длинным именем и отчеством',
+              'full_name':
+                  'Александрова-Семёнова Александрина Константиновна Иннокентьевна',
               'about_text':
                   'Научные интересы: системы водоснабжения, очистка стока и эксплуатация сооружений.'
             };
@@ -76,6 +78,11 @@ void main() {
         expect(find.textContaining('балл'), findsNothing);
         expect(tester.getSize(find.byType(ListView).first).width,
             lessThanOrEqualTo(760));
+        final name = find.text(
+            'Александрова-Семёнова Александрина Константиновна Иннокентьевна');
+        final nameParagraph = tester.renderObject<RenderParagraph>(name);
+        expect(nameParagraph.didExceedMaxLines, isFalse,
+            reason: 'The full teacher name must be readable with large fonts');
         final rate = find.widgetWithText(FilledButton, 'Оценить');
         await tester.ensureVisible(rate);
         await tester.pumpAndSettle();
@@ -91,6 +98,9 @@ void main() {
           final star = find.byTooltip('$score из 5');
           expect(star, findsOneWidget);
           expect(tester.getSize(star).width, greaterThanOrEqualTo(48));
+          await tester.ensureVisible(star);
+          await tester.pumpAndSettle();
+          expect(star.hitTestable(), findsOneWidget);
         }
         expect(tester.takeException(), isNull);
         final close = find.byTooltip('Закрыть без оценки');

@@ -55,38 +55,60 @@ class ChatScrollController {
     scroll.jumpTo(target.toDouble());
   }
 
-  Future<void> scrollToMessage(String id, {double alignment = 0.12}) async {
-    if (!scroll.hasClients) return;
-    final key = messageKeys[id];
-    if (key?.currentContext == null) {
-      // Пробуем приблизительно прокрутить по индексу, чтобы элемент попал в кэш и отрисовался
-      // Затем ещё раз ensureVisible после кадра
-      try {
-        // Маленький сдвиг для инициирования построения виджетов сверху/снизу
-        final target = (scroll.position.pixels + 300).clamp(
-            scroll.position.minScrollExtent, scroll.position.maxScrollExtent);
+  Future<void> scrollToMessage(
+    String id, {
+    double alignment = 0.12,
+    List<String>? orderedIds,
+    bool Function()? isCurrent,
+  }) async {
+    bool active() => scroll.hasClients && (isCurrent?.call() ?? true);
+    if (!active()) return;
+
+    if (messageKeys[id]?.currentContext == null) {
+      if (orderedIds == null) {
+        final position = scroll.position;
         await scroll.animateTo(
-          target,
+          (position.pixels + 300).clamp(position.minScrollExtent, position.maxScrollExtent),
           duration: const Duration(milliseconds: 180),
           curve: Curves.easeOut,
         );
-      } catch (_) {}
-
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
-        final retryKey = messageKeys[id];
-        if (retryKey?.currentContext != null) {
-          try {
-            await Scrollable.ensureVisible(
-              retryKey!.currentContext!,
-              duration: const Duration(milliseconds: 260),
-              alignment: alignment,
-              curve: Curves.easeOutCubic,
-            );
-          } catch (_) {}
+        await WidgetsBinding.instance.endOfFrame;
+      } else {
+        final targetIndex = orderedIds.indexOf(id);
+        if (targetIndex < 0 || orderedIds.length < 2) return;
+        // In a reversed list larger offsets show older messages. Estimate once,
+        // then narrow the offset interval using rows actually built each frame.
+        final index = {for (var i = 0; i < orderedIds.length; i++) orderedIds[i]: i};
+        var low = scroll.position.minScrollExtent;
+        var high = scroll.position.maxScrollExtent;
+        var offset = high - (high - low) * targetIndex / (orderedIds.length - 1);
+        for (var frame = 0; frame < 24 && active(); frame++) {
+          final previousMax = scroll.position.maxScrollExtent;
+          scroll.jumpTo(offset.clamp(scroll.position.minScrollExtent, previousMax));
+          await WidgetsBinding.instance.endOfFrame;
+          if (!active() || messageKeys[id]?.currentContext != null) break;
+          int? mountedIndex;
+          for (final entry in messageKeys.entries) {
+            if (entry.value.currentContext != null && index.containsKey(entry.key)) {
+              mountedIndex = index[entry.key];
+              break;
+            }
+          }
+          if (mountedIndex == null) return;
+          if (targetIndex < mountedIndex) {
+            low = scroll.position.pixels;
+            if (high == previousMax) high = scroll.position.maxScrollExtent;
+          } else {
+            high = scroll.position.pixels;
+          }
+          if (high - low < 0.5) return;
+          offset = (low + high) / 2;
         }
-      });
-      return;
+      }
     }
+    if (!active()) return;
+    final key = messageKeys[id];
+    if (key?.currentContext == null) return;
 
     // Precise positioning via RenderObject
     try {
@@ -124,7 +146,6 @@ class ChatScrollController {
     if (!scroll.hasClients) return true;
     return (scroll.position.pixels <=
             (scroll.position.minScrollExtent + 0.5)) ||
-        scroll.position.extentAfter <= 1 ||
         scroll.position.maxScrollExtent <= 0;
   }
 
@@ -132,7 +153,6 @@ class ChatScrollController {
     if (!scroll.hasClients) return true;
     final position = scroll.position;
     return position.pixels <= position.minScrollExtent + threshold ||
-        position.extentAfter <= threshold ||
         position.maxScrollExtent <= 0;
   }
 }

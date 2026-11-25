@@ -244,8 +244,8 @@ class ChatMessageList extends StatelessWidget {
             reverse: true,
             padding: const EdgeInsets.fromLTRB(24, 96.0, 24, 12),
             children: [
-              SizedBox(
-                height: height > 140 ? height - 108 : 180,
+              ConstrainedBox(
+                constraints: BoxConstraints(minHeight: height > 140 ? height - 108 : 180),
                 child: _EmptyChatState(
                   isDirectChat: isDirectChat,
                   onFocusComposer: onFocusComposer,
@@ -1834,7 +1834,7 @@ class _ChatLoadErrorState extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Center(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1854,7 +1854,7 @@ class _ChatLoadErrorState extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Проверьте соединение и попробуйте снова.',
+              'Сохранённые сообщения на устройстве недоступны. Проверьте соединение и попробуйте снова.',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onSurface.withValues(alpha: .62),
               ),

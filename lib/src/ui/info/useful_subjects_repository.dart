@@ -28,7 +28,7 @@ class UsefulSubjectsRepository {
 
   SupabaseClient get _sb => _client ??= Supabase.instance.client;
 
-  Future<List<UsefulSubject>> load({required String groupId, bool Function()? isCurrent}) async {
+  Future<List<UsefulSubject>> load({required String groupId, int? currentSemester, bool Function()? isCurrent}) async {
     void checkCurrent() {
       if (isCurrent != null && !isCurrent()) throw StateError('Subject plan session changed');
     }
@@ -50,12 +50,50 @@ class UsefulSubjectsRepository {
       checkCurrent();
       final fallbackRows = await _loadFallbackRows(groupId);
       checkCurrent();
-      return fallbackRows
-          .map(UsefulSubject.fromFallbackMap)
-          .toList(growable: false);
+      Map<String, (String, String)> memberships = const {};
+      if (rpcError is PostgrestException && rpcError.code == 'PGRST202' &&
+          _fallbackLoader == null && fallbackRows.isNotEmpty && currentSemester != null) {
+        memberships = await _confirmedChats(groupId);
+        checkCurrent();
+      }
+      return [
+        for (final row in fallbackRows)
+          UsefulSubject.fromFallbackMap(row, membership: memberships[row['id']], currentSemester: currentSemester),
+      ];
     } catch (fallbackError) {
       // Never mask a transport/RPC failure with an empty list.
       throw rpcError ?? fallbackError;
+    }
+  }
+
+  Future<Map<String, (String, String)>> _confirmedChats(String groupId) async {
+    final uid = _sb.auth.currentUser?.id;
+    if (uid == null) return {};
+    try {
+      final rows = await _sb.from('teams')
+          .select('id,subject_offering_id,team_members!inner(user_id),chats!inner(id,type)')
+          .eq('group_id', groupId).eq('team_members.user_id', uid).eq('chats.type', 'team_main');
+      if (_sb.auth.currentUser?.id != uid) return {};
+      final found = <String, (String, String)>{};
+      final ambiguous = <String>{};
+      for (final row in rows) {
+        final offering = row['subject_offering_id'], team = row['id'];
+        final members = row['team_members'], chats = row['chats'];
+        if (offering is! String || team is! String || team.isEmpty || members is! List ||
+            !members.any((m) => m is Map && m['user_id'] == uid) ||
+            chats is! List || chats.length != 1) continue;
+        final chat = chats.single;
+        if (chat is! Map || chat['type'] != 'team_main' || chat['id'] is! String ||
+            (chat['id'] as String).isEmpty) continue;
+        if (found.containsKey(offering)) ambiguous.add(offering);
+        found[offering] = (team, chat['id'] as String);
+      }
+      for (final offering in ambiguous) { found.remove(offering); }
+      return found;
+    } on PostgrestException {
+      return {};
+    } on Exception {
+      return {};
     }
   }
 

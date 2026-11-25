@@ -431,11 +431,14 @@ class SupabaseLearningRepository implements LearningRepository {
   }
 
   /// Strict server-only page; errors never fall back to ownerless legacy data.
-  Future<ConfirmedTeamChatPage> loadConfirmedChatPage(String chatId) async {
+  Future<ConfirmedTeamChatPage> loadConfirmedChatPage(String chatId,
+      {DateTime? beforeAt, String? beforeId}) async {
     if (chatId.isEmpty) throw ArgumentError('Chat id required');
     final rows = await _sb.rpc('get_chat_messages_page', params: {
       'p_chat_id': chatId,
       'p_limit': 100,
+      if (beforeAt != null) 'p_before_at': beforeAt.toUtc().toIso8601String(),
+      if (beforeId != null) 'p_before_id': beforeId,
     });
     if (rows is! List) throw const FormatException('Invalid chat page');
     final messages = <Message>[];
@@ -675,6 +678,43 @@ class SupabaseLearningRepository implements LearningRepository {
   }
 
   @override
+  Future<Message?> loadFileSourceMessage(String teamId, String messageId) async {
+    final owner = _sb.auth.currentUser?.id;
+    if (owner == null || messageId.isEmpty) return null;
+    final chatId = await _getTeamMainChatId(teamId);
+    if (chatId == null) return null;
+    try {
+      // The table supplies a cursor only. The history RPC enforces current team
+      // membership, archive expiry and the student's personal clear boundary.
+      final cursor = await _sb.from('messages').select('created_at')
+          .eq('chat_id', chatId).eq('id', messageId).maybeSingle();
+      final at = DateTime.tryParse(cursor?['created_at']?.toString() ?? '');
+      if (at == null) return null;
+      var before = at.add(const Duration(microseconds: 1));
+      String? beforeId;
+      while (_sb.auth.currentUser?.id == owner) {
+        final page = await loadConfirmedChatPage(chatId, beforeAt: before, beforeId: beforeId);
+        if (_sb.auth.currentUser?.id != owner) return null;
+        for (final message in page.messages) {
+          if (message.id == messageId) return message;
+        }
+        if (!page.hasMore || page.messages.isEmpty) return null;
+        final first = page.messages.first;
+        if (first.at.isBefore(at) || (beforeId != null && first.id == beforeId)) return null;
+        before = first.at;
+        beforeId = first.id;
+      }
+    } on PostgrestException catch (error) {
+      if (error.code == '42501' || error.code == 'P0001' &&
+          const {'forbidden', 'chat_not_found', 'academic_chat_expired', 'not_authenticated'}.contains(error.message)) {
+        return null;
+      }
+      rethrow;
+    }
+    return null;
+  }
+
+  @override
   Future<Message?> loadMessageById(String teamId, String messageId) async {
     try {
       final chatId = await _getTeamMainChatId(teamId);
@@ -714,36 +754,47 @@ class SupabaseLearningRepository implements LearningRepository {
       final chatId = await _getTeamMainChatId(teamId);
       if (chatId == null || chatId.isEmpty) return [];
 
-      final rows = await _sb
-          .from('messages')
-          .select('*')
-          .eq('chat_id', chatId)
-          .lte('created_at', before.at.toUtc().toIso8601String())
-          .order('created_at', ascending: false)
-          .limit(limit + 1);
-
-      final older = <Message>[];
-      for (final row in rows as List) {
-        final data = Map<String, dynamic>.from(row as Map);
-        final id = (data['id'] ?? '').toString();
-        if (id.isEmpty || id == before.id) continue;
-
-        final attachments = await _loadChatFilesForMessage(id);
-        if (attachments.isNotEmpty) {
-          data['attachments'] = attachments.map((e) => e.toJson()).toList();
-        }
-
-        await _applyAuthorIdentity(data, (data['author_id'] ?? '').toString());
-
-        older.add(_mapMessageRow(
-          data,
-          chatId: chatId,
-          currentUserId: _sb.auth.currentUser?.id ?? '',
-        ));
+      final currentUser = _sb.auth.currentUser?.id ?? '';
+      try {
+        final rows = await _sb.rpc('get_chat_messages_page', params: {
+          'p_chat_id': chatId,
+          'p_limit': limit,
+          'p_before_at': before.at.toUtc().toIso8601String(),
+          'p_before_id': before.id,
+        }) as List;
+        return rows.map((row) => _mapMessageRow(Map<String, dynamic>.from(row as Map),
+            chatId: chatId, currentUserId: currentUser, preserveStructuredForward: true)).toList();
+      } on PostgrestException catch (error) {
+        if (error.code != 'PGRST202') rethrow;
       }
 
-      older.sort((a, b) => a.at.compareTo(b.at));
-      return older.take(limit).toList();
+      // Older installations without the page RPC still use the same composite
+      // cursor. Select one extra dimension (id) to disambiguate equal timestamps.
+      final cutoff = before.at.toUtc().toIso8601String();
+      final rows = await _sb.from('messages').select('*').eq('chat_id', chatId)
+          .or('created_at.lt.$cutoff,and(created_at.eq.$cutoff,id.lt.${before.id})')
+          .order('created_at', ascending: false).order('id', ascending: false)
+          .limit(limit);
+      final files = await _loadChatFilesByMessageIds(
+          [for (final row in rows) row['id'] as String]);
+      final authors = <String, Map<String, dynamic>>{};
+      final older = <Message>[];
+      for (final data in rows.reversed) {
+        final attachments = files[data['id']];
+        if (attachments != null && attachments.isNotEmpty) {
+          data['attachments'] = attachments.map((f) => f.toJson()).toList();
+        }
+        final author = (data['author_id'] ?? '').toString();
+        if (!authors.containsKey(author)) {
+          final identity = <String, dynamic>{};
+          await _applyAuthorIdentity(identity, author);
+          authors[author] = identity;
+        }
+        data.addAll(authors[author]!);
+        older.add(_mapMessageRow(data, chatId: chatId, currentUserId: currentUser,
+            preserveStructuredForward: true));
+      }
+      return older;
     } catch (e, st) {
       debugPrint('[loadOlderMessages] error: $e\n$st');
       rethrow;

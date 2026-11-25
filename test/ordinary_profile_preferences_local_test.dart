@@ -13,7 +13,9 @@ import 'package:student_platform/src/core/auth_session_scope_host.dart';
 import 'package:student_platform/src/themes/themes.dart';
 import 'package:student_platform/src/ui/notifications/notification_settings_screen.dart';
 import 'package:student_platform/src/ui/profile/edit_profile_screen.dart';
+import 'package:student_platform/src/ui/profile/profile_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'support/student_storage_journeys.dart';
 
 const _origin = 'http://127.0.0.1:55321';
 
@@ -32,7 +34,7 @@ class _LocalHttp extends http.BaseClient {
     if (request.url.origin != _origin) throw StateError('Loopback only');
     final path = request.url.pathSegments.last;
     if (path == 'update_my_notification_preferences') preferenceWrites++;
-    if (unavailable == path && (path != 'users' || request.method == 'PATCH')) {
+    if (unavailable == '*' || unavailable == path && (path != 'users' || request.method == 'PATCH')) {
       refused++;
       return http.StreamedResponse(
           Stream.value(utf8.encode('{"message":"Local QA offline"}')), 503,
@@ -101,6 +103,7 @@ void main() {
         GoRoute(
             path: '/notification-settings',
             builder: (_, state) => const NotificationSettingsScreen()),
+        GoRoute(path: '/profile', builder: (_, state) => const ProfileScreen()),
       ]);
 
       Future<void> until(
@@ -313,6 +316,34 @@ void main() {
         expect(reopened.user?.id, uid);
         debugPrint(
             'PASS PROFILE-5 correct a mismatched confirmation and sign in with the exact new password');
+        await peer.from('users').update({'status':'Отошёл'}).eq('id',students.last['id']);
+        for (final (account, password, own, foreign) in [
+          (students.last, students.last['password'] as String, 'Отошёл', 'В библиотеке'),
+          (student, exact, 'В библиотеке', 'Отошёл'),
+        ]) {
+          router.go('/');
+          await visible(find.text('Открыть профиль'));
+          await until(() => find.byType(EditProfileScreen).evaluate().isEmpty &&
+              find.byType(ProfileScreen).evaluate().isEmpty, 'Previous profile route still visible');
+          await me.auth.signOut();
+          await me.auth.signInWithPassword(email:account['email'], password:password);
+          router.go('/profile');
+          final elapsed = Stopwatch()..start();
+          await until(() {
+            final page = find.byType(ProfileScreen);
+            expect(find.descendant(of:page, matching:find.text(foreign)), findsNothing);
+            return find.descendant(of:page, matching:find.text(own)).evaluate().isNotEmpty;
+          }, 'Profile did not display its own status');
+          debugPrint('E2E-095 profile visible in ${elapsed.elapsedMilliseconds} ms');
+        }
+        debugPrint('PASS E2E-095 two students open their own statuses on successive logins');
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump(const Duration(milliseconds: 350));
+        transport.unavailable = '*';
+        final priorRefusals = transport.refused;
+        await exerciseStudentStorage(tester, config['chat'] as String);
+        expect(transport.refused, priorRefusals, reason: 'Offline storage UI must not request student data');
+        transport.unavailable = null;
         expect(tester.takeException(), isNull);
       } finally {
         await tester.pumpWidget(const SizedBox.shrink());

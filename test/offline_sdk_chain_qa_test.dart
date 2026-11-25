@@ -263,6 +263,17 @@ void main() {
     expect(tester.widgetList<Image>(find.byType(Image)).where((i) => i.image is NetworkImage), isEmpty);
     expect(tester.widgetList<CircleAvatar>(find.byType(CircleAvatar))
         .where((avatar) => avatar.backgroundImage is NetworkImage || avatar.foregroundImage is NetworkImage), isEmpty);
+    Future<void> expectCachedImage() async {
+      final image = find.byWidgetPredicate((widget) => widget is Image &&
+          widget.image is MemoryImage &&
+          listEquals((widget.image as MemoryImage).bytes, imageBytes));
+      final elapsed = Stopwatch()..start();
+      while (image.evaluate().isEmpty && elapsed.elapsed < const Duration(seconds: 8)) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(image, findsWidgets);
+    }
     await tester.tap(find.text('Локальный чат QA'));
     await tester.pumpAndSettle();
     for (var i = 0; i < 100 && find.text('qa.pdf').evaluate().isEmpty; i++) {
@@ -272,10 +283,7 @@ void main() {
     expect(find.byType(UnifiedChatScreen), findsOneWidget);
     expect(find.text('Локальное сообщение QA'), findsOneWidget);
     expect(find.text('qa.pdf'), findsOneWidget);
-    expect(tester.widgetList<Image>(find.byType(Image))
-        .where((image) => image.image is MemoryImage &&
-            (image.image as MemoryImage).bytes.length == imageBytes.length &&
-            listEquals((image.image as MemoryImage).bytes, imageBytes)), isNotEmpty);
+    await expectCachedImage();
     expect(calls, admissionCalls);
     await tester.pageBack();
     await tester.pumpAndSettle();
@@ -286,15 +294,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 20));
     }
     expect(find.text('Сообщение команды QA'), findsOneWidget);
-    for (var i = 0; i < 100 && tester.widgetList<Image>(find.byType(Image))
-        .where((image) => image.image is MemoryImage &&
-            listEquals((image.image as MemoryImage).bytes, imageBytes)).isEmpty; i++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
-      await tester.pump(const Duration(milliseconds: 20));
-    }
-    expect(tester.widgetList<Image>(find.byType(Image))
-        .where((image) => image.image is MemoryImage &&
-            listEquals((image.image as MemoryImage).bytes, imageBytes)), isNotEmpty);
+    await expectCachedImage();
     await tester.runAsync(() async {
       final originalBinding = binding;
       binding = OfflineSessionBinding(issuer: 'https://example.invalid/auth/v1',

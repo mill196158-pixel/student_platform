@@ -301,6 +301,8 @@ void _showVacancyDetailSheet(
                     await launchUrl(uri, mode: LaunchMode.externalApplication);
                   }
                 },
+          onComposeEmail: isDemo ? null : (uri) =>
+              launchUrl(uri, mode: LaunchMode.externalApplication),
           onRevealContacts: isDemo || !card.hasContacts
               ? null
               : () => vacancyService.fetchContacts(card.id),
@@ -945,7 +947,7 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
       );
     }
 
-    final subjects = await _subjectsRepository.load(groupId: groupId, isCurrent: valid);
+    final subjects = await _subjectsRepository.load(groupId: groupId, currentSemester: contextData.currentSemesterNumber, isCurrent: valid);
     if (valid != null && !valid()) throw StateError('Subject plan session changed');
 
     return InfoPlanState(

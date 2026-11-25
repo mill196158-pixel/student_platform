@@ -1,3 +1,4 @@
+import 'personal_task_deadline_button.dart';
 import 'package:student_ui/student_ui.dart' show ProductTheme, ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 
@@ -10,14 +11,16 @@ import '../schedule/subject_diary_screen.dart';
 import 'diary_expansion_state.dart';
 
 class PersonalDiaryScreen extends StatefulWidget {
-  const PersonalDiaryScreen({super.key, this.service});
+  const PersonalDiaryScreen({super.key, this.service, this.assignmentId, this.now});
   final PersonalDiaryService? service;
+  final String? assignmentId;
+  final DateTime Function()? now;
 
   @override
   State<PersonalDiaryScreen> createState() => _PersonalDiaryScreenState();
 }
 
-class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
+class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> with WidgetsBindingObserver {
   late final _service = widget.service ?? PersonalDiaryService();
   final _searchController = TextEditingController();
   final _assignmentDoneOverrides = <String, bool>{};
@@ -25,10 +28,17 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
   final _pendingMutations = <String>{};
   int _refreshGeneration = 0;
   late Future<PersonalDiaryData> _future;
+  late DateTime _today;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _today = DateUtils.dateOnly(widget.now?.call() ?? DateTime.now());
+    if (widget.assignmentId != null) {
+      _future = _loadForAssignment(widget.assignmentId!);
+      return;
+    }
     // Instant RAM cache: if we already loaded the diary this session, show it
     // on the first frame (no spinner) and refresh quietly in the background.
     final memoryCached = _service.peekCached();
@@ -38,6 +48,49 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
     } else {
       _future = _loadWithCache();
     }
+  }
+
+  Future<PersonalDiaryData> _loadForAssignment(String id) async {
+    final data = await _service.loadAndCache();
+    if (data.academicContext.userId != _service.authenticatedUserId) {
+      throw StateError('Session changed');
+    }
+    if (!mounted || widget.assignmentId != id) return data;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          widget.assignmentId != id ||
+          ModalRoute.of(context)?.isCurrent != true ||
+          data.academicContext.userId != _service.authenticatedUserId) return;
+      final assignment =
+          data.publishedAssignments.where((item) => item.id == id).firstOrNull;
+      if (assignment == null) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Задание недоступно')));
+      } else if (assignment.dueAt == null) {
+        _openAssignmentDetails(assignment);
+      } else {
+        _openDiaryCalendar(data, openAssignment: assignment);
+      }
+    });
+    return data;
+  }
+
+  @override
+  void didUpdateWidget(PersonalDiaryScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.assignmentId != null &&
+        widget.assignmentId != oldWidget.assignmentId) {
+      _future = _loadForAssignment(widget.assignmentId!);
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    final today = DateUtils.dateOnly(widget.now?.call() ?? DateTime.now());
+    if (DateUtils.isSameDay(today, _today)) return;
+    setState(() => _today = today);
+    _refreshSilently();
   }
 
   Future<PersonalDiaryData> _loadWithCache() async {
@@ -68,6 +121,7 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _searchController.dispose();
     super.dispose();
   }
@@ -122,6 +176,11 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
           final upcomingItems = _buildUpcomingItems(data)
               .where((item) => _matchesUpcomingItem(item, query))
               .toList();
+          bool isToday(_UpcomingDiaryItem item) => DateUtils.isSameDay(
+              item.task != null ? item.dueAt : item.dueAt?.toLocal(), _today);
+          final todayItems = upcomingItems.where(isToday).toList();
+          final otherItems =
+              upcomingItems.where((item) => !isToday(item)).take(8).toList();
           final hiddenDoneItems = _buildDoneUpcomingItems(data)
               .where((item) => _matchesUpcomingItem(item, query))
               .toList();
@@ -158,16 +217,28 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
                       if (upcomingItems.isEmpty)
                         const _EmptyCard(
                           text: 'Активных ближайших дел пока нет.',
-                        )
-                      else
+                        ),
+                      if (todayItems.isNotEmpty)
+                        _CollapsibleTasksSection(
+                          key: ValueKey('today_tasks_${data.academicContext.userId}'),
+                          userId: data.academicContext.userId,
+                          section: 'today_tasks',
+                          title: 'Сегодня',
+                          subtitle: '${todayItems.length} в списке',
+                          icon: Icons.today_outlined,
+                          items: todayItems,
+                          itemBuilder: _buildUpcomingCard,
+                          initiallyExpanded: true,
+                        ),
+                      if (otherItems.isNotEmpty)
                         _CollapsibleTasksSection(
                           key: ValueKey('active_tasks_${data.academicContext.userId}'),
                           userId: data.academicContext.userId,
                           section: 'active_tasks',
                           title: 'Активные ближайшие',
-                          subtitle: '${upcomingItems.length} в списке',
+                          subtitle: '${otherItems.length} в списке',
                           icon: Icons.upcoming_rounded,
-                          items: upcomingItems,
+                          items: otherItems,
                           itemBuilder: _buildUpcomingCard,
                           initiallyExpanded: true,
                         ),
@@ -236,11 +307,17 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
 
   List<_UpcomingDiaryItem> _buildUpcomingItems(PersonalDiaryData data) {
     final items = <_UpcomingDiaryItem>[
-      ...data.upcomingAssignments.map(_UpcomingDiaryItem.groupAssignment),
+      ...(data.publishedAssignments.isEmpty
+              ? data.upcomingAssignments
+              : data.publishedAssignments)
+          .map(_UpcomingDiaryItem.groupAssignment),
       ...data.groupActions
           .where((a) => !a.isCompleted)
           .map(_UpcomingDiaryItem.groupAction),
-      ...data.upcomingPersonalTasks.map(_UpcomingDiaryItem.personalTask),
+      ...(data.personalTasks.isEmpty
+              ? data.upcomingPersonalTasks
+              : data.personalTasks)
+          .map(_UpcomingDiaryItem.personalTask),
     ].where((item) => !_isUpcomingItemDone(item)).toList()
       ..sort((a, b) {
         final aDue = a.dueAt;
@@ -250,7 +327,7 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
         if (bDue != null) return 1;
         return a.createdAt.compareTo(b.createdAt);
       });
-    return items.take(8).toList();
+    return items;
   }
 
   List<_UpcomingDiaryItem> _buildDoneUpcomingItems(PersonalDiaryData data) {
@@ -540,6 +617,10 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
         return _PersonalTaskDetailsSheet(
           task: task,
           statusOverride: _taskStatus(task),
+          onSetDeadline: (date) async {
+            await _service.updatePersonalTaskDeadline(task.id, date);
+            if (mounted) _refreshSilently();
+          },
           onSetStatus: (status) async {
             Navigator.of(ctx).pop();
             await _setPersonalTaskStatus(task, status);
@@ -655,10 +736,21 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
     }
   }
 
-  Future<void> _openDiaryCalendar(PersonalDiaryData data) async {
-    final lessons = await _service.loadScheduleLessons();
-    if (!mounted) return;
-    await showModalBottomSheet<void>(
+  Future<void> _openDiaryCalendar(PersonalDiaryData data,
+      {PersonalDiaryAssignment? openAssignment}) async {
+    var lessons = <PersonalDiaryLesson>[];
+    try {
+      lessons = await _service.loadScheduleLessons();
+    } catch (_) {
+      if (openAssignment == null) rethrow;
+    }
+    if (!mounted ||
+        (openAssignment != null &&
+            (widget.assignmentId != openAssignment.id ||
+                ModalRoute.of(context)?.isCurrent != true ||
+                data.academicContext.userId != _service.authenticatedUserId)))
+      return;
+    final calendar = showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
@@ -669,6 +761,7 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
       builder: (ctx) {
         return _DiaryCalendarSheet(
           data: data,
+          initialDate: openAssignment?.dueAt?.toLocal(),
           lessons: lessons,
           assignmentDone: _assignmentDone,
           taskStatus: _taskStatus,
@@ -695,6 +788,10 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> {
         );
       },
     );
+    if (openAssignment != null) {
+      await _openAssignmentDetails(openAssignment);
+    }
+    await calendar;
   }
 
   Future<void> _createPersonalTask(PersonalDiaryData data) async {
@@ -894,6 +991,7 @@ typedef _SavePersonalTask = Future<PersonalDiaryTask> Function({
 });
 
 class _DiaryCalendarSheet extends StatefulWidget {
+  final DateTime? initialDate;
   final PersonalDiaryData data;
   final List<PersonalDiaryLesson> lessons;
   final bool Function(PersonalDiaryAssignment assignment) assignmentDone;
@@ -903,6 +1001,7 @@ class _DiaryCalendarSheet extends StatefulWidget {
   final ValueChanged<PersonalDiaryTask> onOpenTask;
 
   const _DiaryCalendarSheet({
+    this.initialDate,
     required this.data,
     required this.lessons,
     required this.assignmentDone,
@@ -923,7 +1022,7 @@ class _DiaryCalendarSheetState extends State<_DiaryCalendarSheet> {
   @override
   void initState() {
     super.initState();
-    final initial = _initialDayWithEvents();
+    final initial = widget.initialDate ?? _initialDayWithEvents();
     _visibleMonth = DateTime(initial.year, initial.month);
     _selectedDay = DateTime(initial.year, initial.month, initial.day);
   }
@@ -938,80 +1037,83 @@ class _DiaryCalendarSheetState extends State<_DiaryCalendarSheet> {
         constraints: BoxConstraints(maxHeight: maxHeight),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Календарь дневника',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurface,
-                            fontWeight: FontWeight.w900,
-                          ),
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () => setState(() {
-                      _visibleMonth =
-                          DateTime(_visibleMonth.year, _visibleMonth.month - 1);
-                    }),
-                    icon: const Icon(Icons.chevron_left_rounded),
-                  ),
-                  IconButton(
-                    onPressed: () => setState(() {
-                      _visibleMonth =
-                          DateTime(_visibleMonth.year, _visibleMonth.month + 1);
-                    }),
-                    icon: const Icon(Icons.chevron_right_rounded),
-                  ),
-                ],
-              ),
-              Text(
-                '${_monthName(_visibleMonth.month)} ${_visibleMonth.year}',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant, fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 12),
-              const _DiaryCalendarLegend(),
-              const SizedBox(height: 10),
-              _MonthGrid(
-                month: _visibleMonth,
-                selectedDay: _selectedDay,
-                eventColorsForDay: (day) {
-                  final dayEvents = events[_dayKey(day)] ?? const [];
-                  return dayEvents.map(_eventColor).toList();
-                },
-                onSelect: (day) => setState(() => _selectedDay = day),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'События на ${_fmtDate(_selectedDay)}',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurface,
-                      fontWeight: FontWeight.w900,
-                    ),
-              ),
-              const SizedBox(height: 8),
-              Flexible(
-                child: selectedEvents.isEmpty
-                    ? const _EmptyCard(text: 'На этот день событий нет.')
-                    : ListView.separated(
-                        shrinkWrap: true,
-                        itemCount: selectedEvents.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 8),
-                        itemBuilder: (ctx, index) {
-                          final event = selectedEvents[index];
-                          return _DiaryCalendarEventTile(
-                            event: event,
-                            onTap: () => _openEvent(event),
-                          );
-                        },
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Календарь дневника',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              color: Theme.of(context).colorScheme.onSurface,
+                              fontWeight: FontWeight.w900,
+                            ),
                       ),
-              ),
-            ],
+                    ),
+                    IconButton(
+                      onPressed: () => setState(() {
+                        _visibleMonth = DateTime(
+                            _visibleMonth.year, _visibleMonth.month - 1);
+                      }),
+                      icon: const Icon(Icons.chevron_left_rounded),
+                    ),
+                    IconButton(
+                      onPressed: () => setState(() {
+                        _visibleMonth = DateTime(
+                            _visibleMonth.year, _visibleMonth.month + 1);
+                      }),
+                      icon: const Icon(Icons.chevron_right_rounded),
+                    ),
+                  ],
+                ),
+                Text(
+                  '${_monthName(_visibleMonth.month)} ${_visibleMonth.year}',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 12),
+                const _DiaryCalendarLegend(),
+                const SizedBox(height: 10),
+                _MonthGrid(
+                  month: _visibleMonth,
+                  selectedDay: _selectedDay,
+                  eventColorsForDay: (day) {
+                    final dayEvents = events[_dayKey(day)] ?? const [];
+                    return dayEvents.map(_eventColor).toList();
+                  },
+                  onSelect: (day) => setState(() => _selectedDay = day),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'События на ${_fmtDate(_selectedDay)}',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontWeight: FontWeight.w900,
+                      ),
+                ),
+                const SizedBox(height: 8),
+                if (selectedEvents.isEmpty)
+                  const _EmptyCard(text: 'На этот день событий нет.')
+                else
+                  ListView.separated(
+                    physics: const NeverScrollableScrollPhysics(),
+                    shrinkWrap: true,
+                    itemCount: selectedEvents.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (ctx, index) {
+                      final event = selectedEvents[index];
+                      return _DiaryCalendarEventTile(
+                        event: event,
+                        onTap: () => _openEvent(event),
+                      );
+                    },
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1039,7 +1141,7 @@ class _DiaryCalendarSheetState extends State<_DiaryCalendarSheet> {
       final due = assignment.dueAt;
       if (due == null) continue;
       add(
-        due,
+        due.toLocal(),
         _DiaryCalendarEvent.assignment(
           title: assignment.title,
           subtitle: 'Невыполненное задание группы',
@@ -1603,6 +1705,7 @@ class _PersonalTaskFormSheetState extends State<_PersonalTaskFormSheet> {
   }
 
   Future<void> _save() async {
+    if (_saving) return;
     final title = _titleController.text.trim();
     if (title.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2990,11 +3093,13 @@ class _PersonalTaskDetailsSheet extends StatelessWidget {
   final PersonalDiaryTask task;
   final String statusOverride;
   final Future<void> Function(String status) onSetStatus;
+  final Future<void> Function(DateTime date) onSetDeadline;
 
   const _PersonalTaskDetailsSheet({
     required this.task,
     required this.statusOverride,
     required this.onSetStatus,
+    required this.onSetDeadline,
   });
 
   @override
@@ -3042,7 +3147,8 @@ class _PersonalTaskDetailsSheet extends StatelessWidget {
                     height: 1.35,
                   ),
             ),
-            const SizedBox(height: 16),
+            PersonalTaskDeadlineButton(current: task.dueAt, save: onSetDeadline),
+            const SizedBox(height: 8),
             Row(
               children: [
                 Expanded(

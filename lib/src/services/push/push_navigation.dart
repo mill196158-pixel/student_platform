@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:student_platform/src/navigation/root_nav.dart';
 import 'package:student_platform/src/services/push/push_payload.dart';
+import 'package:student_platform/src/services/push/active_chat_tracker.dart';
 import 'package:student_platform/src/ui/chats/direct_chat_screen.dart';
 import 'package:student_platform/src/ui/chats/dm_title.dart';
 import 'package:student_platform/src/ui/friends/friend_profile_screen.dart';
@@ -113,7 +114,10 @@ class PushNavigation {
         break;
       case 'assignment':
         final ctx = pushContext ?? tabContext;
-        if (ctx != null && ctx.mounted) ctx.push('/my-diary');
+        if (ctx != null && ctx.mounted) {
+          final id = payload.assignmentId;
+          ctx.push(Uri(path: '/my-diary', queryParameters: id == null ? null : {'assignment': id}).toString());
+        }
         break;
       case 'schedule_change':
         if (tabContext != null) {
@@ -278,6 +282,8 @@ class PushNavigation {
   ) async {
     var teamId = payload.teamId;
     final chatId = payload.chatId;
+
+    if (ActiveChatTracker.instance.isCurrentTeamChat(teamId, chatId)) return;
 
     if ((teamId == null || teamId.isEmpty) &&
         chatId != null &&

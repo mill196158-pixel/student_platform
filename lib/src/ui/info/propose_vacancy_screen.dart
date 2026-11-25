@@ -404,6 +404,9 @@ class _ProposeVacancyScreenState extends State<ProposeVacancyScreen> {
                           const SizedBox(height: 16),
                           TextFormField(
                             controller: _locationController,
+                            minLines: 1,
+                            maxLines: 3,
+                            keyboardType: TextInputType.multiline,
                             decoration: const InputDecoration(
                               labelText: 'Местоположение (текст)',
                             ),

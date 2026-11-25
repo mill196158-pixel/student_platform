@@ -1,5 +1,6 @@
 """Run a local Flutter suite against its own PostgREST schema and synthetic accounts."""
 from contextlib import ExitStack
+from http.client import RemoteDisconnected
 import json
 import os
 from pathlib import Path
@@ -31,7 +32,7 @@ def drop_schema(schema):
     assert "(0 rows)" in sql(f"select 1 from pg_namespace where nspname='{schema}';")
 
 
-def run_suite(name, setup, target, env_key, student_count=1):
+def run_suite(name, setup, target, env_key, student_count=1, phases=(None,), run_client=None):
     tag = uuid4().hex[:12]
     schema = "e2e_" + name + "_" + tag
     gateway = "e2e-" + name + "-rest-" + tag
@@ -72,7 +73,7 @@ def run_suite(name, setup, target, env_key, student_count=1):
             try:
                 with opener.open("http://" + address + "/", timeout=2):
                     break
-            except URLError as error:
+            except (URLError, RemoteDisconnected) as error:
                 if getattr(error, "code", None) in (401, 403):
                     break
                 if attempt == 29:
@@ -81,8 +82,13 @@ def run_suite(name, setup, target, env_key, student_count=1):
         env = dict(os.environ, **{env_key: json.dumps(dict(
             schema=schema, restPort=port, anon=status["ANON_KEY"],
             accounts=accounts, **accounts[0], **values))})
-        result = subprocess.run(["flutter.bat" if os.name == "nt" else "flutter", "test",
-            "--no-pub", "-d", "windows", "--reporter=expanded",
-            "--dart-define=SUPABASE_URL=http://127.0.0.1:55321", target], cwd=ROOT, env=env)
+        command = ["flutter.bat" if os.name == "nt" else "flutter", "test",
+                   "--no-pub", "-d", "windows", "--reporter=expanded",
+                   "--dart-define=SUPABASE_URL=http://127.0.0.1:55321", target]
+        for phase in phases:
+            phase_env = env if phase is None else dict(env, STUDENT_QA_PHASE=phase)
+            result = (run_client or subprocess.run)(command, cwd=ROOT, env=phase_env)
+            if result.returncode:
+                break
     print(f"PASS cleanup of isolated {name} schema, REST container and test accounts", flush=True)
     return result.returncode

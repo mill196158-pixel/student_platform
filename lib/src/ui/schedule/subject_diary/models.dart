@@ -74,12 +74,14 @@ class SubjectDiaryArgs {
 class SubjectDiaryEntry {
   final String id;
   final String subjectKey;
+  final String? lessonId;
   final DateTime date; // день записи (без времени)
   final String? text;  // заметка
   final List<SubjectDiaryFile> files; // файлы/фото
   SubjectDiaryEntry({
     required this.id,
     required this.subjectKey,
+    this.lessonId,
     required this.date,
     this.text,
     this.files = const [],

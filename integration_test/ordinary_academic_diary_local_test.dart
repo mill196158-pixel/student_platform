@@ -1,18 +1,59 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
+import 'package:http/http.dart' as http;
 import 'package:integration_test/integration_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_platform/src/config/supabase_config.dart';
+import 'package:student_platform/src/services/push/push_navigation.dart';
+import 'package:student_platform/src/services/push/push_payload.dart';
 import 'package:student_platform/src/data/personal_diary_service.dart';
+import 'package:student_platform/src/ui/profile/personal_diary_screen.dart';
 import 'package:student_platform/src/ui/schedule/lesson_details_screen.dart';
+import 'package:student_platform/src/ui/learning/assignment_details_screen.dart';
 import 'package:student_platform/src/ui/schedule/models/lesson.dart';
 import 'package:student_platform/src/ui/schedule/schedule_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'support/local_schema_http_client.dart';
+
+class _HoldSavedDiary extends PersonalDiaryService {
+  final saved = Completer<void>();
+  final release = Completer<void>();
+
+  @override
+  Future<void> saveCached(PersonalDiaryData data, {int? semesterNumber}) async {
+    await super.saveCached(data, semesterNumber: semesterNumber);
+    saved.complete();
+    await release.future;
+  }
+}
+
+class _DiaryHttpClient extends LocalSchemaHttpClient {
+  _DiaryHttpClient(super.port, this.delayTasks);
+  final bool delayTasks;
+  int taskPosts = 0;
+  Completer<void>? holdTask;
+  final taskResponses = <int>[];
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    if (delayTasks &&
+        request.method == 'POST' &&
+        request.url.path.endsWith('/personal_diary_tasks')) {
+      taskPosts++;
+      if (holdTask != null) await holdTask!.future;
+      final response = await super.send(request);
+      taskResponses.add(response.statusCode);
+      debugPrint('Delayed task POST response ${response.statusCode}');
+      return response;
+    }
+    return super.send(request);
+  }
+}
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -26,7 +67,8 @@ void main() {
     expect(SupabaseConfig.url, localSupabaseUrl);
     tester.testTextInput.register();
     SharedPreferences.setMockInitialValues({});
-    final httpClient = LocalSchemaHttpClient(data['restPort'] as int);
+    final httpClient =
+        _DiaryHttpClient(data['restPort'] as int, data['backlog'] == true);
     await Supabase.initialize(
       url: localSupabaseUrl,
       publishableKey: data['anon'] as String,
@@ -106,6 +148,464 @@ void main() {
     await tester
         .pumpWidget(MaterialApp(home: LessonDetailsScreen(lesson: lesson)));
     await diary();
+    if (data['backlog'] == true) {
+      final accounts = (data['accounts'] as List).cast<Map<String, dynamic>>();
+      final tasks = client.from('personal_diary_tasks');
+      final entries = client.from('subject_diary_entries');
+      final secondLesson = Lesson(
+          id: data['secondLesson'] as String,
+          date: lessonDay,
+          week: 2,
+          day: '',
+          pairNum: 4,
+          start: const TimeOfDay(hour: 14, minute: 0),
+          end: const TimeOfDay(hour: 15, minute: 30),
+          subjectRaw: lesson.subjectRaw,
+          subjectOfferingId: lesson.subjectOfferingId);
+      Future<void> showLesson(Lesson selected) async {
+        await tester.pumpWidget(MaterialApp(
+            key: UniqueKey(), home: LessonDetailsScreen(lesson: selected)));
+        await animate();
+      }
+
+      Future<void> login(int index) async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await animate();
+        await client.auth.signOut(scope: SignOutScope.local);
+        final account = accounts[index];
+        final result = await client.auth.signInWithPassword(
+            email: account['email'], password: account['password']);
+        expect(result.user!.id, account['student']);
+        await showLesson(lesson);
+      }
+
+      const repeatedTitle = 'Backlog twin deadline';
+      final now = DateTime.now();
+      final early = DateTime(now.year, now.month + 1, 7);
+      final late = DateTime(now.year, now.month + 1, 9);
+      Future<void> searchTwins() async {
+        await tester.enterText(
+            field(hint: 'Поиск по дневнику предмета'), repeatedTitle);
+        await animate();
+      }
+
+      Future<void> twin(DateTime due, String description) async {
+        await tap(find.byIcon(Icons.add));
+        await tap(find.text('Личная задача'));
+        await tester.enterText(field(label: 'Название'), repeatedTitle);
+        await tester.enterText(
+            field(label: 'Описание, если нужно'), description);
+        await tap(find.text('Добавить дедлайн'));
+        final picker = find.byType(DatePickerDialog);
+        await waitFor(picker);
+        await tap(find.byTooltip(
+            MaterialLocalizations.of(tester.element(picker)).nextMonthTooltip));
+        await tap(
+            find.descendant(of: picker, matching: find.text('${due.day}')));
+        await tap(find.text('Выбрать'));
+        await tap(find.text('Создать задачу'));
+        await waitFor(find.text('до ${displayDate(due)}'));
+      }
+
+      final phase = Platform.environment['STUDENT_QA_PHASE'];
+      if (phase == 'deadline') {
+        const title = 'Month boundary task';
+        final today = DateUtils.dateOnly(DateTime.now());
+        final next = DateTime(today.year, today.month + 1, 1);
+        final task = await PersonalDiaryService().createPersonalTask(
+            title: title, subjectOfferingId: data['offering'], dueAt: today);
+        expect(task.id.startsWith('local-'), isFalse);
+        await showLesson(lesson);
+        await diary();
+        await tester.enterText(
+            field(hint: 'Поиск по дневнику предмета'), title);
+        await animate();
+        await tap(find.text('до ${displayDate(today)}'));
+        await tap(find.text('Изменить срок'));
+        final picker = find.byType(DatePickerDialog);
+        await tap(find.byTooltip(
+            MaterialLocalizations.of(tester.element(picker)).nextMonthTooltip));
+        await tap(find.descendant(of: picker, matching: find.text('1')));
+        await tap(find.text('Сохранить'));
+        await waitFor(find.text('до ${displayDate(next)}'));
+        expect(find.text('до ${displayDate(today)}'), findsNothing);
+        final rows = await tasks.select('id,due_at,status').eq('title', title);
+        expect(rows, hasLength(1));
+        expect(rows.single['id'], task.id);
+        expect(rows.single['status'], 'todo');
+        expect(displayDate(DateTime.parse(rows.single['due_at'])),
+            displayDate(next));
+        await tester.pumpWidget(
+            MaterialApp(key: UniqueKey(), home: const PersonalDiaryScreen()));
+        await tap(find.byIcon(Icons.add_rounded));
+        await tap(find.text('Календарь дневника'));
+        await waitFor(find.byType(GridView));
+        Finder calendarDay(int day) => find.descendant(
+            of: find.byType(GridView), matching: find.text('$day'));
+        await tap(calendarDay(today.day).first);
+        await waitFor(find.text('События на ${displayDate(today)}'));
+        final calendar = find.byType(BottomSheet);
+        expect(find.descendant(of: calendar, matching: find.text(title)),
+            findsNothing);
+        await tap(find.descendant(
+            of: calendar, matching: find.byIcon(Icons.chevron_right_rounded)));
+        await tap(calendarDay(1).first);
+        await waitFor(find.text('События на ${displayDate(next)}'));
+        expect(find.descendant(of: calendar, matching: find.text(title)),
+            findsOneWidget);
+        debugPrint(
+            'E2E-072 PASS same own task UUID moved from today to first of next month and appears once in calendar');
+        final published = await client
+            .from('assignments')
+            .select('id,due_at')
+            .eq('title', 'Deadline notification example')
+            .single();
+        final due = DateTime.parse(published['due_at']).toLocal();
+        expect(due.day, DateTime(due.year, due.month + 1, 0).day);
+        final router = GoRouter(routes: [
+          GoRoute(
+              path: '/',
+              builder: (_, __) =>
+                  const Scaffold(body: Text('Open notifications'))),
+          GoRoute(
+              path: '/my-diary',
+              builder: (_, state) => PersonalDiaryScreen(
+                  assignmentId: state.uri.queryParameters['assignment'])),
+        ]);
+        addTearDown(router.dispose);
+        await tester.pumpWidget(
+            MaterialApp.router(key: UniqueKey(), routerConfig: router));
+        await waitFor(find.text('Open notifications'));
+        PushNavigation.markReady();
+        addTearDown(PushNavigation.markNotReady);
+        for (var attempt = 0; attempt < 2; attempt++) {
+          final push = PushPayload.tryParse({
+            'v': '1',
+            'type': 'assignment',
+            'assignment_id': published['id']
+          })!;
+          await PushNavigation.handle(
+              tester.element(find.text('Open notifications')), push,
+              force: true);
+          await waitFor(find.text('Last-day assignment instructions'));
+          await tester.binding.handlePopRoute();
+          await animate();
+          await waitFor(find.text('События на ${displayDate(due)}'));
+          expect(
+              find.descendant(
+                  of: find.byType(BottomSheet),
+                  matching: find.text('Deadline notification example')),
+              findsOneWidget);
+          await tester.binding.handlePopRoute();
+          await animate();
+          await tester.binding.handlePopRoute();
+          await animate();
+          await waitFor(find.text('Open notifications'));
+        }
+        debugPrint(
+            'E2E-079 APP PASS push payload opened allowed assignment, two system returns left month-end selected twice');
+        const prefix = 'Midnight test ';
+        final midnight = DateTime(now.year, now.month + 1, 0, 23, 59);
+        var localClock = midnight;
+        final tomorrow =
+            DateTime(midnight.year, midnight.month, midnight.day + 1);
+        await PersonalDiaryService().createPersonalTask(
+            title: '${prefix}old',
+            dueAt: midnight,
+            subjectOfferingId: data['offering']);
+        await PersonalDiaryService().createPersonalTask(
+            title: '${prefix}new',
+            dueAt: tomorrow,
+            subjectOfferingId: data['offering']);
+        await tester.pumpWidget(MaterialApp(
+            key: UniqueKey(),
+            home: PersonalDiaryScreen(now: () => localClock)));
+        final search = field(hint: 'Поиск по дневнику');
+        await waitFor(search);
+        await tester.enterText(search, prefix);
+        await animate();
+        final todayKey = find.byKey(ValueKey('today_tasks_${data['student']}'));
+        final othersKey =
+            find.byKey(ValueKey('active_tasks_${data['student']}'));
+        Future<void> checkGroup(Finder group, String title) async {
+          final list = find.byType(ListView).first;
+          await tester.drag(list, const Offset(0, 1400));
+          await animate();
+          if (group.evaluate().isEmpty) {
+            await tester.scrollUntilVisible(group, 180,
+                scrollable: find.byType(Scrollable).first);
+          }
+          await tester.ensureVisible(group.first);
+          await animate();
+          final row =
+              find.descendant(of: group, matching: find.text('$prefix$title'));
+          await waitFor(row);
+          expect(row, findsOneWidget);
+        }
+
+        await checkGroup(todayKey, 'old');
+        await checkGroup(othersKey, 'new');
+        for (final state in [
+          AppLifecycleState.inactive,
+          AppLifecycleState.hidden,
+          AppLifecycleState.paused
+        ]) {
+          tester.binding.handleAppLifecycleStateChanged(state);
+        }
+        localClock = tomorrow.add(const Duration(minutes: 2));
+        for (final state in [
+          AppLifecycleState.hidden,
+          AppLifecycleState.inactive,
+          AppLifecycleState.resumed
+        ]) {
+          tester.binding.handleAppLifecycleStateChanged(state);
+        }
+        await animate();
+        await checkGroup(todayKey, 'new');
+        await checkGroup(othersKey, 'old');
+        expect(find.text('${prefix}old'), findsOneWidget);
+        expect(find.text('${prefix}new'), findsOneWidget);
+        debugPrint(
+            'E2E-080 APP PASS last day in background to new month: active tasks changed sections without duplicates');
+        final held = _HoldSavedDiary();
+        final rejected = expectLater(held.loadAndCache(), throwsStateError);
+        try {
+          await held.saved.future;
+          await login(1);
+        } finally {
+          held.release.complete();
+        }
+        await rejected;
+        debugPrint('PASS diary account change during pending cache save cannot return former student data');
+        return;
+      }
+      if (phase == 'restart') {
+        await searchTwins();
+        for (final record in [
+          (early, 'Early twin', 'Нужно сделать'),
+          (late, 'Late twin', 'Готово')
+        ]) {
+          await tap(find.text('до ${displayDate(record.$1)}'));
+          await waitFor(find.text(record.$2));
+          await waitFor(find.text('E2E Mechanics • ${record.$3}'));
+          await tester.tapAt(const Offset(5, 5));
+          await animate();
+        }
+        final rows = await tasks
+            .select('description,status,due_at')
+            .eq('title', repeatedTitle)
+            .order('due_at', ascending: true);
+        expect(rows.map((r) => r['status']), ['todo', 'done']);
+        expect(
+            rows.map((r) => displayDate(DateTime.parse(r['due_at'] as String))),
+            [displayDate(early), displayDate(late)]);
+        debugPrint(
+            'E2E-071 PASS independent native process logins, same title, two dates and states verified');
+        return;
+      }
+      await twin(early, 'Early twin');
+      await twin(late, 'Late twin');
+      await searchTwins();
+      await tap(find.text('до ${displayDate(late)}'));
+      await waitFor(find.text('Late twin'));
+      await tap(find.widgetWithText(FilledButton, 'Готово'));
+      await showLesson(lesson);
+      await diary();
+      Future<void> toggle(bool done) async {
+        await tap(find.text('Frame calculation'));
+        await tap(find.text(
+            done ? 'Отметить как выполнено' : 'Отметить как не выполнено'));
+        await animate();
+      }
+
+      await toggle(true);
+      await login(1);
+      await diary();
+      await toggle(true);
+      await back();
+      await diary();
+      await toggle(false);
+      await login(0);
+      await diary();
+      await tap(find.text('Frame calculation'));
+      await waitFor(find.text('Отметить как не выполнено'));
+      final assignment = await client
+          .from('assignments')
+          .select('id')
+          .eq('title', 'Frame calculation')
+          .single();
+      final receipts = await client
+          .from('assignment_done')
+          .select('user_id')
+          .eq('assignment_id', assignment['id']);
+      expect(receipts.map((r) => r['user_id']), [accounts[0]['student']]);
+      debugPrint(
+          'E2E-078 PASS student B completing and undoing leaves student A completed');
+      Future<void> notesFor(Lesson selected) async {
+        await showLesson(selected);
+        await tap(find.text('Добавить запись по предмету'));
+        await waitFor(find.byTooltip('Добавить'));
+      }
+
+      const firstText = 'Разбор балки.\n\nM = F × l\nПроверено ✅';
+      const secondText = 'Второе занятие: другой конспект';
+      await notesFor(lesson);
+      await tap(find.byTooltip('Добавить'));
+      await tap(find.text('Заметка по предмету'));
+      await noteText(firstText);
+      await login(0);
+      await notesFor(lesson);
+      await waitFor(find.text(firstText));
+      expect(
+          (await entries
+              .select('text')
+              .eq('lesson_id', lesson.id)
+              .single())['text'],
+          firstText);
+      debugPrint(
+          'E2E-074 PASS multiline formula and emoji exactly preserved after login');
+      await tap(find.text('Изменить'));
+      await tester.enterText(field(hint: 'Текст заметки...'), '');
+      await tap(find.text('Сохранить'));
+      await waitFor(find.text('Пустой текст'));
+      expect(
+          (await entries
+              .select('text')
+              .eq('lesson_id', lesson.id)
+              .single())['text'],
+          firstText);
+      debugPrint(
+          'E2E-075 PASS empty edit shows reason and keeps original text on server');
+      await tap(find.text('Отмена'));
+      await notesFor(secondLesson);
+      await waitFor(find.byTooltip('Добавить'));
+      await tap(find.byTooltip('Добавить'));
+      expect(find.text(firstText, skipOffstage: false), findsNothing,
+          reason: 'Another lesson must not inherit the first lesson note');
+      await tap(find.text('Заметка по предмету'));
+      await noteText(secondText);
+      for (final pair in [
+        (lesson, firstText, secondText),
+        (secondLesson, secondText, firstText)
+      ]) {
+        await notesFor(pair.$1);
+        await waitFor(find.text(pair.$2));
+        expect(find.text(pair.$3), findsNothing);
+      }
+      await showLesson(lesson);
+      await diary();
+      await tap(find.byIcon(Icons.more_horiz));
+      await tap(find.text('Все заметки'));
+      await waitFor(find.text(firstText));
+      await waitFor(find.text(secondText));
+      expect(
+          (await entries
+                  .select('lesson_id')
+                  .eq('subject_offering_id', data['offering'])
+                  .inFilter('text', [firstText, secondText]))
+              .map((r) => r['lesson_id']),
+          unorderedEquals([lesson.id, secondLesson.id]));
+      debugPrint(
+          'E2E-073 PASS separate notes for both lessons; both appear in the full diary');
+      await showLesson(lesson);
+      await diary();
+      await tap(find.byIcon(Icons.add));
+      await tap(find.text('Личная задача'));
+      await tester.enterText(
+          field(label: 'Название'), 'Slow task double submit');
+      final create = find.text('Создать задачу');
+      await tester.ensureVisible(create);
+      final earlierPosts = httpClient.taskPosts;
+      final gate = Completer<void>();
+      httpClient.holdTask = gate;
+      final submitAt = tester.getCenter(create);
+      try {
+        await tester.tapAt(submitAt);
+        await tester.tapAt(submitAt);
+        final deadline = DateTime.now().add(const Duration(seconds: 8));
+        while (httpClient.taskPosts == earlierPosts &&
+            DateTime.now().isBefore(deadline)) {
+          await tester.pump(const Duration(milliseconds: 70));
+        }
+        expect(httpClient.taskPosts - earlierPosts, 1,
+            reason: 'Only one request may leave for a double tap');
+      } finally {
+        httpClient.holdTask = null;
+        gate.complete();
+      }
+      final savedTask = find.text('Slow task double submit');
+      final deadline = DateTime.now().add(const Duration(seconds: 12));
+      while (field(label: 'Название').evaluate().isNotEmpty &&
+          DateTime.now().isBefore(deadline)) {
+        await tester.pump(const Duration(milliseconds: 80));
+      }
+      expect(field(label: 'Название'), findsNothing,
+          reason: 'Task form remained open after submit');
+      await tester.enterText(
+          field(hint: 'Поиск по дневнику предмета'), 'Slow task double submit');
+      await animate();
+      await waitFor(savedTask);
+      await tester.ensureVisible(savedTask.last);
+      expect(httpClient.taskPosts - earlierPosts, 1,
+          reason: 'Exactly one HTTP request for double submit');
+      expect(httpClient.taskResponses.last, 201,
+          reason: 'Expected real PostgreSQL commit');
+      expect(await tasks.select('id').eq('title', 'Slow task double submit'),
+          hasLength(1));
+      debugPrint(
+          'E2E-076 PASS one personal task after two immediate taps on a delayed write');
+      Future<void> calendarDay(DateTime date, String title) async {
+        await tester.pumpWidget(MaterialApp(
+            key: UniqueKey(),
+            home: ScheduleScreen(now: () => date, subscribeRealtime: false)));
+        await waitFor(find.text(title));
+      }
+
+      await calendarDay(lessonDay, 'Frame calculation');
+      final teacherTransport = LocalSchemaHttpClient(data['restPort']);
+      final teacher = SupabaseClient(localSupabaseUrl, data['anon'],
+          httpClient: teacherTransport,
+          postgrestOptions: PostgrestClientOptions(schema: schema),
+          authOptions: const AuthClientOptions(autoRefreshToken: false));
+      try {
+        final actor = accounts[2];
+        await teacher.auth.signInWithPassword(
+            email: actor['email'], password: actor['password']);
+        final moved = await teacher
+            .from('assignments')
+            .update({
+              'due_at': lessonDay
+                  .toUtc()
+                  .add(const Duration(days: 2, hours: 12))
+                  .toIso8601String()
+            })
+            .eq('id', assignment['id'])
+            .select('id,created_by')
+            .single();
+        expect(moved['created_by'], actor['student']);
+      } finally {
+        await teacher.auth.signOut(scope: SignOutScope.local);
+        await teacher.dispose();
+        teacherTransport.close();
+      }
+      await calendarDay(lessonDay, 'Legacy practice');
+      expect(find.text('Frame calculation'), findsNothing);
+      await calendarDay(
+          lessonDay.add(const Duration(days: 2)), 'Frame calculation');
+      expect(find.text('Frame calculation'), findsOneWidget);
+      await tap(find.text('Frame calculation'));
+      await waitFor(find.byType(AssignmentDetailsScreen));
+      expect(
+          tester
+              .widget<AssignmentDetailsScreen>(
+                  find.byType(AssignmentDetailsScreen))
+              .assignmentId,
+          assignment['id']);
+      await waitFor(find.text('Draw the support reactions'));
+      debugPrint(
+          'E2E-077 PASS same assignment opens from its rescheduled date after calendar reload');
+      return;
+    }
     if (data['planner'] == true) {
       final accounts = (data['accounts'] as List).cast<Map<String, dynamic>>();
       final tasks = client.from('personal_diary_tasks');
