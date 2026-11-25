@@ -182,6 +182,7 @@ class _SubjectLinkCard extends StatelessWidget {
                         subjectId: lesson.subjectId,
                         subjectOfferingId: offeringId,
                         lessonId: lesson.id,
+                        lessonDate: lesson.date,
                         groupId: lesson.groupId,
                         semesterNumber: lesson.semesterNumber,
                       ),

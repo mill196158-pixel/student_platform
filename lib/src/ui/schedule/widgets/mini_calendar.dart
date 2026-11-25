@@ -35,8 +35,9 @@ class MiniCalendar extends StatelessWidget {
   bool _sameDate(DateTime a, DateTime b) =>
       a.year == b.year && a.month == b.month && a.day == b.day;
 
-  Widget _arrow(IconData icon, VoidCallback onTap) => IconButton(
+  Widget _arrow(IconData icon, String tooltip, VoidCallback onTap) => IconButton(
         onPressed: onTap,
+        tooltip: tooltip,
         icon: Icon(icon, size: 22),
         padding: EdgeInsets.zero,
         constraints: const BoxConstraints.tightFor(width: 36, height: 36),
@@ -57,7 +58,7 @@ class MiniCalendar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 2, 12, 8),
       child: Row(
         children: [
-          _arrow(Icons.chevron_left, onPrevWeek),
+          _arrow(Icons.chevron_left, 'Предыдущая неделя', onPrevWeek),
           const SizedBox(width: 2),
           Expanded(
             child: Container(
@@ -102,7 +103,7 @@ class MiniCalendar extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 2),
-          _arrow(Icons.chevron_right, onNextWeek),
+          _arrow(Icons.chevron_right, 'Следующая неделя', onNextWeek),
         ],
       ),
     );
@@ -193,15 +194,15 @@ class MiniCalendar extends StatelessWidget {
                 Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      _arrow(Icons.chevron_left, onPrevWeek),
-                      _arrow(Icons.chevron_right, onNextWeek),
+                      _arrow(Icons.chevron_left, 'Предыдущая неделя', onPrevWeek),
+                      _arrow(Icons.chevron_right, 'Следующая неделя', onNextWeek),
                     ]),
                 daysRow,
               ])
             : Row(children: [
-                _arrow(Icons.chevron_left, onPrevWeek),
+                _arrow(Icons.chevron_left, 'Предыдущая неделя', onPrevWeek),
                 Expanded(child: daysRow),
-                _arrow(Icons.chevron_right, onNextWeek),
+                _arrow(Icons.chevron_right, 'Следующая неделя', onNextWeek),
               ]),
       );
     });

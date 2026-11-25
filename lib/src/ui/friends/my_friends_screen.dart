@@ -28,7 +28,6 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
 
   // Друзья (теперь из таблицы friends)
   List<_Friend> _friends = [];
-  List<_Friend> _visible = [];
   List<_Friend> _classmates = [];
   bool _classmatesLoadFailed = false;
   _FriendsTab _activeTab = _FriendsTab.friends;
@@ -42,6 +41,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
   final FocusNode _searchFocus = FocusNode();
   String _query = '';
   Timer? _debounce;
+  int _searchGeneration = 0;
   bool _searching = false;
   List<_Friend> _remote = [];
 
@@ -63,6 +63,9 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
 
   String get _currentUserId => _sb.auth.currentUser?.id ?? '';
 
+  bool _isCurrentStudent(String? uid) =>
+      mounted && _sb.auth.currentUser?.id == uid;
+
   Future<void> _initialize() async {
     if (!_hydrated) {
       await _hydrateFromCache();
@@ -83,14 +86,14 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
   }
 
   Future<void> _load() async {
+    if (!mounted) return;
+    final uid = _sb.auth.currentUser?.id;
     try {
-      final uid = _sb.auth.currentUser?.id;
       if (uid == null) {
         setState(() {
           _loading = false;
           _hydrated = true;
           _friends = [];
-          _visible = [];
           _requests = [];
         });
         return;
@@ -102,11 +105,9 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
         _reloadRequestsOnly(persistCache: false),
       ]);
 
+      if (!_isCurrentStudent(uid)) return;
       _subscribeRealtime(uid);
-
-      if (!mounted) return;
       setState(() {
-        _applyFilter();
         if (_friends.isEmpty && _classmates.isNotEmpty) {
           _activeTab = _FriendsTab.classmates;
         }
@@ -116,7 +117,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
       unawaited(_saveSnapshot());
     } catch (e) {
       debugPrint('[Friends] load error: $e');
-      if (!mounted) return;
+      if (!_isCurrentStudent(uid)) return;
       setState(() {
         _loading = false;
         _hydrated = true;
@@ -127,6 +128,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
   // ---------- ДРУЗЬЯ ----------
 
   Future<void> _loadFriends({bool persistCache = true}) async {
+    if (!mounted) return;
     final uid = _sb.auth.currentUser?.id;
     if (uid == null) {
       setState(() => _friends = []);
@@ -135,6 +137,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
 
     try {
       final res = await _sb.rpc('get_my_friends_bulk');
+      if (!_isCurrentStudent(uid)) return;
       final rows = res is List
           ? res.map((e) => Map<String, dynamic>.from(e as Map)).toList()
           : const <Map<String, dynamic>>[];
@@ -142,17 +145,12 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
       final list = rows.map(_friendFromMap).toList()
         ..sort((a, b) => a.surname.compareTo(b.surname));
 
-      setState(() {
-        _friends = list;
-        if (_query.trim().length < 2 || _remote.isEmpty) {
-          _applyFilter();
-        }
-      });
+      setState(() => _friends = list);
       if (persistCache) unawaited(_saveSnapshot());
     } catch (e) {
       debugPrint('[Friends] get_my_friends_bulk error: $e');
       // Keep previous list on failure so a blip does not look like "no friends".
-      if (mounted) {
+      if (_isCurrentStudent(uid)) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Не удалось обновить список друзей')),
         );
@@ -232,6 +230,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
   }
 
   Future<void> _loadClassmates({bool persistCache = true}) async {
+    if (!mounted) return;
     final uid = _sb.auth.currentUser?.id;
     if (uid == null) {
       setState(() => _classmates = []);
@@ -240,6 +239,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
 
     try {
       final rpcRows = await _loadClassmateRowsFromRpc();
+      if (!_isCurrentStudent(uid)) return;
       if (rpcRows.isNotEmpty) {
         setState(() {
           _classmates = rpcRows.map(_friendFromMap).toList();
@@ -271,6 +271,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
       if (groupId.isEmpty) {
         groupId = await _loadMyActiveGroupId(uid);
       }
+      if (!_isCurrentStudent(uid)) return;
 
       if (groupId.isEmpty && groupName.isEmpty) {
         setState(() {
@@ -290,6 +291,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
         rows = await _loadClassmateRowsByGroupName(groupName, uid);
       }
 
+      if (!_isCurrentStudent(uid)) return;
       final list = <_Friend>[];
       for (final r in rows) {
         list.add(_friendFromMap(r));
@@ -301,6 +303,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
       });
       if (persistCache) unawaited(_saveSnapshot());
     } catch (e) {
+      if (!_isCurrentStudent(uid)) return;
       debugPrint('[Friends] load classmates error: $e');
       setState(() {
         if (!_hydrated) _classmates = [];
@@ -467,7 +470,6 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
         _friends = decodeList('friends');
         _classmates = decodeList('classmates');
         _requests = decodeList('requests');
-        _applyFilter();
         if (_friends.isEmpty && _classmates.isNotEmpty) {
           _activeTab = _FriendsTab.classmates;
         }
@@ -533,14 +535,16 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
   // ---------- ЗАЯВКИ ----------
 
   Future<void> _reloadRequestsOnly({bool persistCache = true}) async {
+    if (!mounted) return;
+    final uid = _sb.auth.currentUser?.id;
     try {
-      final uid = _sb.auth.currentUser?.id;
       if (uid == null) {
         setState(() => _requests = const []);
         return;
       }
 
       final res = await _sb.rpc('get_my_incoming_friend_requests');
+      if (!_isCurrentStudent(uid)) return;
       final rows = res is List
           ? res.map((e) => Map<String, dynamic>.from(e as Map)).toList()
           : const <Map<String, dynamic>>[];
@@ -548,6 +552,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
       setState(() => _requests = rows.map(_friendFromMap).toList());
       if (persistCache) unawaited(_saveSnapshot());
     } catch (e) {
+      if (!_isCurrentStudent(uid)) return;
       debugPrint('[Friends] get_my_incoming_friend_requests error: $e');
       if (!_hydrated) setState(() => _requests = const []);
     }
@@ -577,10 +582,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
     } finally {
       await Future.wait([_reloadRequestsOnly(), _loadFriends()]);
       if (mounted) {
-        setState(() {
-          _pendingReq.remove(f.id);
-          if (_query.trim().length < 2) _visible = List.of(_friends);
-        });
+        setState(() => _pendingReq.remove(f.id));
       }
     }
   }
@@ -615,39 +617,26 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
 
   // ---------- ПОИСК ----------
 
-  void _applyFilter() {
-    if (_query.trim().isEmpty) {
-      _visible = List.of(_friends);
-    } else {
-      final q = _query.toLowerCase();
-      _visible = _friends
-          .where((f) => ('${f.name} ${f.surname}'.toLowerCase().contains(q)))
-          .toList();
+  void _onSearchChanged(String s) {
+    final q = s.trim();
+    if (_query == q) return;
+    _debounce?.cancel();
+    final generation = ++_searchGeneration;
+    setState(() {
+      _query = q;
+      _searching = q.length >= 2;
+      _remote = [];
+    });
+    if (_searching) {
+      _debounce = Timer(const Duration(milliseconds: 220),
+          () => _searchRemote(q, generation));
     }
   }
 
-  void _onSearchChanged(String s) {
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 220), () async {
-      final q = s.trim();
-      setState(() => _query = q);
-
-      if (q.length < 2) {
-        setState(() {
-          _remote = [];
-          _applyFilter();
-        });
-        return;
-      }
-
-      await _searchRemote(q);
-    });
-  }
-
-  Future<void> _searchRemote(String q) async {
-    setState(() => _searching = true);
-
+  Future<void> _searchRemote(String q, int generation) async {
     final me = _sb.auth.currentUser?.id;
+    bool isCurrent() =>
+        _searchGeneration == generation && _isCurrentStudent(me);
     String myGroup = '';
     try {
       final meMap = await LegacyUserCache.read(currentSession: () => _sb.auth.currentSession);
@@ -656,10 +645,11 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
       }
     } catch (_) {}
 
-    if (_sb.auth.currentUser?.id != me) return;
+    if (!isCurrent()) return;
 
     try {
       final res = await _sb.rpc('search_users_global', params: {'p_q': q});
+      if (!isCurrent()) return;
       List<Map<String, dynamic>> rows;
       if (res is List) {
         rows = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
@@ -698,6 +688,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
         }
       }
 
+      if (!isCurrent()) return;
       final found = <_Friend>[];
       for (final r in rows) {
         final id = (r['id'] ?? '').toString();
@@ -715,16 +706,14 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
 
       setState(() {
         _remote = found;
-        // Empty search must stay empty — never fall back to the friends list.
-        _visible = List.of(found);
         _searching = false;
       });
     } catch (e) {
+      if (!isCurrent()) return;
       debugPrint('[Friends] remote search error: $e');
       setState(() {
         _searching = false;
         _remote = [];
-        _visible = [];
       });
     }
   }
@@ -741,10 +730,6 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
     await _loadFriends();
     await _loadClassmates();
     await _reloadRequestsOnly();
-
-    if (_query.trim().length < 2) {
-      setState(() => _visible = List.of(_friends));
-    }
   }
 
   void _startChat(_Friend f) async {
@@ -874,7 +859,7 @@ class _MyFriendsScreenState extends State<MyFriendsScreen> {
 
     // Список друзей (в строчку, как чаты)
     final list = searchingMode
-        ? _visible
+        ? _remote
         : (_activeTab == _FriendsTab.friends ? _friends : _classmates);
     for (var i = 0; i < list.length; i++) {
       final f = list[i];

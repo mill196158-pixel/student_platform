@@ -61,7 +61,10 @@ class SubjectDiaryArgs {
       subjectTitle: subjectTitle ?? this.subjectTitle,
       groupId: groupId ?? this.groupId,
       semesterNumber: semesterNumber ?? this.semesterNumber,
-      lessonId: lessonId ?? this.lessonId,
+      lessonId: lessonId ??
+          (date == null || DateUtils.isSameDay(date, this.date)
+              ? this.lessonId
+              : null),
       date: date ?? this.date,
       legacySubjectKey: legacySubjectKey ?? this.legacySubjectKey,
     );

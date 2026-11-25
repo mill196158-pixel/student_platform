@@ -238,6 +238,9 @@ class _LoginScreenState extends State<LoginScreen> {
                                                     ? 'Минимум 4 символа'
                                                     : null,
                                                 suffix: IconButton(
+                                                  tooltip: _hidePassword
+                                                      ? 'Показать пароль'
+                                                      : 'Скрыть пароль',
                                                   onPressed: () => setState(
                                                     () => _hidePassword =
                                                         !_hidePassword,

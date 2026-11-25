@@ -581,7 +581,8 @@ class SubjectDiaryRepositorySupabase implements SubjectDiaryRepository {
       } else {
         query = query
             .eq('subject_offering_id', context.subjectOfferingId)
-            .eq('entry_date', _yyyyMmDd(date));
+            .eq('entry_date', _yyyyMmDd(date))
+            .filter('lesson_id', 'is', null);
       }
       final row = await query.limit(1).maybeSingle();
       return (row?['id'] ?? '').toString();

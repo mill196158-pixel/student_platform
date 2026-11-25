@@ -462,7 +462,7 @@ class _SubjectDiaryScreenState extends State<SubjectDiaryScreen> {
         final theme = Theme.of(ctx);
         final day = _selectedDay ?? DateTime.now();
         return SafeArea(
-          child: Padding(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
             child: Column(
               mainAxisSize: MainAxisSize.min,

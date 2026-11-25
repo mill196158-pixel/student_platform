@@ -11,7 +11,8 @@ from local_e2e_schema import CONTAINER, ROOT, sql
 
 def main():
     compose = sys.argv[1:2] == ["--compose"]
-    args = sys.argv[2:] if compose else sys.argv[1:]
+    organize = sys.argv[1:2] == ["--organize"]
+    args = sys.argv[2:] if compose or organize else sys.argv[1:]
     if compose:
         if len(args) != 3:
             raise ValueError("Supply sender, recipient and the local TLS certificate")
@@ -69,6 +70,8 @@ def main():
             env["STUDENT_TEAM_LOCAL_CA"] = str(ca)
             target = ["-d", "windows", "--dart-define=SUPABASE_URL=https://127.0.0.1:55443",
                       "integration_test/ordinary_team_messages_local_test.dart"]
+        elif organize:
+            target = ["test/ordinary_chat_list_actions_local_test.dart"]
         else:
             target = ["test/online_chat_switch_local_test.dart"]
         return subprocess.call(["flutter.bat" if os.name == "nt" else "flutter", "test", "--no-pub",

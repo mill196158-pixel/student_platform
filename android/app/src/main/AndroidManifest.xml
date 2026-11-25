@@ -15,6 +15,9 @@
         android:label="student_platform"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <!-- Honor the existing portrait activities on Android 16 large screens. -->
+        <property android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY"
+            android:value="true" />
         <service android:name=".SourceAuthorityRecoveryFixtureService"
             android:enabled="${sourceRecoveryQaEnabled}" android:exported="false"
             android:process=":qa_recovery_owner" />

@@ -50,7 +50,10 @@ class Device:
 
     def nodes(self, package=PACKAGE):
         path = "/data/local/tmp/student-materials-push-qa.xml"
-        self.run("shell", "uiautomator", "dump", path)
+        status = self.run("shell", "uiautomator", "dump", path)
+        if path.encode() not in status:
+            # A transient null root may leave an earlier XML file on the device.
+            return []
         raw = self.run("exec-out", "cat", path)
         start, end = raw.find(b"<hierarchy"), raw.rfind(b"</hierarchy>")
         if start < 0 or end < start:

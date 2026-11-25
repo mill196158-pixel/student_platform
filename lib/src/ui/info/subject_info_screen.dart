@@ -190,6 +190,7 @@ class SubjectInfoScreen extends StatefulWidget {
   final String? subjectId;
   final String subjectOfferingId;
   final String? lessonId;
+  final DateTime? lessonDate;
   final String? groupId;
   final int? semesterNumber;
 
@@ -199,6 +200,7 @@ class SubjectInfoScreen extends StatefulWidget {
     required this.subjectOfferingId,
     this.subjectId,
     this.lessonId,
+    this.lessonDate,
     this.groupId,
     this.semesterNumber,
   });
@@ -648,6 +650,7 @@ class _SubjectInfoScreenState extends State<SubjectInfoScreen> {
             groupId: data.groupId,
             semesterNumber: data.semesterNumber,
             lessonId: widget.lessonId,
+            date: widget.lessonDate,
             legacySubjectKey: data.displayTitle,
           ),
         ),

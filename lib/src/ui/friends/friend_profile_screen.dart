@@ -77,6 +77,7 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
       // гость — через SECURITY DEFINER RPC, обходящий RLS
       final res =
           await _sb.rpc('get_user_profile', params: {'p_id': widget.userId});
+      if (!mounted) return;
       Map<String, dynamic>? g;
       if (res is List) {
         if (res.isNotEmpty) g = Map<String, dynamic>.from(res.first as Map);
@@ -98,6 +99,7 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
         _loadGuestFriendsSafe(),
         _loadBlockStateSafe(),
       ]);
+      if (!mounted) return;
 
       setState(() {
         _loading = false;
@@ -105,6 +107,7 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
       });
       _subscribeFriendsRealtime();
     } catch (_) {
+      if (!mounted) return;
       setState(() {
         _loading = false;
         _error = true;

@@ -412,6 +412,8 @@ Future<void> main() async {
   stage('binding-ready');
 
   final android = !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+  await SystemChrome.setPreferredOrientations(const [DeviceOrientation.portraitUp]);
+  stage('orientation-ready');
   if (android) {
     // Draw the branded loader while the session and disk caches initialize.
     await Future.wait([
@@ -421,12 +423,7 @@ Future<void> main() async {
     runApp(const _StartupApp());
     await WidgetsBinding.instance.endOfFrame;
     stage('loader-frame');
-  } else {
-    await SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-    ]);
   }
-  stage('orientation-ready');
 
   try {
     await _initializeApp(stage, initializeTheme: !android);
