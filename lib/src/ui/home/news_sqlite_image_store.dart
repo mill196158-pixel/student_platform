@@ -36,6 +36,7 @@ class NewsOrphanCollectionResult {
 /// unreferenced immutable blobs; legacy files are never collected here.
 /// Callers must use the same coordination database for this namespace.
 class NewsSqliteImageStore {
+  static const _acquisitionTimeout = Duration(milliseconds: 500);
   NewsSqliteImageStore({required this.database, required this.root}) : ownsDatabase = false, _canCollectOrphans = false;
   NewsSqliteImageStore._owned(this.database, this.root, this._canCollectOrphans) : ownsDatabase = true;
   @visibleForTesting
@@ -214,7 +215,7 @@ class NewsSqliteImageStore {
   Future<T> _transaction<T>(Future<T> Function(sqlite.Transaction) action) {
     var allowed = true, started = false;
     final expiry = Completer<T>();
-    final timer = Timer(const Duration(milliseconds: 500), () {
+    final timer = Timer(_acquisitionTimeout, () {
       if (!started) {
         allowed = false;
         expiry.completeError(TimeoutException('Image index acquisition timed out'));
@@ -449,7 +450,7 @@ class NewsSqliteImageStore {
   /// durable suppression. Errors are unknown, never a cached miss.
   Future<NewsImageReadResult> readWithLegacy(NewsImageCacheKey key,
       Future<Uint8List?> Function() readLegacy,
-      {Duration legacyTimeout = const Duration(milliseconds: 500)}) async {
+      {Duration legacyTimeout = _acquisitionTimeout}) async {
     try {
       final ns = await _namespace();
       // Bootstrap is committed before a timed callback can abort its own
@@ -466,7 +467,11 @@ class NewsSqliteImageStore {
           return const NewsImageReadResult(NewsImageReadState.miss);
         }
         if (legacyTimeout <= Duration.zero) throw StateError('Invalid legacy timeout');
-        final legacy = await readLegacy().timeout(legacyTimeout);
+        // A competing clear must still have time to acquire this transaction
+        // after a stalled legacy lookup times out and rolls back.
+        final maxLegacyWait = _acquisitionTimeout ~/ 2;
+        final wait = legacyTimeout < maxLegacyWait ? legacyTimeout : maxLegacyWait;
+        final legacy = await readLegacy().timeout(wait);
         return legacy == null || legacy.isEmpty
             ? const NewsImageReadResult(NewsImageReadState.miss)
             : NewsImageReadResult(NewsImageReadState.hit, legacy);

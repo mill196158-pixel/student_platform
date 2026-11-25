@@ -97,6 +97,24 @@ void main() {
     expect(card.payload.hasExternalUrl, isTrue);
   });
 
+  test(
+      'requirements-only vacancies remain readable for legacy and current rows',
+      () {
+    for (final description in [
+      '${vacancyRequirementsMarker.trim()}Read blueprints',
+      '${vacancyRequirementsMarker}Read blueprints',
+    ]) {
+      final card = VacancyCardPayload.tryParse({
+        'title': 'Internship',
+        'summary': 'Summer work',
+        'description': description,
+      });
+      expect(card?.requirementsText, 'Read blueprints');
+      expect(card?.descriptionFull, isNull);
+      expect(card?.summary, 'Summer work');
+    }
+  });
+
   test('VacancyAssetDescriptor uses safe fallback labels', () {
     expect(
       VacancyAssetDescriptor(

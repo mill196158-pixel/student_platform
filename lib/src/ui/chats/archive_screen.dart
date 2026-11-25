@@ -261,7 +261,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                               return _ArchiveRow(
                                 data: c,
                                 onTap: () => unawaited(_openChat(c)),
-                                onLongPressStart: c.archiveType == 'personal'
+                                onLongPressEnd: c.archiveType == 'personal'
                                     ? (details) => _showPersonalMenu(
                                           c,
                                           details.globalPosition,
@@ -361,12 +361,12 @@ class _SegChip extends StatelessWidget {
 class _ArchiveRow extends StatelessWidget {
   final _ArchivedChat data;
   final VoidCallback onTap;
-  final GestureLongPressStartCallback? onLongPressStart;
+  final GestureLongPressEndCallback? onLongPressEnd;
 
   const _ArchiveRow({
     required this.data,
     required this.onTap,
-    this.onLongPressStart,
+    this.onLongPressEnd,
   });
 
   @override
@@ -389,7 +389,7 @@ class _ArchiveRow extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: GestureDetector(
-        onLongPressStart: onLongPressStart,
+        onLongPressEnd: onLongPressEnd,
         child: InkWell(
           onTap: onTap,
           child: Padding(

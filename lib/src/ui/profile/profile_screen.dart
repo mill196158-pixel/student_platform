@@ -1074,31 +1074,73 @@ class MapSpbgasuScreen extends StatefulWidget {
 }
 
 class _MapSpbgasuScreenState extends State<MapSpbgasuScreen> {
-  late final WebViewController _controller;
+  static final _mapUrl = Uri.parse('https://map.spbgasu.ru/');
+  final _controller = WebViewController();
+  bool _failed = false;
 
   @override
   void initState() {
     super.initState();
-    _controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onPageFinished: (url) {
-            _controller.runJavaScript("""
-              document.querySelector('header')?.style.display='none';
-              document.querySelector('footer')?.style.display='none';
-            """);
-          },
-        ),
-      )
-      ..loadRequest(Uri.parse('https://map.spbgasu.ru/'));
+    unawaited(_openMap());
+  }
+
+  Future<void> _openMap() async {
+    if (_failed) setState(() => _failed = false);
+    try {
+      await _controller.setJavaScriptMode(JavaScriptMode.unrestricted);
+      if (!mounted) return;
+      await _controller.setNavigationDelegate(NavigationDelegate(
+        onWebResourceError: (error) {
+          if (error.isForMainFrame == true) _showLoadError();
+        },
+        onPageFinished: _hideSiteNavigation,
+      ));
+      if (mounted) await _controller.loadRequest(_mapUrl);
+    } on Exception {
+      _showLoadError();
+    }
+  }
+
+  void _showLoadError() {
+    if (mounted && !_failed) setState(() => _failed = true);
+  }
+
+  Future<void> _hideSiteNavigation(String url) async {
+    if (!mounted || _failed || Uri.tryParse(url)?.host != _mapUrl.host) return;
+    try {
+      await _controller.runJavaScript("""
+        document.querySelectorAll('header, footer').forEach(function(element) {
+          element.style.display = 'none';
+        });
+      """);
+    } on Exception {
+      // The native view can close while the optional page styling is running.
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Карта СПБГАСУ')),
-      body: WebViewWidget(controller: _controller),
+      body: Stack(fit: StackFit.expand, children: [
+        Offstage(offstage: _failed, child: WebViewWidget(controller: _controller)),
+        if (_failed)
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Text('Не удалось загрузить карту',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 8),
+                const Text('Проверь подключение к интернету.',
+                    textAlign: TextAlign.center),
+                const SizedBox(height: 16),
+                OutlinedButton(onPressed: _openMap, child: const Text('Повторить')),
+              ]),
+            ),
+          ),
+      ]),
     );
   }
 }

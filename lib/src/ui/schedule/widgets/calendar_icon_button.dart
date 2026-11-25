@@ -456,13 +456,17 @@ class _HeaderArrow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkResponse(
-      onTap: onTap,
-      onLongPress: onLongPress,
-      radius: 24,
-      child: Padding(
-        padding: const EdgeInsets.all(6.0),
-        child: Icon(icon),
+    return Semantics(
+      button: true,
+      label: tooltip,
+      child: InkResponse(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        radius: 24,
+        child: Padding(
+          padding: const EdgeInsets.all(6.0),
+          child: Icon(icon),
+        ),
       ),
     );
   }

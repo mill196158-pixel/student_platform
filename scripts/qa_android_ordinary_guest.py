@@ -26,6 +26,8 @@ def bounds(node):
 
 
 class GuestDevice(Device):
+    app_package = PACKAGE
+
     def __init__(self, serial, apk_hash):
         if not re.fullmatch(r"emulator-\d+", serial) or not re.fullmatch(r"[0-9a-f]{64}", apk_hash):
             raise ValueError("Supply a dedicated AVD and the ordinary APK hash")
@@ -52,7 +54,7 @@ class GuestDevice(Device):
         deadline = time.monotonic() + 65
         while time.monotonic() < deadline:
             try:
-                nodes = self.nodes(PACKAGE)
+                nodes = self.nodes(self.app_package)
                 for node in nodes:
                     if predicate(node):
                         return node

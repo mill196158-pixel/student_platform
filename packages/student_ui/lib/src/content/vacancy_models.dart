@@ -347,6 +347,14 @@ List<VacancyAssetDescriptor> _readVacancyAssets(Object? raw) {
   final idx = description.indexOf(vacancyRequirementsMarker);
 
   if (idx < 0) {
+    // Earlier clients trimmed the separator when requirements were the only text.
+    final legacyPrefix = vacancyRequirementsMarker.trim();
+    if (description.startsWith(legacyPrefix)) {
+      return (
+        body: '',
+        requirements: description.substring(legacyPrefix.length).trim()
+      );
+    }
     return (body: description.trim(), requirements: '');
   }
 
@@ -466,14 +474,11 @@ class VacancyCardPayload {
       final split = splitVacancyDescription(rawDescription);
 
       final summary = _readString(json, const ['summary']) ??
-          (split.body.isNotEmpty ? split.body : null) ??
-          rawDescription.trim();
+          (split.body.isNotEmpty ? split.body : split.requirements);
 
       if (summary.isEmpty) return null;
 
-      final descriptionFull = split.body.isNotEmpty
-          ? split.body
-          : (rawDescription.trim().isEmpty ? null : rawDescription.trim());
+      final descriptionFull = split.body.isEmpty ? null : split.body;
 
       final requirements =
           split.requirements.isNotEmpty ? split.requirements : null;

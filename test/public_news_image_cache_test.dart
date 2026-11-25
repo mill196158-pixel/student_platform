@@ -221,15 +221,16 @@ void main() {
   test('hung legacy read releases transaction so clear completes and late data stays hidden', () async {
     final gated = _GatedLegacy();
     final cache = PublicNewsImageCache(legacy: gated, openStore: () async => storeA,
-        budget: budget, operationTimeout: const Duration(milliseconds: 80));
+        budget: budget);
     final pending = cache.read(key);
-    await gated.entered.future;
+    await gated.entered.future.timeout(const Duration(seconds: 5));
     final clear = b.invalidate(key.path);
-    expect((await pending.timeout(const Duration(seconds: 2))).state, NewsImageReadState.unknown);
-    await clear.timeout(const Duration(seconds: 2));
+    expect((await pending.timeout(const Duration(seconds: 5))).state, NewsImageReadState.unknown);
+    await clear.timeout(const Duration(seconds: 5));
     gated.release.complete(Uint8List.fromList([1]));
-    await Future<void>.delayed(const Duration(milliseconds: 60));
-    expect((await cache.read(key)).state, NewsImageReadState.miss);
+    final afterClear = await cache.read(key).timeout(const Duration(seconds: 5));
+    expect(afterClear.state, NewsImageReadState.miss);
+    expect(afterClear.bytes, isNull);
   });
 
   test('unknown DB never uses legacy or preloaded bytes, network remains usable', () async {

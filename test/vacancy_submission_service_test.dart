@@ -176,6 +176,28 @@ void main() {
     expect(resubmitted.isSubmitted, isTrue);
   });
 
+  test('clearing all optional fields in an edit writes explicit empty values',
+      () async {
+    final rpc = _FakeSubmitRpc(response: {'ok': true, 'row_version': 4});
+    final service = VacancySubmissionService(rpcClient: rpc);
+    await service.updateDraft(
+        id: 'vac-1',
+        expectedRowVersion: 3,
+        draft: const VacancySubmissionDraft(
+            title: 'Vacancy', summary: 'New summary'));
+    final patch = rpc.lastParams!['p_patch'] as Map;
+    for (final key in [
+      'employment_type',
+      'work_format',
+      'location',
+      'salary_text',
+      'external_url'
+    ]) {
+      expect(patch, containsPair(key, null));
+    }
+    expect(patch, containsPair('contacts', isEmpty));
+  });
+
   test('local submissions persist per user key', () async {
     SharedPreferences.setMockInitialValues({
       '${VacancySubmissionService.localSubmissionsKey}__user-b':

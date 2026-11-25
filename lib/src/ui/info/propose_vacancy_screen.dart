@@ -25,6 +25,10 @@ class _ProposeVacancyScreenState extends State<ProposeVacancyScreen> {
   final _formKey = GlobalKey<FormState>();
   final _titleKey = GlobalKey<FormFieldState<String>>();
   final _summaryKey = GlobalKey<FormFieldState<String>>();
+  final _urlKey = GlobalKey<FormFieldState<String>>();
+  // Mirrors vacancy_assert_patch so the form can identify the field to correct.
+  static final _externalUrl = RegExp(
+      r'^https://[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9](:[0-9]{1,5})?(/[^\s]*)?$');
   late final VacancySubmissionService _service =
       widget.submissionService ?? VacancySubmissionService();
 
@@ -90,7 +94,10 @@ class _ProposeVacancyScreenState extends State<ProposeVacancyScreen> {
   }
 
   VacancySubmissionDraft _draftFromFields() {
-    final contacts = <String, dynamic>{};
+    // Keep contact channels that the mobile form does not edit.
+    final contacts = {...?widget.existingSubmission?.contacts}
+      ..remove('email')
+      ..remove('phone');
     final email = _emailController.text.trim();
     final phone = _phoneController.text.trim();
     if (email.isNotEmpty) contacts['email'] = email;
@@ -123,7 +130,7 @@ class _ProposeVacancyScreenState extends State<ProposeVacancyScreen> {
       FocusManager.instance.primaryFocus?.unfocus();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        for (final key in [_titleKey, _summaryKey]) {
+        for (final key in [_titleKey, _summaryKey, _urlKey]) {
           final fieldContext = key.currentContext;
           if (key.currentState?.hasError == true && fieldContext != null) {
             Scrollable.ensureVisible(fieldContext,
@@ -396,7 +403,19 @@ class _ProposeVacancyScreenState extends State<ProposeVacancyScreen> {
                           ),
                           const SizedBox(height: 16),
                           TextFormField(
+                            key: _urlKey,
                             controller: _urlController,
+                            validator: (value) {
+                              final url = value?.trim() ?? '';
+                              if (url.runes.length > 500) {
+                                return 'Сократите ссылку до 500 символов.';
+                              }
+                              if (url.isNotEmpty &&
+                                  !_externalUrl.hasMatch(url)) {
+                                return 'Введите полную ссылку, например https://example.org/jobs';
+                              }
+                              return null;
+                            },
                             decoration:
                                 const InputDecoration(labelText: 'Ссылка'),
                             keyboardType: TextInputType.url,

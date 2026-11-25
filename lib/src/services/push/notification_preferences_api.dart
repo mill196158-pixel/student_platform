@@ -103,17 +103,11 @@ class NotificationPreferencesApi {
   final SupabaseClient _sb;
 
   Future<NotificationPreferences> getMine() async {
-    try {
-      final res = await _sb.rpc('get_my_notification_preferences');
-      if (res is Map) {
-        return NotificationPreferences.fromJson(
-          Map<String, dynamic>.from(res),
-        );
-      }
-    } catch (_) {
-      // Missing migration / RPC → defaults.
+    final res = await _sb.rpc('get_my_notification_preferences');
+    if (res is! Map) {
+      throw const FormatException('Expected notification preferences');
     }
-    return NotificationPreferences.defaults();
+    return NotificationPreferences.fromJson(Map<String, dynamic>.from(res));
   }
 
   Future<NotificationPreferences> updateMine(Map<String, dynamic> patch) async {

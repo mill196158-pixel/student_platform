@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:student_platform/src/core/auth_session_scope_host.dart';
 import 'package:student_platform/src/core/legacy_user_cache.dart';
 import '../../themes/theme_service.dart';
 import 'theme_mode_picker.dart';
@@ -44,6 +45,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   String? _avatarUrl; // url из БД
 
   bool _saving = false;
+  bool _savingStatus = false;
   Map<String, dynamic>? _user;
 
   final _sb = Supabase.instance.client;
@@ -138,18 +140,61 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Future<void> _setStatus(String newStatus) async {
-    if (_user == null) return;
-    setState(() => _status = newStatus);
+    final session = _sb.auth.currentSession;
+    if (_savingStatus || session == null || _user?['id'] != session.user.id) {
+      return;
+    }
+    final scope = AuthSessionScopeHost.maybeRead(context);
+    if (scope != null && scope.capture() == null) return;
+    final generation = scope?.generation;
+    bool sameOwner() {
+      final current = _sb.auth.currentSession;
+      if (current == null || current.user.id != session.user.id) return false;
+      if (scope == null) return current.accessToken == session.accessToken;
+      return !scope.logoutFenced && scope.generation == generation;
+    }
+    setState(() => _savingStatus = true);
     try {
-      final id = _user!['id'] as String;
-      await _sb.from('users').update({'status': newStatus}).eq('id', id);
-
+      await _sb.from('users').update({'status': newStatus})
+          .eq('id', session.user.id).select('id').single();
+    } catch (_) {
+      if (mounted) {
+        setState(() => _savingStatus = false);
+        if (sameOwner()) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Не удалось сохранить статус')),
+          );
+        }
+      }
+      return;
+    }
+    try {
       final prefs = await SharedPreferences.getInstance();
-      final u = Map<String, dynamic>.from(_user!);
-      u['status'] = newStatus;
-      _user = u;
-      await prefs.setString('user', jsonEncode(u));
-    } catch (_) {}
+      final cached = await LegacyUserCache.read(
+        currentSession: () => _sb.auth.currentSession,
+        preferences: () async => prefs,
+      );
+      if (sameOwner() && cached != null) {
+        final saved = await prefs.setString('user', jsonEncode({...cached, 'status': newStatus}));
+        if (!saved) throw StateError('Profile cache write failed');
+      }
+    } catch (_) {
+      if (mounted && sameOwner()) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Статус сохранён. Не удалось обновить его на устройстве')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _savingStatus = false;
+          if (sameOwner()) {
+            _status = newStatus;
+            _user = {...?_user, 'status': newStatus};
+          }
+        });
+      }
+    }
   }
 
   Future<void> _openStatusPicker() async {
@@ -161,7 +206,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         current: _status,
       ),
     );
-    if (picked == null || picked == _status) return;
+    if (!mounted || picked == null || picked == _status) return;
     await _setStatus(picked);
   }
 
@@ -331,7 +376,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       ),
                       title: _status,
                       subtitle: 'Нажмите, чтобы изменить',
-                      onTap: _openStatusPicker,
+                      onTap: _savingStatus || _user == null ? null : _openStatusPicker,
                     );
                   },
                 ),
@@ -770,14 +815,15 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
   }
 
   Future<void> _submit() async {
+    if (_busy) return;
     setState(() => _error = null);
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
-    final a = _newCtrl.text.trim();
+    final password = _newCtrl.text;
     setState(() => _busy = true);
     try {
       await Supabase.instance.client.auth
-          .updateUser(UserAttributes(password: a));
+          .updateUser(UserAttributes(password: password));
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } on AuthException catch (e) {
@@ -879,7 +925,7 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
                     onToggle: () =>
                         setState(() => _obscureConfirm = !_obscureConfirm),
                     validator: (v) {
-                      if ((v ?? '').trim() != _newCtrl.text.trim()) {
+                      if (v != _newCtrl.text) {
                         return 'Пароли не совпадают';
                       }
                       return null;

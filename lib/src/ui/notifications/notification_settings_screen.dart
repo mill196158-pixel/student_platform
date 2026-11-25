@@ -5,6 +5,7 @@ import 'package:student_ui/student_ui.dart';
 
 import 'package:student_platform/src/services/push/notification_preferences_api.dart';
 import 'package:student_platform/src/services/push/push_notification_service.dart';
+import 'package:student_platform/src/ui/common/friendly_empty_state.dart';
 
 class NotificationSettingsScreen extends StatefulWidget {
   const NotificationSettingsScreen({super.key});
@@ -17,9 +18,10 @@ class NotificationSettingsScreen extends StatefulWidget {
 class _NotificationSettingsScreenState
     extends State<NotificationSettingsScreen> {
   final _api = NotificationPreferencesApi();
-  NotificationPreferences _prefs = NotificationPreferences.defaults();
-  AuthorizationStatus _osStatus = AuthorizationStatus.notDetermined;
+  late NotificationPreferences _prefs;
+  AuthorizationStatus? _osStatus;
   bool _loading = true;
+  bool _loadFailed = false;
   bool _saving = false;
 
   @override
@@ -29,13 +31,30 @@ class _NotificationSettingsScreenState
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
-    final prefs = await _api.getMine();
-    final os =
-        await PushNotificationService.instance.currentAuthorizationStatus();
+    setState(() {
+      _loading = true;
+      _loadFailed = false;
+    });
+    try {
+      final prefs = await _api.getMine();
+      if (!mounted) return;
+      setState(() => _prefs = prefs);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _loadFailed = true;
+      });
+      return;
+    }
+    AuthorizationStatus? os;
+    try {
+      os = await PushNotificationService.instance.currentAuthorizationStatus();
+    } catch (_) {
+      // The device permission is independent of the student's saved settings.
+    }
     if (!mounted) return;
     setState(() {
-      _prefs = prefs;
       _osStatus = os;
       _loading = false;
     });
@@ -88,15 +107,27 @@ class _NotificationSettingsScreenState
       ),
       body: _loading
           ? Center(child: ProductLoadingIndicator.page(color: colors.primary))
+          : _loadFailed
+              ? FriendlyEmptyState(
+                  title: 'Не удалось загрузить настройки уведомлений',
+                  fallbackIcon: Icons.cloud_off_outlined,
+                  animationHeight: 64,
+                  action: FilledButton(
+                    onPressed: _load,
+                    child: const Text('Повторить'),
+                  ),
+                )
           : ListView(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 36),
               children: [
-                _OsStatusCard(
-                  enabled: _osEnabled,
-                  onOpenSettings: () => PushNotificationService.instance
-                      .openSystemNotificationSettings(),
-                ),
-                const SizedBox(height: 22),
+                if (_osStatus != null) ...[
+                  _OsStatusCard(
+                    enabled: _osEnabled,
+                    onOpenSettings: () => PushNotificationService.instance
+                        .openSystemNotificationSettings(),
+                  ),
+                  const SizedBox(height: 22),
+                ],
                 const _SectionLabel('Сообщения и друзья'),
                 _PrefGroup(
                   children: [

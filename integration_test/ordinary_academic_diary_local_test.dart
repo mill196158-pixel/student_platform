@@ -3,8 +3,6 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:http/http.dart' as http;
-import 'package:http/io_client.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_platform/src/config/supabase_config.dart';
@@ -12,32 +10,7 @@ import 'package:student_platform/src/ui/schedule/lesson_details_screen.dart';
 import 'package:student_platform/src/ui/schedule/models/lesson.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-const _local = 'http://127.0.0.1:55321';
-
-// Keep GoTrue on its normal local API. Route PostgREST to this run's isolated
-// server so other native E2Es can use their own schemas at the same time.
-class _LocalAcademicClient extends http.BaseClient {
-  _LocalAcademicClient(this.port);
-  final int port;
-  final _client = IOClient(HttpClient()..findProxy = (_) => 'DIRECT');
-
-  @override
-  Future<http.StreamedResponse> send(http.BaseRequest request) async {
-    if (request.url.origin != _local) throw StateError('Non-local host');
-    const prefix = '/rest/v1';
-    if (!request.url.path.startsWith('$prefix/')) return _client.send(request);
-    final uri = request.url
-        .replace(port: port, path: request.url.path.substring(prefix.length));
-    final forwarded = http.Request(request.method, uri)
-      ..followRedirects = false
-      ..headers.addAll(request.headers)
-      ..bodyBytes = await request.finalize().toBytes();
-    return _client.send(forwarded);
-  }
-
-  @override
-  void close() => _client.close();
-}
+import 'support/local_schema_http_client.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -48,12 +21,12 @@ void main() {
     final schema = data['schema'] as String;
     expect(schema, matches(RegExp(r'^e2e_diary_[0-9a-f]{12}$')));
     expect(data['email'], '$schema@student.local');
-    expect(SupabaseConfig.url, _local);
+    expect(SupabaseConfig.url, localSupabaseUrl);
     tester.testTextInput.register();
     SharedPreferences.setMockInitialValues({});
-    final httpClient = _LocalAcademicClient(data['restPort'] as int);
+    final httpClient = LocalSchemaHttpClient(data['restPort'] as int);
     await Supabase.initialize(
-      url: _local,
+      url: localSupabaseUrl,
       publishableKey: data['anon'] as String,
       httpClient: httpClient,
       authOptions: const FlutterAuthClientOptions(

@@ -146,7 +146,7 @@ void main() {
     expect(find.text('Локальная копия недоступна.'), findsOneWidget);
     ScaffoldMessenger.of(tester.element(find.byType(AppFileCard))).clearSnackBars();
     await tester.pumpAndSettle();
-    var opened = false;
+    final openedBytes = Completer<List<int>>();
     final actualDocumentRead = Completer<void>();
     await mount(document, read: (item) async {
       final bytes = await ChatFileAccess.readCachedOnly(item.fileUrl,
@@ -154,8 +154,7 @@ void main() {
       actualDocumentRead.complete();
       return bytes;
     }, open: (path) async {
-      opened = true;
-      expect(await File(path).readAsBytes(), [7, 8, 9]);
+      openedBytes.complete(File(path).readAsBytes());
       return true;
     });
     expect(find.byType(InteractiveViewer), findsNothing);
@@ -167,12 +166,12 @@ void main() {
     expect(actualDocumentRead.isCompleted, isTrue);
     await tester.pump();
     final button = tester.widget<AppFileCard>(find.byType(AppFileCard));
-    await tester.runAsync(() async {
+    final bytesOnOpen = await tester.runAsync(() {
       button.onTap!();
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+      return openedBytes.future.timeout(const Duration(seconds: 5));
     });
     await tester.pump();
-    expect(opened, isTrue);
+    expect(bytesOnOpen, [7, 8, 9]);
     // Exercise a serialized nested forward through the real SQLite cache and
     // the same session-scoped on-disk file/receipt used by the viewer.
     if (Platform.isWindows) {

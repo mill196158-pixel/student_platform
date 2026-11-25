@@ -1058,18 +1058,18 @@ class _MyChatsScreenState extends State<MyChatsScreen>
               tooltip: 'Ещё',
               padding: EdgeInsets.zero,
               icon: const Icon(Icons.more_vert),
-              onSelected: (value) {
+              onSelected: (value) async {
                 if (value == 'archive') {
-                  unawaited(
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => BlocProvider.value(
-                          value: context.read<TeamCubit>(),
-                          child: const ArchiveScreen(),
-                        ),
+                  final team = context.read<TeamCubit>();
+                  await Navigator.of(context).push<void>(
+                    MaterialPageRoute(
+                      builder: (_) => BlocProvider.value(
+                        value: team,
+                        child: const ArchiveScreen(),
                       ),
                     ),
                   );
+                  if (mounted) await _refreshAfterReturningFromChat();
                 }
               },
               itemBuilder: (ctx) => const [

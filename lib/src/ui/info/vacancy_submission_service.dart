@@ -33,14 +33,10 @@ class VacancySubmissionDraft {
   final String? externalUrl;
   final Map<String, dynamic> contacts;
 
-  static const _requirementsMarker = '\n\n---\nТребования:\n';
-
   String get fullDescription {
     final body = description.trim();
     final req = requirements.trim();
-    if (req.isEmpty) return body;
-    if (body.isEmpty) return '${_requirementsMarker.trim()}$req';
-    return '$body$_requirementsMarker$req';
+    return req.isEmpty ? body : '$body$vacancyRequirementsMarker$req';
   }
 
   Map<String, dynamic> toSubmitPatch() {
@@ -60,6 +56,18 @@ class VacancySubmissionDraft {
       if (contacts.isNotEmpty) 'contacts': contacts,
     };
   }
+
+  // The update RPC leaves absent keys untouched. An empty form control must
+  // therefore explicitly clear its stored value when editing a draft.
+  Map<String, dynamic> toUpdatePatch() => {
+        ...toSubmitPatch(),
+        'employment_type': employmentType?.wireValue,
+        'work_format': workFormat?.wireValue,
+        'location': location?.trim(),
+        'salary_text': salaryText?.trim(),
+        'external_url': externalUrl?.trim(),
+        'contacts': contacts,
+      };
 }
 
 /// Result of mobile `submit_vacancy(p_patch)` (or local demo fallback).
@@ -170,20 +178,13 @@ class MyVacancySubmissionItem {
   }
 
   VacancySubmissionDraft toDraft() {
-    const marker = '\n\n---\nТребования:\n';
-    var description = this.description;
-    var requirements = '';
-    final idx = description.indexOf(marker);
-    if (idx >= 0) {
-      requirements = description.substring(idx + marker.length);
-      description = description.substring(0, idx);
-    }
+    final split = splitVacancyDescription(description);
     return VacancySubmissionDraft(
       title: title,
       companyName: companyName,
       summary: summary,
-      description: description,
-      requirements: requirements,
+      description: split.body,
+      requirements: split.requirements,
       employmentType: VacancyEmploymentType.tryParse(employmentType),
       workFormat: VacancyWorkFormat.tryParse(workFormat),
       location: location,
@@ -318,7 +319,7 @@ class VacancySubmissionService {
     required VacancySubmissionDraft draft,
     required int expectedRowVersion,
   }) async {
-    final patch = draft.toSubmitPatch();
+    final patch = draft.toUpdatePatch();
     if ((patch['title']?.toString().trim().isEmpty ?? true)) {
       return const VacancySubmissionResult(
         ok: false,
