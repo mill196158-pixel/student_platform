@@ -12,10 +12,12 @@ class ProposeVacancyScreen extends StatefulWidget {
     super.key,
     this.submissionService,
     this.existingSubmission,
+    this.onVersionConflict,
   });
 
   final VacancySubmissionService? submissionService;
   final MyVacancySubmissionItem? existingSubmission;
+  final VoidCallback? onVersionConflict;
 
   @override
   State<ProposeVacancyScreen> createState() => _ProposeVacancyScreenState();
@@ -23,6 +25,7 @@ class ProposeVacancyScreen extends StatefulWidget {
 
 class _ProposeVacancyScreenState extends State<ProposeVacancyScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _bannerKey = GlobalKey();
   final _titleKey = GlobalKey<FormFieldState<String>>();
   final _summaryKey = GlobalKey<FormFieldState<String>>();
   final _urlKey = GlobalKey<FormFieldState<String>>();
@@ -159,9 +162,7 @@ class _ProposeVacancyScreenState extends State<ProposeVacancyScreen> {
           expectedRowVersion: expected,
         );
         if (!updated.ok) {
-          if (!mounted) return;
-          setState(
-              () => _banner = updated.errorMessage ?? 'Не удалось сохранить.');
+          _showSubmissionError(updated, 'Не удалось сохранить.');
           return;
         }
         _rowVersion = updated.rowVersion ?? expected + 1;
@@ -174,8 +175,7 @@ class _ProposeVacancyScreenState extends State<ProposeVacancyScreen> {
       }
       if (!mounted) return;
       if (!result.ok) {
-        setState(
-            () => _banner = result.errorMessage ?? 'Не удалось отправить.');
+        _showSubmissionError(result, 'Не удалось отправить.');
         return;
       }
       setState(() => _usedLocalFallback = result.isLocalFallback);
@@ -206,6 +206,19 @@ class _ProposeVacancyScreenState extends State<ProposeVacancyScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  void _showSubmissionError(VacancySubmissionResult result, String fallback) {
+    if (!mounted) return;
+    if (result.versionConflict) widget.onVersionConflict?.call();
+    setState(() => _banner = result.errorMessage ?? fallback);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final banner = _bannerKey.currentContext;
+      if (mounted && banner != null) {
+        Scrollable.ensureVisible(banner,
+            duration: const Duration(milliseconds: 250), alignment: 0.1);
+      }
+    });
   }
 
   @override
@@ -302,6 +315,7 @@ class _ProposeVacancyScreenState extends State<ProposeVacancyScreen> {
                             const SizedBox(height: 12),
                             Text(
                               _banner!,
+                              key: _bannerKey,
                               style: TextStyle(
                                   color: Theme.of(context).colorScheme.error),
                             ),

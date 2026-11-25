@@ -65,9 +65,10 @@ void main() {
         .copyWith(deletionVerified: true);
     final missingDocument = makeFile('missing.docx',
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    final png = base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/afoAAAAASUVORK5CYII=');
-    final firstPng = Uint8List.fromList([...png, 1]);
-    final secondPng = Uint8List.fromList([...png, 2]);
+    // Distinct, decodable 2×2 PNGs for the disk copy and the two thumbnails.
+    final png = base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAE0lEQVR4nGP8//8/AwMDEwMYAAAkBgMBXaJOiAAAAABJRU5ErkJggg==');
+    final firstPng = base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP8zwACTGCSAQANHQEDgslx/wAAAABJRU5ErkJggg==');
+    final secondPng = base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGNkYPjPwMDAxAAGAAsfAQMU4wsAAAAAAElFTkSuQmCC');
     Future<void> save(ChatFile item, List<int> bytes) async {
       final key = ChatFileAccess.keyFor(item.fileUrl)!;
       final file = File('${dir.path}/authorized_chat_files/$uid/${sha256.convert(utf8.encode('$uid:$key'))}');
@@ -91,19 +92,31 @@ void main() {
             : Uint8List.fromList([7, 8, 9]))))));
       await tester.pump();
     }
+    final thumbnail = find.descendant(
+      of: find.byType(CachedChatAttachment),
+      matching: find.byWidgetPredicate((widget) => widget is RawImage && widget.image != null),
+    ).hitTestable();
+    Future<void> waitForThumbnail() async {
+      final deadline = Stopwatch()..start();
+      while (thumbnail.evaluate().isEmpty && deadline.elapsed < const Duration(seconds: 10)) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
+        await tester.pump();
+      }
+      expect(thumbnail, findsOneWidget, reason: 'The decoded thumbnail must accept a tap');
+    }
     await mount(first, beforeRead: () => gate.future);
     await mount(second);
     gate.complete();
-    await tester.runAsync(() async => Future<void>.delayed(const Duration(milliseconds: 50)));
-    await tester.pump();
+    await waitForThumbnail();
     expect(find.text('Вложение: first.png'), findsNothing);
     final shown = tester.widget<Image>(find.byType(Image).first).image as MemoryImage;
     expect(shown.bytes, secondPng);
-    await tester.tap(find.byType(Image).first);
-    // A second tap before the overlay frame must not add another back entry.
-    await tester.tap(find.byType(Image).first);
+    await tester.tap(thumbnail);
     await tester.pumpAndSettle();
     expect(find.byType(InteractiveViewer), findsOneWidget);
+    expect(find.descendant(of: find.byType(InteractiveViewer),
+        matching: find.byWidgetPredicate((widget) => widget is RawImage && widget.image != null)),
+        findsOneWidget);
     expect(find.byTooltip('Назад'), findsOneWidget);
     expect(tester.widget<Material>(find.ancestor(
       of: find.byType(InteractiveViewer), matching: find.byType(Material)).first).color,
@@ -112,7 +125,10 @@ void main() {
     await tester.pump();
     expect(find.byType(InteractiveViewer), findsNothing);
     expect(tester.state<NavigatorState>(find.byType(Navigator)).canPop(), isFalse);
-    await tester.tap(find.byType(Image).first);
+    await waitForThumbnail();
+    await tester.tap(thumbnail);
+    // A second tap before the overlay frame must not add another back entry.
+    await tester.tap(thumbnail);
     await tester.pumpAndSettle();
     expect(find.byType(InteractiveViewer), findsOneWidget);
     final viewerSize = tester.getSize(find.byType(InteractiveViewer));
@@ -120,7 +136,9 @@ void main() {
     await tester.binding.handlePopRoute();
     await tester.pump();
     expect(find.byType(InteractiveViewer), findsNothing);
-    await tester.tap(find.byType(Image).first);
+    expect(tester.state<NavigatorState>(find.byType(Navigator)).canPop(), isFalse);
+    await waitForThumbnail();
+    await tester.tap(thumbnail);
     await tester.pumpAndSettle();
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: CachedChatAttachment(
       file: makeFile('second.png', 'image/png', deleted: true), service: service))));
@@ -320,7 +338,8 @@ void main() {
     await tester.pump();
     expect(find.byType(Image), findsNothing);
     await mount(second);
-    await tester.tap(find.byType(Image).first);
+    await waitForThumbnail();
+    await tester.tap(thumbnail);
     await tester.pumpAndSettle();
     expect(find.byType(InteractiveViewer), findsOneWidget);
     final navigator = tester.state<NavigatorState>(find.byType(Navigator));

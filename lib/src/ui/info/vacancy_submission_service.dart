@@ -79,8 +79,20 @@ class VacancySubmissionResult {
     this.rowVersion,
     this.isLocalFallback = false,
     this.rpcUnavailable = false,
+    this.versionConflict = false,
     this.errorMessage,
   });
+
+  factory VacancySubmissionResult.draftError(PostgrestException error) {
+    final conflict = error.message == 'row_version_conflict';
+    return VacancySubmissionResult(
+      ok: false,
+      versionConflict: conflict,
+      errorMessage: conflict
+          ? 'Заявка изменилась в другой сессии. Вернитесь в «Мои заявки» и заново откройте заявку.'
+          : error.message,
+    );
+  }
 
   final bool ok;
   final String? id;
@@ -88,6 +100,7 @@ class VacancySubmissionResult {
   final int? rowVersion;
   final bool isLocalFallback;
   final bool rpcUnavailable;
+  final bool versionConflict;
   final String? errorMessage;
 
   bool get isSubmitted => ok && status == 'submitted';
@@ -346,7 +359,7 @@ class VacancySubmissionService {
             : int.tryParse('$rowVersionRaw'),
       );
     } on PostgrestException catch (error) {
-      return VacancySubmissionResult(ok: false, errorMessage: error.message);
+      return VacancySubmissionResult.draftError(error);
     } catch (error) {
       return VacancySubmissionResult(ok: false, errorMessage: error.toString());
     }
@@ -375,7 +388,7 @@ class VacancySubmissionService {
             : int.tryParse('$rowVersionRaw'),
       );
     } on PostgrestException catch (error) {
-      return VacancySubmissionResult(ok: false, errorMessage: error.message);
+      return VacancySubmissionResult.draftError(error);
     } catch (error) {
       return VacancySubmissionResult(ok: false, errorMessage: error.toString());
     }

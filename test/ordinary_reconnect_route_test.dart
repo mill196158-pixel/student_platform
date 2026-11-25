@@ -17,30 +17,8 @@ import 'package:student_platform/src/core/auth_session_scope.dart';
 import 'package:student_platform/src/ui/home/home_snapshot_cache.dart';
 import 'package:student_platform/src/ui/navigation/navigation_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
 
-class _FakeSocketSink implements WebSocketSink {
-  _FakeSocketSink(this.controller);
-  final StreamController<dynamic> controller;
-  @override void add(dynamic data) {}
-  @override void addError(Object error, [StackTrace? stackTrace]) {}
-  @override Future<void> addStream(Stream<dynamic> stream) async { await stream.drain<void>(); }
-  @override Future<void> close([int? closeCode, String? closeReason]) => controller.close();
-  @override Future<void> get done => controller.done;
-  @override dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
-}
-
-class _FakeSocket implements WebSocketChannel {
-  final StreamController<dynamic> controller = StreamController<dynamic>.broadcast();
-  late final _FakeSocketSink output = _FakeSocketSink(controller);
-  @override Stream<dynamic> get stream => controller.stream;
-  @override WebSocketSink get sink => output;
-  @override Future<void> get ready async {}
-  @override String? get protocol => null;
-  @override int? get closeCode => null;
-  @override String? get closeReason => null;
-  @override dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
-}
+import 'support/in_memory_realtime_socket.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -85,7 +63,7 @@ void main() {
     });
     await tester.runAsync(() => app.debugInitializeOrdinaryApp(client: transport,
       databasePath: dir.path, databaseFactory: databaseFactoryFfi,
-      realtimeOptions: RealtimeClientOptions(transport: (_, __) => _FakeSocket())));
+      realtimeOptions: RealtimeClientOptions(transport: (_, __) => InMemoryRealtimeSocket())));
     await tester.pumpWidget(const app.StudentPlatformApp()); await tester.pumpAndSettle();
     for (var i = 0; i < 60 && find.byType(NavigationScreen).evaluate().isEmpty; i++) {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));

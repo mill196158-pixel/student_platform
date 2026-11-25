@@ -1552,19 +1552,12 @@ class TeamCubit extends Cubit<TeamState> {
       _rtDone?.unsubscribe();
     } catch (_) {}
     _rtDone = sb.channel('public:assignment_done');
-    _rtDone!
-        .onPostgresChanges(
-          event: PostgresChangeEvent.insert,
-          schema: 'public',
-          table: 'assignment_done',
-          callback: (_) => _reloadAssignments(),
-        )
-        .onPostgresChanges(
-          event: PostgresChangeEvent.delete,
-          schema: 'public',
-          table: 'assignment_done',
-          callback: (_) => _reloadAssignments(),
-        );
+    _rtDone!.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'assignment_done',
+      callback: (_) => _reloadAssignments(),
+    );
 
     _rtAssignments!.subscribe();
     _rtVotes!.subscribe();

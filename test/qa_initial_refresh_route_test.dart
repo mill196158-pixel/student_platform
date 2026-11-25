@@ -45,12 +45,14 @@ void main() {
           'user':{'id':user,'aud':'authenticated','app_metadata':{},
             'user_metadata':{},'created_at':'2026-01-01T00:00:00Z'},
         };
-        final entered = Completer<void>(), release = Completer<void>();
+        final entered = Completer<void>(), secondEntered = Completer<void>();
+        final release = Completer<void>();
         var calls = 0;
         final inner = MockClient((request) async {
           if (request.url.path == '/auth/v1/token') {
             calls++;
             if (!entered.isCompleted) entered.complete();
+            if (calls == 2) secondEntered.complete();
             await release.future;
             return http.Response(jsonEncode(session(2)), 200,
               headers: {'content-type':'application/json'}, request: request);
@@ -127,7 +129,7 @@ void main() {
         await entered.future;
         return (dir:dir, db:db, store:store, gate:gate, client:client, scope:scope,
           caps:caps, receipt:receipt, admission:admission, refresh:refresh, release:release,
-          calls:() => calls, failedAttempts:() => failedAttempts);
+          secondEntered: secondEntered.future, calls:() => calls, failedAttempts:() => failedAttempts);
       });
       expect(h, isNotNull);
       final setup = h!;
@@ -144,17 +146,21 @@ void main() {
       ));
       final result = await tester.runAsync(() async {
         final pending = setup.admission.resolve(setup.caps);
-        await Future<void>.delayed(const Duration(milliseconds: 10));
         Future<http.StreamedResponse>? second;
-        if (scenario == 'overlap') {
-          final request = http.Request('POST', Uri.parse(
-              'https://a.invalid/auth/v1/token?grant_type=refresh_token'))
-            ..body = jsonEncode({'refresh_token':'refresh-1'});
-          second = setup.gate.send(request);
-          await Future<void>.delayed(const Duration(milliseconds: 10));
+        try {
+          if (scenario == 'overlap') {
+            final request = http.Request('POST', Uri.parse(
+                'https://a.invalid/auth/v1/token?grant_type=refresh_token'))
+              ..body = jsonEncode({'refresh_token':'refresh-1'});
+            second = setup.gate.send(request);
+            // Surface an early transport failure while the first response is held.
+            await Future.any<void>([setup.secondEntered, second.then<void>((_) {})]);
+            expect(setup.calls(), 2, reason: 'Both refresh requests must reach the transport before release');
+          }
+          if (scenario == 'logout') setup.scope.invalidateForSignOut();
+        } finally {
+          if (scenario != 'timeout') setup.release.complete();
         }
-        if (scenario == 'logout') setup.scope.invalidateForSignOut();
-        if (scenario != 'timeout') setup.release.complete();
         final result = await pending;
         if (!setup.release.isCompleted) setup.release.complete();
         try { await setup.refresh; } catch (_) {}

@@ -149,6 +149,7 @@ class ScheduleRepository {
 
   Future<List<ScheduleAssignment>> loadMonthAssignments(DateTime anchor) async {
     try {
+      final userId = _sb.auth.currentUser?.id ?? '';
       final first = DateTime(anchor.year, anchor.month, 1);
       final nextMonth = DateTime(anchor.year, anchor.month + 1, 1);
       const select =
@@ -234,18 +235,11 @@ class ScheduleRepository {
           }
         } catch (_) {}
       }
-      final doneById = <String, bool>{};
+      var completedIds = <String>{};
       if (ids.isNotEmpty) {
         try {
-          final doneRows = await _sb
-              .from('assignment_done')
-              .select('assignment_id,done')
-              .inFilter('assignment_id', ids);
-          for (final raw in doneRows as List) {
-            final row = Map<String, dynamic>.from(raw as Map);
-            final id = (row['assignment_id'] ?? '').toString();
-            if (id.isNotEmpty) doneById[id] = (row['done'] ?? false) == true;
-          }
+          completedIds = await PersonalDiaryService(client: _sb)
+              .loadCompletedAssignmentIds(userId, ids);
         } catch (_) {}
       }
 
@@ -255,7 +249,7 @@ class ScheduleRepository {
                 fallbackYear: anchor.year,
                 subjectTitleByOfferingId: offeringTitles,
                 teamsById: teamsById,
-                completed: doneById[(row['id'] ?? '').toString()] == true,
+                completed: completedIds.contains(row['id']),
               ))
           .where((assignment) => assignment.dueAt != null)
           .toList();

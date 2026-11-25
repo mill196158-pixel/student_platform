@@ -2181,6 +2181,15 @@ class _PullSearchHostState extends State<_PullSearchHost>
     setState(() => _revealed = false);
   }
 
+  void _dismissSearchFromContent() {
+    if (!_revealed) return;
+    if (_query.isEmpty) {
+      unawaited(_closeSearch());
+    } else {
+      _focus.unfocus();
+    }
+  }
+
   bool _onScroll(ScrollNotification notification) {
     if (notification.metrics.axis != Axis.vertical) return false;
 
@@ -2251,9 +2260,7 @@ class _PullSearchHostState extends State<_PullSearchHost>
           axis: Axis.vertical,
           alignment: Alignment.topCenter,
           child: TapRegion(
-            onTapOutside: (_) {
-              if (_revealed) _closeSearch();
-            },
+            onTapOutside: (_) => _dismissSearchFromContent(),
             child: _FancySearchPanel(
               controller: _field,
               focusNode: _focus,
@@ -2269,7 +2276,7 @@ class _PullSearchHostState extends State<_PullSearchHost>
             onNotification: _onScroll,
             child: GestureDetector(
               behavior: HitTestBehavior.translucent,
-              onTap: _revealed ? _closeSearch : null,
+              onTap: _revealed ? _dismissSearchFromContent : null,
               child: ListView(
                 controller: _scroll,
                 physics: const AlwaysScrollableScrollPhysics(

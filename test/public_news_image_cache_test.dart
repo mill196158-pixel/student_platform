@@ -26,10 +26,34 @@ class _GatedLegacy extends NewsImageDiskCache {
 }
 
 class _CountingBudget extends OptionalImageCacheBudget {
-  _CountingBudget({required super.roots});
+  _CountingBudget({required super.roots, super.elapsed, super.refreshInterval, super.limitBytes});
   int calls = 0;
+  final retried = Completer<void>();
   @override
-  void Function()? reserve(int bytes) { calls++; return super.reserve(bytes); }
+  void Function()? reserve(int bytes) {
+    final reservation = super.reserve(bytes);
+    if (++calls == 2) retried.complete();
+    return reservation;
+  }
+}
+
+// Service deadlines use the widget clock. Let real SQLite/file completions run
+// without spending the test's virtual timeout while the host is busy.
+Future<T> _finishIo<T>(WidgetTester tester, Future<T> operation) async {
+  var settled = false;
+  final work = operation.whenComplete(() => settled = true);
+  Future<void> advanceIo() async {
+    final watchdog = Stopwatch()..start();
+    while (!settled) {
+      if (watchdog.elapsed > const Duration(seconds: 30)) {
+        fail('Timed out waiting for the SQLite and quota-scan scenario to finish');
+      }
+      await tester.pump();
+      if (!settled) await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    }
+  }
+  await Future.wait<void>([work.then<void>((_) {}), advanceIo()], eagerError: true);
+  return work;
 }
 
 class _CountingStore extends NewsSqliteImageStore {
@@ -326,25 +350,27 @@ void main() {
   });
 
   for (final overLimit in [false, true]) {
-    test('stale public news measurement ${overLimit ? 'rejects' : 'retries'} persistence', () async {
-      final measured = await Directory('${root.path}/measured').create();
+    testWidgets('stale public news measurement ${overLimit ? 'rejects' : 'retries'} persistence', (tester) async {
+      final measured = await _finishIo(tester, Directory('${root.path}/measured').create());
       var now = Duration.zero;
       var scans = 0;
       final pending = Completer<List<Directory>>();
-      final budget = OptionalImageCacheBudget(
+      final budget = _CountingBudget(
           roots: () => ++scans == 1 ? Future.value([measured]) : pending.future,
           elapsed: () => now, refreshInterval: const Duration(seconds: 1), limitBytes: 10);
-      await budget.refreshForTesting();
-      if (overLimit) await File('${measured.path}/protected').writeAsBytes(List.filled(11, 1));
+      await _finishIo(tester, budget.refreshForTesting());
+      if (overLimit) await _finishIo(tester, File('${measured.path}/protected').writeAsBytes(List.filled(11, 1)));
       now = const Duration(seconds: 2);
       final spy = _CountingStore(database: dbA, root: Directory('${root.path}/blobs'));
       final cache = PublicNewsImageCache(legacy: legacy, openStore: () async => spy, budget: budget);
-      expect(await cache.getOrFetch(key, () async => Uint8List.fromList([5])), [5]);
+      expect(await _finishIo(tester, cache.getOrFetch(key, () async => Uint8List.fromList([5]))), [5]);
       expect(spy.calls, 0);
+      expect(scans, 2);
+      expect(budget.calls, 1);
       pending.complete([measured]);
-      await budget.refreshForTesting();
-      if (!overLimit) await spy.written.future.timeout(const Duration(seconds: 2));
-      else await Future<void>.delayed(const Duration(milliseconds: 50));
+      await _finishIo(tester, budget.retried.future);
+      if (!overLimit) await _finishIo(tester, spy.written.future);
+      expect(budget.calls, 2);
       expect(spy.calls, overLimit ? 0 : 1);
     });
   }

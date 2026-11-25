@@ -54,15 +54,17 @@ class _MyVacancySubmissionsScreenState
   }
 
   Future<void> _openItem(MyVacancySubmissionItem item) async {
+    var listIsStale = false;
     final changed = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => ProposeVacancyScreen(
           submissionService: _service,
           existingSubmission: item,
+          onVersionConflict: () => listIsStale = true,
         ),
       ),
     );
-    if (changed == true && mounted) await _load();
+    if (mounted && (changed == true || listIsStale)) await _load();
   }
 
   @override

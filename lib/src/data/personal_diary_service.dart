@@ -409,7 +409,7 @@ class PersonalDiaryService {
     final assignmentsByOffering = <String, List<PersonalDiaryAssignment>>{};
     final tasksByOffering = <String, List<PersonalDiaryTask>>{};
     final messageIdByAssignment = <String, String>{};
-    final doneByAssignment = <String, bool>{};
+    var completedAssignments = <String>{};
     var generalTasks = const <PersonalDiaryTask>[];
 
     if (offeringIds.isNotEmpty) {
@@ -502,17 +502,8 @@ class PersonalDiaryService {
         } catch (_) {}
 
         try {
-          final doneRows = await _sb
-              .from('assignment_done')
-              .select('assignment_id,done,done_at')
-              .eq('user_id', userId)
-              .inFilter('assignment_id', assignmentIds);
-          for (final raw in doneRows as List) {
-            final row = Map<String, dynamic>.from(raw as Map);
-            final assignmentId = (row['assignment_id'] ?? '').toString();
-            if (assignmentId.isEmpty) continue;
-            doneByAssignment[assignmentId] = (row['done'] ?? false) == true;
-          }
+          completedAssignments =
+              await loadCompletedAssignmentIds(userId, assignmentIds);
         } catch (_) {}
       }
 
@@ -530,7 +521,7 @@ class PersonalDiaryService {
           dueAt: _nullableDate(row['due_at']),
           dueText: _nullIfEmpty(row['due_text']),
           status: (row['status'] ?? 'published').toString(),
-          completedByMe: doneByAssignment[id] == true,
+          completedByMe: completedAssignments.contains(id),
           teamId: _nullIfEmpty(row['team_id']),
           messageId: messageIdByAssignment[id],
           createdAt: _nullableDate(row['created_at']) ?? DateTime.now(),
@@ -966,6 +957,24 @@ class PersonalDiaryService {
     });
   }
 
+  Future<Set<String>> loadCompletedAssignmentIds(
+      String userId, List<String> ids) async {
+    if (userId.isEmpty || ids.isEmpty) return {};
+    // Current receipts store completion by presence. Older tables can also
+    // contain an explicit false. Their optional column cannot be selected by
+    // name on installations using only assignment_id and user_id.
+    final rows = await _sb
+        .from('assignment_done')
+        .select()
+        .eq('user_id', userId)
+        .inFilter('assignment_id', ids);
+    return rows
+        .where((row) => row['done'] != false)
+        .map((row) => row['assignment_id'])
+        .whereType<String>()
+        .toSet();
+  }
+
   Future<List<PersonalDiaryAssignment>> loadPublishedAssignmentsForOffering({
     required String subjectOfferingId,
     String? subjectTitle,
@@ -992,20 +1001,7 @@ class PersonalDiaryService {
         .map((row) => (row['id'] ?? '').toString())
         .where((id) => id.isNotEmpty)
         .toList();
-    final doneByAssignment = <String, bool>{};
-    if (ids.isNotEmpty) {
-      final doneRows = await _sb
-          .from('assignment_done')
-          .select('assignment_id,done')
-          .eq('user_id', userId)
-          .inFilter('assignment_id', ids);
-      for (final raw in doneRows as List) {
-        final row = Map<String, dynamic>.from(raw as Map);
-        final id = (row['assignment_id'] ?? '').toString();
-        if (id.isNotEmpty)
-          doneByAssignment[id] = (row['done'] ?? false) == true;
-      }
-    }
+    final completedAssignments = await loadCompletedAssignmentIds(userId, ids);
 
     final title = _cleanTitle(subjectTitle);
     return rawAssignments.map((row) {
@@ -1019,7 +1015,7 @@ class PersonalDiaryService {
         dueAt: _nullableDate(row['due_at']),
         dueText: _nullIfEmpty(row['due_text']),
         status: (row['status'] ?? 'published').toString(),
-        completedByMe: doneByAssignment[id] == true,
+        completedByMe: completedAssignments.contains(id),
         teamId: _nullIfEmpty(row['team_id']),
         createdAt: _nullableDate(row['created_at']) ?? DateTime.now(),
         publishedAt: _nullableDate(row['published_at']),

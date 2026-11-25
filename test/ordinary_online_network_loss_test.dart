@@ -15,6 +15,8 @@ import 'package:student_platform/src/config/supabase_config.dart';
 import 'package:student_platform/src/ui/navigation/navigation_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'support/in_memory_realtime_socket.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   testWidgets('offline auth error does not replace an already open online shell', (tester) async {
@@ -51,7 +53,8 @@ void main() {
           headers: {'content-type': 'application/json'});
     });
     await tester.runAsync(() => app.debugInitializeOrdinaryApp(client: transport,
-      databasePath: dir.path, databaseFactory: databaseFactoryFfi));
+      databasePath: dir.path, databaseFactory: databaseFactoryFfi,
+      realtimeOptions: RealtimeClientOptions(transport: (_, __) => InMemoryRealtimeSocket())));
     expect(app.debugOrdinaryOfflineEnabled, isTrue);
     expect(Supabase.instance.client.auth.currentUser?.id, uid);
     final persisted = jsonDecode((await SharedPreferences.getInstance()).getString(key)!) as Map;
