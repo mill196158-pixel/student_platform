@@ -264,6 +264,44 @@ class AuthorizedFileImageProvider
       url, user, epoch, sessionBinding, clientIdentity, contentEpoch, accessEpoch, _qaCredential, _cancelledNonce);
   @override
   String toString() => 'AuthorizedFileImageProvider';
+
+  ImageProvider get forDisplay => _DisplayImageProvider(this);
+}
+
+// Flutter can detach an Image while its async authorization key is pending.
+// Deliver an offline failure to the current image stream, even when the
+// widget that requested it has left the route. Never cache a failed key.
+class _DisplayImageProvider extends ImageProvider<Object> {
+  const _DisplayImageProvider(this.source);
+  final AuthorizedFileImageProvider source;
+
+  @override
+  Future<Object> obtainKey(ImageConfiguration configuration) =>
+      source.obtainKey(configuration).then<Object>((key) => key,
+          onError: (Object error, StackTrace stack) {
+        if (ChatFileAccess.isOfflineFailure(error)) return AsyncError(error, stack);
+        Error.throwWithStackTrace(error, stack);
+      });
+
+  @override
+  void resolveStreamForKey(ImageConfiguration configuration, ImageStream stream,
+      Object key, ImageErrorListener handleError) {
+    if (key is AsyncError) {
+      final completer = OneFrameImageStreamCompleter(
+          Future<ImageInfo>.error(key.error, key.stackTrace));
+      completer.addEphemeralErrorListener((_, __) {});
+      stream.setCompleter(completer);
+      return;
+    }
+    source.resolveStreamForKey(configuration, stream,
+        key as AuthorizedFileImageProvider, handleError);
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is _DisplayImageProvider && other.source == source;
+  @override
+  int get hashCode => source.hashCode;
 }
 
 class AuthorizedFileImage extends StatefulWidget {
@@ -456,7 +494,7 @@ class _AuthorizedFileImageState extends State<AuthorizedFileImage> {
     }
     return Image(
       key: ValueKey(_attempt),
-      image: provider,
+      image: provider.forDisplay,
       fit: widget.fit,
       width: widget.width,
       height: widget.height,

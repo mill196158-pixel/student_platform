@@ -332,6 +332,14 @@ class _FullscreenImageState extends State<FullscreenImage> {
     if (mounted) setState(() {});
   }
 
+  void _retryImage(int index) {
+    if (!mounted || index != _currentIndex || !_access.isCurrent(_currentUrl)) {
+      return;
+    }
+    PaintingBinding.instance.imageCache.evict(_providers[index]);
+    setState(() => _providers[index] = AuthorizedFileImageProvider(_currentUrl));
+  }
+
   String get _currentUrl =>
       _isGallery ? widget.galleryUrls![_currentIndex] : widget.imageUrl;
 
@@ -534,7 +542,8 @@ class _FullscreenImageState extends State<FullscreenImage> {
         minScale: 0.7,
         maxScale: 4,
         child: Image(
-          image: _providers.first,
+          key: ObjectKey(_providers.first),
+          image: _providers.first.forDisplay,
           fit: BoxFit.contain,
           frameBuilder: (context, child, frame, synchronous) =>
               synchronous || frame != null
@@ -546,23 +555,8 @@ class _FullscreenImageState extends State<FullscreenImage> {
               child: ProductLoadingIndicator.page(color: Colors.white),
             );
           },
-          errorBuilder: (context, error, stackTrace) => const Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.broken_image_outlined,
-                  color: Colors.white,
-                  size: 48,
-                ),
-                SizedBox(height: 16),
-                Text(
-                  'Не удалось открыть изображение',
-                  style: TextStyle(color: Colors.white),
-                ),
-              ],
-            ),
-          ),
+          errorBuilder: (context, error, stackTrace) =>
+              _ImageLoadError(onRetry: () => _retryImage(0)),
         ),
       ),
     );
@@ -583,7 +577,11 @@ class _FullscreenImageState extends State<FullscreenImage> {
             return Stack(children: [
               Offstage(
                   offstage: !permitted,
-                  child: GalleryImageSurface(provider: _providers[index])),
+                  child: GalleryImageSurface(
+                    key: ObjectKey(_providers[index]),
+                    provider: _providers[index],
+                    onRetry: () => _retryImage(index),
+                  )),
               if (!permitted) const _RevokedMedia(),
             ]);
           },
@@ -593,10 +591,34 @@ class _FullscreenImageState extends State<FullscreenImage> {
   }
 }
 
+class _ImageLoadError extends StatelessWidget {
+  const _ImageLoadError({required this.onRetry});
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.broken_image_outlined, color: Colors.white, size: 48),
+            const SizedBox(height: 16),
+            const Text('Не удалось открыть изображение',
+                textAlign: TextAlign.center, style: TextStyle(color: Colors.white)),
+            TextButton.icon(
+              onPressed: onRetry,
+              style: TextButton.styleFrom(foregroundColor: Colors.white),
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Повторить'),
+            ),
+          ]),
+        ),
+      );
+}
+
 /// Resolves the image size so the white backing follows the zoomed image.
 class GalleryImageSurface extends StatefulWidget {
-  const GalleryImageSurface({super.key, required this.provider});
+  const GalleryImageSurface({super.key, required this.provider, this.onRetry});
   final ImageProvider provider;
+  final VoidCallback? onRetry;
 
   @override
   State<GalleryImageSurface> createState() => _GalleryImageSurfaceState();
@@ -693,9 +715,12 @@ class _GalleryImageSurfaceState extends State<GalleryImageSurface> {
 
   @override
   Widget build(BuildContext context) {
-    if (_error)
+    if (_error) {
+      final retry = widget.onRetry;
+      if (retry != null) return _ImageLoadError(onRetry: retry);
       return const Center(
           child: Icon(Icons.broken_image_outlined, color: Colors.white));
+    }
     final info = _imageInfo;
     if (info == null)
       return const Center(

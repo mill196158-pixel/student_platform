@@ -1,6 +1,7 @@
 import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:student_platform/src/navigation/root_nav.dart';
 import 'package:student_platform/src/services/push/app_notifications_api.dart';
@@ -98,9 +99,17 @@ class _NotificationCenterBody extends StatefulWidget {
 }
 
 class _NotificationCenterBodyState extends State<_NotificationCenterBody> {
+  static const _pageSize = 50;
   final _api = AppNotificationsApi();
+  final _owner = Supabase.instance.client.auth.currentUser?.id;
   List<AppNotificationItem> _items = const [];
   bool _loading = true;
+  bool _canMarkAll = false;
+  bool _markingAll = false;
+  int _loadNumber = 0;
+  String? _actionError;
+  bool get _current =>
+      mounted && _owner == Supabase.instance.client.auth.currentUser?.id;
   Object? _error;
   final Set<_NotifGroup> _expandedGroups = {};
   final Set<String> _expandedThreads = {};
@@ -113,24 +122,41 @@ class _NotificationCenterBodyState extends State<_NotificationCenterBody> {
   }
 
   Future<void> _load() async {
+    if (!_current) return;
+    final load = ++_loadNumber;
+    bool current() => _current && load == _loadNumber;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final items = await _api.listMine(limit: 50);
-      if (!mounted) return;
-      setState(() => _items = items);
-      await _hydratePeerTitles(items);
+      final items = await _api.listMine(limit: _pageSize);
+      if (!current()) return;
+      var canMarkAll = items.any((item) => item.isUnread);
+      if (!canMarkAll && items.length == _pageSize) {
+        try {
+          canMarkAll = await _api.unreadCount() > 0;
+        } catch (_) {
+          // Older rows may still be unread. The bulk operation is idempotent.
+          canMarkAll = true;
+        }
+      }
+      if (!current()) return;
+      setState(() {
+        _items = items;
+        _canMarkAll = canMarkAll;
+      });
+      await _hydratePeerTitles(items, current);
     } catch (e) {
-      if (!mounted) return;
+      if (!current()) return;
       setState(() => _error = e);
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (current()) setState(() => _loading = false);
     }
   }
 
-  Future<void> _hydratePeerTitles(List<AppNotificationItem> items) async {
+  Future<void> _hydratePeerTitles(
+      List<AppNotificationItem> items, bool Function() current) async {
     final peerIds = <String>{};
     for (final item in items) {
       if (item.eventType != 'dm_message') continue;
@@ -140,15 +166,15 @@ class _NotificationCenterBodyState extends State<_NotificationCenterBody> {
     }
     if (peerIds.isEmpty) return;
 
-    final missing =
-        peerIds.where((id) => !_peerNames.containsKey(id)).toList();
+    final missing = peerIds.where((id) => !_peerNames.containsKey(id)).toList();
     for (final id in missing) {
       final profile = await PushNavigation.resolvePeerProfile(id);
+      if (!current()) return;
       if (!isUnresolvedDmTitle(profile.name)) {
         _peerNames[id] = profile.name;
       }
     }
-    if (mounted) setState(() {});
+    if (current()) setState(() {});
   }
 
   String _displayTitle(AppNotificationItem item) {
@@ -163,8 +189,21 @@ class _NotificationCenterBodyState extends State<_NotificationCenterBody> {
   }
 
   Future<void> _markAllRead() async {
-    await _api.markAllRead();
-    await _load();
+    if (!_current || _markingAll || !_canMarkAll) return;
+    setState(() {
+      _markingAll = true;
+      _actionError = null;
+    });
+    try {
+      await _api.markAllRead();
+      if (_current) await _load();
+    } catch (_) {
+      if (_current)
+        setState(() =>
+            _actionError = 'Не удалось отметить уведомления прочитанными');
+    } finally {
+      if (_current) setState(() => _markingAll = false);
+    }
   }
 
   Future<void> _openItem(AppNotificationItem item) async {
@@ -210,14 +249,11 @@ class _NotificationCenterBodyState extends State<_NotificationCenterBody> {
 
     final result = <_NotifGroup, List<_ThreadSummary>>{};
     for (final g in _NotifGroup.values) {
-      final threads = byGroup[g]!
-          .entries
-          .map((e) {
-            final list = List<AppNotificationItem>.from(e.value)
-              ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-            return _ThreadSummary(key: e.key, items: list);
-          })
-          .toList()
+      final threads = byGroup[g]!.entries.map((e) {
+        final list = List<AppNotificationItem>.from(e.value)
+          ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        return _ThreadSummary(key: e.key, items: list);
+      }).toList()
         ..sort((a, b) => b.latest.createdAt.compareTo(a.latest.createdAt));
       result[g] = threads;
     }
@@ -230,7 +266,7 @@ class _NotificationCenterBodyState extends State<_NotificationCenterBody> {
     final cs = theme.colorScheme;
     final compact = MediaQuery.sizeOf(context).width < 360 ||
         MediaQuery.textScalerOf(context).scale(16) > 20;
-    final hasUnread = _items.any((item) => item.isUnread);
+    final canMarkAll = _current && _canMarkAll && !_markingAll;
     return SizedBox(
       height: MediaQuery.sizeOf(context).height * 0.78,
       child: SafeArea(
@@ -250,18 +286,26 @@ class _NotificationCenterBodyState extends State<_NotificationCenterBody> {
                 if (_items.isNotEmpty && compact)
                   IconButton(
                     tooltip: 'Прочитать все',
-                    onPressed: hasUnread ? _markAllRead : null,
+                    onPressed: canMarkAll ? _markAllRead : null,
                     icon: const Icon(Icons.done_all_rounded),
                   )
                 else if (_items.isNotEmpty)
                   TextButton(
                       style: TextButton.styleFrom(
                           textStyle: theme.textTheme.bodyMedium),
-                      onPressed: hasUnread ? _markAllRead : null,
+                      onPressed: canMarkAll ? _markAllRead : null,
                       child: const Text('Прочитать все')),
               ]),
             ),
             Divider(height: 1, color: cs.outlineVariant),
+            if (_actionError != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                child: Semantics(
+                    liveRegion: true,
+                    child:
+                        Text(_actionError!, style: TextStyle(color: cs.error))),
+              ),
             Expanded(
                 child: RefreshIndicator(
                     onRefresh: _load, child: _buildList(theme))),

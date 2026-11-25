@@ -10,6 +10,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:student_platform/src/core/online_side_effect_barrier.dart';
+import 'package:student_platform/src/navigation/root_nav.dart';
 import 'package:student_platform/src/services/push/push_notification_service.dart';
 import 'package:student_platform/src/ui/notifications/notification_center_sheet.dart';
 import 'package:student_platform/src/ui/notifications/push_session_host.dart';
@@ -24,7 +25,7 @@ void main() async {
     throw StateError('An isolated Android debug fixture is required.');
   }
   await initializeDateFormatting('ru_RU');
-  runApp(const MaterialApp(home: _Fixture()));
+  runApp(MaterialApp(navigatorKey: rootNavigatorKey, home: const _Fixture()));
 }
 
 class _Fixture extends StatefulWidget {
@@ -35,6 +36,7 @@ class _Fixture extends StatefulWidget {
 }
 
 class _FixtureState extends State<_Fixture> {
+  static const coldTap = bool.fromEnvironment('E2E_COLD_PUSH_TAP');
   String status = 'Starting Firebase';
   bool ready = false;
   bool signedIn = false;
@@ -62,6 +64,18 @@ class _FixtureState extends State<_Fixture> {
       final files = await getApplicationSupportDirectory();
       await File('${files.path}/student_push_qa_token')
           .writeAsString(token, flush: true);
+      if (coldTap) {
+        final backend = File('${files.path}/student_push_qa_backend.json');
+        if (await backend.exists()) {
+          await _initializeBackend(
+              jsonDecode(await backend.readAsString()) as Map<String, dynamic>);
+          final session = Supabase.instance.client.auth.currentSession;
+          if (session != null) {
+            _admit(session);
+            return;
+          }
+        }
+      }
       if (mounted) {
         setState(() {
           ready = true;
@@ -73,6 +87,41 @@ class _FixtureState extends State<_Fixture> {
     }
   }
 
+  Future<void> _initializeBackend(Map<String, dynamic> cfg) async {
+    if (initializedBackend) return;
+    final port = cfg['port'];
+    if (port is! int || port < 1024 || port > 65535) {
+      throw StateError('Invalid local port');
+    }
+    await Supabase.initialize(
+      url: 'http://127.0.0.1:$port',
+      publishableKey: cfg['anonKey'] as String,
+      authOptions: FlutterAuthClientOptions(
+        autoRefreshToken: false,
+        detectSessionInUri: false,
+        localStorage: coldTap ? null : const EmptyLocalStorage(),
+      ),
+    );
+    initializedBackend = true;
+  }
+
+  void _admit(Session session) {
+    barrier = OnlineSideEffectBarrier(
+      ownerIsCurrent: () {
+        final current = Supabase.instance.client.auth.currentSession;
+        return current?.user.id == session.user.id &&
+            current?.accessToken == session.accessToken &&
+            current?.refreshToken == session.refreshToken;
+      },
+    );
+    if (mounted) {
+      setState(() {
+        signedIn = true;
+        status = 'Test student signed in';
+      });
+    }
+  }
+
   Future<void> _signIn() async {
     if (connecting) return;
     setState(() => connecting = true);
@@ -81,38 +130,19 @@ class _FixtureState extends State<_Fixture> {
       final cfg = jsonDecode(
         await File('${files.path}/student_push_qa_config.json').readAsString(),
       ) as Map<String, dynamic>;
-      final port = cfg['port'];
-      if (port is! int || port < 1024 || port > 65535) {
-        throw StateError('Invalid local port');
-      }
-      if (!initializedBackend) {
-        await Supabase.initialize(
-          url: 'http://127.0.0.1:$port',
-          publishableKey: cfg['anonKey'] as String,
-          authOptions: const FlutterAuthClientOptions(
-            autoRefreshToken: false,
-            detectSessionInUri: false,
-            localStorage: EmptyLocalStorage(),
-          ),
-        );
-        initializedBackend = true;
-      }
+      await _initializeBackend(cfg);
       final result = await Supabase.instance.client.auth.signInWithPassword(
         email: cfg['email'] as String,
         password: cfg['password'] as String,
       );
       if (result.user == null) throw StateError('Missing test user');
-      final session = result.session!;
-      barrier = OnlineSideEffectBarrier(
-        ownerIsCurrent: () =>
-            identical(Supabase.instance.client.auth.currentSession, session),
-      );
-      if (mounted) {
-        setState(() {
-          signedIn = true;
-          status = 'Test student signed in';
-        });
+      if (coldTap) {
+        await File('${files.path}/student_push_qa_backend.json').writeAsString(
+            jsonEncode({'port': cfg['port'], 'anonKey': cfg['anonKey']}),
+            flush: true);
+        await File('${files.path}/student_push_qa_config.json').delete();
       }
+      _admit(result.session!);
     } catch (e) {
       _setStatus('Local test login failed (${e.runtimeType})');
     } finally {

@@ -272,54 +272,8 @@ class _MyChatsScreenState extends State<MyChatsScreen>
       final res = await sb.rpc('get_my_chat_summaries');
       if (!current()) return;
       _saveConfirmedSummaries(projectCache, ticket, res);
-      final rows = (res as List? ?? const [])
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .toList();
-
-      // Локальный кеш — быстрый старт; pin/mute с сервера — источник истины.
-      // settings_exists=false → один раз перенести старые локальные pin/mute.
-      final localStateByKey = <String, _ChatSummary>{
-        for (final item in _all) _summaryIdentity(item): item,
-      };
-      final list = <_ChatSummary>[];
       final toMigrate = <Map<String, dynamic>>[];
-
-      for (final row in rows) {
-        final item = _summaryFromRpcRow(row);
-        if (item.isDm && (item.peerId == null || item.peerId!.isEmpty)) {
-          continue;
-        }
-
-        final settingsExists = row['settings_exists'] == true;
-        if (!settingsExists) {
-          final local = localStateByKey[_summaryIdentity(item)];
-          if (local != null) {
-            item.pinned = local.pinned;
-            item.muted = local.muted;
-          }
-          final chatId = item.chatId;
-          if (chatId != null && chatId.isNotEmpty) {
-            toMigrate.add({
-              'user_id': me,
-              'chat_id': chatId,
-              'is_pinned': item.pinned,
-              'is_muted': item.muted,
-              'updated_at': DateTime.now().toUtc().toIso8601String(),
-            });
-          }
-        }
-        list.add(item);
-      }
-
-      if (toMigrate.isNotEmpty && !qaNoAutomaticWrites) {
-        if (!current()) return;
-        await sb.from('chat_user_settings').upsert(
-              toMigrate,
-              onConflict: 'user_id,chat_id',
-            );
-      }
-
-      list.sort(_compareChats);
+      final list = _summariesFromServer(res, me, toMigrate);
 
       if (!current()) return;
       _safeSetState(() {
@@ -335,6 +289,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
       unawaited(_hydrateUnresolvedDmTitles());
 
       if (widget.enableRealtime) _subscribeChatsRealtime();
+      await _migrateSettings(toMigrate);
     } catch (_) {
       _safeSetState(() => _loading = false);
     } finally {
@@ -343,6 +298,61 @@ class _MyChatsScreenState extends State<MyChatsScreen>
         _summariesQueued = false;
         unawaited(_reloadSummariesFromRpc());
       }
+    }
+  }
+
+  List<_ChatSummary> _summariesFromServer(
+    dynamic response,
+    String owner,
+    List<Map<String, dynamic>> toMigrate,
+  ) {
+    // Локальный кеш — быстрый старт; pin/mute с сервера — источник истины.
+    // settings_exists=false → один раз перенести старые локальные pin/mute.
+    final localStateByKey = <String, _ChatSummary>{
+      for (final item in _all) _summaryIdentity(item): item,
+    };
+    final list = <_ChatSummary>[];
+
+    for (final raw in response as List? ?? const []) {
+      final row = Map<String, dynamic>.from(raw as Map);
+      final item = _summaryFromRpcRow(row);
+      if (item.isDm && (item.peerId == null || item.peerId!.isEmpty)) {
+        continue;
+      }
+
+      final settingsExists = row['settings_exists'] == true;
+      if (!settingsExists) {
+        final local = localStateByKey[_summaryIdentity(item)];
+        if (local != null) {
+          item.pinned = local.pinned;
+          item.muted = local.muted;
+        }
+        final chatId = item.chatId;
+        if (chatId != null && chatId.isNotEmpty) {
+          toMigrate.add({
+            'user_id': owner,
+            'chat_id': chatId,
+            'is_pinned': item.pinned,
+            'is_muted': item.muted,
+            'updated_at': DateTime.now().toUtc().toIso8601String(),
+          });
+        }
+      }
+      list.add(item);
+    }
+    return list..sort(_compareChats);
+  }
+
+  Future<void> _migrateSettings(List<Map<String, dynamic>> settings) async {
+    if (settings.isEmpty || qaNoAutomaticWrites) return;
+    try {
+      await Supabase.instance.client.from('chat_user_settings').upsert(
+        settings,
+        onConflict: 'user_id,chat_id',
+        ignoreDuplicates: true,
+      );
+    } catch (error) {
+      safeDebugLog('[MyChatsScreen] settings sync failed error=${error.runtimeType}');
     }
   }
 
@@ -778,11 +788,8 @@ class _MyChatsScreenState extends State<MyChatsScreen>
         final res = await sb.rpc('get_my_chat_summaries');
         if (!current()) break;
         _saveConfirmedSummaries(projectCache, ticket, res);
-        final list = (res as List? ?? const [])
-            .map((e) => _summaryFromRpcRow(Map<String, dynamic>.from(e as Map)))
-            .where((c) => !c.isDm || (c.peerId?.isNotEmpty ?? false))
-            .toList()
-          ..sort(_compareChats);
+        final toMigrate = <Map<String, dynamic>>[];
+        final list = _summariesFromServer(res, owner.userId, toMigrate);
 
         if (!current()) break;
         _safeSetState(() {
@@ -795,6 +802,7 @@ class _MyChatsScreenState extends State<MyChatsScreen>
         await _saveCache(list, owner: owner.userId);
         if (!current()) break;
         if (widget.enableRealtime) _subscribeChatsRealtime();
+        await _migrateSettings(toMigrate);
       } while (_summariesQueued && mounted);
     } catch (e) {
       safeDebugLog(

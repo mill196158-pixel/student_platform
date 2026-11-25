@@ -277,7 +277,7 @@ class _AppNetworkImagePreviewState extends State<AppNetworkImagePreview> {
     final epoch = ChatFileAccess.generation;
     final revision = _resolveRevision;
     final provider = AuthorizedFileImageProvider(url);
-    final stream = provider.resolve(const ImageConfiguration());
+    final stream = provider.forDisplay.resolve(const ImageConfiguration());
     final listener = ImageStreamListener((info, _) {
       try {
         final width = info.image.width.toDouble();

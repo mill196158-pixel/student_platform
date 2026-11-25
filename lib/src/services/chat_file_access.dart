@@ -1071,7 +1071,7 @@ class ChatFileAccess {
 
   static Future<bool> _offlineCopy(
       Object error, String url, File? file, String? uid, int epoch) async {
-    if (!_offline(error) ||
+    if (!isOfflineFailure(error) ||
         file == null ||
         uid == null ||
         _unsupportedProtocol.contains('$uid:${keyFor(url)}')) return false;
@@ -1100,7 +1100,7 @@ class ChatFileAccess {
               (error.details as Map)['error'] == 'file_unavailable' &&
               (error.details as Map)['reason'] == 'access_denied_v1'));
 
-  static bool _offline(Object error) =>
+  static bool isOfflineFailure(Object error) =>
       error is SocketException ||
       error is http.ClientException ||
       error is TimeoutException ||
@@ -1299,7 +1299,7 @@ class ChatFileAccess {
           try {
             if (_explicitDenial(error)) {
               await fence.finish(fenceToken, allowed: false);
-            } else if (_offline(error)) {
+            } else if (isOfflineFailure(error)) {
               await fence.finish(fenceToken, allowed: null);
             }
           } catch (_) {}
@@ -1361,7 +1361,7 @@ class ChatFileAccess {
       }, onError: (Object error, StackTrace _) async {
         if (timedOut && _explicitDenial(error)) {
           await revoke();
-        } else if (timedOut && _offline(error) && current()) {
+        } else if (timedOut && isOfflineFailure(error) && current()) {
           await _restoreAfterTransportFailure(
               url, uid, _sessionId(client.auth.currentSession), current);
         } else if (timedOut &&
@@ -1401,7 +1401,7 @@ class ChatFileAccess {
           await _denyLocalCopy(url, uid, key, id);
         } catch (_) {}
       }
-      if (_offline(error)) {
+      if (isOfflineFailure(error)) {
         await _restoreAfterTransportFailure(
             url,
             uid,
@@ -1415,7 +1415,7 @@ class ChatFileAccess {
       }
       rethrow;
     } catch (error) {
-      if (_offline(error)) {
+      if (isOfflineFailure(error)) {
         await _restoreAfterTransportFailure(
             url,
             uid,

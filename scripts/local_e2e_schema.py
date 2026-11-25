@@ -19,12 +19,52 @@ def sql(value):
         raise RuntimeError(result.stderr[-2400:])
     return result.stdout
 
+def install_chat_journeys():
+    """Prepare the existing minimal local database for real chat/inbox journeys."""
+    migrations = ROOT / 'supabase/migrations'
+    summary = (migrations / '20260717155000_get_my_chat_summaries_rpc.sql').read_text('utf-8')
+    push = (migrations / '20260718101311_stage11_push_notifications.sql').read_text('utf-8')
+    # The minimal database has no assignments or lessons; use the message trigger
+    # and its dependencies directly from Stage 11.
+    chat_push, marker, remaining = push.partition('-- 11. Event triggers: friends')
+    _, realtime_marker, remaining = remaining.partition('-- 14. Realtime for in-app center')
+    realtime, cron_marker, _ = remaining.partition('-- 15. Optional cleanup cron')
+    if not all((marker, realtime_marker, cron_marker)):
+        raise RuntimeError('Message notification migration boundary is missing')
+    # Existing notification installations can be more recent. Never replace them.
+    has_push = 'present' in sql("""
+      select 'present' where to_regclass('public.app_notifications') is not null;
+    """)
+    baseline = (ROOT / 'supabase/local/chat_journey_rpcs.sql').read_text('utf-8')
+    sql("""
+      begin;
+      do $$ begin
+        if to_regprocedure('public.mark_chat_read(uuid,uuid)') is not null
+          or to_regprocedure('public.get_unread_in_chat(uuid)') is not null
+          or to_regprocedure('public.send_chat_message(uuid,text,text,uuid,text,uuid,uuid)') is not null
+          or (select btrim(prosrc, E' \\n\\r\\t') from pg_proc where oid='public.get_my_chat_summaries()'::regprocedure)
+             is distinct from 'select null::uuid where false;'
+        then raise exception 'Chat RPCs already installed or divergent; expected minimal local schema';
+        end if;
+      end $$;
+      drop function public.get_my_chat_summaries();
+    """ + summary + baseline + ('' if has_push else chat_push + realtime) + """
+      notify pgrst, 'reload schema';
+      commit;
+    """)
+    print('Installed local chat journey RPCs and message notifications')
+
 def main():
     # Exact container identity, no DSN/env/remote fallback supported.
     name = subprocess.check_output(
         ['docker', 'inspect', '--format', '{{.Name}}', CONTAINER], text=True).strip()
     if name != '/' + CONTAINER:
         raise SystemExit('Wrong local container')
+    if sys.argv[1:] == ['--chat-journeys']:
+        install_chat_journeys()
+        return
+    if sys.argv[1:]:
+        raise SystemExit('Usage: local_e2e_schema.py [--chat-journeys]')
     exists = sql("select to_regclass('public.users');").strip()
     if 'users' in exists:
         raise SystemExit('Local users table already exists; refusing implicit reset')

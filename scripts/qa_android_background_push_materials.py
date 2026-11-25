@@ -4,6 +4,9 @@ Install integration_test/android_background_push_fixture_main.dart first.
 Use prepare with an ACL-protected dir containing android.json. Send two FCM
 messages to its fcm-token.txt using the two IDs from the local test backend,
 then run read. Install the materials fixture and run materials on the same AVD.
+For cold-tap and warm-tap, build the push fixture with E2E_COLD_PUSH_TAP=true.
+Seed two independent DM histories on the local E2E database, then send both
+notices in the background. Run cold-tap before warm-tap on that installation.
 """
 
 import argparse
@@ -13,6 +16,7 @@ import subprocess
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from uuid import UUID
 
 PACKAGE = "com.mill453020.studentplatform.offlinefixture"
 ACTIVITY = PACKAGE + "/com.mill453020.studentplatform.MainActivity"
@@ -44,7 +48,7 @@ class Device:
             timeout=15, check=True,
         )
 
-    def nodes(self):
+    def nodes(self, package=PACKAGE):
         path = "/data/local/tmp/student-materials-push-qa.xml"
         self.run("shell", "uiautomator", "dump", path)
         raw = self.run("exec-out", "cat", path)
@@ -52,13 +56,13 @@ class Device:
         if start < 0 or end < start:
             return []
         hierarchy = ET.fromstring(raw[start : end + len(b"</hierarchy>")])
-        return [n for n in hierarchy.iter("node") if n.get("package") == PACKAGE]
+        return [n for n in hierarchy.iter("node") if n.get("package") == package]
 
-    def find(self, label, *, wait=18, scroll=False):
+    def find(self, label, *, wait=18, scroll=False, package=PACKAGE):
         deadline = time.monotonic() + wait
         while time.monotonic() < deadline:
             try:
-                nodes = self.nodes()
+                nodes = self.nodes(package)
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
                 time.sleep(0.5)
                 continue
@@ -72,7 +76,9 @@ class Device:
         raise RuntimeError(f"Expected fixture control unavailable: {label}")
 
     def tap(self, label, **kwargs):
-        n = self.find(label, **kwargs)
+        self.tap_node(self.find(label, **kwargs))
+
+    def tap_node(self, n):
         x, y, xx, yy = map(int, re.findall(r"\d+", n.get("bounds")))
         self.run("shell", "input", "tap", str((x + xx) // 2), str((y + yy) // 2))
 
@@ -118,6 +124,129 @@ def prepare(device, private, cfg):
     device.find("Test student signed in")
     device.run("shell", "input", "keyevent", "KEYCODE_HOME")
     print("PASS local account signed in; recipient is in background", flush=True)
+
+
+def check_chat_reads(cfg, read_chats):
+    owner = UUID(cfg["recipientId"])
+    rows = []
+    for label in ("first", "second"):
+        notice, chat, message = (UUID(cfg[label + k]) for k in ("Id", "ChatId", "MessageId"))
+        rows.append(f"('{label}', '{notice}'::uuid, '{chat}'::uuid, '{message}'::uuid)")
+    query = f"""
+        SELECT f.label, n.read_at IS NOT NULL, COALESCE(r.last_read_message_id = f.message, false)
+        FROM (VALUES {', '.join(rows)}) AS f(label, notice, chat, message)
+        JOIN public.app_notifications n ON n.id = f.notice AND n.recipient_id = '{owner}'::uuid
+        LEFT JOIN public.chat_reads r ON r.chat_id = f.chat AND r.user_id = n.recipient_id
+        ORDER BY f.label
+    """
+    expected = [label + ("|t|t" if label in read_chats else "|f|f") for label in ("first", "second")]
+    deadline = time.monotonic() + 25
+    while time.monotonic() < deadline:
+        result = subprocess.check_output(
+            ["docker", "exec", "-i", "supabase_db_student_platform_e2e", "psql",
+             "-XAt", "-U", "postgres", "-v", "ON_ERROR_STOP=1"],
+            input=query, text=True, timeout=8,
+        )
+        if result.splitlines() == expected:
+            return
+        time.sleep(0.5)
+    raise RuntimeError("The server's notification read state or DM read cursor did not match")
+
+
+def tap_system_card(device, title, body, tag):
+    def last_click():
+        events = device.run("logcat", "-b", "events", "-d", "-v", "epoch",
+                            "-s", "notification_clicked:I").decode()
+        clicks = [line for line in events.splitlines() if "|" + PACKAGE + "|" in line]
+        return clicks[-1] if clicks else ""
+
+    def resource(node):
+        return node.get("resource-id", "").split("/")[-1]
+
+    def contains(row, label):
+        return any(label in (n.get("content-desc") or n.get("text") or "").splitlines()
+                   for n in row.iter("node"))
+
+    previous = last_click()
+    device.run("shell", "cmd", "statusbar", "expand-notifications")
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        rows = [n for n in device.nodes("com.android.systemui") if resource(n) == "expandableNotificationRow"]
+        group_toggle = None
+        target = None
+        for row in rows:
+            if not contains(row, title):
+                continue
+            children = list(row.iter("node"))
+            if any(resource(n) == "expandableNotificationRow" for n in children[1:]):
+                group_toggle = next((n for n in children if resource(n) == "expand_button"
+                                     and n.get("content-desc") == "Expand"
+                                     and any(resource(k) == "expand_button_number" for k in n.iter("node"))), None)
+            elif contains(row, body):
+                target = next(n for n in children if body in
+                              (n.get("content-desc") or n.get("text") or "").splitlines())
+        if group_toggle is not None:
+            device.tap_node(group_toggle)
+            time.sleep(0.5)
+            continue
+        if target is not None:
+            device.tap_node(target)
+            break
+        time.sleep(0.3)
+    else:
+        raise RuntimeError("Android did not expose the requested child notification")
+
+    for _ in range(15):
+        click = last_click()
+        if click != previous:
+            if f"|{PACKAGE}|0|{tag}|" not in click:
+                raise RuntimeError("Android clicked a different notification or its group summary")
+            return
+        time.sleep(0.2)
+    raise RuntimeError("Android did not confirm the physical notification click")
+
+
+def system_tap(device, cfg, cold):
+    first, second, owner = cfg["firstId"], cfg["secondId"], cfg["recipientId"]
+    target, other = ("second", "first") if cold else ("first", "second")
+    check_chat_reads(cfg, set() if cold else {"second"})
+    device.expect_ids(owner, {first, second} if cold else {first}, observed={first, second})
+    device.run("shell", "input", "keyevent", "KEYCODE_HOME")
+
+    def pid():
+        result = subprocess.run([*device.prefix, "shell", "pidof", PACKAGE], capture_output=True, timeout=8)
+        if result.returncode == 1 and not result.stdout.strip():
+            return None
+        result.check_returncode()
+        return int(result.stdout.strip())
+
+    previous_pid = pid()
+    if previous_pid is None:
+        raise RuntimeError("Expected a running test fixture before the tap scenario")
+    if cold:
+        for _ in range(20):
+            device.run("shell", "am", "kill", PACKAGE)
+            time.sleep(1)
+            if pid() is None:
+                break
+        else:
+            raise RuntimeError("Android did not stop the background process")
+        device.expect_ids(owner, {first, second}, observed={first, second})
+
+    tap_system_card(device, cfg[target + "Title"], cfg[target + "Marker"],
+                    f"student:{owner}:{cfg[target + 'Id']}")
+    device.find(cfg[target + "Marker"], wait=55)
+    if any(cfg[other + "Marker"] in ((n.get("content-desc") or "") + (n.get("text") or ""))
+           for n in device.nodes()):
+        raise RuntimeError("The other conversation's content is visible")
+    new_pid = pid()
+    if new_pid is None or (new_pid != previous_pid) != cold:
+        raise RuntimeError("Unexpected process lifecycle for system notification tap")
+    device.expect_ids(owner, {first} if cold else set(), observed={first, second})
+    check_chat_reads(cfg, {"second"} if cold else {"first", "second"})
+    print("PASS correct DM history from system notification in a " +
+          ("new Android process" if cold else "resumed Android process"), flush=True)
+    print("PASS matching backend read cursors and notification read receipts", flush=True)
 
 
 def read(device, cfg):
@@ -203,7 +332,7 @@ def materials(device, cfg=None, ca=None):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=["prepare", "read", "materials", "pair", "removed", "replay"])
+    parser.add_argument("action", choices=["prepare", "read", "materials", "pair", "removed", "replay", "cold-tap", "warm-tap"])
     parser.add_argument("--serial", required=True)
     parser.add_argument("--private", type=Path)
     parser.add_argument("--config", default="android.json")
@@ -225,6 +354,8 @@ def main():
         prepare(device, opts.private, cfg)
     elif opts.action == "read":
         read(device, cfg)
+    elif opts.action in ("cold-tap", "warm-tap"):
+        system_tap(device, cfg, cold=opts.action == "cold-tap")
     else:
         background(device, cfg, opts.action, opts.private)
 
